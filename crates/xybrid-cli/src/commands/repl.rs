@@ -29,7 +29,10 @@ use targeting::{
 };
 use warmup::warmup_models;
 
-use super::utils::{maybe_warn_thinking_budget, thinking_budget_exhausted, THINKING_BUDGET_HINT};
+use super::utils::{
+    load_speculative_model, maybe_warn_thinking_budget, thinking_budget_exhausted,
+    THINKING_BUDGET_HINT,
+};
 use crate::ui;
 
 /// Arguments for the interactive REPL, grouped to keep the entry point legible.
@@ -104,8 +107,8 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         false
     };
 
-    // Holds the cloud-backed (or already-local) model produced by the
-    // speculative path, installed into `loaded_model` below.
+    // Holds the cloud-backed model when the speculative load speculated,
+    // installed into `loaded_model` below.
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     let mut speculative_model: Option<xybrid_sdk::model::XybridModel> = None;
 
@@ -114,41 +117,30 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         let model_id = model.clone().expect("want_speculative implies a model id");
         // Serve the registry model itself: the gateway routes its id to xycloud
         // (the CPU cluster that runs the edge model) while it downloads locally.
-        let loader = ModelLoader::from_registry(&model_id).with_speculative_cloud(true);
-
-        if loader.will_speculate() {
-            ui::ok(&format!(
-                "Speculative cloud: serving '{}' via xycloud while it downloads in the background",
-                model_id
-            ));
-        } else if xybrid_sdk::cache::CacheManager::new()
-            .map(|c| c.is_extracted(&model_id))
-            .unwrap_or(false)
-        {
-            ui::hint("Model already cached locally — running on device (no speculation needed)");
-        } else {
-            ui::hint(
-                "Speculative cloud unavailable (no API key?) — downloading, then running locally",
-            );
-        }
-
-        let model_obj = loader
-            .load()
-            .context("Failed to load speculative cloud model")?;
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-        {
-            speculative_model = Some(model_obj);
-        }
-        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
-        {
-            drop(model_obj);
-        }
-
-        // No bundle_path: the weights aren't on disk yet, so warmup and the
-        // local-load block skip this stage — the speculative model drives the
-        // loop and transparently switches to local once the download lands.
+        let model_obj = load_speculative_model(&model_id)?;
         let mut stage = StageDescriptor::new(&model_id);
         stage.target = execution_target.clone();
+        if model_obj.is_speculative() {
+            // No bundle_path: the weights aren't on disk yet, so warmup and the
+            // local-load block skip this stage — the speculative model drives
+            // the loop and transparently switches to local once the download
+            // lands.
+            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+            {
+                speculative_model = Some(model_obj);
+            }
+        } else {
+            // The model is on disk (cached, no API key, or not a chat model,
+            // which the load downloaded), so run it like any registry model:
+            // from its extracted directory, through the local paths below.
+            let model_dir = RegistryClient::from_env()
+                .context("Failed to initialize registry client")?
+                .resolve_offline(&model_id)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("'{model_id}' loaded but is missing from the model cache")
+                })?;
+            stage.bundle_path = Some(model_dir.to_string_lossy().to_string());
+        }
         vec![stage]
     } else if let Some(ref repo) = huggingface {
         let sp = ui::spinner(&format!("Loading from HuggingFace: {}...", repo));

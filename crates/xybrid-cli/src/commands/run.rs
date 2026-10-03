@@ -21,7 +21,10 @@ use xybrid_core::target::{Platform, TargetResolver};
 use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_sdk::registry_client::RegistryClient;
 
-use super::utils::{display_stage_name, format_size, maybe_warn_thinking_budget, save_wav_file};
+use super::utils::{
+    display_stage_name, format_size, load_speculative_model, maybe_warn_thinking_budget,
+    save_wav_file,
+};
 use crate::ui;
 
 /// Run a pipeline from a configuration file.
@@ -985,6 +988,9 @@ pub(crate) fn run_model(
 /// Run a one-shot registry-model inference with speculative cloud fallback:
 /// serve the answer from the cloud gateway instead of blocking on the model
 /// download. Streams tokens to stdout and optionally writes the text output.
+/// A model the registry does not describe as chat downloads and runs locally,
+/// and its non-text output (a TTS model's audio, say) is printed and saved as
+/// `run` does.
 ///
 /// One-shot, so the background download (started by `load()`) doesn't outlive
 /// the process — the point here is the immediate cloud answer; the REPL is
@@ -1004,25 +1010,7 @@ pub(crate) fn run_model_speculative(
 
     // Serve the registry model itself: the gateway routes its id to xycloud
     // (the CPU cluster that runs the edge model) while it downloads locally.
-    let loader = xybrid_sdk::ModelLoader::from_registry(model_id).with_speculative_cloud(true);
-
-    if loader.will_speculate() {
-        ui::ok(&format!(
-            "Serving '{}' via xycloud while it downloads in the background",
-            model_id
-        ));
-    } else if xybrid_sdk::cache::CacheManager::new()
-        .map(|c| c.is_extracted(model_id))
-        .unwrap_or(false)
-    {
-        ui::hint("Model already cached locally — running on device (no speculation needed)");
-    } else {
-        ui::hint("Speculative cloud unavailable (no API key?) — downloading, then running locally");
-    }
-
-    let model = loader
-        .load()
-        .context("Failed to load speculative cloud model")?;
+    let model = load_speculative_model(model_id)?;
 
     let envelope = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
 
@@ -1039,15 +1027,30 @@ pub(crate) fn run_model_speculative(
     });
     println!();
 
-    result.context("Speculative inference failed")?;
+    let result = result.context("Speculative inference failed")?;
+    let streamed = accumulated.lock().map(|t| t.clone()).unwrap_or_default();
+    finish_speculative_output(result.envelope(), &streamed, output_path)
+}
 
+/// Report what a speculative-cloud run produced.
+///
+/// Text was already printed token by token, so only `--output` is left to
+/// handle. Any other output (a TTS model's audio, say) never streams and
+/// reaches us in the result alone, so it is printed and saved from there.
+fn finish_speculative_output(
+    output: &Envelope,
+    streamed_text: &str,
+    output_path: Option<&PathBuf>,
+) -> Result<()> {
+    if !matches!(output.kind, EnvelopeKind::Text(_)) {
+        ui::kv("Output", output.kind_str());
+        return print_output_payload(output, output_path);
+    }
     if let Some(path) = output_path {
-        let text = accumulated.lock().map(|t| t.clone()).unwrap_or_default();
-        fs::write(path, text)
+        fs::write(path, streamed_text)
             .with_context(|| format!("Failed to write output to {}", path.display()))?;
         ui::ok(&format!("Saved output to {}", path.display()));
     }
-
     Ok(())
 }
 
@@ -1404,6 +1407,36 @@ fn print_inference_results(
     ui::kv("Time", &format!("{:.2}s", elapsed.as_secs_f32()));
     ui::kv("Output", output.kind_str());
 
+    print_output_payload(output, output_path)?;
+
+    // Chain-of-thought, opt-in via `--show-reasoning`. Thinking models emit
+    // `<think>...</think>` blocks that are stripped from the answer text above;
+    // the reasoning is carried on the envelope metadata under "reasoning_content".
+    if show_reasoning {
+        match output.metadata.get("reasoning_content") {
+            Some(reasoning) if !reasoning.is_empty() => {
+                println!();
+                ui::section("Reasoning");
+                println!();
+                println!("    {}", reasoning);
+            }
+            _ => {
+                println!();
+                ui::hint("No reasoning emitted (model produced no <think> blocks)");
+            }
+        }
+    }
+
+    println!();
+    ui::ok("Inference completed successfully");
+    println!();
+
+    Ok(())
+}
+
+/// Print an output's payload by kind and, when asked, save it to
+/// `output_path` (text as-is, audio as WAV, an embedding as JSON).
+fn print_output_payload(output: &Envelope, output_path: Option<&PathBuf>) -> Result<()> {
     match &output.kind {
         EnvelopeKind::Text(text) => {
             if !text.is_empty() {
@@ -1459,29 +1492,6 @@ fn print_inference_results(
             }
         }
     }
-
-    // Chain-of-thought, opt-in via `--show-reasoning`. Thinking models emit
-    // `<think>...</think>` blocks that are stripped from the answer text above;
-    // the reasoning is carried on the envelope metadata under "reasoning_content".
-    if show_reasoning {
-        match output.metadata.get("reasoning_content") {
-            Some(reasoning) if !reasoning.is_empty() => {
-                println!();
-                ui::section("Reasoning");
-                println!();
-                println!("    {}", reasoning);
-            }
-            _ => {
-                println!();
-                ui::hint("No reasoning emitted (model produced no <think> blocks)");
-            }
-        }
-    }
-
-    println!();
-    ui::ok("Inference completed successfully");
-    println!();
-
     Ok(())
 }
 
@@ -1910,5 +1920,25 @@ mod tests {
         )
         .expect_err("invalid option");
         assert!(format!("{err:#}").contains("max_tokens"));
+    }
+
+    /// A model the registry does not describe as chat runs locally under
+    /// `--speculative-cloud`. Its audio never streams, so it has to be saved
+    /// from the result; before, the empty stream was written to `--output`.
+    #[test]
+    fn speculative_run_saves_audio_from_the_result_and_text_from_the_stream() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let wav = dir.path().join("speech.wav");
+        let audio = Envelope::new(EnvelopeKind::Audio(vec![1, 0, 2, 0]));
+        finish_speculative_output(&audio, "", Some(&wav)).unwrap();
+        let bytes = fs::read(&wav).unwrap();
+        assert_eq!(&bytes[..4], b"RIFF");
+        assert_eq!(&bytes[44..], &[1, 0, 2, 0]);
+
+        let txt = dir.path().join("answer.txt");
+        let text = Envelope::new(EnvelopeKind::Text("final".into()));
+        finish_speculative_output(&text, "streamed answer", Some(&txt)).unwrap();
+        assert_eq!(fs::read_to_string(&txt).unwrap(), "streamed answer");
     }
 }

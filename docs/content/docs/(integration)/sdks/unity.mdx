@@ -32,6 +32,8 @@ void Awake()
 
 `Initialize()` is thread-safe and idempotent — multiple calls are no-ops.
 
+On Android, models are cached in `Application.persistentDataPath/xybrid/models`. To use another folder, call `XybridBolt.XybridBolt.InitSdkCacheDir(path)` before loading or listing any model; the first folder set wins.
+
 Inference runs entirely on-device whether or not you authenticate. Pass an `apiKey` to light up the [dashboard](https://dashboard.xybrid.dev) — that single call starts the telemetry exporter, and your `model.Run(...)` calls automatically emit execution traces:
 
 ```csharp

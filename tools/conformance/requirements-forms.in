@@ -1,0 +1,10 @@
+# forms environment: FORMS export, FORMS goldens, fake scorers (lock.sh locks it).
+numpy==2.4.6
+onnx==1.23.0
+# ONNX Runtime 1.23.2 is what ort-sys 2.0.0-rc.11 (xybrid's) ships, so the
+# export gates run the runtime version the conformance tests do.
+onnxruntime==1.23.2
+onnxscript==0.7.2
+protobuf==7.36.2
+safetensors==0.8.0
+torch==2.14.0

@@ -6,14 +6,17 @@ use xybrid_sdk::ResourceTelemetryMode;
 
 use super::{ensure_native_logging, FLUTTER_BINDING};
 
-/// Install native logging (logcat / os_log) and the panic logger.
+/// Install native logging (logcat / os_log) and the panic logger, and
+/// register the `flutter` binding.
 ///
 /// Runs automatically from `XybridRustLib.init()`, on every platform and
-/// before any other call, so logs flow without an API key or cache
-/// directory being set first.
+/// before any other call. Nothing else is guaranteed to run: without an API
+/// key, `Xybrid.init` reaches no other Rust entry point on iOS, macOS, Linux
+/// or Windows, so logging and registry attribution cannot wait for one.
 #[frb(init)]
-pub fn init_native_logging() {
+pub fn init_app() {
     ensure_native_logging();
+    facade::set_binding(FLUTTER_BINDING.to_string());
 }
 
 /// Logical storage area containing a cached model entry.
@@ -145,7 +148,6 @@ fn parse_resource_telemetry_mode(value: Option<&str>) -> Option<ResourceTelemetr
 impl XybridSdkClient {
     #[frb(sync)]
     pub fn init_sdk_cache_dir(cache_dir: String) {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         facade::init_sdk_cache_dir(cache_dir);
     }
 
@@ -196,7 +198,6 @@ impl XybridSdkClient {
 
     #[frb(sync)]
     pub fn set_api_key(api_key: &str) {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         facade::set_api_key(api_key.to_string());
     }
 
@@ -207,16 +208,17 @@ impl XybridSdkClient {
     /// `/v1` suffix is applied internally.
     #[frb(sync)]
     pub fn set_platform_url(url: String) {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         facade::set_platform_url(url);
     }
 
-    /// Enable speculative cloud fallback globally: a registry model that isn't
-    /// downloaded yet is served from the gateway while the weights download.
+    /// Enable speculative cloud fallback globally: a registry chat model that
+    /// isn't downloaded yet is served from the gateway while the weights
+    /// download.
     ///
-    /// Only takes effect when an API key resolves. Speculation is LLM/chat
-    /// only — prefer `FfiModelLoader.fromRegistrySpeculative` when the app also
-    /// loads ASR/TTS models, which cannot be served this way.
+    /// Only takes effect when an API key resolves. An uncached load asks the
+    /// registry first, so other models (ASR, TTS, `.xyb` bundles) download and
+    /// load as usual. `FfiModelLoader.fromRegistrySpeculative` opts a single
+    /// load in instead.
     #[frb(sync)]
     pub fn set_speculative_cloud(enabled: bool) {
         facade::set_speculative_cloud(enabled);
@@ -257,11 +259,9 @@ impl XybridSdkClient {
 
     #[frb(sync)]
     pub fn set_gateway_url(gateway_url: String) {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         // `set_gateway_url` is gateway-routing-specific and not part of the
         // facade's init surface (would bloat it for one platform). Route
-        // straight to the SDK; the binding identifier is already registered
-        // above so registry calls are still attributed correctly.
+        // straight to the SDK.
         xybrid_sdk::set_gateway_url(gateway_url);
     }
 
@@ -285,7 +285,6 @@ impl XybridSdkClient {
     /// spins up its own background thread for batched sends.
     #[frb(sync)]
     pub fn init_telemetry(endpoint: String, api_key: String) {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         let config = xybrid_sdk::TelemetryConfig::new(endpoint, api_key);
         initialize_telemetry_once(config);
     }
@@ -304,11 +303,10 @@ impl XybridSdkClient {
         ingest_url: Option<String>,
         resource_telemetry: Option<String>,
     ) {
-        // Route binding + api-key through the facade (bolt migration);
+        // Route the api-key through the facade (bolt migration);
         // master's DEFAULT_INGEST_URL defaulting lives in
         // resolve_ingest_endpoint below. Clone the key because it's moved
         // into TelemetryConfig::new on the next line.
-        facade::set_binding(FLUTTER_BINDING.to_string());
         facade::set_api_key(api_key.clone());
 
         let endpoint = resolve_ingest_endpoint(ingest_url.as_deref());
@@ -352,7 +350,6 @@ impl XybridSdkClient {
     /// at `~/.xybrid/cache/extracted/{model_id}/model_metadata.json`.
     #[frb(sync)]
     pub fn is_model_cached(model_id: &str) -> bool {
-        facade::set_binding(FLUTTER_BINDING.to_string());
         if let Ok(client) = xybrid_sdk::RegistryClient::from_env() {
             return client.is_extracted(model_id);
         }
@@ -390,10 +387,11 @@ mod tests {
     }
 
     #[test]
-    fn flutter_init_registers_flutter_binding() {
+    fn init_app_registers_flutter_binding() {
         // Single combined test (the binding is process-global via OnceLock —
         // splitting into multiple tests would race on which one observes the
         // first set_binding).
+        init_app();
         XybridSdkClient::init_sdk_cache_dir(
             std::env::temp_dir()
                 .join("xybrid-flutter-test-cache")

@@ -321,6 +321,9 @@ jobs:
   check-llamacpp-vulkan:
     name: check llama.cpp Vulkan (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    # 7-11 min warm. Without a bound, a stalled step holds the runner for
+    # GitHub's 6 h default.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -336,6 +339,7 @@ jobs:
         with:
           toolchain: stable
       - uses: ./.github/actions/setup-vulkan-sdk
+        timeout-minutes: 15
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ${{ matrix.cache-key }}

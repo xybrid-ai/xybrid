@@ -1,7 +1,9 @@
 //! Shared utility functions for CLI commands.
 
 use std::path::Path;
+use std::sync::{Mutex, PoisonError};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::{DownloadState, ModelLoader, XybridModel};
 
 use crate::ui;
 
@@ -64,6 +66,56 @@ pub fn format_size(bytes: u64) -> String {
 /// Display a stage name, stripping any "@target" suffix.
 pub fn display_stage_name(name: &str) -> &str {
     name.split('@').next().unwrap_or(name)
+}
+
+/// Load a registry model with speculative cloud serving on, and say what the
+/// load did.
+///
+/// [`ModelLoader::will_speculate`] only checks local preconditions; the
+/// registry decides during the load, and [`XybridModel::is_speculative`]
+/// reports the outcome. A load that downloads before returning (a model
+/// xycloud cannot serve, or no API key) draws a download bar.
+pub(crate) fn load_speculative_model(model_id: &str) -> anyhow::Result<XybridModel> {
+    use anyhow::Context;
+
+    let loader = ModelLoader::from_registry(model_id).with_speculative_cloud(true);
+    let may_speculate = loader.will_speculate();
+    if may_speculate {
+        ui::hint("Asking the registry whether this model can be served via xycloud");
+    } else if xybrid_sdk::cache::CacheManager::new()
+        .map(|c| c.is_extracted(model_id))
+        .unwrap_or(false)
+    {
+        ui::hint("Model already cached locally — running on device (no speculation needed)");
+    } else {
+        ui::hint("Speculative cloud unavailable (no API key?) — downloading, then running locally");
+    }
+
+    // Only a load that downloads before returning reports bytes in flight: a
+    // cache hit reports a single `Ready`, a speculative load nothing at all.
+    let bar = Mutex::new(None);
+    let loaded = loader.load_with_progress(|status| {
+        if status.state != DownloadState::Downloading {
+            return;
+        }
+        let mut bar = bar.lock().unwrap_or_else(PoisonError::into_inner);
+        let pb =
+            bar.get_or_insert_with(|| ui::download_bar(status.total_bytes.unwrap_or(0), model_id));
+        ui::apply_download_status(pb, &status);
+    });
+    if let Some(pb) = bar.into_inner().unwrap_or_else(PoisonError::into_inner) {
+        pb.finish_and_clear();
+    }
+    let model = loaded.context("Failed to load speculative cloud model")?;
+
+    if model.is_speculative() {
+        ui::ok(&format!(
+            "Serving '{model_id}' via xycloud while it downloads in the background"
+        ));
+    } else if may_speculate {
+        ui::hint("Not a chat model xycloud can serve — downloaded, running locally");
+    }
+    Ok(model)
 }
 
 /// Save raw PCM audio bytes as a WAV file with proper headers.

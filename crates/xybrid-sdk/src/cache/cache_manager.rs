@@ -157,13 +157,12 @@ impl CacheManager {
 
         #[cfg(target_os = "android")]
         {
-            // Android apps cannot write to arbitrary paths - they MUST use
-            // the app's sandbox directory provided by the platform.
-            // The directory must be passed from Flutter using path_provider.
+            // Android apps can only write inside their own sandbox, whose path
+            // only the host app knows; each SDK passes it at init.
             Err(SdkError::cache(
-                "Android requires cache directory to be configured. \
-                Call init_sdk_cache_dir() with a path from path_provider before loading models. \
-                Example: initSdkCacheDir('${appDir.path}/xybrid/models')",
+                "Android needs a model cache folder before any load: call \
+                Xybrid.init(context) on Kotlin or Xybrid.init() on Flutter (Unity \
+                sets one itself), or pass an app-private path to init_sdk_cache_dir()",
             ))
         }
 

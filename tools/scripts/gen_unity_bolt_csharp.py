@@ -50,6 +50,11 @@ What it does:
         a Rust-side allocator (e.g. boltffi_alloc_buf).
      g. Probes before decoding the append-only `XybridResult` reasoning tail,
         preserving compatibility with the merged tool-calling wire shape.
+     h. The generated entry types (`XybridBolt`, `XybridDownload`,
+        `XybridPipeline`, `XybridTelemetryConfig`; `XybridModel` already is,
+        via d.) -> `partial`, so a static constructor for each in
+        bindings/unity/Runtime/BoltSupplement registers the `unity` binding
+        before that type's first call reaches native code.
   3. Writes deterministic Unity .meta files (GUID = sha256(asset path)[:32],
      the same scheme as stage_unity_desktop_ort.py).
   4. Syncs the result into bindings/unity/Runtime/Bolt, pruning stale files.
@@ -282,7 +287,18 @@ GUID_REWRITES = (
 BOLT_CLASS_FILE = "Xybrid_bolt.cs"
 BOLT_CLASS_DEST = "XybridBolt.cs"
 BOLT_CLASS_TARGET = "public static class Xybrid_bolt"
-BOLT_CLASS_REPLACEMENT = "public static class XybridBolt"
+# Partial for transform (h), like the entry types below.
+BOLT_CLASS_REPLACEMENT = "public static partial class XybridBolt"
+
+# --- Transform (h): make the generated entry types partial so the supplement
+# can give each a static constructor that registers the binding.
+ENTRY_PARTIAL_TARGETS = {
+    "XybridDownload.cs": "public sealed class XybridDownload : global::System.IDisposable",
+    "XybridPipeline.cs": "public sealed class XybridPipeline : global::System.IDisposable",
+    "XybridTelemetryConfig.cs": (
+        "public sealed class XybridTelemetryConfig : global::System.IDisposable"
+    ),
+}
 
 # --- Transform (c): IsExternalInit polyfill (a Unity-only supplement) ---
 POLYFILL_FILE = "IsExternalInit.cs"
@@ -409,6 +425,7 @@ def generate() -> dict[str, str]:
     text_variant_fixed = False
     guid_fenced = False
     model_made_partial = False
+    entry_partials_made = 0
     context_made_partial = False
     result_defaulted = False
     reader_remaining_added = False
@@ -447,6 +464,16 @@ def generate() -> dict[str, str]:
                 READER_REMAINING_TARGET, READER_REMAINING_REPLACEMENT, 1
             )
             reader_remaining_added = True
+        if src.name in ENTRY_PARTIAL_TARGETS:
+            target = ENTRY_PARTIAL_TARGETS[src.name]
+            _drift(
+                content.count(target) == 1,
+                f"expected the class declaration `{target}` in {src.name}",
+            )
+            content = content.replace(
+                target, target.replace("sealed class", "sealed partial class"), 1
+            )
+            entry_partials_made += 1
         if src.name == MODEL_FILE:
             _drift(
                 MODEL_PARTIAL_TARGET in content,
@@ -515,6 +542,11 @@ def generate() -> dict[str, str]:
         text_variant_fixed, f"{ENVELOPE_KIND_FILE} not found in boltffi output"
     )
     _drift(model_made_partial, f"{MODEL_FILE} not found in boltffi output")
+    _drift(
+        entry_partials_made == len(ENTRY_PARTIAL_TARGETS),
+        f"made {entry_partials_made} entry types partial, expected "
+        f"{len(ENTRY_PARTIAL_TARGETS)}",
+    )
     _drift(stream_next_kept_alive, f"StreamNext not found in {MODEL_FILE}")
     _drift(context_made_partial, f"{CONTEXT_FILE} not found in boltffi output")
     _drift(result_defaulted, f"{RESULT_FILE} not found in boltffi output")

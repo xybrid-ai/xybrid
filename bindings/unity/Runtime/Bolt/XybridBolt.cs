@@ -514,7 +514,7 @@ namespace XybridBolt
         }
     }
 
-    public static class XybridBolt
+    public static partial class XybridBolt
     {
         /// <summary>
         /// Build the continuation envelope for the turn after the model asked for
@@ -967,11 +967,12 @@ namespace XybridBolt
         }
 
         /// <summary>
-        /// Enable speculative cloud fallback globally: a registry model that isn't
-        /// downloaded yet is served from the gateway while the weights download.
+        /// Enable speculative cloud fallback globally: a registry chat model that
+        /// isn't downloaded yet is served from the gateway while the weights download.
         ///
-        /// LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
-        /// also loads ASR/TTS models, which cannot be served this way.
+        /// An uncached load asks the registry first, so other models (ASR, TTS,
+        /// `.xyb` bundles) download and load as usual.
+        /// `XybridModel.fromRegistrySpeculative` opts a single load in instead.
         /// </summary>
         public static void SetSpeculativeCloud(bool enabled)
         {
@@ -995,11 +996,13 @@ namespace XybridBolt
             => NativeMethods.NativeIsSpeculativeCloudEnabled();
 
         /// <summary>
-        /// Whether `XybridModel::from_registry_speculative(model_id)` would actually
-        /// speculate: an API key resolves and the model is not already cached.
+        /// Whether `XybridModel::from_registry_speculative(model_id)` may speculate:
+        /// an API key resolves and the model is not already cached.
         ///
-        /// Lets the hand-written Swift/Kotlin loader facades answer "will this
-        /// speculate?" before loading. Never touches the network.
+        /// Lets the hand-written Swift/Kotlin loader facades answer "can this
+        /// speculate?" before loading. Never touches the network, so it cannot know
+        /// the model type: the load asks the registry and speculates only for a chat
+        /// model.
         /// </summary>
         public static bool WillSpeculateForModel(string modelId)
         {

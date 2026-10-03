@@ -11,7 +11,7 @@ import '../frb_generated.dart';
 import 'model.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `from_core`, `from_core`, `from_inference_result`, `from_sdk`
+// These functions are ignored because they are not marked as `pub`: `ensure_ffi_payload`, `from_core`, `from_core`, `from_sdk`, `try_from_inference_result`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`
 
 /// Where a result was produced — the observed fact, not a routing preference.

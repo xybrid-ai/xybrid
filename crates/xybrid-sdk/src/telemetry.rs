@@ -344,8 +344,8 @@ struct PlatformEvent {
     // (adoption / per-platform performance). `sdk_version` is the
     // `xybrid-sdk` crate version (compile-time `CARGO_PKG_VERSION`);
     // `binding` is the process-global identifier set by the platform
-    // binding at init (`flutter`/`swift`/`kotlin`/`unity`), defaulting
-    // to `rust` when no binding has called `set_binding`.
+    // binding (`cli`/`flutter`/`kotlin`/`python`/`react-native`/`swift`/
+    // `unity`), defaulting to `rust` when nothing has called `set_binding`.
     sdk_version: String,
     binding: String,
     // `device_id` honors the opt-out contract: when the SDK clears it

@@ -39,6 +39,20 @@ Crate-wide lint opt-outs go in `lib.rs` at the crate root (see e.g.
 `crates/xybrid-core/src/lib.rs`). Don't sprinkle `#[allow(...)]` at call sites —
 push it to crate level or fix the lint. Never bypass hooks (`--no-verify`).
 
+A workspace grows to tens of GB: `target/`, React Native `Pods/` and Gradle
+builds, release checkouts in `.context/`, and a Bazel output base that lives
+outside the workspace. `just clean` (`./clean.sh`) lists what a rebuild
+recreates; add `--all` for merged `.context` worktrees and Bazel output bases,
+`--apply` to delete. Use it rather than a hand-rolled `rm -rf`.
+
+Cleaning is per folder. Every folder that produces build output owns a
+`clean.sh` that sources `tools/scripts/clean-lib.sh` and names its outputs
+(`clean_paths`, plus `clean_command` for a tool like `flutter clean`); the root
+`clean.sh` runs every one git tracks, in parallel. **A new folder that builds
+something gets a `clean.sh` too** (commit it, or it never runs). Only list
+paths git ignores: the lib refuses anything else, and
+`tools/scripts/tests/test_clean.py` fails on it.
+
 ### Building native bindings / cross-compiled artifacts
 
 **Native artifacts are built by Bazel**, not `xtask`. Bazel brings its own
@@ -237,6 +251,16 @@ Native (spec, both shims, TS facade — see its README) or exclude it there with
 reason; don't leave the test red. Its iOS core is not in the npm tarball:
 `pod install` downloads the release XCFramework and checks the SHA-256 that
 release-prep pins in its `package.json`.
+
+Every SDK names itself in registry requests and telemetry (`binding=` in
+`X-Xybrid-Client`), and the first registration in a process wins. Flutter
+registers in its `#[frb(init)]` hook, Python on import, Unity from static
+constructors and React Native before every bridged call. Until an SDK
+registers, `xybrid-bolt` reports a fallback: `swift` on Apple platforms,
+`kotlin` on Android. A registration always replaces it, whenever it happens,
+so a new binding there reports theirs only until it registers. Add a new name
+to the facade's `resolve_binding`; a test fails until you do. The table is in
+`docs/telemetry/registry.md`.
 
 **Dependency direction (do not reverse):**
 

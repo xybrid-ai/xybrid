@@ -227,7 +227,8 @@ class XybridModelLoader {
   // Serve from the cloud gateway while the weights download in the background
   factory XybridModelLoader.fromRegistrySpeculative(String modelId);
 
-  // Would load() actually speculate? (enabled + API key + not cached)
+  // May load() speculate? (enabled + API key + not cached; the registry
+  // then decides whether it is a chat model)
   bool get willSpeculate;
 
   // Load the model
@@ -417,8 +418,12 @@ var result = model.Run(Envelope.Text("Hello!"));
 
 `fromRegistrySpeculative()` answers from the cloud gateway while the registry
 weights download in the background, then switches to on-device by itself. It
-needs an API key and an uncached model — otherwise it behaves exactly like
-`fromRegistry()`, which `willSpeculate` reports up front. LLM/chat models only.
+needs an API key, an uncached model, and a chat model the registry serves as a
+direct download (a GGUF or vision-language variant, not a `.xyb` bundle) —
+otherwise it behaves exactly like `fromRegistry()`. `willSpeculate` checks the
+first two before loading and never touches the network; the load asks the
+registry for the third, and `isCloudServing()` on the loaded model reports the
+outcome.
 
 It sets the per-load override itself, so it does **not** depend on
 `setSpeculativeCloud()` — that toggle is the default for loads which do not opt
@@ -909,6 +914,10 @@ Of `XybridRunOptions`, only `correlationId` applies to a pipeline run. Setting
 `generationConfig` or `abortOn` fails with `ConfigError` instead of being
 ignored; per-stage generation settings belong in the pipeline YAML.
 
+A run fails if any stage's output cannot be represented, as described under
+[Result Types](#7-result-types); Dart, which returns only the final output,
+checks that one.
+
 ### Rust
 
 ```rust
@@ -1241,6 +1250,12 @@ stages:
 > **Audio format**: TTS models produce raw PCM audio bytes (16-bit signed, little-endian).
 > Typical sample rate is 24kHz mono (e.g., Kokoro TTS). The audio is returned as raw bytes,
 > not base64-encoded. Convert to WAV or feed directly to platform audio APIs.
+
+A result always carries its output. If a run produces an output the binding has
+no field for, the run fails instead of returning success with empty payload
+fields: `UnsupportedModelCapability` (code 20) on Kotlin, Swift, C# and Python,
+an `Unsupported model capability:` error on Dart. Streams end with that error
+instead of a completion. No shipped model produces such an output today.
 
 ### Dart
 
@@ -1916,50 +1931,21 @@ XybridClient.InitializeTelemetry(config);
 
 ### Rust — `SdkConfig`
 
-The Rust SDK ships a small `SdkConfig` struct consumed by `init_sdk_cache_dir`.
-It carries the `binding` identifier reported in the `X-Xybrid-Client` registry
-telemetry header. Non-Rust bindings register their identifier through the
-platform-specific entry points listed under "Setting `binding` per binding"
-below — they do not expose `SdkConfig` directly.
+The Rust SDK ships a small `SdkConfig` struct that holds the folder set by
+`init_sdk_cache_dir`. Its `binding` field, `with_binding()` and `binding()` are
+deprecated: no API reads a config's binding, so it never reaches a request.
+Register the identifier reported in the `X-Xybrid-Client` registry header
+before the first registry call instead:
 
 ```rust
-pub struct SdkConfig {
-    pub cache_dir: Option<std::path::PathBuf>,
-    /// Reported in the `X-Xybrid-Client` registry header. Defaults to
-    /// `DEFAULT_BINDING` ("rust") when unset.
-    pub binding: Option<&'static str>,
-}
-
-impl SdkConfig {
-    /// Override the binding identifier reported in the registry telemetry header.
-    pub fn with_binding(self, binding: &'static str) -> Self;
-    /// Resolve the configured binding identifier, falling back to `DEFAULT_BINDING`.
-    pub fn binding(&self) -> &'static str;
-}
-
-pub const DEFAULT_BINDING: &str = "rust";
+xybrid_sdk::init().binding("my-tool").run();
+// or
+xybrid_sdk::set_binding("my-tool");
 ```
 
-**Example — explicit Rust binding:**
-
-```rust
-use xybrid_sdk::{SdkConfig, DEFAULT_BINDING};
-
-let config = SdkConfig::default().with_binding("my-tool");
-assert_eq!(config.binding(), "my-tool");
-```
-
-**Setting `binding` per binding:**
-
-| Binding | Resolves to | Set by |
-|---------|-------------|--------|
-| Rust SDK direct | `rust` (default) | `xybrid_sdk::DEFAULT_BINDING`, override with `SdkConfig::with_binding(...)` or `xybrid_sdk::set_binding(...)` |
-| Flutter | `flutter` | Internal: `XybridSdkClient` calls `xybrid_sdk::set_binding("flutter")` from every FRB entry point |
-| Kotlin (Android) | `kotlin` | Internal: `Xybrid.init(context)` calls UniFFI `setBinding("kotlin")` |
-| Swift (iOS / macOS) | `swift` | Internal: `Xybrid.initialize()` calls UniFFI `setBinding(binding: "swift")` |
-| Unity (C#) | `unity` | Internal: `XybridClient.Initialize()` calls native `xybrid_set_binding("unity")` |
-
-The full wire format and the list of enum values for each header field is documented in [`docs/telemetry/registry.md`](../telemetry/registry.md).
+Every binding's identifier, and where each SDK registers it, is listed in
+[`docs/telemetry/registry.md`](../telemetry/registry.md) with the full wire
+format.
 
 ### Implementation Status
 
@@ -1985,8 +1971,8 @@ The full wire format and the list of enum values for each header field is docume
 
 | Method (Rust `SdkConfig`) | Rust |
 |---------------------------|------|
-| `with_binding(binding)` | ✅ |
-| `binding()` | ✅ |
+| `with_binding(binding)` | Deprecated, no effect |
+| `binding()` | Deprecated, no effect |
 
 > **Note**: On Dart, prefer passing `apiKey` (and optional `ingestUrl`) to
 > `Xybrid.init()` — that bundles telemetry startup into initialization.
@@ -1995,9 +1981,9 @@ The full wire format and the list of enum values for each header field is docume
 > both routes share the same process-wide once-guard. Flush / shutdown / batch
 > configuration are not yet exposed on Dart; events flush on the Rust exporter's
 > default 5 s interval. The C# (Unity) SDK remains the reference implementation
-> of the wider telemetry-config surface. `SdkConfig.binding` is Rust-only —
-> non-Rust bindings register their identifier through the platform-specific
-> entry points listed in [`docs/telemetry/registry.md`](../telemetry/registry.md).
+> of the wider telemetry-config surface. Every binding registers its
+> identifier at the entry points listed in
+> [`docs/telemetry/registry.md`](../telemetry/registry.md).
 
 ---
 

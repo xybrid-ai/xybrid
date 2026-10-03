@@ -226,7 +226,8 @@ enum Commands {
 
         /// Serve from the cloud while the registry model downloads, instead of
         /// blocking on the download. Requires --api-key (or XYBRID_API_KEY) and
-        /// a registry --model. LLM/chat only.
+        /// a registry --model. Chat models only: the registry is asked first,
+        /// and any other model downloads, then runs locally.
         #[arg(long)]
         speculative_cloud: bool,
     },
@@ -277,7 +278,9 @@ enum Commands {
 
         /// Serve from the cloud while the registry model downloads in the
         /// background, then switch to local once ready. Requires --api-key
-        /// (or XYBRID_API_KEY) and a registry --model. LLM/chat only.
+        /// (or XYBRID_API_KEY) and a registry --model. Chat models only: the
+        /// registry is asked first, and any other model downloads, then runs
+        /// locally.
         #[arg(long)]
         speculative_cloud: bool,
 
@@ -359,6 +362,10 @@ fn parse_max_tokens(s: &str) -> Result<usize, String> {
 }
 
 fn main() -> Result<()> {
+    // Registry requests and telemetry from the CLI say `cli`, not the `rust`
+    // that Rust SDK apps report.
+    xybrid_sdk::set_binding("cli");
+
     let cli = Cli::parse();
 
     configure_log_level(&cli);

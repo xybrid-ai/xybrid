@@ -1,0 +1,261 @@
+name: Test choice conformance
+
+# Choice-scoring conformance inputs (integration-tests/fixtures/choice). The
+# model artifacts are not published anywhere: tools/conformance/prepare.sh
+# regenerates them from pinned upstream inputs and stages them only if they
+# match the sha256 that models.json and provenance.json pin.
+#
+# Each job caches its staged artifacts under a key that covers the whole
+# recipe: the model's models.json entry, the provenance sections it depends
+# on, the locked environment, the tooling and this workflow. Any recipe change
+# therefore re-proves regeneration, every run re-verifies the bytes, and the
+# nightly scheduled run skips the cache so a cold rebuild (upstream
+# availability, resolvable packages) is exercised without a repository change.
+#
+# The forms job then runs xybrid's ONNX choice-scoring tests against the staged
+# model (G0 encoding, fake-model contract, G1 numerics within the frozen
+# provenance.json bounds) with XYBRID_REQUIRE_MODELS set, so a missing model or
+# ONNX Runtime fails instead of skipping. The label-token (llama.cpp) runtime
+# tests join that job with the label scorer.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'integration-tests/fixtures/choice/**'
+      - 'integration-tests/fixtures/models/models.json'
+      - 'integration-tests/download.sh'
+      - 'tools/conformance/**'
+      - 'tools/scripts/check_choice_provenance.py'
+      - 'tools/scripts/tests/test_check_choice_provenance.py'
+      - 'tools/scripts/stage_unity_desktop_ort.py'
+      - 'vendor/llama-cpp'
+      - 'crates/xybrid-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.cargo/**'
+      - '.github/workflows/test-choice-conformance.yml'
+      - "!**.md"
+  pull_request:
+    branches: [master]
+    paths:
+      - 'integration-tests/fixtures/choice/**'
+      - 'integration-tests/fixtures/models/models.json'
+      - 'integration-tests/download.sh'
+      - 'tools/conformance/**'
+      - 'tools/scripts/check_choice_provenance.py'
+      - 'tools/scripts/tests/test_check_choice_provenance.py'
+      - 'tools/scripts/stage_unity_desktop_ort.py'
+      - 'vendor/llama-cpp'
+      - 'crates/xybrid-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.cargo/**'
+      - '.github/workflows/test-choice-conformance.yml'
+      - "!**.md"
+  schedule:
+    # Daily 05:23 UTC.
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  provenance:
+    name: Provenance and fixture digests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Checker unit tests
+        run: python3 -m unittest discover -s tools/scripts/tests -p 'test_check_choice_provenance.py' -v
+      # Reads the vendor/llama-cpp gitlink from the index, so the submodule
+      # itself need not be checked out.
+      - name: Verify every digest and citation
+        run: python3 tools/scripts/check_choice_provenance.py --check
+
+  forms:
+    name: CUA-S1-FORMS ONNX (regenerate, verify, conform)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Digest the recipe
+        id: recipe
+        run: |
+          {
+            jq -cS '.models["cua-s1-forms"]' integration-tests/fixtures/models/models.json
+            jq -cS '{artifact: .artifacts["cua-s1-forms"], sources, environment: .environments.forms}' \
+              integration-tests/fixtures/choice/provenance.json
+          } > "$RUNNER_TEMP/recipe"
+          echo "digest=$(sha256sum "$RUNNER_TEMP/recipe" | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # Skipped on the nightly schedule, so that run always rebuilds from cold.
+      - name: Cache cua-s1-forms
+        if: github.event_name != 'schedule'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: integration-tests/fixtures/models/cua-s1-forms
+          key: choice-cua-s1-forms-${{ steps.recipe.outputs.digest }}-${{ hashFiles('tools/conformance/prepare.sh', 'tools/conformance/export_forms_onnx.py', 'tools/conformance/common.py', 'tools/conformance/requirements-forms.txt', 'integration-tests/fixtures/choice/cases/forms.json', '.github/workflows/test-choice-conformance.yml') }}
+
+      # A miss, or a restored artifact that fails its digest, needs a rebuild.
+      - name: Verify the restored artifact
+        id: staged
+        run: |
+          if python3 tools/scripts/check_choice_provenance.py --staged cua-s1-forms; then
+            echo "verified=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "verified=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.staged.outputs.verified != 'true'
+        with:
+          version: '0.11.23'
+          enable-cache: false
+
+      # Exports the ONNX from the pinned checkpoint and stages it only if the
+      # parity and padding gates hold and its sha256 matches the pin; a no-op
+      # when the restored artifact already verified.
+      - name: Prepare cua-s1-forms
+        env:
+          # CPU-only torch: the default Linux wheels pull in the CUDA stack.
+          # The locked `torch==2.14.0` resolves to 2.14.0+cpu, whose export is
+          # byte-identical to the macOS one.
+          UV_INDEX: https://download.pytorch.org/whl/cpu
+          UV_INDEX_STRATEGY: unsafe-best-match
+        run: tools/conformance/prepare.sh cua-s1-forms
+
+      - name: Verify the staged artifact against provenance
+        run: python3 tools/scripts/check_choice_provenance.py --staged cua-s1-forms
+
+      - name: Upload the export report
+        if: steps.staged.outputs.verified != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cua-s1-forms-export-report
+          path: target/choice-conformance/reports/cua-s1-forms-export.json
+          if-no-files-found: error
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: choice-forms
+
+      # Off Apple platforms ort loads libonnxruntime at run time; without it
+      # the ONNX tests would skip. Stage the version ort-sys pins (1.23.2).
+      - name: Stage ONNX Runtime
+        run: python3 tools/scripts/stage_unity_desktop_ort.py linux "$RUNNER_TEMP/ort"
+
+      - name: FORMS runtime conformance
+        env:
+          ORT_DYLIB_PATH: ${{ runner.temp }}/ort/libonnxruntime.so
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          # Enumerate and assert every required test: cargo test exits 0 on an
+          # empty set, so a renamed or compiled-out test would pass silently.
+          # `choice::` selects ir::choice, execution::template::choice and
+          # execution::choice together.
+          LIST="$(cargo test -p xybrid-core --features ort-download --lib choice:: -- --list)"
+          printf '%s\n' "$LIST"
+          for test in \
+            execution::choice::tests::candidates_count_after_the_fixed_choices_are_appended \
+            execution::choice::tests::candidates_put_fixed_choices_after_the_callers \
+            execution::choice::tests::candidates_reject_empty_duplicate_and_reserved_ids \
+            execution::choice::tests::choice_errors_map_onto_adapter_errors \
+            execution::choice::tests::encoder_cuts_raw_bytes_offsets_them_and_zero_pads \
+            execution::choice::tests::encoder_masks_the_rows_after_the_candidates \
+            execution::choice::tests::encoder_rejects_an_empty_context \
+            execution::choice::tests::encoder_rejects_overlong_fields_under_reject \
+            execution::choice::tests::errors_carry_no_caller_content \
+            execution::choice::tests::fake_dynamic_scores_follow_the_formula_in_candidate_order \
+            execution::choice::tests::fake_float64_output_is_rejected \
+            execution::choice::tests::fake_models_reject_specs_naming_missing_or_mistyped_tensors \
+            execution::choice::tests::fake_short_output_is_rejected \
+            execution::choice::tests::fake_static_axis_drops_its_nan_padding_rows \
+            execution::choice::tests::g0_forms_candidates_and_encoding_match_the_goldens \
+            execution::choice::tests::g1_forms_logits_and_scores_match_the_reference \
+            execution::choice::tests::runtime_failures_withhold_the_backend_message \
+            execution::choice::tests::softmax_divides_by_the_temperature \
+            execution::choice::tests::softmax_is_stable_and_ties_go_to_the_first_candidate \
+            execution::choice::tests::softmax_rejects_empty_and_non_finite_logits \
+            execution::choice::tests::spec_validation_rejects_unusable_specs \
+            execution::choice::tests::the_committed_forms_spec_is_valid \
+            execution::template::choice::tests::the_committed_forms_spec_deserializes \
+            execution::template::choice::tests::unknown_fields_and_types_are_rejected \
+            ir::choice::tests::best_breaks_rounded_score_ties_by_logit \
+            ir::choice::tests::best_prefers_the_first_of_equal_scores \
+            ir::choice::tests::debug_never_prints_ids_or_text \
+            ir::choice::tests::margin_is_top_minus_runner_up \
+            ir::choice::tests::serde_round_trips; do
+            printf '%s\n' "$LIST" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          cargo test -p xybrid-core --features ort-download --lib choice:: -- --nocapture
+
+  label-token:
+    name: Qwen3.5-0.8B GGUF (regenerate or verify)
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Ensure jq and cmake
+        run: |
+          for tool in jq cmake; do
+            command -v "$tool" >/dev/null || brew install "$tool"
+          done
+
+      - name: Digest the recipe
+        id: recipe
+        run: |
+          {
+            jq -cS '[.models["qwen3.5-0.8b-f16-cf"], .models["qwen3.5-0.8b-q4km-cf"]]' \
+              integration-tests/fixtures/models/models.json
+            jq -cS '{f16: .artifacts["qwen3.5-0.8b-f16-cf"], q4: .artifacts["qwen3.5-0.8b-q4km-cf"], sources, environment: .environments.convert, templates}' \
+              integration-tests/fixtures/choice/provenance.json
+          } > "$RUNNER_TEMP/recipe"
+          echo "digest=$(shasum -a 256 "$RUNNER_TEMP/recipe" | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # Skipped on the nightly schedule, so that run always rebuilds from cold.
+      - name: Cache the Qwen3.5-0.8B GGUFs
+        if: github.event_name != 'schedule'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            integration-tests/fixtures/models/qwen3.5-0.8b-f16-cf
+            integration-tests/fixtures/models/qwen3.5-0.8b-q4km-cf
+          key: choice-qwen3.5-0.8b-${{ steps.recipe.outputs.digest }}-${{ hashFiles('tools/conformance/prepare.sh', 'tools/conformance/convert_gguf.sh', 'tools/conformance/requirements-convert.txt', 'integration-tests/fixtures/choice/templates/qwen3.5.jinja', '.github/workflows/test-choice-conformance.yml') }}
+
+      # A miss, or a restored artifact that fails its digest, needs a rebuild.
+      - name: Verify the restored artifacts
+        id: staged
+        run: |
+          if python3 tools/scripts/check_choice_provenance.py --staged qwen3.5-0.8b-f16-cf qwen3.5-0.8b-q4km-cf; then
+            echo "verified=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "verified=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Only a rebuild needs the converter and llama-quantize sources.
+      - name: Check out vendor/llama-cpp
+        if: steps.staged.outputs.verified != 'true'
+        run: git submodule update --init --depth 1 vendor/llama-cpp
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.staged.outputs.verified != 'true'
+        with:
+          version: '0.11.23'
+          enable-cache: false
+
+      - name: Prepare the F16 and Q4_K_M GGUFs
+        run: tools/conformance/prepare.sh qwen3.5-0.8b-f16-cf qwen3.5-0.8b-q4km-cf
+
+      - name: Verify the staged artifacts against provenance
+        run: python3 tools/scripts/check_choice_provenance.py --staged qwen3.5-0.8b-f16-cf qwen3.5-0.8b-q4km-cf

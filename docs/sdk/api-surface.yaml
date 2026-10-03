@@ -211,9 +211,10 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       willSpeculate:
         return: bool
-        # Whether load() would actually speculate: speculation is in effect for
-        # this loader, an API key resolves, and the model is not already
-        # cached. Reads the local cache; never hits the network.
+        # Whether load() may speculate: speculation is in effect for this
+        # loader, an API key resolves, and the model is not already cached.
+        # Reads the local cache; never hits the network. The load then asks
+        # the registry and speculates only for a chat model.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
@@ -594,6 +595,11 @@ classes:
   XybridResult:
     type: data
     section: "7. Result Types"
+    # A result always carries its output. A run whose output has no field here
+    # fails instead of returning success with every payload empty:
+    # UnsupportedModelCapability (code 20) on the bolt bindings, an
+    # "Unsupported model capability:" error on Dart. The same holds for stream
+    # completions.
     dart_name: XybridResult
     kotlin_name: XybridResult
     swift_name: XybridResult
@@ -704,7 +710,8 @@ classes:
     type: data
     section: "4. XybridPipeline"
     # Every stage's output, not only the final one: an ASR -> LLM -> TTS run
-    # exposes the transcript and the reply alongside the audio.
+    # exposes the transcript and the reply alongside the audio. The run fails
+    # when any of those outputs cannot be represented (see XybridResult).
     dart_name: XybridPipelineResult
     kotlin_name: XybridPipelineResult
     swift_name: XybridPipelineResult
@@ -765,7 +772,7 @@ classes:
     methods:
       history:
         return: "List<Envelope>"
-        notes: "Snapshot of history turns; excludes the persistent system envelope."
+        notes: "Snapshot of history turns; excludes the persistent system envelope. Cannot fail: the context holds only envelopes pushed through this binding."
         status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
     status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
@@ -1141,12 +1148,10 @@ classes:
     since: "0.1.0-beta12"
     notes: >-
       Rust-side init configuration consumed by `init_sdk_cache_dir`. Non-Rust
-      bindings register the binding identifier via the platform-specific entry
-      points listed in `docs/telemetry/registry.md` (Flutter:
-      `XybridSdkClient`, Kotlin: `Xybrid.init`, Swift: `Xybrid.initialize`,
-      Unity: `XybridClient.Initialize`); they do not expose `SdkConfig`
-      directly. The `binding` field flows into the `X-Xybrid-Client` registry
-      header — see `docs/telemetry/registry.md` for the wire format.
+      bindings register the binding identifier themselves, at the entry points
+      listed in `docs/telemetry/registry.md`; they do not expose `SdkConfig`
+      directly. The `binding` field and its methods are deprecated: nothing
+      reads them. Rust apps use `set_binding` or `init().binding()`.
     properties:
       cache_dir:
         type: "Option<PathBuf>"
@@ -1155,10 +1160,8 @@ classes:
       binding:
         type: "Option<&'static str>"
         description: >-
-          Binding identifier reported in the `X-Xybrid-Client` registry
-          telemetry header. Defaults to `xybrid_sdk::DEFAULT_BINDING`
-          ("rust") when unset. Each platform binding (Flutter, Kotlin,
-          Swift, Unity) sets its own value at SDK init.
+          Deprecated and never read. Register the binding with
+          `xybrid_sdk::set_binding` or `xybrid_sdk::init().binding()`.
         since: "0.1.0-beta12"
     methods:
       with_binding:
@@ -1166,12 +1169,12 @@ classes:
         parameters:
           - { name: binding, type: "&'static str" }
         returns: Self
-        description: "Override the binding identifier reported in the registry telemetry header. Fluent builder."
+        description: "Deprecated, no effect: stores a binding nothing reads."
         since: "0.1.0-beta12"
       binding:
         name: binding
         returns: "&'static str"
-        description: "Resolve the configured binding identifier, falling back to `DEFAULT_BINDING` when unset."
+        description: "Deprecated, no effect: returns the stored binding, not the one requests report."
         since: "0.1.0-beta12"
   RunOptions:
     type: data

@@ -1,0 +1,11 @@
+# convert environment: convert_gguf.sh. The pinned llama.cpp commit's own
+# requirements-convert_hf_to_gguf.txt at exact versions, plus what its bundled
+# gguf-py needs (imported from the submodule, not PyPI). lock.sh locks it.
+numpy==1.26.4
+protobuf==4.25.8
+pyyaml==6.0.3
+requests==2.32.5
+sentencepiece==0.2.1
+torch==2.6.0
+tqdm==4.67.1
+transformers==5.5.1

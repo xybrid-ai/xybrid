@@ -12,7 +12,7 @@
 
 <p align="center">
   <strong>Run LLMs, ASR, and TTS natively in apps and games.</strong><br/>
-  <a href="#flutter">Flutter</a> · <a href="#swift">Swift</a> · <a href="#kotlin">Kotlin</a> · <a href="#unity">Unity</a> · <a href="#rust">Rust</a><br/>
+  <a href="#flutter">Flutter</a> · <a href="#swift">Swift</a> · <a href="#kotlin">Kotlin</a> · <a href="#react-native">React Native</a> · <a href="#unity">Unity</a> · <a href="#rust">Rust</a><br/>
   Private, offline, no cloud required.
 </p>
 
@@ -36,6 +36,7 @@
 [![crates.io][crates-shield]][crates-url]
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
+[![npm][npm-shield]][npm-url]
 [![Swift Package Manager][spm-shield]][spm-url]
 <br>
 [![Ask DeepWiki][deepwiki-shield]][deepwiki-url]
@@ -71,6 +72,8 @@
 [pubdev-url]: https://pub.dev/packages/xybrid_flutter
 [maven-shield]: https://img.shields.io/maven-central/v/ai.xybrid/xybrid-kotlin?style=flat-square&label=Maven%20Central
 [maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
+[npm-shield]: https://img.shields.io/npm/v/%40xybrid%2Freact-native?style=flat-square&label=npm&logo=npm
+[npm-url]: https://www.npmjs.com/package/@xybrid/react-native
 [spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat-square&logo=swift&logoColor=white
 [spm-url]: https://github.com/xybrid-ai/xybrid
 
@@ -98,6 +101,7 @@ Install and run a model in your language of choice.
   <a href="https://docs.xybrid.dev/en/docs/sdks/flutter"><img src="https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Flutter SDK"></a>
   <a href="https://docs.xybrid.dev/en/docs/sdks/ios"><img src="https://img.shields.io/badge/Swift-F05138?style=for-the-badge&logo=swift&logoColor=white" alt="Swift SDK"></a>
   <a href="https://docs.xybrid.dev/en/docs/sdks/kotlin"><img src="https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin SDK"></a>
+  <a href="https://docs.xybrid.dev/en/docs/sdks/react-native"><img src="https://img.shields.io/badge/React_Native-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React Native SDK"></a>
   <a href="https://docs.xybrid.dev/en/docs/sdks/unity"><img src="https://img.shields.io/badge/Unity-000000?style=for-the-badge&logo=unity&logoColor=white" alt="Unity SDK"></a>
   <br>
   <a href="https://crates.io/crates/xybrid"><img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust crate"></a>
@@ -115,7 +119,7 @@ Each badge links to its platform setup. See the full
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.6.0
+  xybrid_flutter: ^0.10.1
 ```
 
 **Run a model:**
@@ -132,7 +136,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.6.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.10.1")
 }
 ```
 
@@ -150,7 +154,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.6.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.10.1")
 ]
 ```
 
@@ -161,6 +165,31 @@ let model = try await Xybrid.model("kokoro-82m").load()
 let result = try await model.runAsync(envelope: Envelope.text("Hello world"))
 // result → 24kHz WAV audio
 ```
+
+### React Native
+
+**Install** in a React Native 0.76+ app with the New Architecture (or an Expo SDK 52+ development build):
+
+```sh
+npm install @xybrid/react-native@0.10.1
+```
+
+For bare React Native, run `cd ios && pod install`. For Expo, run `npx expo prebuild`; Expo Go cannot load the native module.
+
+**Run a model:**
+
+```ts
+import { Envelope, GenerationConfigs, ModelLoader } from '@xybrid/react-native';
+
+const model = await ModelLoader.fromRegistry('lfm2.5-230m').load();
+const result = await model.run(Envelope.text('Name three rivers.'), {
+  generationConfig: GenerationConfigs.greedy({ maxTokens: 64 }),
+});
+console.log(result.text);
+await model.release();
+```
+
+See the [React Native guide](https://docs.xybrid.dev/en/docs/sdks/react-native) for Expo setup, streaming, and cancellation. On the iOS Simulator, llama.cpp uses the CPU for reliable inference; iOS devices retain Metal acceleration.
 
 ### Unity
 
@@ -199,7 +228,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.6.0"
+xybrid = "0.10.1"
 ```
 
 **Run a model:**
@@ -387,9 +416,9 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CPU, opt-in Vulkan | CPU |
+| Hardware Acceleration | Metal, ANE on devices; CPU llama.cpp on Simulator | CPU | Metal, ANE | CPU, opt-in Vulkan | CPU |
 
-**SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · Unity ✅
+**SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
 **Tool calling:** local models call functions you define — your tools are plain
 data and the loop is your code. See the

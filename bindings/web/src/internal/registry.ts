@@ -8,11 +8,17 @@ import {
   validateBrowserMetadata,
   validateLlmBrowserMetadata,
 } from "../metadata.ts";
+import { SDK_VERSION } from "../version.ts";
 import { abortReason, isAbortError } from "./loading.ts";
 
 const DEFAULT_REGISTRY_URLS = ["https://registry.xybrid.dev", "https://r2.xybrid.dev"] as const;
 const REGISTRY_TIMEOUT_MS = 30_000;
 const MAX_MODEL_BYTES = 512 * 1024 * 1024;
+// Which SDK made the call, never who: the anonymous identity every xybrid SDK
+// sends the registry (docs/telemetry/registry.md). The registry allows the
+// header cross-origin. Model downloads never carry it, since a custom header
+// would cost each one a CORS preflight on hosts that may not allow it.
+const CLIENT_HEADER = `binding=web; sdk_version=${SDK_VERSION}; platform=web`;
 
 const resolvedSchema = z
   .object({
@@ -204,6 +210,7 @@ const fetchRegistryResolution = async (
   try {
     response = await ky.get(endpoint, {
       credentials: "omit",
+      headers: { "X-Xybrid-Client": CLIENT_HEADER },
       retry: 0,
       timeout: REGISTRY_TIMEOUT_MS,
       ...(signal === undefined ? {} : { signal }),

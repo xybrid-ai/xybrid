@@ -8,6 +8,7 @@ import type { LlmEngine, LlmGeneration, LlmRuntime } from "../src/internal/runti
 import { downloadVerifiedModel } from "../src/internal/verified-download.ts";
 import { loadLlmFromResolution } from "../src/llm.ts";
 import type { DownloadProgress } from "../src/types.ts";
+import { SDK_VERSION } from "../src/version.ts";
 import { tfliteMetadata } from "./helpers.ts";
 
 const REGISTRY_URL = "https://registry.test";
@@ -226,6 +227,10 @@ describe("registry resolution and verified downloads", () => {
       expect(control.created).toEqual([{ accelerator: "wasm", contextLength: 2048 }]);
       expect(downloadRequests).toBe(1);
       expect(requests.map((request) => request.credentials)).toEqual(["omit", "omit"]);
+      expect(requests[0]?.headers.get("x-xybrid-client")).toBe(
+        `binding=web; sdk_version=${SDK_VERSION}; platform=web`,
+      );
+      expect(requests[1]?.headers.get("x-xybrid-client")).toBeNull();
       expect(progress.length).toBeGreaterThan(0);
       expect(progress.every((value) => value.totalBytes === bytes.byteLength)).toBe(true);
       expect(progress.at(-1)).toEqual({

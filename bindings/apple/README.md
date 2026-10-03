@@ -37,6 +37,10 @@ Then add the dependency to your target:
 ```swift
 import Xybrid
 
+// Once, at app launch. Runs locally as-is; pass a free key from
+// dashboard.xybrid.dev to see your inference traces: initialize(apiKey: "...")
+Xybrid.initialize()
+
 // Describing the source is cheap; load() is the explicit async boundary.
 let model = try await Xybrid.model("kokoro-82m").load()
 

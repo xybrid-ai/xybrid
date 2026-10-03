@@ -315,12 +315,14 @@ static SDK_CONFIG: OnceLock<SdkConfig> = OnceLock::new();
 /// [`get_binding`], which returns [`DEFAULT_BINDING`] when unset.
 static BINDING: OnceLock<&'static str> = OnceLock::new();
 
+/// Binding reported until [`set_binding`] runs; see [`set_fallback_binding`].
+static FALLBACK_BINDING: OnceLock<&'static str> = OnceLock::new();
+
 /// Default binding identifier reported in the registry telemetry header.
 ///
 /// Each platform binding (Flutter, Kotlin, React Native, Swift, Unity)
-/// overrides this via [`set_binding`] (process-global) or
-/// [`SdkConfig::with_binding`] (per-config) so registry calls can be
-/// attributed correctly.
+/// overrides this via [`set_binding`] so registry calls can be attributed
+/// correctly.
 pub const DEFAULT_BINDING: &str = "rust";
 
 /// SDK crate version, stamped onto every telemetry event as `sdk_version` and
@@ -348,12 +350,28 @@ pub fn set_binding(binding: &'static str) {
     let _ = BINDING.set(binding);
 }
 
+/// Set the binding reported until one is registered with [`set_binding`].
+///
+/// A native library that several SDKs load uses this for the SDK that usually
+/// ships it, so an app that never registers is still attributed: `xybrid-bolt`
+/// names `swift` on Apple platforms and `kotlin` on Android. Unlike
+/// [`set_binding`] it never blocks a registration, so an SDK that registers
+/// later (Unity, React Native, Python) reports its own name from then on. The
+/// first call wins.
+pub fn set_fallback_binding(binding: &'static str) {
+    let _ = FALLBACK_BINDING.set(binding);
+}
+
 /// Read the process-global binding identifier.
 ///
-/// Returns the value passed to the most recent successful [`set_binding`]
-/// call, falling back to [`DEFAULT_BINDING`] when unset.
+/// Returns the value passed to the first [`set_binding`] call, else the one
+/// passed to [`set_fallback_binding`], else [`DEFAULT_BINDING`].
 pub fn get_binding() -> &'static str {
-    BINDING.get().copied().unwrap_or(DEFAULT_BINDING)
+    BINDING
+        .get()
+        .or_else(|| FALLBACK_BINDING.get())
+        .copied()
+        .unwrap_or(DEFAULT_BINDING)
 }
 
 /// SDK configuration options.
@@ -361,23 +379,23 @@ pub fn get_binding() -> &'static str {
 pub struct SdkConfig {
     /// Custom cache directory (required on Android, optional elsewhere)
     pub cache_dir: Option<std::path::PathBuf>,
-    /// Binding identifier reported in the `X-Xybrid-Client` registry header.
-    ///
-    /// Defaults to [`DEFAULT_BINDING`] when unset. Bindings should set this
-    /// at SDK init via [`SdkConfig::with_binding`].
+    /// Never read: no API takes an `SdkConfig`, so this reaches no request.
+    /// Register the binding with [`set_binding`] or [`XybridInit::binding`].
     pub binding: Option<&'static str>,
 }
 
 impl SdkConfig {
-    /// Override the binding identifier reported in the registry telemetry header.
-    ///
-    /// Returns `self` to support a fluent builder style.
+    /// Store a binding that nothing reads; see [`SdkConfig::binding`].
+    #[deprecated(
+        note = "has no effect; use xybrid_sdk::set_binding or xybrid_sdk::init().binding()"
+    )]
     pub fn with_binding(mut self, binding: &'static str) -> Self {
         self.binding = Some(binding);
         self
     }
 
-    /// Resolve the configured binding identifier, falling back to [`DEFAULT_BINDING`].
+    /// The stored binding, or [`DEFAULT_BINDING`]; not what requests report.
+    #[deprecated(note = "has no effect; read xybrid_sdk::get_binding instead")]
     pub fn binding(&self) -> &'static str {
         self.binding.unwrap_or(DEFAULT_BINDING)
     }
@@ -396,6 +414,9 @@ impl SdkConfig {
 /// that third-party libraries (like mistralrs/hf-hub) can find cache directories
 /// on platforms like Android where standard Unix paths don't exist.
 ///
+/// The first call wins: later calls change neither the folder nor those
+/// variables, so an SDK's default never overrides an app's earlier choice.
+///
 /// # Example (Flutter/Dart)
 ///
 /// ```dart
@@ -413,7 +434,19 @@ impl SdkConfig {
 /// * `cache_dir` - Path to the directory where model bundles will be cached
 pub fn init_sdk_cache_dir(cache_dir: impl Into<std::path::PathBuf>) {
     let cache_path = cache_dir.into();
+    // `get_or_init` runs this once: a later call changes neither the folder nor
+    // the environment that points third-party libraries at it.
+    SDK_CONFIG.get_or_init(|| {
+        export_cache_env(&cache_path);
+        SdkConfig {
+            cache_dir: Some(cache_path),
+            ..SdkConfig::default()
+        }
+    });
+}
 
+/// Point third-party libraries (hf-hub, mistralrs, ...) at the cache folder.
+fn export_cache_env(cache_path: &std::path::Path) {
     // Set environment variables for third-party libraries (hf-hub, mistralrs, etc.)
     // On Android, dirs::home_dir() and dirs::cache_dir() return None, causing panics.
     // Setting these env vars provides fallback paths for those libraries.
@@ -447,12 +480,6 @@ pub fn init_sdk_cache_dir(cache_dir: impl Into<std::path::PathBuf>) {
             std::env::set_var("XDG_CACHE_HOME", cache_str);
         }
     }
-
-    let config = SdkConfig {
-        cache_dir: Some(cache_path),
-        ..SdkConfig::default()
-    };
-    let _ = SDK_CONFIG.set(config);
 }
 
 /// Get the configured cache directory (if set).
@@ -550,7 +577,8 @@ pub fn set_provider_api_key(provider: &str, api_key: &str) {
 ///
 /// When enabled, a [`ModelLoader`] whose model isn't downloaded yet is served
 /// from the Xybrid gateway while the weights download in the background —
-/// provided a cloud API key is resolvable. This sets the process-global
+/// provided a cloud API key is resolvable and the registry reports a chat
+/// model (see [`ModelLoader::will_speculate`]). This sets the process-global
 /// default; individual loads override it with
 /// [`ModelLoader::with_speculative_cloud`]. The flag persists in memory for the
 /// app lifetime.
@@ -1153,7 +1181,7 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
 
 #[cfg(test)]
 mod sdk_config_tests {
-    use super::{SdkConfig, DEFAULT_BINDING};
+    use super::DEFAULT_BINDING;
 
     #[test]
     fn default_binding_is_rust() {
@@ -1167,34 +1195,6 @@ mod sdk_config_tests {
         // cargo and `bazel test`, this proves the version reaches the crate;
         // that EVERY target passes it is a `bazel query` check in bazel.yml.
         assert_ne!(crate::SDK_VERSION, "0.0.0");
-    }
-
-    #[test]
-    fn default_config_resolves_to_default_binding() {
-        let cfg = SdkConfig::default();
-        assert!(cfg.binding.is_none());
-        assert_eq!(cfg.binding(), "rust");
-    }
-
-    #[test]
-    fn with_binding_overrides_default() {
-        let cfg = SdkConfig::default().with_binding("flutter");
-        assert_eq!(cfg.binding, Some("flutter"));
-        assert_eq!(cfg.binding(), "flutter");
-    }
-
-    #[test]
-    fn with_binding_preserves_other_fields() {
-        let cfg = SdkConfig {
-            cache_dir: Some(std::path::PathBuf::from("/tmp/xybrid-cache")),
-            ..SdkConfig::default()
-        }
-        .with_binding("kotlin");
-        assert_eq!(cfg.binding(), "kotlin");
-        assert_eq!(
-            cfg.cache_dir.as_deref(),
-            Some(std::path::Path::new("/tmp/xybrid-cache"))
-        );
     }
 }
 

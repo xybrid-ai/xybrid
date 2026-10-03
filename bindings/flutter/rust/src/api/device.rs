@@ -37,15 +37,20 @@ static DEBUG_MEMORY_PRESSURE_REMAINING: AtomicU8 = AtomicU8::new(0);
 
 pub(crate) fn current_snapshot_with_debug_memory_pressure(max_age: Duration) -> ResourceSnapshot {
     let mut snapshot = xybrid_sdk::ResourceMonitor::global().current_snapshot(max_age);
-    let previous = DEBUG_MEMORY_PRESSURE_REMAINING
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |remaining| {
-            if remaining > 0 {
-                Some(remaining - 1)
-            } else {
-                None
-            }
-        })
-        .unwrap_or(0);
+    // Decrement if positive. `fetch_update` is deprecated from Rust 1.99 and
+    // its `try_update` rename needs 1.95, newer than Bazel's pinned 1.92.
+    let mut previous = DEBUG_MEMORY_PRESSURE_REMAINING.load(Ordering::Acquire);
+    while previous > 0 {
+        match DEBUG_MEMORY_PRESSURE_REMAINING.compare_exchange_weak(
+            previous,
+            previous - 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => break,
+            Err(actual) => previous = actual,
+        }
+    }
     if previous > 0 {
         snapshot.memory_pressure = MemoryPressure::Critical;
     }

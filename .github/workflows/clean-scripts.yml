@@ -1,0 +1,45 @@
+name: Clean scripts
+
+# Checks the per-folder clean.sh scripts, the root clean.sh and their shared
+# tools/scripts/clean-lib.sh (tools/scripts/tests/test_clean.py): every path a
+# folder script lists must be one git ignores, or the lib refuses it. A
+# workflow of its own because ci.yml ignores docs/** and examples/**, which
+# hold clean scripts too, and because a .gitignore edit anywhere can break
+# the check.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'clean.sh'
+      - '**/clean.sh'
+      - '.gitignore'
+      - '**/.gitignore'
+      - 'tools/scripts/clean-lib.sh'
+      - 'tools/scripts/tests/test_clean.py'
+      - '.github/workflows/clean-scripts.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'clean.sh'
+      - '**/clean.sh'
+      - '.gitignore'
+      - '**/.gitignore'
+      - 'tools/scripts/clean-lib.sh'
+      - 'tools/scripts/tests/test_clean.py'
+      - '.github/workflows/clean-scripts.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  test:
+    name: Clean script tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Test clean.sh, clean-lib.sh and every folder clean.sh
+        run: python3 -m unittest discover -s tools/scripts/tests -p 'test_clean.py' -v

@@ -16,7 +16,7 @@ import 'result.dart';
 import 'streaming.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `completion`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
@@ -264,9 +264,11 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   ///
   /// `load()` then returns almost immediately with a cloud-backed model that
   /// switches to on-device by itself once the download lands. Requires a
-  /// resolvable API key and an uncached model — otherwise this behaves
-  /// exactly like [`Self::from_registry`], which [`Self::will_speculate`]
-  /// reports. LLM/chat models only.
+  /// resolvable API key, an uncached model, and a chat model the registry
+  /// serves as a direct download (GGUF or vision-language, not a `.xyb`
+  /// bundle) — otherwise this behaves exactly like [`Self::from_registry`].
+  /// [`Self::will_speculate`] checks the first two before loading;
+  /// `FfiModel::is_cloud_serving` reports the outcome.
   static FfiModelLoader fromRegistrySpeculative({required String modelId}) =>
       XybridRustLib.instance.api
           .crateApiModelFfiModelLoaderFromRegistrySpeculative(modelId: modelId);
@@ -285,8 +287,10 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   /// After receiving `Complete`, call `load()` to get the cached model instantly.
   Stream<FfiLoadEvent> loadWithProgress();
 
-  /// Whether `load()` would actually speculate: enabled, an API key
-  /// resolves, and the model is not already cached. Never hits the network.
+  /// Whether `load()` may speculate: enabled, an API key resolves, and the
+  /// model is not already cached. Never hits the network, so it cannot know
+  /// the model type: the load asks the registry and speculates only for a
+  /// chat model.
   bool willSpeculate();
 }
 

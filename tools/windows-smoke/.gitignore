@@ -1,0 +1,5 @@
+# dotnet build output.
+bin/
+obj/
+# The Bazel-built DLL the bazel-windows-bolt-smoke job downloads here.
+xybrid_bolt.dll

@@ -41,11 +41,10 @@ pub type LlmResult<T> = Result<T, AdapterError>;
 /// to the wire payload by the SDK so the analytics backend can attribute
 /// latency to the engine that actually ran (Metal vs CPU vs CUDA).
 ///
-/// Build flags determine the answer because backend selection happens at
-/// compile time: `llm-mistral-metal` and `llm-mistral-cuda` switch
-/// mistralrs to the corresponding accelerator; `llm-llamacpp` on macOS
-/// builds with `GGML_METAL=ON` by default. On Linux/Windows,
-/// `XYBRID_LLAMA_CPP_VULKAN=1` builds llama.cpp with `GGML_VULKAN=ON`.
+/// Build flags and the iOS target determine the answer. `llm-mistral-metal`
+/// and `llm-mistral-cuda` select their accelerators. `llm-llamacpp` reports
+/// Metal on macOS and physical iOS devices; the simulator uses CPU. On
+/// Linux/Windows, `XYBRID_LLAMA_CPP_VULKAN=1` enables Vulkan.
 /// For unknown or mock backends we report `cpu` rather than guessing —
 /// wrong is worse than missing on a diagnostic field.
 pub(crate) fn local_execution_provider(backend_name: &str) -> &'static str {
@@ -56,10 +55,20 @@ pub(crate) fn local_execution_provider(backend_name: &str) -> &'static str {
     }
 }
 
-#[cfg(all(feature = "llm-llamacpp", any(target_os = "macos", target_os = "ios")))]
+#[cfg(all(
+    feature = "llm-llamacpp",
+    any(target_os = "macos", all(target_os = "ios", not(target_abi = "sim")))
+))]
 fn llamacpp_execution_provider() -> &'static str {
-    // build.rs sets GGML_METAL=ON for both macOS and iOS Apple targets.
+    // Metal is available on macOS and physical iOS devices.
     "metal"
+}
+
+#[cfg(all(feature = "llm-llamacpp", target_os = "ios", target_abi = "sim"))]
+fn llamacpp_execution_provider() -> &'static str {
+    // The simulator binary includes Metal, but llama.cpp runs with zero GPU
+    // layers there because Metal inference returns invalid tokens.
+    "cpu"
 }
 
 #[cfg(all(

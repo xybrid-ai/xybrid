@@ -1,0 +1,392 @@
+{
+  "schema": "xybrid/choice-provenance/v1",
+  "description": "Pins every input of the choice-scoring conformance suite. Upstream code and weights are pinned by full commit and per-file sha256; the model artifacts are regenerated from them by tools/conformance (never published) and pinned by sha256; every committed fixture in this directory is pinned below. Verify with tools/scripts/check_choice_provenance.py --check.",
+  "sources": {
+    "trycua-cua": {
+      "kind": "git",
+      "repository": "https://github.com/trycua/cua",
+      "revision": "bf6c76786d938070f4ecf1e44004752f69f518b8",
+      "license": "MIT",
+      "license_evidence": "libs/cua-s1/python/LICENSE",
+      "files": {
+        "libs/cua-s1/python/LICENSE": {
+          "sha256": "c0779290c1d4783169aa3dbfb55feb505e563ef8a004bbf55298ceffcfbda8d9",
+          "size": 1069
+        },
+        "libs/cua-s1/python/src/cua_s1/__init__.py": {
+          "sha256": "68ca526b67bdb95401ddaa2ccc09b0717879d16a9102e2014f4f9018df292ddf",
+          "size": 169
+        },
+        "libs/cua-s1/python/src/cua_s1/checkpoint.py": {
+          "sha256": "6d96ab6e946c88af341947d656ff244a8de5846edfd1f6a410466a97d89b375f",
+          "size": 7697
+        },
+        "libs/cua-s1/python/src/cua_s1/model.py": {
+          "sha256": "7538cb4c9730d70a0b325050f370f981a9e109a1b182b8c66be3ba0fa2474344",
+          "size": 12978
+        },
+        "libs/cua-s1/python/src/cua_s1/schema.py": {
+          "sha256": "89091773b050f538cb914a4da4cda59da0afa772b245b8e1264aa55e7e4b0e57",
+          "size": 3508
+        }
+      }
+    },
+    "cua-s1-forms": {
+      "kind": "huggingface",
+      "repository": "cua-ai/cua-s1-forms",
+      "revision": "4a7a9f42a3d42e6dfbd111c0c843e37ac50f1332",
+      "license": "MIT",
+      "license_evidence": "README.md",
+      "files": {
+        "README.md": {
+          "sha256": "854077f0ef3c89ea0a507a63e83ea9e16150c212cbfe7e01b021fafbb0fe5ca2",
+          "size": 7468
+        },
+        "cua-s1-forms.json": {
+          "sha256": "62d31e2f9a001a8e9b6f8534c5194d07ebdd3f9d62ef1ac281906622992650ca",
+          "size": 1053
+        },
+        "cua-s1-forms.safetensors": {
+          "sha256": "05954c1caf51c2fb6c13ea4acbfc88a2e7653dea192252bb51dc89e76a356ddc",
+          "size": 2828784
+        }
+      }
+    },
+    "qwen3.5-0.8b": {
+      "kind": "huggingface",
+      "repository": "Qwen/Qwen3.5-0.8B",
+      "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+      "license": "Apache-2.0",
+      "license_evidence": "LICENSE",
+      "files": {
+        "LICENSE": {
+          "sha256": "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a",
+          "size": 11544
+        },
+        "chat_template.jinja": {
+          "sha256": "273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80",
+          "size": 7755
+        },
+        "config.json": {
+          "sha256": "b90b86f35c8e6925ef74ee04d0e758f0a845c83a42089ad82bbaa948de9b4204",
+          "size": 2907
+        },
+        "merges.txt": {
+          "sha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d",
+          "size": 3353259
+        },
+        "model.safetensors-00001-of-00001.safetensors": {
+          "sha256": "04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696",
+          "size": 1746942600
+        },
+        "model.safetensors.index.json": {
+          "sha256": "d8a08838a613b025eb7952ed9db11696213e57e76a375661ef5c12f9dd5dcf4e",
+          "size": 50900
+        },
+        "tokenizer.json": {
+          "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+          "size": 12807982
+        },
+        "tokenizer_config.json": {
+          "sha256": "49e2b6e395f959f077f1e992b338919c0d4a9732fc6e613995e06557f843500c",
+          "size": 16709
+        },
+        "vocab.json": {
+          "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
+          "size": 6722759
+        }
+      }
+    },
+    "llama.cpp": {
+      "kind": "git",
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "revision": "b46812de78f8fbcb6cf0154947e8633ebc78d9ac",
+      "license": "MIT",
+      "license_evidence": "LICENSE",
+      "submodule": "vendor/llama-cpp",
+      "files": {
+        "LICENSE": {
+          "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+          "size": 1078
+        },
+        "convert_hf_to_gguf.py": {
+          "sha256": "da052d343a320e214d7675a619a67f757d81a032fc7db519c063e5c787ff9083",
+          "size": 670385
+        }
+      }
+    }
+  },
+  "environments": {
+    "forms": {
+      "python": "3.12",
+      "requirements": "tools/conformance/requirements-forms.txt",
+      "sha256": "6bc7b1cd899b5787769f7743469b8967e3dc7ed952ed26372bedd86558eebd4a",
+      "direct": "tools/conformance/requirements-forms.in"
+    },
+    "labels": {
+      "python": "3.12",
+      "requirements": "tools/conformance/requirements-labels.txt",
+      "sha256": "0e30abc9eb04e863a3898d125c82645478b90df603e08c0b3262233aaf32e0c4",
+      "direct": "tools/conformance/requirements-labels.in"
+    },
+    "convert": {
+      "python": "3.12",
+      "requirements": "tools/conformance/requirements-convert.txt",
+      "sha256": "428d0d795b2b4e30092dd30371b31ad1a8fcaf4098f46da07732110ae0da5607",
+      "direct": "tools/conformance/requirements-convert.in"
+    }
+  },
+  "artifacts": {
+    "cua-s1-forms": {
+      "files": {
+        "cua-s1-forms.onnx": {
+          "sha256": "2db6e4be6750b3cff0b67efb7b99625bc54c0570c213d0bb2266236343b8c3c6",
+          "size": 2855588
+        }
+      },
+      "inputs": [
+        {
+          "source": "cua-s1-forms",
+          "file": "cua-s1-forms.safetensors"
+        },
+        {
+          "source": "cua-s1-forms",
+          "file": "cua-s1-forms.json"
+        },
+        {
+          "source": "trycua-cua",
+          "file": "libs/cua-s1/python/src/cua_s1/__init__.py",
+          "output": "cua_s1/__init__.py"
+        },
+        {
+          "source": "trycua-cua",
+          "file": "libs/cua-s1/python/src/cua_s1/checkpoint.py",
+          "output": "cua_s1/checkpoint.py"
+        },
+        {
+          "source": "trycua-cua",
+          "file": "libs/cua-s1/python/src/cua_s1/model.py",
+          "output": "cua_s1/model.py"
+        }
+      ],
+      "tool": "tools/conformance/export_forms_onnx.py",
+      "environment": "forms",
+      "settings": {
+        "exporter": "torch.onnx.export(dynamo=True), attention fast path disabled while tracing",
+        "opset": 18,
+        "ir_version": 8,
+        "inputs": {
+          "context_ids": "int64 [1, 224]",
+          "context_mask": "bool [1, 224]",
+          "option_ids": "int64 [1, choices, 96]",
+          "option_token_mask": "bool [1, choices, 96]",
+          "option_mask": "bool [1, choices]"
+        },
+        "output": {
+          "logits": "float32 [1, choices]"
+        },
+        "choices": "dynamic, 1..64"
+      },
+      "export_checks": {
+        "cases": 213,
+        "bounds": {
+          "logit": 5e-05,
+          "score": 1e-05
+        },
+        "max_abs": {
+          "macos_arm64": {
+            "export_parity": {
+              "logit": 2.2649765014648438e-05,
+              "score": 1.2889063838450454e-06
+            },
+            "padding": {
+              "logit": 1.9073486328125e-06,
+              "score": 4.709821421755578e-11
+            },
+            "export_vs_reference": {
+              "logit": 2.2649765014648438e-05,
+              "score": 1.2889063838450454e-06
+            }
+          },
+          "linux_x86_64": {
+            "export_parity": {
+              "logit": 1.621246337890625e-05,
+              "score": 2.151038560438412e-06
+            },
+            "padding": {
+              "logit": 1.1444091796875e-05,
+              "score": 1.1750544772204385e-06
+            },
+            "export_vs_reference": {
+              "logit": 1.621246337890625e-05,
+              "score": 3.3260930376588504e-06
+            }
+          }
+        },
+        "reproduced_on": [
+          "macOS arm64 (torch 2.14.0)",
+          "Linux x86_64 (torch 2.14.0+cpu)"
+        ]
+      }
+    },
+    "qwen3.5-0.8b-f16-cf": {
+      "files": {
+        "Qwen3.5-0.8B-F16.gguf": {
+          "sha256": "7b10bd707f33b78919eae3b77df2f8775f6da32cc79edccd8e3871c4befa48fb",
+          "size": 1516744128
+        }
+      },
+      "inputs": [
+        {
+          "source": "qwen3.5-0.8b",
+          "file": "LICENSE"
+        },
+        {
+          "source": "qwen3.5-0.8b",
+          "file": "chat_template.jinja"
+        },
+        {
+          "source": "qwen3.5-0.8b",
+          "file": "config.json"
+        },
+        {
+          "source": "qwen3.5-0.8b",
+          "file": "merges.txt"
+        },
+        {
+          "source": "qwen3.5-0.8b",
+          "file": "model.safetensors-00001-of-00001.safetensors"
+        },
+        {
+          "source": "qwen3.5-0.8b",
+          "file": "model.safetensors.index.json"
+        },
+        {
+          "source": "qwen3.5-0.8b",
+          "file": "tokenizer.json"
+        },
+        {
+          "source": "qwen3.5-0.8b",
+          "file": "tokenizer_config.json"
+        },
+        {
+          "source": "qwen3.5-0.8b",
+          "file": "vocab.json"
+        }
+      ],
+      "tool": "tools/conformance/convert_gguf.sh",
+      "environment": "convert",
+      "settings": {
+        "command": "vendor/llama-cpp/convert_hf_to_gguf.py Qwen3.5-0.8B --outtype f16 --model-name Qwen3.5-0.8B",
+        "llama.cpp": "b46812de78f8fbcb6cf0154947e8633ebc78d9ac",
+        "embedded_chat_template": "templates/qwen3.5.jinja"
+      }
+    },
+    "qwen3.5-0.8b-q4km-cf": {
+      "files": {
+        "Qwen3.5-0.8B-Q4_K_M.gguf": {
+          "sha256": "bb8fc97cae2a004c0be37c5a9d0f14b4303609f60d2dcd100d7210d9a77c6ee1",
+          "size": 529296832
+        }
+      },
+      "inputs": [
+        {
+          "artifact": "qwen3.5-0.8b-f16-cf",
+          "file": "Qwen3.5-0.8B-F16.gguf"
+        }
+      ],
+      "tool": "tools/conformance/convert_gguf.sh",
+      "environment": "convert",
+      "settings": {
+        "command": "llama-quantize Qwen3.5-0.8B-F16.gguf Qwen3.5-0.8B-Q4_K_M.gguf Q4_K_M",
+        "build": "cmake Release, static, GGML_NATIVE=OFF, -ffp-contract=off, CPU only (no Metal, BLAS or OpenMP)",
+        "llama.cpp": "b46812de78f8fbcb6cf0154947e8633ebc78d9ac",
+        "embedded_chat_template": "templates/qwen3.5.jinja",
+        "reproduced_on": [
+          "macOS arm64 (Apple clang 21)",
+          "Linux arm64 (GCC 13.3)",
+          "Linux x86_64 (GCC 13.3)"
+        ]
+      }
+    }
+  },
+  "templates": {
+    "templates/qwen3.5.jinja": {
+      "source": "qwen3.5-0.8b",
+      "file": "chat_template.jinja"
+    }
+  },
+  "cases": [
+    "cases/forms.json",
+    "cases/labels.json"
+  ],
+  "generated": {
+    "goldens/forms.json": {
+      "generator": "tools/conformance/gen_forms_goldens.py",
+      "environment": "forms",
+      "cases": "cases/forms.json",
+      "spec": "specs/cua-s1-forms.json"
+    },
+    "goldens/labels.json": {
+      "generator": "tools/conformance/gen_label_goldens.py",
+      "environment": "labels",
+      "cases": "cases/labels.json",
+      "template": "templates/qwen3.5.jinja"
+    },
+    "fake/dynamic.onnx": {
+      "generator": "tools/conformance/gen_fake_scorers.py",
+      "environment": "forms"
+    },
+    "fake/short_output.onnx": {
+      "generator": "tools/conformance/gen_fake_scorers.py",
+      "environment": "forms"
+    },
+    "fake/static_masked.onnx": {
+      "generator": "tools/conformance/gen_fake_scorers.py",
+      "environment": "forms"
+    },
+    "fake/wrong_dtype.onnx": {
+      "generator": "tools/conformance/gen_fake_scorers.py",
+      "environment": "forms"
+    }
+  },
+  "gates": {
+    "note": "Each track freezes its own bounds from measured spreads: PR 02 the FORMS track, PR 05 the label track. Loosening a frozen bound needs a written justification.",
+    "forms": {
+      "status": "frozen",
+      "note": "Frozen by PR 02 at max(export-time bound, 4x the worst measured |delta|), capped at the starting bound 1e-4. Measured through xybrid's ONNX path against goldens/forms.json (13 cases, ONNX Runtime 1.23.2, ORT_ENABLE_LAYOUT, intra-op threads 1/4/8 x 5 repeats, bit-identical across repeats): macOS arm64 |dlogit| 1.895e-5, |dscore| 4.45e-7; Linux x86_64 |dlogit| 1.24e-5, |dscore| 1.97e-6.",
+      "g1": {
+        "max_abs_logit": 8e-05,
+        "max_abs_score": 1e-05,
+        "near_tie_margin": 0.05
+      }
+    },
+    "labels": {
+      "status": "provisional",
+      "g1": {
+        "max_abs_logit": 0.15,
+        "max_abs_score": 0.02,
+        "max_abs_label_mass": 0.02,
+        "near_tie_margin": 0.05
+      },
+      "g2": {
+        "max_abs_logit": 0.001,
+        "max_abs_score": 0.0001,
+        "max_abs_label_mass": 0.0001,
+        "near_tie_margin": 0.001
+      }
+    }
+  },
+  "fixtures": {
+    "cases/forms.json": "84e1bfbb5e256bd6ef3702b731a0471507c3b594e849f8facc938a7522a99138",
+    "cases/labels.json": "b4e3b9e17e9f35b24391472b67cb391d9b982538d8a43270a7460f36b90092fa",
+    "fake/dynamic.onnx": "6708155f0e9a51eb1e77563baed3f2d44749b3f990a7b9bd159782b09fc104aa",
+    "fake/short_output.onnx": "7f9885e0b1218956733c64545c71a5c4c66c47d97c20164894d73b78bd630670",
+    "fake/static_masked.onnx": "e7b8b9dd4113067f88babb7b65020bc5eb054afc3ebba23e6335445cc188c817",
+    "fake/wrong_dtype.onnx": "e47a63c7a13dd56966150a0de6cf1233734480f987e1e19cb0b546d1207faf4b",
+    "goldens/forms.json": "63fb1879e90117e8609481758fecff0cd88416d9e4be3d67b07e15ab15f60c66",
+    "goldens/labels.json": "9c351c9d953a169407c695860f78cd51bde55afb0d3a8adf0b1279cb436dcccd",
+    "specs/cua-s1-forms.json": "37d2ef9ae8f42375796d9eb02446b07c79432679f9398af5497a643d10254549",
+    "templates/qwen3.5.jinja": "273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80"
+  }
+}

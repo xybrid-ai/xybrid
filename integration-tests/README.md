@@ -122,6 +122,13 @@ Models are hosted on HuggingFace under the `xybrid-ai` organization:
 - https://huggingface.co/xybrid-ai/kokoro-82m
 - https://huggingface.co/xybrid-ai/whisper-tiny
 
+Models with `"source": "derived"` in `models.json` (the choice-scoring
+conformance fixtures, e.g. `cua-s1-forms`) are not hosted anywhere. They are
+regenerated from pinned upstream inputs and checked against the sha256 in
+`models.json`; `./download.sh <model>` delegates to
+`tools/conformance/prepare.sh`, and `--all` skips them. See
+[`tools/conformance/README.md`](../tools/conformance/README.md).
+
 ## CI Integration
 
 Integration tests are run separately from unit tests in CI:

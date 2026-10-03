@@ -445,11 +445,11 @@ impl Envelope {
         // Built through the SDK constructor rather than by re-deriving the
         // metadata keys here, so the continuation wire format has exactly one
         // definition and this can't silently drift from the executor.
-        Ok(Self::from_sdk(sdk::ir::Envelope::tool_results(
+        Self::try_from_sdk(sdk::ir::Envelope::tool_results(
             user_text,
             prior_assistant_text,
             &sdk_results,
-        )))
+        ))
     }
 
     /// Set the LLM message role on this envelope. Stored under
@@ -509,7 +509,17 @@ impl Envelope {
         Ok(sdk::ir::Envelope::with_metadata(sdk_kind, metadata))
     }
 
-    pub fn from_sdk(env: sdk::ir::Envelope) -> Self {
+    /// Consuming conversion from the SDK type. `pub` so binding crates with
+    /// their own Ffi envelope POD can convert through the facade.
+    ///
+    /// # Errors
+    /// Returns [`Error::UnsupportedModelCapability`] if the envelope, or a part
+    /// nested in a [`MultiPart`], carries a payload no facade type can hold:
+    /// today a raw pixel image. Failing beats returning the result with that
+    /// payload dropped or replaced.
+    ///
+    /// [`MultiPart`]: EnvelopeKind::MultiPart
+    pub fn try_from_sdk(env: sdk::ir::Envelope) -> Result<Self> {
         let kind = match env.kind {
             sdk::ir::EnvelopeKind::Text(text) => EnvelopeKind::Text { text },
             sdk::ir::EnvelopeKind::Audio(bytes) => EnvelopeKind::Audio { bytes },
@@ -519,21 +529,40 @@ impl Envelope {
                     bytes: bytes.to_vec(),
                     format: format.as_str().to_string(),
                 },
-                // Raw (camera) images aren't representable on the facade
-                // surface yet; outputs are never raw images, so this is a
-                // defensive marker rather than a real path.
-                None => EnvelopeKind::Text {
-                    text: "[raw image]".to_string(),
-                },
+                // Raw (camera) images have no facade form. No model outputs
+                // one today and `into_sdk` never builds one.
+                None => return Err(unrepresentable("a raw pixel image")),
             },
             sdk::ir::EnvelopeKind::MultiPart(parts) => EnvelopeKind::MultiPart {
-                parts: parts.into_iter().map(Envelope::from_sdk).collect(),
+                parts: parts
+                    .into_iter()
+                    .map(Envelope::try_from_sdk)
+                    .collect::<Result<Vec<_>>>()?,
             },
         };
-        Self {
+        Ok(Self {
             kind,
             metadata: env.metadata,
-        }
+        })
+    }
+
+    /// Convert an envelope that [`ConversationContextHandle`] stored.
+    ///
+    /// Cannot fail: the handle stores only what [`Self::into_sdk`] built, and
+    /// [`Self::try_from_sdk`] accepts every kind `into_sdk` produces. Keeping
+    /// it infallible keeps the foreign `history()` signature unchanged.
+    fn from_stored_history(env: sdk::ir::Envelope) -> Self {
+        Self::try_from_sdk(env)
+            .expect("conversation history holds only envelopes built by Envelope::into_sdk")
+    }
+}
+
+/// The error for an SDK payload that no facade type can carry.
+///
+/// Conversions return it rather than a success with the payload dropped.
+fn unrepresentable(payload: &str) -> Error {
+    Error::UnsupportedModelCapability {
+        message: format!("{payload} cannot be returned through the FFI bindings yet"),
     }
 }
 
@@ -590,6 +619,10 @@ impl MessageRole {
 /// shared `&self` — FFI handle methods only ever receive a shared
 /// reference. The mutex is uncontended in normal usage — a conversation
 /// handle is held by one host thread.
+///
+/// Every envelope it holds came through [`Envelope::into_sdk`] (`push`,
+/// `set_system`); the other methods only drop, reorder or copy them. That is
+/// why [`Self::history`] can convert back without failing.
 pub struct ConversationContextHandle {
     inner: std::sync::Mutex<sdk::ConversationContext>,
 }
@@ -679,7 +712,7 @@ impl ConversationContextHandle {
             .history()
             .iter()
             .cloned()
-            .map(Envelope::from_sdk)
+            .map(Envelope::from_stored_history)
             .collect()
     }
 
@@ -1295,6 +1328,20 @@ pub enum StreamEvent {
     Error(Error),
 }
 
+impl StreamEvent {
+    /// The event that ends a stream: `Complete` only when the result converts,
+    /// so a stream never completes with its output dropped.
+    fn terminal(result: sdk::SdkResult<sdk::InferenceResult>) -> Self {
+        match result
+            .map_err(Error::from)
+            .and_then(InferenceResult::try_from_sdk)
+        {
+            Ok(result) => StreamEvent::Complete(result),
+            Err(error) => StreamEvent::Error(error),
+        }
+    }
+}
+
 const STREAM_CHANNEL_CAPACITY: usize = 32;
 
 /// Pull-based bridge over the SDK's callback streaming API.
@@ -1339,7 +1386,12 @@ impl StreamingSession {
 }
 
 impl InferenceResult {
-    pub fn from_sdk(result: sdk::InferenceResult) -> Self {
+    /// Convert an SDK result.
+    ///
+    /// # Errors
+    /// Returns [`Error::UnsupportedModelCapability`] when the output envelope
+    /// cannot be converted (see [`Envelope::try_from_sdk`]).
+    pub fn try_from_sdk(result: sdk::InferenceResult) -> Result<Self> {
         let output_type = OutputType::from_sdk(result.output_type());
         let model_id = result.model_id().to_string();
         let latency_ms = result.latency_ms();
@@ -1350,8 +1402,8 @@ impl InferenceResult {
             .into_iter()
             .map(ToolCall::from_sdk)
             .collect();
-        let envelope = Envelope::from_sdk(result.into_envelope());
-        Self {
+        let envelope = Envelope::try_from_sdk(result.into_envelope())?;
+        Ok(Self {
             envelope,
             output_type,
             model_id,
@@ -1359,7 +1411,7 @@ impl InferenceResult {
             execution_target,
             metrics,
             tool_calls,
-        }
+        })
     }
 
     /// Convenience: text payload, if the result is `OutputType::Text`.
@@ -1444,18 +1496,18 @@ pub struct StageResult {
 }
 
 impl StageResult {
-    fn from_sdk(stage: sdk::PipelineStageTiming) -> Self {
+    fn try_from_sdk(stage: sdk::PipelineStageTiming) -> Result<Self> {
         let metrics =
             sdk::InferenceMetrics::from_metadata(&stage.output.metadata, stage.latency_ms);
-        let envelope = Envelope::from_sdk(stage.output);
-        Self {
+        let envelope = Envelope::try_from_sdk(stage.output)?;
+        Ok(Self {
             execution_target: ExecutionTarget::from_pipeline_target(&stage.target),
             output_type: OutputType::of_envelope(&envelope.kind),
             envelope,
             stage_id: stage.name,
             latency_ms: stage.latency_ms,
             metrics: InferenceMetrics::from_sdk(&metrics),
-        }
+        })
     }
 
     /// Convenience: text payload, if this stage produced text.
@@ -1481,17 +1533,20 @@ pub struct PipelineResult {
 }
 
 impl PipelineResult {
-    fn from_sdk(result: sdk::PipelineExecutionResult) -> Self {
-        Self {
-            envelope: Envelope::from_sdk(result.output),
+    /// Fails if the final output or any stage's output cannot be converted
+    /// (see [`Envelope::try_from_sdk`]): a run never reports success with one
+    /// of its outputs missing.
+    fn try_from_sdk(result: sdk::PipelineExecutionResult) -> Result<Self> {
+        Ok(Self {
+            envelope: Envelope::try_from_sdk(result.output)?,
             output_type: OutputType::from_sdk(result.output_type),
             latency_ms: result.total_latency_ms,
             stages: result
                 .stages
                 .into_iter()
-                .map(StageResult::from_sdk)
-                .collect(),
-        }
+                .map(StageResult::try_from_sdk)
+                .collect::<Result<_>>()?,
+        })
     }
 
     /// The stage with this identifier, if it ran.
@@ -1561,7 +1616,7 @@ impl Pipeline {
         let sdk_options = pipeline_run_options(options)?;
         let envelope = envelope.into_sdk()?;
         let result = self.inner.run_with_options(&envelope, &sdk_options)?;
-        Ok(PipelineResult::from_sdk(result))
+        PipelineResult::try_from_sdk(result)
     }
 
     /// Pipeline name from the YAML definition, if present.
@@ -1708,9 +1763,12 @@ impl ModelLoader {
     /// Registry load that serves from the cloud gateway while the weights
     /// download in the background, instead of blocking on the download.
     ///
-    /// Requires a resolvable API key and an uncached model; otherwise this
-    /// behaves exactly like [`Self::from_registry`]. Check
-    /// [`Self::will_speculate`] to know which you got. LLM/chat models only.
+    /// Requires a resolvable API key, an uncached model, and a chat model the
+    /// registry serves as a direct download (a GGUF or vision-language
+    /// variant, not a `.xyb` bundle); otherwise this behaves exactly like
+    /// [`Self::from_registry`]. [`Self::will_speculate`] checks the first two
+    /// before loading; `is_cloud_serving` on the loaded model reports the
+    /// outcome.
     pub fn from_registry_speculative(id: String) -> Arc<Self> {
         Arc::new(Self {
             inner: sdk::ModelLoader::from_registry(&id).with_speculative_cloud(true),
@@ -1725,9 +1783,10 @@ impl ModelLoader {
         })
     }
 
-    /// Whether [`Self::load`] would actually speculate: speculation enabled, an
-    /// API key resolves, and the model is not already cached. Never touches the
-    /// network.
+    /// Whether [`Self::load`] may speculate: speculation enabled, an API key
+    /// resolves, and the model is not already cached. Never touches the
+    /// network, so it cannot know the model type: the load asks the registry
+    /// and speculates only for a chat model.
     pub fn will_speculate(&self) -> bool {
         self.inner.will_speculate()
     }
@@ -2047,7 +2106,7 @@ impl XybridModel {
     pub fn run(&self, envelope: Envelope) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
         let result = self.inner.run(&env, None).map_err(Error::from)?;
-        Ok(InferenceResult::from_sdk(result))
+        InferenceResult::try_from_sdk(result)
     }
 
     /// Run inference with explicit [`RunOptions`] and an optional
@@ -2065,7 +2124,7 @@ impl XybridModel {
             .inner
             .run_with_options(&env, &opts)
             .map_err(Error::from)?;
-        Ok(InferenceResult::from_sdk(result))
+        InferenceResult::try_from_sdk(result)
     }
 
     /// Run inference with conversation history (LLM chat).
@@ -2089,7 +2148,7 @@ impl XybridModel {
             .inner
             .run_with_context(&env, &ctx, gc.as_ref())
             .map_err(Error::from)?;
-        Ok(InferenceResult::from_sdk(result))
+        InferenceResult::try_from_sdk(result)
     }
 
     /// Run inference with conversation history, explicit [`RunOptions`] and an
@@ -2115,7 +2174,7 @@ impl XybridModel {
             .inner
             .run_with_context_options(&env, &ctx, &opts)
             .map_err(Error::from)?;
-        Ok(InferenceResult::from_sdk(result))
+        InferenceResult::try_from_sdk(result)
     }
 
     /// Async inference. The SDK offloads to `spawn_blocking` internally.
@@ -2126,7 +2185,7 @@ impl XybridModel {
             .run_async(&env, None)
             .await
             .map_err(Error::from)?;
-        Ok(InferenceResult::from_sdk(result))
+        InferenceResult::try_from_sdk(result)
     }
 
     /// Start inference and return a pull-based token stream.
@@ -2162,11 +2221,7 @@ impl XybridModel {
                     })
             });
 
-            let terminal = match result {
-                Ok(result) => StreamEvent::Complete(InferenceResult::from_sdk(result)),
-                Err(error) => StreamEvent::Error(Error::from(error)),
-            };
-            let _ = sender.send(terminal);
+            let _ = sender.send(StreamEvent::terminal(result));
         })
         .map_err(|error| Error::InferenceError {
             message: format!("failed to start streaming worker: {error}"),
@@ -2209,11 +2264,7 @@ impl XybridModel {
                         })
                 });
 
-            let terminal = match result {
-                Ok(result) => StreamEvent::Complete(InferenceResult::from_sdk(result)),
-                Err(error) => StreamEvent::Error(Error::from(error)),
-            };
-            let _ = sender.send(terminal);
+            let _ = sender.send(StreamEvent::terminal(result));
         })
         .map_err(|error| Error::InferenceError {
             message: format!("failed to start streaming worker: {error}"),
@@ -2905,7 +2956,7 @@ pub fn is_sdk_cache_configured() -> bool {
     sdk::is_sdk_cache_configured()
 }
 
-/// Register the binding identifier (`"flutter"`, `"kotlin"`,
+/// Register the binding identifier (`"flutter"`, `"kotlin"`, `"python"`,
 /// `"react-native"`, `"swift"`, `"unity"`) reported in the `X-Xybrid-Client`
 /// registry header and on telemetry events.
 ///
@@ -2917,11 +2968,20 @@ pub fn set_binding(binding: String) {
     sdk::set_binding(resolve_binding(&binding));
 }
 
+/// Set the binding reported until one is registered with [`set_binding`],
+/// which it never blocks. Native libraries name the SDK that usually ships
+/// them this way. Names outside the accepted set fall back to
+/// [`sdk::DEFAULT_BINDING`]. First call wins.
+pub fn set_fallback_binding(binding: String) {
+    sdk::set_fallback_binding(resolve_binding(&binding));
+}
+
 /// Map a binding name onto the accepted set, or [`sdk::DEFAULT_BINDING`].
 fn resolve_binding(binding: &str) -> &'static str {
     match binding {
         "flutter" => "flutter",
         "kotlin" => "kotlin",
+        "python" => "python",
         "react-native" => "react-native",
         "swift" => "swift",
         "unity" => "unity",
@@ -2953,12 +3013,13 @@ pub fn set_platform_url(url: String) {
     sdk::set_platform_url(&url);
 }
 
-/// Enable speculative cloud fallback globally: a registry model that isn't
-/// downloaded yet is served from the gateway while the weights download.
+/// Enable speculative cloud fallback globally: a registry chat model that
+/// isn't downloaded yet is served from the gateway while the weights download.
 ///
-/// Only takes effect when an API key resolves. Speculation is LLM/chat-only —
-/// prefer the per-load [`ModelLoader::from_registry_speculative`] when the app
-/// also loads ASR/TTS models, which cannot be served this way.
+/// Only takes effect when an API key resolves. An uncached load asks the
+/// registry first, so other models (ASR, TTS, `.xyb` bundles) download and
+/// load as usual. [`ModelLoader::from_registry_speculative`] opts a single
+/// load in instead.
 pub fn set_speculative_cloud(enabled: bool) {
     sdk::set_speculative_cloud(enabled);
 }
@@ -2968,12 +3029,13 @@ pub fn is_speculative_cloud_enabled() -> bool {
     sdk::is_speculative_cloud_enabled()
 }
 
-/// Whether a speculative load of `model_id` would actually speculate right now:
-/// an API key resolves and the model is not already cached.
+/// Whether a speculative load of `model_id` may speculate right now: an API
+/// key resolves and the model is not already cached.
 ///
 /// A free function rather than a method because the foreign bindings collapse
 /// the loader into `XybridModel::from_*` constructors, leaving nowhere to hang
-/// a pre-load query. Never touches the network.
+/// a pre-load query. Never touches the network, so it cannot know the model
+/// type: the load asks the registry and speculates only for a chat model.
 pub fn will_speculate_for_model(model_id: String) -> bool {
     sdk::ModelLoader::from_registry(&model_id)
         .with_speculative_cloud(true)
@@ -3510,7 +3572,7 @@ stages:
             output: sdk::ir::Envelope::new(tts_audio),
         };
 
-        let result = PipelineResult::from_sdk(sdk_result);
+        let result = PipelineResult::try_from_sdk(sdk_result).expect("every stage output converts");
 
         assert_eq!(result.output_type, OutputType::Audio);
         assert_eq!(result.audio_bytes(), Some([1u8, 2, 3].as_slice()));
@@ -3604,7 +3666,7 @@ stages:
     fn envelope_roundtrip_preserves_text_and_metadata() {
         let env = Envelope::text("hello".into()).with_role(MessageRole::User);
         let sdk_env = env.clone().into_sdk().unwrap();
-        let back = Envelope::from_sdk(sdk_env);
+        let back = Envelope::try_from_sdk(sdk_env).unwrap();
 
         assert_eq!(
             back.kind,
@@ -3645,7 +3707,7 @@ stages:
     #[test]
     fn envelope_roundtrip_audio() {
         let env = Envelope::audio(vec![1, 2, 3, 4]);
-        let back = Envelope::from_sdk(env.into_sdk().unwrap());
+        let back = Envelope::try_from_sdk(env.into_sdk().unwrap()).unwrap();
         assert_eq!(
             back.kind,
             EnvelopeKind::Audio {
@@ -3657,7 +3719,7 @@ stages:
     #[test]
     fn envelope_roundtrip_embedding() {
         let env = Envelope::embedding(vec![0.1, 0.2, 0.3]);
-        let back = Envelope::from_sdk(env.into_sdk().unwrap());
+        let back = Envelope::try_from_sdk(env.into_sdk().unwrap()).unwrap();
         assert_eq!(
             back.kind,
             EnvelopeKind::Embedding {
@@ -4041,7 +4103,7 @@ stages:
             0,
         );
 
-        let result = InferenceResult::from_sdk(sdk_result);
+        let result = InferenceResult::try_from_sdk(sdk_result).expect("a text result converts");
 
         assert_eq!(
             result.tool_calls,
@@ -4193,10 +4255,277 @@ stages:
         assert!(ctx.history().is_empty());
     }
 
+    /// A 1×1 RGB PNG: small enough to inline, valid enough to decode.
+    const ONE_PIXEL_PNG: [u8; 69] = [
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90,
+        0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0x10,
+        0x54, 0x32, 0x06, 0x00, 0x00, 0xae, 0x00, 0x67, 0x2b, 0xe3, 0x72, 0xf3, 0x00, 0x00, 0x00,
+        0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    /// A raw camera frame: valid in the SDK, with no facade form.
+    fn raw_pixel_image() -> sdk::ir::Envelope {
+        sdk::ir::Envelope::image_raw(
+            vec![17, 34, 51],
+            sdk::ir::PixelFormat::Rgb8,
+            1,
+            1,
+            vec![sdk::ir::ImagePlane {
+                offset: 0,
+                row_stride: 3,
+                pixel_stride: 3,
+                width: 1,
+                height: 1,
+            }],
+            None,
+        )
+        .expect("a 1x1 RGB frame is valid")
+    }
+
+    fn sdk_text(text: &str) -> sdk::ir::Envelope {
+        sdk::ir::Envelope::new(sdk::ir::EnvelopeKind::Text(text.into()))
+    }
+
+    fn assert_unconvertible<T: std::fmt::Debug>(outcome: Result<T>) {
+        match outcome {
+            Err(Error::UnsupportedModelCapability { message }) => {
+                assert!(message.contains("raw pixel image"), "{message}")
+            }
+            other => panic!("expected UnsupportedModelCapability, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_raw_image_anywhere_in_an_envelope_fails_the_conversion() {
+        assert_unconvertible(Envelope::try_from_sdk(raw_pixel_image()));
+
+        let nested = sdk::ir::Envelope::new(sdk::ir::EnvelopeKind::MultiPart(vec![
+            sdk_text("look at this"),
+            raw_pixel_image(),
+        ]));
+        assert_unconvertible(Envelope::try_from_sdk(nested));
+    }
+
+    #[test]
+    fn a_result_that_cannot_be_converted_fails_instead_of_losing_its_output() {
+        let result = sdk::InferenceResult::new(raw_pixel_image(), "m", 0);
+
+        assert_unconvertible(InferenceResult::try_from_sdk(result));
+    }
+
+    #[test]
+    fn a_stream_ends_in_an_error_when_its_result_cannot_be_converted() {
+        let unconvertible = sdk::InferenceResult::new(raw_pixel_image(), "m", 0);
+        match StreamEvent::terminal(Ok(unconvertible)) {
+            StreamEvent::Error(Error::UnsupportedModelCapability { .. }) => {}
+            other => panic!("expected a terminal error, got {other:?}"),
+        }
+
+        let text = sdk::InferenceResult::new(sdk_text("done"), "m", 0);
+        match StreamEvent::terminal(Ok(text)) {
+            StreamEvent::Complete(result) => assert_eq!(result.text(), Some("done")),
+            other => panic!("expected completion, got {other:?}"),
+        }
+        assert!(matches!(
+            StreamEvent::terminal(Err(sdk::SdkError::NotLoaded)),
+            StreamEvent::Error(Error::NotLoaded)
+        ));
+    }
+
+    #[test]
+    fn a_pipeline_fails_when_any_of_its_outputs_cannot_be_converted() {
+        let text = || sdk::ir::EnvelopeKind::Text("ok".into());
+        let mut camera = sdk_stage("camera", "local", text(), HashMap::new());
+        camera.output = raw_pixel_image();
+        let stage_output = sdk::PipelineExecutionResult {
+            name: None,
+            stages: vec![camera, sdk_stage("llm", "local", text(), HashMap::new())],
+            total_latency_ms: 80,
+            output_type: sdk::OutputType::Text,
+            output: sdk_text("ok"),
+        };
+        assert_unconvertible(PipelineResult::try_from_sdk(stage_output));
+
+        let final_output = sdk::PipelineExecutionResult {
+            name: None,
+            stages: vec![sdk_stage("llm", "local", text(), HashMap::new())],
+            total_latency_ms: 40,
+            output_type: sdk::OutputType::Unknown,
+            output: raw_pixel_image(),
+        };
+        assert_unconvertible(PipelineResult::try_from_sdk(final_output));
+    }
+
+    /// `history()` cannot fail because the handle only ever holds what
+    /// `Envelope::into_sdk` built. Change the handle every way it can change
+    /// and read the history back after each.
+    #[test]
+    fn history_reads_back_every_kind_after_every_change() {
+        let image = || Envelope::image(ONE_PIXEL_PNG.to_vec(), "png".into());
+        let turns = [
+            Envelope::text("hi".into()).with_role(MessageRole::User),
+            Envelope::audio(vec![1, 2, 3]),
+            Envelope::embedding(vec![0.5, -0.5]),
+            image(),
+            Envelope::multipart(vec![Envelope::text("describe".into()), image()]),
+        ];
+        // Storing mints a local id on nested parts; it is not part of the
+        // content, so compare without it.
+        fn content(kind: &EnvelopeKind) -> EnvelopeKind {
+            match kind {
+                EnvelopeKind::MultiPart { parts } => EnvelopeKind::MultiPart {
+                    parts: parts
+                        .iter()
+                        .map(|part| {
+                            let mut metadata = part.metadata.clone();
+                            metadata.remove(xybrid_core::ir::Envelope::LOCAL_ID_METADATA_KEY);
+                            Envelope {
+                                kind: content(&part.kind),
+                                metadata,
+                            }
+                        })
+                        .collect(),
+                },
+                other => other.clone(),
+            }
+        }
+        let kinds = |envelopes: &[Envelope]| {
+            envelopes
+                .iter()
+                .map(|envelope| content(&envelope.kind))
+                .collect::<Vec<_>>()
+        };
+
+        let ctx = ConversationContextHandle::new();
+        ctx.set_system(Envelope::text("be brief".into()).with_role(MessageRole::System))
+            .unwrap();
+        for turn in &turns {
+            ctx.push(turn.clone()).unwrap();
+        }
+        assert_eq!(kinds(&ctx.history()), kinds(&turns));
+        assert_eq!(ctx.history()[0].role(), Some(MessageRole::User));
+
+        // Replacing the system prompt keeps the turns.
+        ctx.set_system(Envelope::text("be terse".into()).with_role(MessageRole::System))
+            .unwrap();
+        assert_eq!(kinds(&ctx.history()), kinds(&turns));
+
+        // Lowering the cap prunes the oldest turns at once, and a later push
+        // past it drops the oldest again.
+        ctx.set_max_history_len(2);
+        assert_eq!(kinds(&ctx.history()), kinds(&turns[3..]));
+        ctx.push(turns[0].clone()).unwrap();
+        assert_eq!(
+            kinds(&ctx.history()),
+            kinds(&[turns[4].clone(), turns[0].clone()])
+        );
+
+        // The copy a run receives holds the same turns.
+        let snapshot: Vec<Envelope> = ctx
+            .snapshot()
+            .history()
+            .iter()
+            .cloned()
+            .map(Envelope::try_from_sdk)
+            .collect::<Result<_>>()
+            .unwrap();
+        assert_eq!(kinds(&snapshot), kinds(&ctx.history()));
+
+        // Clearing drops the turns and keeps the system prompt.
+        ctx.clear();
+        assert!(ctx.history().is_empty());
+        assert!(ctx.has_system());
+    }
+
+    /// Every name a shipped SDK registers.
+    const PLATFORM_BINDINGS: [&str; 6] = [
+        "flutter",
+        "kotlin",
+        "python",
+        "react-native",
+        "swift",
+        "unity",
+    ];
+
     #[test]
     fn resolve_binding_keeps_every_platform_binding() {
-        for binding in ["flutter", "kotlin", "react-native", "swift", "unity"] {
+        for binding in PLATFORM_BINDINGS {
             assert_eq!(resolve_binding(binding), binding);
+        }
+    }
+
+    /// A name `resolve_binding` collapses makes that whole SDK report `rust`,
+    /// which is how React Native and Python went unattributed. This reads the
+    /// bindings' sources and xybrid-bolt's per-platform defaults, so it only
+    /// runs from a checkout (`cargo test`), not from a Bazel sandbox that has
+    /// neither.
+    #[test]
+    fn every_name_a_binding_registers_is_accepted() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let roots = [repo.join("bindings"), repo.join("crates/xybrid-bolt/src")];
+        if !roots.iter().all(|root| root.is_dir()) {
+            eprintln!("skipped: no bindings/ checkout at {}", repo.display());
+            return;
+        }
+        let mut found = Vec::new();
+        for root in &roots {
+            collect_registered_bindings(root, &mut found);
+        }
+        for sdk in PLATFORM_BINDINGS {
+            assert!(
+                found.iter().any(|(_, name)| name == sdk),
+                "no `{sdk}` registration found; did its call change shape? {found:?}"
+            );
+        }
+        for (file, name) in &found {
+            assert_eq!(
+                resolve_binding(name),
+                name,
+                "{file} registers `{name}`, which resolve_binding collapses"
+            );
+        }
+    }
+
+    /// Collect `(file, name)` for each literal registration under `dir`:
+    /// `setBinding("…")`, `SetBinding("…")`, `set_binding("…")`,
+    /// `set_fallback_binding("…")`, and the Flutter crate's `FLUTTER_BINDING`
+    /// constant.
+    fn collect_registered_bindings(dir: &std::path::Path, found: &mut Vec<(String, String)>) {
+        const SOURCES: [&str; 7] = ["cs", "java", "kt", "py", "rs", "swift", "ts"];
+        const SKIPPED_DIRS: [&str; 4] = ["build", "node_modules", "Pods", "target"];
+        let entries = std::fs::read_dir(dir).expect("scanned sources should be readable");
+        for path in entries.flatten().map(|entry| entry.path()) {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            if path.is_dir() {
+                if !name.starts_with('.') && !SKIPPED_DIRS.contains(&name.as_ref()) {
+                    collect_registered_bindings(&path, found);
+                }
+                continue;
+            }
+            let extension = path.extension().unwrap_or_default().to_string_lossy();
+            if !SOURCES.contains(&extension.as_ref()) {
+                continue;
+            }
+            let Ok(source) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for marker in [
+                "etBinding(",
+                "et_binding(",
+                "_fallback_binding(",
+                "_BINDING: &str = ",
+            ] {
+                for (at, _) in source.match_indices(marker) {
+                    let call = source[at + marker.len()..].trim_start_matches("binding: ");
+                    let literal = call
+                        .strip_prefix('"')
+                        .and_then(|rest| rest.split('"').next());
+                    if let Some(literal) = literal {
+                        found.push((path.display().to_string(), literal.to_string()));
+                    }
+                }
+            }
         }
     }
 
@@ -4220,10 +4549,7 @@ stages:
         // `get_binding()` returns one of the accepted values.
         set_binding("flutter".into());
         let bound = get_binding();
-        assert!(matches!(
-            bound.as_str(),
-            "flutter" | "kotlin" | "react-native" | "swift" | "unity" | "rust"
-        ));
+        assert!(PLATFORM_BINDINGS.contains(&bound.as_str()) || bound == sdk::DEFAULT_BINDING);
     }
 
     #[test]
@@ -4234,10 +4560,7 @@ stages:
         // mapping itself.
         set_binding("not-a-real-binding".into());
         let bound = get_binding();
-        assert!(matches!(
-            bound.as_str(),
-            "flutter" | "kotlin" | "react-native" | "swift" | "unity" | "rust"
-        ));
+        assert!(PLATFORM_BINDINGS.contains(&bound.as_str()) || bound == sdk::DEFAULT_BINDING);
     }
 
     #[test]

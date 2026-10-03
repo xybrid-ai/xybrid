@@ -35,7 +35,7 @@ Shared behavior: browser memory guards (1 MiB metadata, 512 MiB models, and 256 
 
 Both engines load their wasm JavaScript and binary assets at runtime, and each takes its own `wasmPath`: host `@litertjs/core/wasm` for the tensor surface and `@litert-lm/core/wasm` for the text surface. The example copies them to `/litert` and `/llm-runtime` with `bun run example:assets`. The underlying engines are an implementation detail of this preview — application code and UI copy should only speak in terms of `@xybrid/web`.
 
-Metadata and model files may use another origin when that host permits browser CORS requests. Metadata, registry, Hugging Face, and model acquisition requests use `credentials: "omit"`. Wasm paths are executable code and must remain on the page's own HTTP(S) origin.
+Metadata and model files may use another origin when that host permits browser CORS requests. Metadata, registry, Hugging Face, and model acquisition requests use `credentials: "omit"`. Registry resolve requests also send an anonymous `X-Xybrid-Client` header (`binding=web; sdk_version=…; platform=web`), which the registry allows cross-origin; model downloads never carry it. Wasm paths are executable code and must remain on the page's own HTTP(S) origin.
 
 LiteRT may execute unsupported WebGPU operations on CPU. `model.accelerator` reports the compile path selected by this wrapper; inspect `model.isFullyAccelerated` to distinguish a fully delegated graph from one with CPU fallback.
 

@@ -3105,9 +3105,11 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
          * download in the background.
          *
          * Returns almost immediately instead of blocking on the download. Requires
-         * a resolvable API key and an uncached model; otherwise it behaves exactly
-         * like `from_registry`. Poll `download_status` for progress and
-         * `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+         * a resolvable API key, an uncached model, and a chat model the registry
+         * serves as a direct download (GGUF or vision-language, not a `.xyb`
+         * bundle); otherwise it behaves exactly like `from_registry`. Poll
+         * `download_status` for progress and `is_cloud_serving` to know which leg
+         * is answering.
          */
         fun fromRegistrySpeculative(id: String): XybridModel {
             val __boltffi_id_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(id))
@@ -4287,11 +4289,12 @@ fun setPlatformUrl(url: String) {
 }
 
 /**
- * Enable speculative cloud fallback globally: a registry model that isn't
- * downloaded yet is served from the gateway while the weights download.
+ * Enable speculative cloud fallback globally: a registry chat model that
+ * isn't downloaded yet is served from the gateway while the weights download.
  *
- * LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
- * also loads ASR/TTS models, which cannot be served this way.
+ * An uncached load asks the registry first, so other models (ASR, TTS,
+ * `.xyb` bundles) download and load as usual.
+ * `XybridModel.fromRegistrySpeculative` opts a single load in instead.
  */
 fun setSpeculativeCloud(enabled: Boolean) {
     Native.boltffi_function_xybrid_bolt_set_speculative_cloud(enabled)
@@ -4312,11 +4315,13 @@ fun isSpeculativeCloudEnabled(): Boolean {
 }
 
 /**
- * Whether `XybridModel::from_registry_speculative(model_id)` would actually
- * speculate: an API key resolves and the model is not already cached.
+ * Whether `XybridModel::from_registry_speculative(model_id)` may speculate:
+ * an API key resolves and the model is not already cached.
  *
- * Lets the hand-written Swift/Kotlin loader facades answer "will this
- * speculate?" before loading. Never touches the network.
+ * Lets the hand-written Swift/Kotlin loader facades answer "can this
+ * speculate?" before loading. Never touches the network, so it cannot know
+ * the model type: the load asks the registry and speculates only for a chat
+ * model.
  */
 fun willSpeculateForModel(modelId: String): Boolean {
     val __boltffi_modelId_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(modelId))

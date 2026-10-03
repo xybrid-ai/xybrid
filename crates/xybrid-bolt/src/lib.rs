@@ -1064,6 +1064,21 @@ fn ensure_native_logging() {
     });
 }
 
+/// Name the SDK that usually ships this library on this platform, for apps that
+/// never register one: `swift` on Apple platforms, `kotlin` on Android.
+///
+/// Swift's generated constructors can't be wrapped, so the constructors and
+/// setters that can reach the registry or telemetry call this instead. It is a
+/// fallback, not a registration: React Native, Unity and Python load this
+/// library on the same platforms and report their own names once they
+/// register, whether that happens before or after this runs.
+fn set_platform_fallback_binding() {
+    #[cfg(any(target_os = "ios", target_os = "macos"))]
+    facade::set_fallback_binding("swift".to_string());
+    #[cfg(target_os = "android")]
+    facade::set_fallback_binding("kotlin".to_string());
+}
+
 /// One-stop SDK initialization: API key + gateway/ingest URL overrides in
 /// one call. Delegates to [`facade::configure_runtime`]; blank strings are
 /// treated as absent. This is the canonical init the Swift
@@ -1076,6 +1091,7 @@ pub fn configure_runtime(
     ingest_url: Option<String>,
 ) {
     ensure_native_logging();
+    set_platform_fallback_binding();
     facade::configure_runtime(api_key, gateway_url, ingest_url);
 }
 
@@ -1165,11 +1181,12 @@ pub fn set_platform_url(url: String) {
     facade::set_platform_url(url);
 }
 
-/// Enable speculative cloud fallback globally: a registry model that isn't
-/// downloaded yet is served from the gateway while the weights download.
+/// Enable speculative cloud fallback globally: a registry chat model that
+/// isn't downloaded yet is served from the gateway while the weights download.
 ///
-/// LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
-/// also loads ASR/TTS models, which cannot be served this way.
+/// An uncached load asks the registry first, so other models (ASR, TTS,
+/// `.xyb` bundles) download and load as usual.
+/// `XybridModel.fromRegistrySpeculative` opts a single load in instead.
 #[export]
 pub fn set_speculative_cloud(enabled: bool) {
     ensure_native_logging();
@@ -1188,11 +1205,13 @@ pub fn is_speculative_cloud_enabled() -> bool {
     facade::is_speculative_cloud_enabled()
 }
 
-/// Whether `XybridModel::from_registry_speculative(model_id)` would actually
-/// speculate: an API key resolves and the model is not already cached.
+/// Whether `XybridModel::from_registry_speculative(model_id)` may speculate:
+/// an API key resolves and the model is not already cached.
 ///
-/// Lets the hand-written Swift/Kotlin loader facades answer "will this
-/// speculate?" before loading. Never touches the network.
+/// Lets the hand-written Swift/Kotlin loader facades answer "can this
+/// speculate?" before loading. Never touches the network, so it cannot know
+/// the model type: the load asks the registry and speculates only for a chat
+/// model.
 #[export]
 pub fn will_speculate_for_model(model_id: String) -> bool {
     facade::will_speculate_for_model(model_id)
@@ -1263,6 +1282,7 @@ pub struct XybridDownload {
 impl XybridDownload {
     /// Start downloading a registry model. Returns immediately.
     pub fn from_registry(id: String) -> Self {
+        set_platform_fallback_binding();
         Self {
             inner: facade::ModelDownload::from_registry(id),
         }
@@ -1270,6 +1290,7 @@ impl XybridDownload {
 
     /// Start downloading a registry model resolved for a specific platform.
     pub fn from_registry_with_platform(id: String, platform: String) -> Self {
+        set_platform_fallback_binding();
         Self {
             inner: facade::ModelDownload::from_registry_with_platform(id, platform),
         }
@@ -1604,6 +1625,7 @@ impl XybridModel {
 impl XybridModel {
     /// Load from the xybrid registry. Recommended path.
     pub fn from_registry(id: String) -> Result<Self, XybridError> {
+        set_platform_fallback_binding();
         let model = facade::ModelLoader::from_registry(id)
             .load()
             .map_err(XybridError::from)?;
@@ -1614,10 +1636,13 @@ impl XybridModel {
     /// download in the background.
     ///
     /// Returns almost immediately instead of blocking on the download. Requires
-    /// a resolvable API key and an uncached model; otherwise it behaves exactly
-    /// like `from_registry`. Poll `download_status` for progress and
-    /// `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+    /// a resolvable API key, an uncached model, and a chat model the registry
+    /// serves as a direct download (GGUF or vision-language, not a `.xyb`
+    /// bundle); otherwise it behaves exactly like `from_registry`. Poll
+    /// `download_status` for progress and `is_cloud_serving` to know which leg
+    /// is answering.
     pub fn from_registry_speculative(id: String) -> Result<Self, XybridError> {
+        set_platform_fallback_binding();
         let model = facade::ModelLoader::from_registry_speculative(id)
             .load()
             .map_err(XybridError::from)?;
@@ -1626,6 +1651,7 @@ impl XybridModel {
 
     /// Load from a local model directory (must contain `model_metadata.json`).
     pub fn from_directory(path: String) -> Result<Self, XybridError> {
+        set_platform_fallback_binding();
         let loader = facade::ModelLoader::from_directory(path).map_err(XybridError::from)?;
         let model = loader.load().map_err(XybridError::from)?;
         Ok(Self::new(model))
@@ -1633,6 +1659,7 @@ impl XybridModel {
 
     /// Load from a local `.xyb` bundle.
     pub fn from_bundle(path: String) -> Result<Self, XybridError> {
+        set_platform_fallback_binding();
         let loader = facade::ModelLoader::from_bundle(path).map_err(XybridError::from)?;
         let model = loader.load().map_err(XybridError::from)?;
         Ok(Self::new(model))
@@ -1640,6 +1667,7 @@ impl XybridModel {
 
     /// Resolve and load from a HuggingFace repo (`org/repo` or `org/repo:variant`).
     pub fn from_huggingface(repo: String) -> Result<Self, XybridError> {
+        set_platform_fallback_binding();
         let model = facade::ModelLoader::from_huggingface(repo)
             .load()
             .map_err(XybridError::from)?;
@@ -1651,6 +1679,7 @@ impl XybridModel {
         repo: String,
         revision: String,
     ) -> Result<Self, XybridError> {
+        set_platform_fallback_binding();
         let model = facade::ModelLoader::from_huggingface_with_revision(repo, revision)
             .load()
             .map_err(XybridError::from)?;
@@ -1660,6 +1689,7 @@ impl XybridModel {
     /// Load from a raw GGUF file, auto-generating `model_metadata.json` from the
     /// GGUF header (written next to the file if absent).
     pub fn from_model_file(path: String) -> Result<Self, XybridError> {
+        set_platform_fallback_binding();
         let loader = facade::ModelLoader::from_model_file(path).map_err(XybridError::from)?;
         let model = loader.load().map_err(XybridError::from)?;
         Ok(Self::new(model))
@@ -1989,18 +2019,21 @@ pub struct XybridPipeline {
 impl XybridPipeline {
     /// Parse and load a pipeline from YAML content.
     pub fn from_yaml(yaml: String) -> Result<Self, XybridError> {
+        set_platform_fallback_binding();
         let inner = facade::Pipeline::from_yaml(yaml).map_err(XybridError::from)?;
         Ok(Self { inner })
     }
 
     /// Read, parse, and load a pipeline from a YAML file.
     pub fn from_file(path: String) -> Result<Self, XybridError> {
+        set_platform_fallback_binding();
         let inner = facade::Pipeline::from_file(path).map_err(XybridError::from)?;
         Ok(Self { inner })
     }
 
     /// Load a pipeline bundle.
     pub fn from_bundle(path: String) -> Result<Self, XybridError> {
+        set_platform_fallback_binding();
         let inner = facade::Pipeline::from_bundle(path).map_err(XybridError::from)?;
         Ok(Self { inner })
     }
@@ -2198,6 +2231,7 @@ impl XybridTelemetryConfig {
     /// Errors if this config was already consumed, or if telemetry is already
     /// initialized without an intervening [`telemetry_shutdown`].
     pub fn init(&self) -> Result<(), XybridError> {
+        set_platform_fallback_binding();
         facade::telemetry_init(&self.inner).map_err(XybridError::from)
     }
 }
@@ -2291,6 +2325,26 @@ impl XybridBundle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_platform_fallback_yields_to_a_later_registration() {
+        // One test, because the binding is process-wide and no other test here
+        // touches it. The load fails, but the constructor sets the fallback
+        // first.
+        let _ = XybridModel::from_directory("/nonexistent/xybrid-model".to_string());
+        let fallback = if cfg!(any(target_os = "ios", target_os = "macos")) {
+            "swift"
+        } else if cfg!(target_os = "android") {
+            "kotlin"
+        } else {
+            "rust"
+        };
+        assert_eq!(facade::get_binding(), fallback);
+
+        // An SDK that registers after a native call still reports its name.
+        facade::set_binding("unity".to_string());
+        assert_eq!(facade::get_binding(), "unity");
+    }
 
     #[test]
     fn cache_records_cross_from_facade_without_losing_storage_semantics() {

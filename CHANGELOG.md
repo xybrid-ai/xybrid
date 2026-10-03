@@ -7,6 +7,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`XybridModel::is_speculative`** reports whether a load served the model
+  from the cloud while it downloaded. It stays `true` once the download lands;
+  `is_cloud_serving` reports whether the cloud still answers.
+
+### Changed
+
+- **A speculative load asks the registry before serving from the cloud.**
+  When speculation is on and the model is not cached, the load now resolves
+  the model first and serves it from the gateway only if the registry
+  describes a chat model: a GGUF or vision-language variant served as a direct
+  download. Every other model downloads and loads as if speculation were off.
+  Before, every uncached registry model was speculated, so speech and TTS
+  models had their requests sent to the gateway as chat. Models packaged as
+  `.xyb` bundles are no longer speculated either; on today's registry that is
+  `qwen3.5-0.8b` and `qwen3.5-2b`.
+
+  The check costs one registry request before the load returns; the download
+  reuses its answer. An uncached speculative load now fails when the registry
+  is unreachable, instead of returning a model whose download then fails.
+  Cached models still load offline without a registry request.
+  `will_speculate` (`willSpeculate` in the bindings) still reads only the local
+  cache, so it can return `true` for a model the load then declines to
+  speculate. The loaded model's `is_speculative` (Rust) or `isCloudServing`
+  (bindings) tells.
+- **The bindings never report success with the output missing.** A run,
+  pipeline run or stream whose output a binding has no field for now fails with
+  `UnsupportedModelCapability` (code 20) on Kotlin, Swift, C# and Python, and
+  with an `Unsupported model capability:` error on Dart. Before, Dart returned
+  `success: true` with every payload field empty, and the other bindings
+  replaced a raw pixel image with the text `[raw image]`. No shipped model
+  produces such an output, so existing results are unchanged.
+- **Breaking (Rust):** in `xybrid-ffi-facade`, `Envelope::from_sdk` and
+  `InferenceResult::from_sdk` are now `Envelope::try_from_sdk` and
+  `InferenceResult::try_from_sdk`, returning `Result`. The foreign APIs are
+  unchanged.
+
+### Fixed
+
+- **Dart streams no longer drop an error that follows the final token.**
+  `runStreaming` and `runStreamingWithFallback` ignored any error that arrived
+  after the final token, so a run that failed once generation stopped looked
+  like a successful stop. They now end the stream with the error token, as
+  `runStreamingWithContext` already did.
+- **`xybrid run` and `xybrid repl` with `--speculative-cloud` handle a model
+  that loads locally.** `run` saved only streamed text, so a TTS model's
+  `--output` came out empty; it now prints and saves the audio as WAV, as
+  plain `run` does. The REPL failed every turn on a model that is not a chat
+  model and now runs it like any registry model. Both show a download bar while
+  such a model downloads, and report whether the load speculated even when the
+  download finishes at once.
+- **Registry requests and telemetry name the SDK that sent them.** Several
+  paths reported the fallback `rust` instead:
+  - Python always did: the SDK rejected the name `python`. It is accepted now
+    and registered on `import xybrid`, so `xybrid.init()` stays optional.
+  - Flutter did on iOS, macOS, Linux and Windows unless an API key was set,
+    because `Xybrid.init` reached no registering call there.
+    `XybridRustLib.init()` now registers `flutter` on every platform.
+  - Swift and Unity did whenever an app skipped `Xybrid.initialize()` or
+    `XybridClient.Initialize()`, including through the generated constructors.
+    The native library now reports `swift` on Apple platforms and `kotlin` on
+    Android until an SDK registers its own name, and Unity registers from the
+    static constructors of the generated types.
+  - The `xybrid` CLI now reports `cli` instead of `rust`.
+  - The browser SDK (`@xybrid/web`) sent no header at all; it now sends
+    `binding=web` with its version.
+
+  A test now fails if a binding registers a name the SDK would reject.
+- **Unity on Android can load models.** Android has no default model cache
+  folder, and the Unity SDK never set one, so every registry and bundle load
+  failed. It now uses `Application.persistentDataPath/xybrid/models`, unless
+  the app sets its own folder first.
+- **`init_sdk_cache_dir` keeps its first folder entirely.** A later call left
+  the folder alone but still pointed `HF_HOME` and related variables at its
+  own path.
+
+### Deprecated
+
+- **`SdkConfig::with_binding()` and `SdkConfig::binding()`.** No API reads a
+  config's binding, so they never changed what requests report. Use
+  `xybrid_sdk::set_binding` or `xybrid_sdk::init().binding()`.
+
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.10.1] - 2026-09-27
+
+### Fixed
+
+- **Readable llama.cpp output on the iOS Simulator.** Simulator builds now run
+  llama.cpp inference on the CPU. This fixes the invalid special-token output
+  observed in fresh Expo and bare React Native apps with 0.10.0. Physical iOS
+  devices continue to use Metal. The fix was verified with local XCFramework
+  builds in both Expo and bare React Native apps on an iPhone 17 Pro simulator.
+
+---
+
+## [0.10.0] - 2026-09-26
+
+This is the stable release of the React Native, model-cache, pipeline, live
+speech and download-progress work in 0.10.0-rc1. See the release-candidate
+entry below for the full SDK changes.
+
 ### Fixed
 
 - **A download survives losing the network for a while.** Once bytes have
@@ -17,9 +124,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Wi-Fi for 10 seconds mid-download). A download that starts offline still
   fails fast.
 
-### Planned
+### Known issues
 
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+- In fresh Expo and bare React Native apps, the published rc1 built and loaded
+  a local model on the iOS Simulator, but inference returned invalid special
+  tokens. This was reproduced on an iPhone 17 Pro simulator running iOS 26.5;
+  inference on a physical iPhone was not tested.
 
 ---
 

@@ -520,6 +520,7 @@ jobs:
       # cargo Vulkan job.
       - name: Setup Vulkan SDK
         uses: ./.github/actions/setup-vulkan-sdk
+        timeout-minutes: 15
 
       # //:llama_vulkan reads the Vulkan headers from a fixed /opt path, which
       # this step points at whatever the runner actually has. Fixed, because a
