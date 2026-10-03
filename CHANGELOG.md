@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Dart streams no longer drop an error that follows the final token.**
+  `runStreaming` and `runStreamingWithFallback` ignored any error that arrived
+  after the final token, so a run that failed once generation stopped looked
+  like a successful stop. They now end the stream with the error token, as
+  `runStreamingWithContext` already did.
 - **`xybrid run` and `xybrid repl` with `--speculative-cloud` handle a model
   that loads locally.** `run` saved only streamed text, so a TTS model's
   `--output` came out empty; it now prints and saves the audio as WAV, as

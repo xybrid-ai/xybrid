@@ -402,7 +402,8 @@ class XybridModel {
   /// Returns a [Stream] of [StreamToken].
   ///
   /// Each [StreamToken] contains the generated token text and metadata.
-  /// The stream completes when generation finishes.
+  /// The stream completes when generation finishes. A failed run ends it with
+  /// an error token ([StreamToken.isError]), which can follow a final token.
   ///
   /// # Arguments
   /// * [envelope] - The input envelope (typically text for LLMs)
@@ -491,15 +492,15 @@ class XybridModel {
               );
             }
           case FfiStreamEvent_Error(:final field0):
-            if (!emittedFinal) {
-              yield StreamToken(
-                token: '',
-                index: 0,
-                cumulativeText: '',
-                isFinal: true,
-                finishReason: 'error: $field0',
-              );
-            }
+            // Even after a final token: the run can still fail once
+            // generation stops, e.g. on an output XybridResult cannot carry.
+            yield StreamToken(
+              token: '',
+              index: 0,
+              cumulativeText: '',
+              isFinal: true,
+              finishReason: 'error: $field0',
+            );
         }
       }
     } catch (e) {
@@ -541,6 +542,9 @@ class XybridModel {
   }
 
   /// Run streaming inference with local abort and cloud fallback.
+  ///
+  /// A failed run ends the stream with an error token
+  /// ([StreamToken.isError]), which can follow a final token.
   ///
   /// Pass an optional [cancellationToken] to make the run user-cancellable in
   /// addition to the resource-pressure abort policy: calling
@@ -596,15 +600,15 @@ class XybridModel {
               );
             }
           case FfiStreamEvent_Error(:final field0):
-            if (!emittedFinal) {
-              yield StreamToken(
-                token: '',
-                index: 0,
-                cumulativeText: '',
-                isFinal: true,
-                finishReason: 'error: $field0',
-              );
-            }
+            // Even after a final token: the run can still fail once
+            // generation stops, e.g. on an output XybridResult cannot carry.
+            yield StreamToken(
+              token: '',
+              index: 0,
+              cumulativeText: '',
+              isFinal: true,
+              finishReason: 'error: $field0',
+            );
         }
       }
     } catch (e) {
