@@ -47,10 +47,13 @@ choice-conformance provenance must all succeed. Any other pending or failing
 check also blocks preparation. The intake/preparation jobs themselves are
 excluded so the bot does not wait on its own running check.
 
-For a stable `0.x` workspace, the default target is the next minor version
-(currently `0.11.0`). This includes all unreleased master changes and avoids
-claiming patch compatibility from the upstream version alone. Upstream major
-upgrades and SDK versions >=1.0 require an explicit `sdk_version` input.
+For a stable `0.x` workspace with a classified patch or minor upstream update,
+the default target is the next minor version (currently `0.11.0`). This includes
+all unreleased master changes and avoids claiming patch compatibility from
+the upstream version alone. The first tracked update is classified as
+`bootstrap`: without a previous upstream tag, its compatibility is unknown.
+Bootstrap updates, upstream major upgrades, and SDK versions >=1.0 require an
+explicit `sdk_version` input.
 Automatic patch classification is outside this POC.
 A prerelease SDK workspace waits for its current release to finish before
 preparing another release branch; upstream discovery can still open an update PR.
@@ -85,10 +88,10 @@ writes if `RELEASE_PAT` is absent. Scheduled writes run only in `xybrid-ai/xybri
 Dispatch **Update llama.cpp stable** with `dry_run: true` (the default) to
 report the upstream candidate and release readiness without creating a branch,
 PR, tag, or release. To accelerate preparation after validation finishes,
-dispatch it with `dry_run: false`; supply `sdk_version` when an explicit
-version is required. Both jobs check out master even if dispatched from
-another ref. Deployment of the workflows themselves still requires merging
-this POC into master.
+dispatch it with `dry_run: false`; supply `sdk_version` for the first tracked
+update, upstream major upgrades, or SDK versions >=1.0. Both jobs check out
+master even if dispatched from another ref. Deployment of the workflows
+themselves still requires merging this POC into master.
 
 For a local read-only rehearsal:
 

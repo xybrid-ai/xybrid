@@ -256,8 +256,8 @@ def open_pr(root: Path, repository: str, candidate: dict, bindings_ok: bool) -> 
         "The choice-conformance provenance also pins the old converter; update its "
         "recipe and regenerate artifacts deliberately if that gate reports drift.\n\n"
         "After this PR and the generated native-manifest PR merge and validation passes, "
-        "the daily automation can prepare the next 0.x minor release. "
-        "Major upgrades and SDK versions >=1.0 require an explicit release version. "
+        "the daily automation can prepare the next 0.x minor release for classified patch or minor updates. "
+        "First tracked updates, major upgrades and SDK versions >=1.0 require an explicit release version. "
         "The existing release PR remains the publishing approval point.\n"
     )
     with tempfile.TemporaryDirectory() as directory:
@@ -333,8 +333,9 @@ def release_plan(root: Path, repository: str, selected_version: str | None,
         if base[0] == 0 and target[0] == 0 and target[1] == base[1]:
             raise UpdateError("This POC reserves automated 0.x releases for minor updates")
         result["version"] = selected_version
-    elif base[0] != 0 or state["update_kind"] == "major":
-        return dict(result, reasons=["Choose sdk_version explicitly for major upstream updates or SDK >=1.0"])
+    # Without a previous upstream tag, a bootstrap may include major changes.
+    elif base[0] != 0 or state["update_kind"] in {"bootstrap", "major"}:
+        return dict(result, reasons=["Choose sdk_version explicitly for the first tracked update, major upstream updates or SDK >=1.0"])
     else:
         result["version"] = f"0.{base[1] + 1}.0"
     result["branch"] = f"release/v{result['version']}"

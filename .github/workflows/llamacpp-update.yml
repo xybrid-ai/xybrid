@@ -18,7 +18,7 @@ on:
         type: boolean
         default: true
       sdk_version:
-        description: 'Optional SDK release version; required for upstream major updates or SDK >=1.0'
+        description: 'SDK release version; required for bootstrap or major upstream updates, or SDK >=1.0'
         type: string
         required: false
 

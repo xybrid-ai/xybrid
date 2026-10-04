@@ -467,8 +467,10 @@ Keep the submodule gitlink, `LLAMA_CPP_COMMIT`, and
 `.github/llamacpp-version.json` consistent. Release preparation waits for
 successful validation and a matching, complete generated native manifest,
 then pushes `release/v<version>` through the existing pipeline. Stable `0.x`
-SDKs default to the next minor; upstream major updates and SDKs >=1.0 require
-an explicit version. The release PR remains the publishing approval point.
+SDKs default to the next minor for classified patch or minor upstream updates;
+first tracked (bootstrap) updates, upstream major updates and SDKs >=1.0
+require an explicit version. The release PR remains the publishing approval
+point.
 Release-branch version sync records the exact upstream commit being shipped.
 Setup, dry runs, and conformance-fixture migration are documented in
 `docs/development/llamacpp-updates.md`.

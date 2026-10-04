@@ -244,6 +244,20 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(self.plan()["ready"])
         self.assertTrue(self.plan("0.11.0")["ready"])
 
+    def test_bootstrap_update_needs_explicit_release_version(self):
+        for tag in ("v0.5.0", "v1.0.0"):
+            with self.subTest(tag=tag):
+                self.track(tag, kind=update.update_kind(None, tag))
+                plan = self.plan()
+                self.assertFalse(plan["ready"])
+                self.assertNotIn("version", plan)
+                self.assertNotIn("branch", plan)
+                self.assertTrue(any("sdk_version" in reason for reason in plan["reasons"]))
+                selected = self.plan("0.11.0")
+                self.assertTrue(selected["ready"], selected["reasons"])
+                self.assertEqual(selected["version"], "0.11.0")
+                self.assertEqual(selected["branch"], "release/v0.11.0")
+
     def test_sdk_one_requires_explicit_version_and_poc_rejects_zero_patch(self):
         self.write("Cargo.toml", '[workspace.package]\nversion = "1.2.3"\n')
         self.track("v0.5.0", sdk="1.2.3")
