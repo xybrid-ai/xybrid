@@ -129,13 +129,36 @@ def resolve_tag(tag: str, fetch: Callable[[str], Any] = api) -> str:
     raise UpdateError("Cannot peel upstream release tag to a commit")
 
 
+def latest_stable_tag(fetch: Callable[[str], Any] = api) -> str | None:
+    """Select the highest published stable version across the release history."""
+    latest = None
+    highest = None
+    page = 1
+    while True:
+        releases = fetch(f"repos/{UPSTREAM}/releases?per_page=100&page={page}")
+        if not isinstance(releases, list):
+            raise UpdateError("Expected a list of upstream releases")
+        for release in releases:
+            if release.get("draft") is not False or release.get("prerelease") is not False:
+                continue
+            try:
+                candidate = tag_version(release.get("tag_name"))
+            except UpdateError:
+                continue
+            if highest is None or candidate > highest:
+                latest = release["tag_name"]
+                highest = candidate
+        # GitHub caps release pages at 100; a short page ends the history.
+        if len(releases) < 100:
+            return latest
+        page += 1
+
+
 def discover(root: Path, repository: str, fetch: Callable[[str], Any] = api) -> dict:
     state = pin(root)
-    release = fetch(f"repos/{UPSTREAM}/releases/latest")
-    tag = release.get("tag_name")
-    tag_version(tag)
-    if release.get("draft") is not False or release.get("prerelease") is not False:
-        raise UpdateError("Expected a published, non-prerelease llama.cpp release")
+    tag = latest_stable_tag(fetch)
+    if tag is None:
+        return {"update": False, "reason": "No published stable vX.Y.Z llama.cpp release found"}
     commit = resolve_tag(tag, fetch)
     result = {
         "update": False, "tag": tag, "commit": commit,

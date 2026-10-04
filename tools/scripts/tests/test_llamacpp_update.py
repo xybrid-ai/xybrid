@@ -55,6 +55,8 @@ class ReleaseTests(unittest.TestCase):
         self.release = {"tag_name": "v0.5.0", "draft": False, "prerelease": False,
                         # Deliberately wrong: only the peeled tag is authoritative.
                         "target_commitish": "master"}
+        self.releases = [self.release]
+        self.api_requests = []
         self.comparison = "ahead"
         self.patcher = patch.object(update, "run", side_effect=self.fake_run)
         self.patcher.start()
@@ -96,8 +98,11 @@ class ReleaseTests(unittest.TestCase):
         return REAL_RUN(args, root or self.root, **kwargs)
 
     def api(self, endpoint: str):
-        if endpoint.endswith("/releases/latest"):
-            return self.release
+        self.api_requests.append(endpoint)
+        releases_prefix = f"repos/{update.UPSTREAM}/releases?per_page=100&page="
+        if endpoint.startswith(releases_prefix):
+            start = (int(endpoint.removeprefix(releases_prefix)) - 1) * 100
+            return self.releases[start:start + 100]
         if "/git/ref/tags/" in endpoint:
             return {"object": {"type": "tag", "sha": TAG_OBJECT}}
         if endpoint.endswith(f"/git/tags/{TAG_OBJECT}"):
@@ -122,14 +127,57 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(candidate["commit"], NEW)
         self.assertEqual(candidate["update_kind"], "bootstrap")
 
-    def test_development_prerelease_and_malformed_tags_are_rejected(self):
+    def test_development_prerelease_draft_and_malformed_releases_are_ignored(self):
         for tag, prerelease, draft in [("b12345", False, False), ("v0.5.0-rc1", True, False),
                                        ("v0.5.0", True, False), ("v0.5.0", False, True),
                                        ("v00.5.0", False, False)]:
             with self.subTest(tag=tag, prerelease=prerelease, draft=draft):
                 self.release.update(tag_name=tag, prerelease=prerelease, draft=draft)
-                with self.assertRaises(update.UpdateError):
-                    self.discover()
+                candidate = self.discover()
+                self.assertFalse(candidate["update"])
+                self.assertIn("No published stable", candidate["reason"])
+
+    def test_development_builds_do_not_hide_a_stable_release_on_a_later_page(self):
+        stable = dict(self.release)
+        self.release["tag_name"] = "b20000"
+        self.releases = [{"tag_name": f"b{20000 - index}", "draft": False, "prerelease": False}
+                         for index in range(100)] + [stable]
+        candidate = self.discover()
+        self.assertTrue(candidate["update"])
+        self.assertEqual(candidate["tag"], "v0.5.0")
+        self.assertEqual(candidate["commit"], NEW)
+        self.assertIn(f"repos/{update.UPSTREAM}/releases?per_page=100&page=2", self.api_requests)
+        self.assertNotIn(f"repos/{update.UPSTREAM}/releases/latest", self.api_requests)
+
+    def test_highest_stable_version_is_selected_across_all_pages(self):
+        self.releases = [dict(self.release, tag_name="v0.9.0")]
+        self.releases += [dict(self.release, tag_name=f"b{index}") for index in range(99)]
+        self.releases += [dict(self.release, tag_name="v0.10.0"),
+                          dict(self.release, tag_name="v1.0.0", prerelease=True),
+                          dict(self.release, tag_name="v2.0.0", draft=True)]
+        candidate = self.discover()
+        self.assertTrue(candidate["update"])
+        self.assertEqual(candidate["tag"], "v0.10.0")
+
+    def test_no_stable_release_is_a_successful_noop(self):
+        for count in (0, 100):
+            with self.subTest(release_count=count):
+                self.releases = [dict(self.release, tag_name=f"b{index}") for index in range(count)]
+                self.api_requests.clear()
+                candidate = self.discover()
+                self.assertFalse(candidate["update"])
+                self.assertIn("No published stable", candidate["reason"])
+                self.assertNotIn("branch", candidate)
+                pages = (1,) if count == 0 else (1, 2)
+                self.assertEqual(self.api_requests, [f"repos/{update.UPSTREAM}/releases?per_page=100&page={page}"
+                                                      for page in pages])
+                self.assertFalse(any(args[0] == "gh" for args in self.commands))
+
+    def test_release_history_api_failure_is_not_a_successful_noop(self):
+        def fail(endpoint):
+            raise subprocess.CalledProcessError(1, ["gh", "api", endpoint])
+        with self.assertRaises(subprocess.CalledProcessError):
+            update.discover(self.root, "xybrid-ai/xybrid", fail)
 
     def test_tag_tree_is_not_treated_as_commit(self):
         with self.assertRaises(update.UpdateError):

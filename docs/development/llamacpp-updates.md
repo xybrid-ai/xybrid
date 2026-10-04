@@ -1,9 +1,13 @@
 # llama.cpp stable update automation
 
 The POC checks for an official llama.cpp release once a day at 07:43 UTC.
-It accepts published `vX.Y.Z` tags, ignores development builds and prereleases,
-and resolves annotated tags to immutable commit SHAs. The committed submodule,
-Cargo fallback pin, and `.github/llamacpp-version.json` must agree.
+It scans every page of the upstream release history and selects the highest
+published `vX.Y.Z` version, skipping development builds, drafts, prereleases,
+and malformed tags. GitHub's `releases/latest` can point at a `b*` development
+build, so it does not identify the stable channel reliably. With no qualifying
+stable release, discovery succeeds with no update and release preparation can
+still run. Annotated tags resolve to immutable commit SHAs. The committed
+submodule, Cargo fallback pin, and `.github/llamacpp-version.json` must agree.
 
 ## Update review
 
