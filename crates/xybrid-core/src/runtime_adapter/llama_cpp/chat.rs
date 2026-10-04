@@ -219,14 +219,16 @@ fn ensure_tool_names_rendered(prompt: &str, tools: &[Tool]) -> LlmResult<()> {
 /// `<turn|>` marker and never references `eos_token`, so this is a no-op for
 /// the motivating model but keeps other templates correct.)
 ///
-/// `enable_thinking = false`: xybrid's llama.cpp backend is a raw
+/// `enable_thinking: Some(false)`: xybrid's llama.cpp backend is a raw
 /// tokenize → generate → detokenize loop with no parser for gemma-4's
 /// `<|channel>thought … <channel|>` reasoning blocks (unlike llama.cpp's own
 /// chat server). Requesting a reasoning channel would leak its markers and
 /// reasoning text into the user-facing output, which the post-processing
 /// stop/strip patterns don't yet understand. Asking for a direct answer makes
 /// gemma-4's template pre-fill an empty thought and emit the response
-/// straight away.
+/// straight away. The flag is passed explicitly, never omitted (`None`):
+/// templates such as Qwen3's close the think block only for an explicit
+/// `false`, and treat a missing flag as thinking on.
 fn render_embedded(
     model: &xybrid_llama::LlamaModel,
     template: &str,
@@ -249,7 +251,7 @@ fn render_embedded_template(
     let tpl = JinjaChatTemplate::new(template, None, eos_token);
     let options = RenderOptions {
         add_generation_prompt: true,
-        enable_thinking: false,
+        enable_thinking: Some(false),
         tools,
     };
     tpl.render(messages, &options)
