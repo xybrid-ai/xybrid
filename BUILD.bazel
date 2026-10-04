@@ -74,7 +74,7 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-# The browser spike uses the same pinned sources as //:llama. These sources
+# The browser runtime uses the same pinned sources as //:llama. These sources
 # mirror ggml/src/{,ggml-cpu/}CMakeLists.txt and src/CMakeLists.txt. Keeping the
 # browser build in Bazel lets Emscripten's registered toolchain own compilation
 # and the final JS/WASM link, including the Rust static library.
@@ -109,7 +109,7 @@ cc_library(
         "vendor/llama-cpp/ggml/src/ggml-cpu/amx/amx.cpp",
         "vendor/llama-cpp/ggml/src/ggml-cpu/amx/mmq.cpp",
     ] + select({
-        "//bindings/web/spike:webgpu_enabled": ["vendor/llama-cpp/ggml/src/ggml-webgpu/ggml-webgpu.cpp"],
+        "//bindings/web/runtime:webgpu_enabled": ["vendor/llama-cpp/ggml/src/ggml-webgpu/ggml-webgpu.cpp"],
         "//conditions:default": [],
     }),
     hdrs = glob([
@@ -120,13 +120,13 @@ cc_library(
         "vendor/llama-cpp/ggml/src/*.h",
         "vendor/llama-cpp/ggml/src/ggml-cpu/**/*.h",
     ]) + select({
-        "//bindings/web/spike:webgpu_enabled": [":browser_wgsl"] + glob([
+        "//bindings/web/runtime:webgpu_enabled": [":browser_wgsl"] + glob([
             "vendor/llama-cpp/ggml/src/ggml-webgpu/*.hpp",
         ]),
         "//conditions:default": [],
     }),
     copts = ["-fexceptions"] + select({
-        "//bindings/web/spike:webgpu_enabled": ["--use-port=emdawnwebgpu"],
+        "//bindings/web/runtime:webgpu_enabled": ["--use-port=emdawnwebgpu"],
         "//conditions:default": [],
     }),
     defines = [
@@ -135,7 +135,7 @@ cc_library(
         "GGML_VERSION=\\\"0.11.0\\\"",
         "GGML_COMMIT=\\\"b46812de78f8fbcb6cf0154947e8633ebc78d9ac\\\"",
     ] + select({
-        "//bindings/web/spike:webgpu_enabled": ["GGML_USE_WEBGPU"],
+        "//bindings/web/runtime:webgpu_enabled": ["GGML_USE_WEBGPU"],
         "//conditions:default": [],
     }),
     includes = [
@@ -147,13 +147,13 @@ cc_library(
         "browser_wgsl",
     ],
     linkopts = select({
-        "//bindings/web/spike:webgpu_enabled": ["--use-port=emdawnwebgpu", "-fexceptions"],
+        "//bindings/web/runtime:webgpu_enabled": ["--use-port=emdawnwebgpu", "-fexceptions"],
         "//conditions:default": ["-fexceptions"],
     }),
     # Virtual include paths keep the port's absolute header paths out of the
     # dependency file, while declaring those headers to Bazel.
     deps = select({
-        "//bindings/web/spike:webgpu_enabled": ["@emscripten_cache//:emdawnwebgpu_cpp_headers"],
+        "//bindings/web/runtime:webgpu_enabled": ["@emscripten_cache//:emdawnwebgpu_cpp_headers"],
         "//conditions:default": [],
     }),
     tags = ["manual"],

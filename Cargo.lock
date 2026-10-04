@@ -6460,7 +6460,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "xybrid-web-spike"
+name = "xybrid-web-runtime"
 version = "0.10.1"
 dependencies = [
  "xybrid-llama",

@@ -121,7 +121,8 @@ TensorFlow Lite model execution (mobile).
 
 ### `LiteRtLm`
 
-LiteRT-LM text generation. Runs only in the browser SDK (`@xybrid/web`);
+Legacy LiteRT-LM metadata, retained for serialization compatibility. The current
+browser SDK (`@xybrid/web`) uses `Gguf` and rejects this template;
 native runtimes reject this template with an explicit error.
 
 ```json
@@ -135,7 +136,7 @@ native runtimes reject this template with an explicit error.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `model_file` | string | yes | Path to `.litertlm` file (relative to model directory) |
-| `context_length` | integer | no | Maximum context length in tokens; omit when unset and the engine default applies. Must be at least 1 when present; the browser SDK caps it at 32768 |
+| `context_length` | integer | no | Legacy context length in tokens; omit when unset. Must be at least 1 when present |
 
 ### `ModelGraph`
 

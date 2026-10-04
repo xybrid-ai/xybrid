@@ -335,7 +335,7 @@
           ]
         },
         {
-          "description": "LiteRT-LM model execution (browser SDK / @xybrid/web only)",
+          "description": "Legacy LiteRT-LM metadata; retained for serialization compatibility.",
           "type": "object",
           "properties": {
             "context_length": {

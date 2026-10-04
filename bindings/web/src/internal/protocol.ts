@@ -27,7 +27,15 @@ export type RunMetrics = {
   memory: Memory;
 };
 export type Request =
-  | { type: "load"; id: number; accelerator: Accelerator | "auto" }
+  | {
+      type: "load";
+      id: number;
+      accelerator: Accelerator;
+      wasmPath: string;
+      bytes: ArrayBuffer;
+      contextLength: number;
+      downloadMs: number;
+    }
   | { type: "generate"; id: number; prompt: string; maxTokens: number }
   | { type: "cancel" }
   | { type: "dispose"; id: number };

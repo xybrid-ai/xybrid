@@ -1,5 +1,4 @@
-import { MODEL } from "./model.ts";
-import type { Accelerator, LoadMetrics, Memory, Request, Response } from "./protocol.ts";
+import type { LoadMetrics, Memory, Request, Response } from "./internal/protocol.ts";
 
 type Runtime = {
   HEAPU8: Uint8Array;
@@ -61,47 +60,17 @@ const webGpuAdapter = async (): Promise<Adapter | null> => {
   return adapter?.features.has("shader-f16") ? adapter : null;
 };
 
-const download = async (): Promise<Uint8Array> => {
-  const response = await fetch("/model.gguf", { credentials: "omit" });
-  if (!response.ok || response.body === null) throw new Error(`Model download: ${response.status}`);
-  const bytes = new Uint8Array(MODEL.bytes);
-  const reader = response.body.getReader();
-  let offset = 0;
-  try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value.byteLength > bytes.byteLength - offset) throw new Error("Oversized GGUF download.");
-      bytes.set(value, offset);
-      offset += value.byteLength;
-      send({ type: "progress", loadedBytes: offset, totalBytes: MODEL.bytes });
-    }
-  } catch (error) {
-    await reader.cancel().catch(() => {});
-    throw error;
-  } finally {
-    reader.releaseLock();
-  }
-  if (offset !== MODEL.bytes) throw new Error("Truncated GGUF download.");
-  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-  const digest = Array.from(hash, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  if (digest !== MODEL.sha256) throw new Error("GGUF checksum mismatch.");
-  return bytes;
-};
-
-const load = async (preference: Accelerator | "auto"): Promise<LoadMetrics> => {
-  if (handle !== 0)
-    throw new Error("The spike worker owns one model; dispose it before reloading.");
-  const adapter = preference === "wasm" ? null : await webGpuAdapter();
-  if (preference === "webgpu" && adapter === null) {
+const load = async (request: Extract<Request, { type: "load" }>): Promise<LoadMetrics> => {
+  if (handle !== 0) throw new Error("The worker owns one model; dispose it before reloading.");
+  const { accelerator, downloadMs, contextLength } = request;
+  const adapter = accelerator === "wasm" ? null : await webGpuAdapter();
+  if (accelerator === "webgpu" && adapter === null) {
     throw new Error("WebGPU with shader-f16 is unavailable in this browser.");
   }
-  const accelerator = adapter === null ? "wasm" : "webgpu";
-  const downloadStart = performance.now();
-  const bytes = await download();
-  const downloadMs = performance.now() - downloadStart;
+  const bytes = new Uint8Array(request.bytes);
   const initializationStart = performance.now();
-  const moduleUrl = new URL(`/runtime/${accelerator}/xybrid_spike.js`, location.origin).href;
+  const root = request.wasmPath.endsWith("/") ? request.wasmPath : `${request.wasmPath}/`;
+  const moduleUrl = new URL(`${accelerator}/xybrid_runtime.js`, root).href;
   const { default: createModule } = (await import(/* @vite-ignore */ moduleUrl)) as {
     default: (options: Record<string, unknown>) => Promise<Runtime>;
   };
@@ -122,8 +91,8 @@ const load = async (preference: Accelerator | "auto"): Promise<LoadMetrics> => {
     const status = await runtime.ccall(
       "xybrid_web_load",
       "number",
-      ["number", "number", "number"],
-      [handle, path, accelerator === "webgpu" ? 99 : 0],
+      ["number", "number", "number", "number"],
+      [handle, path, accelerator === "webgpu" ? 99 : 0, contextLength],
       { async: true },
     );
     if (status !== 0) throw new Error(runtime.UTF8ToString(runtime._xybrid_web_error(handle)));
@@ -149,7 +118,7 @@ const load = async (preference: Accelerator | "auto"): Promise<LoadMetrics> => {
           ]
             .filter(Boolean)
             .join(" / "),
-    modelBytes: MODEL.bytes,
+    modelBytes: bytes.byteLength,
     downloadMs,
     initializationMs,
     loadMs: performance.now() - loadStart,
@@ -222,7 +191,7 @@ scope.onmessage = (event) => {
     try {
       switch (request.type) {
         case "load":
-          send({ type: "loaded", id: request.id, metrics: await load(request.accelerator) });
+          send({ type: "loaded", id: request.id, metrics: await load(request) });
           break;
         case "generate":
           await generate(request);

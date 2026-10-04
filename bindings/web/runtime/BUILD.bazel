@@ -27,7 +27,7 @@ rust_static_library(
 )
 
 cc_binary(
-    name = "xybrid_spike",
+    name = "xybrid_runtime",
     srcs = ["bridge.cpp"],
     linkopts = [
         "--no-entry",
@@ -57,8 +57,8 @@ cc_binary(
 
 wasm_cc_binary(
     name = "runtime",
-    cc_target = ":xybrid_spike",
-    outputs = ["runtime/xybrid_spike.js", "runtime/xybrid_spike.wasm"],
+    cc_target = ":xybrid_runtime",
+    outputs = ["runtime/xybrid_runtime.js", "runtime/xybrid_runtime.wasm"],
     simd = "simd128",
     tags = ["manual"],
     threads = "off",

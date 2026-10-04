@@ -1,8 +1,8 @@
 import { access, copyFile, open, unlink, writeFile } from "node:fs/promises";
 import { arch, cpus, platform } from "node:os";
 import { expect, test } from "@playwright/test";
-import { SDK_VERSION } from "../../src/version.ts";
-import { MODEL } from "../model.ts";
+import { MODEL } from "../example/model.ts";
+import { SDK_VERSION } from "../src/version.ts";
 
 test("streams real GGUF tokens through Rust, cancels, reuses and releases the model", async ({
   page,
@@ -10,16 +10,20 @@ test("streams real GGUF tokens through Rust, cancels, reuses and releases the mo
 }, testInfo) => {
   await page.goto("/");
   const result = await page.evaluate(async () => {
-    const moduleUrl = "/client.ts";
-    const { RustGgufModel } = (await import(moduleUrl)) as typeof import("../client.ts");
-    const model = await RustGgufModel.load({ accelerator: "wasm" });
+    const moduleUrl = "/sdk/index.js";
+    const { XybridLlm } = (await import(moduleUrl)) as typeof import("../src/index.ts");
+    const model = await XybridLlm.fromUrl("/model.gguf", {
+      accelerator: "wasm",
+      wasmPath: "/sdk/runtime",
+      contextLength: 512,
+    });
     const runs = [];
     for (let index = 0; index < 3; index += 1) {
       let output = "";
       let deltas = 0;
       for await (const text of model.generateStream(
         "Tell me a short story about a fox who learns to share.",
-        { maxTokens: 32 },
+        { maxOutputTokens: 32 },
       )) {
         output += text;
         deltas += 1;
@@ -29,7 +33,7 @@ test("streams real GGUF tokens through Rust, cancels, reuses and releases the mo
     let cancelledDeltas = 0;
     let cancelStarted = 0;
     for await (const _text of model.generateStream("Tell me a long story about a fox.", {
-      maxTokens: 256,
+      maxOutputTokens: 256,
     })) {
       cancelledDeltas += 1;
       if (cancelledDeltas === 5) {
@@ -40,12 +44,14 @@ test("streams real GGUF tokens through Rust, cancels, reuses and releases the mo
     const cancelMs = performance.now() - cancelStarted;
     const cancelled = model.lastRun;
     let resumed = "";
-    for await (const text of model.generateStream("Say hello.", { maxTokens: 8 })) resumed += text;
+    for await (const text of model.generateStream("Say hello.", { maxOutputTokens: 8 }))
+      resumed += text;
     const reused = model.lastRun;
-    const paused = model.generateStream("Tell me another story.", { maxTokens: 256 });
+    const paused = model.generateStream("Tell me another story.", { maxOutputTokens: 256 });
     const first = await paused.next();
     const disposeStarted = performance.now();
-    const disposed = await model.dispose();
+    await model.dispose();
+    const disposed = model.releasedMemory;
     const disposeMs = performance.now() - disposeStarted;
     await paused.return(undefined);
     return {
@@ -82,7 +88,9 @@ test("streams real GGUF tokens through Rust, cancels, reuses and releases the mo
   expect(result.reused?.cancelled).toBe(false);
   expect(result.first.done).toBe(false);
   expect(result.disposeMs).toBeLessThan(5000);
-  expect(result.disposed.allocatedBytes).toBeLessThan(result.loaded.memory.allocatedBytes / 2);
+  expect(result.disposed?.allocatedBytes ?? Infinity).toBeLessThan(
+    result.loaded.memory.allocatedBytes / 2,
+  );
   const processors = cpus();
   const report = {
     model: MODEL,
@@ -99,40 +107,87 @@ test("streams real GGUF tokens through Rust, cancels, reuses and releases the mo
     body: JSON.stringify(report, null, 2),
     contentType: "application/json",
   });
-  const reportPath = process.env["XYBRID_SPIKE_REPORT"];
+  const reportPath = process.env["XYBRID_WEB_REPORT"];
   if (reportPath !== undefined) await writeFile(reportPath, JSON.stringify(report, null, 2));
 });
 
 test("rejects an overlapping generation and remains usable", async ({ page }) => {
   await page.goto("/");
   const result = await page.evaluate(async () => {
-    const moduleUrl = "/client.ts";
-    const { RustGgufModel } = (await import(moduleUrl)) as typeof import("../client.ts");
-    const model = await RustGgufModel.load();
-    const active = model.generateStream("Tell me a story about a fox.", { maxTokens: 256 });
+    const moduleUrl = "/sdk/index.js";
+    const { XybridLlm } = (await import(moduleUrl)) as typeof import("../src/index.ts");
+    const model = await XybridLlm.fromUrl("/model.gguf", {
+      accelerator: "wasm",
+      wasmPath: "/sdk/runtime",
+      contextLength: 512,
+    });
+    const active = model.generateStream("Tell me a story about a fox.", { maxOutputTokens: 256 });
     await active.next();
-    const overlap = model.generateStream("Hello.");
     let failure = "";
     try {
+      const overlap = model.generateStream("Hello.");
       await overlap.next();
     } catch (error) {
       failure = String(error);
     }
     await active.return(undefined);
     let output = "";
-    for await (const text of model.generateStream("Say hello.", { maxTokens: 8 })) output += text;
+    for await (const text of model.generateStream("Say hello.", { maxOutputTokens: 8 }))
+      output += text;
     await model.dispose();
     return { failure, output };
   });
-  expect(result.failure).toContain("already in flight");
+  expect(result.failure).toContain("in-flight run");
   expect(result.output.length).toBeGreaterThan(0);
+});
+
+test("loads GGUF metadata and applies its context budget in the Rust engine", async ({ page }) => {
+  await page.route("**/model_metadata.json", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        model_id: "browser-smollm2",
+        version: "1",
+        execution_template: { type: "Gguf", model_file: "model.gguf", context_length: 128 },
+        files: ["model.gguf"],
+        preprocessing: [],
+        postprocessing: [],
+      }),
+    }),
+  );
+  await page.goto("/");
+  const result = await page.evaluate(async () => {
+    const moduleUrl = "/sdk/index.js";
+    const { XybridLlm, InferenceError } = (await import(
+      moduleUrl
+    )) as typeof import("../src/index.ts");
+    const model = await XybridLlm.load("/model_metadata.json", {
+      wasmPath: "/sdk/runtime",
+      accelerator: "wasm",
+    });
+    try {
+      let budgetRejected = false;
+      try {
+        await model.generate("Say hello.", { maxOutputTokens: 128 });
+      } catch (error) {
+        budgetRejected = error instanceof InferenceError;
+      }
+      const output = await model.generate("Say hello.", { maxOutputTokens: 8 });
+      return { budgetRejected, output, rustVersion: model.loaded.rustVersion };
+    } finally {
+      await model.dispose();
+    }
+  });
+  expect(result.budgetRejected).toBe(true);
+  expect(result.output.length).toBeGreaterThan(0);
+  expect(result.rustVersion).toBe(SDK_VERSION);
 });
 
 test("rejects a corrupt GGUF before native loading", async ({ page }) => {
   // Serve a real corrupt file over HTTP without forwarding a 92 MB response
   // body through Chromium's debugging protocol.
-  const corruptPath = new URL("../public/corrupt-test.gguf", import.meta.url);
-  await copyFile(new URL("../public/model.gguf", import.meta.url), corruptPath);
+  const corruptPath = new URL("../example/dist/corrupt-test.gguf", import.meta.url);
+  await copyFile(new URL("../example/dist/model.gguf", import.meta.url), corruptPath);
   try {
     const file = await open(corruptPath, "r+");
     try {
@@ -152,7 +207,7 @@ test("rejects a corrupt GGUF before native loading", async ({ page }) => {
     await expect(page.locator("#status")).toHaveAttribute("data-state", "error", {
       timeout: 60_000,
     });
-    await expect(page.locator("#status")).toContainText("checksum mismatch");
+    await expect(page.locator("#status")).toContainText("SHA-256 mismatch");
   } finally {
     await unlink(corruptPath);
   }
@@ -196,18 +251,13 @@ test("reports an unavailable WebGPU adapter before downloading the model", async
 });
 
 test("WebGPU artifact exposes Rust handles and asynchronous calls", async ({ page }, testInfo) => {
-  try {
-    await access(new URL("../public/runtime/webgpu/xybrid_spike.wasm", import.meta.url));
-  } catch {
-    test.skip(true, "Prepare the optional WebGPU artifact first.");
-    return;
-  }
+  await access(new URL("../example/dist/sdk/runtime/webgpu/xybrid_runtime.wasm", import.meta.url));
   await page.goto("/");
   const result = await page.evaluate(async () => {
     // Exercise the built GPU module without initializing a GPU backend. An
     // unloaded Engine safely returns a Rust error, even on a software adapter.
     const source = `
-      const url = new URL("/runtime/webgpu/xybrid_spike.js", self.location.origin).href;
+      const url = new URL("/sdk/runtime/webgpu/xybrid_runtime.js", self.location.origin).href;
       const { default: createModule } = await import(url);
       const module = await createModule({ locateFile: file => new URL(file, url).href });
       const handle = module._xybrid_web_create();
@@ -259,7 +309,7 @@ test("WebGPU artifact exposes Rust handles and asynchronous calls", async ({ pag
 
 test("WebGPU generates through the Rust wrapper", async ({ page }) => {
   test.skip(
-    process.env["XYBRID_SPIKE_WEBGPU"] !== "1",
+    process.env["XYBRID_WEB_WEBGPU"] !== "1",
     "Opt in after preparing WebGPU assets on a shader-f16-capable adapter.",
   );
   await page.goto("/");

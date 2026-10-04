@@ -467,10 +467,33 @@ jobs:
         run: ./tools/scripts/api-contract-check.sh --check
 
   web:
-    name: Web SDK
+    name: Web SDK (Rust/WASM)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Use Bazelisk
+        uses: bazel-contrib/setup-bazel@4fd964a13a440a8aeb0be47350db2fc640f19ca8 # 0.15.0
+        with:
+          bazelisk-cache: true
+
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
+      - name: Cache browser runtime build outputs
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .context/bazel-disk-cache
+          key: web-wasm-${{ runner.os }}-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'emsdk.patch', 'rules_rs.patch', 'BUILD.bazel', 'bindings/web/runtime/**', 'crates/xybrid-llama/**', 'crates/llama-cpp-sys/**') }}
+          restore-keys: web-wasm-${{ runner.os }}-
+
+      - name: Bound the browser build cache
+        run: echo 'build --experimental_disk_cache_gc_max_size=536870912' >> .context/local.bazelrc
 
       - name: Use Node.js
         uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
@@ -504,22 +527,17 @@ jobs:
         working-directory: bindings/web
         run: pnpm test
 
-      - name: Build Web SDK
+      - name: Build Web SDK with CPU and WebGPU Rust runtimes
         working-directory: bindings/web
         run: pnpm build
 
-      # The example pulls a 136 MB LiteRT-LM model from a shared HuggingFace
-      # mirror that rate-limits CI egress by IP. Both assets are pinned by
-      # checksum in prepare-assets.ts, which re-downloads whatever fails to
-      # verify — so keying the cache on that file makes a restore safe and a
-      # pin change self-invalidating.
+      # The demo and browser suite use the same 92 MB GGUF. Preparation and
+      # the SDK verify size/SHA-256; runtime assets are rebuilt from source.
       - name: Cache Web example model assets
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: |
-            bindings/web/example/public/model.tflite
-            bindings/web/example/public/llm/SmolLM2_135M_Instruct.litertlm
-          key: web-example-assets-${{ hashFiles('bindings/web/example/scripts/prepare-assets.ts') }}
+          path: bindings/web/example/public/model.gguf
+          key: web-gguf-${{ hashFiles('bindings/web/example/model.ts') }}
 
       - name: Build Web example
         working-directory: bindings/web
@@ -529,9 +547,27 @@ jobs:
         working-directory: bindings/web
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Test Web SDK in Chromium
+      - name: Test packaged Rust/WASM SDK in Chromium
         working-directory: bindings/web
+        env:
+          XYBRID_WEB_REPORT: test-results/runtime-measurements.json
         run: pnpm test:browser
+
+      - name: Record JavaScript and WASM build sizes
+        if: ${{ !cancelled() }}
+        working-directory: bindings/web
+        run: pnpm size
+
+      - name: Upload Web SDK and browser measurements
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: xybrid-web-wasm
+          path: |
+            bindings/web/dist/
+            bindings/web/test-results/
+          if-no-files-found: warn
+          retention-days: 7
 
   # All checks passed
   ci-success:

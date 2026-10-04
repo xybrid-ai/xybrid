@@ -5,15 +5,19 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: "line",
+  timeout: 180_000,
   use: {
     ...devices["Desktop Chrome"],
     baseURL: "http://127.0.0.1:4173",
+    launchOptions: {
+      ...(process.env["CHROME_PATH"] ? { executablePath: process.env["CHROME_PATH"] } : {}),
+    },
   },
   webServer: {
-    command: "pnpm dev:example --host 127.0.0.1 --port 4173",
+    command:
+      "pnpm exec vite preview --config example/vite.config.ts --host 127.0.0.1 --port 4173 --strictPort",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: false,
-    // The predev asset step downloads the 136 MB LiteRT-LM model on first run.
-    timeout: 600_000,
+    timeout: 30_000,
   },
 });

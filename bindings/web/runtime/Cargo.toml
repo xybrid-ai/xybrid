@@ -1,11 +1,11 @@
 [package]
-name = "xybrid-web-spike"
+name = "xybrid-web-runtime"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
-description = "Browser experiment over xybrid's existing Rust llama.cpp wrappers"
+description = "Browser runtime over xybrid's existing Rust llama.cpp wrappers"
 
 [lib]
 crate-type = ["lib", "staticlib"]

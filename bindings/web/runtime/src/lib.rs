@@ -1,4 +1,4 @@
-//! Browser experiment using xybrid's existing safe llama.cpp wrapper.
+//! Browser runtime using xybrid's existing safe llama.cpp wrapper.
 //!
 //! Bazel links these exports and `xybrid-llama` into one Emscripten module.
 //! The browser worker owns each handle and serializes all calls. Cancellation
@@ -24,6 +24,7 @@ mod runtime {
         error: CString,
         prompt_tokens: usize,
         generated_tokens: usize,
+        context_length: usize,
     }
 
     #[derive(Debug)]
@@ -48,13 +49,21 @@ mod runtime {
             -1
         }
 
-        fn load(&mut self, path: &str, gpu_layers: i32) -> LlamaResult<()> {
+        fn load(&mut self, path: &str, gpu_layers: i32, context_length: usize) -> LlamaResult<()> {
+            if !(1..=32_768).contains(&context_length) {
+                return Err(LlamaError::InvalidInput(
+                    "context_length must be 1..=32768".into(),
+                ));
+            }
             self.context = None;
             self.model = None;
             xybrid_llama::backend_init();
             let model = LlamaModel::load(path, gpu_layers)?;
-            // Keep the spike bounded and deterministic across browser runs.
-            let context = LlamaContext::new(&model, 512, 1, 128, false)?;
+            // A single worker owns inference; one thread needs no shared memory.
+            let context = LlamaContext::new(&model, context_length, 1, 128, false)?;
+            // llama.cpp pads small contexts for its cache layout. Preserve
+            // the caller's token budget even when allocation capacity is larger.
+            self.context_length = context_length.min(context.n_ctx());
             self.model = Some(model);
             self.context = Some(context);
             Ok(())
@@ -69,16 +78,16 @@ mod runtime {
                 .context
                 .as_ref()
                 .ok_or_else(|| LlamaError::InvalidInput("context is not loaded".into()))?;
-            if !(1..=256).contains(&max_tokens) {
+            if max_tokens == 0 || max_tokens >= self.context_length {
                 return Err(LlamaError::InvalidInput(
-                    "max_tokens must be 1..=256".into(),
+                    "max_tokens must be positive and less than the context length".into(),
                 ));
             }
             let formatted = format_chat(model, &["user"], &[prompt])?.ok_or_else(|| {
                 LlamaError::InvalidInput("model needs a supported embedded chat template".into())
             })?;
             let tokens = model.tokenize_special(&formatted, true)?;
-            if tokens.len() + max_tokens >= context.n_ctx() {
+            if tokens.len() + max_tokens >= self.context_length {
                 return Err(LlamaError::InvalidInput(
                     "prompt exceeds context budget".into(),
                 ));
@@ -133,6 +142,7 @@ mod runtime {
             error: CString::default(),
             prompt_tokens: 0,
             generated_tokens: 0,
+            context_length: 0,
         }))
     }
 
@@ -151,11 +161,12 @@ mod runtime {
         engine: *mut Engine,
         path: *const c_char,
         gpu_layers: i32,
+        context_length: usize,
     ) -> i32 {
         // SAFETY: the worker upholds the handle and string ownership contract.
         let engine = unsafe { &mut *engine };
         let path = unsafe { CStr::from_ptr(path) }.to_string_lossy();
-        match engine.load(&path, gpu_layers) {
+        match engine.load(&path, gpu_layers, context_length) {
             Ok(()) => 0,
             Err(error) => engine.record_error(error),
         }

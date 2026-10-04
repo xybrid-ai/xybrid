@@ -1,140 +1,169 @@
-# @xybrid/web preview
+# @xybrid/web
 
-`@xybrid/web` is the future umbrella browser package for Xybrid. Version `0.6.0` is a private preview with two surfaces: a low-level LiteRT tensor surface backed by `@litertjs/core` `2.5.2`, and a text-generation surface backed by `@litert-lm/core` `0.14.0`.
+Private browser SDK preview for local GGUF text generation. It compiles Xybrid's
+existing `xybrid-llama` Rust wrappers, C++ shim, and pinned llama.cpp into one
+WebAssembly module. A Web Worker streams tokens while the page stays responsive.
+The package includes CPU/WASM SIMD and optional WebGPU execution.
 
-The [Rust GGUF browser experiment](spike/README.md) builds the existing
-`xybrid-llama` runtime into WASM and exercises loading, token streaming,
-cancellation, and memory/speed measurements. Run it with `pnpm spike:prepare`
-and `pnpm spike:dev`.
+## Build and run
 
-## Supported now
-
-### Tensor surface (`XybridModel`)
-
-- `XybridModel.load(metadataUrl, { wasmPath?, accelerator?, signal? })` for Xybrid metadata whose execution template is exactly `{ "type": "TfLite", "model_file": "..." }`.
-- `XybridModel.fromRegistry(id, options?)` and `XybridModel.fromHuggingFace(repo, options?)` for registry and Hugging Face model resolution.
-- Explicit `wasm` or `webgpu` compilation, plus `auto` that skips unavailable WebGPU and otherwise falls back to wasm when the WebGPU attempt fails.
-- Positional arrays or name-keyed records of `Float32Array`, `Int32Array`, and `Uint8Array` inputs.
-- Model-derived readonly tensor details, the selected compile path, and `isFullyAccelerated`.
-- Copied typed-array outputs, WebGPU device-loss protection, rejected overlapping runs, and idempotent asynchronous disposal.
-
-### Text generation surface (`XybridLlm`)
-
-- `XybridLlm.load(metadataUrl, { wasmPath?, accelerator?, signal?, onDownloadProgress? })` for metadata whose execution template is `{ "type": "LiteRtLm", "model_file": "...", "context_length"? }`.
-- `XybridLlm.fromRegistry(id, options?)` and `XybridLlm.fromHuggingFace(repo, options?)` for registry and Hugging Face model resolution.
-- `generate(prompt, { maxOutputTokens? })` for one-shot replies and `generateStream(...)` for an async iterator of text deltas; each call is a fresh single-turn conversation and the model's embedded prompt template is applied by LiteRT-LM.
-- `webgpu` maps to the LiteRT-LM GPU backend and `wasm` to its CPU backend; `auto` prefers WebGPU and falls back to CPU. The engine loads models through the wasm filesystem rather than the default streaming path, because streaming cannot read the zlib-compressed tokenizer sections used by current `litert-community` `.litertlm` files.
-- Rejected overlapping generations, cancellation of in-flight decoding on early iterator exit or `dispose()`, and idempotent asynchronous disposal.
-
-Shared behavior: browser memory guards (1 MiB metadata, 512 MiB models, and 256 MiB tensor I/O), and a forward-compatible metadata boundary — unrecognized fields are accepted, while malformed metadata, unsupported templates, and unavailable browser features become typed Xybrid errors. `model_file` must be a listed, bare relative filename in the same directory as the metadata document. For `LiteRtLm`, omit `context_length` when unset; legacy `null` is accepted as absent, and a present value must be an integer from 1 through 32,768.
-
-## Deliberately deferred
-
-- Preprocessing and postprocessing pipelines.
-- Voices and `vision_encoder` metadata.
-- Tensor dtypes beyond float32, int32, and uint8.
-- Threads, JSPI, WebNN, GPU buffer I/O, and higher-level multimodal APIs.
-- Multi-turn conversations, system prompts, sampling controls, constrained decoding, and tool calling on the LiteRT-LM surface.
-
-## Wasm assets
-
-Both engines load their wasm JavaScript and binary assets at runtime, and each takes its own `wasmPath`: host `@litertjs/core/wasm` for the tensor surface and `@litert-lm/core/wasm` for the text surface. The example copies them to `/litert` and `/llm-runtime` with `bun run example:assets`. The underlying engines are an implementation detail of this preview — application code and UI copy should only speak in terms of `@xybrid/web`.
-
-Metadata and model files may use another origin when that host permits browser CORS requests. Metadata, registry, Hugging Face, and model acquisition requests use `credentials: "omit"`. Registry resolve requests also send an anonymous `X-Xybrid-Client` header (`binding=web; sdk_version=…; platform=web`), which the registry allows cross-origin; model downloads never carry it. Wasm paths are executable code and must remain on the page's own HTTP(S) origin.
-
-LiteRT may execute unsupported WebGPU operations on CPU. `model.accelerator` reports the compile path selected by this wrapper; inspect `model.isFullyAccelerated` to distinguish a fully delegated graph from one with CPU fallback.
-
-Each runtime's initialization is a per-page singleton. Concurrent loads with the same wasm configuration share the one initialization; a later request with another wasm path fails with `RuntimeConfigurationError`. This preview always sets `threads: false` and `jspi: false`, so it has no SharedArrayBuffer or COOP/COEP requirement.
-
-## Model sources and loading
-
-All load constructors accept the common `wasmPath?`, `accelerator?`, and `signal?` options. Registry constructors additionally accept `registryUrl?` (HTTPS), `version?`, and `onDownloadProgress?`; Hugging Face constructors accept `revision?` (default `"main"`), `file?`, and `onDownloadProgress?`.
-
-```ts
-const model = await XybridModel.fromRegistry("model-id", {
-  version: "1.0.0",
-  wasmPath: "/litert",
-  accelerator: "auto",
-})
-
-const llm = await XybridLlm.fromHuggingFace("org/model", {
-  revision: "main",
-  file: "model.litertlm",
-  wasmPath: "/llm-runtime",
-  accelerator: "auto",
-  onDownloadProgress: ({ loadedBytes, totalBytes }) => render(loadedBytes, totalBytes),
-})
-```
-
-Registry resolution requires browser-compatible metadata, an HTTPS download URL, a declared size no greater than 512 MiB, and a 64-character lowercase SHA-256 value. The downloaded bytes must match the declared size and SHA-256. Hugging Face resolution reads the repository tree, uses `model_metadata.json` when present, or synthesizes compatible metadata in memory when the selected top-level `.tflite` or `.litertlm` file is unambiguous. It enforces the tree's declared size, uses the LFS size when present, and verifies a valid LFS OID as SHA-256. Resolved downloads reject oversized or truncated bytes through size enforcement; registry artifacts and Hugging Face LFS files also fail closed on SHA-256 mismatches. Hugging Face files without a valid LFS OID have no tree-provided hash and therefore receive size enforcement only.
-
-Every load path accepts `signal: AbortSignal`. A caller abort rejects with an abort error rather than a `XybridError`; a failure in one load stage cancels sibling in-flight requests. The model is downloaded exactly once per load. Explicit `webgpu` probes availability before downloading and fails before the download when WebGPU is unavailable. With `auto`, unavailable WebGPU is skipped silently; other WebGPU failures fall back to wasm using the same bytes, and if wasm also fails the `RuntimeInitializationError` cause is an `AggregateError` containing both failures.
-
-`XybridModel` subscribes to WebGPU device loss and reports later tensor runs as `DeviceLostError`. `XybridLlm` has no device-loss subscription; generation failures surface as `InferenceError`. `XybridLlm.dispose()` settles even when a consumer stopped iterating `generateStream`, cancelling the abandoned generation before deleting the engine.
-
-## Errors
-
-All SDK error classes extend `XybridError` and expose a stable `code`. A caller-triggered abort is an abort error, not a `XybridError`.
-
-| Error class | `code` |
-|-------------|--------|
-| `InvalidMetadataError` | `invalid_metadata` |
-| `UnsupportedTemplateError` | `unsupported_template` |
-| `UnsupportedFeatureError` | `unsupported_feature` |
-| `RuntimeConfigurationError` | `runtime_configuration` |
-| `RuntimeInitializationError` | `runtime_initialization` |
-| `InputValidationError` | `input_validation` |
-| `UnsupportedTensorTypeError` | `unsupported_tensor_type` |
-| `RegistryError` | `registry` |
-| `HuggingFaceError` | `huggingface` |
-| `IntegrityError` | `integrity` |
-| `InferenceError` | `inference` |
-| `ConcurrentRunError` | `concurrent_run` |
-| `DeviceLostError` | `device_lost` |
-| `DisposedError` | `disposed` |
-
-## Example
-
-From `bindings/web`:
+Install Bun, pnpm, and Bazelisk (`bazel` on PATH), then from the repository root:
 
 ```sh
-pnpm install
+git submodule update --init vendor/llama-cpp
+cd bindings/web
+pnpm install --frozen-lockfile
+pnpm build
 pnpm dev:example
 ```
 
-The predev script downloads two pinned models, verifies their SHA-256 checksums, and copies both runtimes' wasm assets. No model binary is committed.
+`pnpm build` builds both runtime variants through Bazel and packages the ESM
+client, declarations, worker, and runtime assets in `dist/`. Bazel downloads the
+pinned Rust/Emscripten toolchains; no system Emscripten installation is needed.
+`pnpm runtime:build` builds only the Rust/C++ artifacts.
 
-- `/` runs SmolLM2-135M-Instruct, a 136 MB `.litertlm` language model from [litert-community](https://huggingface.co/litert-community/SmolLM2-135M-Instruct), streaming a reply on WebGPU (or the CPU engine) with live download progress, first-token latency, and generation timings, plus the exact `@xybrid/web` calls it makes.
-- `/tensor.html` keeps the deterministic diagnostic: the pinned 708-byte LiteRT addition model runs named inputs `a` and `b` as `float32[10,10]` and shows PASS only when all 100 `Identity` outputs equal elementwise `a+b`.
+The example downloads and verifies a pinned SmolLM2-135M-Instruct Q4_0 GGUF
+(91,726,912 bytes). `pnpm build:example` creates a static site in `example/dist`.
+`pnpm exec vite preview --config example/vite.config.ts` serves that build.
+Serve over HTTPS or localhost. The single-thread CPU build needs no
+SharedArrayBuffer or COOP/COEP headers. Generated assets and models are ignored;
+`./clean.sh` lists build outputs and `./clean.sh --apply` removes them.
 
-`pnpm test:browser` runs both pages through the real adapters in Chromium.
+## Use in an application
 
-## API
+Import `XybridLlm` from `@xybrid/web` in your bundler. Keep `dist/worker.js` with
+the package; the client loads it relative to its own module. Copy the package's
+`dist/runtime/` directory into your application's public `/xybrid/runtime/`
+directory, or set `wasmPath` to another directory on the page's origin.
+That directory must contain both `wasm/xybrid_runtime.{js,wasm}` and
+`webgpu/xybrid_runtime.{js,wasm}` when using `auto` or WebGPU. Only the selected
+backend is fetched. Serve WASM as `application/wasm` and enable gzip or Brotli.
+
+The built ESM files bundle their JavaScript dependencies, so they can also be
+hosted directly: copy all of `dist/` to `/sdk/` and import `/sdk/index.js`, with
+`wasmPath: "/sdk/runtime"`. The production example and browser tests exercise
+these packaged files.
 
 ```ts
-import { XybridLlm, XybridModel } from "@xybrid/web"
+import { XybridLlm } from "@xybrid/web";
 
-const llm = await XybridLlm.load("https://example.test/llm/model_metadata.json", {
-  wasmPath: "/llm-runtime",
+const model = await XybridLlm.fromUrl("/models/model.gguf", {
   accelerator: "auto",
-  onDownloadProgress: ({ loadedBytes, totalBytes }) => render(loadedBytes, totalBytes),
-})
-
-for await (const delta of llm.generateStream("Hello!", { maxOutputTokens: 256 })) {
-  append(delta)
+  wasmPath: "/xybrid/runtime",
+  contextLength: 512,
+  onDownloadProgress: ({ loadedBytes, totalBytes }) => {
+    console.log(loadedBytes, totalBytes);
+  },
+});
+try {
+  for await (const delta of model.generateStream("Tell me a short story.", {
+    maxOutputTokens: 64,
+  })) {
+    output.append(delta);
+    // Breaking the loop cancels decoding and waits for native generation to settle.
+  }
+  console.log(model.loaded, model.lastRun);
+} finally {
+  await model.dispose();
+  console.log(model.releasedMemory);
 }
-await llm.dispose()
-
-const model = await XybridModel.load("https://example.test/model_metadata.json", {
-  wasmPath: "/litert",
-  accelerator: "auto",
-})
-
-const result = await model.run({
-  a: new Float32Array(100),
-  b: new Float32Array(100),
-})
-
-console.log(result.byName["Identity"]?.data)
-await model.dispose()
 ```
+
+`generate(prompt, options?)` returns the complete string. `cancel()` requests a
+stop and waits for native generation to settle. Concurrent generations on one
+model are rejected. `dispose()` cancels active work, drops the Rust model/context,
+and terminates the worker; it is idempotent.
+
+Generation currently uses an embedded GGUF chat template, a fresh single-user
+turn with a cleared KV cache, and greedy decoding. External templates,
+metadata preprocessing/postprocessing, sampling metadata, vision, and speech are
+rejected. `maxOutputTokens` defaults to 64 and must fit the context together with
+the prompt. Direct loads default to a 512-token context; `contextLength` accepts
+positive integers through 32,768. Cancellation is cooperative at token
+boundaries; prompt prefill runs synchronously inside the worker.
+
+## Model sources and verification
+
+- `XybridLlm.fromUrl(ggufUrl, options?)`: direct HTTP(S) GGUF. Supply `sizeBytes`
+  to enforce an exact byte count and optional `sha256` (64 lowercase hex digits)
+  to verify integrity. A hash requires a declared size.
+- `XybridLlm.load(metadataUrl, options?)`: Xybrid metadata with a `Gguf` template.
+  `model_file` must be a listed, bare `.gguf` filename beside the metadata.
+- `XybridLlm.fromRegistry(id, options?)`: requests `platform=web&format=gguf`,
+  preserves the anonymous `X-Xybrid-Client` binding header, and requires an HTTPS
+  download URL, exact size, SHA-256, and compatible `Gguf` metadata.
+- `XybridLlm.fromHuggingFace(repo, options?)`: selects a top-level GGUF using
+  `file` and optional `revision`. It uses repository metadata when present, or
+  synthesizes `Gguf` metadata when the selection is unambiguous. It verifies the
+  declared size and, when provided, a valid Git-LFS SHA-256 OID.
+
+```json
+{
+  "model_id": "my-model",
+  "version": "1",
+  "execution_template": {
+    "type": "Gguf",
+    "model_file": "model.gguf",
+    "context_length": 512
+  },
+  "files": ["model.gguf"],
+  "preprocessing": [],
+  "postprocessing": []
+}
+```
+
+Load options include `signal` for aborting resolution, download, or worker
+initialization. Executable runtime assets stay on the page's origin; cross-origin
+model servers need CORS. Metadata is limited to 1 MiB and models to 512 MiB.
+Public failures use the exported `XybridError` subclasses and `code` values.
+
+## Measurements and CI
+
+`loaded` reports actual Rust artifact version, chosen accelerator, model bytes,
+download/checksum time, module initialization, load time, and WASM memory.
+`lastRun` reports token counts, first-token latency, total time, decode tokens per
+second, cancellation, and sampled peak memory. Decode speed excludes the first
+token and includes worker yields. `releasedMemory` records allocations after
+Rust destruction, before worker termination.
+
+`Memory.heapBytes` is WASM linear-memory capacity; `allocatedBytes` is live
+Rust/C++ allocator usage. Heap capacity does not shrink when models are freed.
+These figures exclude JavaScript buffers, browser process memory, GPU memory,
+and temporary allocation peaks during loading or prefill.
+
+```sh
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm build:example
+pnpm exec playwright install --with-deps chromium
+XYBRID_WEB_REPORT=test-results/runtime-measurements.json pnpm test:browser
+pnpm size
+```
+
+Required CI builds CPU and WebGPU artifacts, runs the production example and
+packaged SDK in Chromium, and verifies streaming, iterator cancellation,
+overlapping generation, reuse, checksum failure, model release, and GPU Rust
+exports. It caches the GGUF and Bazel outputs and uploads `dist/`, measurements,
+and raw/gzip sizes. Throughput is informational on shared runners.
+
+Actual GPU inference requires an adapter with `shader-f16`. Run
+`XYBRID_WEB_WEBGPU=1 pnpm test:browser --grep 'WebGPU generates'` on suitable
+hardware, or dispatch `.github/workflows/web-webgpu.yml` with a self-hosted runner
+labelled `webgpu`. The cloud VM's software adapter lacks this feature; actual GPU
+inference and GPU speed remain unvalidated here.
+
+## Migration from the LiteRT preview
+
+The runtime dependencies and tensor `XybridModel` API were removed. Use
+`XybridLlm` with GGUF and `Gguf` metadata in place of `.litertlm`/`LiteRtLm`.
+`wasmPath` now defaults to `/xybrid/runtime`. Existing registry/Hugging Face,
+streaming, generation, load cancellation, and typed-error surfaces remain.
+The former `spike:*` commands are replaced by the normal build/example/test
+commands above.
+
+This is the browser binding of Xybrid's Rust llama inference path. The complete
+`xybrid-core`/`xybrid-sdk`/BoltFFI API, pipelines, auth, cloud routing, and telemetry
+export still need a browser platform layer. The package remains private and is
+not published to npm.

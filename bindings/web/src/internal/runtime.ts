@@ -1,4 +1,5 @@
-import type { DownloadProgress, SelectedAccelerator, TensorDetail, TensorValue } from "../types.ts";
+import type { DownloadProgress, SelectedAccelerator } from "../types.ts";
+import type { LoadMetrics, Memory, RunMetrics } from "./protocol.ts";
 
 export class AcceleratorUnavailableError extends Error {}
 
@@ -8,28 +9,6 @@ export type RuntimeInitConfig = {
   readonly jspi: false;
 };
 
-export type RuntimeTensor = {
-  readonly detail: TensorDetail;
-  read(): Promise<TensorValue>;
-  delete(): void;
-};
-
-export type RuntimeModel = {
-  readonly inputs: readonly TensorDetail[];
-  readonly outputs: readonly TensorDetail[];
-  readonly isFullyAccelerated: boolean;
-  invoke(inputs: readonly RuntimeTensor[]): Promise<readonly RuntimeTensor[]>;
-  delete(): void;
-};
-
-export type BrowserRuntime = {
-  initialize(config: RuntimeInitConfig): Promise<void>;
-  probeAccelerator(accelerator: SelectedAccelerator): Promise<void>;
-  compileBytes(bytes: Uint8Array, accelerator: SelectedAccelerator): Promise<RuntimeModel>;
-  createTensor(detail: TensorDetail, data: TensorValue, shape: readonly number[]): RuntimeTensor;
-  onDeviceLost(callback: () => void): () => void;
-};
-
 export type LlmGeneration = {
   readonly stream: AsyncGenerator<string, void, undefined>;
   cancel(): void;
@@ -37,6 +16,9 @@ export type LlmGeneration = {
 };
 
 export type LlmEngine = {
+  readonly loaded?: LoadMetrics | undefined;
+  readonly lastRun?: RunMetrics | undefined;
+  readonly releasedMemory?: Memory | undefined;
   generate(prompt: string, options: { readonly maxOutputTokens?: number }): Promise<LlmGeneration>;
   delete(): Promise<void>;
 };
@@ -49,10 +31,11 @@ export type LlmRuntime<Model> = {
     onProgress: ((progress: DownloadProgress) => void) | undefined,
     signal?: AbortSignal,
   ): Promise<Model>;
-  modelFromChunks(chunks: readonly Uint8Array[]): Promise<Model>;
+  modelFromChunks(chunks: readonly Uint8Array[], downloadMs?: number): Promise<Model>;
   createEngine(
     model: Model,
     accelerator: SelectedAccelerator,
     contextLength: number | undefined,
+    signal?: AbortSignal,
   ): Promise<LlmEngine>;
 };

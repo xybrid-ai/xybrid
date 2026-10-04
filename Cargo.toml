@@ -12,7 +12,7 @@ members = [
     "crates/xybrid-llama",
     "crates/xybrid-whisper",
     "bindings/flutter/rust",
-    "bindings/web/spike",
+    "bindings/web/runtime",
     "macros",
     "xtask",
     "integration-tests",
