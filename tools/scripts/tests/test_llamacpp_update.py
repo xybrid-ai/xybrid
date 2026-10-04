@@ -57,6 +57,7 @@ class ReleaseTests(unittest.TestCase):
                         "target_commitish": "master"}
         self.releases = [self.release]
         self.api_requests = []
+        self.release_cursors = []
         self.comparison = "ahead"
         self.patcher = patch.object(update, "run", side_effect=self.fake_run)
         self.patcher.start()
@@ -97,12 +98,22 @@ class ReleaseTests(unittest.TestCase):
             return self.remote_refs
         return REAL_RUN(args, root or self.root, **kwargs)
 
-    def api(self, endpoint: str):
+    def api(self, endpoint: str, **fields):
         self.api_requests.append(endpoint)
-        releases_prefix = f"repos/{update.UPSTREAM}/releases?per_page=100&page="
-        if endpoint.startswith(releases_prefix):
-            start = (int(endpoint.removeprefix(releases_prefix)) - 1) * 100
-            return self.releases[start:start + 100]
+        if endpoint == "graphql":
+            self.assertEqual(fields["owner"], "ggml-org")
+            self.assertEqual(fields["name"], "llama.cpp")
+            cursor = fields.get("cursor")
+            self.release_cursors.append(cursor)
+            start = 0 if cursor is None else int(cursor.removeprefix("cursor-"))
+            batch = self.releases[start:start + 100]
+            return {"data": {"repository": {"releases": {
+                "nodes": [{"tagName": release.get("tag_name"),
+                           "isDraft": release.get("draft"),
+                           "isPrerelease": release.get("prerelease")} for release in batch],
+                "pageInfo": {"hasNextPage": start + len(batch) < len(self.releases),
+                             "endCursor": f"cursor-{start + len(batch)}" if batch else None},
+            }}}}
         if "/git/ref/tags/" in endpoint:
             return {"object": {"type": "tag", "sha": TAG_OBJECT}}
         if endpoint.endswith(f"/git/tags/{TAG_OBJECT}"):
@@ -146,7 +157,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertTrue(candidate["update"])
         self.assertEqual(candidate["tag"], "v0.5.0")
         self.assertEqual(candidate["commit"], NEW)
-        self.assertIn(f"repos/{update.UPSTREAM}/releases?per_page=100&page=2", self.api_requests)
+        self.assertEqual(self.release_cursors, [None, "cursor-100"])
         self.assertNotIn(f"repos/{update.UPSTREAM}/releases/latest", self.api_requests)
 
     def test_highest_stable_version_is_selected_across_all_pages(self):
@@ -159,22 +170,62 @@ class ReleaseTests(unittest.TestCase):
         self.assertTrue(candidate["update"])
         self.assertEqual(candidate["tag"], "v0.10.0")
 
+    def test_cursor_pagination_continues_past_a_rest_history_limit(self):
+        self.releases = [dict(self.release, tag_name="v0.9.0")]
+        self.releases += [dict(self.release, tag_name=f"b{index}") for index in range(10_000)]
+        self.releases += [dict(self.release, tag_name="v0.10.0")]
+        prefix = f"repos/{update.UPSTREAM}/releases?per_page=100&page="
+        def fetch(endpoint, **fields):
+            if endpoint.startswith(prefix):
+                page = int(endpoint.removeprefix(prefix))
+                if page > 100:
+                    raise subprocess.CalledProcessError(1, ["gh", "api", endpoint],
+                                                        output='{"message": "Only the first 10000 results are available."}')
+                start = (page - 1) * 100
+                return self.releases[start:start + 100]
+            return self.api(endpoint, **fields)
+        candidate = update.discover(self.root, "xybrid-ai/xybrid", fetch)
+        self.assertTrue(candidate["update"])
+        self.assertEqual(candidate["tag"], "v0.10.0")
+        self.assertIn("cursor-10000", self.release_cursors)
+
+    def test_full_final_cursor_page_does_not_request_another_page(self):
+        self.releases += [dict(self.release, tag_name=f"b{index}") for index in range(99)]
+        candidate = self.discover()
+        self.assertTrue(candidate["update"])
+        self.assertEqual(candidate["tag"], "v0.5.0")
+        self.assertEqual(self.release_cursors, [None])
+
+    def test_missing_or_repeated_release_cursor_blocks_discovery(self):
+        self.releases *= 2
+        for cursor in (None, "", "cursor-1"):
+            with self.subTest(cursor=cursor):
+                def fetch(endpoint, **fields):
+                    result = self.api(endpoint, **fields)
+                    if endpoint == "graphql":
+                        result["data"]["repository"]["releases"]["pageInfo"] = {
+                            "hasNextPage": True, "endCursor": cursor,
+                        }
+                    return result
+                with self.assertRaisesRegex(update.UpdateError, "cursor"):
+                    update.discover(self.root, "xybrid-ai/xybrid", fetch)
+
     def test_no_stable_release_is_a_successful_noop(self):
         for count in (0, 100):
             with self.subTest(release_count=count):
                 self.releases = [dict(self.release, tag_name=f"b{index}") for index in range(count)]
                 self.api_requests.clear()
+                self.release_cursors.clear()
                 candidate = self.discover()
                 self.assertFalse(candidate["update"])
                 self.assertIn("No published stable", candidate["reason"])
                 self.assertNotIn("branch", candidate)
-                pages = (1,) if count == 0 else (1, 2)
-                self.assertEqual(self.api_requests, [f"repos/{update.UPSTREAM}/releases?per_page=100&page={page}"
-                                                      for page in pages])
+                self.assertEqual(self.api_requests, ["graphql"])
+                self.assertEqual(self.release_cursors, [None])
                 self.assertFalse(any(args[0] == "gh" for args in self.commands))
 
     def test_release_history_api_failure_is_not_a_successful_noop(self):
-        def fail(endpoint):
+        def fail(endpoint, **fields):
             raise subprocess.CalledProcessError(1, ["gh", "api", endpoint])
         with self.assertRaises(subprocess.CalledProcessError):
             update.discover(self.root, "xybrid-ai/xybrid", fail)
@@ -193,10 +244,10 @@ class ReleaseTests(unittest.TestCase):
                 update.update_kind("v0.5.0", tag)
 
     def test_same_commit_does_not_open_an_update(self):
-        def fetch(endpoint):
+        def fetch(endpoint, **fields):
             if endpoint.endswith(f"/git/tags/{TAG_OBJECT}"):
                 return {"object": {"type": "commit", "sha": OLD}}
-            return self.api(endpoint)
+            return self.api(endpoint, **fields)
         self.assertFalse(update.discover(self.root, "xybrid-ai/xybrid", fetch)["update"])
 
     def test_stable_release_behind_or_divergent_from_pin_is_skipped(self):

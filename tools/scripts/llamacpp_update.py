@@ -23,6 +23,14 @@ from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[2]
 UPSTREAM = "ggml-org/llama.cpp"
+RELEASES_QUERY = """query($owner: String!, $name: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    releases(first: 100, after: $cursor) {
+      nodes { tagName isDraft isPrerelease }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}"""
 TRACKING = Path(".github/llamacpp-version.json")
 SYS = Path("crates/llama-cpp-sys")
 VENDOR = Path("vendor/llama-cpp")
@@ -55,8 +63,14 @@ def run(args: list[str], root: Path = ROOT, **kwargs: Any) -> str:
     return subprocess.check_output(args, cwd=root, text=True, **kwargs).strip()
 
 
-def api(endpoint: str) -> Any:
-    return json.loads(run(["gh", "api", endpoint]))
+def api(endpoint: str, **fields: Any) -> Any:
+    args = ["gh", "api", endpoint]
+    for key, value in fields.items():
+        if value is None:
+            args.extend(["-F", f"{key}=null"])
+        else:
+            args.extend(["-f", f"{key}={value}"])
+    return json.loads(run(args))
 
 
 def version(value: str) -> tuple[int, int, int]:
@@ -129,32 +143,45 @@ def resolve_tag(tag: str, fetch: Callable[[str], Any] = api) -> str:
     raise UpdateError("Cannot peel upstream release tag to a commit")
 
 
-def latest_stable_tag(fetch: Callable[[str], Any] = api) -> str | None:
+def latest_stable_tag(fetch: Callable[..., Any] = api) -> str | None:
     """Select the highest published stable version across the release history."""
     latest = None
     highest = None
-    page = 1
+    cursor = None
+    seen = set()
+    owner, name = UPSTREAM.split("/", 1)
     while True:
-        releases = fetch(f"repos/{UPSTREAM}/releases?per_page=100&page={page}")
-        if not isinstance(releases, list):
-            raise UpdateError("Expected a list of upstream releases")
-        for release in releases:
-            if release.get("draft") is not False or release.get("prerelease") is not False:
+        payload = fetch("graphql", query=RELEASES_QUERY, owner=owner, name=name, cursor=cursor)
+        if payload.get("errors"):
+            raise UpdateError("Upstream release query failed")
+        data = payload.get("data")
+        repository = data.get("repository") if isinstance(data, dict) else None
+        if not isinstance(repository, dict):
+            raise UpdateError("Cannot read the upstream release history")
+        releases = repository["releases"]
+        if not isinstance(releases.get("nodes"), list):
+            raise UpdateError("Expected upstream release nodes")
+        for release in releases["nodes"]:
+            if release.get("isDraft") is not False or release.get("isPrerelease") is not False:
                 continue
             try:
-                candidate = tag_version(release.get("tag_name"))
+                candidate = tag_version(release.get("tagName"))
             except UpdateError:
                 continue
             if highest is None or candidate > highest:
-                latest = release["tag_name"]
+                latest = release["tagName"]
                 highest = candidate
-        # GitHub caps release pages at 100; a short page ends the history.
-        if len(releases) < 100:
+        page_info = releases["pageInfo"]
+        if page_info.get("hasNextPage") is False:
             return latest
-        page += 1
+        cursor = page_info.get("endCursor")
+        if (page_info.get("hasNextPage") is not True or not isinstance(cursor, str)
+                or not cursor or cursor in seen):
+            raise UpdateError("Invalid or repeated upstream release cursor")
+        seen.add(cursor)
 
 
-def discover(root: Path, repository: str, fetch: Callable[[str], Any] = api) -> dict:
+def discover(root: Path, repository: str, fetch: Callable[..., Any] = api) -> dict:
     state = pin(root)
     tag = latest_stable_tag(fetch)
     if tag is None:
