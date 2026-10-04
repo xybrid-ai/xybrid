@@ -40,6 +40,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - name: Test clean.sh, clean-lib.sh and every folder clean.sh
         run: python3 -m unittest discover -s tools/scripts/tests -p 'test_clean.py' -v
