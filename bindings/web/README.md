@@ -2,6 +2,11 @@
 
 `@xybrid/web` is the future umbrella browser package for Xybrid. Version `0.6.0` is a private preview with two surfaces: a low-level LiteRT tensor surface backed by `@litertjs/core` `2.5.2`, and a text-generation surface backed by `@litert-lm/core` `0.14.0`.
 
+The [Rust GGUF browser experiment](spike/README.md) builds the existing
+`xybrid-llama` runtime into WASM and exercises loading, token streaming,
+cancellation, and memory/speed measurements. Run it with `pnpm spike:prepare`
+and `pnpm spike:dev`.
+
 ## Supported now
 
 ### Tensor surface (`XybridModel`)

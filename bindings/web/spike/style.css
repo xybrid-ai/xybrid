@@ -1,0 +1,159 @@
+:root {
+  color-scheme: light;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  color: #172722;
+  background: #f5f5ef;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 56px 28px 80px;
+}
+.eyebrow {
+  color: #477760;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  font-weight: 700;
+}
+h1 {
+  font-size: clamp(42px, 7vw, 70px);
+  line-height: 1.05;
+  letter-spacing: -0.05em;
+  margin: 22px 0;
+}
+.intro {
+  color: #5b6a61;
+  line-height: 1.7;
+}
+.controls,
+.run-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.controls {
+  margin-top: 30px;
+}
+label {
+  font-size: 13px;
+  font-weight: 600;
+}
+button,
+select,
+input,
+textarea {
+  font: inherit;
+  border: 1px solid #c9d4cc;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+button {
+  background: #1c593d;
+  color: white;
+  border-color: #1c593d;
+  cursor: pointer;
+  font-weight: 600;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+#stop,
+#dispose {
+  background: transparent;
+  color: #1c593d;
+}
+select,
+input,
+textarea {
+  background: #fff;
+  color: #172722;
+}
+input {
+  width: 85px;
+}
+#status {
+  min-height: 24px;
+  color: #477760;
+  font-size: 14px;
+  line-height: 1.6;
+}
+#status[data-state="error"] {
+  color: #9e302b;
+}
+progress {
+  width: 100%;
+  accent-color: #1c593d;
+}
+.conversation {
+  background: #fff;
+  border: 1px solid #d6ded6;
+  border-radius: 14px;
+  padding: 22px;
+  margin: 22px 0;
+}
+textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  margin: 10px 0 16px;
+  line-height: 1.6;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font:
+    14px / 1.7 ui-monospace,
+    monospace;
+}
+#output {
+  border-top: 1px solid #e3e8e1;
+  padding-top: 22px;
+  min-height: 100px;
+  margin: 22px 0 0;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+.metrics div {
+  border-left: 2px solid #86ad91;
+  padding-left: 13px;
+}
+.metrics span {
+  display: block;
+  font-size: 12px;
+  color: #5b6a61;
+}
+.metrics strong {
+  display: block;
+  font-size: 23px;
+  margin-top: 8px;
+}
+.note {
+  color: #647568;
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 22px 0;
+}
+summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  main {
+    padding: 32px 18px;
+  }
+  .metrics {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+  }
+}

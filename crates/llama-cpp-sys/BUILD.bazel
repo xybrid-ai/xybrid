@@ -75,6 +75,7 @@ cc_library(
         "//conditions:default": [],
     }),
     deps = select({
+        "@rules_rs//rs/platforms/config:wasm32-unknown-emscripten": ["//:llama_browser"],
         # --//:metal=true swaps in the Metal llama (a separate, local-pinned
         # target — see //:llama_metal), --//:vulkan=true the Vulkan one.
         # Everything above these selects is identical between the lanes by design.
@@ -102,6 +103,7 @@ rust_library(
     } | {"//conditions:default": []}),
     edition = "2021",
     deps = [":wrapper_cc"] + select({
+        "@rules_rs//rs/platforms/config:wasm32-unknown-emscripten": ["//:llama_browser"],
         "//:metal_enabled": ["//:llama_metal"],
         "//:vulkan_enabled": ["//:llama_vulkan"],
         "//bazel/ggml:cpu_variants_enabled": ["//:llama_android_dl"],

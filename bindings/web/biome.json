@@ -33,13 +33,21 @@
       "!node_modules",
       "!example/public/litert",
       "!example/public/llm-runtime",
+      "!spike/public",
+      "!spike/dist",
       "!playwright-report",
       "!test-results"
     ]
   },
   "overrides": [
     {
-      "includes": ["tsdown.config.ts", "playwright.config.ts", "example/vite.config.ts"],
+      "includes": [
+        "tsdown.config.ts",
+        "playwright.config.ts",
+        "example/vite.config.ts",
+        "spike/vite.config.ts",
+        "spike/playwright.config.ts"
+      ],
       "linter": { "rules": { "style": { "noDefaultExport": "off" } } }
     }
   ]

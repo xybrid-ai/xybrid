@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Xybrid · GGUF browser experiment</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">XYBRID / BROWSER EXPERIMENT</div>
+      <h1>The runtime,<br />in your browser.</h1>
+      <p class="intro">SmolLM2-135M-Instruct · Q4_0 · 92 MB GGUF.<br />Local generation through Xybrid’s existing Rust and llama.cpp wrappers.</p>
+      <section class="controls" aria-label="Runtime controls">
+        <label for="accelerator">Execution</label>
+        <select id="accelerator">
+          <option value="wasm">WASM CPU + SIMD</option>
+          <option value="webgpu">WebGPU</option>
+          <option value="auto">Auto</option>
+        </select>
+        <button id="load" type="button">Load model</button>
+        <button id="dispose" type="button" disabled>Release model</button>
+      </section>
+      <p id="status" role="status" data-state="idle">Ready to load. The model runs in a worker so the page stays responsive.</p>
+      <progress id="progress" max="100" value="0" hidden aria-label="Model download"></progress>
+      <section class="conversation" aria-label="Generation">
+        <label for="prompt">Prompt</label>
+        <textarea id="prompt" rows="3">Tell me a short story about a fox who learns to share.</textarea>
+        <div class="run-controls">
+          <label for="max-tokens">Token limit</label>
+          <input id="max-tokens" type="number" min="1" max="256" value="64" />
+          <button id="run" type="button" disabled>Generate</button>
+          <button id="stop" type="button" disabled>Stop</button>
+        </div>
+        <pre id="output" aria-live="polite">Generated text will appear here.</pre>
+      </section>
+      <section class="metrics" aria-label="Runtime measurements">
+        <div><span>First token</span><strong id="first-token">—</strong></div>
+        <div><span>Decode speed</span><strong id="speed">—</strong></div>
+        <div><span>WASM heap capacity</span><strong id="heap">—</strong></div>
+        <div><span>Live allocations</span><strong id="allocated">—</strong></div>
+      </section>
+      <p class="note">Memory measures the shared Rust/C++ WASM module. Heap capacity is retained after release; live allocations can fall. GPU memory and browser JavaScript memory are not included.</p>
+      <details>
+        <summary>Measurement report</summary>
+        <pre id="report">Load the model to start a report.</pre>
+      </details>
+    </main>
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>

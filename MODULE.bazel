@@ -81,6 +81,40 @@ use_repo(windows_sdk, "windows_sdk")
 # rules_cc must be a direct dep so the `@rules_cc//...` flag in .bazelrc resolves.
 bazel_dep(name = "rules_cc", version = "0.2.20")
 
+# Browser runtime experiment. Emscripten supplies the C++/WebGPU glue; the
+# existing rules_rs toolchains already include wasm32-unknown-emscripten.
+bazel_dep(name = "emsdk", version = "6.0.11")
+git_override(
+    module_name = "emsdk",
+    commit = "dd8e25632640cfc1fb570c7fa4cc374e8a5e5a72",
+    remote = "https://github.com/emscripten-core/emsdk.git",
+    strip_prefix = "bazel",
+    patch_strip = 1,
+    patches = ["//:emsdk.patch"],
+)
+
+# Bazel freezes Emscripten's cache during compile actions. Materialize the
+# WebGPU port and the single-threaded system libraries at repo fetch
+# time so actions never download ports or modify a shared cache.
+emscripten_cache = use_extension("@emsdk//:emscripten_cache.bzl", "emscripten_cache")
+emscripten_cache.targets(targets = [
+    "sysroot",
+    "libGL-getprocaddr",
+    "libal",
+    "libhtml5",
+    "libclang_rt.builtins",
+    "libc-debug",
+    "libprintf_long_double-debug",
+    "libc++-debug",
+    "libc++abi-debug",
+    "libdlmalloc-debug",
+    "libstubs-debug",
+    "libnoexit",
+    "libsockets",
+    "emdawnwebgpu",
+])
+use_repo(emscripten_cache, "emscripten_cache")
+
 # Apple cc toolchain for iOS (Apple G1). hermetic-llvm has NO iOS target and
 # @macos_sdk is macOS-only/link-only, so the iOS cc toolchain — used for the
 # C-sys build-script compiles (ring, zstd-sys, ...), the wrapper cc_library, and
@@ -338,6 +372,7 @@ crate.from_cargo(
     cargo_lock = "//:Cargo.lock",
     cargo_toml = "//:Cargo.toml",
     platform_triples = [
+        "wasm32-unknown-emscripten",
         "x86_64-unknown-linux-gnu",
         # Desktop Windows cross (GNU/MinGW ABI — hermetic-llvm ships no MSVC CRT).
         "x86_64-pc-windows-gnu",

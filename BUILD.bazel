@@ -7,6 +7,7 @@ exports_files([
 
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_python//python:py_binary.bzl", "py_binary")
 load("//bazel/ggml:android.bzl", "ANDROID_ARM64_CPU_VARIANTS", "ANDROID_ARM64_GGML_LIBS")
 
 # The macOS GPU lane toggle (Flip 2). Both darwin lanes share the SAME Rust
@@ -71,6 +72,108 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+# The browser spike uses the same pinned sources as //:llama. These sources
+# mirror ggml/src/{,ggml-cpu/}CMakeLists.txt and src/CMakeLists.txt. Keeping the
+# browser build in Bazel lets Emscripten's registered toolchain own compilation
+# and the final JS/WASM link, including the Rust static library.
+cc_library(
+    name = "llama_browser",
+    srcs = glob([
+        "vendor/llama-cpp/src/*.cpp",
+        "vendor/llama-cpp/src/models/*.cpp",
+    ]) + [
+        "vendor/llama-cpp/ggml/src/ggml.c",
+        "vendor/llama-cpp/ggml/src/ggml.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-alloc.c",
+        "vendor/llama-cpp/ggml/src/ggml-backend.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-backend-dl.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-backend-meta.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-backend-reg.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-opt.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-quants.c",
+        "vendor/llama-cpp/ggml/src/ggml-threading.cpp",
+        "vendor/llama-cpp/ggml/src/gguf.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/ggml-cpu.c",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/ggml-cpu.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/arch/wasm/quants.c",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/binary-ops.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/hbm.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/ops.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/quants.c",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/repack.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/traits.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/unary-ops.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/vec.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/amx/amx.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/amx/mmq.cpp",
+    ] + select({
+        "//bindings/web/spike:webgpu_enabled": ["vendor/llama-cpp/ggml/src/ggml-webgpu/ggml-webgpu.cpp"],
+        "//conditions:default": [],
+    }),
+    hdrs = glob([
+        "vendor/llama-cpp/include/*.h",
+        "vendor/llama-cpp/src/*.h",
+        "vendor/llama-cpp/src/models/*.h",
+        "vendor/llama-cpp/ggml/include/*.h",
+        "vendor/llama-cpp/ggml/src/*.h",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/**/*.h",
+    ]) + select({
+        "//bindings/web/spike:webgpu_enabled": [":browser_wgsl"] + glob([
+            "vendor/llama-cpp/ggml/src/ggml-webgpu/*.hpp",
+        ]),
+        "//conditions:default": [],
+    }),
+    copts = ["-fexceptions"] + select({
+        "//bindings/web/spike:webgpu_enabled": ["--use-port=emdawnwebgpu"],
+        "//conditions:default": [],
+    }),
+    defines = [
+        "GGML_USE_CPU",
+        "GGML_SCHED_MAX_COPIES=4",
+        "GGML_VERSION=\\\"0.11.0\\\"",
+        "GGML_COMMIT=\\\"b46812de78f8fbcb6cf0154947e8633ebc78d9ac\\\"",
+    ] + select({
+        "//bindings/web/spike:webgpu_enabled": ["GGML_USE_WEBGPU"],
+        "//conditions:default": [],
+    }),
+    includes = [
+        "vendor/llama-cpp/include",
+        "vendor/llama-cpp/src",
+        "vendor/llama-cpp/ggml/include",
+        "vendor/llama-cpp/ggml/src",
+        "vendor/llama-cpp/ggml/src/ggml-cpu",
+        "browser_wgsl",
+    ],
+    linkopts = select({
+        "//bindings/web/spike:webgpu_enabled": ["--use-port=emdawnwebgpu", "-fexceptions"],
+        "//conditions:default": ["-fexceptions"],
+    }),
+    # Virtual include paths keep the port's absolute header paths out of the
+    # dependency file, while declaring those headers to Bazel.
+    deps = select({
+        "//bindings/web/spike:webgpu_enabled": ["@emscripten_cache//:emdawnwebgpu_cpp_headers"],
+        "//conditions:default": [],
+    }),
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "browser_embed_wgsl",
+    srcs = ["vendor/llama-cpp/ggml/src/ggml-webgpu/wgsl-shaders/embed_wgsl.py"],
+    main = "vendor/llama-cpp/ggml/src/ggml-webgpu/wgsl-shaders/embed_wgsl.py",
+    tags = ["manual"],
+)
+
+genrule(
+    name = "browser_wgsl",
+    srcs = glob(["vendor/llama-cpp/ggml/src/ggml-webgpu/wgsl-shaders/*.wgsl", "vendor/llama-cpp/ggml/src/ggml-webgpu/wgsl-shaders/*.tmpl"]),
+    outs = ["browser_wgsl/ggml-wgsl-shaders.hpp"],
+    cmd = "$(execpath :browser_embed_wgsl) --input_dir vendor/llama-cpp/ggml/src/ggml-webgpu/wgsl-shaders --output_file $@",
+    tools = [":browser_embed_wgsl"],
+    tags = ["manual"],
 )
 
 # OPTION B: build llama.cpp's libraries hermetically via its own CMakeLists,
