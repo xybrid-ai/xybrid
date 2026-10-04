@@ -343,7 +343,6 @@ case "${1:-}" in
     *)
         # Set version everywhere
         VERSION="$1"
-        TAG="v$VERSION"
         echo "Setting all packages to version: $VERSION"
         set_cargo_version "$VERSION"
         set_flutter_version "$VERSION"
@@ -367,6 +366,12 @@ case "${1:-}" in
         echo "Regenerating Cargo.lock..."
         (cd "$REPO_ROOT" && cargo generate-lockfile --quiet)
         echo "Cargo.lock updated."
+        # Record which upstream runtime the release branch actually includes.
+        # A version bump elsewhere cannot prove that a pending update shipped.
+        if [ -f "$REPO_ROOT/.github/llamacpp-version.json" ] \
+            && [ "$(git -C "$REPO_ROOT" branch --show-current)" = "release/v$VERSION" ]; then
+            python3 "$REPO_ROOT/tools/scripts/llamacpp_update.py" record-release "$VERSION"
+        fi
         echo ""
         echo "━━━ Release Protocol ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
@@ -378,13 +383,11 @@ case "${1:-}" in
         echo ""
         echo "     git add -A && git commit -m \"bump: $VERSION\""
         echo ""
-        echo "  3. Tag and push:"
+        echo "  3. Push the release/v$VERSION branch (release-prep creates the release PR):"
         echo ""
-        echo "     git tag $TAG && git push && git push --tags"
+        echo "     git push -u origin release/v$VERSION"
         echo ""
-        echo "  To revert a tag (even after push):"
-        echo ""
-        echo "     git tag -d $TAG && git push origin :refs/tags/$TAG"
+        echo "  Do not create release tags or release PRs by hand."
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         ;;
