@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Daily llama.cpp stable-release intake (POC).** Official upstream releases
+  produce reviewed dependency-update PRs, with real grammar and vision tests.
+  Once validation and the refreshed native manifest are ready, automation
+  prepares a release branch for the existing reviewed release pipeline.
 - **`XybridModel::is_speculative`** reports whether a load served the model
   from the cloud while it downloaded. It stays `true` once the download lands;
   `is_cloud_serving` reports whether the cloud still answers.

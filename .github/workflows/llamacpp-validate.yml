@@ -1,0 +1,81 @@
+name: Validate llama.cpp stable
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'vendor/llama-cpp'
+      - 'crates/llama-cpp-sys/**'
+      - 'crates/xybrid-llama/**'
+      - '.github/llamacpp-version.json'
+      - 'tools/scripts/llamacpp_update.py'
+      - 'integration-tests/tests/llamacpp_release.rs'
+      - '.github/workflows/llamacpp-validate.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'vendor/llama-cpp'
+      - 'crates/llama-cpp-sys/**'
+      - 'crates/xybrid-llama/**'
+      - '.github/llamacpp-version.json'
+      - 'tools/scripts/llamacpp_update.py'
+      - 'integration-tests/tests/llamacpp_release.rs'
+      - '.github/workflows/llamacpp-validate.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: llamacpp-stable-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: llama.cpp stable validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      XYBRID_NATIVES_FORCE_SOURCE: 1
+      XYBRID_REQUIRE_MODELS: 1
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: llamacpp-stable-validation
+
+      - name: Validate pin consistency and generated bindings
+        run: |
+          python3 tools/scripts/llamacpp_update.py check-pin
+          python3 tools/scripts/llamacpp_update.py bindings --check
+
+      - name: Install fixture download tools
+        run: sudo apt-get update && sudo apt-get install -y jq zstd
+
+      - name: Download real text and vision fixtures
+        run: |
+          ./integration-tests/download.sh functiongemma-270m-it
+          ./integration-tests/download.sh lfm2-vl-450m
+
+      - name: Require the model files before running tests
+        run: |
+          echo '83940d4dd9676710856f43523bed096164a595a96f6b34771610a03937de5270  integration-tests/fixtures/models/functiongemma-270m-it/functiongemma-270m-it-q8_0.gguf' | sha256sum -c -
+          test -s integration-tests/fixtures/models/lfm2-vl-450m/LFM2-VL-450M-Q4_0.gguf
+          test -s integration-tests/fixtures/models/lfm2-vl-450m/mmproj-LFM2-VL-450M-Q8_0.gguf
+
+      - name: Test constrained text generation
+        run: |
+          LIST="$(cargo test -p integration-tests --features llm-llamacpp --test llamacpp_release -- --list)"
+          printf '%s\n' "$LIST" | grep -qx 'text_generation_obeys_grammar: test'
+          cargo test -p integration-tests --features llm-llamacpp --test llamacpp_release -- --nocapture
+
+      - name: Test real vision inference
+        run: |
+          LIST="$(cargo test -p xybrid-core --features llm-llamacpp-vision,ort-download --test vlm_lfm2_smoke -- --list)"
+          printf '%s\n' "$LIST" | grep -qx 'lfm2_vl_runtime_caption_smoke_when_fixture_is_downloaded: test'
+          cargo test -p xybrid-core --features llm-llamacpp-vision,ort-download --test vlm_lfm2_smoke -- --nocapture

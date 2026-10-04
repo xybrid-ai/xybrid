@@ -1,0 +1,158 @@
+name: Update llama.cpp stable
+
+# Intake and release preparation are deliberately separate from validation.
+# This workflow only writes in the canonical repo on trusted master checkouts;
+# pull requests (including forks) run the read-only validation workflow.
+on:
+  schedule:
+    - cron: '43 7 * * *' # Daily at 07:43 UTC.
+  push:
+    branches: [master]
+    paths:
+      - '.github/llamacpp-version.json'
+      - 'crates/llama-cpp-sys/natives-manifest.txt'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report discovery and release readiness without writing branches or PRs'
+        type: boolean
+        default: true
+      sdk_version:
+        description: 'Optional SDK release version; required for upstream major updates or SDK >=1.0'
+        type: string
+        required: false
+
+concurrency:
+  group: llamacpp-stable-automation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+jobs:
+  discover:
+    name: Discover llama.cpp stable
+    if: github.repository == 'xybrid-ai/xybrid' && github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: master
+          token: ${{ secrets.RELEASE_PAT || github.token }}
+
+      - name: Discover the latest official release
+        id: candidate
+        run: python3 tools/scripts/llamacpp_update.py discover --output "$RUNNER_TEMP/llamacpp-candidate.json"
+
+      - name: Require a token that triggers PR validation
+        if: steps.candidate.outputs.update == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+        env:
+          AUTOMATION_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          if [ -z "$AUTOMATION_TOKEN" ]; then
+            echo '::error::Set RELEASE_PAT with repository write access. GITHUB_TOKEN-created PRs do not trigger validation.'
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        if: steps.candidate.outputs.update == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        if: steps.candidate.outputs.update == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+        with:
+          key: llamacpp-stable-bindings
+
+      - name: Update the source pins and changelog
+        if: steps.candidate.outputs.update == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+        run: python3 tools/scripts/llamacpp_update.py apply "$RUNNER_TEMP/llamacpp-candidate.json"
+
+      # Upstream C++ changes can need human wrapper fixes. Preserve a reviewable
+      # draft PR and its failed workflow log instead of discovering it forever.
+      - name: Compile the wrapper and regenerate committed bindings
+        id: bindings
+        if: steps.candidate.outputs.update == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+        continue-on-error: true
+        run: python3 tools/scripts/llamacpp_update.py bindings
+
+      - name: Open the update PR
+        if: steps.candidate.outputs.update == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          BINDINGS_OUTCOME: ${{ steps.bindings.outcome }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          args=()
+          if [ "$BINDINGS_OUTCOME" = success ]; then
+            args+=(--bindings-ok)
+          fi
+          python3 tools/scripts/llamacpp_update.py open-pr "$RUNNER_TEMP/llamacpp-candidate.json" "${args[@]}"
+
+  prepare:
+    name: Prepare llama.cpp release
+    needs: discover
+    if: >-
+      always() && !cancelled() && github.repository == 'xybrid-ai/xybrid' &&
+      (needs.discover.result == 'success' || needs.discover.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: master
+          token: ${{ secrets.RELEASE_PAT || github.token }}
+
+      # On a merge, checks are normally still running. Report what is missing;
+      # the next daily run retries, or a maintainer can dispatch a rehearsal.
+      - name: Check validation and native-manifest readiness
+        id: plan
+        env:
+          SELECTED_VERSION: ${{ inputs.sdk_version }}
+        run: |
+          args=()
+          if [ -n "$SELECTED_VERSION" ]; then
+            args+=(--sdk-version "$SELECTED_VERSION")
+          fi
+          python3 tools/scripts/llamacpp_update.py release-plan --output "$RUNNER_TEMP/llamacpp-release.json" "${args[@]}"
+
+      - name: Require a token that triggers release-prep
+        if: steps.plan.outputs.ready == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+        env:
+          AUTOMATION_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          if [ -z "$AUTOMATION_TOKEN" ]; then
+            echo '::error::Set RELEASE_PAT with repository write access. GITHUB_TOKEN pushes do not trigger release-prep.'
+            exit 1
+          fi
+
+      - name: Verify native slices are anonymously reachable
+        if: steps.plan.outputs.ready == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+        run: tools/scripts/natives-verify-anon.sh
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        if: steps.plan.outputs.ready == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        if: steps.plan.outputs.ready == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+        with:
+          key: llamacpp-stable-release
+
+      - name: Install the pinned binding generator
+        if: steps.plan.outputs.ready == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+        run: cargo install boltffi_cli --version 0.30.1 --locked
+
+      - name: Push the release branch for the existing release pipeline
+        if: steps.plan.outputs.ready == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.dry_run)
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 tools/scripts/llamacpp_update.py prepare-release "$RUNNER_TEMP/llamacpp-release.json"
