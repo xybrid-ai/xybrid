@@ -233,7 +233,20 @@ fn render_embedded(
     messages: &[ChatMessage],
     tools: Option<serde_json::Value>,
 ) -> Result<String, JinjaTemplateError> {
-    let tpl = JinjaChatTemplate::new(template, None, detokenize_special(model, model.token_eos()));
+    let eos_token = detokenize_special(model, model.token_eos());
+    render_embedded_template(template, eos_token, messages, tools)
+}
+
+/// The model-free half of [`render_embedded`]: applies its BOS, EOS and
+/// thinking policy, with the EOS text already read off the model. Kept
+/// separate so tests can pin the exact output without loading a GGUF.
+fn render_embedded_template(
+    template: &str,
+    eos_token: Option<String>,
+    messages: &[ChatMessage],
+    tools: Option<serde_json::Value>,
+) -> Result<String, JinjaTemplateError> {
+    let tpl = JinjaChatTemplate::new(template, None, eos_token);
     let options = RenderOptions {
         add_generation_prompt: true,
         enable_thinking: false,
@@ -277,6 +290,84 @@ fn format_chat_chatml(messages: &[ChatMessage]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+    use std::path::PathBuf;
+
+    /// Byte fixtures for [`render_embedded_template`], captured before the
+    /// thinking flag became an `Option`.
+    const RENDER_FIXTURES: &str = "integration-tests/fixtures/chat_render/render_embedded.json";
+
+    fn read_workspace_file(relative: &str) -> String {
+        // The runtime CARGO_MANIFEST_DIR, not `env!`: under Bazel the test
+        // runs in a sandbox where the compile-time path points nowhere.
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let path = PathBuf::from(manifest_dir).join("../..").join(relative);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    }
+
+    #[derive(Deserialize)]
+    struct RenderFixtures {
+        cases: Vec<RenderFixture>,
+    }
+
+    #[derive(Deserialize)]
+    struct RenderFixture {
+        id: String,
+        template: FixtureTemplate,
+        eos_token: Option<String>,
+        messages: Vec<ChatMessage>,
+        tools: Option<serde_json::Value>,
+        rendered: String,
+    }
+
+    /// A fixture's template: inline text, or a file relative to the
+    /// workspace root.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum FixtureTemplate {
+        Inline(String),
+        File(String),
+    }
+
+    impl FixtureTemplate {
+        fn text(&self) -> String {
+            match self {
+                Self::Inline(text) => text.clone(),
+                Self::File(relative) => read_workspace_file(relative),
+            }
+        }
+    }
+
+    /// The embedded-template render is pinned byte for byte on both paths
+    /// that use it: the fallback (no tools) and the tools render. The
+    /// templates include ones that tell an explicit thinking-off flag apart
+    /// from an omitted one and from thinking-on, so a change in how the
+    /// thinking policy reaches the template fails here.
+    #[test]
+    fn render_embedded_template_matches_byte_fixtures() {
+        let RenderFixtures { cases } = serde_json::from_str(&read_workspace_file(RENDER_FIXTURES))
+            .unwrap_or_else(|e| panic!("parse {RENDER_FIXTURES}: {e}"));
+        assert!(
+            cases.iter().any(|case| case.tools.is_none()),
+            "the fixtures must cover the fallback path"
+        );
+        assert!(
+            cases.iter().any(|case| case.tools.is_some()),
+            "the fixtures must cover the tools path"
+        );
+
+        for case in &cases {
+            let rendered = render_embedded_template(
+                &case.template.text(),
+                case.eos_token.clone(),
+                &case.messages,
+                case.tools.clone(),
+            )
+            .unwrap_or_else(|e| panic!("{}: {e}", case.id));
+            assert_eq!(rendered, case.rendered, "{}: render changed", case.id);
+        }
+    }
 
     fn tool(name: &str) -> Tool {
         Tool::function(

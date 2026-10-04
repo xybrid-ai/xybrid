@@ -1,0 +1,153 @@
+{
+  "description": "Byte fixtures for the llama.cpp adapter's embedded chat-template render: chat::render_embedded_template, the model-free half of render_embedded (BOS suppressed, EOS passed through, add_generation_prompt true, thinking off). Cases with tools null take the fallback path; cases with tools take the tools path, with the definitions in the shape render_with_tools passes for these templates (bare function objects). template is inline text or a file relative to the workspace root. The renders must stay byte-identical.",
+  "generator": "Captured on master 89400752 (before enable_thinking became Option<bool>) by a throwaway test that called render_embedded_template on each case's inputs and wrote the results with serde_json; the rendered fields were copied in unchanged. Regenerate only for an intended render change.",
+  "cases": [
+    {
+      "id": "fallback-mistral-v0.1-multi-turn",
+      "template": {
+        "inline": "{{ bos_token }}{% for message in messages %}{% if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}{% endif %}{% if message['role'] == 'user' %}{{ '[INST] ' + message['content'] + ' [/INST]' }}{% elif message['role'] == 'assistant' %}{{ message['content'] + eos_token}}{% else %}{{ raise_exception('Only user and assistant roles are supported!') }}{% endif %}{% endfor %}"
+      },
+      "eos_token": "</s>",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Name a prime number."
+        },
+        {
+          "role": "assistant",
+          "content": "7"
+        },
+        {
+          "role": "user",
+          "content": "Name a larger one."
+        }
+      ],
+      "tools": null,
+      "rendered": "[INST] Name a prime number. [/INST]7</s>[INST] Name a larger one. [/INST]"
+    },
+    {
+      "id": "fallback-gemma4-shaped-system-multi-turn",
+      "template": {
+        "inline": "{{- bos_token -}}{%- if enable_thinking -%}<|turn>system\n<|think|>\n<turn|>\n{%- endif -%}{%- for message in messages -%}<|turn>{{ message.role }}\n{{ message.content }}<turn|>\n{%- endfor -%}{%- if add_generation_prompt -%}<|turn>model\n{%- if not enable_thinking -%}<|channel>thought\n<channel|>{%- endif -%}{%- endif -%}"
+      },
+      "eos_token": "<eos>",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Answer in one short sentence."
+        },
+        {
+          "role": "user",
+          "content": "What is the capital of France?"
+        },
+        {
+          "role": "assistant",
+          "content": "Paris."
+        },
+        {
+          "role": "user",
+          "content": "And of Italy?"
+        }
+      ],
+      "tools": null,
+      "rendered": "<|turn>system\nAnswer in one short sentence.<turn|><|turn>user\nWhat is the capital of France?<turn|><|turn>assistant\nParis.<turn|><|turn>user\nAnd of Italy?<turn|><|turn>model<|channel>thought\n<channel|>"
+    },
+    {
+      "id": "fallback-qwen3-shaped-system",
+      "template": {
+        "inline": "{%- for message in messages %}\n    {{- '<|im_start|>' + message.role + '\\n' + message.content + '<|im_end|>' + '\\n' }}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- '<|im_start|>assistant\\n' }}\n    {%- if enable_thinking is defined and enable_thinking is false %}\n        {{- '<think>\\n\\n</think>\\n\\n' }}\n    {%- endif %}\n{%- endif %}\n"
+      },
+      "eos_token": "<|im_end|>",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a concise assistant."
+        },
+        {
+          "role": "user",
+          "content": "Is 91 a prime number?"
+        }
+      ],
+      "tools": null,
+      "rendered": "<|im_start|>system\nYou are a concise assistant.<|im_end|>\n<|im_start|>user\nIs 91 a prime number?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    },
+    {
+      "id": "fallback-qwen3.5-system-multi-turn",
+      "template": {
+        "file": "integration-tests/fixtures/choice/templates/qwen3.5.jinja"
+      },
+      "eos_token": "<|im_end|>",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a helpful assistant."
+        },
+        {
+          "role": "user",
+          "content": "Wie spät ist es in Zürich?"
+        },
+        {
+          "role": "assistant",
+          "content": "Ich habe keinen Zugriff auf die aktuelle Uhrzeit."
+        },
+        {
+          "role": "user",
+          "content": "Then answer in English: which time zone is Zürich in?"
+        }
+      ],
+      "tools": null,
+      "rendered": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWie spät ist es in Zürich?<|im_end|>\n<|im_start|>assistant\nIch habe keinen Zugriff auf die aktuelle Uhrzeit.<|im_end|>\n<|im_start|>user\nThen answer in English: which time zone is Zürich in?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    },
+    {
+      "id": "tools-qwen3.5-system",
+      "template": {
+        "file": "integration-tests/fixtures/choice/templates/qwen3.5.jinja"
+      },
+      "eos_token": "<|im_end|>",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Use the tools when they help."
+        },
+        {
+          "role": "user",
+          "content": "What is the weather in Paris right now?"
+        }
+      ],
+      "tools": [
+        {
+          "name": "get_weather",
+          "description": "Get the current weather for a city",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": "City name, for example Paris"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        },
+        {
+          "name": "get_time",
+          "description": "Get the local time in an IANA time zone",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "timezone": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "timezone"
+            ]
+          }
+        }
+      ],
+      "rendered": "<|im_start|>system\n# Tools\n\nYou have access to the following functions:\n\n<tools>\n{\"description\":\"Get the current weather for a city\",\"name\":\"get_weather\",\"parameters\":{\"properties\":{\"city\":{\"description\":\"City name, for example Paris\",\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"}}\n{\"description\":\"Get the local time in an IANA time zone\",\"name\":\"get_time\",\"parameters\":{\"properties\":{\"timezone\":{\"type\":\"string\"}},\"required\":[\"timezone\"],\"type\":\"object\"}}\n</tools>\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>\n\nUse the tools when they help.<|im_end|>\n<|im_start|>user\nWhat is the weather in Paris right now?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    }
+  ]
+}

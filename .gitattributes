@@ -1,0 +1,4 @@
+# Chat templates in the choice fixtures are pinned by SHA-256 and rendered
+# byte for byte in tests, so check them out exactly as committed: no CRLF
+# conversion under core.autocrlf on Windows.
+integration-tests/fixtures/choice/templates/** -text

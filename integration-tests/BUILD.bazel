@@ -68,6 +68,18 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# Byte fixtures for the llama.cpp adapter's embedded chat-template render,
+# read by xybrid-core's inline chat tests. Two of their cases render the
+# Qwen3.5 template from choice_fixtures.
+filegroup(
+    name = "chat_render_fixtures",
+    srcs = glob(
+        ["fixtures/chat_render/**"],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)
+
 filegroup(
     name = "coreml_model_fixture",
     srcs = glob(["fixtures/coreml/xybrid_linear.mlpackage/**"]),
