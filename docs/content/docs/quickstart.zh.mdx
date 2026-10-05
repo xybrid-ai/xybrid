@@ -174,9 +174,10 @@ Debug.Log($"延迟: {result.LatencyMs}ms");
 `@xybrid/web` 为私有预览版，尚未发布到 npm。它位于仓库的 [`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web) 目录：
 
 ```bash
-git clone https://github.com/xybrid-ai/xybrid
+git clone --recurse-submodules https://github.com/xybrid-ai/xybrid
 cd xybrid/bindings/web
-pnpm install
+pnpm install --frozen-lockfile
+pnpm build        # Bazel builds the Rust/WASM runtime
 pnpm dev:example   # 下载固定版本的示例模型并启动示例
 ```
 
@@ -187,7 +188,7 @@ import { XybridLlm } from "@xybrid/web";
 
 // 在浏览器中流式运行语言模型
 const llm = await XybridLlm.load("/llm/model_metadata.json", {
-  wasmPath: "/llm-runtime",
+  wasmPath: "/xybrid/runtime",
   accelerator: "auto", // 可用时使用 WebGPU，否则使用 wasm
 });
 
@@ -201,14 +202,15 @@ for await (const delta of llm.generateStream("Hello from Xybrid!")) {
 非 LFS 文件则仅按大小校验；仓库未提供元数据时，SDK 会在内存中合成兼容的元数据：
 
 ```ts
-const llm = await XybridLlm.fromHuggingFace("litert-community/SmolLM2-135M-Instruct", {
-  wasmPath: "/llm-runtime", // 省略时默认为 /xybrid/llm-runtime
+const llm = await XybridLlm.fromHuggingFace("QuantFactory/SmolLM2-135M-Instruct-GGUF", {
+  file: "SmolLM2-135M-Instruct.Q4_0.gguf",
+  wasmPath: "/xybrid/runtime", // 省略时默认为 /xybrid/runtime
 });
 ```
 
 **预期输出：** 完全在浏览器中生成的文本，逐 token 流式写入页面。
 
-张量界面、注册表加载与完整 API 请参阅 [Web SDK 指南](/zh/docs/sdks/web)。
+GGUF 加载、取消生成、测量与当前 API 请参阅 [Web SDK 指南](/zh/docs/sdks/web)。
   </Tab>
   <Tab value="Rust">
 **安装**

@@ -19,6 +19,8 @@ const metadataSchema = z
         type: z.string(),
         model_file: z.string().optional(),
         context_length: z.unknown().optional(),
+        chat_template: z.unknown().optional(),
+        generation_params: z.unknown().optional(),
       })
       .loose(),
     files: z.array(z.string()),
@@ -36,6 +38,8 @@ export type ParsedMetadata = {
     readonly type: string;
     readonly modelFile: string | undefined;
     readonly contextLength: unknown;
+    readonly chatTemplate: unknown;
+    readonly generationParams: unknown;
   };
   readonly files: readonly string[];
   readonly preprocessing: readonly unknown[];
@@ -59,6 +63,8 @@ export const parseMetadata = (input: unknown): ParsedMetadata => {
       type: parsed.data.execution_template.type,
       modelFile: parsed.data.execution_template.model_file,
       contextLength: parsed.data.execution_template.context_length,
+      chatTemplate: parsed.data.execution_template.chat_template,
+      generationParams: parsed.data.execution_template.generation_params,
     },
     files: parsed.data.files,
     preprocessing: parsed.data.preprocessing,
@@ -87,25 +93,32 @@ const assertBrowserFeatureSubset = (metadata: ParsedMetadata, template: string):
   return metadata.template.modelFile;
 };
 
-export const validateBrowserMetadata = (metadata: ParsedMetadata): string => {
-  if (metadata.template.type !== "TfLite") {
-    throw new UnsupportedTemplateError(metadata.template.type, "TfLite");
-  }
-  return assertBrowserFeatureSubset(metadata, "TfLite");
-};
-
 export type LlmBrowserMetadata = {
   readonly modelFile: string;
   readonly contextLength: number | undefined;
 };
 
 export const validateLlmBrowserMetadata = (metadata: ParsedMetadata): LlmBrowserMetadata => {
-  if (metadata.template.type !== "LiteRtLm") {
-    throw new UnsupportedTemplateError(metadata.template.type, "LiteRtLm");
+  if (metadata.template.type !== "Gguf") {
+    throw new UnsupportedTemplateError(metadata.template.type, "Gguf");
   }
-  const modelFile = assertBrowserFeatureSubset(metadata, "LiteRtLm");
+  const modelFile = assertBrowserFeatureSubset(metadata, "Gguf");
+  validateModelFile(modelFile, metadata.files);
+  if (!modelFile.endsWith(".gguf")) {
+    throw new InvalidMetadataError("Gguf model_file must end with .gguf.");
+  }
+  if (metadata.template.chatTemplate != null) {
+    throw new UnsupportedFeatureError(
+      "external chat templates; use a GGUF with an embedded template",
+    );
+  }
+  if (metadata.template.generationParams != null) {
+    throw new UnsupportedFeatureError(
+      "metadata generation_params; this preview uses greedy decoding",
+    );
+  }
   const rawContextLength = metadata.template.contextLength;
-  if (rawContextLength === undefined || rawContextLength === null) {
+  if (rawContextLength == null) {
     return { modelFile, contextLength: undefined };
   }
   if (
@@ -115,7 +128,7 @@ export const validateLlmBrowserMetadata = (metadata: ParsedMetadata): LlmBrowser
     rawContextLength > MAX_CONTEXT_LENGTH
   ) {
     throw new InvalidMetadataError(
-      `LiteRtLm metadata context_length must be a positive safe integer no greater than ${MAX_CONTEXT_LENGTH}.`,
+      `Gguf metadata context_length must be a positive safe integer no greater than ${MAX_CONTEXT_LENGTH}.`,
     );
   }
   return {
@@ -124,11 +137,7 @@ export const validateLlmBrowserMetadata = (metadata: ParsedMetadata): LlmBrowser
   };
 };
 
-export const resolveModelUrl = (
-  metadataUrl: URL,
-  modelFile: string,
-  files: readonly string[],
-): URL => {
+const validateModelFile = (modelFile: string, files: readonly string[]): void => {
   if (
     modelFile.length === 0 ||
     modelFile === "." ||
@@ -147,6 +156,14 @@ export const resolveModelUrl = (
   if (!files.includes(modelFile)) {
     throw new InvalidMetadataError("model_file must be present in metadata files.");
   }
+};
+
+export const resolveModelUrl = (
+  metadataUrl: URL,
+  modelFile: string,
+  files: readonly string[],
+): URL => {
+  validateModelFile(modelFile, files);
   try {
     return new URL(modelFile, metadataUrl);
   } catch (error: unknown) {

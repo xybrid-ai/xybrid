@@ -1,0 +1,65 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@emsdk//emscripten_toolchain:wasm_rules.bzl", "wasm_cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_rs//rs:rust_static_library.bzl", "rust_static_library")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
+
+bool_flag(
+    name = "webgpu",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "webgpu_enabled",
+    flag_values = {":webgpu": "true"},
+    visibility = ["//visibility:public"],
+)
+
+rust_static_library(
+    name = "rust_runtime",
+    version = XYBRID_VERSION,
+    srcs = ["src/lib.rs"],
+    crate_root = "src/lib.rs",
+    crate_features = ["runtime"],
+    edition = "2021",
+    tags = ["manual"],
+    deps = ["//crates/xybrid-llama:xybrid_llama"],
+)
+
+cc_binary(
+    name = "xybrid_runtime",
+    srcs = ["bridge.cpp"],
+    linkopts = [
+        "--no-entry",
+        "-sASSERTIONS=1",
+        "-sMODULARIZE=1",
+        "-sEXPORT_ES6=1",
+        "-sENVIRONMENT=worker",
+        "-sALLOW_MEMORY_GROWTH=1",
+        "-sINITIAL_MEMORY=67108864",
+        "-sMAXIMUM_MEMORY=2147483648",
+        "-sFORCE_FILESYSTEM=1",
+        "-sASYNCIFY=1",
+        # Rust's Emscripten std and minja use Emscripten exception handling.
+        # JSPI with native WASM exceptions would need a compatible Rust std.
+        "-sDISABLE_EXCEPTION_CATCHING=0",
+        "-sEXPORTED_RUNTIME_METHODS=FS,ccall,UTF8ToString,stringToNewUTF8,HEAPU8",
+        "-sEXPORTED_FUNCTIONS=_xybrid_web_create,_xybrid_web_load,_xybrid_web_generate,_xybrid_web_destroy,_xybrid_web_error,_xybrid_web_version,_xybrid_web_prompt_tokens,_xybrid_web_generated_tokens,_xybrid_web_allocated_bytes,_free",
+    ] + select({
+        ":webgpu_enabled": [
+            "--use-port=emdawnwebgpu",
+        ],
+        "//conditions:default": [],
+    }),
+    tags = ["manual"],
+    deps = [":rust_runtime"],
+)
+
+wasm_cc_binary(
+    name = "runtime",
+    cc_target = ":xybrid_runtime",
+    outputs = ["runtime/xybrid_runtime.js", "runtime/xybrid_runtime.wasm"],
+    simd = "simd128",
+    tags = ["manual"],
+    threads = "off",
+)

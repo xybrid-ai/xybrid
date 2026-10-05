@@ -134,6 +134,13 @@ llama_model* llama_load_model_from_file_c(
 ) {
     llama_model_params params = llama_model_default_params();
     params.n_gpu_layers = n_gpu_layers;
+#ifdef __EMSCRIPTEN__
+    // llama.cpp trims mapped files with partial munmap calls. Emscripten's
+    // emulated mmap only supports unmapping the original complete allocation,
+    // so trimmed mappings otherwise survive model destruction. Read tensors
+    // into owned backend buffers that llama_model_free can release instead.
+    params.use_mmap = false;
+#endif
 
     return llama_model_load_from_file(path_model, params);
 }

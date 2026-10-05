@@ -9,10 +9,10 @@ import { downloadVerifiedModel } from "../src/internal/verified-download.ts";
 import { loadLlmFromResolution } from "../src/llm.ts";
 import type { DownloadProgress } from "../src/types.ts";
 import { SDK_VERSION } from "../src/version.ts";
-import { tfliteMetadata } from "./helpers.ts";
+import { ggufMetadata } from "./helpers.ts";
 
 const REGISTRY_URL = "https://registry.test";
-const MODEL_URL = "https://models.test/model.tflite";
+const MODEL_URL = "https://models.test/model.gguf";
 const SHA256 = "a".repeat(64);
 
 const validEnvelope = (resolved: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -20,15 +20,15 @@ const validEnvelope = (resolved: Record<string, unknown> = {}): Record<string, u
   platform: "web",
   resolved: {
     hf_repo: "example/demo-model",
-    file: "model.tflite",
+    file: "model.gguf",
     download_url: MODEL_URL,
-    format: "tflite",
+    format: "gguf",
     quantization: "none",
     size_bytes: 4,
     sha256: SHA256,
     passthrough: true,
     artifacts: [],
-    model_metadata: tfliteMetadata(),
+    model_metadata: ggufMetadata(),
     ...resolved,
   },
 });
@@ -37,13 +37,13 @@ const llmMetadata = (): Record<string, unknown> => ({
   model_id: "demo-llm",
   version: "1",
   execution_template: {
-    type: "LiteRtLm",
-    model_file: "model.litertlm",
+    type: "Gguf",
+    model_file: "model.gguf",
     context_length: 2048,
   },
   preprocessing: [],
   postprocessing: [],
-  files: ["model.litertlm"],
+  files: ["model.gguf"],
 });
 
 const installFetch = (
@@ -117,63 +117,62 @@ const createRegistryLlmRuntime = (): RegistryLlmControl => {
 };
 
 describe("registry resolution and verified downloads", () => {
-  test("rejects the live GGUF leak and independently rejects its empty sha256", async () => {
+  test("supports the live GGUF response only after its missing integrity hash is supplied", async () => {
     const fixture = await Bun.file("test/fixtures/registry-resolve-gguf-leak.json").json();
-    expect(() => parseRegistryResponse(fixture, "litertlm")).toThrow(RegistryError);
-    expect(() => parseRegistryResponse(fixture, "litertlm")).toThrow(/format/);
+    expect(() => parseRegistryResponse(fixture, "gguf")).toThrow(RegistryError);
+    expect(() => parseRegistryResponse(fixture, "gguf")).toThrow(/sha256/);
 
     const forcedFormat = structuredClone(fixture) as Record<string, unknown> & {
       resolved: Record<string, unknown>;
     };
+    forcedFormat.resolved["sha256"] = SHA256;
+    expect(parseRegistryResponse(forcedFormat, "gguf").metadata.template.type).toBe("Gguf");
     forcedFormat.resolved["format"] = "litertlm";
-    expect(() => parseRegistryResponse(forcedFormat, "litertlm")).toThrow(RegistryError);
-    expect(() => parseRegistryResponse(forcedFormat, "litertlm")).toThrow(/sha256/);
+    expect(() => parseRegistryResponse(forcedFormat, "gguf")).toThrow(/format/);
   });
 
   test("rejects missing, short, and non-hex sha256 values", () => {
     const missing = validEnvelope();
     delete (missing["resolved"] as Record<string, unknown>)["sha256"];
-    expect(() => parseRegistryResponse(missing, "tflite")).toThrow(RegistryError);
+    expect(() => parseRegistryResponse(missing, "gguf")).toThrow(RegistryError);
 
     for (const sha256 of ["abc", "g".repeat(64), "A".repeat(64)]) {
-      expect(() => parseRegistryResponse(validEnvelope({ sha256 }), "tflite")).toThrow(
-        RegistryError,
-      );
+      expect(() => parseRegistryResponse(validEnvelope({ sha256 }), "gguf")).toThrow(RegistryError);
     }
   });
 
   test("rejects an oversized model before downloading", () => {
     expect(() =>
-      parseRegistryResponse(validEnvelope({ size_bytes: 512 * 1024 * 1024 + 1 }), "tflite"),
+      parseRegistryResponse(validEnvelope({ size_bytes: 512 * 1024 * 1024 + 1 }), "gguf"),
     ).toThrow(RegistryError);
   });
 
   test("rejects passthrough false", () => {
-    expect(() => parseRegistryResponse(validEnvelope({ passthrough: false }), "tflite")).toThrow(
+    expect(() => parseRegistryResponse(validEnvelope({ passthrough: false }), "gguf")).toThrow(
       RegistryError,
     );
   });
 
   test("rejects non-empty artifacts", () => {
     expect(() =>
-      parseRegistryResponse(validEnvelope({ artifacts: [{ file: "tokenizer.json" }] }), "tflite"),
+      parseRegistryResponse(validEnvelope({ artifacts: [{ file: "tokenizer.json" }] }), "gguf"),
     ).toThrow(RegistryError);
   });
 
   test("rejects missing model_metadata", () => {
     const body = validEnvelope();
     delete (body["resolved"] as Record<string, unknown>)["model_metadata"];
-    expect(() => parseRegistryResponse(body, "tflite")).toThrow(RegistryError);
+    expect(() => parseRegistryResponse(body, "gguf")).toThrow(RegistryError);
   });
 
   test("rejects a file that differs from execution_template.model_file", () => {
-    expect(() =>
-      parseRegistryResponse(validEnvelope({ file: "different.tflite" }), "tflite"),
-    ).toThrow(RegistryError);
+    expect(() => parseRegistryResponse(validEnvelope({ file: "different.gguf" }), "gguf")).toThrow(
+      RegistryError,
+    );
   });
 
   test("rejects an envelope without resolved", () => {
-    expect(() => parseRegistryResponse({ mask: "demo-model", platform: "web" }, "tflite")).toThrow(
+    expect(() => parseRegistryResponse({ mask: "demo-model", platform: "web" }, "gguf")).toThrow(
       RegistryError,
     );
   });
@@ -184,8 +183,8 @@ describe("registry resolution and verified downloads", () => {
     const expectedSha256 = await sha256(bytes);
     const body = {
       ...validEnvelope({
-        file: "model.litertlm",
-        format: "litertlm",
+        file: "model.gguf",
+        format: "gguf",
         model_metadata: llmMetadata(),
         size_bytes: bytes.byteLength,
         sha256: expectedSha256,
@@ -213,7 +212,7 @@ describe("registry resolution and verified downloads", () => {
         "https://app.test/",
         "/xybrid/llm-runtime",
       );
-      const resolution = await resolveRegistryModel("demo-llm", "litertlm", normalizedOptions);
+      const resolution = await resolveRegistryModel("demo-llm", "gguf", normalizedOptions);
       const control = createRegistryLlmRuntime();
       const session = await loadLlmFromResolution(
         resolution,
@@ -289,7 +288,7 @@ describe("registry resolution and verified downloads", () => {
     const restoreFetch = installFetch(async () => new Response("missing", { status: 404 }));
     try {
       await expect(
-        resolveRegistryModel("missing-model", "tflite", { registryUrl: REGISTRY_URL }),
+        resolveRegistryModel("missing-model", "gguf", { registryUrl: REGISTRY_URL }),
       ).rejects.toThrow(/missing-model/);
     } finally {
       restoreFetch();
@@ -303,12 +302,12 @@ describe("registry resolution and verified downloads", () => {
       return jsonResponse(validEnvelope());
     });
     try {
-      await resolveRegistryModel("demo-model", "tflite", {
+      await resolveRegistryModel("demo-model", "gguf", {
         registryUrl: REGISTRY_URL,
         version: "2026.07.13",
       });
       expect(requestedUrl?.searchParams.get("platform")).toBe("web");
-      expect(requestedUrl?.searchParams.get("format")).toBe("tflite");
+      expect(requestedUrl?.searchParams.get("format")).toBe("gguf");
       expect(requestedUrl?.searchParams.get("version")).toBe("2026.07.13");
     } finally {
       restoreFetch();
@@ -325,7 +324,7 @@ describe("registry resolution and verified downloads", () => {
       return jsonResponse(validEnvelope());
     });
     try {
-      await resolveRegistryModel("demo-model", "tflite");
+      await resolveRegistryModel("demo-model", "gguf");
       expect(hosts).toEqual(["registry.xybrid.dev", "r2.xybrid.dev"]);
     } finally {
       restoreFetch();
@@ -338,7 +337,7 @@ describe("registry resolution and verified downloads", () => {
     });
     try {
       await expect(
-        resolveRegistryModel("demo-model", "tflite", { registryUrl: REGISTRY_URL }),
+        resolveRegistryModel("demo-model", "gguf", { registryUrl: REGISTRY_URL }),
       ).rejects.toBeInstanceOf(RegistryError);
       expect(explicitHosts).toEqual(["registry.test"]);
     } finally {
@@ -385,22 +384,22 @@ describe("registry resolution and verified downloads", () => {
     const normalized = normalizeBaseLoadOptions(
       { accelerator: "wasm" },
       "https://app.test/models/",
-      "/xybrid/litert",
+      "/xybrid/runtime",
     );
     expect(normalized.accelerator).toBe("wasm");
-    expect(normalized.wasmPath.href).toBe("https://app.test/xybrid/litert");
+    expect(normalized.wasmPath.href).toBe("https://app.test/xybrid/runtime");
     expect(() =>
       normalizeBaseLoadOptions(
-        { accelerator: "wasm", wasmPath: "https://cdn.test/litert" },
+        { accelerator: "wasm", wasmPath: "https://cdn.test/runtime" },
         "https://app.test/models/",
-        "/xybrid/litert",
+        "/xybrid/runtime",
       ),
     ).toThrow(RuntimeConfigurationError);
     expect(() =>
       normalizeBaseLoadOptions(
         { accelerator: "wasm", signal: { aborted: false } },
         "https://app.test/models/",
-        "/xybrid/litert",
+        "/xybrid/runtime",
       ),
     ).toThrow(RuntimeConfigurationError);
   });

@@ -1,0 +1,20 @@
+[package]
+name = "xybrid-web-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Browser runtime over xybrid's existing Rust llama.cpp wrappers"
+
+[lib]
+crate-type = ["lib", "staticlib"]
+path = "src/lib.rs"
+
+[dependencies]
+xybrid-llama = { path = "../../../crates/xybrid-llama", default-features = false }
+
+[features]
+default = []
+# Enabled by Bazel for the browser build. Default workspace checks stay lean.
+runtime = ["xybrid-llama/bindings"]

@@ -6460,6 +6460,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "xybrid-web-runtime"
+version = "0.10.1"
+dependencies = [
+ "xybrid-llama",
+]
+
+[[package]]
 name = "xybrid-whisper"
 version = "0.10.1"
 dependencies = [

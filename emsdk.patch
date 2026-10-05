@@ -1,0 +1,94 @@
+diff --git a/MODULE.bazel b/MODULE.bazel
+--- a/MODULE.bazel
++++ b/MODULE.bazel
+@@ -17,6 +17,7 @@
+ python.toolchain(
+     python_version = "3.14",
+ )
++use_repo(python, "python_3_14_host")
+ 
+ node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
+ node.toolchain(node_version = "20.18.0")
+diff --git a/emscripten_cache.bzl b/emscripten_cache.bzl
+--- a/emscripten_cache.bzl
++++ b/emscripten_cache.bzl
+@@ -11,10 +11,25 @@
+ """
+ 
+ BUILD_FILE_USE_SECONDARY_CACHE = """
++load("@rules_cc//cc:defs.bzl", "cc_library")
++
+ filegroup(
+     name = "emscripten_cache",
+     srcs = glob(["cache/**"]),
+     visibility = ["//visibility:public"],
++)
++
++cc_library(
++    name = "emdawnwebgpu_c_headers",
++    hdrs = glob(["cache/ports/emdawnwebgpu/emdawnwebgpu_pkg/webgpu/include/webgpu/*.h"]),
++    strip_include_prefix = "cache/ports/emdawnwebgpu/emdawnwebgpu_pkg/webgpu/include",
++)
++
++cc_library(
++    name = "emdawnwebgpu_cpp_headers",
++    hdrs = glob(["cache/ports/emdawnwebgpu/emdawnwebgpu_pkg/webgpu_cpp/include/webgpu/*.h"]),
++    strip_include_prefix = "cache/ports/emdawnwebgpu/emdawnwebgpu_pkg/webgpu_cpp/include",
++    deps = [":emdawnwebgpu_c_headers"],
+ )
+ """
+ 
+@@ -101,7 +116,8 @@
+         )
+         repository_ctx.file("embuilder_config", embuilder_config_content)
+         embuilder_config_path = repository_ctx.path("embuilder_config")
+-        embuilder_path = "{}{}".format(root.get_child("emscripten").get_child("embuilder"), script_ext)
++        python = repository_ctx.path(Label("@python_3_14_host//:python"))
++        embuilder_path = root.get_child("emscripten").get_child("embuilder.py")
+ 
+         # Prepare the command line
+         if repository_ctx.attr.targets:
+@@ -110,7 +126,7 @@
+             # If no targets are requested, build everything
+             targets = ["ALL"]
+         flags = ["--em-config", embuilder_config_path] + repository_ctx.attr.configuration
+-        embuilder_args = [embuilder_path] + flags + ["build"] + targets
++        embuilder_args = [python, embuilder_path] + flags + ["build"] + targets
+ 
+         # Run embuilder
+         repository_ctx.report_progress("Building secondary cache")
+@@ -120,10 +136,34 @@
+             environment = {
+                 "EM_IGNORE_SANITY": "1",
+                 "EM_NODE_JS": "empty",
++                "EMSDK_PYTHON": str(python),
+             },
+         )
+         if result.return_code != 0:
+             fail("Embuilder exited with a non-zero return code")
++
++        # Dawn sorts the port's input filenames before hashing their contents.
++        # Its own __file__ can be relative in Bazel actions while the other
++        # inputs are absolute. Canonicalize it so repository preparation and
++        # sandboxed linking use the same ordering and cached archive.
++        dawn_port = repository_ctx.path("cache/ports/emdawnwebgpu/emdawnwebgpu_pkg/emdawnwebgpu.port.py")
++        if dawn_port.exists:
++            dawn_source = repository_ctx.read(dawn_port)
++            input_line = "    __file__,\n"
++            if input_line not in dawn_source:
++                fail("Unexpected Emdawnwebgpu port hash inputs")
++            repository_ctx.file(dawn_port, dawn_source.replace(input_line, "    os.path.realpath(__file__),\n"))
++            result = repository_ctx.execute(
++                [python, embuilder_path] + flags + ["build", "emdawnwebgpu"],
++                quiet = False,
++                environment = {
++                    "EM_IGNORE_SANITY": "1",
++                    "EM_NODE_JS": "empty",
++                    "EMSDK_PYTHON": str(python),
++                },
++            )
++            if result.return_code != 0:
++                fail("Embuilder failed to rebuild the canonicalized WebGPU port")
+ 
+         use_builtin_cache = False
+ 
