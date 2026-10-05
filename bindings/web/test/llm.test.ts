@@ -525,8 +525,21 @@ describe("XybridLlm lifecycle", () => {
     const stopping = llm.cancel();
     control.releaseEngineGenerate();
     await stopping;
+    await expect(llm.generate("after")).resolves.toBe("Hello, world.");
     expect((await first).done).toBe(true);
     expect(control.cancelled()).toBeGreaterThan(0);
+    await llm.dispose();
+  });
+
+  test("explicit cancellation closes a paused iterator and allows immediate reuse", async () => {
+    const { llm, control } = await load();
+    const stream = llm.generateStream("hi");
+    await expect(stream.next()).resolves.toEqual({ value: "Hello", done: false });
+
+    await llm.cancel();
+    expect(control.disposedGenerations()).toBe(1);
+    await expect(llm.generate("after")).resolves.toBe("Hello, world.");
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
     await llm.dispose();
   });
 

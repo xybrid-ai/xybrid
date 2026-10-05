@@ -137,9 +137,11 @@ class LlmSession {
   }
 
   async cancel(): Promise<void> {
+    const iterator = this.activeIterator;
     const generation = this.activeGeneration ?? (await this.startingGeneration);
-    generation?.cancel();
-    await generation?.dispose();
+    if (this.activeIterator === iterator) generation?.cancel();
+    // Closing the iterator awaits native disposal and releases the run lock.
+    await iterator?.return(undefined);
   }
 
   generateStream(prompt: string, options?: GenerateOptions): AsyncGenerator<string, void, void> {

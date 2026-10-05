@@ -87,7 +87,7 @@ mod runtime {
                 LlamaError::InvalidInput("model needs a supported embedded chat template".into())
             })?;
             let tokens = model.tokenize_special(&formatted, true)?;
-            if tokens.len() + max_tokens >= self.context_length {
+            if tokens.len() + max_tokens > self.context_length {
                 return Err(LlamaError::InvalidInput(
                     "prompt exceeds context budget".into(),
                 ));

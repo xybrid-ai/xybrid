@@ -141,7 +141,109 @@ test("rejects an overlapping generation and remains usable", async ({ page }) =>
   expect(result.output.length).toBeGreaterThan(0);
 });
 
-test("loads GGUF metadata and applies its context budget in the Rust engine", async ({ page }) => {
+test("explicit cancellation closes a paused iterator and permits immediate reuse", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const result = await page.evaluate(async () => {
+    const moduleUrl = "/sdk/index.js";
+    const { XybridLlm } = (await import(moduleUrl)) as typeof import("../src/index.ts");
+    const model = await XybridLlm.fromUrl("/model.gguf", {
+      accelerator: "wasm",
+      wasmPath: "/sdk/runtime",
+    });
+    try {
+      const stream = model.generateStream("Tell me a long story about a fox.", {
+        maxOutputTokens: 256,
+      });
+      const first = await stream.next();
+      await model.cancel();
+      const cancelled = model.lastRun;
+      const output = await model.generate("Say hello.", { maxOutputTokens: 8 });
+      const closed = await stream.next();
+      return { first, cancelled, output, closed, reused: model.lastRun };
+    } finally {
+      await model.dispose();
+    }
+  });
+  expect(result.first.done).toBe(false);
+  expect(result.cancelled?.cancelled).toBe(true);
+  expect(result.output.length).toBeGreaterThan(0);
+  expect(result.closed.done).toBe(true);
+  expect(result.reused?.cancelled).toBe(false);
+});
+
+test("Rust preserves cancellation on each of the first four tokens", async ({ page }) => {
+  await page.goto("/");
+  const results = await page.evaluate(async () => {
+    // Set the cancellation flag inside the token callback to exercise exactly
+    // -1 through -4 native callback-stop results without worker-message races.
+    const source = `
+      try {
+        const url = new URL("/sdk/runtime/wasm/xybrid_runtime.js", self.location.origin).href;
+        const { default: createModule } = await import(url);
+        const module = await createModule({ locateFile: file => new URL(file, url).href });
+        const modelUrl = new URL("/model.gguf", self.location.origin);
+        const bytes = new Uint8Array(await (await fetch(modelUrl)).arrayBuffer());
+        module.FS.writeFile("/model.gguf", bytes);
+        const handle = module._xybrid_web_create();
+        const path = module.stringToNewUTF8("/model.gguf");
+        const prompt = module.stringToNewUTF8("Tell me a long story about a fox.");
+        const results = [];
+        try {
+          const loaded = await module.ccall("xybrid_web_load", "number",
+            ["number", "number", "number", "number"], [handle, path, 0, 512], { async: true });
+          if (loaded !== 0) throw new Error(module.UTF8ToString(module._xybrid_web_error(handle)));
+          module.FS.unlink("/model.gguf");
+          for (const stopAt of [1, 2, 3, 4]) {
+            let tokens = 0;
+            module.xybridCancelled = false;
+            module.xybridToken = () => {
+              tokens += 1;
+              if (tokens === stopAt) module.xybridCancelled = true;
+            };
+            const status = await module.ccall("xybrid_web_generate", "number",
+              ["number", "number", "number"], [handle, prompt, 32], { async: true });
+            results.push({
+              stopAt, status, generatedTokens: module._xybrid_web_generated_tokens(handle),
+            });
+          }
+        } finally {
+          module._free(path);
+          module._free(prompt);
+          await module.ccall("xybrid_web_destroy", null,
+            ["number"], [handle], { async: true });
+        }
+        self.postMessage(results);
+      } catch (error) {
+        self.postMessage({ error: String(error) });
+      }
+    `;
+    const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+    const worker = new Worker(url, { type: "module" });
+    try {
+      return await new Promise<{ stopAt: number; status: number; generatedTokens: number }[]>(
+        (resolve, reject) => {
+          worker.onmessage = (event) => {
+            if ("error" in event.data) reject(new Error(event.data.error));
+            else resolve(event.data);
+          };
+          worker.onerror = (event) => reject(new Error(event.message));
+        },
+      );
+    } finally {
+      worker.terminate();
+      URL.revokeObjectURL(url);
+    }
+  });
+  expect(results).toEqual(
+    [1, 2, 3, 4].map((stopAt) => ({ stopAt, status: 1, generatedTokens: stopAt })),
+  );
+});
+
+test("loads GGUF metadata and accepts an exact context budget in the Rust engine", async ({
+  page,
+}) => {
   await page.route("**/model_metadata.json", (route) =>
     route.fulfill({
       contentType: "application/json",
@@ -173,13 +275,35 @@ test("loads GGUF metadata and applies its context budget in the Rust engine", as
         budgetRejected = error instanceof InferenceError;
       }
       const output = await model.generate("Say hello.", { maxOutputTokens: 8 });
-      return { budgetRejected, output, rustVersion: model.loaded.rustVersion };
+      const promptTokens = model.lastRun?.promptTokens;
+      if (promptTokens === undefined) throw new Error("Rust did not report prompt tokens.");
+      const exactOutputTokens = 128 - promptTokens;
+      const exactOutput = await model.generate("Say hello.", {
+        maxOutputTokens: exactOutputTokens,
+      });
+      let overflowRejected = false;
+      try {
+        await model.generate("Say hello.", { maxOutputTokens: exactOutputTokens + 1 });
+      } catch (error) {
+        overflowRejected = error instanceof InferenceError;
+      }
+      return {
+        budgetRejected,
+        output,
+        exactOutput,
+        exactBudget: promptTokens + exactOutputTokens,
+        overflowRejected,
+        rustVersion: model.loaded.rustVersion,
+      };
     } finally {
       await model.dispose();
     }
   });
   expect(result.budgetRejected).toBe(true);
   expect(result.output.length).toBeGreaterThan(0);
+  expect(result.exactOutput.length).toBeGreaterThan(0);
+  expect(result.exactBudget).toBe(128);
+  expect(result.overflowRejected).toBe(true);
   expect(result.rustVersion).toBe(SDK_VERSION);
 });
 

@@ -340,14 +340,14 @@ where
         )
     };
 
-    // Hard error codes first — these are never callback-stop.
-    if (-4..=-1).contains(&result) {
-        return Err(decode_hard_error(result, n_past_in));
-    }
-
-    // Callback error wins over the silent "stopped by callback" path.
+    // Callback stops return -n_generated, which overlaps native error codes
+    // for the first four tokens. Recover the recorded error before decoding.
     if let Some(err) = streaming_ctx.error.take() {
         return Err(LlamaError::StreamingCallbackAborted(err));
+    }
+
+    if (-4..=-1).contains(&result) {
+        return Err(decode_hard_error(result, n_past_in));
     }
 
     let (n_generated, stopped_by_callback) = if result < 0 {
@@ -433,12 +433,13 @@ where
         )
     };
 
-    if (-5..=-1).contains(&result) {
-        return Err(decode_current_logits_error(result, n_past));
-    }
-
+    // Current-logits callback stops also overlap native hard-error codes.
     if let Some(err) = streaming_ctx.error.take() {
         return Err(LlamaError::StreamingCallbackAborted(err));
+    }
+
+    if (-5..=-1).contains(&result) {
+        return Err(decode_current_logits_error(result, n_past));
     }
 
     let (n_generated, stopped_by_callback) = if result < 0 {
