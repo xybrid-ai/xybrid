@@ -461,6 +461,20 @@ internal path-dep `version = "..."` pins (e.g. `xybrid-sdk`/`xybrid-core` in
 sibling `Cargo.toml`s). If those drift, lockfile regen fails under `^0.1.x` —
 update them to match and re-run `cargo update -w` when bumping.
 
+**llama.cpp stable updates (POC).** `llamacpp-update.yml` checks official
+`vX.Y.Z` releases daily and opens one version-specific update PR at a time.
+Keep the submodule gitlink, `LLAMA_CPP_COMMIT`, and
+`.github/llamacpp-version.json` consistent. Release preparation waits for
+successful validation and a matching, complete generated native manifest,
+then pushes `release/v<version>` through the existing pipeline. Stable `0.x`
+SDKs default to the next minor for classified patch or minor upstream updates;
+first tracked (bootstrap) updates, upstream major updates and SDKs >=1.0
+require an explicit version. The release PR remains the publishing approval
+point.
+Release-branch version sync records the exact upstream commit being shipped.
+Setup, dry runs, and conformance-fixture migration are documented in
+`docs/development/llamacpp-updates.md`.
+
 ---
 
 ## Things to leave alone unless explicitly asked

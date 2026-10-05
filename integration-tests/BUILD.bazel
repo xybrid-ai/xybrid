@@ -90,6 +90,7 @@ _E2E_TESTS = {
     "coreml_native": ["coreml"],
     "context_budget_clamp": ["llm-llamacpp"],
     "integration_check": [],
+    "llamacpp_release": ["llm-llamacpp"],
     "llm_chat_template": ["llm-llamacpp"],
     "reasoning_budget": ["llm-llamacpp"],
     "reasoning_capture": ["llm-llamacpp"],
