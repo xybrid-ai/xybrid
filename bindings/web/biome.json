@@ -31,8 +31,10 @@
       "!dist",
       "!example/dist",
       "!node_modules",
-      "!example/public/litert",
-      "!example/public/llm-runtime",
+      "!example/public",
+      "!runtime/artifacts",
+      "!spike/public",
+      "!spike/dist",
       "!playwright-report",
       "!test-results"
     ]

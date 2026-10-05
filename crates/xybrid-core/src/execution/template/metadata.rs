@@ -59,7 +59,7 @@ pub enum ExecutionTemplate {
         model_file: String,
     },
 
-    /// LiteRT-LM model execution (browser SDK / @xybrid/web only)
+    /// Legacy LiteRT-LM metadata; retained for serialization compatibility.
     LiteRtLm {
         /// Path to the .litertlm model file (relative to bundle root)
         model_file: String,
@@ -984,6 +984,38 @@ mod tests {
             std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
         let fixture_path = std::path::PathBuf::from(manifest_dir)
             .join("../../bindings/web/test/fixtures/rust-metadata-litertlm.json");
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(fixture_path).unwrap()).unwrap();
+
+        assert_eq!(serialized, fixture);
+    }
+
+    #[test]
+    fn test_gguf_serialization_matches_web_fixture() {
+        let metadata = ModelMetadata {
+            model_id: "browser-smollm2".to_string(),
+            version: "1".to_string(),
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 512,
+                generation_params: None,
+            },
+            preprocessing: Vec::new(),
+            postprocessing: Vec::new(),
+            files: vec!["model.gguf".to_string()],
+            vision_encoder: None,
+            description: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+        let serialized = serde_json::to_value(&metadata).unwrap();
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let fixture_path = std::path::PathBuf::from(manifest_dir)
+            .join("../../bindings/web/test/fixtures/rust-metadata-gguf.json");
         let fixture: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(fixture_path).unwrap()).unwrap();
 

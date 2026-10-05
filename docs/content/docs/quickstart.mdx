@@ -174,9 +174,10 @@ Debug.Log($"Latency: {result.LatencyMs}ms");
 `@xybrid/web` is a private preview and not yet on npm. It lives in [`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web):
 
 ```bash
-git clone https://github.com/xybrid-ai/xybrid
+git clone --recurse-submodules https://github.com/xybrid-ai/xybrid
 cd xybrid/bindings/web
-pnpm install
+pnpm install --frozen-lockfile
+pnpm build        # Bazel builds the Rust/WASM runtime
 pnpm dev:example   # downloads pinned demo models, then serves the demo
 ```
 
@@ -187,7 +188,7 @@ import { XybridLlm } from "@xybrid/web";
 
 // Stream a reply from a language model running in the browser
 const llm = await XybridLlm.load("/llm/model_metadata.json", {
-  wasmPath: "/llm-runtime",
+  wasmPath: "/xybrid/runtime",
   accelerator: "auto", // WebGPU when available, wasm otherwise
 });
 
@@ -202,14 +203,15 @@ verifies the download with SHA-256 when Hugging Face provides a Git-LFS OID
 compatible metadata in memory when the repo doesn't ship one:
 
 ```ts
-const llm = await XybridLlm.fromHuggingFace("litert-community/SmolLM2-135M-Instruct", {
-  wasmPath: "/llm-runtime", // defaults to /xybrid/llm-runtime when omitted
+const llm = await XybridLlm.fromHuggingFace("QuantFactory/SmolLM2-135M-Instruct-GGUF", {
+  file: "SmolLM2-135M-Instruct.Q4_0.gguf",
+  wasmPath: "/xybrid/runtime", // defaults to /xybrid/runtime when omitted
 });
 ```
 
 **Expected output:** Text streamed into the page token by token, generated entirely in the browser.
 
-See the [Web SDK guide](/docs/sdks/web) for the tensor surface, registry loading, and the full API.
+See the [Web SDK guide](/docs/sdks/web) for GGUF loading, cancellation, measurements, and the current API.
   </Tab>
   <Tab value="Rust">
 **Install**

@@ -11,28 +11,28 @@ import {
   UnsupportedTemplateError,
 } from "../src/errors.ts";
 import { RuntimeInitializer } from "../src/internal/initialization.ts";
-import { liteRtLmRuntime } from "../src/internal/litert-lm-runtime.ts";
 import type { LlmEngine, LlmGeneration, LlmRuntime } from "../src/internal/runtime.ts";
 import { AcceleratorUnavailableError } from "../src/internal/runtime.ts";
+import { rustLlmRuntime } from "../src/internal/rust-llm-runtime.ts";
 import { loadLlm, XybridLlm } from "../src/llm.ts";
 import { parseMetadata } from "../src/metadata.ts";
 import type { DownloadProgress, LlmLoadOptions } from "../src/types.ts";
-import { createRuntime, loadWithDependencies, tfliteMetadata } from "./helpers.ts";
+import { ggufMetadata } from "./helpers.ts";
 
 const metadataUrl = new URL("https://models.example/smollm2/model_metadata.json");
-const options: LlmLoadOptions = { wasmPath: "/litert-lm", accelerator: "auto" };
+const options: LlmLoadOptions = { wasmPath: "/runtime", accelerator: "auto" };
 
-const litertLmMetadata = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+const ggufLlmMetadata = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   model_id: "smollm2-135m-instruct",
   version: "1",
   execution_template: {
-    type: "LiteRtLm",
-    model_file: "model.litertlm",
+    type: "Gguf",
+    model_file: "model.gguf",
     context_length: 2048,
   },
   preprocessing: [],
   postprocessing: [],
-  files: ["model.litertlm"],
+  files: ["model.gguf"],
   ...overrides,
 });
 
@@ -237,7 +237,7 @@ const createLlmRuntime = (): LlmRuntimeControl => {
 const load = async (
   control = createLlmRuntime(),
   loadOptions: LlmLoadOptions = options,
-  metadata: Record<string, unknown> = litertLmMetadata(),
+  metadata: Record<string, unknown> = ggufLlmMetadata(),
 ) => ({
   control,
   llm: await loadLlm(
@@ -259,8 +259,8 @@ describe("XybridLlm lifecycle", () => {
       null,
       undefined,
       {},
-      { wasmPath: "/litert-lm", accelerator: "invalid" },
-      { wasmPath: "/litert-lm", accelerator: "auto", onDownloadProgress: "notify" },
+      { wasmPath: "/runtime", accelerator: "invalid" },
+      { wasmPath: "/runtime", accelerator: "auto", onDownloadProgress: "notify" },
     ]) {
       await expect(
         Reflect.apply(XybridLlm.load, XybridLlm, [metadataUrl, malformed]),
@@ -268,16 +268,18 @@ describe("XybridLlm lifecycle", () => {
     }
   });
 
-  test("routes template mismatches in both directions to typed errors", async () => {
-    await expect(load(createLlmRuntime(), options, tfliteMetadata())).rejects.toThrow(
-      UnsupportedTemplateError,
-    );
-    const tensorRuntime = createRuntime();
-    await expect(
-      loadWithDependencies(metadataUrl, options, tensorRuntime.runtime, async () =>
-        parseMetadata(litertLmMetadata()),
-      ),
-    ).rejects.toThrow(UnsupportedTemplateError);
+  test("rejects the former tensor and LiteRT-LM templates with typed errors", async () => {
+    for (const type of ["TfLite", "LiteRtLm"]) {
+      await expect(
+        load(
+          createLlmRuntime(),
+          options,
+          ggufMetadata({
+            execution_template: { type, model_file: "model.gguf" },
+          }),
+        ),
+      ).rejects.toThrow(UnsupportedTemplateError);
+    }
   });
 
   test("wraps model download failures in the typed error hierarchy", async () => {
@@ -287,24 +289,24 @@ describe("XybridLlm lifecycle", () => {
     });
     try {
       await expect(
-        liteRtLmRuntime.fetchModel(new URL("https://models.example/missing.litertlm"), undefined),
+        rustLlmRuntime.fetchModel(new URL("https://models.example/missing.gguf"), undefined),
       ).rejects.toBeInstanceOf(RuntimeInitializationError);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  test("rejects malformed LiteRtLm metadata before downloading the model", async () => {
-    const missingFile = litertLmMetadata({
-      execution_template: { type: "LiteRtLm" },
+  test("rejects malformed Gguf metadata before downloading the model", async () => {
+    const missingFile = ggufLlmMetadata({
+      execution_template: { type: "Gguf" },
     });
     const control = createLlmRuntime();
     await expect(load(control, options, missingFile)).rejects.toBeInstanceOf(InvalidMetadataError);
     for (const contextLength of [0, -1, 1.5, "2048", 2 ** 53]) {
-      const malformedContext = litertLmMetadata({
+      const malformedContext = ggufLlmMetadata({
         execution_template: {
-          type: "LiteRtLm",
-          model_file: "model.litertlm",
+          type: "Gguf",
+          model_file: "model.gguf",
           context_length: contextLength,
         },
       });
@@ -349,7 +351,7 @@ describe("XybridLlm lifecycle", () => {
       const pending = load(control, { ...options, accelerator, signal: controller.signal });
 
       await Bun.sleep(0);
-      expect(control.initialized).toEqual(["/litert-lm"]);
+      expect(control.initialized).toEqual(["/runtime"]);
       controller.abort();
       await expect(
         Promise.race([
@@ -368,9 +370,9 @@ describe("XybridLlm lifecycle", () => {
     await expect(
       loadLlm(
         metadataUrl,
-        { wasmPath: "/litert-lm-a", accelerator: "wasm" },
+        { wasmPath: "/runtime-a", accelerator: "wasm" },
         invalidRuntime.runtime,
-        async () => parseMetadata(litertLmMetadata({ execution_template: { type: "LiteRtLm" } })),
+        async () => parseMetadata(ggufLlmMetadata({ execution_template: { type: "Gguf" } })),
         initializer,
       ),
     ).rejects.toBeInstanceOf(InvalidMetadataError);
@@ -380,13 +382,13 @@ describe("XybridLlm lifecycle", () => {
     await expect(
       loadLlm(
         metadataUrl,
-        { wasmPath: "/litert-lm-b", accelerator: "wasm" },
+        { wasmPath: "/runtime-b", accelerator: "wasm" },
         validRuntime.runtime,
-        async () => parseMetadata(litertLmMetadata()),
+        async () => parseMetadata(ggufLlmMetadata()),
         initializer,
       ),
     ).resolves.toBeDefined();
-    expect(validRuntime.initialized).toEqual(["/litert-lm-b"]);
+    expect(validRuntime.initialized).toEqual(["/runtime-b"]);
   });
 
   test("downloads the model once and reuses it across the auto fallback", async () => {
@@ -398,7 +400,7 @@ describe("XybridLlm lifecycle", () => {
       onDownloadProgress: (value) => progress.push(value),
     });
     expect(llm.accelerator).toBe("wasm");
-    expect(control.fetches).toEqual(["https://models.example/smollm2/model.litertlm"]);
+    expect(control.fetches).toEqual(["https://models.example/smollm2/model.gguf"]);
     expect(control.created).toEqual([{ accelerator: "wasm", contextLength: 2048 }]);
     expect(progress).toEqual([
       { loadedBytes: 3, totalBytes: 7 },
@@ -408,7 +410,7 @@ describe("XybridLlm lifecycle", () => {
     const explicit = createLlmRuntime();
     explicit.failWebGpu();
     await expect(
-      load(explicit, { wasmPath: "/litert-lm", accelerator: "webgpu" }),
+      load(explicit, { wasmPath: "/runtime", accelerator: "webgpu" }),
     ).rejects.toBeInstanceOf(RuntimeInitializationError);
     expect(explicit.fetches).toHaveLength(0);
 
@@ -451,9 +453,9 @@ describe("XybridLlm lifecycle", () => {
     expect(control.initialized).toHaveLength(0);
     expect(control.fetches).toHaveLength(0);
 
-    resolveMetadata?.(parseMetadata(litertLmMetadata()));
+    resolveMetadata?.(parseMetadata(ggufLlmMetadata()));
     await Bun.sleep(0);
-    expect(control.fetches).toEqual(["https://models.example/smollm2/model.litertlm"]);
+    expect(control.fetches).toEqual(["https://models.example/smollm2/model.gguf"]);
     expect(control.created).toHaveLength(0);
 
     control.releaseFetch();
@@ -513,6 +515,32 @@ describe("XybridLlm lifecycle", () => {
     }
     expect(control.cancelled()).toBeGreaterThan(0);
     await expect(llm.generate("after")).resolves.toBe("Hello, world.");
+  });
+
+  test("explicit cancellation also waits for a generation still starting", async () => {
+    const { llm, control } = await load();
+    control.holdEngineGenerate();
+    const stream = llm.generateStream("hi");
+    const first = stream.next();
+    const stopping = llm.cancel();
+    control.releaseEngineGenerate();
+    await stopping;
+    await expect(llm.generate("after")).resolves.toBe("Hello, world.");
+    expect((await first).done).toBe(true);
+    expect(control.cancelled()).toBeGreaterThan(0);
+    await llm.dispose();
+  });
+
+  test("explicit cancellation closes a paused iterator and allows immediate reuse", async () => {
+    const { llm, control } = await load();
+    const stream = llm.generateStream("hi");
+    await expect(stream.next()).resolves.toEqual({ value: "Hello", done: false });
+
+    await llm.cancel();
+    expect(control.disposedGenerations()).toBe(1);
+    await expect(llm.generate("after")).resolves.toBe("Hello, world.");
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+    await llm.dispose();
   });
 
   test("disposes a paused stream and closes its iterator", async () => {

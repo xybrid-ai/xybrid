@@ -52,8 +52,9 @@ const downloadModel = async <Model>(
 export const loadModelBytes = (
   modelUrl: URL,
   signal?: AbortSignal,
+  onProgress?: (progress: DownloadProgress) => void,
 ): Promise<Uint8Array<ArrayBuffer>> =>
-  downloadModel(modelUrl, readResponseBytes, undefined, signal);
+  downloadModel(modelUrl, readResponseBytes, onProgress, signal);
 
 export const loadModelChunks = (
   modelUrl: URL,
