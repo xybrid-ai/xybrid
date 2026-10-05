@@ -480,7 +480,7 @@ jobs:
         with:
           bazelisk-cache: true
 
-      - name: Cache the pinned macOS SDK
+      - name: Cache pinned Bazel downloads
         uses: ./.github/actions/bazel-repo-cache
         with:
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
@@ -528,6 +528,7 @@ jobs:
         run: pnpm test
 
       - name: Build Web SDK with CPU and WebGPU Rust runtimes
+        id: web-build
         working-directory: bindings/web
         run: pnpm build
 
@@ -554,7 +555,7 @@ jobs:
         run: pnpm test:browser
 
       - name: Record JavaScript and WASM build sizes
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.web-build.outcome == 'success' }}
         working-directory: bindings/web
         run: pnpm size
 

@@ -119,6 +119,25 @@ describe("metadata boundary", () => {
     expect(() => validateLlmBrowserMetadata(parsed)).toThrow(InvalidMetadataError);
   });
 
+  test("loads metadata with JSON null context_length using the runtime default", async () => {
+    const parsed = parseMetadata(
+      JSON.parse(JSON.stringify(metadataWithContextLength("Gguf", null))),
+    );
+    expect(validateLlmBrowserMetadata(parsed)).toEqual({
+      modelFile: "model.gguf",
+      contextLength: undefined,
+    });
+    const runtime = createRuntime();
+    const llm = await loadWithDependencies(
+      metadataUrl,
+      { wasmPath: "/wasm", accelerator: "wasm" },
+      runtime.runtime,
+      async () => parsed,
+    );
+    expect(llm.accelerator).toBe("wasm");
+    await llm.dispose();
+  });
+
   test("accepts the Rust Gguf metadata fixture", async () => {
     const fixture = await Bun.file("test/fixtures/rust-metadata-gguf.json").json();
     const parsed = parseMetadata(fixture);

@@ -118,7 +118,7 @@ export const validateLlmBrowserMetadata = (metadata: ParsedMetadata): LlmBrowser
     );
   }
   const rawContextLength = metadata.template.contextLength;
-  if (rawContextLength === undefined) {
+  if (rawContextLength == null) {
     return { modelFile, contextLength: undefined };
   }
   if (
