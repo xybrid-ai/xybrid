@@ -56,6 +56,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stopping a llama.cpp run on one of its first tokens no longer reports a
+  native failure.** When memory or thermal pressure, a cancel, or an
+  `on_token` error stopped generation on one of the first four tokens (five
+  for vision models), the run failed with an unrelated error such as
+  `Generation failed with error code -2 (sampler chain creation failed)`.
+  Cloud fallback therefore never reached the cloud, and a cancel did not read
+  as a cancel. Those stops now behave as they do later in the run.
 - **Dart streams no longer drop an error that follows the final token.**
   `runStreaming` and `runStreamingWithFallback` ignored any error that arrived
   after the final token, so a run that failed once generation stopped looked

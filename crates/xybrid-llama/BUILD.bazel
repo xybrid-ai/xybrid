@@ -56,12 +56,13 @@ rust_test(
 # target. Unlike the inline target above, these use `srcs` + a dep on the library
 # (they link it as an external crate, exactly as cargo does).
 #
-# crate_features matters here: both GGUF smokes open with
+# crate_features matters here: the GGUF smokes open with
 # `#![cfg(feature = "bindings")]`, so without that feature the file compiles to
 # an EMPTY binary — `--list` reports "0 tests" and nothing is type-checked. They
 # are `#[ignore]`d (each wants a multi-hundred-MB model on disk), so compiling
 # them is the entire value of having them here.
 _LLAMA_INTEGRATION_TESTS = {
+    "callback_stop_boundaries": ["bindings"],
     "prefix_cache_hit_smoke": ["bindings"],
     "recurrent_gating_smoke": ["bindings"],
     "wrapper_invariants": [],
