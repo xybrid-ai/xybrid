@@ -6485,6 +6485,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "xybrid-zzz-sys"
+version = "0.10.1"
+dependencies = [
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "xybrid_bolt"
 version = "0.10.1"
 dependencies = [
