@@ -651,13 +651,19 @@ fn build_from_source(
     let mut cmake_config = cmake::Config::new(llama_cpp_dir);
     cmake_config
         .define("BUILD_SHARED_LIBS", "OFF")
+        .define("CMAKE_INSTALL_LIBDIR", "lib")
         .define("LLAMA_BUILD_EXAMPLES", "OFF")
         .define("LLAMA_BUILD_TESTS", "OFF")
+        .define("LLAMA_BUILD_APP", "OFF")
+        .define("LLAMA_BUILD_COMMON", "OFF")
+        .define("LLAMA_BUILD_TOOLS", "OFF")
         .define(
-            "LLAMA_BUILD_TOOLS",
+            "LLAMA_BUILD_MTMD",
             if vision_enabled { "ON" } else { "OFF" },
         )
         .define("LLAMA_BUILD_SERVER", "OFF")
+        .define("LLAMA_SUBPROCESS", "OFF")
+        .define("LLAMA_BUILD_IS_DEV", "OFF")
         .define("LLAMA_CURL", "OFF")
         // Default-ON upstream, but never let vendored cpp-httplib pick up a
         // host OpenSSL: we only ship the static archives, so tool-binary TLS
@@ -734,7 +740,31 @@ fn build_from_source(
         ndk_path_used.as_deref().unwrap_or("N/A")
     );
 
+    let cmake_profile = cmake_config.get_profile().to_owned();
     let dst = cmake_config.build();
+    if vision_enabled {
+        // mtmd now depends on an internal archive that upstream does not install.
+        let name = if ctx.target_os == "windows" {
+            "vendor-hash.lib"
+        } else {
+            "libvendor-hash.a"
+        };
+        let build = dst.join("build/vendor/hash");
+        let source = if build.join(name).is_file() {
+            build.join(name)
+        } else {
+            build.join(cmake_profile).join(name)
+        };
+        let lib = dst.join("lib");
+        if let Err(error) = std::fs::create_dir_all(&lib)
+            .and_then(|()| std::fs::copy(&source, lib.join(name)).map(|_| ()))
+        {
+            fatal(
+                "Could not stage the llama.cpp vision hashing archive",
+                &[format!("{}: {error}", source.display())],
+            );
+        }
+    }
     export_prebuilt(ctx, &dst);
     dst
 }
@@ -773,6 +803,7 @@ fn emit_link_and_wrapper(
 
     if vision_enabled {
         println!("cargo:rustc-link-lib=static=mtmd");
+        println!("cargo:rustc-link-lib=static=vendor-hash");
     }
     println!("cargo:rustc-link-lib=static=llama");
     println!("cargo:rustc-link-lib=static=ggml");
@@ -873,6 +904,7 @@ fn required_archives(target_os: &str, vision_enabled: bool, vulkan_enabled: bool
     }
     if vision_enabled {
         libs.push(format!("{prefix}mtmd{suffix}"));
+        libs.push(format!("{prefix}vendor-hash{suffix}"));
     }
     libs
 }

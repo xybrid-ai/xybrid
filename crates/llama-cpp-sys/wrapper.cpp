@@ -139,7 +139,7 @@ llama_model* llama_load_model_from_file_c(
     // emulated mmap only supports unmapping the original complete allocation,
     // so trimmed mappings otherwise survive model destruction. Read tensors
     // into owned backend buffers that llama_model_free can release instead.
-    params.use_mmap = false;
+    params.load_mode = LLAMA_LOAD_MODE_NONE;
 #endif
 
     return llama_model_load_from_file(path_model, params);
@@ -182,7 +182,9 @@ mtmd_bitmap* mtmd_bitmap_init_from_buf_c(
     const unsigned char* buf,
     size_t len
 ) {
-    return mtmd_helper_bitmap_init_from_buf(ctx, buf, len);
+    return mtmd_helper_bitmap_init_from_buf(
+        ctx, buf, len, false, mtmd_helper_init_opt_default()
+    ).bitmap;
 }
 
 mtmd_bitmap* mtmd_bitmap_init_rgb_c(
@@ -313,8 +315,9 @@ int32_t mtmd_tokenize_c(
         return -1;
     }
 
-    mtmd_input_text input;
+    mtmd_input_text input = {};
     input.text = text;
+    input.text_len = strlen(text);
     input.add_special = add_special;
     input.parse_special = parse_special;
 
@@ -681,7 +684,12 @@ llama_sampler* llama_sampler_chain_create_c(
     // Add samplers in order: penalties -> top_k -> top_p -> min_p -> temp -> dist
     // Repetition penalty must come first to modify logits before sampling
     if (repeat_penalty != 1.0f && penalty_last_n > 0) {
+        if (!model) {
+            llama_sampler_free(chain);
+            return nullptr;
+        }
         llama_sampler_chain_add(chain, llama_sampler_init_penalties(
+            llama_vocab_n_tokens(llama_model_get_vocab(model)),
             penalty_last_n,    // penalty_last_n: how many tokens to consider
             repeat_penalty,    // penalty_repeat: > 1.0 penalizes repetition
             0.0f,              // penalty_freq: frequency penalty (disabled)

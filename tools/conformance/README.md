@@ -64,10 +64,17 @@ byte:
   from the snapshot's directory name, so `convert_gguf.sh` converts from a view
   named after the upstream repository (`Qwen3.5-0.8B`).
 - `llama-quantize` is built CPU-only, without `-march=native` and with
-  `-ffp-contract=off`. Without that flag GCC and clang fuse multiply-adds
-  differently and produce different Q4_K_M bytes; with it, Apple clang 21
-  (macOS arm64) and GCC 13.3 (Linux arm64 and x86_64) agree, at any thread
-  count.
+  `-ffp-contract=off` to avoid compiler-dependent fused multiply-adds.
+  `provenance.json` records the platforms verified for the current
+  conversion; CI checks the same digest on every conformance platform.
+
+The llama.cpp v0.6.0 migration keeps the Qwen text-trunk fixture by passing
+`--no-mtp`, which excludes the optional prediction head the new converter
+otherwise exports. A comparison against a rebuild with the previous converter
+found the same 320 tensor payloads. The F16 digest changes with new
+`qwen35.attention.recurrent_layers` and `tokenizer.ggml.add_eos_token` metadata,
+and the Q4_K_M fixture is regenerated from that F16. Reference goldens,
+templates and scoring tolerances are preserved.
 
 ## Environments
 
@@ -83,7 +90,7 @@ torch as the `+cpu` build the `==` pin accepts.
 |---|---|
 | `forms` | `export_forms_onnx.py`, `gen_forms_goldens.py`, `gen_fake_scorers.py` |
 | `labels` | `gen_label_goldens.py` |
-| `convert` | `convert_gguf.sh` (llama.cpp's own converter pins) |
+| `convert` | `convert_gguf.sh` (compatible pins for the Qwen fixture converter) |
 
 ```bash
 uv run --no-project --python 3.12 --with-requirements tools/conformance/requirements-forms.txt python <script>
