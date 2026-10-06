@@ -1,0 +1,31 @@
+crates/zzz-sys/README.md
+  s_03bae9cec08f2e::t_acd1ab808f80d6 2,12
+  s_03bae9cec08f2e::t_47e2a3233300e1 6,8
+  s_ed780a17b03eb8::t_bc7007328b8e69 1,3-5,7,9-11,13-15
+crates/zzz-sys/natives-manifest.json
+  s_03bae9cec08f2e::t_7f817099d69e2a 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2d037067a17cff35ef6f15af41e40cf05852dc27",
+  "prompts": {},
+  "sessions": {
+    "s_03bae9cec08f2e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a105c2-dd94-7bb0-b785-0e4c8556c332",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_ed780a17b03eb8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a105c2-dd94-7bb0-b785-0e4c8556c332",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
