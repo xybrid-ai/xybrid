@@ -1,0 +1,21 @@
+tools/scripts/tests/test_zzz_pull.py
+  s_243a7ec9f68bcc::t_f29ec2e0bd6c02 340-358
+tools/scripts/zzz_pull.py
+  s_243a7ec9f68bcc::t_ac50e12a31fe42 461-465
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2d0c11629144e4abcc9245d8b07773c94b92140e",
+  "prompts": {},
+  "sessions": {
+    "s_243a7ec9f68bcc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a1c4b82a-d842-415f-9bfa-5053d9722049",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
