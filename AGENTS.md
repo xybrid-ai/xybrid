@@ -262,6 +262,14 @@ so a new binding there reports theirs only until it registers. Add a new name
 to the facade's `resolve_binding`; a test fails until you do. The table is in
 `docs/telemetry/registry.md`.
 
+The browser package (`bindings/web`, npm `@xybrid/web`) is a GGUF text-generation
+preview over the existing Rust/llama.cpp path. `pnpm build` invokes Bazel for CPU
+and experimental WebGPU WASM, then bundles the client and worker. `pnpm
+pack:release` checks the real npm archive in an isolated consumer; CI and release
+preparation run Chromium against its extracted contents. Release publication
+stages that same archive for npm approval. Setup is in
+`bindings/web/RELEASING.md`; installing the package never invokes native tools.
+
 **Dependency direction (do not reverse):**
 
 ```

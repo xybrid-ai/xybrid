@@ -233,6 +233,30 @@ def add_changelog(root: Path, candidate: dict) -> None:
     path.write_text(text[:start] + section + text[end:])
 
 
+def fetch_commit(root: Path, commit: str) -> None:
+    # Discovery already peeled the release tag. Avoid extra tag/submodule
+    # fetches while updating the shallow boundary.
+    args = ["git", "fetch", "--no-tags", "--recurse-submodules=no", "--depth", "1",
+            "origin", commit]
+    for attempt in range(3):
+        try:
+            output = run(args, root, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as error:
+            output = error.output or ""
+            if output:
+                print(output.strip(), file=sys.stderr)
+            # A fresh Git process rereads the shallow file. Bound recovery to
+            # this specific transient error; exhausted attempts still fail.
+            if ("fatal: shallow file has changed since we read it" not in output
+                    or attempt == 2):
+                raise
+            print(f"llamacpp-update: retrying shallow fetch ({attempt + 2}/3)", file=sys.stderr)
+        else:
+            if output:
+                print(output, file=sys.stderr)
+            return
+
+
 def apply(root: Path, candidate: dict) -> None:
     state = pin(root)
     tag_version(candidate["tag"])
@@ -242,7 +266,7 @@ def apply(root: Path, candidate: dict) -> None:
             or not SHA.fullmatch(candidate["commit"])):
         raise UpdateError("Candidate no longer matches this checkout")
     run(["git", "submodule", "update", "--init", "--depth", "1", "--", str(VENDOR)], root)
-    run(["git", "fetch", "--depth", "1", "origin", candidate["commit"]], root / VENDOR)
+    fetch_commit(root / VENDOR, candidate["commit"])
     run(["git", "checkout", "--detach", candidate["commit"]], root / VENDOR)
     if run(["git", "rev-parse", "HEAD"], root / VENDOR) != candidate["commit"]:
         raise UpdateError("Submodule checkout did not resolve to the candidate commit")

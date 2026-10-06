@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "browser-test",
+  // Playwright clears this directory; preserve the checked npm archive beside it.
+  outputDir: "test-results/browser",
   fullyParallel: false,
   workers: 1,
   reporter: "line",

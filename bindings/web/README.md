@@ -1,6 +1,6 @@
 # @xybrid/web
 
-Private browser SDK preview for local GGUF text generation. It compiles Xybrid's
+Browser SDK preview for local GGUF text generation. It compiles Xybrid's
 existing `xybrid-llama` Rust wrappers, C++ shim, and pinned llama.cpp into one
 WebAssembly module. A Web Worker streams tokens while the page stays responsive.
 The package includes CPU/WASM SIMD and optional WebGPU execution.
@@ -30,6 +30,20 @@ SharedArrayBuffer or COOP/COEP headers. Generated assets and models are ignored;
 `./clean.sh` lists build outputs and `./clean.sh --apply` removes them.
 
 ## Use in an application
+
+Install the package from npm after the release is approved:
+
+```sh
+npm install @xybrid/web
+# Release candidates use the next tag:
+npm install @xybrid/web@next
+```
+
+Each GitHub Release also includes `xybrid-web-<version>.tgz` and its SHA-256
+checksum. Install that archive with `npm install ./xybrid-web-<version>.tgz`.
+The archive contains the runtime assets, so installing it needs no Rust, Bun,
+Emscripten, or Bazel toolchain. See [RELEASING.md](https://github.com/xybrid-ai/xybrid/blob/master/bindings/web/RELEASING.md) for the release
+pipeline and npm setup.
 
 Import `XybridLlm` from `@xybrid/web` in your bundler. Keep `dist/worker.js` with
 the package; the client loads it relative to its own module. Copy the package's
@@ -136,16 +150,22 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
-pnpm build:example
+pnpm pack:release
+XYBRID_WEB_PACKAGE=test-results/npm/package pnpm build:example
 pnpm exec playwright install --with-deps chromium
 XYBRID_WEB_REPORT=test-results/runtime-measurements.json pnpm test:browser
 pnpm size
 ```
 
-Required CI builds CPU and WebGPU artifacts, runs the production example and
-packaged SDK in Chromium, and verifies streaming, iterator cancellation,
-overlapping generation, reuse, checksum failure, model release, and GPU Rust
-exports. It caches the GGUF and Bazel outputs and uploads `dist/`, measurements,
+`pnpm pack:release` creates `test-results/npm/xybrid-web-<version>.tgz`, rejects
+missing runtime assets or unexpected files, and verifies ESM imports and
+TypeScript declarations in an isolated consumer. It extracts the checked package
+into `test-results/npm/package`; `XYBRID_WEB_PACKAGE` makes the example use it.
+
+Required CI builds CPU and WebGPU artifacts, packs the npm archive, runs the
+production example and extracted SDK in Chromium, and verifies streaming,
+iterator cancellation, overlapping generation, reuse, checksum failure, model
+release, and GPU Rust exports. It caches the GGUF and Bazel outputs and uploads `dist/`, measurements,
 and raw/gzip sizes. Throughput is informational on shared runners.
 
 Actual GPU inference requires an adapter with `shader-f16`. Run
@@ -165,5 +185,5 @@ commands above.
 
 This is the browser binding of Xybrid's Rust llama inference path. The complete
 `xybrid-core`/`xybrid-sdk`/BoltFFI API, pipelines, auth, cloud routing, and telemetry
-export still need a browser platform layer. The package remains private and is
-not published to npm.
+export still need a browser platform layer. WebGPU execution remains experimental;
+this release surface covers GGUF text generation.
