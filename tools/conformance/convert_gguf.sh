@@ -90,8 +90,10 @@ convert_f16() {
     mkdir -p "$view/$MODEL_NAME"
     ln -s "$snapshot"/* "$view/$MODEL_NAME"/
     log="$CACHE/logs/convert-f16.log"
+    # The reference scores the text trunk; exclude the optional MTP head,
+    # which older converters omitted and v0.6.0 exports by default.
     if ! convert_env python "$LLAMA/convert_hf_to_gguf.py" "$view/$MODEL_NAME" \
-        --outtype f16 --model-name "$MODEL_NAME" --outfile "$tmp" >"$log" 2>&1; then
+        --no-mtp --outtype f16 --model-name "$MODEL_NAME" --outfile "$tmp" >"$log" 2>&1; then
         tail -n 40 "$log" >&2
         die "conversion failed; full log: $log"
     fi
@@ -116,6 +118,7 @@ QUANTIZE_FLAGS=(
     -DLLAMA_BUILD_TESTS=OFF
     -DLLAMA_BUILD_EXAMPLES=OFF
     -DLLAMA_BUILD_SERVER=OFF
+    -DLLAMA_BUILD_APP=OFF
 )
 
 build_quantize() {

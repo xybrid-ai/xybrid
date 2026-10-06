@@ -34,10 +34,25 @@ the existing LFM2-VL caption test with both model files present. Missing model
 files fail validation. Whisper consumes llama.cpp's ggml, so its real-model
 suite is a release prerequisite too.
 
+One update triggers several workflows for platform builds and integration
+tests. These are checks on the same PR, not repeated discoveries. The single
+`CI Success` check belongs to `ci.yml`; its build matrix is skipped only when
+every changed path is documentation. A changelog alongside a native update
+still requires the complete matrix.
+
+SDK builds disable llama.cpp's application and CLI tools and enable standalone
+mtmd for vision. Static vision builds also stage and link upstream's internal
+`vendor-hash` archive. Cargo, Bazel, and the native publisher must all carry
+that dependency; an incomplete prebuilt slice falls back to a source build.
+
 The choice-conformance provenance pins the llama.cpp converter as well as the
 runtime submodule. An update will report that drift. Review its conversion
 recipe and regenerate the derived artifacts deliberately; do not replace
 expected digests merely to make the check green.
+The Qwen fixture excludes the optional MTP prediction head with `--no-mtp`,
+preserving the text trunk covered by the reference goldens. Record new artifact
+digests only after rebuilding from the pinned inputs and checking the embedded
+chat template.
 
 ## Release preparation
 

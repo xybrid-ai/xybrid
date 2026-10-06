@@ -100,7 +100,7 @@
     "llama.cpp": {
       "kind": "git",
       "repository": "https://github.com/ggml-org/llama.cpp",
-      "revision": "b46812de78f8fbcb6cf0154947e8633ebc78d9ac",
+      "revision": "d81235049384534c167caea52b85a694f6103d14",
       "license": "MIT",
       "license_evidence": "LICENSE",
       "submodule": "vendor/llama-cpp",
@@ -110,8 +110,8 @@
           "size": 1078
         },
         "convert_hf_to_gguf.py": {
-          "sha256": "da052d343a320e214d7675a619a67f757d81a032fc7db519c063e5c787ff9083",
-          "size": 670385
+          "sha256": "e9a1da876330bbce9687541ab31736542a01b4ac43c6686126514a50f122fb7f",
+          "size": 13012
         }
       }
     }
@@ -232,8 +232,8 @@
     "qwen3.5-0.8b-f16-cf": {
       "files": {
         "Qwen3.5-0.8B-F16.gguf": {
-          "sha256": "7b10bd707f33b78919eae3b77df2f8775f6da32cc79edccd8e3871c4befa48fb",
-          "size": 1516744128
+          "sha256": "d6343edf17da5c65709e42c2c7ec988285c1cb7582986d97c4028eba11fb4909",
+          "size": 1516744256
         }
       },
       "inputs": [
@@ -277,16 +277,16 @@
       "tool": "tools/conformance/convert_gguf.sh",
       "environment": "convert",
       "settings": {
-        "command": "vendor/llama-cpp/convert_hf_to_gguf.py Qwen3.5-0.8B --outtype f16 --model-name Qwen3.5-0.8B",
-        "llama.cpp": "b46812de78f8fbcb6cf0154947e8633ebc78d9ac",
+        "command": "vendor/llama-cpp/convert_hf_to_gguf.py Qwen3.5-0.8B --no-mtp --outtype f16 --model-name Qwen3.5-0.8B",
+        "llama.cpp": "d81235049384534c167caea52b85a694f6103d14",
         "embedded_chat_template": "templates/qwen3.5.jinja"
       }
     },
     "qwen3.5-0.8b-q4km-cf": {
       "files": {
         "Qwen3.5-0.8B-Q4_K_M.gguf": {
-          "sha256": "bb8fc97cae2a004c0be37c5a9d0f14b4303609f60d2dcd100d7210d9a77c6ee1",
-          "size": 529296832
+          "sha256": "ebd6db4dc3aa7303e6922ba42b381773965a5b00e0c07d3b6e5cb4b5fa8d7d89",
+          "size": 529296960
         }
       },
       "inputs": [
@@ -300,12 +300,10 @@
       "settings": {
         "command": "llama-quantize Qwen3.5-0.8B-F16.gguf Qwen3.5-0.8B-Q4_K_M.gguf Q4_K_M",
         "build": "cmake Release, static, GGML_NATIVE=OFF, -ffp-contract=off, CPU only (no Metal, BLAS or OpenMP)",
-        "llama.cpp": "b46812de78f8fbcb6cf0154947e8633ebc78d9ac",
+        "llama.cpp": "d81235049384534c167caea52b85a694f6103d14",
         "embedded_chat_template": "templates/qwen3.5.jinja",
         "reproduced_on": [
-          "macOS arm64 (Apple clang 21)",
-          "Linux arm64 (GCC 13.3)",
-          "Linux x86_64 (GCC 13.3)"
+          "Linux x86_64 (GCC 11.5)"
         ]
       }
     }
