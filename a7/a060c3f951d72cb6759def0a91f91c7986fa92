@@ -1,0 +1,19 @@
+crates/zzz-sys/README.md
+  s_ed780a17b03eb8::t_bc7007328b8e69 1,3-5,7,9-11,13-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a7a060c3f951d72cb6759def0a91f91c7986fa92",
+  "prompts": {},
+  "sessions": {
+    "s_ed780a17b03eb8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a105c2-dd94-7bb0-b785-0e4c8556c332",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
