@@ -28,7 +28,7 @@ decisions to keep.
   is genuinely misleading, rename it on purpose and plan for the new history and
   the new code-scanning configuration.
 - **Job names are the required checks.** Branch protection on `master` requires
-  `CI Success` (reported by both `ci.yml` and `ci-docs.yml`) and
+  `CI Success` (`ci.yml`) and
   `Bazel graph + RBE targets` (`bazel.yml`), matched by job name.
   `tools/scripts/llamacpp_update.py` waits on more job names before it cuts a
   llama.cpp release (its `REQUIRED_CHECKS`). A workflow's `name:` can change
@@ -59,7 +59,6 @@ Workspace validation, pull-request gates and backend test suites.
 | [`test-candle.yml`](test-candle.yml) | CI: Candle backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Test the Candle backend (Metal runs only on macOS), scoped to the paths that can affect it. |
 | [`test-choice-conformance.yml`](test-choice-conformance.yml) | CI: Choice conformance | push to `master`, pull_request to `master`, schedule (`23 5 * * *`), workflow_dispatch | none | Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI; daily cold rebuild. |
 | [`clean-scripts.yml`](clean-scripts.yml) | CI: Clean scripts | push to `master`, pull_request to `master` | none | Test the root and per-folder clean.sh scripts and clean-lib.sh; every path they list must be one git ignores. |
-| [`ci-docs.yml`](ci-docs.yml) | CI: Docs-only gate | push to `master`, pull_request to `master` | none | Report the CI Success gate for docs-only changes, which ci.yml skips. |
 | [`llamacpp-validate.yml`](llamacpp-validate.yml) | CI: llama.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Check the llama.cpp pins and generated bindings, then run real text and vision models on a source build. |
 | [`test-policy-routing.yml`](test-policy-routing.yml) | CI: Policy routing | push to `master`, pull_request to `master`, workflow_dispatch | none | Drive the xybrid binary through a policy-routed hybrid stage: local GGUF leg, fake DeepSeek cloud leg. |
 | [`test-whispercpp.yml`](test-whispercpp.yml) | CI: whisper.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Exercise whisper.cpp with real multilingual weights: translation, per-request language, long windows, non-speech suppression. |
@@ -140,10 +139,10 @@ not a repository write, and `star-history.yml` writes to the unprotected
 
 ## How they fit together
 
-**Docs-only changes.** `ci.yml` skips itself when a change touches only docs
-paths (its `paths-ignore`), which would leave the required `CI Success` check
-pending forever. `ci-docs.yml` runs on exactly those paths and reports the same
-check. Keep the two path lists in sync and the job names identical.
+**Docs-only changes.** `ci.yml` runs on every change. Its first job classifies
+the changed paths with `tools/scripts/ci_gate.py`. When every path is
+documentation, the build matrix is skipped. `CI Success` still reports, and it
+checks that each skipped job had a recorded reason.
 
 **Natives.** `build-natives.yml` compiles the llama.cpp static slices once per
 target and feature set and pushes them to `ghcr.io/xybrid-ai/llama-natives`. It
