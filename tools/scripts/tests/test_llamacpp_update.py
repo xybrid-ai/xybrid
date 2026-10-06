@@ -520,6 +520,16 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn(f"commit `{NEW}`", text)
         self.assertIn("## [0.10.1]", text)
 
+    def test_repository_changelogs_support_intake_and_release_preparation(self):
+        for filename in ("CHANGELOG.md", "bindings/flutter/CHANGELOG.md"):
+            self.write(filename, (SCRIPT.parents[2] / filename).read_text())
+        candidate = self.discover()
+        update.add_changelog(self.root, candidate)
+        update.promote_changelogs(self.root, "0.11.0")
+        text = (self.root / "CHANGELOG.md").read_text()
+        self.assertLess(text.index("## [0.11.0]"), text.index(f"commit `{NEW}`"))
+        self.assertIn("## 0.11.0\n", (self.root / "bindings/flutter/CHANGELOG.md").read_text())
+
     def test_internal_path_constraints_update_without_touching_external_deps(self):
         self.write("examples/demo/Cargo.toml", '[dependencies]\n'
                    'example = { path = "../../crates/example", version = "0.10.1" }\n'

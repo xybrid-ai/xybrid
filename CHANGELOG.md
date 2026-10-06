@@ -2082,7 +2082,7 @@ First production release of xybrid - a hybrid cloud-edge ML inference orchestrat
 | Android arm64 | ✅ | ✅ | CPU (NNAPI planned) |
 | iOS arm64 | ✅ | Planned | CoreML ANE, Metal GPU |
 
-## [Unreleased]
+## Roadmap
 
 ### Planned
 
