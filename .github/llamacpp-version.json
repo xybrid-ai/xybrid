@@ -1,7 +1,7 @@
 {
-  "tag": null,
-  "commit": "b46812de78f8fbcb6cf0154947e8633ebc78d9ac",
-  "sdk_base_version": null,
-  "update_kind": null,
+  "tag": "v0.6.0",
+  "commit": "d81235049384534c167caea52b85a694f6103d14",
+  "sdk_base_version": "0.10.1",
+  "update_kind": "bootstrap",
   "sdk_release": null
 }
