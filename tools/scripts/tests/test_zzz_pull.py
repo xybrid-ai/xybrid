@@ -337,6 +337,25 @@ class ZzzPullTests(unittest.TestCase):
         self.assertEqual(staged, zzz.verify_staged(staged, pin))
         self.assertFalse(list(staged.parent.glob(".stage-*")))
 
+    def test_staging_renames_a_subdirectory_not_the_temporary_root(self):
+        archive, pin = self.make_archive()
+
+        class StrictPython311TemporaryDirectory(tempfile.TemporaryDirectory):
+            # Emulate Python 3.11, whose cleanup fails with FileNotFoundError
+            # once the temporary root has been renamed away.
+            def cleanup(self):
+                if not os.path.exists(self.name):
+                    raise FileNotFoundError(self.name)
+                super().cleanup()
+
+        with mock.patch.object(
+            zzz.tempfile, "TemporaryDirectory", StrictPython311TemporaryDirectory
+        ):
+            staged = zzz.stage_archive(archive, pin, self.root / "staged")
+        self.assertEqual(zzz.verify_staged(staged, pin), staged)
+        self.assertFalse(list(staged.parent.glob(".stage-*")))
+        self.assertFalse(list((self.root / "staged").parent.glob(".stage-*")))
+
     def test_interrupted_extraction_leaves_no_partial_slice_and_preserves_previous_pin(
         self,
     ):

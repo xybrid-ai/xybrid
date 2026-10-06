@@ -458,7 +458,11 @@ def stage_archive(archive: Path, pin: Pin, destination: Path) -> Path:
     if staged.exists() or staged.is_symlink():
         return verify_staged(staged, pin)
     with tempfile.TemporaryDirectory(prefix=".stage-", dir=parent) as temp:
-        temporary = Path(temp)
+        # Rename a subdirectory of the temporary root, never the root itself.
+        # TemporaryDirectory cleanup raises FileNotFoundError on Python 3.11
+        # when its renamed root is already gone.
+        temporary = Path(temp) / pin.entry["sha256"][:16]
+        temporary.mkdir(mode=0o700)
         copied = temporary / STAGED_ARCHIVE
         with open_regular(archive) as source, copied.open("xb") as output:
             copied.chmod(0o600)
