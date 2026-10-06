@@ -1,0 +1,23 @@
+Cargo.toml
+  s_a27705c7eed0ea::t_b268661c15983a 12
+crates/zzz-sys/Cargo.toml
+  s_a27705c7eed0ea::t_fe735cbfa3a983 1-40
+crates/zzz-sys/src/lib.rs
+  s_a27705c7eed0ea::t_35d05fa48754d5 1-223
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4fb2ddcee3b7556fdb72d303754a318592e325d5",
+  "prompts": {},
+  "sessions": {
+    "s_a27705c7eed0ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "505b4087-52bd-424a-ba0a-a56df633a17b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
