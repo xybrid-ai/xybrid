@@ -532,6 +532,10 @@ jobs:
         working-directory: bindings/web
         run: pnpm build
 
+      - name: Pack and verify the Web SDK as an isolated npm consumer
+        working-directory: bindings/web
+        run: pnpm pack:release
+
       # The demo and browser suite use the same 92 MB GGUF. Preparation and
       # the SDK verify size/SHA-256; runtime assets are rebuilt from source.
       - name: Cache Web example model assets
@@ -542,6 +546,8 @@ jobs:
 
       - name: Build Web example
         working-directory: bindings/web
+        env:
+          XYBRID_WEB_PACKAGE: test-results/npm/package
         run: pnpm build:example
 
       - name: Install Chromium

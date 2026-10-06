@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Web SDK release packaging.** Releases include `@xybrid/web` as an npm
+  archive with its ESM client, declarations, worker, CPU/WASM SIMD and
+  experimental WebGPU runtimes. Preparation checks the actual archive in an
+  isolated consumer and Chromium; npm publication stages that same artifact
+  for approval, using `next` for prereleases.
 - **Daily llama.cpp stable-release intake (POC).** Official upstream releases
   produce reviewed dependency-update PRs, with real grammar and vision tests.
   Once validation and the refreshed native manifest are ready, automation
