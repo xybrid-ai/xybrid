@@ -1,9 +1,10 @@
 {
   "name": "@xybrid/web",
   "version": "0.10.1",
-  "private": true,
   "type": "module",
   "description": "Browser GGUF inference using Xybrid's Rust runtime and llama.cpp, with WASM SIMD and WebGPU.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,7 +14,9 @@
     "./worker.js": "./dist/worker.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "bun run scripts/build.ts",
@@ -22,6 +25,7 @@
     "dev:example": "vite --config example/vite.config.ts",
     "example:assets": "bun run example/scripts/prepare-assets.ts",
     "lint": "biome check .",
+    "pack:release": "node scripts/check-pack.mjs",
     "runtime:build": "bun run scripts/build-runtime.ts",
     "size": "bun run scripts/measure-size.ts",
     "prebuild:example": "bun run example:assets",
@@ -30,6 +34,19 @@
     "test": "bun test test/metadata.test.ts test/llm.test.ts test/registry.test.ts test/huggingface.test.ts",
     "test:browser": "playwright test",
     "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xybrid-ai/xybrid.git",
+    "directory": "bindings/web"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/xybrid-ai/xybrid/tree/master/bindings/web#readme",
+  "bugs": {
+    "url": "https://github.com/xybrid-ai/xybrid/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "hash-wasm": "^4.12.0",

@@ -1,9 +1,18 @@
 name: Setup Vulkan SDK
 description: Install Vulkan headers, loader, glslc, and expose VULKAN_SDK for llama.cpp Vulkan builds.
 
-# Normally about 40s. A composite action cannot bound its own run time, so
-# every caller sets `timeout-minutes: 15` on the step that uses it: room for
-# the apt retries below (at most ~11 min) plus the SDK download.
+# Pinned, not `latest`: Cargo and Bazel must compile against the same headers.
+# Update the Linux archive checksum alongside the version.
+inputs:
+  vulkan-version:
+    description: Vulkan SDK version.
+    default: '1.4.363.0'
+  linux-sha256:
+    description: SHA-256 of the LunarG Linux x86_64 SDK archive.
+    default: '197962f5cbf80baf2775a03336a01cee7c8745686c65aaa70d3f751ade4d7e43'
+
+# Normally about 40s. Every caller sets `timeout-minutes: 15`. Linux apt
+# retries take at most ~7 min, the download at most 5 min, and extraction 90s.
 runs:
   using: composite
   steps:
@@ -17,20 +26,38 @@ runs:
         apt_retry() {
           local attempt
           for attempt in 1 2 3; do
-            sudo timeout --kill-after=10 90 apt-get \
+            sudo timeout --kill-after=5 60 apt-get \
               -o Acquire::Retries=3 -o Acquire::http::Timeout=30 "$@" && return 0
             echo "apt-get $* failed or timed out (attempt $attempt of 3)" >&2
-            sleep 10
+            if [ "$attempt" -lt 3 ]; then sleep 10; fi
           done
           return 1
         }
         apt_retry update
         apt_retry install -y glslc libvulkan-dev
 
-    # Pinned, not `latest`: a new SDK would otherwise change the headers every
-    # Vulkan build compiles against (bazel.yml stages them for //:llama_vulkan)
-    # with no commit to point at. Bump it deliberately.
+    # Cache the compressed archive; the extracted SDK occupies several GB.
+    # There is no fallback key: an SDK version/checksum change must miss.
+    - name: Cache Linux Vulkan SDK archive
+      if: runner.os == 'Linux' && runner.arch == 'X64'
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ runner.temp }}/xybrid-vulkan/vulkansdk-${{ inputs.vulkan-version }}.tar.xz
+        key: vulkan-sdk-archive-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.vulkan-version }}-${{ inputs.linux-sha256 }}
+
+    # downloadTool in the upstream action can stall until the caller's entire
+    # step times out. Bound and retry cold downloads, and verify cache hits too.
+    - name: Install Linux Vulkan SDK
+      if: runner.os == 'Linux' && runner.arch == 'X64'
+      shell: bash
+      env:
+        SDK_VERSION: ${{ inputs.vulkan-version }}
+        SDK_SHA256: ${{ inputs.linux-sha256 }}
+        SDK_DIRECTORY: ${{ runner.temp }}/xybrid-vulkan
+      run: bash "$GITHUB_WORKSPACE/tools/scripts/install-vulkan-sdk-linux.sh" "$SDK_VERSION" "$SDK_SHA256" "$SDK_DIRECTORY"
+
     - name: Install Vulkan SDK
+      if: runner.os != 'Linux' || runner.arch != 'X64'
       uses: jakoch/install-vulkan-sdk-action@37effcfa045411f8bfbbda26df2fd1b3bf3436fa # v1.6.0
       with:
-        vulkan_version: 1.4.363.0
+        vulkan_version: ${{ inputs.vulkan-version }}

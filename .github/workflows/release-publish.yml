@@ -24,8 +24,8 @@ name: Release Publish
 #   3. Verifies the published tag's Package.swift checksum matches the
 #      now-public xcframework zip (sanity belt).
 #   4. Publishes the language packages: crates.io and Maven Central run on
-#      either trigger, and npm (React Native) too once NPM_PUBLISH_ENABLED is
-#      set. pub.dev (publish-flutter) only runs on
+#      either trigger, and npm packages once NPM_PUBLISH_ENABLED (React Native)
+#      or NPM_WEB_PUBLISH_ENABLED (Web) is set. pub.dev (publish-flutter) only runs on
 #      workflow_dispatch-from-tag — pub.dev's OIDC binding rejects
 #      pull_request / branch-ref tokens — so on the merge path
 #      dispatch-flutter-publish re-fires this workflow against the new tag
@@ -545,6 +545,80 @@ jobs:
           DIST_TAG=latest
           case "$VERSION" in *-*) DIST_TAG=next ;; esac
           npm stage publish --provenance --access public --tag "$DIST_TAG"
+
+  # =========================================================================
+  # Stage @xybrid/web using the exact archive built and tested by release-prep.
+  # Separate opt-in and stage-only token let its first-publish/trusted-publisher
+  # setup happen independently of React Native. See bindings/web/RELEASING.md.
+  # =========================================================================
+  publish-web-npm:
+    name: Publish Web SDK (npm)
+    if: ${{ vars.NPM_WEB_PUBLISH_ENABLED == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.flutter_only) }}
+    needs: [publish-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # npm trusted publishing + provenance
+    defaults:
+      run:
+        working-directory: bindings/web
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.publish-release.outputs.tag }}
+
+      - name: Use Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm
+        run: npm install -g npm@11
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.2.2 --activate
+
+      - name: Install package verification tools
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the tested web release package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.publish-release.outputs.tag }}
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "xybrid-web-${VERSION}.tgz*" --dir "$RUNNER_TEMP/xybrid-web-npm"
+
+      - name: Verify release archive checksum
+        working-directory: ${{ runner.temp }}/xybrid-web-npm
+        env:
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: sha256sum --check "xybrid-web-${VERSION}.tgz.sha256"
+
+      - name: Verify the release archive contents and version
+        env:
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: node scripts/check-pack.mjs "$RUNNER_TEMP/xybrid-web-npm/xybrid-web-${VERSION}.tgz"
+
+      - name: Stage Web SDK for npm approval
+        env:
+          VERSION: ${{ needs.publish-release.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_WEB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+          if npm view "@xybrid/web@${VERSION}" version >/dev/null 2>&1; then
+            echo "::notice::@xybrid/web@${VERSION} is already on npm — skipping."
+            exit 0
+          fi
+          DIST_TAG=latest
+          case "$VERSION" in *-*) DIST_TAG=next ;; esac
+          npm stage publish "$RUNNER_TEMP/xybrid-web-npm/xybrid-web-${VERSION}.tgz" \
+            --ignore-scripts --provenance --access public --tag "$DIST_TAG"
 
   # =========================================================================
   # Update the legacy `swift` branch with the URL-based Package.swift.

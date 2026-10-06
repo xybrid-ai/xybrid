@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -289,6 +290,94 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn(OLD, (self.root / update.SYS / "build.rs").read_text())
         self.assertIn(f"llama_commit {OLD}", (self.root / update.SYS / "natives-manifest.txt").read_text())
 
+    def assert_real_shallow_update(self, initialized: bool):
+        candidate = self.discover()
+        with tempfile.TemporaryDirectory() as directory:
+            upstream = Path(directory).resolve()
+
+            def git(*args):
+                return REAL_RUN(["git", *args], upstream, stderr=subprocess.DEVNULL)
+
+            git("init", "--quiet", "--initial-branch=master")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Test")
+            source = upstream / "source.cpp"
+            source.write_text("// old\n")
+            git("add", ".")
+            git("commit", "--quiet", "-m", "old")
+            old = git("rev-parse", "HEAD")
+            source.write_text("// stable\n")
+            git("commit", "--quiet", "-am", "stable")
+            new = git("rev-parse", "HEAD")
+            git("tag", "--annotate", "v0.5.0", "--message", "stable release")
+            # The initial depth-one clone must not already contain the tagged
+            # candidate; fetching it can otherwise skip the tag-backfill path.
+            source.write_text("// development\n")
+            git("commit", "--quiet", "-am", "development")
+            self.write(".gitmodules", '[submodule "vendor/llama-cpp"]\n'
+                       '\tpath = vendor/llama-cpp\n'
+                       f'\turl = {upstream.as_uri()}\n\tshallow = true\n')
+            state = update.pin(self.root)
+            state["commit"] = old
+            self.write(str(update.SYS / "build.rs"), f'const LLAMA_CPP_COMMIT: &str = "{old}";\n')
+            self.write(str(update.TRACKING), json.dumps(state))
+            self.git("update-index", "--cacheinfo", f"160000,{old},{update.VENDOR}")
+            self.git("add", ".gitmodules", str(update.SYS / "build.rs"), str(update.TRACKING))
+            self.git("commit", "--quiet", "-m", "real submodule fixture")
+            candidate.update(commit=new, previous_commit=old)
+            vendor = self.root / update.VENDOR
+            with patch.object(update, "run", REAL_RUN), patch.dict(os.environ, {"GIT_ALLOW_PROTOCOL": "file"}):
+                if initialized:
+                    REAL_RUN(["git", "submodule", "update", "--init", "--depth", "1", "--", str(update.VENDOR)], self.root)
+                    REAL_RUN(["git", "config", "remote.origin.tagOpt", "--tags"], vendor)
+                update.apply(self.root, candidate)
+                self.assertEqual(REAL_RUN(["git", "rev-parse", "HEAD"], vendor), new)
+                self.assertEqual(REAL_RUN(["git", "rev-parse", "--is-shallow-repository"], vendor), "true")
+                self.assertEqual(REAL_RUN(["git", "tag", "--list"], vendor), "")
+                self.assertEqual(update.pin(self.root)["commit"], new)
+
+    def test_apply_advances_a_fresh_shallow_submodule_without_fetching_tags(self):
+        self.assert_real_shallow_update(initialized=False)
+
+    def test_apply_advances_an_initialized_shallow_submodule_without_fetching_tags(self):
+        self.assert_real_shallow_update(initialized=True)
+
+    def test_shallow_fetch_race_is_retried(self):
+        failure = subprocess.CalledProcessError(128, ["git", "fetch"],
+                                               output="fatal: shallow file has changed since we read it\n")
+        with patch.object(update, "run", side_effect=[failure, ""]) as fetch, patch("sys.stderr"):
+            update.fetch_commit(self.root / update.VENDOR, NEW)
+        self.assertEqual(fetch.call_count, 2)
+
+    def test_shallow_fetch_race_exhaustion_preserves_source_pins(self):
+        candidate = self.discover()
+        before = update.pin(self.root)
+        attempts = []
+
+        def commands(args, root=self.root, **kwargs):
+            if args[:3] == ["git", "submodule", "update"]:
+                return ""
+            if args[:2] == ["git", "fetch"]:
+                attempts.append(args)
+                raise subprocess.CalledProcessError(128, args,
+                                                    output="fatal: shallow file has changed since we read it\n")
+            return self.fake_run(args, root, **kwargs)
+
+        with patch.object(update, "run", side_effect=commands), patch("sys.stderr"):
+            with self.assertRaises(subprocess.CalledProcessError):
+                update.apply(self.root, candidate)
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(update.pin(self.root), before)
+        self.assertNotIn(NEW, (self.root / "CHANGELOG.md").read_text())
+
+    def test_other_fetch_errors_are_not_retried(self):
+        failure = subprocess.CalledProcessError(128, ["git", "fetch"],
+                                               output="fatal: could not read from remote repository\n")
+        with patch.object(update, "run", side_effect=failure) as fetch, patch("sys.stderr"):
+            with self.assertRaises(subprocess.CalledProcessError):
+                update.fetch_commit(self.root / update.VENDOR, NEW)
+        self.assertEqual(fetch.call_count, 1)
+
     def test_stale_candidate_is_rejected_before_fetching(self):
         candidate = self.discover()
         candidate["previous_commit"] = NEW
@@ -430,6 +519,16 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("Existing change.", text)
         self.assertIn(f"commit `{NEW}`", text)
         self.assertIn("## [0.10.1]", text)
+
+    def test_repository_changelogs_support_intake_and_release_preparation(self):
+        for filename in ("CHANGELOG.md", "bindings/flutter/CHANGELOG.md"):
+            self.write(filename, (SCRIPT.parents[2] / filename).read_text())
+        candidate = self.discover()
+        update.add_changelog(self.root, candidate)
+        update.promote_changelogs(self.root, "0.11.0")
+        text = (self.root / "CHANGELOG.md").read_text()
+        self.assertLess(text.index("## [0.11.0]"), text.index(f"commit `{NEW}`"))
+        self.assertIn("## 0.11.0\n", (self.root / "bindings/flutter/CHANGELOG.md").read_text())
 
     def test_internal_path_constraints_update_without_touching_external_deps(self):
         self.write("examples/demo/Cargo.toml", '[dependencies]\n'

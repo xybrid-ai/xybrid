@@ -1,17 +1,28 @@
 import { spawnSync } from "node:child_process";
 import { cp, mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import ky from "ky";
 import { MODEL } from "../model.ts";
 
 const packageDirectory = new URL("../../", import.meta.url);
-if (!(await Bun.file(new URL("dist/index.js", packageDirectory)).exists())) {
+// Release/CI browser tests serve the extracted npm tarball, including its worker.
+const packedPackage = process.env["XYBRID_WEB_PACKAGE"];
+const sdkDirectory =
+  packedPackage === undefined
+    ? new URL("dist/", packageDirectory)
+    : resolve(fileURLToPath(packageDirectory), packedPackage, "dist");
+if (
+  packedPackage === undefined &&
+  !(await Bun.file(new URL("dist/index.js", packageDirectory)).exists())
+) {
   const build = spawnSync("pnpm", ["build"], { cwd: packageDirectory, stdio: "inherit" });
   if (build.error !== undefined) throw build.error;
   if (build.status !== 0) throw new Error(`SDK build failed (${build.status}).`);
 }
 const publicDirectory = new URL("../public/", import.meta.url);
 await mkdir(publicDirectory, { recursive: true });
-await cp(new URL("dist/", packageDirectory), new URL("sdk/", publicDirectory), { recursive: true });
+await cp(sdkDirectory, new URL("sdk/", publicDirectory), { recursive: true });
 const verified = (bytes: Uint8Array): boolean =>
   bytes.byteLength === MODEL.bytes &&
   new Bun.CryptoHasher("sha256").update(bytes).digest("hex") === MODEL.sha256;
