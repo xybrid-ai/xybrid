@@ -10,6 +10,11 @@ and linker metadata.
 | Android ARM64 | Android API 29+ |
 | Linux x86_64 | x86-64-v3 CPU, glibc 2.28+ |
 
-This directory currently contains only binary pins. Downloading, Rust bindings,
-and native linking will be added during integration. Model weights are supplied
-separately.
+Privately stage a pinned slice before native builds with
+`python3 tools/scripts/zzz_pull.py --target <target>` from the repository root;
+see `--help` for authentication, offline archives and staged verification.
+The tool prints the verified slice path for `XYBRID_ZZZ_PREBUILT_DIR`. Keep its
+archives, receipts and staging directories private.
+
+Rust bindings and native linking will be added during integration. Model
+weights are supplied separately.
