@@ -7,8 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.11.0] - 2026-10-06
+
+The browser SDK now runs Xybrid's own Rust llama.cpp path compiled to
+WebAssembly, replacing the LiteRT preview, and ships with each GitHub Release.
+Speculative loads ask the registry before serving from the cloud, early stops
+in llama.cpp runs report as stops, and every SDK reports its own name to the
+registry and telemetry. Unity on Android can load models.
+
+This release breaks the `@xybrid/web` preview API (`XybridModel` and LiteRT
+models are gone) and renames two `xybrid-ffi-facade` conversions in Rust. The
+foreign binding APIs are unchanged.
+
 ### Added
 
+- **The browser SDK runs GGUF models through Xybrid's Rust runtime.**
+  `@xybrid/web` compiles the existing `xybrid-llama` wrappers and the pinned
+  llama.cpp to WebAssembly, with a CPU/WASM SIMD build and an experimental
+  WebGPU build that needs `shader-f16`. `XybridLlm` loads a GGUF from a URL,
+  the registry or Hugging Face with integrity checks, streams tokens in a
+  worker, cancels generation, enforces the context limit and reports memory
+  and speed. The gzipped runtime is about 1.1 MiB (CPU) or 1.5 MiB (WebGPU),
+  plus the model. CI builds both runtimes and runs real GGUF generation in
+  Chromium; WebGPU generation has not been verified on GPU hardware yet.
+- **ONNX choice-scoring primitives in `xybrid-core`.** `OnnxChoiceScorer`
+  scores a closed list of candidates against one context without generating
+  text, from a `ChoiceScorerSpec`. It matches the PyTorch reference for the
+  CUA-S1-FORMS fixtures within 2e-5 in logits on macOS and Linux. No SDK entry
+  point runs a scorer yet.
 - **Web SDK release packaging.** Releases include `@xybrid/web` as an npm
   archive with its ESM client, declarations, worker, CPU/WASM SIMD and
   experimental WebGPU runtimes. Preparation checks the actual archive in an
@@ -24,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking (`@xybrid/web`):** the LiteRT runtime and the tensor
+  `XybridModel` API are removed. Use `XybridLlm` with GGUF models and `Gguf`
+  metadata instead of `.litertlm` / `LiteRtLm`. `wasmPath` now defaults to
+  `/xybrid/runtime`. Registry and Hugging Face loading, streaming, generation
+  options, load cancellation and typed errors keep their shape.
 - **A speculative load asks the registry before serving from the cloud.**
   When speculation is on and the model is not cached, the load now resolves
   the model first and serves it from the gateway only if the registry
@@ -105,10 +142,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`SdkConfig::with_binding()` and `SdkConfig::binding()`.** No API reads a
   config's binding, so they never changed what requests report. Use
   `xybrid_sdk::set_binding` or `xybrid_sdk::init().binding()`.
-
-### Planned
-
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
 
 ---
 

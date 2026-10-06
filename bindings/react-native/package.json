@@ -1,6 +1,6 @@
 {
   "name": "@xybrid/react-native",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "On-device (and optionally cloud) ML inference for React Native: LLM, ASR, TTS, embeddings and vision, backed by the Xybrid Rust SDK",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",

@@ -1,6 +1,6 @@
 {
   "name": "@xybrid/web",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "type": "module",
   "description": "Browser GGUF inference using Xybrid's Rust runtime and llama.cpp, with WASM SIMD and WebGPU.",
   "main": "./dist/index.js",
