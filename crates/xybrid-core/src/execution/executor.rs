@@ -337,6 +337,11 @@ impl TemplateExecutor {
             "whispercpp".to_string(),
             Box::new(crate::runtime_adapter::WhisperCppRuntime::new()),
         );
+        #[cfg(feature = "tts-zzz")]
+        runtimes.insert(
+            "zzz".to_string(),
+            Box::new(crate::runtime_adapter::zzz::ZzzKittenRuntime::new()),
+        );
         runtimes
     }
 
@@ -830,6 +835,22 @@ impl TemplateExecutor {
             ExecutionTemplate::GgmlWhisper { .. } => {
                 return Err(AdapterError::RuntimeError(
                     "GGML Whisper execution requires the 'asr-whispercpp' feature".to_string(),
+                ));
+            }
+            #[cfg(feature = "tts-zzz")]
+            ExecutionTemplate::ZzzEmbed { .. } => {
+                // The four asset paths are bundle-declared and resolved
+                // inside execute_zzz (which has base_path and the whole
+                // template in scope), so this arm never reaches the generic
+                // single-model flow below.
+                return self.execute_zzz(metadata, input);
+            }
+            #[cfg(not(feature = "tts-zzz"))]
+            ExecutionTemplate::ZzzEmbed { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "zzz execution requires the 'tts-zzz' feature and its \
+                     privately staged pinned engine slice"
+                        .to_string(),
                 ));
             }
         };
@@ -3025,6 +3046,88 @@ impl TemplateExecutor {
             ndarray::Array1::from_vec(audio).into_dyn(),
         );
         self.run_postprocessing(metadata, RawOutputs::TensorMap(outputs))
+    }
+
+    /// zzz CPU engine execution (Kitten TTS 2), dispatched directly from the
+    /// `ZzzEmbed` template arm — like GGUF executions, it bypasses the generic
+    /// single-model flow (no phonemize preprocessing, ONNX chunking does not
+    /// apply, and audio envelopes are built by the runtime itself).
+    ///
+    /// The session lives on the `zzz` runtime registered in
+    /// [`Self::default_runtimes`]; paths resolve against `base_path` here.
+    #[cfg(feature = "tts-zzz")]
+    fn execute_zzz(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+    ) -> ExecutorResult<Envelope> {
+        let ExecutionTemplate::ZzzEmbed {
+            model_file,
+            decoder_file,
+            language_voice_file,
+            decoder_voice_file,
+            language,
+            threads,
+            max_tokens,
+            seed,
+        } = &metadata.execution_template
+        else {
+            return Err(AdapterError::RuntimeError(
+                "execute_zzz requires a ZzzEmbed template".to_string(),
+            ));
+        };
+        crate::runtime_adapter::zzz::assert_engine_abi()?;
+        let resolve = |file: &String| Path::new(&self.base_path).join(file).to_path_buf();
+        // Primary language GGUF resolves from the template's model_file;
+        // `ModelRuntime::load` receives the same path the dispatcher
+        // computed, keeping session identity consistent with other runtimes.
+        let primary = resolve(model_file);
+        let defaults = crate::runtime_adapter::zzz::ZzzDefaults {
+            language_model: primary.clone(),
+            decoder_model: resolve(decoder_file),
+            language_voice: resolve(language_voice_file),
+            decoder_voice: resolve(decoder_voice_file),
+            language: language.clone(),
+            settings: xybrid_zzz_sys::KittenSettings {
+                threads: *threads,
+                max_tokens: *max_tokens,
+                seed: *seed,
+            },
+            // The bundle's chunk budget rides along so the runtime can
+            // chunk without template access.
+            max_chunk_chars: metadata.max_chunk_chars,
+        };
+        {
+            let runtime = self.runtimes.get_mut("zzz").ok_or_else(|| {
+                AdapterError::RuntimeError(
+                    "zzz runtime not configured; enable the 'tts-zzz' feature".to_string(),
+                )
+            })?;
+            let Some(engine) = runtime
+                .as_any()
+                .downcast_ref::<crate::runtime_adapter::zzz::ZzzKittenRuntime>()
+            else {
+                return Err(AdapterError::RuntimeError(
+                    "Runtime 'zzz' is not ZzzKittenRuntime".to_string(),
+                ));
+            };
+            engine.apply_defaults(defaults);
+
+            // Loading mutability requires `&mut dyn ModelRuntime`; borrow the
+            // entry again mutable (the immutable downcast above finished).
+            let runtime = self
+                .runtimes
+                .get_mut("zzz")
+                .expect("zzz runtime was present above");
+            runtime
+                .load(&primary)
+                .map_err(|error| AdapterError::RuntimeError(format!("Load failed: {error}")))?;
+            let result = runtime
+                .execute(input)
+                .map_err(|e| AdapterError::RuntimeError(format!("zzz execute failed: {e}")))?;
+            debug!(target: "xybrid_core", "zzz execution complete");
+            Ok(result)
+        }
     }
 
     /// Synthesize one TTS chunk to a trimmed f32 waveform: build the chunk

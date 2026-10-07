@@ -100,6 +100,12 @@ platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "coreml"
 # Desktop (Linux/Windows): CPU with llama.cpp
 platform-desktop = ["xybrid-core/ort-download", "llm-llamacpp-vision", "asr-whispercpp"]
 
+# Kitten TTS 2 via the pinned zzz engine is intentionally NOT in any
+# platform-* preset yet: the native slice is only published for
+# (macos-arm64 | android-arm64 | linux-x86_64), so enabling it in presets
+# would fail Windows/iOS SDK builds. Enable explicitly, per target, until
+# the native CI fetch step gates it.
+
 # INDIVIDUAL FEATURE FORWARDING (for custom builds)
 
 # ONNX Runtime Execution Providers
@@ -125,6 +131,10 @@ llm-llamacpp = ["xybrid-core/llm-llamacpp"]
 # In every `platform-*` preset above; kept as a standalone forwarder so
 # tools/scripts/measure-binary-size.sh can build the with/without delta.
 asr-whispercpp = ["xybrid-core/asr-whispercpp"]
+
+# Kitten TTS 2 via the pinned zzz engine slice. Per-target: enabled builds
+# fail on targets whose slice is not pinned (Windows, iOS).
+tts-zzz = ["xybrid-core/tts-zzz"]
 llm-llamacpp-vision = ["llm-llamacpp", "xybrid-core/llm-llamacpp-vision"]
 
 # Dev-tools (test seams for demos and integration tests)
