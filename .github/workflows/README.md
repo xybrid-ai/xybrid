@@ -11,11 +11,14 @@ which ones depend on each other.
 decisions to keep.
 
 - **Display name** is `"Group: Subject"`, quoted, with a group from the
-  inventory below. Groups sort together in the Actions sidebar.
-- **Purpose**: the line directly above `name:` is `# Purpose: <one sentence>`.
-  It becomes the Purpose column.
-- **Concurrency groups are literal**: `<file-stem>-${{ github.ref }}`, never
-  `${{ github.workflow }}`. The display name can then change without changing
+  inventory below. Groups sort together in the Actions sidebar. A dispatch-only
+  workflow ends its Subject with `(manual)`.
+- **Purpose**: the line directly above `name:` is `# Purpose: <one sentence>`,
+  starting `Manual:` for a dispatch-only workflow. It becomes the Purpose column.
+- **Concurrency groups are literal** and start with the file stem:
+  `<file-stem>-${{ github.ref }}`, the tag or issue number for event-driven
+  workflows, or the bare stem when every run must queue behind the last. Never
+  `${{ github.workflow }}`: the display name can then change without changing
   the group.
 - **Rename files rarely.** GitHub ties run history and code-scanning
   configurations to the file path (CodeQL is

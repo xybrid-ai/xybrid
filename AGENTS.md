@@ -491,20 +491,32 @@ The map of every workflow is
 [`.github/workflows/README.md`](.github/workflows/README.md). Its inventory table
 is generated from the workflow files, and these rules keep it true:
 
-- **Display name** is `"Group: Subject"` (quoted), and the line directly above
-  `name:` is `# Purpose: <one sentence>`. **Concurrency groups** are literal
-  (`<file-stem>-${{ github.ref }}`), never `${{ github.workflow }}`, so a display
-  name can change without changing the group. After touching any workflow, run
-  `python3 tools/scripts/gen_workflow_index.py` to refresh the table. CI runs it
-  with `--check` (job `Workflow index`) and fails on drift, or on a new workflow
-  that breaks these rules.
+- **Display name** is `"Group: Subject"` (quoted). Group is one of `CI`, `SDK`,
+  `Artifacts`, `Release`, `Security`, `Maintenance`, `Community`; `GROUPS` in
+  `tools/scripts/gen_workflow_index.py` is the source of truth and says what
+  each holds. A dispatch-only workflow ends its Subject with `(manual)`. Docs
+  that cite a display name change with it, so `git grep` the old name.
+- **Purpose** is the line directly above `name:`: `# Purpose: <one sentence>`,
+  starting `Manual:` for a dispatch-only workflow. Keep it true when triggers
+  change; a schedule edit can make "weekly" wrong.
+- **Concurrency groups** start with the file stem, never `${{ github.workflow }}`,
+  so a display name can change without changing the group. Use
+  `<file-stem>-${{ github.ref }}`, key on the tag or issue number for
+  event-driven workflows, or use the bare `<file-stem>` when every run must
+  queue behind the last (`llamacpp-update.yml`, `star-history.yml`).
+- **Regenerate the map.** After touching any workflow, run
+  `python3 tools/scripts/gen_workflow_index.py`. CI runs it with `--check` (job
+  `Workflow index`) and fails on drift or a broken rule. A rebase can bring in
+  master workflows written without these rules; fix them on your branch.
 - **Rename workflow files rarely.** GitHub ties run history and code-scanning
   configurations (CodeQL `codeql.yml:analyze`, Scorecard `scorecard.yml:analysis`)
   to the path, and `release-publish.yml` and the docs call
   `gh workflow run <file>`. Change `name:` instead.
-- **Job names are the required checks.** `CI Success` (`ci.yml` and `ci-docs.yml`)
-  and `Bazel graph + RBE targets` (`bazel.yml`) gate `master`, matched by job
-  name. Edit a workflow's `name:` freely; never those job names.
+- **Job names are matched as checks; never rename them.** `CI Success`
+  (`ci.yml` and `ci-docs.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
+  gate `master` through branch protection. `tools/scripts/llamacpp_update.py`
+  also waits on job names (`REQUIRED_CHECKS`, `AUTOMATION_CHECKS`) before it
+  cuts a llama.cpp release. Edit a workflow's `name:` freely.
 
 ---
 
