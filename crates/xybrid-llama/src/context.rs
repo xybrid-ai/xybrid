@@ -13,14 +13,49 @@
 //! `&self` — must serialize through a [`std::sync::Mutex`].
 
 use std::ffi::c_void;
+use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{LlamaError, LlamaResult};
 use crate::ffi;
 use crate::model::LlamaModel;
 
+/// Source of [`LlamaContext::id`]: identifies the context a snapshot came
+/// from without trusting a pointer that could be reused after a free.
+static NEXT_CONTEXT_ID: AtomicU64 = AtomicU64::new(0);
+
 /// Opaque handle to a llama.cpp inference context.
 pub struct LlamaContext {
     ptr: *mut c_void,
+    id: u64,
+}
+
+/// A saved copy of one sequence's state, from
+/// [`LlamaContext::state_seq_save`].
+///
+/// Opaque on purpose. llama.cpp does not validate snapshot bytes, and a
+/// damaged snapshot or one from another model can hit one of its asserts
+/// and abort the process, so a snapshot can only be restored into the
+/// context that saved it.
+pub struct LlamaSeqSnapshot {
+    context_id: u64,
+    bytes: Vec<u8>,
+}
+
+impl LlamaSeqSnapshot {
+    /// Size of the saved state in bytes.
+    pub fn size_bytes(&self) -> usize {
+        self.bytes.len()
+    }
+}
+
+impl fmt::Debug for LlamaSeqSnapshot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LlamaSeqSnapshot")
+            .field("context_id", &self.context_id)
+            .field("size_bytes", &self.bytes.len())
+            .finish()
+    }
 }
 
 impl LlamaContext {
@@ -52,7 +87,10 @@ impl LlamaContext {
                 "llama_new_context_with_model returned null (n_ctx={n_ctx}, n_threads={n_threads}, n_batch={n_batch}, flash_attn={flash_attn})"
             )));
         }
-        Ok(Self { ptr })
+        Ok(Self {
+            ptr,
+            id: NEXT_CONTEXT_ID.fetch_add(1, Ordering::Relaxed),
+        })
     }
 
     /// Raw pointer for the in-crate generation paths.
@@ -92,6 +130,90 @@ impl LlamaContext {
     pub fn kv_cache_seq_rm(&self, seq_id: i32, p_keep: usize) {
         // SAFETY: self.ptr is a live context pointer.
         unsafe { ffi::kv_cache_seq_rm(self.ptr, seq_id, p_keep) };
+    }
+
+    /// Snapshot the full state of `seq_id`: its KV cache and, on
+    /// recurrent / hybrid models, its recurrent state.
+    ///
+    /// This is the prefix-reuse path that also works where
+    /// [`Self::kv_cache_seq_rm`] cannot (see
+    /// [`LlamaModel::has_recurrent_state`]): prefill a shared prefix
+    /// (system prompt, tool definitions) once and save it, then before each
+    /// request [`Self::state_seq_restore`] it and prefill only the new tail
+    /// via [`crate::generate_streaming`] with `n_past_in` = the prefix
+    /// length. The snapshot can only be restored into this context, and
+    /// holds a full copy of the sequence's state.
+    ///
+    /// Do not call this from a generation callback on the same context.
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::Internal`] if `seq_id` is not one of this context's
+    /// sequences (`0` for contexts from [`Self::new`]), the snapshot buffer
+    /// cannot be allocated, or llama.cpp fails to serialize the sequence.
+    pub fn state_seq_save(&self, seq_id: i32) -> LlamaResult<LlamaSeqSnapshot> {
+        // SAFETY: self.ptr is a live context pointer; the shim rejects a
+        // seq_id outside this context's sequences.
+        let size = unsafe { ffi::state_seq_get_size(self.ptr, seq_id) };
+        if size == 0 {
+            return Err(LlamaError::Internal(format!(
+                "llama_state_seq_get_size failed for seq_id {seq_id} \
+                 (not a sequence of this context, or not serializable)"
+            )));
+        }
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(size).map_err(|e| {
+            LlamaError::Internal(format!("cannot allocate a {size}-byte snapshot: {e}"))
+        })?;
+        bytes.resize(size, 0);
+        // SAFETY: self.ptr is a live context pointer; the buffer is sized
+        // by llama.cpp's own probe above.
+        let written = unsafe { ffi::state_seq_get_data(self.ptr, &mut bytes, seq_id) };
+        if written == 0 {
+            return Err(LlamaError::Internal(format!(
+                "llama_state_seq_get_data failed for seq_id {seq_id}"
+            )));
+        }
+        bytes.truncate(written);
+        Ok(LlamaSeqSnapshot {
+            context_id: self.id,
+            bytes,
+        })
+    }
+
+    /// Restore a snapshot from [`Self::state_seq_save`] into `seq_id`,
+    /// replacing whatever that sequence held.
+    ///
+    /// Only the cache comes back, not the logits, so the next call must
+    /// decode a non-empty tail ([`crate::generate_streaming`] with
+    /// `n_past_in` = the snapshot's length) rather than sample from the
+    /// current logits. Do not call this from a generation callback on the
+    /// same context.
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::InvalidInput`] if `snapshot` was saved by another
+    /// context; [`LlamaError::Internal`] if `seq_id` is not one of this
+    /// context's sequences or llama.cpp fails to load the snapshot (for
+    /// example, an allocation failure inside it). A failed load leaves
+    /// `seq_id` empty, so it can be prefilled again from position 0.
+    pub fn state_seq_restore(&self, snapshot: &LlamaSeqSnapshot, seq_id: i32) -> LlamaResult<()> {
+        if snapshot.context_id != self.id {
+            return Err(LlamaError::InvalidInput(
+                "state_seq_restore: the snapshot was saved by another context".to_string(),
+            ));
+        }
+        // SAFETY: self.ptr is a live context pointer; the bytes are an
+        // unmodified llama.cpp snapshot of this context, and the shim
+        // rejects a seq_id outside this context's sequences.
+        let read = unsafe { ffi::state_seq_set_data(self.ptr, &snapshot.bytes, seq_id) };
+        if read == 0 {
+            return Err(LlamaError::Internal(format!(
+                "llama_state_seq_set_data rejected a {}-byte snapshot for seq_id {seq_id}",
+                snapshot.bytes.len()
+            )));
+        }
+        Ok(())
     }
 }
 

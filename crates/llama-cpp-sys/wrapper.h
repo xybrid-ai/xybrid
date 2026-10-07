@@ -75,6 +75,14 @@ void  llama_free_c(XYBRID_LLAMA_CONTEXT* ctx);
 void  llama_kv_cache_clear_c(XYBRID_LLAMA_CONTEXT* ctx);
 int   llama_kv_cache_seq_rm_c(XYBRID_LLAMA_CONTEXT* ctx, int seq_id, int p_keep);
 
+/* Per-sequence state snapshots (KV cache plus recurrent state). Each returns
+   a byte count; 0 means failure, including a seq_id outside
+   [0, n_seq_max). A failed set leaves the sequence empty. Only pass set
+   bytes from get_data on the same model: llama.cpp does not validate them. */
+size_t llama_state_seq_get_size_c(XYBRID_LLAMA_CONTEXT* ctx, int seq_id);
+size_t llama_state_seq_get_data_c(XYBRID_LLAMA_CONTEXT* ctx, uint8_t* dst, size_t size, int seq_id);
+size_t llama_state_seq_set_data_c(XYBRID_LLAMA_CONTEXT* ctx, const uint8_t* src, size_t size, int seq_id);
+
 /* Tokenization */
 int  llama_tokenize_c(
     const XYBRID_LLAMA_MODEL* model,
