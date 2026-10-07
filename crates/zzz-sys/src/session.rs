@@ -136,6 +136,16 @@ pub struct KittenSettings {
     pub seed: u64,
 }
 
+/// One boxed streaming callback (chunk samples + metadata -> continue?).
+/// Explicit `'a` bound: the boxed closure borrows the caller's callback
+/// only for the synchronous call.
+type StreamCallback<'a> = Box<dyn FnMut(&[f32], ChunkInfo) -> bool + 'a>;
+
+/// The owned form the engine receives across the FFI boundary (`'static`
+/// blanket on the alias above is only a decode-level label; the boxed value
+/// always lives in the local synchronous call frame).
+type OwnedStreamCallback = StreamCallback<'static>;
+
 /// One loaded Kitten session. `Drop` closes it exactly once.
 ///
 /// Not `Sync`: the header documents one synthesis at a time per session,
@@ -270,8 +280,7 @@ impl KittenSession {
 
         // Boxed so the trampoline holds one stable heap address for the
         // synchronous call, with no lifetime the C side could outlive.
-        let mut boxed: Box<dyn FnMut(&[f32], ChunkInfo) -> bool> =
-            Box::new(move |samples, info| callback(samples, info));
+        let mut boxed: StreamCallback<'_> = Box::new(move |samples, info| callback(samples, info));
         let mut error = EmbedError::zeroed();
         let mut result = EmbedResult {
             sample_rate: SYNTHESIS_SAMPLE_RATE,
@@ -284,11 +293,18 @@ impl KittenSession {
         // header's contract, which keeps the callback's borrowed samples
         // slice valid until callback return; `text` and `language` are
         // NUL-terminated strings alive for the whole call.
+        // The C pointer must live until the synchronous call ends, so it is
+        // derived from a borrow of the owning `Option<CString>` — not inside
+        // a consuming `map_or` closure, which would drop the `CString` (and
+        // dangle) before the engine ever reads it.
+        let language_ptr = language
+            .as_ref()
+            .map_or(ptr::null(), |lang| lang.as_ptr().cast());
         let code = unsafe {
             zzz_embed_synthesize(
                 self.session.as_ptr(),
                 text.as_ptr().cast(),
-                language.map_or(ptr::null(), |lang| lang.as_ptr().cast()),
+                language_ptr,
                 Some(sample_callback),
                 ptr::addr_of_mut!(boxed).cast(),
                 ptr::addr_of_mut!(result),
@@ -371,7 +387,7 @@ unsafe extern "C" fn sample_callback(
         // the delivery rather than dereference.
         return 1;
     }
-    let boxed: *mut Box<dyn FnMut(&[f32], ChunkInfo) -> bool> = user_data.cast();
+    let boxed: *mut StreamCallback = user_data.cast();
     if boxed.is_null() {
         return 1;
     }

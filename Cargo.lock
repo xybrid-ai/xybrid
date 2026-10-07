@@ -6385,6 +6385,7 @@ dependencies = [
  "xybrid-llama",
  "xybrid-llama-sys",
  "xybrid-whisper",
+ "xybrid-zzz-sys",
  "yuvutils-rs",
  "zstd",
 ]
