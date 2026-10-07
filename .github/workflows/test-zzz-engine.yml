@@ -72,10 +72,12 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
-    # secrets cannot appear in `if:` expressions, so the presence flag rides
-    # an env mirror; every consuming step gates on it.
+    # secrets cannot appear in `if:` expressions, so a presence flag rides
+    # the job env and every consuming step gates on it. The flag is a
+    # boolean, never the token: job env reaches every step, including the
+    # cargo steps that compile and run this change's build scripts and tests.
     env:
-      ZZZ_CI_TOKEN: ${{ secrets.ZZZ_GITHUB_TOKEN }}
+      ZZZ_CI_ENABLED: ${{ secrets.ZZZ_GITHUB_TOKEN != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -101,6 +103,64 @@ jobs:
             native: false
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # The staging step is the only consumer of the private credentials.
+      # Without them (forks, unset secrets) the lane stays green and prints
+      # a notice — the default-build contract, not a silent pass.
+      #
+      # It runs straight after checkout, before the toolchain and any cache
+      # restore: the gh and python3 it calls come from the runner image, not
+      # from a cached ~/.cargo/bin an earlier run of this change could have
+      # written.
+      #
+      # Delivery-file guard: on a same-repo PR the checkout holds the PR's
+      # code, so a change to the delivery tool (or the pins it dereferences)
+      # must not run with the private token while it is being changed. Any
+      # edit to the tool, its tests or the manifest fails the lane before
+      # the token is used; the push to master that lands them runs the lane
+      # against the merged files.
+      #
+      # Scope: this stops an in-flight tool or pin edit from reaching the
+      # token. It is not a boundary against someone who can push a branch to
+      # this repository: they can edit this workflow itself, which is true
+      # of every repository secret here.
+      - name: Guard the delivery tool and pins
+        if: env.ZZZ_CI_ENABLED == 'true'
+        run: |
+          set -euo pipefail
+          # The tree comparison needs master's tip, not its history.
+          git fetch --quiet --depth=1 origin master
+          if ! git diff --exit-code origin/master -- \
+            'tools/scripts/zzz_pull.py' \
+            'tools/scripts/tests/test_zzz_pull.py' \
+            'crates/zzz-sys/natives-manifest.json'; then
+            echo "::error title=zzz delivery files changed::tools/scripts/zzz_pull.py, its tests, or natives-manifest.json differ from master. This lane does not run the private fetch while those files are being edited, on any trigger; land them through review and the push to master runs this lane against them."
+            exit 1
+          fi
+
+      - name: Stage pinned engine slice
+        if: env.ZZZ_CI_ENABLED == 'true'
+        id: stage
+        env:
+          ZZZ_GITHUB_TOKEN: ${{ secrets.ZZZ_GITHUB_TOKEN }}
+          ZZZ_RELEASE_REPOSITORY: ${{ secrets.ZZZ_RELEASE_REPOSITORY }}
+        # -I keeps tools/scripts/ off sys.path: a module added beside the
+        # tool could otherwise shadow the stdlib it imports while the token
+        # is in the environment.
+        run: |
+          set -euo pipefail
+          slice=$(python3 -I tools/scripts/zzz_pull.py --target "${{ matrix.target }}" --cache-dir "$RUNNER_TEMP/zzz-cache" --dest "$RUNNER_TEMP/zzz-staging")
+          echo "slice=$slice" >> "$GITHUB_OUTPUT"
+          test -f "$slice/.pinned-archive.tar.gz"
+          test -f "$slice/RECEIPT.json"
+
+      - name: Verify staged bytes against the committed pin
+        if: steps.stage.outputs.slice != ''
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/zzz_pull.py --target "${{ matrix.target }}" --verify-only
+        env:
+          XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
@@ -139,59 +199,6 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_NDK" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_NDK/aarch64-linux-android29-clang" >> "$GITHUB_ENV"
 
-      # The staging step is the only consumer of the private credentials.
-      # Without them (forks, unset secrets) the lane stays green and prints
-      # a notice — the default-build contract, not a silent pass.
-      #
-      # Delivery-file guard: on a same-repo PR the checkout holds the PR's
-      # code, so a change to the delivery tool (or the pins it dereferences)
-      # must not run with the private token while it is being changed. Any
-      # edit to the tool, its tests or the manifest fails the lane before
-      # the token is used; the push to master that lands them runs the lane
-      # against the merged files.
-      #
-      # Scope: this stops an in-flight tool or pin edit from reaching the
-      # token. It is not a boundary against someone who can push a branch to
-      # this repository: they can edit this workflow itself, which is true
-      # of every repository secret here.
-      - name: Guard the delivery tool and pins
-        if: env.ZZZ_CI_TOKEN != ''
-        run: |
-          set -euo pipefail
-          # The tree comparison needs master's tip, not its history.
-          git fetch --quiet --depth=1 origin master
-          if ! git diff --exit-code origin/master -- \
-            'tools/scripts/zzz_pull.py' \
-            'tools/scripts/tests/test_zzz_pull.py' \
-            'crates/zzz-sys/natives-manifest.json'; then
-            echo "::error title=zzz delivery files changed::tools/scripts/zzz_pull.py, its tests, or natives-manifest.json differ from master. This lane does not run the private fetch while those files are being edited, on any trigger; land them through review and the push to master runs this lane against them."
-            exit 1
-          fi
-
-      - name: Stage pinned engine slice
-        if: env.ZZZ_CI_TOKEN != ''
-        id: stage
-        env:
-          ZZZ_GITHUB_TOKEN: ${{ secrets.ZZZ_GITHUB_TOKEN }}
-          ZZZ_RELEASE_REPOSITORY: ${{ secrets.ZZZ_RELEASE_REPOSITORY }}
-        # -I keeps tools/scripts/ off sys.path: a module added beside the
-        # tool could otherwise shadow the stdlib it imports while the token
-        # is in the environment.
-        run: |
-          set -euo pipefail
-          slice=$(python3 -I tools/scripts/zzz_pull.py --target "${{ matrix.target }}" --cache-dir "$RUNNER_TEMP/zzz-cache" --dest "$RUNNER_TEMP/zzz-staging")
-          echo "slice=$slice" >> "$GITHUB_OUTPUT"
-          test -f "$slice/.pinned-archive.tar.gz"
-          test -f "$slice/RECEIPT.json"
-
-      - name: Verify staged bytes against the committed pin
-        if: steps.stage.outputs.slice != ''
-        run: |
-          set -euo pipefail
-          python3 tools/scripts/zzz_pull.py --target "${{ matrix.target }}" --verify-only
-        env:
-          XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
-
       - name: Link and ABI-test against the pinned slice (native targets)
         if: steps.stage.outputs.slice != '' && matrix.native
         env:
@@ -211,6 +218,6 @@ jobs:
         run: cargo test -p xybrid-core --features tts-zzz --lib zzz
 
       - name: Notice — secrets absent, lane skipped
-        if: env.ZZZ_CI_TOKEN == ''
+        if: env.ZZZ_CI_ENABLED != 'true'
         run: |
           echo "::notice title=zzz engine lane skipped::ZZZ_GITHUB_TOKEN/ZZZ_RELEASE_REPOSITORY not available on this run (fork or unset secrets); the zzz crate stays in its default no-op build, per the private-assets contract."
