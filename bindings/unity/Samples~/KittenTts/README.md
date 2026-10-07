@@ -82,7 +82,7 @@ player minimum accordingly. Inspect the linked plugin rather than deriving its
 minimum from the engine slice. Android's verified slice needs separate device
 validation. This adds no Windows/iOS/Metal Kitten support.
 
-## Install in Xybrid Tavern
+## Install in a Unity project
 
 Close Unity before replacing a loaded plugin. Point `Packages/manifest.json`
 at this checkout's managed package (or a copied `bindings/unity` folder):
@@ -91,8 +91,8 @@ at this checkout's managed package (or a copied `bindings/unity` folder):
 "ai.xybrid.sdk": "file:/absolute/path/to/xybrid/bindings/unity"
 ```
 
-Stage/copy the plugin tree into
-`/Users/glennsonna/Dev/games/Xybrid Tavern/Assets/Xybrid/Plugins`. Remove or park
+Stage/copy the plugin tree into your project's `Assets/Xybrid/Plugins`.
+Remove or park
 old duplicate Xybrid plugins outside `Assets` and the package first; one copy
 must be enabled for the target. Preserve the generated `.meta` files. Write
 `Assets/Xybrid/Plugins/.xybrid-native-macos-version` containing `0.10.1` (the
@@ -101,11 +101,10 @@ resolver then retains the local plugin. Its forced Download menu replaces it
 with release natives, so restage the local plugin/marker afterward if used.
 Do not commit local native binaries or model files.
 
-Stage the two GGUFs from `~/.zzz/models/` and the two prepared Bruno JSONs into a
-readable model directory with the provided metadata. Set `accelerate: true` on
-M1. The game replacement point is
-`Assets/XybridAvatarDemo/Runtime/GatekeeperLiveSpeech.cs`; dialogue, buffering,
-avatar loudness and provider UI remain game-owned.
+Stage the two GGUFs and the two prepared Bruno JSONs into a readable model
+directory with the provided metadata. Set `accelerate: true` on macOS.
+Connect the provider to your application's dialogue and playback code;
+buffering, avatar animation and provider UI remain application-owned.
 
 ## Provider contract
 

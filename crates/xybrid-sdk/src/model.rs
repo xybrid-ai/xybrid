@@ -3103,8 +3103,8 @@ impl ModelLoader {
     }
 
     fn check_streaming_support(metadata: &ModelMetadata) -> bool {
-        if Self::is_llm_template(metadata) || Self::infer_output_type(metadata) == OutputType::Audio
-        {
+        // Speech packets use run_tts_streaming, not the token/ASR stream APIs.
+        if Self::is_llm_template(metadata) {
             return true;
         }
 
@@ -6821,6 +6821,42 @@ mod tests {
             "GGUF LLMs stream tokens and must run abort checks between chunks"
         );
         assert_eq!(ModelLoader::infer_output_type(&metadata), OutputType::Text);
+    }
+
+    #[test]
+    fn tts_models_do_not_advertise_token_or_asr_streaming() {
+        let mut kokoro = ModelMetadata::onnx("kokoro", "1.0", "model.onnx");
+        kokoro
+            .metadata
+            .insert("task".into(), serde_json::json!("text-to-speech"));
+        let mut kitten = kokoro.clone();
+        kitten.execution_template = ExecutionTemplate::ZzzEmbed {
+            model_file: "language.gguf".into(),
+            decoder_file: "decoder.gguf".into(),
+            language_voice_file: "voice.lm.json".into(),
+            decoder_voice_file: "voice.s3.json".into(),
+            language: Some("en".into()),
+            threads: 6,
+            max_tokens: 0,
+            seed: 0,
+            sentence_chunks: true,
+            accelerate: false,
+        };
+        for metadata in [kokoro, kitten] {
+            let directory = tempfile::tempdir().unwrap();
+            std::fs::write(
+                directory.path().join("model_metadata.json"),
+                serde_json::to_vec(&metadata).unwrap(),
+            )
+            .unwrap();
+            let model = ModelLoader::from_directory(directory.path())
+                .unwrap()
+                .load()
+                .unwrap();
+            assert_eq!(model.output_type(), OutputType::Audio);
+            assert!(!model.supports_streaming());
+            assert!(!model.supports_token_streaming());
+        }
     }
 
     #[test]

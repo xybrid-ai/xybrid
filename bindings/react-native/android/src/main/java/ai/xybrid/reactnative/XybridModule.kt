@@ -429,9 +429,12 @@ class XybridModule(reactContext: ReactApplicationContext) : NativeXybridSpec(rea
             handles.dispose(stream)
             mapOf("kind" to "complete", "result" to XybridCodec.encodeResult(result))
           }
+          XybridStreamEventKind.AUDIO -> throw BridgeException.InvalidArgument(
+            "Token streams cannot deliver audio; use run for batch speech"
+          )
         }
       } catch (t: Throwable) {
-        // A failed pull already closed the bolt session.
+        // Dispose also aborts a stream rejected for an unsupported event.
         handles.dispose(stream)
         throw cancellationAware(t, s.cancel)
       }
