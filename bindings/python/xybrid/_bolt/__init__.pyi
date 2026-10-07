@@ -248,6 +248,16 @@ class XybridStreamToken:
 
 
 @dataclass(frozen=True, slots=True)
+class XybridTtsAudioChunk:
+    """Owned PCM16 LE packet. Offsets count samples per channel."""
+    pcm: bytes
+    sample_rate: int
+    channels: int
+    first_sample: int
+
+
+
+@dataclass(frozen=True, slots=True)
 class XybridStreamEvent:
     """One pull from a streaming inference session.
 
@@ -260,6 +270,7 @@ class XybridStreamEvent:
     """
     kind: XybridStreamEventKind
     token: XybridStreamToken | None
+    audio: XybridTtsAudioChunk | None
 
 
 
@@ -546,6 +557,7 @@ class XybridDownloadState(IntEnum):
 class XybridStreamEventKind(IntEnum):
     TOKEN = 0
     COMPLETE = 1
+    AUDIO = 2
 
 
 class XybridCacheEntryLocation(IntEnum):

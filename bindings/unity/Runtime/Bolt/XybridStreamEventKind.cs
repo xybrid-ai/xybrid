@@ -8,6 +8,7 @@ namespace XybridBolt
     public enum XybridStreamEventKind : int
     {
         Token = 0,
-        Complete = 1
+        Complete = 1,
+        Audio = 2
     }
 }

@@ -75,7 +75,10 @@ fn open_session() -> Option<KittenSession> {
         &decoder_model.0,
         &language_voice.0,
         &decoder_voice.0,
-        KittenSettings::default(),
+        KittenSettings {
+            threads: 6,
+            ..KittenSettings::default()
+        },
     );
     Some(session.expect("opening the verified engine with local assets"))
 }
@@ -105,7 +108,7 @@ fn collected_synthesis_yields_nonsilent_mono_audio() {
         return;
     };
     let outcome = session
-        .synthesize("Hello from zzz.", None)
+        .synthesize("Your name sounds like trouble.", None)
         .expect("synthesis of a short utterance");
     assert_eq!(outcome.result.sample_rate, SYNTHESIS_SAMPLE_RATE);
     assert_eq!(outcome.result.channels, SYNTHESIS_CHANNELS);
@@ -129,7 +132,7 @@ fn streaming_chunks_walk_sample_offsets_in_order() {
     let deliveries: std::sync::Mutex<Vec<(u64, usize)>> = std::sync::Mutex::new(Vec::new());
     let result = session
         .synthesize_stream(
-            "Streaming delivers in bounded chunks.",
+            "The village gate stays closed until you tell me your true business.",
             None,
             &mut |chunk, info| {
                 deliveries
@@ -163,23 +166,22 @@ fn cancellation_stops_delivery_and_reports_cancelled() {
     let Some(mut session) = open_session() else {
         return;
     };
-    let long_text = "One short sentence. ".repeat(20);
+    let long_text = "Tell me your name. Then explain your business. The village gate stays closed until I know who you are and what you want here today.".to_string();
     let deliveries = std::cell::Cell::new(0);
     let error = session
         .synthesize_stream(&long_text, None, &mut |_chunk, _info| {
             deliveries.set(deliveries.get() + 1);
             // Cancel within the first two delivered chunks.
-            deliveries.get() >= 2
+            deliveries.get() < 2
         })
         .expect_err("cancellation must surface as an error");
     assert!(matches!(error, xybrid_zzz_sys::ZzzError::Cancelled { .. }));
     assert!(deliveries.get() >= 1 && deliveries.get() <= 2);
     // The session remains reusable after the cancelled call.
-    let again = session.synthesize("Reuse after cancel.", None);
-    assert!(again.is_ok() || matches!(again, Err(_)), "no panic");
-    if let Ok(outcome) = again {
-        assert!(!outcome.samples.is_empty());
-    }
+    let again = session
+        .synthesize("Your name sounds like trouble.", None)
+        .expect("resident reuse must succeed");
+    assert!(!again.samples.is_empty());
 }
 
 #[test]
@@ -203,7 +205,7 @@ fn bad_asset_paths_fail_with_typed_errors() {
     );
     // And the engine's error storage stays empty-safe; no message leak of
     // private receipt or API values in a type that must not carry any:
-    let mut storage = [xybrid_zzz_sys::EmbedError::zeroed(); 2];
+    let storage = [xybrid_zzz_sys::EmbedError::zeroed(); 2];
     assert_eq!(storage[0].code, ZZZ_EMBED_OK);
     assert!(storage[0].is_ok());
     let bad = xybrid_zzz_sys::EmbedError {
@@ -220,4 +222,88 @@ fn bad_asset_paths_fail_with_typed_errors() {
 /// Helper asserted above without importing every code constant publicly.
 fn zzz_code_matches(codes: &[i32], probe: i32) -> bool {
     codes.contains(&probe)
+}
+
+#[test]
+fn final_callback_cancel_and_idle_cancel_preserve_resident_session() {
+    let Some(mut session) = open_session() else {
+        return;
+    };
+    let cancel = session.cancellation_handle();
+    cancel.cancel(); // native ignores idle requests
+    let baseline = session
+        .synthesize("Your name sounds like trouble.", None)
+        .expect("idle cancellation ignored");
+    let total = baseline.result.samples;
+    let outcome = session
+        .synthesize_stream_outcome(
+            "Your name sounds like trouble.",
+            None,
+            &mut |samples, info| {
+                if info.first_sample + samples.len() as u64 == total {
+                    cancel.cancel();
+                }
+                true
+            },
+        )
+        .expect("native returned an outcome");
+    assert_eq!(outcome.status, xybrid_zzz_sys::SynthesisStatus::Cancelled);
+    assert!(!session
+        .synthesize("Your name sounds like trouble.", None)
+        .expect("reuse after final cancellation")
+        .samples
+        .is_empty());
+    // The cancellation handle owns the lifetime even after the synthesis owner drops.
+    drop(session);
+    cancel.cancel();
+    drop(cancel);
+}
+
+#[test]
+fn explicit_token_limit_retains_native_partial_counters() {
+    let Some(assets) = kitten_assets() else {
+        return;
+    };
+    let mut session = KittenSession::open_kitten(
+        &assets[0].0,
+        &assets[1].0,
+        &assets[2].0,
+        &assets[3].0,
+        KittenSettings {
+            max_tokens: 8,
+            ..KittenSettings::default()
+        },
+    )
+    .expect("open capped session");
+    let mut count = 0;
+    let outcome = session
+        .synthesize_stream_outcome(
+            "This is a much longer sentence than eight speech tokens can express.",
+            None,
+            &mut |samples, _| {
+                count += samples.len();
+                true
+            },
+        )
+        .expect("limited outcome");
+    assert_eq!(outcome.status, xybrid_zzz_sys::SynthesisStatus::Limited);
+    assert!(outcome.result.limited_chunks > 0);
+    assert!(count > 0);
+    assert_eq!(count as u64, outcome.result.samples);
+}
+
+#[test]
+fn callback_panic_is_contained_and_reported_as_failure() {
+    let Some(mut session) = open_session() else {
+        return;
+    };
+    let error = session
+        .synthesize_stream("Your name sounds like trouble.", None, &mut |_, _| {
+            panic!("test callback panic")
+        })
+        .expect_err("panic becomes failure, not successful cancellation");
+    assert!(matches!(
+        error,
+        xybrid_zzz_sys::ZzzError::SynthesisFailed { .. }
+    ));
 }

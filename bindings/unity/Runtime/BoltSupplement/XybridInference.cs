@@ -88,14 +88,22 @@ namespace XybridBolt
         /// </remarks>
         private XybridResult DrainStream(ulong streamId, Action<XybridStreamToken> onToken)
         {
+            using var audio = new System.IO.MemoryStream();
+            bool hasAudio = false;
             try
             {
                 while (true)
                 {
                     XybridStreamEvent streamEvent = StreamNext(streamId);
-                    if (streamEvent.Kind != XybridStreamEventKind.Token)
+                    if (streamEvent.Kind == XybridStreamEventKind.Complete) break;
+                    if (streamEvent.Kind == XybridStreamEventKind.Audio && streamEvent.Audio.HasValue)
                     {
-                        break;
+                        // Preserve the existing non-token fallback's batch audio.
+                        // Live playback uses the public RunTtsStreaming API.
+                        var pcm = streamEvent.Audio.Value.Pcm;
+                        audio.Write(pcm, 0, pcm.Length);
+                        hasAudio = true;
+                        continue;
                     }
 
                     if (streamEvent.Token is XybridStreamToken token)
@@ -104,7 +112,12 @@ namespace XybridBolt
                     }
                 }
 
-                return StreamResult(streamId);
+                var result = StreamResult(streamId);
+                if (!hasAudio) return result;
+                return new XybridResult(
+                    new XybridEnvelope(new XybridEnvelopeKind.Audio(audio.ToArray()), result.Envelope.Metadata),
+                    result.OutputType, result.ModelId, result.LatencyMs, result.ExecutionTarget,
+                    result.Metrics, result.ToolCalls, result.ReasoningContent);
             }
             finally
             {

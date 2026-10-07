@@ -70,7 +70,7 @@ rust_library(
     version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
-    crate_features = [
+    crate_features = select({"//:tts_zzz_enabled": ["tts-zzz"], "//conditions:default": []}) + [
         "default",
         "llm-llamacpp",
     ] + select({

@@ -186,14 +186,22 @@ pub enum ExecutionTemplate {
         #[serde(default)]
         threads: u32,
 
-        /// Generation token cap (0 = engine default of 128; 1..=1023
-        /// explicit).
+        /// Per-chunk speech token cap (0 = available LM-window room,
+        /// subject to the split-chunk runaway guard; explicit 1..=1023).
         #[serde(default)]
         max_tokens: u32,
 
         /// Waveform-stage seed; 0 is valid.
         #[serde(default)]
         seed: u64,
+
+        /// Emit each sentence separately; default engine packing stays enabled otherwise.
+        #[serde(default)]
+        sentence_chunks: bool,
+
+        /// Accelerate waveform matrix products on macOS only.
+        #[serde(default)]
+        accelerate: bool,
     },
 }
 
@@ -926,6 +934,8 @@ mod tests {
             threads: 4,
             max_tokens: 128,
             seed: 0,
+            sentence_chunks: false,
+            accelerate: false,
         }
     }
 

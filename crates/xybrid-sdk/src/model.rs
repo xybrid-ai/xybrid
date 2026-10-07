@@ -3103,7 +3103,8 @@ impl ModelLoader {
     }
 
     fn check_streaming_support(metadata: &ModelMetadata) -> bool {
-        if Self::is_llm_template(metadata) {
+        if Self::is_llm_template(metadata) || Self::infer_output_type(metadata) == OutputType::Audio
+        {
             return true;
         }
 
@@ -3134,6 +3135,12 @@ impl ModelLoader {
     }
 
     fn infer_output_type(metadata: &ModelMetadata) -> OutputType {
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ZzzEmbed { .. }
+        ) {
+            return OutputType::Audio;
+        }
         if Self::is_llm_template(metadata) {
             return OutputType::Text;
         }
@@ -3991,25 +3998,42 @@ impl XybridModel {
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
 
-    /// Streaming TTS: synthesize `envelope`'s text sentence-chunk by
-    /// sentence-chunk and hand each chunk's PCM (with its sample rate) to
-    /// `on_chunk` as it is produced, instead of returning one batched WAV. For
-    /// long text this lets playback start after the first sentence.
+    /// Deliver owned PCM16 audio packets during synthesis.
     ///
-    /// Audio rides the callback; there is no batched return value. `on_chunk`
-    /// returning `false` stops early, as does a cancelled
-    /// `options.cancellation_token` — both honored at the next chunk boundary
-    /// (one chunk's ONNX forward is uninterruptible). The model write-lock is
-    /// held for the whole synthesis, exactly like [`run`].
+    /// Kitten uses native callbacks and supports cancellation during inference.
+    /// Sentence mode computes each sentence waveform before delivering it.
+    /// ONNX backends check cancellation at chunk boundaries; one ONNX forward
+    /// cannot be interrupted. Returning `false` also cancels delivery. The
+    /// terminal summary distinguishes completed, cancelled and limited audio;
+    /// failures use `SdkError`. The model remains resident and reusable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input, unavailable assets or backend failure.
     pub fn run_tts_streaming<F>(
         &self,
         envelope: &Envelope,
         options: &RunOptions,
         mut on_chunk: F,
-    ) -> SdkResult<()>
+    ) -> SdkResult<xybrid_core::execution::TtsStreamResult>
     where
-        F: FnMut(Vec<u8>, u32) -> bool,
+        F: FnMut(xybrid_core::execution::TtsAudioChunk) -> bool,
     {
+        let cancelled_result = || xybrid_core::execution::TtsStreamResult {
+            status: xybrid_core::execution::TtsStatus::Cancelled,
+            sample_rate: 24_000,
+            channels: 1,
+            samples: 0,
+            chunks: 0,
+            limited_chunks: 0,
+        };
+        if options
+            .cancellation_token
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Ok(cancelled_result());
+        }
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
         let start = Instant::now();
@@ -4019,27 +4043,38 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        if options
+            .cancellation_token
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Ok(cancelled_result());
+        }
         handle.ensure_runnable()?;
         let metadata = handle.metadata.clone();
 
-        // Between-chunk cancellation: a chunk's ONNX forward can't be aborted
-        // mid-way, so the token (and the caller's `on_chunk`) is consulted at
-        // chunk boundaries.
+        // Delivery checks the token too; the independent predicate below lets
+        // Kitten interrupt computation before its next audio packet is ready.
         let cancel = options.cancellation_token.clone();
-        let mut adapter = |pcm: Vec<u8>, sample_rate: u32| -> bool {
+        let mut adapter = |packet: xybrid_core::execution::TtsAudioChunk| -> bool {
             if let Some(token) = &cancel {
                 if token.is_cancelled() {
                     return false;
                 }
             }
-            on_chunk(pcm, sample_rate)
+            on_chunk(packet)
         };
 
-        handle
+        let summary = handle
             .executor
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .execute_tts_streaming(&metadata, envelope, &mut adapter)
+            .execute_tts_streaming_controlled(
+                &metadata,
+                envelope,
+                &|| cancel.as_ref().is_some_and(CancellationToken::is_cancelled),
+                &mut adapter,
+            )
             .map_err(|e| sdk_execution_error("TTS streaming failed", e))?;
 
         let latency_ms = start.elapsed().as_millis() as u32;
@@ -4055,6 +4090,8 @@ impl XybridModel {
                     "version": self.version,
                     "output_type": format!("{:?}", self.output_type),
                     "streaming": true,
+                    "tts_status": format!("{:?}", summary.status).to_lowercase(),
+                    "limited_chunks": summary.limited_chunks,
                 })
                 .to_string(),
             ),
@@ -4065,7 +4102,25 @@ impl XybridModel {
         };
         crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
-        Ok(())
+        Ok(summary)
+    }
+
+    /// Synthesize on a blocking worker, delivering owned audio packets.
+    pub async fn run_tts_streaming_async<F>(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+        on_chunk: F,
+    ) -> SdkResult<xybrid_core::execution::TtsStreamResult>
+    where
+        F: FnMut(xybrid_core::execution::TtsAudioChunk) -> bool + Send + 'static,
+    {
+        let model = self.clone();
+        let envelope = envelope.clone();
+        let options = options.clone();
+        tokio::task::spawn_blocking(move || model.run_tts_streaming(&envelope, &options, on_chunk))
+            .await
+            .map_err(|e| SdkError::inference_src("TTS worker failed", e))?
     }
 
     /// Run batch inference with per-run controls.
@@ -4078,6 +4133,32 @@ impl XybridModel {
         abort_state
             .check_before_run()
             .map_err(|reason| SdkError::inference(format!("Execution aborted: {reason}")))?;
+        #[cfg(feature = "tts-zzz")]
+        {
+            let is_kitten = matches!(
+                self.handle
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .metadata
+                    .execution_template,
+                ExecutionTemplate::ZzzEmbed { .. }
+            );
+            if is_kitten {
+                let start = Instant::now();
+                let mut pcm = Vec::new();
+                let summary = self.run_tts_streaming(envelope, options, |packet| {
+                    pcm.extend(packet.pcm);
+                    true
+                })?;
+                let mut output = summary.into_envelope();
+                output.kind = xybrid_core::ir::EnvelopeKind::Audio(pcm);
+                return Ok(InferenceResult::new(
+                    output,
+                    &self.model_id,
+                    start.elapsed().as_millis() as u32,
+                ));
+            }
+        }
         self.run(envelope, options.generation_config.as_ref())
     }
 
@@ -6956,6 +7037,56 @@ mod tests {
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
         }
+    }
+
+    #[test]
+    fn tts_pre_cancelled_request_does_not_wait_for_model_lock_or_touch_assets() {
+        use xybrid_core::ir::EnvelopeKind;
+        let model = test_loaded_model(false);
+        let held = model.handle.write().unwrap();
+        let token = CancellationToken::new();
+        token.cancel();
+        let options = RunOptions::new().with_cancellation_token(token);
+        let (send, recv) = std::sync::mpsc::channel();
+        let worker_model = model.clone();
+        let worker = std::thread::spawn(move || {
+            send.send(worker_model.run_tts_streaming(
+                &Envelope::new(EnvelopeKind::Text("hello".into())),
+                &options,
+                |_| panic!("cancelled request must not deliver audio"),
+            ))
+            .unwrap();
+        });
+        let result = recv
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("pre-cancel skips held lock")
+            .unwrap();
+        assert_eq!(result.status, xybrid_core::execution::TtsStatus::Cancelled);
+        assert_eq!(result.samples, 0);
+        drop(held);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn tts_cancelled_while_queued_never_enters_backend() {
+        use xybrid_core::ir::EnvelopeKind;
+        let model = test_loaded_model(false); // nonexistent ONNX assets catch accidental execution
+        let held = model.handle.write().unwrap();
+        let token = CancellationToken::new();
+        let options = RunOptions::new().with_cancellation_token(token.clone());
+        let worker_model = model.clone();
+        let worker = std::thread::spawn(move || {
+            worker_model.run_tts_streaming(
+                &Envelope::new(EnvelopeKind::Text("hello".into())),
+                &options,
+                |_| panic!("no audio"),
+            )
+        });
+        token.cancel();
+        drop(held);
+        let result = worker.join().unwrap().unwrap();
+        assert_eq!(result.status, xybrid_core::execution::TtsStatus::Cancelled);
+        assert_eq!(result.samples, 0);
     }
 
     #[test]

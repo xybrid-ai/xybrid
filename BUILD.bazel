@@ -10,6 +10,13 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("//bazel/ggml:android.bzl", "ANDROID_ARM64_CPU_VARIANTS", "ANDROID_ARM64_GGML_LIBS")
 
+# Kitten is opt-in and consumes a privately staged, verified static archive.
+bool_flag(name = "tts_zzz", build_setting_default = False, visibility = ["//visibility:public"])
+config_setting(
+    name = "tts_zzz_enabled", flag_values = {":tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+
 # The macOS GPU lane toggle (Flip 2). Both darwin lanes share the SAME Rust
 # feature set (candle-metal/CoreML/vision are bindings — pure Rust, cross-
 # compilable, so keeping features identical maximizes rlib cache overlap
@@ -194,6 +201,9 @@ _LLAMA_CACHE_ENTRIES = {
     "LLAMA_BUILD_SERVER": "OFF",
     "LLAMA_BUILD_COMMON": "OFF",
     "LLAMA_CURL": "OFF",
+    # Current llama.cpp uses OpenSSL in its optional HTTP helper. Match the
+    # Cargo embedding build and avoid discovering host headers in cross builds.
+    "LLAMA_OPENSSL": "OFF",
     "GGML_OPENMP": "OFF",
     "GGML_NATIVE": "OFF",  # reproducible: no -march=native
     "GGML_METAL": "OFF",  # <-- the key: no Apple GPU => no Xcode => hermetic
@@ -344,6 +354,9 @@ _STATIC_CXX_RUNTIME_LIBS = [
 # (macOS/arm64 is PIC by default, Android via the NDK, so only the linux GNU arm
 # needs this explicitly).
 _LINUX_LLAMA = _LLAMA_CACHE_ENTRIES | {
+    # GNUInstallDirs otherwise follows the host distro (lib64 on Amazon Linux),
+    # while rules_foreign_cc declares these archives under lib/.
+    "CMAKE_INSTALL_LIBDIR": "lib",
     "LLAMA_BUILD_TOOLS": "ON",
     "LLAMA_BUILD_COMMON": "ON",
     "CMAKE_CXX_STANDARD_LIBRARIES": "$$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxx.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxxabi.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libunwind:libunwind.static)",

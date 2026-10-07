@@ -674,6 +674,29 @@ class XybridModel {
     required RunOptions options,
   });
 
+  // Unity uses RunTtsStreaming(envelope, onAudio, cancellationToken) and
+  // RunTtsStreamingAsync with the same arguments. Audio is owned PCM16 LE,
+  // carrying sampleRate, channels and firstSample (per-channel offset).
+  // Both return TtsStreamResult: completed, cancelled, limited, or failed.
+  // Calls run off the main/audio thread; callbacks run on the draining worker.
+  // The existing native RunStream/StreamNext/StreamResult/StreamClose protocol
+  // delivers Audio events for TTS models and Token events for text models.
+  // Kitten cancellation reaches the active native session without the model
+  // lock; pre-cancelled/queued requests never synthesize. Cancellation discards
+  // queued audio; callers invalidate already scheduled playback themselves.
+  // Dispose only after the asynchronous run has returned.
+  // Batch Kitten output uses the existing raw PCM16 LE audio contract.
+  // Unity InferenceResult.SpeechStatus / LimitedChunks expose partial limits;
+  // Success is false for limited/cancelled batch output, with AudioBytes retained.
+  // RunTts (byte-only convenience) therefore throws on a limit.
+  // Kitten Run with a cancellation token collects the controlled stream, so
+  // live interruption also retains a cancelled batch outcome/partial PCM.
+  // ZzzEmbed metadata adds sentence_chunks=false and accelerate=false. The
+  // latter is macOS-only. max_tokens=0 uses available LM-window room, with the
+  // engine's split-chunk runaway guard; explicit caps remain explicit. Kitten
+  // owns text splitting and preserves expression markup. Limited output is
+  // partial audio, never an unqualified completed request.
+
   // Benchmarking
   Future<BenchmarkResult> benchmark({
     required Envelope envelope,

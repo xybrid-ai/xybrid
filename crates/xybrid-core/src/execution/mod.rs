@@ -134,3 +134,6 @@ pub mod listener;
 pub(crate) mod strategies;
 #[allow(unused_imports)]
 pub(crate) use strategies::{ExecutionContext, ExecutionStrategy};
+
+pub mod tts_stream;
+pub use tts_stream::{TtsAudioChunk, TtsStatus, TtsStreamResult};

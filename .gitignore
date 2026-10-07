@@ -85,3 +85,12 @@ bindings/kotlin/consumer-smoke/app/libs/
 /.metrics/
 /docs/assets/star-history.svg
 /docs/assets/star-history-dark.svg
+
+# Managed TTS native-host validation outputs.
+tools/tts-stream-smoke/bin/
+tools/tts-stream-smoke/obj/
+
+# Unity sample folders conventionally end in a tilde.
+!bindings/unity/Samples~/
+!bindings/unity/Samples~/KittenTts/
+!bindings/unity/Samples~/KittenTts/**
