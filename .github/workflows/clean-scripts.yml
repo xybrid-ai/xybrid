@@ -1,4 +1,5 @@
-name: Clean scripts
+# Purpose: Test the root and per-folder clean.sh scripts and clean-lib.sh; every path they list must be one git ignores.
+name: "CI: Clean scripts"
 
 # Checks the per-folder clean.sh scripts, the root clean.sh and their shared
 # tools/scripts/clean-lib.sh (tools/scripts/tests/test_clean.py): every path a
@@ -29,7 +30,7 @@ on:
       - '.github/workflows/clean-scripts.yml'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: clean-scripts-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all

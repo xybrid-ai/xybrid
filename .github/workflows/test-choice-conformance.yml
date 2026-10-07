@@ -1,4 +1,4 @@
-# Purpose: Regenerate and verify choice-scoring conformance artifacts against pinned sha256s; weekly cold rebuild.
+# Purpose: Regenerate and verify choice-scoring conformance artifacts against pinned sha256s; daily cold rebuild.
 name: "CI: Choice conformance"
 
 # Choice-scoring conformance inputs (integration-tests/fixtures/choice). The

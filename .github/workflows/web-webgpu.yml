@@ -1,4 +1,5 @@
-name: WebGPU browser inference
+# Purpose: Manual: build the Web SDK and run WebGPU generation in Chromium on a self-hosted GPU runner.
+name: "SDK: WebGPU inference (manual)"
 
 # Explicit dispatch only: requires a runner labelled webgpu with a real GPU
 # and a browser adapter exposing shader-f16. Hosted CI still compiles this

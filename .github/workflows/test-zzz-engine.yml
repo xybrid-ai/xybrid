@@ -1,4 +1,5 @@
-name: Test zzz engine
+# Purpose: Fetch and verify the pinned zzz (Kitten TTS) engine slices and link them into Rust tests on each pinned target.
+name: "CI: zzz engine"
 
 # The Kitten TTS 2 pins (crates/zzz-sys/natives-manifest.json) define the
 # binary contract; this lane proves the delivery path end to end in CI:
@@ -60,7 +61,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: test-zzz-engine-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all

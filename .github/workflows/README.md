@@ -26,8 +26,10 @@ decisions to keep.
   the new code-scanning configuration.
 - **Job names are the required checks.** Branch protection on `master` requires
   `CI Success` (reported by both `ci.yml` and `ci-docs.yml`) and
-  `Bazel graph + RBE targets` (`bazel.yml`), matched by job name. A workflow's
-  `name:` can change freely; those job names cannot.
+  `Bazel graph + RBE targets` (`bazel.yml`), matched by job name.
+  `tools/scripts/llamacpp_update.py` waits on more job names before it cuts a
+  llama.cpp release (its `REQUIRED_CHECKS`). A workflow's `name:` can change
+  freely; those job names cannot.
 
 ## Preserving execution
 
@@ -52,11 +54,14 @@ Workspace validation, pull-request gates and backend test suites.
 | --- | --- | --- | --- | --- |
 | [`bazel.yml`](bazel.yml) | CI: Bazel | push to `master`, pull_request to `master`, workflow_dispatch | none | Bazel graph analysis and remote-execution targets; a required check that skips when no Bazel input changed. |
 | [`test-candle.yml`](test-candle.yml) | CI: Candle backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Test the Candle backend (Metal runs only on macOS), scoped to the paths that can affect it. |
-| [`test-choice-conformance.yml`](test-choice-conformance.yml) | CI: Choice conformance | push to `master`, pull_request to `master`, schedule (`23 5 * * 1`), workflow_dispatch | none | Regenerate and verify choice-scoring conformance artifacts against pinned sha256s; weekly cold rebuild. |
+| [`test-choice-conformance.yml`](test-choice-conformance.yml) | CI: Choice conformance | push to `master`, pull_request to `master`, schedule (`23 5 * * *`), workflow_dispatch | none | Regenerate and verify choice-scoring conformance artifacts against pinned sha256s; daily cold rebuild. |
+| [`clean-scripts.yml`](clean-scripts.yml) | CI: Clean scripts | push to `master`, pull_request to `master` | none | Test the root and per-folder clean.sh scripts and clean-lib.sh; every path they list must be one git ignores. |
 | [`ci-docs.yml`](ci-docs.yml) | CI: Docs-only gate | push to `master`, pull_request to `master` | none | Report the CI Success gate for docs-only changes, which ci.yml skips. |
+| [`llamacpp-validate.yml`](llamacpp-validate.yml) | CI: llama.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Check the llama.cpp pins and generated bindings, then run real text and vision models on a source build. |
 | [`test-policy-routing.yml`](test-policy-routing.yml) | CI: Policy routing | push to `master`, pull_request to `master`, workflow_dispatch | none | Drive the xybrid binary through a policy-routed hybrid stage: local GGUF leg, fake DeepSeek cloud leg. |
 | [`test-whispercpp.yml`](test-whispercpp.yml) | CI: whisper.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Exercise whisper.cpp with real multilingual weights: translation, per-request language, long windows, non-speech suppression. |
 | [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master` | none | Rust format, lint, tests and feature matrix, plus binding drift, API contract, Python and Web SDK checks. Gates merges. |
+| [`test-zzz-engine.yml`](test-zzz-engine.yml) | CI: zzz engine | push to `master`, pull_request to `master`, workflow_dispatch | none | Fetch and verify the pinned zzz (Kitten TTS) engine slices and link them into Rust tests on each pinned target. |
 
 ### SDK
 
@@ -69,6 +74,7 @@ Per-platform SDK builds, wrapper tests and example apps.
 | [`build-flutter.yml`](build-flutter.yml) | SDK: Flutter | push to `master`, pull_request to `master`, workflow_dispatch | none | Analyze and test the Dart wrapper, build the native libraries, and build a consumer app against the packaged layout. |
 | [`build-react-native.yml`](build-react-native.yml) | SDK: React Native | push to `master`, pull_request to `master`, workflow_dispatch | none | Test and npm-pack the JS package; build the iOS and Android example apps. |
 | [`unity-editor.yml`](unity-editor.yml) | SDK: Unity Editor | push to `master`, pull_request to `master`, workflow_dispatch | checks | Run a real Unity Editor: EditMode tests against a Bazel-built native, then an IL2CPP player smoke. |
+| [`web-webgpu.yml`](web-webgpu.yml) | SDK: WebGPU inference (manual) | workflow_dispatch | none | Manual: build the Web SDK and run WebGPU generation in Chromium on a self-hosted GPU runner. |
 
 ### Artifacts
 
@@ -86,6 +92,7 @@ Cut, validate, publish and announce a release.
 | --- | --- | --- | --- | --- |
 | [`release-notify.yml`](release-notify.yml) | Release: Announce on Discord | release (published) | none | Announce a published release on Discord. |
 | [`release-dryrun.yml`](release-dryrun.yml) | Release: Dry-run | push to `release/**`, pull_request to `master`, workflow_dispatch | none | Validate release packages before tagging: version sync, changelog, pub.dev and Kotlin/Maven dry-runs. |
+| [`llamacpp-update.yml`](llamacpp-update.yml) | Release: llama.cpp stable update | push to `master`, schedule (`43 7 * * *`), workflow_dispatch | none | Daily: open a PR for each new llama.cpp stable release; once it is validated and its natives are published, push the release branch. |
 | [`release-prep.yml`](release-prep.yml) | Release: Prepare | push to `release/v*`, workflow_dispatch | attestations, contents, id-token, pull-requests | Release step 1: build every artifact on a release/v* branch, create the draft release, open the release PR. |
 | [`release-publish.yml`](release-publish.yml) | Release: Publish | pull_request (closed) to `master`, workflow_dispatch | contents, id-token | Release step 2: when the release PR merges, publish the release and the language packages. |
 | [`build-unity.yml`](build-unity.yml) | Release: Unity bundles | push of tags `v*`, workflow_dispatch | contents | On a v* tag, build the Unity native libraries for every platform and upload the bundles to the release. |
@@ -144,6 +151,13 @@ updates `crates/llama-cpp-sys/natives-manifest.txt`, which lets a plain
 `cargo build` download a slice too. Its `NDK_VERSION` must equal
 `build-android.yml`'s, or every Android slice is invalidated.
 
+**llama.cpp updates.** `llamacpp-update.yml` looks for a new llama.cpp stable
+release daily and opens one update PR with `RELEASE_PAT`, so the PR triggers
+`llamacpp-validate.yml` and the other required checks. Once that PR merges and
+`build-natives.yml` has published a matching natives manifest, it pushes
+`release/v<version>`, which starts the release flow below. Setup and dry runs
+are in [docs/development/llamacpp-updates.md](../../docs/development/llamacpp-updates.md).
+
 **Release.** Pushing a `release/v<version>` branch starts two workflows:
 `release-prep.yml` (builds every artifact, patches the checksums, creates the
 draft release, opens the release PR) and `release-dryrun.yml` (version sync,
@@ -162,3 +176,5 @@ Releases.
 uploads them to GitHub Releases (`contents: write`), and dry-runs the Kotlin
 publish. `unity-activation.yml` emits the Unity license activation request; it is
 kept for when the license expires or the GameCI image changes.
+`web-webgpu.yml` runs WebGPU generation on a self-hosted runner labelled
+`webgpu`, because hosted runners have no GPU adapter with `shader-f16`.
