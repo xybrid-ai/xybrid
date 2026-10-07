@@ -1,0 +1,175 @@
+name: Test zzz engine
+
+# The Kitten TTS 2 pins (crates/zzz-sys/natives-manifest.json) define the
+# binary contract; this lane proves the delivery path end to end in CI:
+# authenticated fetch from the pinned release, staged verification by the
+# same trusted tool that stages locally (zzz_pull.py), and real linking of
+# libzzz_embed.a into a Rust test binary on every pinned target.
+#
+# Design contract (crates/zzz-sys/README.md): default and fork builds never
+# require private assets. The secrets-gated steps below skip (with a loud
+# notice) when ZZZ_GITHUB_TOKEN is absent — fork PRs, or the tree before
+# credentials are configured — and every other CI lane treats the zzz
+# crate as its no-op default build.
+#
+# Weights stay out of scope here: the real-synthesis tests loudly skip
+# without the converted Kitten GGUFs + voice fixture pair, which are private
+# model-store assets (the zzz-research repo owns that e2e coverage today).
+# Adding weights to CI is a follow-up with its own distribution decision.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'crates/zzz-sys/**'
+      - 'crates/xybrid-core/src/runtime_adapter/zzz/**'
+      - 'crates/xybrid-core/tests/zzz_tts_integration.rs'
+      - 'crates/xybrid-core/Cargo.toml'
+      - 'tools/scripts/zzz_pull.py'
+      - 'tools/scripts/tests/test_zzz_pull.py'
+      - '.github/workflows/test-zzz-engine.yml'
+      - 'Cargo.lock'
+      # Markdown cannot affect this build.
+      - "!**.md"
+  pull_request:
+    branches: [master]
+    paths:
+      - 'crates/zzz-sys/**'
+      - 'crates/xybrid-core/src/runtime_adapter/zzz/**'
+      - 'crates/xybrid-core/tests/zzz_tts_integration.rs'
+      - 'crates/xybrid-core/Cargo.toml'
+      - 'tools/scripts/zzz_pull.py'
+      - 'tools/scripts/tests/test_zzz_pull.py'
+      - '.github/workflows/test-zzz-engine.yml'
+      - 'Cargo.lock'
+      # Markdown cannot affect this build.
+      - "!**.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Pinned release to verify against; the tool refuses anything the committed
+  # manifest does not say, so this only fails fast before the token is used.
+  ZZZ_ENGINE_TAG: v0.1.0-rc.3
+
+jobs:
+  test-zzz-engine:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS + Linux run the fetched slice natively (ABI probes,
+          # linking, and default-options behavior).
+          - name: macOS ARM64 (link + verify pinned slice)
+            target: aarch64-apple-darwin
+            runs-on: macos-15
+            native: true
+          - name: Linux x86_64 (link + verify pinned slice)
+            target: x86_64-unknown-linux-gnu
+            runs-on: ubuntu-latest
+            native: true
+          # Android cannot execute test binaries without an emulator, and
+          # the contract gates on real linking: build-and-link the test
+          # binaries via the NDK — that exercises the Android archive, its
+          # system-library set, and PIE/TLS alignment requirements without
+          # device time.
+          - name: Android ARM64 (NDK link gate)
+            target: aarch64-linux-android
+            runs-on: ubuntu-latest
+            native: false
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: zzz-engine-${{ matrix.target }}
+
+      # Android-only machinery: the NDK supplies the linker driver for the
+      # aarch64 target (see build-android.yml for the same pin and cache).
+      - name: Cache Android NDK
+        if: matrix.target == 'aarch64-linux-android'
+        id: cache-ndk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
+          key: android-ndk-27.0.12077973-zzz
+
+      - name: Setup Android SDK
+        if: matrix.target == 'aarch64-linux-android'
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+
+      - name: Install NDK
+        if: matrix.target == 'aarch64-linux-android' && steps.cache-ndk.outputs.cache-hit != 'true'
+        run: sdkmanager --install "ndk;27.0.12077973"
+
+      - name: Set NDK environment
+        if: matrix.target == 'aarch64-linux-android'
+        run: |
+          ANDROID_NDK="$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_NDK/aarch64-linux-android29-clang" >> $GITHUB_ENV
+
+      # The staging step is the only consumer of the private credentials.
+      # Without them (forks, unset secrets) the lane stays green and prints
+      # a notice — the default-build contract, not a silent pass.
+      - name: Stage pinned engine slice
+        if: ${{ secrets.ZZZ_GITHUB_TOKEN != '' }}
+        id: stage
+        env:
+          ZZZ_GITHUB_TOKEN: ${{ secrets.ZZZ_GITHUB_TOKEN }}
+          ZZZ_RELEASE_REPOSITORY: ${{ secrets.ZZZ_RELEASE_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          slice=$(python3 tools/scripts/zzz_pull.py --target "${{ matrix.target }}" --cache-dir "$RUNNER_TEMP/zzz-cache" --dest "$RUNNER_TEMP/zzz-staging")
+          echo "slice=$slice" >> "$GITHUB_OUTPUT"
+          test -f "$slice/.pinned-archive.tar.gz"
+          test -f "$slice/RECEIPT.json"
+
+      - name: Verify staged bytes against the committed pin
+        if: steps.stage.outputs.slice != ''
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/zzz_pull.py --target "${{ matrix.target }}" --verify-only
+        env:
+          XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
+
+      - name: Link and ABI-test against the pinned slice (native targets)
+        if: steps.stage.outputs.slice != '' && matrix.native
+        env:
+          XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
+        run: cargo test -p xybrid-zzz-sys --features bindings --target ${{ matrix.target }}
+
+      - name: Link gate against the pinned slice (Android, no execution)
+        if: steps.stage.outputs.slice != '' && !matrix.native
+        env:
+          XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
+        run: cargo test -p xybrid-zzz-sys --features bindings --target ${{ matrix.target }} --no-run
+
+      - name: Adapter state tests
+        if: steps.stage.outputs.slice != '' && matrix.native
+        env:
+          XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
+        run: cargo test -p xybrid-core --features tts-zzz --lib zzz
+
+      - name: Notice — secrets absent, lane skipped
+        if: ${{ secrets.ZZZ_GITHUB_TOKEN == '' }}
+        run: |
+          echo "::notice title=zzz engine lane skipped::ZZZ_GITHUB_TOKEN/ZZZ_RELEASE_REPOSITORY not available on this run (fork or unset secrets); the zzz crate stays in its default no-op build, per the private-assets contract."
