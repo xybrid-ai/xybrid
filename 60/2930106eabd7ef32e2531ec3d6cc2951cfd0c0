@@ -1,0 +1,19 @@
+.github/workflows/test-zzz-engine.yml
+  s_a226ff82f0db3a::t_97308b6d54dd94 10-18,78-81,133-135,233-242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "602930106eabd7ef32e2531ec3d6cc2951cfd0c0",
+  "prompts": {},
+  "sessions": {
+    "s_a226ff82f0db3a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "afd1b42d-7fa3-4ab5-94ad-98addedea7c4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
