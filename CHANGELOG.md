@@ -79,6 +79,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **KittenTTS no longer returns its phoneme durations instead of speech.**
+  KittenTTS 0.8 models (nano, micro and mini) return per-phoneme durations
+  next to the waveform, and synthesis used whichever output came first. In
+  about four runs out of ten, "Hello world" came back as 15 samples, under a
+  millisecond of sound, and the run still succeeded. Short, long and streamed
+  text were all affected. Synthesis now uses the output named `waveform` (or
+  `audio`); a TTS model with several outputs and neither name fails with an
+  error instead of guessing. Kokoro has a single output and was not affected.
 - **Stopping a llama.cpp run on one of its first tokens no longer reports a
   native failure.** When memory or thermal pressure, a cancel, or an
   `on_token` error stopped generation on one of the first four tokens (five

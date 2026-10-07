@@ -177,7 +177,7 @@ use crate::runtime_adapter::llm::LlmRuntimeAdapter;
 
 use super::modes::{
     execute_autoregressive_stage, execute_bert_inference, execute_single_shot_stage,
-    execute_tts_inference, execute_whisper_decoder_stage,
+    execute_tts_inference, execute_whisper_decoder_stage, tts_waveform_output,
 };
 use super::path::{file_identity, FileIdentity};
 use super::postprocessing;
@@ -2964,14 +2964,22 @@ impl TemplateExecutor {
         // run); the graph load is paid once, not per call. The voice embedding is
         // identical for every chunk, so load it once here.
         let session = self.tts_session(model_path)?;
+        let waveform_output = tts_waveform_output(session.output_names())?;
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
 
         let mut audio_chunks: Vec<Vec<f32>> = Vec::new();
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(target: "xybrid_core", "TTS: Processing chunk {}/{}: {} chars", i + 1, chunks.len(), chunk.len());
-            let chunk_audio =
-                self.synthesize_chunk(&session, metadata, input, chunk, &voice_embedding, speed)?;
+            let chunk_audio = self.synthesize_chunk(
+                &session,
+                metadata,
+                input,
+                chunk,
+                &voice_embedding,
+                speed,
+                waveform_output,
+            )?;
             // Inference always yields a waveform; guard the degenerate empty case
             // so it can't enter the crossfade (matches the pre-refactor skip).
             if chunk_audio.is_empty() {
@@ -2986,14 +2994,11 @@ impl TemplateExecutor {
 
         debug!(target: "xybrid_core", "TTS: Total audio samples: {}", all_audio.len());
 
-        // Convert concatenated audio to envelope
-        // The postprocessing will handle conversion to bytes
-        let output_names = session.output_names();
-        let output_name = output_names.first().map(|s| s.as_str()).unwrap_or("audio");
-
+        // Convert concatenated audio to envelope, keyed by the waveform output's
+        // name. The postprocessing will handle conversion to bytes
         let mut combined_outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
         let audio_array = ndarray::Array1::from_vec(all_audio).into_dyn();
-        combined_outputs.insert(output_name.to_string(), audio_array);
+        combined_outputs.insert(waveform_output.to_string(), audio_array);
 
         // Run postprocessing on combined audio
         self.run_postprocessing(metadata, RawOutputs::TensorMap(combined_outputs))
@@ -3009,6 +3014,7 @@ impl TemplateExecutor {
         // Reuse the cached TTS session — the first run builds it, later runs skip
         // the graph load + Level-3 optimization (the dominant short-TTS latency).
         let session = self.tts_session(model_path)?;
+        let waveform_output = tts_waveform_output(session.output_names())?;
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
         let text = match &input.kind {
@@ -3022,19 +3028,23 @@ impl TemplateExecutor {
 
         // The whole (short) text is one chunk; the synthesis body is shared with
         // the chunked/streaming paths via synthesize_chunk.
-        let audio =
-            self.synthesize_chunk(&session, metadata, input, &text, &voice_embedding, speed)?;
+        let audio = self.synthesize_chunk(
+            &session,
+            metadata,
+            input,
+            &text,
+            &voice_embedding,
+            speed,
+            waveform_output,
+        )?;
 
         // Wrap the already-trimmed waveform for postprocessing (mirrors the
-        // chunked path's single-tensor map keyed by the model's output name).
-        let output_name = session
-            .output_names()
-            .first()
-            .map(|s| s.as_str())
-            .unwrap_or("audio")
-            .to_string();
+        // chunked path's single-tensor map keyed by the waveform output's name).
         let mut outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
-        outputs.insert(output_name, ndarray::Array1::from_vec(audio).into_dyn());
+        outputs.insert(
+            waveform_output.to_string(),
+            ndarray::Array1::from_vec(audio).into_dyn(),
+        );
         self.run_postprocessing(metadata, RawOutputs::TensorMap(outputs))
     }
 
@@ -3122,11 +3132,12 @@ impl TemplateExecutor {
 
     /// Synthesize one TTS chunk to a trimmed f32 waveform: build the chunk
     /// envelope, preprocess → phonemes → inference (with the shared voice
-    /// embedding + speed), and trim trailing artifact samples. Postprocessing
-    /// (loudness normalization, PCM encode, crossfade / edge-fade) is left to the
-    /// caller — the batch and streaming paths differ there. Shared by
-    /// `execute_tts_single` / `_chunked` / `_streaming` so the synthesis body
-    /// lives in one place instead of being copy-pasted three ways.
+    /// embedding + speed), read the `waveform_output` tensor (picked by
+    /// `tts_waveform_output`), and trim trailing artifact samples.
+    /// Postprocessing (loudness normalization, PCM encode, crossfade /
+    /// edge-fade) is left to the caller — the batch and streaming paths differ
+    /// there. Shared by `execute_tts_single` / `_chunked` / `_streaming` so the
+    /// synthesis body lives in one place instead of being copy-pasted three ways.
     fn synthesize_chunk(
         &mut self,
         session: &ONNXSession,
@@ -3135,6 +3146,7 @@ impl TemplateExecutor {
         chunk: &str,
         voice_embedding: &[f32],
         speed: f32,
+        waveform_output: &str,
     ) -> ExecutorResult<Vec<f32>> {
         let chunk_input = Envelope {
             kind: crate::ir::EnvelopeKind::Text(chunk.to_string()),
@@ -3144,13 +3156,14 @@ impl TemplateExecutor {
         let phoneme_ids = preprocessed
             .as_phoneme_ids()
             .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
-        let raw_outputs =
-            execute_tts_inference(session, phoneme_ids, voice_embedding.to_vec(), speed)?;
-        let mut audio: Vec<f32> = raw_outputs
-            .values()
-            .next()
-            .map(|t| t.iter().cloned().collect())
-            .unwrap_or_default();
+        let waveform = execute_tts_inference(
+            session,
+            phoneme_ids,
+            voice_embedding.to_vec(),
+            speed,
+            waveform_output,
+        )?;
+        let mut audio: Vec<f32> = waveform.iter().copied().collect();
         let trim_count = metadata.trim_trailing_samples.unwrap_or(0);
         if trim_count > 0 && audio.len() > trim_count {
             audio.truncate(audio.len() - trim_count);
@@ -3239,18 +3252,21 @@ impl TemplateExecutor {
         let fade_samples = (sample_rate as usize * 5) / 1000; // ~5ms edge fade
         let chunks = super::text_chunking::chunk_text_for_tts(&text, max_tts_chars);
         let session = self.tts_session(&model_path)?;
+        let waveform_output = tts_waveform_output(session.output_names())?;
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
-        let output_name = session
-            .output_names()
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "audio".to_string());
 
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(target: "xybrid_core", "TTS stream: chunk {}/{} ({} chars)", i + 1, chunks.len(), chunk.len());
-            let chunk_audio =
-                self.synthesize_chunk(&session, metadata, input, chunk, &voice_embedding, speed)?;
+            let chunk_audio = self.synthesize_chunk(
+                &session,
+                metadata,
+                input,
+                chunk,
+                &voice_embedding,
+                speed,
+                waveform_output,
+            )?;
             if chunk_audio.is_empty() {
                 continue; // degenerate empty inference output — skip (pre-refactor behavior)
             }
@@ -3259,7 +3275,7 @@ impl TemplateExecutor {
             // applied to this chunk rather than the concatenated buffer).
             let mut outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
             outputs.insert(
-                output_name.clone(),
+                waveform_output.to_string(),
                 ndarray::Array1::from_vec(chunk_audio).into_dyn(),
             );
             let env = self.run_postprocessing(metadata, RawOutputs::TensorMap(outputs))?;
