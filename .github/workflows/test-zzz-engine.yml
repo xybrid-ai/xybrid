@@ -7,10 +7,15 @@ name: Test zzz engine
 # libzzz_embed.a into a Rust test binary on every pinned target.
 #
 # Design contract (crates/zzz-sys/README.md): default and fork builds never
-# require private assets. The secrets-gated steps below skip (with a loud
-# notice) when ZZZ_GITHUB_TOKEN is absent — fork PRs, or the tree before
-# credentials are configured — and every other CI lane treats the zzz
-# crate as its no-op default build.
+# require private assets. Fork and Dependabot runs never receive the
+# secrets, so they take the notice job instead; the secrets-gated steps
+# below also skip (with a loud notice) if ZZZ_GITHUB_TOKEN is unset. Every
+# other CI lane treats the zzz crate as its no-op default build.
+#
+# Both secrets live only in the `zzz-engine` environment, which has a
+# required reviewer: a job naming it waits for approval before it receives
+# them, so a branch that edits this workflow cannot read them unreviewed.
+# Approve only runs whose workflow and zzz code you have read.
 #
 # Weights stay out of scope here: the real-synthesis tests loudly skip
 # without the converted Kitten GGUFs + voice fixture pair, which are private
@@ -70,6 +75,10 @@ env:
 jobs:
   test-zzz-engine:
     name: ${{ matrix.name }}
+    # Same-repo runs only: forks and Dependabot get no secrets, and asking
+    # for an approval there could only end in the no-op build.
+    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork
+    environment: zzz-engine
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
     # secrets cannot appear in `if:` expressions, so a presence flag rides
@@ -121,9 +130,9 @@ jobs:
       # against the merged files.
       #
       # Scope: this stops an in-flight tool or pin edit from reaching the
-      # token. It is not a boundary against someone who can push a branch to
-      # this repository: they can edit this workflow itself, which is true
-      # of every repository secret here.
+      # token. Someone who can push a branch can edit this workflow itself;
+      # the boundary against that is the zzz-engine environment's required
+      # reviewer, not this step.
       - name: Guard the delivery tool and pins
         if: env.ZZZ_CI_ENABLED == 'true'
         run: |
@@ -221,3 +230,13 @@ jobs:
         if: env.ZZZ_CI_ENABLED != 'true'
         run: |
           echo "::notice title=zzz engine lane skipped::ZZZ_GITHUB_TOKEN/ZZZ_RELEASE_REPOSITORY not available on this run (fork or unset secrets); the zzz crate stays in its default no-op build, per the private-assets contract."
+
+  untrusted-notice:
+    name: zzz engine lane (no secrets on this run)
+    if: github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Notice — fork or Dependabot run, lane skipped
+        run: |
+          echo "::notice title=zzz engine lane skipped::Fork and Dependabot runs never receive the zzz-engine secrets; the zzz crate stays in its default no-op build, per the private-assets contract."
