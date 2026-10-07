@@ -6,7 +6,7 @@
 //
 //   vkGetInstanceProcAddr          bootstraps the dispatcher
 //   vkGetPhysicalDeviceFeatures2   queried before the dispatcher covers it
-//   vkCmdCopyBuffer                one direct command call
+//   vkGetDeviceProcAddr            resolves the device-fault extension
 //
 // The obvious way to satisfy them is to link the exec machine's libvulkan.so,
 // and that does not work here: it is built against ITS glibc, so resolving it
@@ -35,11 +35,8 @@ void vkGetPhysicalDeviceFeatures2(void *physical_device, void *features) {
   (void)features;
 }
 
-void vkCmdCopyBuffer(void *command_buffer, void *src, void *dst,
-                     unsigned int region_count, const void *regions) {
-  (void)command_buffer;
-  (void)src;
-  (void)dst;
-  (void)region_count;
-  (void)regions;
+void *vkGetDeviceProcAddr(void *device, const char *name) {
+  (void)device;
+  (void)name;
+  return 0;
 }
