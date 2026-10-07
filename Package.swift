@@ -42,7 +42,7 @@ let sdkVersion = "0.11.0"
 // SHA-256 of XybridFFI-v<sdkVersion>.xcframework.zip on the GitHub release.
 // Updated by `bindings/apple/scripts/sync-spm-checksum.sh` (or the release
 // workflow) so the manifest at the tagged commit matches the published asset.
-let xybridFFIChecksum = "698f6e7f6f00c17e5a3fd56d722e92f69758d1c1d8cffc66ca34733ba3a568ec"
+let xybridFFIChecksum = "e2dcd364df357b7d855a5c930c3ece2224c92f868ea53219cc424cd7ee278068"
 
 let package = Package(
     name: "Xybrid",
