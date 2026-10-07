@@ -8,6 +8,8 @@
 # carries it into the final Rust link).
 load("@rules_cc//cc:defs.bzl", "cc_binary")
 
+exports_files(["SPIRV-HeadersConfig.cmake"])
+
 cc_binary(
     name = "libvulkan.so",
     srcs = ["vulkan_stub.c"],

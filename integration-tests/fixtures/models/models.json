@@ -893,7 +893,7 @@
       "files": [
         {
           "output": "Qwen3.5-0.8B-F16.gguf",
-          "sha256": "7b10bd707f33b78919eae3b77df2f8775f6da32cc79edccd8e3871c4befa48fb"
+          "sha256": "b7236ab3c7ce678882dac21875b7e7bed71707d699e03c57c896cc93119c066f"
         }
       ]
     },
@@ -907,13 +907,13 @@
         {
           "model": "qwen3.5-0.8b-f16-cf",
           "output": "Qwen3.5-0.8B-F16.gguf",
-          "sha256": "7b10bd707f33b78919eae3b77df2f8775f6da32cc79edccd8e3871c4befa48fb"
+          "sha256": "b7236ab3c7ce678882dac21875b7e7bed71707d699e03c57c896cc93119c066f"
         }
       ],
       "files": [
         {
           "output": "Qwen3.5-0.8B-Q4_K_M.gguf",
-          "sha256": "bb8fc97cae2a004c0be37c5a9d0f14b4303609f60d2dcd100d7210d9a77c6ee1"
+          "sha256": "accd4c2c0870ca5ad60b27f56657b0f7a5652e3f982145e2ec602bef7f55a551"
         }
       ]
     }

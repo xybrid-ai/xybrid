@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **llama.cpp:** update to [v0.6.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0) (commit `d81235049384534c167caea52b85a694f6103d14`).
+
 - **A speculative load asks the registry before serving from the cloud.**
   When speculation is on and the model is not cached, the load now resolves
   the model first and serves it from the gateway only if the registry

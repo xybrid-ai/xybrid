@@ -3,20 +3,8 @@ name: CI
 on:
   push:
     branches: [master]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'examples/**'
-      - '.github/ISSUE_TEMPLATE/**'
-      - 'LICENSE'
   pull_request:
     branches: [master]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'examples/**'
-      - '.github/ISSUE_TEMPLATE/**'
-      - 'LICENSE'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -30,15 +18,17 @@ env:
 
 jobs:
   tooling-changes:
-    name: Detect tooling-relevant changes
+    name: Detect CI-relevant changes
     runs-on: ubuntu-latest
     outputs:
+      full_ci: ${{ steps.filter.outputs.full_ci }}
       relevant: ${{ steps.filter.outputs.relevant }}
       unity_bolt: ${{ steps.filter.outputs.unity_bolt }}
       python_sdk: ${{ steps.filter.outputs.python_sdk }}
       kotlin_jni: ${{ steps.filter.outputs.kotlin_jni }}
       apple_bolt: ${{ steps.filter.outputs.apple_bolt }}
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check changed paths
         id: filter
         env:
@@ -50,52 +40,13 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            FILES=$(gh api --paginate \
-              "repos/$REPOSITORY/pulls/$PR_NUMBER/files" \
-              --jq '.[].filename')
+            gh api --paginate --slurp \
+              "repos/$REPOSITORY/pulls/$PR_NUMBER/files" > "$RUNNER_TEMP/ci-files.json"
           else
-            FILES=$(gh api \
-              "repos/$REPOSITORY/compare/$BEFORE_SHA...$CURRENT_SHA" \
-              --jq '.files[].filename')
+            gh api "repos/$REPOSITORY/compare/$BEFORE_SHA...$CURRENT_SHA" > "$RUNNER_TEMP/ci-files.json"
           fi
-          if printf '%s\n' "$FILES" | grep -qE '^(tools/scripts/|\.github/workflows/ci\.yml$)'; then
-            RELEVANT=true
-          else
-            RELEVANT=false
-          fi
-          echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
-          echo "Tooling-relevant changes: $RELEVANT"
-          # Runtime/Api is in the list because the compile gate compiles it
-          # (UnityBoltCompileCheck.csproj globs Bolt/, BoltSupplement/ AND Api/),
-          # so a hand-written wrapper edit must run the same netstandard2.1 check.
-          if printf '%s\n' "$FILES" | grep -qE '^(bindings/unity/Runtime/Bolt/|bindings/unity/Runtime/BoltSupplement/|bindings/unity/Runtime/Api/|tools/unity-bolt-compile-check/|tools/scripts/gen_unity_bolt_csharp\.py$|crates/xybrid-bolt/boltffi\.toml$|\.github/workflows/ci\.yml$)'; then
-            UNITY_BOLT=true
-          else
-            UNITY_BOLT=false
-          fi
-          echo "unity_bolt=$UNITY_BOLT" >> "$GITHUB_OUTPUT"
-          echo "Unity bolt binding changes: $UNITY_BOLT"
-          if printf '%s\n' "$FILES" | grep -qE '^(bindings/python/|tools/scripts/gen_python_bolt\.py$|tools/scripts/build-python-bolt\.sh$|crates/xybrid-bolt/|\.github/workflows/ci\.yml$)'; then
-            PYTHON_SDK=true
-          else
-            PYTHON_SDK=false
-          fi
-          echo "python_sdk=$PYTHON_SDK" >> "$GITHUB_OUTPUT"
-          echo "Python SDK changes: $PYTHON_SDK"
-          if printf '%s\n' "$FILES" | grep -qE '^(bindings/kotlin/|tools/scripts/gen_kotlin_bolt\.py$|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)'; then
-            KOTLIN_JNI=true
-          else
-            KOTLIN_JNI=false
-          fi
-          echo "kotlin_jni=$KOTLIN_JNI" >> "$GITHUB_OUTPUT"
-          echo "Kotlin and JNI changes: $KOTLIN_JNI"
-          if printf '%s\n' "$FILES" | grep -qE '^(bindings/apple/|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)'; then
-            APPLE_BOLT=true
-          else
-            APPLE_BOLT=false
-          fi
-          echo "apple_bolt=$APPLE_BOLT" >> "$GITHUB_OUTPUT"
-          echo "Apple bolt binding changes: $APPLE_BOLT"
+          python3 tools/scripts/ci_gate.py changes "$EVENT_NAME" "$RUNNER_TEMP/ci-files.json" \
+            | tee -a "$GITHUB_OUTPUT"
 
   kotlin-jni-drift:
     name: Kotlin and JNI generation drift
@@ -216,6 +167,8 @@ jobs:
 
   fmt:
     name: Format
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -227,6 +180,8 @@ jobs:
 
   clippy:
     name: Clippy
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -239,6 +194,8 @@ jobs:
 
   # Feature combination checks - ensure platform builds don't break
   check-no-default-features:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     name: check (no-default-features, ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
@@ -253,6 +210,8 @@ jobs:
         run: cargo check -p xybrid-core --no-default-features
 
   check-platform-macos:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     name: check (platform-macos, macos-latest)
     runs-on: macos-latest
     steps:
@@ -274,6 +233,8 @@ jobs:
         run: cargo test -p integration-tests --features coreml --test coreml_native
 
   check-platform-desktop:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     name: check (platform-desktop, ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
@@ -290,6 +251,8 @@ jobs:
         run: cargo check -p xybrid-sdk --features platform-desktop
 
   check-vision-platforms:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     name: check vision (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -325,6 +288,8 @@ jobs:
   # OUT_DIR: the nested CMake ExternalProject blows past MAX_PATH and MSBuild's
   # FileTracker fails (FTK1011). See the comment in llama-cpp-sys/build.rs.
   check-llamacpp-vulkan:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     name: check llama.cpp Vulkan (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     # 7-11 min warm. Without a bound, a stalled step holds the runner for
@@ -355,6 +320,8 @@ jobs:
         run: cargo check -p xybrid-sdk --features platform-desktop
 
   clippy-llm:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     name: clippy (llm-llamacpp, ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
@@ -379,6 +346,8 @@ jobs:
         run: cargo clippy -p xybrid-core --features "ort-download,llm-llamacpp" --all-targets -- -D warnings
 
   test-llm:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     name: test (llm-llamacpp, ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
@@ -398,6 +367,8 @@ jobs:
   # at release time, and check-platform-macos / build-apple.yml cover
   # Apple-specific compilation when bindings/apple changes.
   test:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     name: Test (ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
@@ -455,6 +426,8 @@ jobs:
 
   # API contract validation (soft warning — does not block CI)
   api-contract:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     name: API Contract Check
     runs-on: ubuntu-latest
     steps:
@@ -467,6 +440,8 @@ jobs:
         run: ./tools/scripts/api-contract-check.sh --check
 
   web:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     name: Web SDK (Rust/WASM)
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -584,40 +559,9 @@ jobs:
     if: ${{ !cancelled() }}
     needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, web]
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Verify required job results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
-          jq --exit-status '
-            . as $needs
-            |
-            to_entries
-            | all(
-                .value.result == "success"
-                or (
-                  .key == "tooling-tests"
-                  and .value.result == "skipped"
-                  and $needs["tooling-changes"].outputs.relevant == "false"
-                )
-                or (
-                  .key == "unity-bolt-compile"
-                  and .value.result == "skipped"
-                  and $needs["tooling-changes"].outputs.unity_bolt == "false"
-                )
-                or (
-                  .key == "python-sdk"
-                  and .value.result == "skipped"
-                  and $needs["tooling-changes"].outputs.python_sdk == "false"
-                )
-                or (
-                  .key == "kotlin-jni-drift"
-                  and .value.result == "skipped"
-                  and $needs["tooling-changes"].outputs.kotlin_jni == "false"
-                )
-                or (
-                  .key == "apple-bolt-drift"
-                  and .value.result == "skipped"
-                  and $needs["tooling-changes"].outputs.apple_bolt == "false"
-                )
-              )
-          ' <<<"$NEEDS_JSON"
+          python3 tools/scripts/ci_gate.py check <<<"$NEEDS_JSON"
