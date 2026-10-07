@@ -1,0 +1,242 @@
+name: Test zzz engine
+
+# The Kitten TTS 2 pins (crates/zzz-sys/natives-manifest.json) define the
+# binary contract; this lane proves the delivery path end to end in CI:
+# authenticated fetch from the pinned release, staged verification by the
+# same trusted tool that stages locally (zzz_pull.py), and real linking of
+# libzzz_embed.a into a Rust test binary on every pinned target.
+#
+# Design contract (crates/zzz-sys/README.md): default and fork builds never
+# require private assets. Fork and Dependabot runs never receive the
+# secrets, so they take the notice job instead; the secrets-gated steps
+# below also skip (with a loud notice) if ZZZ_GITHUB_TOKEN is unset. Every
+# other CI lane treats the zzz crate as its no-op default build.
+#
+# Both secrets live only in the `zzz-engine` environment, which has a
+# required reviewer: a job naming it waits for approval before it receives
+# them, so a branch that edits this workflow cannot read them unreviewed.
+# Approve only runs whose workflow and zzz code you have read.
+#
+# Weights stay out of scope here: the real-synthesis tests loudly skip
+# without the converted Kitten GGUFs + voice fixture pair, which are private
+# model-store assets (the zzz-research repo owns that e2e coverage today).
+# Adding weights to CI is a follow-up with its own distribution decision.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'crates/zzz-sys/**'
+      - 'crates/xybrid-core/src/runtime_adapter/zzz/**'
+      - 'crates/xybrid-core/src/runtime_adapter/mod.rs'
+      - 'crates/xybrid-core/src/execution/executor.rs'
+      - 'crates/xybrid-core/src/execution/template/metadata.rs'
+      - 'crates/xybrid-core/src/features.rs'
+      - 'crates/xybrid-core/tests/zzz_tts_integration.rs'
+      - 'crates/xybrid-core/Cargo.toml'
+      - 'tools/scripts/zzz_pull.py'
+      - 'tools/scripts/tests/test_zzz_pull.py'
+      - '.github/workflows/test-zzz-engine.yml'
+      - 'Cargo.lock'
+      # Markdown cannot affect this build.
+      - "!**.md"
+  pull_request:
+    branches: [master]
+    paths:
+      - 'crates/zzz-sys/**'
+      - 'crates/xybrid-core/src/runtime_adapter/zzz/**'
+      - 'crates/xybrid-core/src/runtime_adapter/mod.rs'
+      - 'crates/xybrid-core/src/execution/executor.rs'
+      - 'crates/xybrid-core/src/execution/template/metadata.rs'
+      - 'crates/xybrid-core/src/features.rs'
+      - 'crates/xybrid-core/tests/zzz_tts_integration.rs'
+      - 'crates/xybrid-core/Cargo.toml'
+      - 'tools/scripts/zzz_pull.py'
+      - 'tools/scripts/tests/test_zzz_pull.py'
+      - '.github/workflows/test-zzz-engine.yml'
+      - 'Cargo.lock'
+      # Markdown cannot affect this build.
+      - "!**.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Pinned release to verify against; the tool refuses anything the committed
+  # manifest does not say, so this only fails fast before the token is used.
+  ZZZ_ENGINE_TAG: v0.1.0-rc.3
+
+jobs:
+  test-zzz-engine:
+    name: ${{ matrix.name }}
+    # Same-repo runs only: forks and Dependabot get no secrets, and asking
+    # for an approval there could only end in the no-op build.
+    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork
+    environment: zzz-engine
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 45
+    # secrets cannot appear in `if:` expressions, so a presence flag rides
+    # the job env and every consuming step gates on it. The flag is a
+    # boolean, never the token: job env reaches every step, including the
+    # cargo steps that compile and run this change's build scripts and tests.
+    env:
+      ZZZ_CI_ENABLED: ${{ secrets.ZZZ_GITHUB_TOKEN != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS + Linux run the fetched slice natively (ABI probes,
+          # linking, and default-options behavior).
+          - name: macOS ARM64 (link + verify pinned slice)
+            target: aarch64-apple-darwin
+            runs-on: macos-15
+            native: true
+          - name: Linux x86_64 (link + verify pinned slice)
+            target: x86_64-unknown-linux-gnu
+            runs-on: ubuntu-latest
+            native: true
+          # Android cannot execute test binaries without an emulator, and
+          # the contract gates on real linking: build-and-link the test
+          # binaries via the NDK — that exercises the Android archive, its
+          # system-library set, and PIE/TLS alignment requirements without
+          # device time.
+          - name: Android ARM64 (NDK link gate)
+            target: aarch64-linux-android
+            runs-on: ubuntu-latest
+            native: false
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # The staging step is the only consumer of the private credentials.
+      # Without them (forks, unset secrets) the lane stays green and prints
+      # a notice — the default-build contract, not a silent pass.
+      #
+      # It runs straight after checkout, before the toolchain and any cache
+      # restore: the gh and python3 it calls come from the runner image, not
+      # from a cached ~/.cargo/bin an earlier run of this change could have
+      # written.
+      #
+      # Delivery-file guard: on a same-repo PR the checkout holds the PR's
+      # code, so a change to the delivery tool (or the pins it dereferences)
+      # must not run with the private token while it is being changed. Any
+      # edit to the tool, its tests or the manifest fails the lane before
+      # the token is used; the push to master that lands them runs the lane
+      # against the merged files.
+      #
+      # Scope: this stops an in-flight tool or pin edit from reaching the
+      # token. Someone who can push a branch can edit this workflow itself;
+      # the boundary against that is the zzz-engine environment's required
+      # reviewer, not this step.
+      - name: Guard the delivery tool and pins
+        if: env.ZZZ_CI_ENABLED == 'true'
+        run: |
+          set -euo pipefail
+          # The tree comparison needs master's tip, not its history.
+          git fetch --quiet --depth=1 origin master
+          if ! git diff --exit-code origin/master -- \
+            'tools/scripts/zzz_pull.py' \
+            'tools/scripts/tests/test_zzz_pull.py' \
+            'crates/zzz-sys/natives-manifest.json'; then
+            echo "::error title=zzz delivery files changed::tools/scripts/zzz_pull.py, its tests, or natives-manifest.json differ from master. This lane does not run the private fetch while those files are being edited, on any trigger; land them through review and the push to master runs this lane against them."
+            exit 1
+          fi
+
+      - name: Stage pinned engine slice
+        if: env.ZZZ_CI_ENABLED == 'true'
+        id: stage
+        env:
+          ZZZ_GITHUB_TOKEN: ${{ secrets.ZZZ_GITHUB_TOKEN }}
+          ZZZ_RELEASE_REPOSITORY: ${{ secrets.ZZZ_RELEASE_REPOSITORY }}
+        # -I keeps tools/scripts/ off sys.path: a module added beside the
+        # tool could otherwise shadow the stdlib it imports while the token
+        # is in the environment.
+        run: |
+          set -euo pipefail
+          slice=$(python3 -I tools/scripts/zzz_pull.py --target "${{ matrix.target }}" --cache-dir "$RUNNER_TEMP/zzz-cache" --dest "$RUNNER_TEMP/zzz-staging")
+          echo "slice=$slice" >> "$GITHUB_OUTPUT"
+          test -f "$slice/.pinned-archive.tar.gz"
+          test -f "$slice/RECEIPT.json"
+
+      - name: Verify staged bytes against the committed pin
+        if: steps.stage.outputs.slice != ''
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/zzz_pull.py --target "${{ matrix.target }}" --verify-only
+        env:
+          XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: zzz-engine-${{ matrix.target }}
+
+      # Android-only machinery: the NDK supplies the linker driver for the
+      # aarch64 target (see build-android.yml for the same pin and cache).
+      - name: Cache Android NDK
+        if: matrix.target == 'aarch64-linux-android'
+        id: cache-ndk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
+          key: android-ndk-27.0.12077973-zzz
+
+      - name: Setup Android SDK
+        if: matrix.target == 'aarch64-linux-android'
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+
+      - name: Install NDK
+        if: matrix.target == 'aarch64-linux-android' && steps.cache-ndk.outputs.cache-hit != 'true'
+        run: sdkmanager --install "ndk;27.0.12077973"
+
+      - name: Set NDK environment
+        if: matrix.target == 'aarch64-linux-android'
+        run: |
+          ANDROID_NDK="$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_NDK/aarch64-linux-android29-clang" >> "$GITHUB_ENV"
+
+      - name: Link and ABI-test against the pinned slice (native targets)
+        if: steps.stage.outputs.slice != '' && matrix.native
+        env:
+          XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
+        run: cargo test -p xybrid-zzz-sys --features bindings --target ${{ matrix.target }}
+
+      - name: Link gate against the pinned slice (Android, no execution)
+        if: steps.stage.outputs.slice != '' && !matrix.native
+        env:
+          XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
+        run: cargo test -p xybrid-zzz-sys --features bindings --target ${{ matrix.target }} --no-run
+
+      - name: Adapter state tests
+        if: steps.stage.outputs.slice != '' && matrix.native
+        env:
+          XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
+        run: cargo test -p xybrid-core --features tts-zzz --lib zzz
+
+      - name: Notice — secrets absent, lane skipped
+        if: env.ZZZ_CI_ENABLED != 'true'
+        run: |
+          echo "::notice title=zzz engine lane skipped::ZZZ_GITHUB_TOKEN/ZZZ_RELEASE_REPOSITORY not available on this run (fork or unset secrets); the zzz crate stays in its default no-op build, per the private-assets contract."
+
+  untrusted-notice:
+    name: zzz engine lane (no secrets on this run)
+    if: github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Notice — fork or Dependabot run, lane skipped
+        run: |
+          echo "::notice title=zzz engine lane skipped::Fork and Dependabot runs never receive the zzz-engine secrets; the zzz crate stays in its default no-op build, per the private-assets contract."
