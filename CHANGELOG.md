@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-sequence state snapshots in `xybrid-llama`.**
+  `LlamaContext::state_seq_save` and `state_seq_restore` copy a sequence's
+  KV cache and recurrent state out and back in, through three new
+  `llama_state_seq_*_c` shim functions. This makes prefix reuse possible on
+  recurrent and hybrid models such as LFM2, where `kv_cache_seq_rm` cannot
+  truncate: prefill a shared system prompt once, then restore it before each
+  request. Snapshots are opaque (`LlamaSeqSnapshot`) and only restore into
+  the context that saved them, because llama.cpp does not validate the bytes
+  and can abort on bad ones. A `seq_id` the context does not hold, or a
+  failed restore, returns an error, and a failed restore leaves the sequence
+  empty. `xybrid-core` does not use it yet.
 - **Kitten TTS 2 via the pinned zzz engine (`tts-zzz`).** `xybrid-zzz-sys`
   carries hand-written ABI-1 FFI for the prebuilt `libzzz_embed.a` and
   statically links the privately staged pinned slice through

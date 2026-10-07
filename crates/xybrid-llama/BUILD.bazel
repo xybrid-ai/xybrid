@@ -65,6 +65,7 @@ _LLAMA_INTEGRATION_TESTS = {
     "callback_stop_boundaries": ["bindings"],
     "prefix_cache_hit_smoke": ["bindings"],
     "recurrent_gating_smoke": ["bindings"],
+    "state_seq_snapshot_smoke": ["bindings"],
     "wrapper_invariants": [],
 }
 

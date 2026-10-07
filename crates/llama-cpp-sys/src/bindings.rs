@@ -727,6 +727,28 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
+    pub fn llama_state_seq_get_size_c(
+        ctx: *mut ::std::os::raw::c_void,
+        seq_id: ::std::os::raw::c_int,
+    ) -> usize;
+}
+extern "C" {
+    pub fn llama_state_seq_get_data_c(
+        ctx: *mut ::std::os::raw::c_void,
+        dst: *mut u8,
+        size: usize,
+        seq_id: ::std::os::raw::c_int,
+    ) -> usize;
+}
+extern "C" {
+    pub fn llama_state_seq_set_data_c(
+        ctx: *mut ::std::os::raw::c_void,
+        src: *const u8,
+        size: usize,
+        seq_id: ::std::os::raw::c_int,
+    ) -> usize;
+}
+extern "C" {
     pub fn llama_tokenize_c(
         model: *const ::std::os::raw::c_void,
         text: *const ::std::os::raw::c_char,
