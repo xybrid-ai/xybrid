@@ -23,6 +23,9 @@ on:
     paths:
       - 'crates/zzz-sys/**'
       - 'crates/xybrid-core/src/runtime_adapter/zzz/**'
+      - 'crates/xybrid-core/src/runtime_adapter/mod.rs'
+      - 'crates/xybrid-core/src/execution/executor.rs'
+      - 'crates/xybrid-core/src/features.rs'
       - 'crates/xybrid-core/tests/zzz_tts_integration.rs'
       - 'crates/xybrid-core/Cargo.toml'
       - 'tools/scripts/zzz_pull.py'
@@ -36,6 +39,9 @@ on:
     paths:
       - 'crates/zzz-sys/**'
       - 'crates/xybrid-core/src/runtime_adapter/zzz/**'
+      - 'crates/xybrid-core/src/runtime_adapter/mod.rs'
+      - 'crates/xybrid-core/src/execution/executor.rs'
+      - 'crates/xybrid-core/src/features.rs'
       - 'crates/xybrid-core/tests/zzz_tts_integration.rs'
       - 'crates/xybrid-core/Cargo.toml'
       - 'tools/scripts/zzz_pull.py'
@@ -134,6 +140,26 @@ jobs:
       # The staging step is the only consumer of the private credentials.
       # Without them (forks, unset secrets) the lane stays green and prints
       # a notice — the default-build contract, not a silent pass.
+      #
+      # Exfiltration guard: on a same-repo PR, the checkout holds the PR's
+      # code, so a change that modifies the delivery tool (or the pins it
+      # dereferences) must not be allowed to run with the private token
+      # while it is being changed. Any edit to the tool, its tests or the
+      # manifest fails the lane before the token is ever used; those files
+      # land through their own review, and the next change consumes them.
+      - name: Guard the delivery tool and pins
+        if: env.ZZZ_CI_TOKEN != ''
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin master
+          if ! git diff --exit-code origin/master -- \
+            'tools/scripts/zzz_pull.py' \
+            'tools/scripts/tests/test_zzz_pull.py' \
+            'crates/zzz-sys/natives-manifest.json'; then
+            echo "::error title=zzz delivery files changed::tools/scripts/zzz_pull.py, its tests, or natives-manifest.json were modified in this change. This lane does not run the private fetch while those files are being edited; land them first and re-run (this lane's next run), or dispatch this workflow manually."
+            exit 1
+          fi
+
       - name: Stage pinned engine slice
         if: env.ZZZ_CI_TOKEN != ''
         id: stage
