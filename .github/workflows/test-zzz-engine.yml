@@ -64,6 +64,10 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
+    # secrets cannot appear in `if:` expressions, so the presence flag rides
+    # an env mirror; every consuming step gates on it.
+    env:
+      ZZZ_CI_TOKEN: ${{ secrets.ZZZ_GITHUB_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -124,14 +128,14 @@ jobs:
         if: matrix.target == 'aarch64-linux-android'
         run: |
           ANDROID_NDK="$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK" >> $GITHUB_ENV
-          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_NDK/aarch64-linux-android29-clang" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_NDK/aarch64-linux-android29-clang" >> "$GITHUB_ENV"
 
       # The staging step is the only consumer of the private credentials.
       # Without them (forks, unset secrets) the lane stays green and prints
       # a notice — the default-build contract, not a silent pass.
       - name: Stage pinned engine slice
-        if: ${{ secrets.ZZZ_GITHUB_TOKEN != '' }}
+        if: env.ZZZ_CI_TOKEN != ''
         id: stage
         env:
           ZZZ_GITHUB_TOKEN: ${{ secrets.ZZZ_GITHUB_TOKEN }}
@@ -170,6 +174,6 @@ jobs:
         run: cargo test -p xybrid-core --features tts-zzz --lib zzz
 
       - name: Notice — secrets absent, lane skipped
-        if: ${{ secrets.ZZZ_GITHUB_TOKEN == '' }}
+        if: env.ZZZ_CI_TOKEN == ''
         run: |
           echo "::notice title=zzz engine lane skipped::ZZZ_GITHUB_TOKEN/ZZZ_RELEASE_REPOSITORY not available on this run (fork or unset secrets); the zzz crate stays in its default no-op build, per the private-assets contract."
