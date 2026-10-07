@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Kitten TTS 2 via the pinned zzz engine (`tts-zzz`).** `xybrid-zzz-sys`
+  carries hand-written ABI-1 FFI for the prebuilt `libzzz_embed.a` and
+  statically links the privately staged pinned slice through
+  `tools/scripts/zzz_pull.py` verification — the crate never compiles zzz;
+  an enabled build fails on unsupported targets or unverified slices. The
+  safe surface (`KittenSession`, streaming audio callback, typed errors)
+  plugs into `xybrid-core` as the `ZzzEmbed` execution template (four asset
+  paths: language and decoder GGUFs plus both voice JSONs), executed by a
+  new `zzz` runtime that synthesizes text to WAV envelopes with the
+  engine's 24 kHz mono output. Feature-gated off every platform preset
+  until native CI fetches the pinned slices. Model weights and voices stay
+  separate files. Raw archives, receipts and staging remain private.
 - **Web SDK release packaging.** Releases include `@xybrid/web` as an npm
   archive with its ESM client, declarations, worker, CPU/WASM SIMD and
   experimental WebGPU runtimes. Preparation checks the actual archive in an

@@ -6385,6 +6385,7 @@ dependencies = [
  "xybrid-llama",
  "xybrid-llama-sys",
  "xybrid-whisper",
+ "xybrid-zzz-sys",
  "yuvutils-rs",
  "zstd",
 ]
@@ -6482,6 +6483,14 @@ dependencies = [
  "bindgen",
  "cc",
  "xybrid-llama-sys",
+]
+
+[[package]]
+name = "xybrid-zzz-sys"
+version = "0.10.1"
+dependencies = [
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
