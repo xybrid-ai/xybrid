@@ -16,7 +16,9 @@
 //!
 //! - [`LlamaModel`] — owning handle to a loaded GGUF model
 //! - [`LlamaContext`] — owning handle to a llama context, with KV-cache
-//!   manipulation methods
+//!   manipulation and per-sequence state snapshot methods
+//! - [`LlamaSeqSnapshot`] — a saved sequence state, restorable into the
+//!   context that saved it
 //! - [`StreamingCallback`] — closure type alias for streaming generation
 //! - [`generate_streaming`] / [`generate_with_stops`] — the autoregressive
 //!   loops, including the prefix-reuse `n_past_in` knob
@@ -70,7 +72,7 @@ mod model;
 mod vision;
 
 #[cfg(feature = "bindings")]
-pub use context::LlamaContext;
+pub use context::{LlamaContext, LlamaSeqSnapshot};
 #[cfg(all(feature = "bindings", feature = "vision"))]
 pub use generation::generate_from_current_logits_streaming;
 #[cfg(feature = "bindings")]
@@ -99,6 +101,10 @@ pub struct LlamaModel;
 /// Stub returned when the `bindings` feature is disabled.
 #[cfg(not(feature = "bindings"))]
 pub struct LlamaContext;
+
+/// Stub returned when the `bindings` feature is disabled.
+#[cfg(not(feature = "bindings"))]
+pub struct LlamaSeqSnapshot;
 
 #[cfg(not(feature = "bindings"))]
 pub fn set_verbosity(_level: i32) {}

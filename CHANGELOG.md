@@ -41,6 +41,17 @@ foreign binding APIs are unchanged.
   text, from a `ChoiceScorerSpec`. It matches the PyTorch reference for the
   CUA-S1-FORMS fixtures within 2e-5 in logits on macOS and Linux. No SDK entry
   point runs a scorer yet.
+- **Per-sequence state snapshots in `xybrid-llama`.**
+  `LlamaContext::state_seq_save` and `state_seq_restore` copy a sequence's
+  KV cache and recurrent state out and back in, through three new
+  `llama_state_seq_*_c` shim functions. This makes prefix reuse possible on
+  recurrent and hybrid models such as LFM2, where `kv_cache_seq_rm` cannot
+  truncate: prefill a shared system prompt once, then restore it before each
+  request. Snapshots are opaque (`LlamaSeqSnapshot`) and only restore into
+  the context that saved them, because llama.cpp does not validate the bytes
+  and can abort on bad ones. A `seq_id` the context does not hold, or a
+  failed restore, returns an error, and a failed restore leaves the sequence
+  empty. `xybrid-core` does not use it yet.
 - **Kitten TTS 2 via the pinned zzz engine (`tts-zzz`).** `xybrid-zzz-sys`
   carries hand-written ABI-1 FFI for the prebuilt `libzzz_embed.a` and
   statically links the privately staged pinned slice through
@@ -105,6 +116,14 @@ foreign binding APIs are unchanged.
 
 ### Fixed
 
+- **KittenTTS no longer returns its phoneme durations instead of speech.**
+  KittenTTS 0.8 models (nano, micro and mini) return per-phoneme durations
+  next to the waveform, and synthesis used whichever output came first. In
+  about four runs out of ten, "Hello world" came back as 15 samples, under a
+  millisecond of sound, and the run still succeeded. Short, long and streamed
+  text were all affected. Synthesis now uses the output named `waveform` (or
+  `audio`); a TTS model with several outputs and neither name fails with an
+  error instead of guessing. Kokoro has a single output and was not affected.
 - **Stopping a llama.cpp run on one of its first tokens no longer reports a
   native failure.** When memory or thermal pressure, a cancel, or an
   `on_token` error stopped generation on one of the first four tokens (five

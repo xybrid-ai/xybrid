@@ -357,6 +357,11 @@ Converts TTS float32 waveform output to PCM audio bytes.
 
 **Input**: Float32 waveform → **Output**: `Envelope::Audio(pcm_bytes)`
 
+The waveform is the model's only output or, when it has several, the output
+named `waveform` (preferred) or `audio`. KittenTTS 0.8, for example, also
+returns per-phoneme `duration`. A TTS model with several outputs and neither
+name fails to run.
+
 ### `WhisperDecode`
 
 Decodes Whisper token IDs to text using a HuggingFace tokenizer.

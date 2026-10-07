@@ -113,6 +113,39 @@ pub(crate) unsafe fn kv_cache_seq_rm(ctx: *mut c_void, seq_id: i32, p_keep: usiz
     let _ = sys::llama_kv_cache_seq_rm_c(ctx, seq_id, p_keep_c);
 }
 
+/// Byte size of a state snapshot of `seq_id`. Zero on failure, including
+/// a `seq_id` outside `[0, n_seq_max)` (checked by the shim).
+///
+/// # Safety
+///
+/// `ctx` must be a live, non-null context pointer.
+pub(crate) unsafe fn state_seq_get_size(ctx: *mut c_void, seq_id: i32) -> usize {
+    sys::llama_state_seq_get_size_c(ctx, seq_id)
+}
+
+/// Write a state snapshot of `seq_id` into `dst`, returning the bytes
+/// written. Zero on failure, including `dst` being too small.
+///
+/// # Safety
+///
+/// `ctx` must be a live, non-null context pointer.
+pub(crate) unsafe fn state_seq_get_data(ctx: *mut c_void, dst: &mut [u8], seq_id: i32) -> usize {
+    sys::llama_state_seq_get_data_c(ctx, dst.as_mut_ptr(), dst.len(), seq_id)
+}
+
+/// Load a snapshot from [`state_seq_get_data`] into `seq_id`, returning
+/// the bytes read. Zero on failure, which leaves `seq_id` empty.
+///
+/// # Safety
+///
+/// `ctx` must be a live, non-null context pointer, and `src` an unmodified
+/// [`state_seq_get_data`] snapshot from a context on the same model.
+/// llama.cpp does not validate the bytes: anything else can hit one of its
+/// asserts and abort the process.
+pub(crate) unsafe fn state_seq_set_data(ctx: *mut c_void, src: &[u8], seq_id: i32) -> usize {
+    sys::llama_state_seq_set_data_c(ctx, src.as_ptr(), src.len(), seq_id)
+}
+
 /// Sizing-probe pass of tokenization.
 ///
 /// # Safety
