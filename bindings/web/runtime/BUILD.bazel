@@ -38,6 +38,9 @@ cc_binary(
         "-sALLOW_MEMORY_GROWTH=1",
         "-sINITIAL_MEMORY=67108864",
         "-sMAXIMUM_MEMORY=2147483648",
+        # llama.cpp's graph construction overflows Emscripten's 64 KiB default
+        # stack, which grows down into static data and corrupts it silently.
+        "-sSTACK_SIZE=1048576",
         "-sFORCE_FILESYSTEM=1",
         "-sASYNCIFY=1",
         # Rust's Emscripten std and minja use Emscripten exception handling.
