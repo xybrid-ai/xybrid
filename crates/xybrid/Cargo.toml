@@ -38,6 +38,9 @@ llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
 llm-llamacpp-vision = ["llm-llamacpp", "xybrid-sdk/llm-llamacpp-vision"]
+# Kitten TTS 2 via the pinned zzz engine slice. Per-target: enabled builds
+# fail on targets whose slice is not pinned (Windows, iOS).
+tts-zzz = ["xybrid-sdk/tts-zzz"]
 huggingface = ["xybrid-sdk/huggingface"]
 onnx-inspect = ["xybrid-sdk/onnx-inspect"]
 dev-tools = ["xybrid-sdk/dev-tools"]

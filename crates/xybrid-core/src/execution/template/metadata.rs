@@ -19,7 +19,7 @@ use schemars::JsonSchema;
 /// Main execution template enum - defines how a model should be executed.
 ///
 /// Variants are named by **format**, not by runtime implementation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "type")]
 pub enum ExecutionTemplate {
@@ -151,6 +151,50 @@ pub enum ExecutionTemplate {
         #[serde(default)]
         generation_params: Option<GenerationParams>,
     },
+
+    /// zzz CPU engine execution, pinned Kitten TTS 2 profile, via the
+    /// quietly staged `libzzz_embed.a` (see `crates/zzz-sys`). Model
+    /// weights and both voice JSONs are bundle files resolved like other
+    /// template paths.
+    ///
+    /// Distinct from the ONNX `KittenTTS-Nano` path: the zzz engine links
+    /// the pinned engine binary (feature `tts-zzz`) and takes the four
+    /// assets directly, without phonemize preprocessing steps.
+    ZzzEmbed {
+        /// Language (speech-token) GGUF, relative to bundle root.
+        model_file: String,
+
+        /// S3 waveform-decoder GGUF, relative to bundle root.
+        #[serde(default)]
+        decoder_file: String,
+
+        /// Language-model voice JSON, relative to bundle root.
+        #[serde(default)]
+        language_voice_file: String,
+
+        /// S3 decoder voice JSON (`zzz.kitten_s3.voice.v1`), relative to
+        /// bundle root.
+        #[serde(default)]
+        decoder_voice_file: String,
+
+        /// Forced language; the engine's PoC accepts prepared English only,
+        /// so absent (its default) is also the correct value there.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
+
+        /// Threads (0 = engine default of 4; explicit range 1..=64).
+        #[serde(default)]
+        threads: u32,
+
+        /// Generation token cap (0 = engine default of 128; 1..=1023
+        /// explicit).
+        #[serde(default)]
+        max_tokens: u32,
+
+        /// Waveform-stage seed; 0 is valid.
+        #[serde(default)]
+        seed: u64,
+    },
 }
 
 /// Sampling parameters for GGUF generation. All fields optional so metadata
@@ -177,7 +221,7 @@ pub struct GenerationParams {
 // ============================================================================
 
 /// A single stage in a pipeline execution
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct PipelineStage {
     /// Stage name (e.g., "encoder", "decoder", "vocoder")
@@ -206,7 +250,7 @@ pub struct PipelineStage {
 // ============================================================================
 
 /// Execution mode for a pipeline stage
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "type")]
 #[derive(Default)]
@@ -247,7 +291,7 @@ pub enum ExecutionMode {
 }
 
 /// Schedule for iterative refinement (diffusion models)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "type")]
 #[derive(Default)]
@@ -679,6 +723,9 @@ pub fn backend_label_from_template(
         // engine to hint at — so this is reported unconditionally rather than
         // deferring to the hint like the GGUF arms above.
         ExecutionTemplate::GgmlWhisper { .. } => Some("whispercpp"),
+        // The template fixes the runtime to the pinned zzz engine slice; no
+        // hint participates.
+        ExecutionTemplate::ZzzEmbed { .. } => Some("zzz"),
         ExecutionTemplate::CoreMl { .. }
         | ExecutionTemplate::TfLite { .. }
         | ExecutionTemplate::LiteRtLm { .. }
@@ -830,6 +877,11 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
                 "cpu"
             }
         }
+        ExecutionTemplate::ZzzEmbed { .. } => {
+            // The pinned zzz slice is CPU-only by profile (the Metal LLM
+            // remains excluded), so the swim-lane colour is fixed.
+            "cpu"
+        }
         ExecutionTemplate::Onnx { .. }
         | ExecutionTemplate::TfLite { .. }
         | ExecutionTemplate::LiteRtLm { .. }
@@ -862,6 +914,38 @@ mod tests {
     #[test]
     fn ggml_whisper_uses_gpu_span_on_apple_silicon_macos() {
         assert_eq!(span_kind_from_template(&ggml_whisper_template()), "gpu");
+    }
+
+    fn zzz_embed_template() -> ExecutionTemplate {
+        ExecutionTemplate::ZzzEmbed {
+            model_file: "kitten-tts-2-q2_0.gguf".into(),
+            decoder_file: "kitten-s3-meanflow-f32.gguf".into(),
+            language_voice_file: "voices/bruno-lm.json".into(),
+            decoder_voice_file: "voices/bruno-s3.json".into(),
+            language: Some("en".into()),
+            threads: 4,
+            max_tokens: 128,
+            seed: 0,
+        }
+    }
+
+    #[test]
+    fn zzz_embed_template_labels_cpu_pinned_zzz_runtime() {
+        // The template fixes the runtime label; no backend hint participates.
+        assert_eq!(
+            backend_label_from_template(&zzz_embed_template(), Some("llamacpp")),
+            Some("zzz")
+        );
+        assert_eq!(span_kind_from_template(&zzz_embed_template()), "cpu");
+    }
+
+    #[test]
+    fn zzz_embed_template_round_trips_serde() {
+        let original = zzz_embed_template();
+        let serialized = serde_json::to_string(&original).expect("serialize");
+        let round_tripped: ExecutionTemplate =
+            serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(original, round_tripped);
     }
 
     #[cfg(not(all(

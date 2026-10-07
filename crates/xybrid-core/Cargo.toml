@@ -30,6 +30,7 @@ xybrid-llama = { path = "../xybrid-llama", version = "0.11.0", optional = true }
 # Safe whisper.cpp wrappers. Gated behind `asr-whispercpp`, which also pulls
 # `llm-llamacpp` — that is where the shared ggml comes from.
 xybrid-whisper = { path = "../xybrid-whisper", version = "0.11.0", optional = true }
+xybrid-zzz-sys = { path = "../zzz-sys", version = "0.11.0", optional = true }
 # Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
 # hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
 # we render that template here instead. Gated with the deps below into
@@ -196,6 +197,16 @@ asr-whispercpp = [
     "llm-llamacpp",
     "dep:xybrid-whisper",
     "xybrid-whisper/bindings",
+]
+
+# zzz CPU engine, pinned Kitten TTS 2 profile. Links the privately staged
+# pinned `libzzz_embed.a` through `xybrid-zzz-sys`; there is no source-build
+# fallback, and an enabled build fails when the staged slice is missing or
+# fails verification (crates/zzz-sys/README.md). Independent of
+# `llm-llamacpp` — the zzz slice carries its own GGUF runtime.
+tts-zzz = [
+    "dep:xybrid-zzz-sys",
+    "xybrid-zzz-sys/bindings",
 ]
 
 # The Rust vision pipeline (envelopes, preprocessing, strategy dispatch) is

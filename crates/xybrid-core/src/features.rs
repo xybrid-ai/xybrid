@@ -23,6 +23,7 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     ("ort-cuda", cfg!(feature = "ort-cuda")),
     ("ort-download", cfg!(feature = "ort-download")),
     ("ort-dynamic", cfg!(feature = "ort-dynamic")),
+    ("tts-zzz", cfg!(feature = "tts-zzz")),
     // Vision (image envelopes + preprocessing pipeline) is always compiled in;
     // the heavy native VLM backend is reported via `llm-llamacpp-vision`.
     ("vision", true),

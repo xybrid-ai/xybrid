@@ -1,0 +1,40 @@
+[package]
+name = "xybrid-zzz-sys"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+repository.workspace = true
+description = "Raw FFI bindings to the pinned zzz CPU engine (Kitten TTS 2 slice). Statically links the privately staged libzzz_embed.a from crates/zzz-sys/natives-manifest.json pins — it never compiles zzz from source."
+# One crate claims the `zzz_embed` links name: mirroring `xybrid-llama-sys`
+# (`links = "llama"`) so that a second zzz binding entering the graph fails
+# resolution loudly instead of static-linking two copies of the engine.
+links = "zzz_embed"
+
+# The native slice is never committed, downloaded by anyone's default, or
+# bundled into this crate's tarball: it arrives privately staged by
+# `tools/scripts/zzz_pull.py` (see natives-manifest.json and the README).
+# Only the hand-written FFI declarations below are public.
+
+[lib]
+name = "xybrid_zzz_sys"
+path = "src/lib.rs"
+
+[features]
+# Default: crate that compiles on any target with the public types but no
+# native library and no FFI entry points. Mirrors `xybrid-llama-sys`'s gating
+# so `cargo check --workspace` on a runner without a staged zzz slice stays
+# green.
+default = []
+# Links the pinned staged engine slice for the build target and exposes the
+# safe session surface. An enabled build fails if the target is unsupported
+# or the staged slice is missing or fails verification — never silently
+# building without the engine.
+bindings = []
+
+[build-dependencies]
+# Manifest + staged receipt parsing. Both are already resolved in the
+# workspace lockfile; nothing new enters it.
+serde_json = "1.0"
+
+[dependencies]
+thiserror = { workspace = true }

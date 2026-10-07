@@ -9,6 +9,7 @@ members = [
     "crates/xybrid-cli",
     "crates/llama-cpp-sys",
     "crates/whisper-cpp-sys",
+    "crates/zzz-sys",
     "crates/xybrid-llama",
     "crates/xybrid-whisper",
     "bindings/flutter/rust",
