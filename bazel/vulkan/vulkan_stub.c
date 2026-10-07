@@ -1,12 +1,13 @@
 // Link-time stub for the Vulkan loader. NEVER shipped, never called.
 //
 // ggml's Vulkan backend routes almost everything through vulkan-hpp's dynamic
-// dispatcher, so the static archives leave exactly three loader symbols
-// undefined (grep ggml-vulkan.cpp for `vk[A-Z]`):
+// dispatcher, so the static archives leave exactly four loader symbols
+// undefined (grep ggml/src/ggml-vulkan/*.cpp for `vk[A-Z]`):
 //
 //   vkGetInstanceProcAddr          bootstraps the dispatcher
 //   vkGetPhysicalDeviceFeatures2   queried before the dispatcher covers it
 //   vkGetDeviceProcAddr            resolves the device-fault extension
+//   vkCmdCopyBuffer                one direct command call
 //
 // The obvious way to satisfy them is to link the exec machine's libvulkan.so,
 // and that does not work here: it is built against ITS glibc, so resolving it
@@ -20,7 +21,7 @@
 // machine's REAL Vulkan loader at startup. The stub bodies below exist only to
 // give the linker something to resolve against; nothing ever executes them.
 //
-// Adding a fourth direct call upstream fails the link with the missing symbol
+// Adding a fifth direct call upstream fails the link with the missing symbol
 // named, which is the diagnostic we want — so this list stays honest rather
 // than padded with entry points we do not use.
 
@@ -39,4 +40,13 @@ void *vkGetDeviceProcAddr(void *device, const char *name) {
   (void)device;
   (void)name;
   return 0;
+}
+
+void vkCmdCopyBuffer(void *command_buffer, void *src, void *dst,
+                     unsigned int region_count, const void *regions) {
+  (void)command_buffer;
+  (void)src;
+  (void)dst;
+  (void)region_count;
+  (void)regions;
 }
