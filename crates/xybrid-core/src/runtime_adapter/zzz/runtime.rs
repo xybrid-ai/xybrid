@@ -11,8 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use xybrid_zzz_sys::{
-    EmbedResult, KittenSession, KittenSettings, SYNTHESIS_CHANNELS, SYNTHESIS_SAMPLE_RATE,
-    ZZZ_EMBED_ABI_VERSION,
+    KittenSession, KittenSettings, SYNTHESIS_CHANNELS, SYNTHESIS_SAMPLE_RATE, ZZZ_EMBED_ABI_VERSION,
 };
 
 use crate::audio::samples_to_wav;
@@ -43,6 +42,9 @@ pub struct ZzzDefaults {
     pub language: Option<String>,
     /// Threads, token cap (0 selects engine defaults) and waveform seed.
     pub settings: KittenSettings,
+    /// The bundle-declared per-chunk character budget (mirrors
+    /// `ModelMetadata.max_chunk_chars` threaded by the dispatcher).
+    pub max_chunk_chars: Option<usize>,
 }
 
 /// zzz-engine-backed runtime (Kitten TTS 2).
@@ -181,11 +183,16 @@ impl ModelRuntime for ZzzKittenRuntime {
                 "zzz engine session is not loaded".to_string(),
             ));
         };
+        // The bundle's `max_chunk_chars` (dispatched via `ZzzDefaults`) is
+        // the default; a request-level `max_chunk_chars` envelope key wins
+        // over it, mirroring the request-over-bundle restore semantics
+        // elsewhere in the executor.
+        let bundle_chars = defaults.max_chunk_chars.unwrap_or(DEFAULT_MAX_TTS_CHARS);
         let max_chars = input
             .metadata
             .get("max_chunk_chars")
             .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(DEFAULT_MAX_TTS_CHARS);
+            .unwrap_or(bundle_chars);
 
         let chunks = if text.chars().count() <= max_chars {
             vec![text]
@@ -193,18 +200,35 @@ impl ModelRuntime for ZzzKittenRuntime {
             crate::execution::text_chunking::chunk_text_for_tts(&text, max_chars)
         };
         let mut all = Vec::new();
-        let mut profile = EmbedResult::default();
+        // Census across chunks: a per-chunk cap does not erase earlier
+        // capped chunks, and the partial audio of a capped chunk is real
+        // delivered audio (the engine cannot retract it), so it is kept.
+        let mut limited_chunks = 0_u32;
         for chunk in chunks {
-            let outcome = session
-                .synthesize(&chunk, defaults.language.as_deref())
-                .map_err(|error| AdapterError::RuntimeError(error.to_string()))?;
-            profile = outcome.result;
-            if outcome.samples.is_empty() {
+            let mut delivered = Vec::new();
+            if let Err(error) = session.synthesize_stream(
+                &chunk,
+                defaults.language.as_deref(),
+                &mut |chunk_samples, _info| {
+                    delivered.extend_from_slice(chunk_samples);
+                    true
+                },
+            ) {
+                let limited = matches!(
+                    error,
+                    xybrid_zzz_sys::ZzzError::LimitReached { .. } if !delivered.is_empty()
+                );
+                if !limited {
+                    return Err(AdapterError::RuntimeError(error.to_string()));
+                }
+                limited_chunks += 1;
+            }
+            if delivered.is_empty() {
                 // Matching the ONNX chunking invariant: the degenerate
                 // empty case never enters concatenation.
                 continue;
             }
-            all.extend(outcome.samples);
+            all.extend(delivered);
         }
 
         let wav = samples_to_wav(&all, SYNTHESIS_SAMPLE_RATE);
@@ -215,11 +239,10 @@ impl ModelRuntime for ZzzKittenRuntime {
         result
             .metadata
             .insert("channels".to_string(), SYNTHESIS_CHANNELS.to_string());
-        if profile.limited_chunks > 0 {
-            result.metadata.insert(
-                "zzz_limited_chunks".to_string(),
-                profile.limited_chunks.to_string(),
-            );
+        if limited_chunks > 0 {
+            result
+                .metadata
+                .insert("zzz_limited_chunks".to_string(), limited_chunks.to_string());
         }
         Ok(result)
     }
@@ -250,6 +273,7 @@ mod tests {
             decoder_voice: PathBuf::from("s3-voice.json"),
             language: Some("en".to_string()),
             settings: KittenSettings::default(),
+            max_chunk_chars: None,
         }
     }
 

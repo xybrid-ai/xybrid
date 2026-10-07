@@ -144,6 +144,7 @@ type StreamCallback<'a> = Box<dyn FnMut(&[f32], ChunkInfo) -> bool + 'a>;
 /// The owned form the engine receives across the FFI boundary (`'static`
 /// blanket on the alias above is only a decode-level label; the boxed value
 /// always lives in the local synchronous call frame).
+#[allow(dead_code)]
 type OwnedStreamCallback = StreamCallback<'static>;
 
 /// One loaded Kitten session. `Drop` closes it exactly once.

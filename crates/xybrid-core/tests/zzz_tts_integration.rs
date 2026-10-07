@@ -177,3 +177,41 @@ fn executor_rejects_non_text_input_for_zzz_embed() {
         "unexpected error: {error}"
     );
 }
+
+#[test]
+fn executor_chunks_long_text_into_a_concatenated_utterance() {
+    // Above the default 350-char budget: exercises the chunker and the
+    // accumulated census (partial capped chunks still deliver audio).
+    let Some(bundle) = synthetic_bundle() else {
+        return;
+    };
+    let Some(base_path) = bundle
+        ._dir
+        .path()
+        .to_str()
+        .map(std::string::ToString::to_string)
+    else {
+        panic!("temp bundle path is not valid UTF-8");
+    };
+    let mut executor = TemplateExecutor::new(&base_path);
+    let text = "The quick speech engine speaks a compact sentence. ".repeat(12);
+    let output = executor
+        .execute(
+            &bundle.metadata,
+            &Envelope::new(EnvelopeKind::Text(text)),
+            None,
+        )
+        .expect("chunked zzz execution");
+    let EnvelopeKind::Audio(wav) = output.kind else {
+        panic!("expected audio, got {:?}", output.kind_str());
+    };
+    assert!(wav.len() > 40_000, "twelve sentences of speech");
+    // Either every chunk fit or the census reports the capped ones; in
+    // both cases audio was delivered and the flag is consistent.
+    if let Some(limited) = output.metadata.get("zzz_limited_chunks") {
+        assert!(
+            limited.parse::<u32>().expect("census parses") >= 1,
+            "the census only appears when a cap was hit"
+        );
+    }
+}

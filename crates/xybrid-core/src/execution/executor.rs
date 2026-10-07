@@ -3083,6 +3083,9 @@ impl TemplateExecutor {
                 max_tokens: *max_tokens,
                 seed: *seed,
             },
+            // The bundle's chunk budget rides along so the runtime can
+            // chunk without template access.
+            max_chunk_chars: metadata.max_chunk_chars,
         };
         {
             let runtime = self.runtimes.get_mut("zzz").ok_or_else(|| {
