@@ -51,8 +51,8 @@ recipe and regenerate the derived artifacts deliberately; do not replace
 expected digests merely to make the check green.
 The Qwen fixture excludes the optional MTP prediction head with `--no-mtp`,
 preserving the text trunk covered by the reference goldens. Record new artifact
-digests only after rebuilding from the pinned inputs and checking the embedded
-chat template.
+digests only after rebuilding from the pinned inputs on the CI platform (macOS
+arm64) and checking the embedded chat template.
 
 ## Release preparation
 

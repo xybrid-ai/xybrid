@@ -66,12 +66,16 @@ byte:
 - `llama-quantize` is built CPU-only, without `-march=native` and with
   `-ffp-contract=off` to avoid compiler-dependent fused multiply-adds.
   `provenance.json` records the platforms verified for the current
-  conversion; CI checks the same digest on every conformance platform.
+  conversion.
+- The Qwen F16 is reproducible per CPU architecture, not across them: the
+  converter folds `ssm_a = -exp(A_log)` with torch's vectorized `exp`, whose
+  last bit differs between arm64 and x86_64. The pinned digests come from
+  the CI platform (macOS arm64); an x86_64 rebuild differs only in those
+  16-element `ssm_a` tensors.
 
 The llama.cpp v0.6.0 migration keeps the Qwen text-trunk fixture by passing
 `--no-mtp`, which excludes the optional prediction head the new converter
-otherwise exports. A comparison against a rebuild with the previous converter
-found the same 320 tensor payloads. The F16 digest changes with new
+otherwise exports. The F16 digest changes with new
 `qwen35.attention.recurrent_layers` and `tokenizer.ggml.add_eos_token` metadata,
 and the Q4_K_M fixture is regenerated from that F16. Reference goldens,
 templates and scoring tolerances are preserved.
