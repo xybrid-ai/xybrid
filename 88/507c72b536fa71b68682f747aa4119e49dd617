@@ -1,0 +1,21 @@
+crates/xybrid-core/src/execution/executor.rs
+  s_a27705c7eed0ea::t_f34e9690cfe52e 3086-3088
+crates/xybrid-core/tests/zzz_tts_integration.rs
+  s_a27705c7eed0ea::t_14ea8687d21660 180-217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "88507c72b536fa71b68682f747aa4119e49dd617",
+  "prompts": {},
+  "sessions": {
+    "s_a27705c7eed0ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "505b4087-52bd-424a-ba0a-a56df633a17b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
