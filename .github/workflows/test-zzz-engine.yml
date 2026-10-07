@@ -25,6 +25,7 @@ on:
       - 'crates/xybrid-core/src/runtime_adapter/zzz/**'
       - 'crates/xybrid-core/src/runtime_adapter/mod.rs'
       - 'crates/xybrid-core/src/execution/executor.rs'
+      - 'crates/xybrid-core/src/execution/template/metadata.rs'
       - 'crates/xybrid-core/src/features.rs'
       - 'crates/xybrid-core/tests/zzz_tts_integration.rs'
       - 'crates/xybrid-core/Cargo.toml'
@@ -41,6 +42,7 @@ on:
       - 'crates/xybrid-core/src/runtime_adapter/zzz/**'
       - 'crates/xybrid-core/src/runtime_adapter/mod.rs'
       - 'crates/xybrid-core/src/execution/executor.rs'
+      - 'crates/xybrid-core/src/execution/template/metadata.rs'
       - 'crates/xybrid-core/src/features.rs'
       - 'crates/xybrid-core/tests/zzz_tts_integration.rs'
       - 'crates/xybrid-core/Cargo.toml'
@@ -141,22 +143,28 @@ jobs:
       # Without them (forks, unset secrets) the lane stays green and prints
       # a notice — the default-build contract, not a silent pass.
       #
-      # Exfiltration guard: on a same-repo PR, the checkout holds the PR's
-      # code, so a change that modifies the delivery tool (or the pins it
-      # dereferences) must not be allowed to run with the private token
-      # while it is being changed. Any edit to the tool, its tests or the
-      # manifest fails the lane before the token is ever used; those files
-      # land through their own review, and the next change consumes them.
+      # Delivery-file guard: on a same-repo PR the checkout holds the PR's
+      # code, so a change to the delivery tool (or the pins it dereferences)
+      # must not run with the private token while it is being changed. Any
+      # edit to the tool, its tests or the manifest fails the lane before
+      # the token is used; the push to master that lands them runs the lane
+      # against the merged files.
+      #
+      # Scope: this stops an in-flight tool or pin edit from reaching the
+      # token. It is not a boundary against someone who can push a branch to
+      # this repository: they can edit this workflow itself, which is true
+      # of every repository secret here.
       - name: Guard the delivery tool and pins
         if: env.ZZZ_CI_TOKEN != ''
         run: |
           set -euo pipefail
-          git fetch --quiet origin master
+          # The tree comparison needs master's tip, not its history.
+          git fetch --quiet --depth=1 origin master
           if ! git diff --exit-code origin/master -- \
             'tools/scripts/zzz_pull.py' \
             'tools/scripts/tests/test_zzz_pull.py' \
             'crates/zzz-sys/natives-manifest.json'; then
-            echo "::error title=zzz delivery files changed::tools/scripts/zzz_pull.py, its tests, or natives-manifest.json were modified in this change. This lane does not run the private fetch while those files are being edited; land them first and re-run (this lane's next run), or dispatch this workflow manually."
+            echo "::error title=zzz delivery files changed::tools/scripts/zzz_pull.py, its tests, or natives-manifest.json differ from master. This lane does not run the private fetch while those files are being edited, on any trigger; land them through review and the push to master runs this lane against them."
             exit 1
           fi
 
@@ -166,9 +174,12 @@ jobs:
         env:
           ZZZ_GITHUB_TOKEN: ${{ secrets.ZZZ_GITHUB_TOKEN }}
           ZZZ_RELEASE_REPOSITORY: ${{ secrets.ZZZ_RELEASE_REPOSITORY }}
+        # -I keeps tools/scripts/ off sys.path: a module added beside the
+        # tool could otherwise shadow the stdlib it imports while the token
+        # is in the environment.
         run: |
           set -euo pipefail
-          slice=$(python3 tools/scripts/zzz_pull.py --target "${{ matrix.target }}" --cache-dir "$RUNNER_TEMP/zzz-cache" --dest "$RUNNER_TEMP/zzz-staging")
+          slice=$(python3 -I tools/scripts/zzz_pull.py --target "${{ matrix.target }}" --cache-dir "$RUNNER_TEMP/zzz-cache" --dest "$RUNNER_TEMP/zzz-staging")
           echo "slice=$slice" >> "$GITHUB_OUTPUT"
           test -f "$slice/.pinned-archive.tar.gz"
           test -f "$slice/RECEIPT.json"
