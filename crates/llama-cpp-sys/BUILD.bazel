@@ -41,7 +41,7 @@ cc_library(
     # Metal lane: the frameworks cargo's build.rs emits on apple (build.rs:
     # 675-680). The Rust crates' #[link] attrs already pull Metal/Foundation/
     # Accelerate; MetalKit exists ONLY here — ggml-metal.m needs it.
-    # Vulkan lane: three loader symbols ggml-vulkan.cpp calls directly, which
+    # Vulkan lane: four loader symbols ggml-vulkan calls directly, which
     # the static archives leave undefined (everything else goes through
     # vulkan-hpp's dynamic dispatcher). Cargo satisfies them with
     # `rustc-link-lib=vulkan` + a $VULKAN_SDK/lib search path (build.rs:760,773);
