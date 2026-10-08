@@ -4006,10 +4006,15 @@ impl XybridModel {
     /// cannot be interrupted. Returning `false` also cancels delivery. The
     /// terminal summary distinguishes completed, cancelled and limited audio;
     /// failures use `SdkError`. The model remains resident and reusable.
+    /// Resource abort policies apply before synthesis and during delivery;
+    /// Kitten also polls them during inference. Resource aborts preserve the
+    /// cloud-fallback decision. `max_grace_tokens` counts audio packets here,
+    /// while user cancellation stops delivery without grace or cloud fallback.
     ///
     /// # Errors
     ///
-    /// Returns an error for invalid input, unavailable assets or backend failure.
+    /// Returns an error for invalid input, unavailable assets, backend failure
+    /// or a resource-policy abort (`AbortedForCloudFallback` when permitted).
     pub fn run_tts_streaming<F>(
         &self,
         envelope: &Envelope,
@@ -4034,6 +4039,11 @@ impl XybridModel {
         {
             return Ok(cancelled_result());
         }
+        let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
+        let mut abort_state = AbortState::new(options);
+        abort_state
+            .check_before_run()
+            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
         let start = Instant::now();
@@ -4050,19 +4060,46 @@ impl XybridModel {
         {
             return Ok(cancelled_result());
         }
+        abort_state
+            .check_before_run()
+            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
         handle.ensure_runnable()?;
         let metadata = handle.metadata.clone();
 
-        // Delivery checks the token too; the independent predicate below lets
-        // Kitten interrupt computation before its next audio packet is ready.
+        // The watcher and packet callback share policy state, independently of
+        // the model lock. Retain the reason that actually stopped synthesis so
+        // a resource abort cannot be mistaken for user cancellation or success.
+        let abort_state = Mutex::new((abort_state, None));
         let cancel = options.cancellation_token.clone();
-        let mut adapter = |packet: xybrid_core::execution::TtsAudioChunk| -> bool {
-            if let Some(token) = &cancel {
-                if token.is_cancelled() {
-                    return false;
-                }
+        let should_stop = |before_packet: bool| {
+            if cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
+                return true;
             }
-            on_chunk(packet)
+            let mut guard = abort_state.lock().unwrap_or_else(|e| e.into_inner());
+            let (state, stopped_reason) = &mut *guard;
+            if stopped_reason.is_some() {
+                return true;
+            }
+            let check = if before_packet {
+                state.check_before_token()
+            } else {
+                state.check_during_compute()
+            };
+            if let Err(reason) = check {
+                *stopped_reason = Some(reason);
+                return true;
+            }
+            false
+        };
+        let mut delivery_cancelled = false;
+        let mut adapter = |packet: xybrid_core::execution::TtsAudioChunk| -> bool {
+            if should_stop(true) {
+                return false;
+            }
+            // Release the abort-state lock before calling consumer code.
+            let keep_going = on_chunk(packet);
+            delivery_cancelled |= !keep_going;
+            keep_going
         };
 
         let summary = handle
@@ -4072,10 +4109,18 @@ impl XybridModel {
             .execute_tts_streaming_controlled(
                 &metadata,
                 envelope,
-                &|| cancel.as_ref().is_some_and(CancellationToken::is_cancelled),
+                &|| should_stop(false),
                 &mut adapter,
-            )
-            .map_err(|e| sdk_execution_error("TTS streaming failed", e))?;
+            );
+        let (_, stopped_reason) = abort_state.into_inner().unwrap_or_else(|e| e.into_inner());
+        // An explicit user cancel remains terminal, even if resource pressure
+        // was observed concurrently: never restart a cancelled request in cloud.
+        if !delivery_cancelled && !cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
+            if let Some(reason) = stopped_reason {
+                return Err(streaming_pre_run_abort_error(reason, fallback_to_cloud));
+            }
+        }
+        let summary = summary.map_err(|e| sdk_execution_error("TTS streaming failed", e))?;
 
         let latency_ms = start.elapsed().as_millis() as u32;
         let event = crate::telemetry::TelemetryEvent {
@@ -7101,6 +7146,95 @@ mod tests {
         assert_eq!(result.samples, 0);
         drop(held);
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn tts_resource_abort_skips_held_model_lock_and_preserves_fallback_policy() {
+        use crate::run_options::{AbortPolicy, AbortSignal};
+        use xybrid_core::device::{MemoryPressure, ResourceSnapshot, ThermalState};
+
+        let model = test_loaded_model(false); // no valid assets: execution must be skipped
+        let held = model.handle.write().unwrap();
+        for (signal, snapshot, core_reason, reason_text) in [
+            (
+                AbortSignal::MemoryPressureCritical,
+                ResourceSnapshot {
+                    memory_pressure: MemoryPressure::Critical,
+                    ..Default::default()
+                },
+                xybrid_core::abort::AbortReason::StressMemory,
+                "memory_pressure_critical",
+            ),
+            (
+                AbortSignal::ThermalCritical,
+                ResourceSnapshot {
+                    thermal_state: ThermalState::Critical,
+                    ..Default::default()
+                },
+                xybrid_core::abort::AbortReason::StressThermal,
+                "thermal_critical",
+            ),
+        ] {
+            for fallback in [false, true] {
+                let options = RunOptions::new()
+                    .with_abort_policy(
+                        AbortPolicy::default()
+                            .stop_on(signal)
+                            .with_cloud_fallback(fallback),
+                    )
+                    .with_resource_provider(Arc::new(FixedUnitResourceProvider::new(snapshot)));
+                let (send, recv) = std::sync::mpsc::channel();
+                let worker_model = model.clone();
+                let worker = std::thread::spawn(move || {
+                    send.send(worker_model.run_tts_streaming(
+                        &text_envelope("hello"),
+                        &options,
+                        |_| panic!("resource-aborted request must not deliver audio"),
+                    ))
+                    .unwrap();
+                });
+                let result = recv
+                    .recv_timeout(Duration::from_secs(2))
+                    .expect("resource abort must skip the held model lock");
+                let error = result.expect_err("resource policy must prevent synthesis");
+                if fallback {
+                    assert!(
+                        matches!(error, SdkError::AbortedForCloudFallback { reason } if reason == core_reason)
+                    );
+                } else {
+                    assert!(
+                        matches!(error, SdkError::InferenceError { message, .. } if message.contains(reason_text))
+                    );
+                }
+                worker.join().unwrap();
+            }
+        }
+        drop(held);
+    }
+
+    #[test]
+    fn tts_user_cancellation_never_falls_back_on_concurrent_resource_pressure() {
+        use crate::run_options::{AbortPolicy, AbortSignal};
+        let model = test_loaded_model(false);
+        let token = CancellationToken::new();
+        token.cancel();
+        let options = RunOptions::new()
+            .with_cancellation_token(token)
+            .with_abort_policy(
+                AbortPolicy::default()
+                    .stop_on(AbortSignal::MemoryPressureCritical)
+                    .with_cloud_fallback(true),
+            )
+            .with_resource_provider(Arc::new(FixedUnitResourceProvider::new(
+                xybrid_core::device::ResourceSnapshot {
+                    memory_pressure: xybrid_core::device::MemoryPressure::Critical,
+                    ..Default::default()
+                },
+            )));
+        let result = model
+            .run_tts_streaming(&text_envelope("hello"), &options, |_| panic!("no audio"))
+            .unwrap();
+        assert_eq!(result.status, xybrid_core::execution::TtsStatus::Cancelled);
     }
 
     #[test]

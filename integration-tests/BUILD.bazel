@@ -146,3 +146,19 @@ rust_test(
         "@crates//:tempfile",
     ],
 )
+
+# Runs with a prepared local Kitten bundle and the verified tts_zzz slice;
+# the default graph omits these tests to avoid fetching private engine inputs.
+rust_test(
+    name = "tts_abort",
+    version = XYBRID_VERSION,
+    srcs = ["tests/tts_abort.rs"],
+    crate_features = select({"//:tts_zzz_enabled": ["tts-zzz"], "//conditions:default": []}),
+    data = [":model_metadata_fixtures"],
+    edition = "2021",
+    deps = [
+        ":integration-tests",
+        "//crates/xybrid-core:xybrid-core",
+        "//crates/xybrid-sdk:xybrid-sdk",
+    ],
+)

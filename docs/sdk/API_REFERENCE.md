@@ -1630,7 +1630,8 @@ final stream = model.runStreaming(
 Per-run controls for cooperative cancellation and resource-driven local abort.
 Rust SDK methods with options are available as model-level `run_with_options`,
 `run_with_context_options`, `run_streaming_with_options`, and
-`run_streaming_with_context_options`, plus pipeline-level `run_with_options`,
+`run_streaming_with_context_options`, `run_tts_streaming` and its async partner,
+plus pipeline-level `run_with_options`,
 `run_async_with_options`, `Xybrid::run_pipeline_with_options`, and
 `Xybrid::run_pipeline_streaming_with_options`.
 
@@ -1657,6 +1658,16 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 `fallback_to_cloud` is carried in policy and telemetry contracts so binding
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
+
+TTS checks the same resource policy before synthesis and before audio packet
+delivery. Kitten also polls it while native inference runs, independently of
+the model lock; ONNX can stop only at chunk boundaries. Resource aborts return
+`AbortedForCloudFallback` when the policy permits fallback, or an inference
+error otherwise. `max_grace_tokens` counts additional audio packets on this
+path; polling does not spend that budget. User cancellation returns a cancelled
+TTS summary immediately after the backend drains, without packet grace or cloud
+fallback. These checks preserve the fallback decision; they do not themselves
+start a cloud request.
 
 **User cancellation (all bindings).** A caller
 can abort an in-flight local streaming run via a `CancellationToken` cancel

@@ -371,6 +371,21 @@ impl AbortState {
         Ok(())
     }
 
+    /// Poll while a waveform is being computed without spending packet grace.
+    ///
+    /// With zero grace, stop computation immediately on an observed signal.
+    /// Otherwise latch it for `check_before_token` at the next audio packet:
+    /// watcher polls must not consume the caller's delivery grace budget.
+    pub(crate) fn check_during_compute(&mut self) -> Result<(), AbortReason> {
+        if self.policy.max_grace_tokens == 0 {
+            return self.check_before_token();
+        }
+        if self.active_reason.is_none() {
+            self.active_reason = self.detect_abort_reason();
+        }
+        Ok(())
+    }
+
     fn detect_user_cancelled(&self) -> Option<AbortReason> {
         (self
             .token
@@ -614,6 +629,59 @@ mod tests {
         assert_eq!(
             state.check_before_run().expect_err("run should abort"),
             AbortReason::UserCancelled
+        );
+    }
+
+    #[test]
+    fn tts_compute_poll_stops_on_resource_pressure_without_grace() {
+        let options = RunOptions::new()
+            .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::ThermalCritical));
+        let reader = Arc::new(CountingResourceReader::new(ResourceSnapshot {
+            thermal_state: ThermalState::Critical,
+            ..Default::default()
+        }));
+        let mut state = AbortState::with_resource_reader(&options, reader);
+
+        assert_eq!(
+            state.check_during_compute(),
+            Err(AbortReason::Thermal(ThermalState::Critical))
+        );
+        // Once stopping has been requested, further polls stay stopped even
+        // inside the resource sampling interval.
+        assert_eq!(
+            state.check_during_compute(),
+            Err(AbortReason::Thermal(ThermalState::Critical))
+        );
+    }
+
+    #[test]
+    fn tts_compute_polls_latch_pressure_without_spending_audio_packet_grace() {
+        let options = RunOptions::new().with_abort_policy(
+            AbortPolicy::default()
+                .stop_on(AbortSignal::MemoryPressureCritical)
+                .with_max_grace_tokens(2),
+        );
+        let reader = Arc::new(CountingResourceReader::new(ResourceSnapshot {
+            memory_pressure: MemoryPressure::Critical,
+            ..Default::default()
+        }));
+        let mut state = AbortState::with_resource_reader(&options, reader.clone());
+
+        for _ in 0..100 {
+            state.check_during_compute().unwrap();
+        }
+        assert_eq!(reader.reads(), 1);
+        state.check_before_token().expect("first grace packet");
+        for _ in 0..100 {
+            state.check_during_compute().unwrap();
+        }
+        state.check_before_token().expect("second grace packet");
+        // A final grace packet can complete normally. The next delivery,
+        // rather than a watcher poll after the final packet, exhausts grace.
+        state.check_during_compute().unwrap();
+        assert_eq!(
+            state.check_before_token(),
+            Err(AbortReason::MemoryPressure(MemoryPressure::Critical))
         );
     }
 
