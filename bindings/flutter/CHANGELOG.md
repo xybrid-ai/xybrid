@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.11.0
+
 * Changed: `XybridModelLoader.fromRegistrySpeculative` asks the registry
   before serving from the cloud, and speculates only for a chat model served
   as a direct GGUF download. Other models, including `.xyb` bundles such as
@@ -17,6 +19,10 @@
   looked like a successful stop. They now end the stream with the error token.
 * Fixed: registry requests and telemetry say `flutter` on every platform.
   On iOS, macOS, Linux and Windows without an API key they said `rust`.
+* Fixed: a llama.cpp run stopped on one of its first tokens, by a cancel,
+  memory or thermal pressure, or cloud fallback, no longer fails with an
+  unrelated native error. `runStreamingWithFallback` now reaches the cloud
+  when it stops that early.
 
 ## 0.10.1
 

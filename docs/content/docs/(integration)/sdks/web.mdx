@@ -8,9 +8,12 @@ through Xybrid's existing Rust llama wrappers and llama.cpp, compiled to
 WebAssembly. A worker streams tokens, supports cancellation, and reports memory
 and speed. CPU execution uses WASM SIMD; WebGPU requires `shader-f16`.
 
-The package is a private ESM preview in
-[`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web),
-not yet published to npm. It replaces the former LiteRT tensor/text package.
+The package is an ESM preview in
+[`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web).
+Starting with 0.11.0, each GitHub Release includes `xybrid-web-<version>.tgz`
+and its SHA-256 checksum; install it with
+`npm install ./xybrid-web-<version>.tgz`. npm publication follows once the
+package is approved. It replaces the former LiteRT tensor/text package.
 The complete native SDK API and platform services are still being integrated.
 
 ## Build and try it
