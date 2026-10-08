@@ -147,8 +147,8 @@ rust_test(
     ],
 )
 
-# Runs with a prepared local Kitten bundle and the verified tts_zzz slice;
-# the default graph omits these tests to avoid fetching private engine inputs.
+# ONNX terminal delivery checks, plus Kitten interruption when tts_zzz is enabled.
+# Real-model tests skip without their prepared bundles.
 rust_test(
     name = "tts_abort",
     version = XYBRID_VERSION,

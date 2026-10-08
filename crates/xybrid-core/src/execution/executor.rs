@@ -3359,13 +3359,14 @@ impl TemplateExecutor {
                 sample_rate,
                 channels: 1,
                 first_sample,
-            }) || cancelled()
-            {
+            }) {
                 summary.status = TtsStatus::Cancelled;
                 debug!(target: "xybrid_core", "TTS stream: stopped early at chunk {}", i + 1);
                 break;
             }
         }
+        // The next iteration checks interruption before more inference. Once
+        // the last packet is accepted, there is no remaining work to abort.
         Ok(summary)
     }
 }

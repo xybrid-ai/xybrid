@@ -1,14 +1,15 @@
-//! Resource-policy interruption through the SDK's real Kitten audio stream.
+//! Resource-policy interruption and terminal outcomes through real TTS streams.
 //!
 //! Uses `kitten-tts-2` fixtures or `XYBRID_KITTEN_TEST_BUNDLE`, skipping when
 //! unavailable. Run with `--features tts-zzz --test tts_abort` and a verified
 //! native slice. The bundle should enable sentence chunks and prepared voices.
-
-#![cfg(feature = "tts-zzz")]
+//! ONNX checks use `kokoro-82m` fixtures or `XYBRID_ONNX_TTS_TEST_BUNDLE`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(feature = "tts-zzz")]
+use std::time::Instant;
 
 use xybrid_core::device::{
     MemoryPressure, ResourceSnapshot, ResourceSnapshotProvider, ThermalState,
@@ -34,6 +35,7 @@ impl ResourceSnapshotProvider for PressureProvider {
 }
 
 #[test]
+#[cfg(feature = "tts-zzz")]
 fn kitten_resource_abort_interrupts_compute_and_keeps_the_session_reusable() {
     let bundle = std::env::var_os("XYBRID_KITTEN_TEST_BUNDLE")
         .map(std::path::PathBuf::from)
@@ -56,6 +58,26 @@ fn kitten_resource_abort_interrupts_compute_and_keeps_the_session_reusable() {
         .unwrap();
     assert_eq!(warm.status, TtsStatus::Completed);
     assert!(warm_packets > 0);
+
+    let token = CancellationToken::new();
+    let mut delivered_end = 0;
+    let cancelled = model
+        .run_tts_streaming(
+            &short,
+            &RunOptions::new().with_cancellation_token(token.clone()),
+            |packet| {
+                delivered_end =
+                    packet.first_sample + packet.pcm.len() as u64 / 2 / u64::from(packet.channels);
+                if delivered_end == warm.samples {
+                    token.cancel();
+                }
+                true
+            },
+        )
+        .expect("cancellation from the final packet must remain terminal");
+    assert_eq!(delivered_end, warm.samples);
+    assert!(token.is_cancelled());
+    assert_eq!(cancelled.status, TtsStatus::Cancelled);
 
     for (signal, snapshot, fallback, reason_text, core_reason) in [
         (
@@ -166,4 +188,113 @@ fn kitten_resource_abort_interrupts_compute_and_keeps_the_session_reusable() {
         .expect("resource aborts must drain and leave a reusable resident session");
     assert_eq!(reused.status, TtsStatus::Completed);
     assert!(reused_packets > 0);
+}
+
+#[test]
+fn onnx_final_packet_pressure_keeps_completion_but_remaining_work_can_abort() {
+    let bundle = std::env::var_os("XYBRID_ONNX_TTS_TEST_BUNDLE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| integration_tests::fixtures::model_if_available("kokoro-82m"));
+    let Some(bundle) = bundle else {
+        eprintln!("Skipping ONNX terminal TTS test: Kokoro bundle unavailable");
+        return;
+    };
+    let model = ModelLoader::from_directory(bundle).unwrap().load().unwrap();
+    let short = Envelope::new(EnvelopeKind::Text("Your name sounds like trouble.".into()));
+    for (signal, snapshot) in [
+        (
+            AbortSignal::MemoryPressureCritical,
+            ResourceSnapshot {
+                memory_pressure: MemoryPressure::Critical,
+                ..Default::default()
+            },
+        ),
+        (
+            AbortSignal::ThermalCritical,
+            ResourceSnapshot {
+                thermal_state: ThermalState::Critical,
+                ..Default::default()
+            },
+        ),
+    ] {
+        for fallback in [false, true] {
+            let provider = Arc::new(PressureProvider {
+                stressed: AtomicBool::new(false),
+                snapshot,
+            });
+            let options = RunOptions::new()
+                .with_resource_provider(provider.clone())
+                .with_abort_policy(
+                    AbortPolicy::default()
+                        .stop_on(signal)
+                        .with_cloud_fallback(fallback),
+                );
+            let mut packets = 0;
+            let mut samples = 0;
+            let result = model
+                .run_tts_streaming(&short, &options, |packet| {
+                    packets += 1;
+                    samples += packet.pcm.len() as u64 / 2;
+                    provider.stressed.store(true, Ordering::Release);
+                    // Exceed the sampling interval so an erroneous post-final
+                    // policy check would observe the new critical signal.
+                    std::thread::sleep(Duration::from_millis(150));
+                    true
+                })
+                .expect("pressure after final delivery must not restart finished speech");
+            assert_eq!(packets, 1);
+            assert_eq!(result.status, TtsStatus::Completed);
+            assert_eq!(result.samples, samples);
+            assert_eq!(result.chunks, 1);
+        }
+    }
+
+    let token = CancellationToken::new();
+    let result = model
+        .run_tts_streaming(
+            &short,
+            &RunOptions::new().with_cancellation_token(token.clone()),
+            |_| {
+                token.cancel();
+                true
+            },
+        )
+        .expect("final-packet user cancellation is not a resource fallback");
+    assert_eq!(result.status, TtsStatus::Cancelled);
+
+    let provider = Arc::new(PressureProvider {
+        stressed: AtomicBool::new(false),
+        snapshot: ResourceSnapshot {
+            memory_pressure: MemoryPressure::Critical,
+            ..Default::default()
+        },
+    });
+    let options = RunOptions::new()
+        .with_resource_provider(provider.clone())
+        .with_abort_policy(
+            AbortPolicy::default()
+                .stop_on(AbortSignal::MemoryPressureCritical)
+                .with_cloud_fallback(true),
+        );
+    // Exceed the default 350-character chunk budget: there is still work after
+    // packet one, so the next chunk's pre-inference resource check must abort.
+    let long = Envelope::new(EnvelopeKind::Text(
+        "The village gate stays closed until you tell me your true business. ".repeat(7),
+    ));
+    let mut packets = 0;
+    let error = model
+        .run_tts_streaming(&long, &options, |_| {
+            packets += 1;
+            provider.stressed.store(true, Ordering::Release);
+            std::thread::sleep(Duration::from_millis(150));
+            true
+        })
+        .expect_err("pressure must still stop remaining synthesis");
+    assert_eq!(packets, 1);
+    assert!(matches!(
+        error,
+        SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory
+        }
+    ));
 }

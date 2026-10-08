@@ -1668,6 +1668,10 @@ path; polling does not spend that budget. User cancellation returns a cancelled
 TTS summary immediately after the backend drains, without packet grace or cloud
 fallback. These checks preserve the fallback decision; they do not themselves
 start a cloud request.
+Completed and limited backend results remain authoritative if a resource
+signal arrives during finalization. A resource fallback requires the backend
+to confirm that local synthesis was interrupted; late signals do not restart
+speech that has already finished.
 
 **User cancellation (all bindings).** A caller
 can abort an in-flight local streaming run via a `CancellationToken` cancel

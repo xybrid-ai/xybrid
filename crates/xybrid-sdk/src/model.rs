@@ -390,6 +390,24 @@ fn streaming_pre_run_abort_error(
     SdkError::inference(format!("Execution aborted: {reason}"))
 }
 
+fn finish_tts_stream(
+    result: xybrid_core::runtime_adapter::AdapterResult<xybrid_core::execution::TtsStreamResult>,
+    stopped_reason: Option<crate::run_options::AbortReason>,
+    fallback_to_cloud: bool,
+    user_cancelled: bool,
+) -> SdkResult<xybrid_core::execution::TtsStreamResult> {
+    let summary = result.map_err(|e| sdk_execution_error("TTS streaming failed", e))?;
+    // A watcher may observe pressure after the backend has finished. Only a
+    // confirmed interruption can trigger fallback; completed/limited audio and
+    // backend failures retain their original result even if a late poll fired.
+    if summary.status == xybrid_core::execution::TtsStatus::Cancelled && !user_cancelled {
+        if let Some(reason) = stopped_reason {
+            return Err(streaming_pre_run_abort_error(reason, fallback_to_cloud));
+        }
+    }
+    Ok(summary)
+}
+
 /// Stamp the live-capture tag onto a telemetry-event `data` object.
 ///
 /// When `live_tag` is `Some`, inserts the flat `live_mode = true` +
@@ -4010,6 +4028,8 @@ impl XybridModel {
     /// Kitten also polls them during inference. Resource aborts preserve the
     /// cloud-fallback decision. `max_grace_tokens` counts audio packets here,
     /// while user cancellation stops delivery without grace or cloud fallback.
+    /// Completed and limited backend outcomes take precedence over late
+    /// resource signals, so finished speech does not trigger a cloud restart.
     ///
     /// # Errors
     ///
@@ -4099,7 +4119,9 @@ impl XybridModel {
             // Release the abort-state lock before calling consumer code.
             let keep_going = on_chunk(packet);
             delivery_cancelled |= !keep_going;
-            keep_going
+            // A user cancel issued from the final callback must still stop
+            // delivery even when the backend performs no further policy poll.
+            keep_going && !cancel.as_ref().is_some_and(CancellationToken::is_cancelled)
         };
 
         let summary = handle
@@ -4113,14 +4135,12 @@ impl XybridModel {
                 &mut adapter,
             );
         let (_, stopped_reason) = abort_state.into_inner().unwrap_or_else(|e| e.into_inner());
-        // An explicit user cancel remains terminal, even if resource pressure
-        // was observed concurrently: never restart a cancelled request in cloud.
-        if !delivery_cancelled && !cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
-            if let Some(reason) = stopped_reason {
-                return Err(streaming_pre_run_abort_error(reason, fallback_to_cloud));
-            }
-        }
-        let summary = summary.map_err(|e| sdk_execution_error("TTS streaming failed", e))?;
+        let summary = finish_tts_stream(
+            summary,
+            stopped_reason,
+            fallback_to_cloud,
+            delivery_cancelled || cancel.as_ref().is_some_and(CancellationToken::is_cancelled),
+        )?;
 
         let latency_ms = start.elapsed().as_millis() as u32;
         let event = crate::telemetry::TelemetryEvent {
@@ -7235,6 +7255,82 @@ mod tests {
             .run_tts_streaming(&text_envelope("hello"), &options, |_| panic!("no audio"))
             .unwrap();
         assert_eq!(result.status, xybrid_core::execution::TtsStatus::Cancelled);
+    }
+
+    #[test]
+    fn tts_finished_outcomes_win_over_a_late_resource_abort() {
+        use crate::run_options::AbortReason;
+        use xybrid_core::execution::{TtsStatus, TtsStreamResult};
+        for status in [TtsStatus::Completed, TtsStatus::Limited] {
+            for fallback in [false, true] {
+                let outcome = TtsStreamResult {
+                    status,
+                    sample_rate: 24_000,
+                    channels: 1,
+                    samples: 48_000,
+                    chunks: 2,
+                    limited_chunks: u32::from(status == TtsStatus::Limited),
+                };
+                // The backend has returned, but a watcher that was already
+                // sampling resources records pressure before its join finishes.
+                let late_reason = AbortReason::Thermal(xybrid_core::device::ThermalState::Critical);
+                assert_eq!(
+                    finish_tts_stream(Ok(outcome.clone()), Some(late_reason), fallback, false)
+                        .expect("finished speech must not restart or become an error"),
+                    outcome
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tts_confirmed_resource_interruption_still_preserves_fallback_policy() {
+        use crate::run_options::AbortReason;
+        use xybrid_core::execution::{TtsStatus, TtsStreamResult};
+        let outcome = TtsStreamResult {
+            status: TtsStatus::Cancelled,
+            sample_rate: 24_000,
+            channels: 1,
+            samples: 24_000,
+            chunks: 1,
+            limited_chunks: 0,
+        };
+        let reason = AbortReason::MemoryPressure(xybrid_core::device::MemoryPressure::Critical);
+        assert!(matches!(
+            finish_tts_stream(Ok(outcome.clone()), Some(reason.clone()), true, false),
+            Err(SdkError::AbortedForCloudFallback {
+                reason: xybrid_core::abort::AbortReason::StressMemory
+            })
+        ));
+        assert!(matches!(
+            finish_tts_stream(Ok(outcome.clone()), Some(reason.clone()), false, false),
+            Err(SdkError::InferenceError { .. })
+        ));
+        assert_eq!(
+            finish_tts_stream(Ok(outcome.clone()), Some(reason), true, true).unwrap(),
+            outcome,
+            "user cancellation must not restart partial speech"
+        );
+    }
+
+    #[test]
+    fn tts_backend_failure_is_not_masked_by_a_late_resource_signal() {
+        let error = finish_tts_stream(
+            Err(xybrid_core::runtime_adapter::AdapterError::RuntimeError(
+                "decoder failed".into(),
+            )),
+            Some(crate::run_options::AbortReason::Thermal(
+                xybrid_core::device::ThermalState::Critical,
+            )),
+            true,
+            false,
+        )
+        .unwrap_err();
+        assert!(matches!(&error, SdkError::InferenceError { .. }));
+        assert!(std::error::Error::source(&error)
+            .expect("backend error cause must be retained")
+            .to_string()
+            .contains("decoder failed"));
     }
 
     #[test]

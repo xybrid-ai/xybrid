@@ -203,14 +203,12 @@ impl ZzzKittenRuntime {
             result
         })
         .map_err(|error| AdapterError::RuntimeError(error.to_string()))?;
-        summary.status = if cancelled() {
-            TtsStatus::Cancelled
-        } else {
-            match outcome.status {
-                xybrid_zzz_sys::SynthesisStatus::Completed => TtsStatus::Completed,
-                xybrid_zzz_sys::SynthesisStatus::Cancelled => TtsStatus::Cancelled,
-                xybrid_zzz_sys::SynthesisStatus::Limited => TtsStatus::Limited,
-            }
+        // Native return is authoritative. A new predicate poll here could
+        // turn completed/limited speech into cancellation after synthesis ends.
+        summary.status = match outcome.status {
+            xybrid_zzz_sys::SynthesisStatus::Completed => TtsStatus::Completed,
+            xybrid_zzz_sys::SynthesisStatus::Cancelled => TtsStatus::Cancelled,
+            xybrid_zzz_sys::SynthesisStatus::Limited => TtsStatus::Limited,
         };
         if outcome.result.sample_rate != 0 {
             summary.sample_rate = outcome.result.sample_rate;
