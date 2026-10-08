@@ -119,7 +119,7 @@ Each badge links to its platform setup. See the full
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.10.1
+  xybrid_flutter: ^0.11.0
 ```
 
 **Run a model:**
@@ -136,7 +136,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.10.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.11.0")
 }
 ```
 
@@ -154,7 +154,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.10.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.11.0")
 ]
 ```
 
@@ -171,7 +171,7 @@ let result = try await model.runAsync(envelope: Envelope.text("Hello world"))
 **Install** in a React Native 0.76+ app with the New Architecture (or an Expo SDK 52+ development build):
 
 ```sh
-npm install @xybrid/react-native@0.10.1
+npm install @xybrid/react-native@0.11.0
 ```
 
 For bare React Native, run `cd ios && pod install`. For Expo, run `npx expo prebuild`; Expo Go cannot load the native module.
@@ -228,7 +228,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.10.1"
+xybrid = "0.11.0"
 ```
 
 **Run a model:**

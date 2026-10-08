@@ -10,7 +10,10 @@ CPU 使用 WASM SIMD；WebGPU 需要支持 `shader-f16` 的适配器。
 
 该包是位于
 [`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web)
-的私有 ESM 预览版，尚未发布到 npm。它替换了原有的 LiteRT 张量与文本推理包。
+的 ESM 预览版。从 0.11.0 起，每个 GitHub Release 都附带
+`xybrid-web-<version>.tgz` 及其 SHA-256 校验文件，可通过
+`npm install ./xybrid-web-<version>.tgz` 安装。包获批后将发布到 npm。
+它替换了原有的 LiteRT 张量与文本推理包。
 完整的原生 SDK API 和平台服务仍需接入浏览器平台层。
 
 ## 构建与运行
