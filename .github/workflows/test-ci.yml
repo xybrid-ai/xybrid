@@ -1,4 +1,5 @@
-name: Test CI
+# Purpose: Manual: precompile and upload Flutter binaries per platform, and dry-run the Kotlin publish.
+name: "Maintenance: Packaging tools (manual)"
 
 on:
   workflow_dispatch:

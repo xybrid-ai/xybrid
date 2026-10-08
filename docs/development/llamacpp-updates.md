@@ -92,7 +92,7 @@ but cannot be used to create these branches/PRs: its events do not trigger the
 downstream validation and release workflows. The automation refuses those
 writes if `RELEASE_PAT` is absent. Scheduled writes run only in `xybrid-ai/xybrid`.
 
-Dispatch **Update llama.cpp stable** with `dry_run: true` (the default) to
+Dispatch **Release: llama.cpp stable update** (`llamacpp-update.yml`) with `dry_run: true` (the default) to
 report the upstream candidate and release readiness without creating a branch,
 PR, tag, or release. To accelerate preparation after validation finishes,
 dispatch it with `dry_run: false`; supply `sdk_version` for the first tracked

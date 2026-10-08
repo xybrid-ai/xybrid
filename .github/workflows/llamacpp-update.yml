@@ -1,4 +1,5 @@
-name: Update llama.cpp stable
+# Purpose: Daily: open a PR for each new llama.cpp stable release; once it is validated and its natives are published, push the release branch.
+name: "Release: llama.cpp stable update"
 
 # Intake and release preparation are deliberately separate from validation.
 # This workflow only writes in the canonical repo on trusted master checkouts;
@@ -23,7 +24,7 @@ on:
         required: false
 
 concurrency:
-  group: llamacpp-stable-automation
+  group: llamacpp-update
   cancel-in-progress: false
 
 permissions:

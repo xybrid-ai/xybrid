@@ -1,4 +1,5 @@
-name: Scorecard
+# Purpose: Weekly OpenSSF Scorecard run; publishes results and uploads SARIF to code scanning.
+name: "Security: OpenSSF Scorecard"
 
 on:
   schedule:
@@ -9,7 +10,7 @@ on:
 # Scorecard's publish_results restrictions: no top-level env or defaults,
 # no workflow-level write permissions.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: scorecard-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all

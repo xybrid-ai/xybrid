@@ -100,7 +100,7 @@ Hugging Face 下载会校验声明大小，并在存在有效 Git-LFS OID 时校
 当前预览不支持外部聊天模板、元数据采样/处理、张量推理、视觉、语音和流水线。
 
 CI 构建两个后端，并在 Chromium 中测试打包后的生产 SDK，上传构建大小与测量结果。
-真实 GPU 推理需在兼容硬件上显式启用，或手动触发 `WebGPU browser inference`
+真实 GPU 推理需在兼容硬件上显式启用，或手动触发 `SDK: WebGPU inference (manual)`
 工作流，使用标记为 `webgpu` 的自托管 runner。
 
 资产布局、迁移说明与验证命令请参阅

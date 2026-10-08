@@ -1,4 +1,5 @@
-name: Test choice conformance
+# Purpose: Regenerate and verify choice-scoring conformance artifacts against pinned sha256s; daily cold rebuild.
+name: "CI: Choice conformance"
 
 # Choice-scoring conformance inputs (integration-tests/fixtures/choice). The
 # model artifacts are not published anywhere: tools/conformance/prepare.sh
@@ -60,7 +61,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: test-choice-conformance-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all
