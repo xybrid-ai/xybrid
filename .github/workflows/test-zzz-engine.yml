@@ -112,7 +112,7 @@ jobs:
             runs-on: ubuntu-latest
             native: false
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
       # The staging step is the only consumer of the private credentials.
       # Without them (forks, unset secrets) the lane stays green and prints
@@ -173,12 +173,12 @@ jobs:
           XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # stable
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: zzz-engine-${{ matrix.target }}
 
@@ -187,14 +187,14 @@ jobs:
       - name: Cache Android NDK
         if: matrix.target == 'aarch64-linux-android'
         id: cache-ndk
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
           key: android-ndk-27.0.12077973-zzz
 
       - name: Setup Android SDK
         if: matrix.target == 'aarch64-linux-android'
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           packages: platform-tools
 
