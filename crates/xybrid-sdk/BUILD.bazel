@@ -136,6 +136,8 @@ rust_test(
     name = "xybrid-sdk_test",
     version = XYBRID_VERSION,
     crate = ":xybrid-sdk",
+    # The registry load tests read the committed CUA-S1-FORMS scorer spec.
+    data = ["//integration-tests:choice_fixtures"],
     deps = ["@crates//:httpmock"],
 )
 
@@ -146,6 +148,17 @@ _SDK_INTEGRATION_TESTS = {
     "async_test": [
         ":xybrid-sdk",
         "@crates//:tokio",
+    ],
+    # Choice requests through every public entry point; reads the committed
+    # CUA-S1-FORMS spec (see _SDK_TEST_DATA below).
+    "choice_scoring": [
+        ":xybrid-sdk",
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:log",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+        "@crates//:tokio",
+        "@crates//:tokio-stream",
     ],
     # NOTE: no cloud_fallback_e2e. Cargo declares it
     # `required-features = ["dev-tools"]`, so a default `cargo test -p xybrid-sdk`
@@ -187,6 +200,7 @@ _SDK_INTEGRATION_TESTS = {
 # straight from the worktree; Bazel sandboxes the action, so they must be
 # declared inputs or the reads fail.
 _SDK_TEST_DATA = {
+    "choice_scoring": ["//integration-tests:choice_fixtures"],
     "from_directory_test": ["//integration-tests:model_metadata_fixtures"],
 }
 

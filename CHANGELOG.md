@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking (Rust):** choice requests have a typed place in the API.
+  `EnvelopeKind` gains `ChoiceRequest` (a sealed `ChoiceRequest`: one context
+  and the caller's choices) and `ChoiceScores`, `ExecutionTemplate` gains
+  `ChoiceScorer`, and the SDK's `OutputType` gains `ChoiceScores`, so
+  exhaustive matches over these enums need new arms. Existing envelopes keep
+  their binary encoding. A `ChoiceScorer` model accepts only a choice request,
+  and only through `run`, `run_with_options` or `run_async`. Every other entry
+  point and every other model refuse choice requests and choice scores,
+  including inside a multi-part message, conversation history or a pipeline,
+  before any backend or cloud call. Scorers do not run yet: a valid request is
+  refused with `UnsupportedModelCapability`. The bindings refuse to load a
+  choice scorer, and an invalid scorer spec fails the load with
+  `MetadataInvalid`.
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

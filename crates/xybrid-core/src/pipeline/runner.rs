@@ -15,6 +15,7 @@ use super::{
 };
 use crate::context::{DeviceMetrics, StageDescriptor};
 use crate::device::capabilities::HardwareCapabilities;
+use crate::execution::choice::ensure_no_choice_kinds;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::orchestrator::routing_engine::LocalAvailability;
 use crate::orchestrator::{Orchestrator, OrchestratorError};
@@ -253,6 +254,14 @@ impl PipelineRunner {
             .validate()
             .map_err(PipelineRunnerError::ValidationFailed)?;
 
+        // Pipelines never carry choice requests or scores. This checks the
+        // pipeline's own input; each stage's input and output are checked
+        // again as the stage runs.
+        if let Some(first) = pipeline.stages.first() {
+            ensure_no_choice_kinds(&first.model, std::iter::once(&input))
+                .map_err(|e| PipelineRunnerError::InputConversionFailed(e.to_string()))?;
+        }
+
         // Reset output context for new pipeline run
         self.output_context = StageOutputContext::new();
 
@@ -375,6 +384,12 @@ impl PipelineRunner {
             &self.config.metrics,
             &availability,
         )?;
+
+        // A stage output is never a choice kind (no scorer runs as a stage),
+        // but check before it becomes the next stage's input or a condition
+        // value, where it could only travel as text.
+        ensure_no_choice_kinds(&stage_config.model, std::iter::once(&exec_result.output))
+            .map_err(|e| PipelineRunnerError::OutputConversionFailed(e.to_string()))?;
 
         // Convert output to Value for context tracking
         let output_value = self.envelope_to_value(&exec_result.output);
@@ -821,5 +836,104 @@ stages: []
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"success\":true"));
         assert!(json.contains("\"output_type\":\"text\""));
+    }
+
+    // =====================================================================
+    // Choice requests never travel through a pipeline
+    // =====================================================================
+
+    const SINGLE_STAGE: &str = r#"
+name: "Choice Pipeline"
+version: "1.0"
+
+input:
+  type: text
+
+stages:
+  - id: process
+    model: test-model
+    target: device
+"#;
+
+    #[test]
+    fn a_choice_request_never_enters_a_pipeline() {
+        let mut runner = PipelineRunner::new();
+        runner.register_local_model("test-model", true);
+        let mut fresh = Orchestrator::with_authority(Box::new(LocalAuthority::new()));
+        let mut adapter = MockRuntimeAdapter::with_text_output("mock output");
+        adapter.load_model("/mock/model.onnx").unwrap();
+        let adapter = Arc::new(adapter);
+        fresh.executor_mut().register_adapter(adapter.clone());
+        *runner.orchestrator_mut() = fresh;
+
+        let request = Envelope::choice_request(
+            text_envelope("FORM Intake"),
+            vec![
+                crate::ir::Choice::new("a", "x"),
+                crate::ir::Choice::new("b", "y"),
+            ],
+        );
+        let buried = Envelope::new(EnvelopeKind::MultiPart(vec![request.clone()]));
+        for input in [request, buried] {
+            match runner.run_yaml(SINGLE_STAGE, input) {
+                Err(PipelineRunnerError::InputConversionFailed(message)) => {
+                    assert!(message.contains("choice requests"), "{message}")
+                }
+                other => panic!("expected InputConversionFailed, got {other:?}"),
+            }
+        }
+        assert_eq!(adapter.call_count(), 0);
+    }
+
+    /// Local adapter that answers with choice scores, which no stage may do.
+    struct ScoresAdapter;
+
+    impl RuntimeAdapter for ScoresAdapter {
+        fn name(&self) -> &str {
+            "onnx"
+        }
+
+        fn supported_formats(&self) -> Vec<&'static str> {
+            vec!["onnx"]
+        }
+
+        fn load_model(&mut self, _path: &str) -> crate::runtime_adapter::AdapterResult<()> {
+            Ok(())
+        }
+
+        fn execute(&self, _input: &Envelope) -> crate::runtime_adapter::AdapterResult<Envelope> {
+            Ok(Envelope::new(EnvelopeKind::ChoiceScores(
+                crate::ir::ChoiceScores {
+                    entries: vec![crate::ir::ChoiceScore {
+                        id: "a".to_string(),
+                        logit: 0.0,
+                        score: 1.0,
+                        fixed: false,
+                    }],
+                    label_mass: None,
+                },
+            )))
+        }
+    }
+
+    #[test]
+    fn a_stage_answering_with_choice_kinds_is_refused() {
+        let mut runner = PipelineRunner::new();
+        runner.register_local_model("test-model", true);
+        let mut fresh = Orchestrator::with_authority(Box::new(LocalAuthority::new()));
+        fresh
+            .executor_mut()
+            .register_adapter(Arc::new(ScoresAdapter));
+        *runner.orchestrator_mut() = fresh;
+
+        match runner.run_yaml(SINGLE_STAGE, text_envelope("hello")) {
+            Err(PipelineRunnerError::OutputConversionFailed(message)) => {
+                assert!(message.contains("choice requests"), "{message}")
+            }
+            other => panic!("expected OutputConversionFailed, got {other:?}"),
+        }
+        // Nothing reached the output context, so no later stage or
+        // condition can read it as text.
+        assert!(!runner.output_context().has_output("process"));
     }
 }

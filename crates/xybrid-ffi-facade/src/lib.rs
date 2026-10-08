@@ -572,6 +572,25 @@ fn unrepresentable(payload: &str) -> Error {
     }
 }
 
+/// Refuses a model the FFI bindings cannot run yet: today a choice scorer,
+/// whose request type no binding carries. Every facade load path calls this,
+/// and so does Flutter's, which loads through the SDK directly.
+///
+/// # Errors
+/// [`Error::UnsupportedModelCapability`] for a choice scorer.
+pub fn ensure_ffi_supported(model: &sdk::XybridModel) -> Result<()> {
+    if model.is_choice_scorer() {
+        return Err(Error::UnsupportedModelCapability {
+            message: format!(
+                "model '{}' is a choice scorer; choice scoring is not available through the \
+                 FFI bindings yet",
+                model.model_id()
+            ),
+        });
+    }
+    Ok(())
+}
+
 // ============================================================================
 // Conversation context (LLM chat)
 // ============================================================================
@@ -1887,6 +1906,7 @@ impl ModelLoader {
     /// Synchronous load. For UI hosts use [`load_async`](Self::load_async).
     pub fn load(&self) -> Result<Arc<XybridModel>> {
         let model = self.inner.load().map_err(Error::from)?;
+        ensure_ffi_supported(&model)?;
         Ok(Arc::new(XybridModel { inner: model }))
     }
 
@@ -1894,6 +1914,7 @@ impl ModelLoader {
     /// is safe to `await` from UI runtimes.
     pub async fn load_async(&self) -> Result<Arc<XybridModel>> {
         let model = self.inner.load_async().await.map_err(Error::from)?;
+        ensure_ffi_supported(&model)?;
         Ok(Arc::new(XybridModel { inner: model }))
     }
 
@@ -4312,6 +4333,104 @@ stages:
             raw_pixel_image(),
         ]));
         assert_unconvertible(Envelope::try_from_sdk(nested));
+    }
+
+    fn sdk_choice_request() -> sdk::ir::Envelope {
+        sdk::ir::Envelope::choice_request(
+            sdk_text("FORM Intake"),
+            vec![
+                sdk::Choice::new("tel", "fill Tel"),
+                sdk::Choice::new("name", "fill Name"),
+            ],
+        )
+    }
+
+    fn sdk_choice_scores() -> sdk::ir::Envelope {
+        sdk::ir::Envelope::new(sdk::ir::EnvelopeKind::ChoiceScores(sdk::ChoiceScores {
+            entries: vec![sdk::ChoiceScore {
+                id: "tel".into(),
+                logit: 1.0,
+                score: 1.0,
+                fixed: false,
+            }],
+            label_mass: None,
+        }))
+    }
+
+    #[test]
+    fn choice_kinds_anywhere_in_an_envelope_fail_the_conversion() {
+        let nested = sdk::ir::Envelope::new(sdk::ir::EnvelopeKind::MultiPart(vec![
+            sdk_text("look at this"),
+            sdk_choice_request(),
+        ]));
+        for (envelope, payload) in [
+            (sdk_choice_request(), "a choice request"),
+            (sdk_choice_scores(), "choice scores"),
+            (nested, "a choice request"),
+        ] {
+            match Envelope::try_from_sdk(envelope) {
+                Err(Error::UnsupportedModelCapability { message }) => {
+                    assert!(message.contains(payload), "{message}")
+                }
+                other => panic!("expected UnsupportedModelCapability, got {other:?}"),
+            }
+        }
+        assert_eq!(
+            OutputType::from_sdk(sdk::OutputType::ChoiceScores),
+            OutputType::Unknown
+        );
+    }
+
+    /// A model directory holding only `model_metadata.json`.
+    fn metadata_only_model(template: serde_json::Value) -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        let metadata = serde_json::json!({
+            "model_id": "m",
+            "version": "1.0",
+            "execution_template": template,
+            "files": [],
+        });
+        std::fs::write(dir.path().join("model_metadata.json"), metadata.to_string()).unwrap();
+        dir
+    }
+
+    #[test]
+    fn ffi_loads_refuse_choice_scorers() {
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let spec_path = std::path::Path::new(&manifest_dir)
+            .join("../../integration-tests/fixtures/choice/specs/cua-s1-forms.json");
+        let spec: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(spec_path).unwrap()).unwrap();
+        let scorer =
+            metadata_only_model(serde_json::json!({ "type": "ChoiceScorer", "scorer": spec }));
+        let path = scorer.path().to_string_lossy().to_string();
+
+        let assert_refused = |outcome: Result<Arc<XybridModel>>| match outcome {
+            Err(Error::UnsupportedModelCapability { message }) => {
+                assert!(message.contains("choice scorer"), "{message}")
+            }
+            Err(other) => panic!("expected UnsupportedModelCapability, got {other:?}"),
+            Ok(_) => panic!("a choice scorer must not load through the facade"),
+        };
+        let loader = ModelLoader::from_directory(path.clone()).unwrap();
+        assert_refused(loader.load());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        assert_refused(runtime.block_on(loader.load_async()));
+
+        let sdk_model = sdk::ModelLoader::from_directory(&path)
+            .unwrap()
+            .load()
+            .unwrap();
+        assert!(ensure_ffi_supported(&sdk_model).is_err());
+
+        // Every other model still loads.
+        let chat =
+            metadata_only_model(serde_json::json!({ "type": "Gguf", "model_file": "model.gguf" }));
+        ModelLoader::from_directory(chat.path().to_string_lossy().to_string())
+            .unwrap()
+            .load()
+            .expect("a chat model loads through the facade");
     }
 
     #[test]
