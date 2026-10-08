@@ -348,12 +348,13 @@ fn parts_from_envelope(envelope: &Envelope) -> Result<Vec<MultimodalMessagePart>
             .iter()
             .map(part_from_multipart_fragment)
             .collect::<Result<Vec<_>, _>>(),
-        EnvelopeKind::Audio(_) | EnvelopeKind::Embedding(_) => {
-            Err(AdapterError::InvalidInput(format!(
-                "unsupported multimodal envelope kind {}",
-                envelope.kind.as_str()
-            )))
-        }
+        EnvelopeKind::Audio(_)
+        | EnvelopeKind::Embedding(_)
+        | EnvelopeKind::ChoiceRequest(_)
+        | EnvelopeKind::ChoiceScores(_) => Err(AdapterError::InvalidInput(format!(
+            "unsupported multimodal envelope kind {}",
+            envelope.kind.as_str()
+        ))),
     }
 }
 

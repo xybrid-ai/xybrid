@@ -201,6 +201,17 @@ impl From<ChoiceError> for AdapterError {
     }
 }
 
+const CHOICE_ROUTE_HINT: &str =
+    "send a ChoiceRequest only to a ChoiceScorer model, through a batch run";
+
+/// What a runtime returns for a choice request or choice scores, so no
+/// runtime turns one into text, tensors or a prompt.
+pub(crate) fn choice_kind_not_runtime_input() -> AdapterError {
+    AdapterError::InvalidInput(format!(
+        "choice requests and choice scores are not runtime input; {CHOICE_ROUTE_HINT}"
+    ))
+}
+
 /// One member of E: a candidate and whether it is a fixed choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Candidate<'a> {

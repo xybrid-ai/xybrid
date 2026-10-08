@@ -788,6 +788,9 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
             EnvelopeKind::MultiPart(_) => Err(AdapterError::InvalidInput(
                 "LLM adapter expects Text input, not MultiPart".to_string(),
             )),
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                Err(crate::execution::choice::choice_kind_not_runtime_input())
+            }
         }
     }
 }

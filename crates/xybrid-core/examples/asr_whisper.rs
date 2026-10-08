@@ -133,6 +133,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("❌ Unexpected vision output");
                 return Err("Expected text output, got vision output".into());
             }
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                println!("❌ Unexpected choice output");
+                return Err("Expected text output, got choice output".into());
+            }
         }
     } else {
         // Load real audio file
@@ -180,6 +184,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                 println!("❌ Unexpected vision output");
                 return Err("Expected text output, got vision output".into());
+            }
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                println!("❌ Unexpected choice output");
+                return Err("Expected text output, got choice output".into());
             }
         }
     }

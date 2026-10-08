@@ -351,7 +351,13 @@ impl TemplateExecutor {
             EnvelopeKind::MultiPart(parts) => {
                 parts.iter().any(Self::requires_multimodal_generation)
             }
-            EnvelopeKind::Audio(_) | EnvelopeKind::Text(_) | EnvelopeKind::Embedding(_) => false,
+            // Choice kinds never reach generation: every entry refuses them
+            // first (see `validate_choice_request`).
+            EnvelopeKind::Audio(_)
+            | EnvelopeKind::Text(_)
+            | EnvelopeKind::Embedding(_)
+            | EnvelopeKind::ChoiceRequest(_)
+            | EnvelopeKind::ChoiceScores(_) => false,
         }
     }
 
@@ -503,6 +509,8 @@ impl TemplateExecutor {
             ExecutionTemplate::TfLite { model_file } => ("tflite", model_file),
             #[cfg(feature = "asr-whispercpp")]
             ExecutionTemplate::GgmlWhisper { model_file, .. } => ("whispercpp", model_file),
+            // Scorers do not run yet, so none is ever loaded.
+            ExecutionTemplate::ChoiceScorer { .. } => return false,
             _ => return false,
         };
         let model_full_path = Path::new(&self.base_path).join(model_file);
@@ -807,6 +815,12 @@ impl TemplateExecutor {
             ExecutionTemplate::VisionLanguage { .. } => {
                 return Err(AdapterError::RuntimeError(
                     "VisionLanguage execution should dispatch before the single-model path"
+                        .to_string(),
+                ));
+            }
+            ExecutionTemplate::ChoiceScorer { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "ChoiceScorer execution should dispatch before the single-model path"
                         .to_string(),
                 ));
             }
@@ -3188,6 +3202,12 @@ impl TemplateExecutor {
             ExecutionTemplate::CoreMl { model_file } => model_file.clone(),
             ExecutionTemplate::TfLite { model_file } => model_file.clone(),
             ExecutionTemplate::SafeTensors { model_file, .. } => model_file.clone(),
+            // A scorer is refused before this point; it synthesizes nothing.
+            ExecutionTemplate::ChoiceScorer { .. } => {
+                return Err(AdapterError::InvalidInput(
+                    "Streaming TTS requires a single-model execution template".to_string(),
+                ))
+            }
             _ => {
                 return Err(AdapterError::InvalidInput(
                     "Streaming TTS requires a single-model execution template".to_string(),
@@ -3462,6 +3482,8 @@ pub fn model_default_gen_config(metadata: &ModelMetadata) -> GenerationConfig {
             context_length,
             ..
         } => (generation_params.as_ref(), *context_length),
+        // A scorer generates nothing, so it has no sampling parameters.
+        ExecutionTemplate::ChoiceScorer { .. } => (None, 0),
         _ => (None, 0),
     };
 

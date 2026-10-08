@@ -515,8 +515,8 @@ impl Envelope {
     /// # Errors
     /// Returns [`Error::UnsupportedModelCapability`] if the envelope, or a part
     /// nested in a [`MultiPart`], carries a payload no facade type can hold:
-    /// today a raw pixel image. Failing beats returning the result with that
-    /// payload dropped or replaced.
+    /// today a raw pixel image, a choice request or choice scores. Failing
+    /// beats returning the result with that payload dropped or replaced.
     ///
     /// [`MultiPart`]: EnvelopeKind::MultiPart
     pub fn try_from_sdk(env: sdk::ir::Envelope) -> Result<Self> {
@@ -533,6 +533,12 @@ impl Envelope {
                 // one today and `into_sdk` never builds one.
                 None => return Err(unrepresentable("a raw pixel image")),
             },
+            // No binding carries choice scoring yet; `ensure_ffi_supported`
+            // refuses scorers at load, so no result here holds either kind.
+            sdk::ir::EnvelopeKind::ChoiceRequest(_) => {
+                return Err(unrepresentable("a choice request"))
+            }
+            sdk::ir::EnvelopeKind::ChoiceScores(_) => return Err(unrepresentable("choice scores")),
             sdk::ir::EnvelopeKind::MultiPart(parts) => EnvelopeKind::MultiPart {
                 parts: parts
                     .into_iter()
@@ -1131,7 +1137,8 @@ impl OutputType {
             sdk::OutputType::Text => OutputType::Text,
             sdk::OutputType::Audio => OutputType::Audio,
             sdk::OutputType::Embedding => OutputType::Embedding,
-            sdk::OutputType::Unknown => OutputType::Unknown,
+            // A scorer never loads through the facade (`ensure_ffi_supported`).
+            sdk::OutputType::Unknown | sdk::OutputType::ChoiceScores => OutputType::Unknown,
         }
     }
 

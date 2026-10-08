@@ -362,6 +362,17 @@ impl xybrid_core::http::RetryableError for SdkError {
     }
 }
 
+/// The refusal for warming up a choice scorer: this build validates choice
+/// requests but does not run scorers yet.
+fn choice_scoring_unavailable(model_id: &str) -> SdkError {
+    SdkError::UnsupportedModelCapability {
+        model_id: model_id.to_string(),
+        capability: "choice scoring".to_string(),
+        hint: "this build validates choice requests but does not run choice scorers yet"
+            .to_string(),
+    }
+}
+
 fn streaming_execution_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
     match error {
         xybrid_core::runtime_adapter::AdapterError::AbortedForCloudFallback { reason } => {
@@ -3106,6 +3117,13 @@ impl ModelLoader {
         if Self::is_llm_template(metadata) {
             return true;
         }
+        // A scorer answers one batch run, whatever task its bundle declares.
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ChoiceScorer { .. }
+        ) {
+            return false;
+        }
 
         // Check if this is an ASR model (supports streaming)
         // Look at metadata task or model type (metadata is HashMap<String, serde_json::Value>)
@@ -3136,6 +3154,12 @@ impl ModelLoader {
     fn infer_output_type(metadata: &ModelMetadata) -> OutputType {
         if Self::is_llm_template(metadata) {
             return OutputType::Text;
+        }
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ChoiceScorer { .. }
+        ) {
+            return OutputType::ChoiceScores;
         }
 
         // Check metadata hints (metadata is HashMap<String, serde_json::Value>)
@@ -3692,6 +3716,8 @@ impl XybridModel {
 
         // Create a minimal input based on expected input type
         let warmup_input = match self.output_type {
+            // Scorers do not run in this build, so there is nothing to warm.
+            OutputType::ChoiceScores => return Err(choice_scoring_unavailable(&self.model_id)),
             // For TTS models, use a short text
             OutputType::Audio => Envelope {
                 kind: EnvelopeKind::Text("Hi".to_string()),
@@ -3806,6 +3832,8 @@ impl XybridModel {
 
             // Create a minimal input based on expected input type
             let warmup_input = match output_type {
+                // Scorers do not run in this build, so there is nothing to warm.
+                OutputType::ChoiceScores => return Err(choice_scoring_unavailable(&model_id)),
                 OutputType::Audio => Envelope {
                     kind: EnvelopeKind::Text("Hi".to_string()),
                     metadata: std::collections::HashMap::new(),

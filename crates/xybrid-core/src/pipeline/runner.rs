@@ -462,6 +462,21 @@ impl PipelineRunner {
                     "parts": parts.iter().map(|part| self.envelope_to_value(part)).collect::<Vec<_>>()
                 })
             }
+            // Refused before and after every stage, so these never reach a
+            // condition. Counts only: ids, texts and contexts are caller
+            // content.
+            EnvelopeKind::ChoiceRequest(request) => {
+                serde_json::json!({
+                    "type": "choice_request",
+                    "choices": request.choices().len()
+                })
+            }
+            EnvelopeKind::ChoiceScores(scores) => {
+                serde_json::json!({
+                    "type": "choice_scores",
+                    "count": scores.entries.len()
+                })
+            }
         }
     }
 
@@ -524,7 +539,9 @@ impl PipelineRunner {
                         .unwrap_or_else(|| "unknown".to_string()),
                 },
             ),
-            EnvelopeKind::MultiPart(_) => (
+            EnvelopeKind::MultiPart(_)
+            | EnvelopeKind::ChoiceRequest(_)
+            | EnvelopeKind::ChoiceScores(_) => (
                 OutputResultType::Json,
                 OutputResult::Json(self.envelope_to_value(envelope)),
             ),
