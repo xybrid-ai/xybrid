@@ -1870,6 +1870,55 @@ data class XybridStreamToken(
 
 
 /**
+ * Owned PCM16 LE packet. Offsets count samples per channel.
+ */
+data class XybridTtsAudioChunk(
+    val pcm: ByteArray,
+    val sampleRate: UInt,
+    val channels: UInt,
+    val firstSample: ULong
+) {
+    internal fun wireSize(): Int {
+        return 4 + this.pcm.size + 4 + 4 + 8
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeBytes(this.pcm)
+        writer.writeU32(this.sampleRate)
+        writer.writeU32(this.channels)
+        writer.writeU64(this.firstSample)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridTtsAudioChunk {
+            return XybridTtsAudioChunk(
+                reader.readBytes(),
+                reader.readU32(),
+                reader.readU32(),
+                reader.readU64()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridTtsAudioChunk {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
  * One pull from a streaming inference session.
  *
  * This is a flat record instead of a data-carrying enum because the pinned
@@ -1881,15 +1930,17 @@ data class XybridStreamToken(
  */
 data class XybridStreamEvent(
     val kind: XybridStreamEventKind,
-    val token: XybridStreamToken?
+    val token: XybridStreamToken?,
+    val audio: XybridTtsAudioChunk?
 ) {
     internal fun wireSize(): Int {
-        return 4 + 1 + (this.token?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
+        return 4 + 1 + (this.token?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0) + 1 + (this.audio?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
         writer.writeI32(this.kind.value)
         writer.writeOptionalValue(this.token, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        writer.writeOptionalValue(this.audio, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -1907,7 +1958,8 @@ data class XybridStreamEvent(
         internal fun fromReader(reader: WireReader): XybridStreamEvent {
             return XybridStreamEvent(
                 XybridStreamEventKind.fromValue(reader.readI32()),
-                reader.readOptionalValue({ reader -> XybridStreamToken.fromReader(reader) })
+                reader.readOptionalValue({ reader -> XybridStreamToken.fromReader(reader) }),
+                reader.readOptionalValue({ reader -> XybridTtsAudioChunk.fromReader(reader) })
             )
         }
 
@@ -2723,7 +2775,8 @@ enum class XybridDownloadState(val value: Int) {
 
 enum class XybridStreamEventKind(val value: Int) {
     TOKEN(0),
-    COMPLETE(1);
+    COMPLETE(1),
+    AUDIO(2);
 
     companion object {
         fun fromValue(value: Int): XybridStreamEventKind =

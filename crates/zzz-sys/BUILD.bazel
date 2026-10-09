@@ -1,36 +1,27 @@
-# xybrid-zzz-sys, Bazel-native.
-#
-# The zzz engine is never compiled from source (see the crate README): the
-# pinned, privately staged `libzzz_embed.a` is a build-time INPUT that landing
-# in Bazel comes from the native-SDK release jobs fetching the pinned archives
-# before analysis and exposing them as a declared prebuilt target. Until that
-# CI-fetch step exists, this package publishes the pure-Rust
-# `xybrid-zzz-sys` default lib (no native archive, no FFI entry points), which
-# is exactly what a `cargo check --workspace` build produces and what the
-# Bazel lanes need today: xybrid-core's current config does not enable the
-# `tts-zzz` feature, so the enabled-library path stays cargo-only.
+# The pinned engine archive remains an opt-in private build input.
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@crates//:defs.bzl", "all_crate_deps")
 load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
+
+exports_files(["natives-manifest.json"])
 
 rust_library(
     name = "xybrid_zzz_sys",
     version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
-    # No `bindings` here: that feature fails a build without a staged slice,
-    # and build.rs (cargo-only) emits the link directives from the verified
-    # receipt. When the CI-fetch step lands, this target switches to
-    # `crate_features = ["bindings"]` plus a cc_import/static-archive dep.
-    crate_features = [],
+    crate_features = select({"//:tts_zzz_enabled": ["bindings"], "//conditions:default": []}),
     edition = "2021",
+    deps = all_crate_deps(normal = True) + select({
+        "//bazel/zzz:linux_enabled": ["@zzz_linux//:zzz"],
+        "//bazel/zzz:macos_enabled": ["@zzz_macos//:zzz"],
+        "//bazel/zzz:android_enabled": ["@zzz_android//:zzz"],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = select({
+        "//bazel/zzz:supported_enabled": [],
+        "//:tts_zzz_enabled": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
 )
-
-# Dir-basename alias so the label all_crate_deps() emits
-# (`//crates/zzz-sys`) resolves. The package is `xybrid-zzz-sys` with [lib]
-# name `xybrid_zzz_sys`; because the two derivations agree here, the alias
-# exists only for symmetry with the other -sys crates.
-alias(
-    name = "zzz-sys",
-    actual = ":xybrid_zzz_sys",
-    visibility = ["//visibility:public"],
-)
+alias(name = "zzz-sys", actual = ":xybrid_zzz_sys", visibility = ["//visibility:public"])

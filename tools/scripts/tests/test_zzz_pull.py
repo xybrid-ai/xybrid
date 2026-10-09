@@ -76,8 +76,8 @@ class ZzzPullTests(unittest.TestCase):
                     "system_libraries": entry["system_libraries"],
                     "compiler_runtime": "bundled",
                 },
-                "source_repository": "example/engine-artifacts",
-                "source_commit": "synthetic-test-revision",
+                "source_repository": self.manifest_data["source_repository"],
+                "source_commit": self.manifest_data["source_commit"],
             }
         )
         if target == "aarch64-linux-android":
@@ -145,6 +145,11 @@ class ZzzPullTests(unittest.TestCase):
             )
 
         return run
+
+    def test_receipt_must_match_pinned_source_revision(self):
+        archive, pin = self.make_archive(receipt_update={"source_commit": "0" * 40})
+        with self.assertRaisesRegex(zzz.StageError, "source_commit"):
+            zzz.inspect_archive(archive, pin)
 
     def test_committed_manifest_has_exactly_three_kitten_targets(self):
         self.assertEqual(

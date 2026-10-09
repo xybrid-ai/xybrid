@@ -1346,10 +1346,30 @@ impl StreamToken {
     }
 }
 
+/// Owned PCM16 LE delivery, copied before the native callback returns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TtsAudioChunk {
+    pub pcm: Vec<u8>,
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub first_sample: u64,
+}
+impl From<xybrid_core::execution::TtsAudioChunk> for TtsAudioChunk {
+    fn from(packet: xybrid_core::execution::TtsAudioChunk) -> Self {
+        Self {
+            pcm: packet.pcm,
+            sample_rate: packet.sample_rate,
+            channels: packet.channels,
+            first_sample: packet.first_sample,
+        }
+    }
+}
+
 /// An item returned by [`StreamingSession::next`].
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     Token(StreamToken),
+    Audio(TtsAudioChunk),
     Complete(InferenceResult),
     Error(Error),
 }
@@ -1377,6 +1397,7 @@ const STREAM_CHANNEL_CAPACITY: usize = 32;
 /// references on their respective sides of the FFI boundary.
 pub struct StreamingSession {
     receiver: Mutex<Receiver<StreamEvent>>,
+    audio_cancel: Option<sdk::CancellationToken>,
 }
 
 impl StreamingSession {
@@ -1389,6 +1410,7 @@ impl StreamingSession {
             .spawn(move || produce(sender))?;
         Ok(Arc::new(Self {
             receiver: Mutex::new(receiver),
+            audio_cancel: None,
         }))
     }
 
@@ -1398,16 +1420,58 @@ impl StreamingSession {
     /// sends exactly one [`StreamEvent::Complete`] or [`StreamEvent::Error`]
     /// before disconnecting.
     pub fn next(&self) -> Option<StreamEvent> {
-        self.receiver
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .recv()
-            .ok()
+        let receiver = self.receiver.lock().unwrap_or_else(|p| p.into_inner());
+        loop {
+            let event = receiver.recv().ok()?;
+            if matches!(event, StreamEvent::Audio(_))
+                && self
+                    .audio_cancel
+                    .as_ref()
+                    .is_some_and(sdk::CancellationToken::is_cancelled)
+            {
+                continue;
+            }
+            return Some(event);
+        }
     }
 
     #[cfg(test)]
     fn spawn_for_test(produce: impl FnOnce(SyncSender<StreamEvent>) + Send + 'static) -> Arc<Self> {
         Self::spawn(produce).expect("test streaming worker should spawn")
+    }
+}
+
+impl Drop for StreamingSession {
+    fn drop(&mut self) {
+        if let Some(cancel) = &self.audio_cancel {
+            cancel.cancel();
+        }
+    }
+}
+
+// A full playback queue must remain interruptible while native's callback
+// is blocked. Terminal delivery waits only until the receiver drains or drops.
+fn send_audio_event(
+    sender: &SyncSender<StreamEvent>,
+    mut event: StreamEvent,
+    cancel: &sdk::CancellationToken,
+    terminal: bool,
+) -> bool {
+    loop {
+        if !terminal && cancel.is_cancelled() {
+            return false;
+        }
+        match sender.try_send(event) {
+            Ok(()) => return true,
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                cancel.cancel();
+                return false;
+            }
+            Err(mpsc::TrySendError::Full(pending)) => {
+                event = pending;
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
     }
 }
 
@@ -2236,6 +2300,49 @@ impl XybridModel {
         let options =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
         let model = self.inner.clone();
+
+        if model.output_type() == sdk::OutputType::Audio {
+            let token = options.cancellation_token.clone().unwrap_or_default();
+            let mut options = options;
+            options.cancellation_token = Some(token.clone());
+            let worker_cancel = token.clone();
+            let (sender, receiver) = mpsc::sync_channel(STREAM_CHANNEL_CAPACITY);
+            std::thread::Builder::new()
+                .name("xybrid-tts-stream".into())
+                .spawn(move || {
+                    let started = std::time::Instant::now();
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        model.run_tts_streaming(&envelope, &options, |packet| {
+                            send_audio_event(
+                                &sender,
+                                StreamEvent::Audio(packet.into()),
+                                &worker_cancel,
+                                false,
+                            )
+                        })
+                    }));
+                    let terminal = match result {
+                        Ok(result) => StreamEvent::terminal(result.map(|summary| {
+                            sdk::InferenceResult::new(
+                                summary.into_envelope(),
+                                model.model_id(),
+                                started.elapsed().as_millis() as u32,
+                            )
+                        })),
+                        Err(_) => StreamEvent::Error(Error::InferenceError {
+                            message: "TTS worker panicked".into(),
+                        }),
+                    };
+                    send_audio_event(&sender, terminal, &worker_cancel, true);
+                })
+                .map_err(|e| Error::InferenceError {
+                    message: format!("failed to start TTS worker: {e}"),
+                })?;
+            return Ok(Arc::new(StreamingSession {
+                receiver: Mutex::new(receiver),
+                audio_cancel: Some(token),
+            }));
+        }
 
         StreamingSession::spawn(move |sender| {
             let result = model.run_streaming_with_options(&envelope, &options, |token| {
@@ -3403,6 +3510,64 @@ mod tests {
             max_grace_tokens: 0,
             correlation_id: None,
         }
+    }
+
+    fn test_audio_event() -> StreamEvent {
+        StreamEvent::Audio(TtsAudioChunk {
+            pcm: vec![1, 0],
+            sample_rate: 24000,
+            channels: 1,
+            first_sample: 0,
+        })
+    }
+
+    #[test]
+    fn audio_backpressure_can_be_cancelled_without_draining() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        sender.send(test_audio_event()).unwrap();
+        let cancel = sdk::CancellationToken::new();
+        let worker_cancel = cancel.clone();
+        let (done, wait) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            done.send(send_audio_event(
+                &sender,
+                test_audio_event(),
+                &worker_cancel,
+                false,
+            ))
+            .unwrap();
+        });
+        cancel.cancel();
+        assert!(!wait
+            .recv_timeout(Duration::from_secs(2))
+            .expect("cancel must unblock full queue"));
+        worker.join().unwrap();
+        drop(receiver);
+    }
+
+    #[test]
+    fn audio_cancel_discards_queued_packets_but_preserves_terminal_failure() {
+        let (sender, receiver) = mpsc::sync_channel(2);
+        sender.send(test_audio_event()).unwrap();
+        sender
+            .send(StreamEvent::Error(Error::InferenceError {
+                message: "test failure".into(),
+            }))
+            .unwrap();
+        let cancel = sdk::CancellationToken::new();
+        let session = StreamingSession {
+            receiver: Mutex::new(receiver),
+            audio_cancel: Some(cancel.clone()),
+        };
+        cancel.cancel();
+        assert!(matches!(session.next(), Some(StreamEvent::Error(_))));
+        drop(session);
+        assert!(!send_audio_event(
+            &sender,
+            test_audio_event(),
+            &cancel,
+            true
+        ));
     }
 
     #[test]

@@ -674,6 +674,29 @@ class XybridModel {
     required RunOptions options,
   });
 
+  // Unity uses RunTtsStreaming(envelope, onAudio, cancellationToken) and
+  // RunTtsStreamingAsync with the same arguments. Audio is owned PCM16 LE,
+  // carrying sampleRate, channels and firstSample (per-channel offset).
+  // Both return TtsStreamResult: completed, cancelled, limited, or failed.
+  // Calls run off the main/audio thread; callbacks run on the draining worker.
+  // The existing native RunStream/StreamNext/StreamResult/StreamClose protocol
+  // delivers Audio events for TTS models and Token events for text models.
+  // Kitten cancellation reaches the active native session without the model
+  // lock; pre-cancelled/queued requests never synthesize. Cancellation discards
+  // queued audio; callers invalidate already scheduled playback themselves.
+  // Dispose only after the asynchronous run has returned.
+  // Batch Kitten output uses the existing raw PCM16 LE audio contract.
+  // Unity InferenceResult.SpeechStatus / LimitedChunks expose partial limits;
+  // Success is false for limited/cancelled batch output, with AudioBytes retained.
+  // RunTts (byte-only convenience) therefore throws on a limit.
+  // Kitten Run with a cancellation token collects the controlled stream, so
+  // live interruption also retains a cancelled batch outcome/partial PCM.
+  // ZzzEmbed metadata adds sentence_chunks=false and accelerate=false. The
+  // latter is macOS-only. max_tokens=0 uses available LM-window room, with the
+  // engine's split-chunk runaway guard; explicit caps remain explicit. Kitten
+  // owns text splitting and preserves expression markup. Limited output is
+  // partial audio, never an unqualified completed request.
+
   // Benchmarking
   Future<BenchmarkResult> benchmark({
     required Envelope envelope,
@@ -1607,7 +1630,8 @@ final stream = model.runStreaming(
 Per-run controls for cooperative cancellation and resource-driven local abort.
 Rust SDK methods with options are available as model-level `run_with_options`,
 `run_with_context_options`, `run_streaming_with_options`, and
-`run_streaming_with_context_options`, plus pipeline-level `run_with_options`,
+`run_streaming_with_context_options`, `run_tts_streaming` and its async partner,
+plus pipeline-level `run_with_options`,
 `run_async_with_options`, `Xybrid::run_pipeline_with_options`, and
 `Xybrid::run_pipeline_streaming_with_options`.
 
@@ -1634,6 +1658,20 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 `fallback_to_cloud` is carried in policy and telemetry contracts so binding
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
+
+TTS checks the same resource policy before synthesis and before audio packet
+delivery. Kitten also polls it while native inference runs, independently of
+the model lock; ONNX can stop only at chunk boundaries. Resource aborts return
+`AbortedForCloudFallback` when the policy permits fallback, or an inference
+error otherwise. `max_grace_tokens` counts additional audio packets on this
+path; polling does not spend that budget. User cancellation returns a cancelled
+TTS summary immediately after the backend drains, without packet grace or cloud
+fallback. These checks preserve the fallback decision; they do not themselves
+start a cloud request.
+Completed and limited backend results remain authoritative if a resource
+signal arrives during finalization. A resource fallback requires the backend
+to confirm that local synthesis was interrupted; late signals do not restart
+speech that has already finished.
 
 **User cancellation (all bindings).** A caller
 can abort an in-flight local streaming run via a `CancellationToken` cancel

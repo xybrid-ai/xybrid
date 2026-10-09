@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "engine": "zzz",
-  "release_tag": "v0.1.0-rc.3",
+  "release_tag": "v0.1.0-rc.4",
   "archives": [
     {
       "target": "aarch64-apple-darwin",
       "slice": "macos-arm64",
       "profile": "kitten-tts2",
-      "archive": "zzz-kitten-tts2-macos-arm64-v0.1.0-rc.3.tar.gz",
-      "sha256": "44f39122488a31f5f5265f63a2515e1eaac280231d9a5495c7f65d6d6e88bc35",
+      "archive": "zzz-kitten-tts2-macos-arm64-v0.1.0-rc.4.tar.gz",
+      "sha256": "57757ceca6231af81f39541f34023838c1f03bb2edb97ead537da3aa8f5fdf06",
       "receipt_schema": 3,
       "apis": {
         "zzz_embed": 1
@@ -31,8 +31,8 @@
       "target": "aarch64-linux-android",
       "slice": "android-arm64",
       "profile": "kitten-tts2",
-      "archive": "zzz-kitten-tts2-android-arm64-v0.1.0-rc.3.tar.gz",
-      "sha256": "adecb89d1aab3c1cb0fb53fe63cbd7ca6d54fe933f6fe93bfc9b9e5c3abe5287",
+      "archive": "zzz-kitten-tts2-android-arm64-v0.1.0-rc.4.tar.gz",
+      "sha256": "7fa1c1fd91f12c277b8535a9d5cd68a7f8444aff6c89adc035dc29efab611b89",
       "receipt_schema": 3,
       "apis": {
         "zzz_embed": 1
@@ -57,8 +57,8 @@
       "target": "x86_64-unknown-linux-gnu",
       "slice": "linux-x86_64",
       "profile": "kitten-tts2",
-      "archive": "zzz-kitten-tts2-linux-x86_64-v0.1.0-rc.3.tar.gz",
-      "sha256": "98c2159e57dc9913b8d7d989a58eabe06e065bfc26529d2b8a968be0b74eb7e6",
+      "archive": "zzz-kitten-tts2-linux-x86_64-v0.1.0-rc.4.tar.gz",
+      "sha256": "45783145e532c5dd808595804f5293604cf3d607b48438a14212af9632866704",
       "receipt_schema": 3,
       "apis": {
         "zzz_embed": 1
@@ -80,5 +80,7 @@
         "dl"
       ]
     }
-  ]
+  ],
+  "source_repository": "xybrid-ai/zzz-research",
+  "source_commit": "56385c4a3fbab8bc503341947af37e96ebb0071d"
 }

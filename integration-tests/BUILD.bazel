@@ -146,3 +146,19 @@ rust_test(
         "@crates//:tempfile",
     ],
 )
+
+# ONNX terminal delivery checks, plus Kitten interruption when tts_zzz is enabled.
+# Real-model tests skip without their prepared bundles.
+rust_test(
+    name = "tts_abort",
+    version = XYBRID_VERSION,
+    srcs = ["tests/tts_abort.rs"],
+    crate_features = select({"//:tts_zzz_enabled": ["tts-zzz"], "//conditions:default": []}),
+    data = [":model_metadata_fixtures"],
+    edition = "2021",
+    deps = [
+        ":integration-tests",
+        "//crates/xybrid-core:xybrid-core",
+        "//crates/xybrid-sdk:xybrid-sdk",
+    ],
+)

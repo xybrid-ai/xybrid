@@ -130,6 +130,7 @@ typedef int32_t ___XybridDownloadState;
 typedef int32_t ___XybridStreamEventKind;
 #define XYBRID_STREAM_EVENT_KIND_TOKEN ((___XybridStreamEventKind)0)
 #define XYBRID_STREAM_EVENT_KIND_COMPLETE ((___XybridStreamEventKind)1)
+#define XYBRID_STREAM_EVENT_KIND_AUDIO ((___XybridStreamEventKind)2)
 typedef int32_t ___XybridCacheEntryLocation;
 #define XYBRID_CACHE_ENTRY_LOCATION_REGISTRY ((___XybridCacheEntryLocation)0)
 #define XYBRID_CACHE_ENTRY_LOCATION_EXTRACTED ((___XybridCacheEntryLocation)1)

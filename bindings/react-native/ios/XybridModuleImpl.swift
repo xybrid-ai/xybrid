@@ -616,9 +616,11 @@ public final class XybridModuleImpl: NSObject {
           let result = try entry.model.streamResult(streamId: entry.streamId)
           handles.dispose(stream)
           return ["kind": "complete", "result": XybridCodec.encodeResult(result)] as JSObject
+        case .audio:
+          throw BridgeError.invalidArgument("Token streams cannot deliver audio; use run for batch speech")
         }
       } catch {
-        // A failed pull already closed the bolt session.
+        // Dispose also aborts a stream rejected for an unsupported event.
         handles.dispose(stream)
         throw Self.cancellationAware(error, entry.cancel)
       }

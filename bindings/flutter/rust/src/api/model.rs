@@ -1069,9 +1069,12 @@ impl FfiModel {
                 // Clone the sink for the per-chunk callback; the original stays
                 // for the terminal Complete/Error emit below.
                 let chunk_sink = sink.clone();
-                let on_chunk = move |pcm: Vec<u8>, sample_rate: u32| -> bool {
+                let on_chunk = move |packet: xybrid_core::execution::TtsAudioChunk| -> bool {
                     if chunk_sink
-                        .add(FfiTtsStreamEvent::AudioChunk { pcm, sample_rate })
+                        .add(FfiTtsStreamEvent::AudioChunk {
+                            pcm: packet.pcm,
+                            sample_rate: packet.sample_rate,
+                        })
                         .is_err()
                         && should_cancel_on_sink_close(
                             reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
@@ -1090,7 +1093,7 @@ impl FfiModel {
             };
 
             match result {
-                Ok(()) => {
+                Ok(summary) => {
                     reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
                     // A cancelled run (barge-in via sink-close, or the caller
                     // cancelling the token) stopped early — don't surface it as a
@@ -1100,7 +1103,13 @@ impl FfiModel {
                         .as_ref()
                         .map(|h| h.0.is_cancelled())
                         .unwrap_or(false);
-                    if !cancelled {
+                    if summary.status == xybrid_core::execution::TtsStatus::Limited {
+                        let _ = sink.add(FfiTtsStreamEvent::Error(
+                            "TTS output limited; partial audio delivered".into(),
+                        ));
+                    } else if !cancelled
+                        && summary.status != xybrid_core::execution::TtsStatus::Cancelled
+                    {
                         let _ = sink.add(FfiTtsStreamEvent::Complete);
                     }
                 }

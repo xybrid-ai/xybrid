@@ -149,6 +149,7 @@
     "XybridPipelineResult": { "ts": "PipelineResult", "fields": { "envelope": "envelope", "output_type": "outputType", "latency_ms": "latencyMs", "stages": "stages" } },
     "XybridStreamEventKind": { "native": "Token/complete events are consumed inside Model.runStreaming." },
     "XybridStreamToken": { "ts": "StreamToken", "fields": { "token": "token", "token_id": "tokenId", "index": "index", "cumulative_text": "cumulativeText", "finish_reason": "finishReason", "tool_calls": "toolCalls", "raw_text": "rawText" } },
+    "XybridTtsAudioChunk": { "excluded": "Audio streaming is currently exposed through the native pull ABI and Unity SDK; React Native playback integration is a follow-up." },
     "XybridStreamEvent": { "native": "Consumed inside Model.runStreaming: tokens are yielded, the completion is the return value." },
     "XybridVoiceInfo": { "ts": "VoiceInfo", "fields": { "id": "id", "name": "name", "gender": "gender", "language": "language", "style": "style" } },
     "XybridCacheEntryLocation": { "ts": "CacheEntryLocation", "variants": { "Registry": "registry", "Extracted": "extracted", "HuggingFace": "huggingFace", "HuggingFaceHub": "huggingFaceHub" } },

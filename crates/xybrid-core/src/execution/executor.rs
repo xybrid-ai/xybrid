@@ -3102,11 +3102,7 @@ impl TemplateExecutor {
     /// The session lives on the `zzz` runtime registered in
     /// [`Self::default_runtimes`]; paths resolve against `base_path` here.
     #[cfg(feature = "tts-zzz")]
-    fn execute_zzz(
-        &mut self,
-        metadata: &ModelMetadata,
-        input: &Envelope,
-    ) -> ExecutorResult<Envelope> {
+    fn prepare_zzz(&mut self, metadata: &ModelMetadata) -> ExecutorResult<()> {
         let ExecutionTemplate::ZzzEmbed {
             model_file,
             decoder_file,
@@ -3116,6 +3112,8 @@ impl TemplateExecutor {
             threads,
             max_tokens,
             seed,
+            sentence_chunks,
+            accelerate,
         } = &metadata.execution_template
         else {
             return Err(AdapterError::RuntimeError(
@@ -3138,10 +3136,11 @@ impl TemplateExecutor {
                 threads: *threads,
                 max_tokens: *max_tokens,
                 seed: *seed,
+                flags: xybrid_zzz_sys::KittenFlags {
+                    sentence_chunks: *sentence_chunks,
+                    accelerate: *accelerate,
+                },
             },
-            // The bundle's chunk budget rides along so the runtime can
-            // chunk without template access.
-            max_chunk_chars: metadata.max_chunk_chars,
         };
         {
             let runtime = self.runtimes.get_mut("zzz").ok_or_else(|| {
@@ -3168,12 +3167,21 @@ impl TemplateExecutor {
             runtime
                 .load(&primary)
                 .map_err(|error| AdapterError::RuntimeError(format!("Load failed: {error}")))?;
-            let result = runtime
-                .execute(input)
-                .map_err(|e| AdapterError::RuntimeError(format!("zzz execute failed: {e}")))?;
-            debug!(target: "xybrid_core", "zzz execution complete");
-            Ok(result)
+            Ok(())
         }
+    }
+
+    #[cfg(feature = "tts-zzz")]
+    fn execute_zzz(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+    ) -> ExecutorResult<Envelope> {
+        self.prepare_zzz(metadata)?;
+        self.runtimes
+            .get_mut("zzz")
+            .expect("prepared zzz runtime exists")
+            .execute(input)
     }
 
     /// Synthesize one TTS chunk to a trimmed f32 waveform: build the chunk
@@ -3282,6 +3290,52 @@ impl TemplateExecutor {
         input: &Envelope,
         on_chunk: &mut dyn FnMut(Vec<u8>, u32) -> bool,
     ) -> ExecutorResult<()> {
+        self.execute_tts_streaming_controlled(metadata, input, &|| false, &mut |packet| {
+            on_chunk(packet.pcm, packet.sample_rate)
+        })
+        .and_then(|summary| {
+            if summary.status == super::TtsStatus::Limited {
+                Err(AdapterError::RuntimeError(
+                    "TTS output limited; partial audio delivered".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    /// Stream owned packets with cancellation that can reach native inference.
+    pub fn execute_tts_streaming_controlled(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        cancelled: &(dyn Fn() -> bool + Sync),
+        on_chunk: &mut dyn FnMut(super::TtsAudioChunk) -> bool,
+    ) -> ExecutorResult<super::TtsStreamResult> {
+        use super::{TtsAudioChunk, TtsStatus, TtsStreamResult};
+        #[cfg(feature = "tts-zzz")]
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ZzzEmbed { .. }
+        ) {
+            self.prepare_zzz(metadata)?;
+            let engine = self
+                .runtimes
+                .get("zzz")
+                .expect("prepared zzz runtime exists")
+                .as_any()
+                .downcast_ref::<crate::runtime_adapter::zzz::ZzzKittenRuntime>()
+                .expect("prepare_zzz checked runtime type");
+            return engine.execute_stream(input, cancelled, on_chunk);
+        }
+        let mut summary = TtsStreamResult {
+            status: TtsStatus::Completed,
+            sample_rate: Self::tts_output_sample_rate(metadata),
+            channels: 1,
+            samples: 0,
+            chunks: 0,
+            limited_chunks: 0,
+        };
         use crate::ir::EnvelopeKind;
 
         validate_choice_request(metadata, input, EntryPoint::Streaming)?;
@@ -3298,7 +3352,7 @@ impl TemplateExecutor {
             }
         };
         if text.trim().is_empty() {
-            return Ok(());
+            return Ok(summary);
         }
 
         let model_path = self.tts_model_path(metadata)?;
@@ -3311,6 +3365,10 @@ impl TemplateExecutor {
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
 
         for (i, chunk) in chunks.iter().enumerate() {
+            if cancelled() {
+                summary.status = TtsStatus::Cancelled;
+                break;
+            }
             debug!(target: "xybrid_core", "TTS stream: chunk {}/{} ({} chars)", i + 1, chunks.len(), chunk.len());
             let chunk_audio = self.synthesize_chunk(
                 &session,
@@ -3343,12 +3401,27 @@ impl TemplateExecutor {
             };
             fade_pcm16_edges(&mut pcm, fade_samples);
 
-            if !on_chunk(pcm, sample_rate) {
+            if cancelled() {
+                summary.status = TtsStatus::Cancelled;
+                break;
+            }
+            let first_sample = summary.samples;
+            summary.samples += (pcm.len() / 2) as u64;
+            summary.chunks += 1;
+            if !on_chunk(TtsAudioChunk {
+                pcm,
+                sample_rate,
+                channels: 1,
+                first_sample,
+            }) {
+                summary.status = TtsStatus::Cancelled;
                 debug!(target: "xybrid_core", "TTS stream: stopped early at chunk {}", i + 1);
                 break;
             }
         }
-        Ok(())
+        // The next iteration checks interruption before more inference. Once
+        // the last packet is accepted, there is no remaining work to abort.
+        Ok(summary)
     }
 }
 

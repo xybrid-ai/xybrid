@@ -91,7 +91,7 @@ rust_library(
             "llm-llamacpp-vision",
         ],
         "//conditions:default": [],
-    }),
+    }) + select({"//:tts_zzz_enabled": ["tts-zzz"], "//conditions:default": []}),
     # Vulkan lane (--//:vulkan=true): `local_execution_provider` decides between
     # "vulkan" and "cpu" with `option_env!("XYBRID_LLAMA_CPP_VULKAN")`
     # (runtime_adapter/llm.rs) — a rustc-time lookup, which cargo satisfies from
@@ -108,7 +108,7 @@ rust_library(
     # default, so the optional `xybrid-whisper` path-dep is absent from it. The
     # feature is force-enabled above, so the dep has to be added by hand or the
     # crate fails to compile with an unresolved `xybrid_whisper` import.
-    deps = all_crate_deps(normal = True) + ["//crates/xybrid-whisper:xybrid_whisper"],
+    deps = all_crate_deps(normal = True) + ["//crates/xybrid-whisper:xybrid_whisper"] + select({"//:tts_zzz_enabled": ["//crates/zzz-sys:xybrid_zzz_sys"], "//conditions:default": []}),
     visibility = ["//visibility:public"],
 )
 

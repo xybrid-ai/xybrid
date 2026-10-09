@@ -47,6 +47,9 @@ use std::os::raw::c_void;
 /// of; the version comes from `zzz_embed_abi_version` at runtime.
 pub const ZZZ_EMBED_ABI_VERSION: u32 = 1;
 
+pub const ZZZ_EMBED_KITTEN_ACCELERATE: u32 = 1;
+pub const ZZZ_EMBED_KITTEN_SENTENCE_CHUNKS: u32 = 2;
+
 pub const ZZZ_EMBED_OK: i32 = 0;
 pub const ZZZ_EMBED_INVALID_ARGUMENT: i32 = -1;
 pub const ZZZ_EMBED_MODEL_NOT_COMPILED: i32 = -2;
@@ -160,7 +163,7 @@ pub type AudioCallback = unsafe extern "C" fn(
 /// pair (language-model voice JSON + S3 decoder voice JSON). Zero-
 /// initialize, set `struct_size`, then all paths — the safe wrapper does
 /// both. `threads: 0` selects the engine default of 4; explicit limits are
-/// 1..=64 threads and 1..=1023 `max_tokens` (0 selects the default 128).
+/// 1..=64 threads and 1..=1023 `max_tokens` (0 uses available LM-window room, with the split-chunk runaway guard).
 /// The seed (including 0) seeds the waveform stage; LM generation is greedy.
 /// Paths need only stay valid through `open`.
 #[derive(Clone, Copy, Debug)]
@@ -169,7 +172,7 @@ pub struct KittenOptions {
     pub struct_size: u32,
     pub threads: u32,
     pub max_tokens: u32,
-    pub reserved: u32,
+    pub flags: u32,
     pub seed: u64,
     pub language_model_path: *const u8,
     pub decoder_model_path: *const u8,
@@ -185,7 +188,7 @@ impl KittenOptions {
             struct_size: core::mem::size_of::<Self>() as u32,
             threads: 0,
             max_tokens: 0,
-            reserved: 0,
+            flags: 0,
             seed: 0,
             language_model_path: core::ptr::null(),
             decoder_model_path: core::ptr::null(),
@@ -211,6 +214,10 @@ const _: () = {
     #[cfg(target_pointer_width = "64")]
     {
         assert!(core::mem::size_of::<KittenOptions>() == 56);
+        assert!(core::mem::offset_of!(KittenOptions, flags) == 12);
+        assert!(core::mem::offset_of!(KittenOptions, seed) == 16);
+        assert!(core::mem::offset_of!(KittenOptions, language_model_path) == 24);
+        assert!(core::mem::offset_of!(KittenOptions, decoder_voice_path) == 48);
     }
 };
 
@@ -218,6 +225,7 @@ const _: () = {
 mod session;
 #[cfg(feature = "bindings")]
 pub use session::{
-    abi_version, default_options, supports_model, KittenSession, KittenSettings, SynthesisOutcome,
-    ZzzError, DEFAULT_MAX_TOKENS, SYNTHESIS_CHANNELS, SYNTHESIS_SAMPLE_RATE,
+    abi_version, default_options, supports_model, ChunkInfo, KittenCancellation, KittenFlags,
+    KittenSession, KittenSettings, StreamOutcome, SynthesisOutcome, SynthesisStatus, ZzzError,
+    SYNTHESIS_CHANNELS, SYNTHESIS_SAMPLE_RATE,
 };
