@@ -2,6 +2,7 @@
 //!
 //! This module contains the core types that define how models are executed.
 
+use super::choice::ChoiceScorerSpec;
 use super::steps::{ImageNormalizePreset, ImageResizeMode, ImageTensorLayout, InterpolationMethod};
 use super::steps::{PostprocessingStep, PreprocessingStep};
 use super::voice::{VoiceConfig, VoiceInfo};
@@ -194,6 +195,21 @@ pub enum ExecutionTemplate {
         /// Waveform-stage seed; 0 is valid.
         #[serde(default)]
         seed: u64,
+    },
+
+    /// A decision model: scores one context against a closed list of
+    /// candidates in a single forward pass, without generating text.
+    ///
+    /// Accepts only an
+    /// [`EnvelopeKind::ChoiceRequest`](crate::ir::EnvelopeKind::ChoiceRequest)
+    /// through a batch run and answers with
+    /// [`EnvelopeKind::ChoiceScores`](crate::ir::EnvelopeKind::ChoiceScores).
+    /// The scores are relative preferences among the offered candidates, not
+    /// calibrated probabilities of being correct.
+    ChoiceScorer {
+        /// How the scorer encodes the request and which output holds the
+        /// candidate logits.
+        scorer: ChoiceScorerSpec,
     },
 }
 
@@ -651,6 +667,7 @@ pub fn stage_kind_from_task(task: &str) -> Option<&'static str> {
         }
         "embedding" | "sentence-embedding" => Some("embed"),
         "audio-classification" | "vad" => Some("audio"),
+        "decision" => Some("decision"),
         _ => None,
     }
 }
@@ -726,6 +743,11 @@ pub fn backend_label_from_template(
         // The template fixes the runtime to the pinned zzz engine slice; no
         // hint participates.
         ExecutionTemplate::ZzzEmbed { .. } => Some("zzz"),
+        // The only registered scorer kind is an ONNX byte scorer; a new kind
+        // states its own runtime here.
+        ExecutionTemplate::ChoiceScorer { scorer } => match scorer {
+            ChoiceScorerSpec::OnnxByteOptionScorer(_) => Some("ort"),
+        },
         ExecutionTemplate::CoreMl { .. }
         | ExecutionTemplate::TfLite { .. }
         | ExecutionTemplate::LiteRtLm { .. }
@@ -794,7 +816,16 @@ pub fn quantization_label_from_metadata(metadata: &ModelMetadata) -> Option<Stri
         ExecutionTemplate::Gguf { model_file, .. } => Some(model_file),
         ExecutionTemplate::VisionLanguage { model_file, .. } => Some(model_file),
         ExecutionTemplate::LiteRtLm { model_file, .. } => Some(model_file),
-        _ => None,
+        // Only GGUF-style file names encode a quantization; a scorer declares
+        // its own in the bundle metadata.
+        ExecutionTemplate::Onnx { .. }
+        | ExecutionTemplate::SafeTensors { .. }
+        | ExecutionTemplate::CoreMl { .. }
+        | ExecutionTemplate::TfLite { .. }
+        | ExecutionTemplate::ModelGraph { .. }
+        | ExecutionTemplate::GgmlWhisper { .. }
+        | ExecutionTemplate::ZzzEmbed { .. }
+        | ExecutionTemplate::ChoiceScorer { .. } => None,
     };
     if let Some(model_file) = model_file {
         return infer_quantization_from_gguf_filename(model_file);
@@ -882,6 +913,8 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
             // remains excluded), so the swim-lane colour is fixed.
             "cpu"
         }
+        // ONNX Runtime on its CPU provider, like the plain ONNX arm.
+        ExecutionTemplate::ChoiceScorer { .. } => "cpu",
         ExecutionTemplate::Onnx { .. }
         | ExecutionTemplate::TfLite { .. }
         | ExecutionTemplate::LiteRtLm { .. }
@@ -946,6 +979,58 @@ mod tests {
         let round_tripped: ExecutionTemplate =
             serde_json::from_str(&serialized).expect("deserialize");
         assert_eq!(original, round_tripped);
+    }
+
+    fn forms_scorer_json() -> serde_json::Value {
+        // The runtime CARGO_MANIFEST_DIR, not `env!`: under Bazel the test
+        // runs in a sandbox where the compile-time path points nowhere.
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let path = std::path::Path::new(&manifest_dir)
+            .join("../../integration-tests/fixtures/choice/specs/cua-s1-forms.json");
+        let spec: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        serde_json::json!({ "type": "ChoiceScorer", "scorer": spec })
+    }
+
+    #[test]
+    fn choice_scorer_template_round_trips_serde() {
+        let template: ExecutionTemplate = serde_json::from_value(forms_scorer_json()).unwrap();
+        let ExecutionTemplate::ChoiceScorer { scorer } = &template else {
+            panic!("expected a ChoiceScorer template, got {template:?}");
+        };
+        let fixed: Vec<&str> = scorer
+            .fixed_choices()
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(fixed, ["check", "click", "skip"]);
+        let serialized = serde_json::to_string(&template).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ExecutionTemplate>(&serialized).unwrap(),
+            template
+        );
+
+        assert_eq!(
+            backend_label_from_template(&template, Some("llamacpp")),
+            Some("ort")
+        );
+        assert_eq!(span_kind_from_template(&template), "cpu");
+        assert_eq!(stage_kind_from_task("decision"), Some("decision"));
+
+        // The spec itself refuses unknown fields.
+        let mut typo = forms_scorer_json();
+        typo["scorer"]["max_choice"] = 8.into();
+        assert!(serde_json::from_value::<ExecutionTemplate>(typo).is_err());
+    }
+
+    #[cfg(feature = "schema")]
+    #[test]
+    fn the_metadata_schema_describes_choice_scorers() {
+        let schema = serde_json::to_string(&schemars::schema_for!(ModelMetadata)).unwrap();
+        for name in ["ChoiceScorer", "OnnxByteOptionScorer", "fixed_choices"] {
+            assert!(schema.contains(name), "the schema is missing {name}");
+        }
     }
 
     #[cfg(not(all(

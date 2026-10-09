@@ -31,5 +31,7 @@ rust_test(
     version = XYBRID_VERSION,
     crate = ":xybrid-ffi-facade",
     crate_features = ["default"],
+    # The FFI load-refusal test reads the committed CUA-S1-FORMS scorer spec.
+    data = ["//integration-tests:choice_fixtures"],
     deps = ["@crates//:tempfile"],
 )

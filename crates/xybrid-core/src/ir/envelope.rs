@@ -31,6 +31,7 @@
 //! let deserialized = Envelope::from_bytes(&bytes).unwrap();
 //! ```
 
+use super::choice::{Choice, ChoiceRequest, ChoiceScores};
 use std::sync::Arc;
 use std::{collections::HashMap, fmt};
 use thiserror::Error;
@@ -1039,7 +1040,8 @@ fn webp_declares_animation(bytes: &[u8]) -> bool {
 /// Typed payload variants for envelope data.
 ///
 /// Each variant represents a different data type that can flow through
-/// the pipeline stages.
+/// the pipeline stages. New variants are appended, so the binary encoding of
+/// existing ones never changes.
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum EnvelopeKind {
     /// Raw audio data (PCM samples, WAV bytes, etc.)
@@ -1052,6 +1054,14 @@ pub enum EnvelopeKind {
     Image { source: ImageSource },
     /// Ordered envelope fragments that represent one logical message.
     MultiPart(Vec<Envelope>),
+    /// A context and the candidates a choice scorer should score.
+    ///
+    /// Only a `ChoiceScorer` model accepts it, and only through a batch run:
+    /// streaming, conversation history and pipelines refuse it, and every
+    /// other model refuses it wherever it appears in an envelope tree.
+    ChoiceRequest(ChoiceRequest),
+    /// The scores a choice scorer returned, one per candidate.
+    ChoiceScores(ChoiceScores),
 }
 
 impl fmt::Debug for EnvelopeKind {
@@ -1094,6 +1104,10 @@ impl fmt::Debug for EnvelopeKind {
                 }
             },
             EnvelopeKind::MultiPart(parts) => f.debug_tuple("MultiPart").field(parts).finish(),
+            // Both print counts and sizes only: ids, texts and the context
+            // are caller content.
+            EnvelopeKind::ChoiceRequest(request) => request.fmt(f),
+            EnvelopeKind::ChoiceScores(scores) => scores.fmt(f),
         }
     }
 }
@@ -1111,6 +1125,8 @@ impl EnvelopeKind {
             EnvelopeKind::Embedding(_) => "Embedding",
             EnvelopeKind::Image { .. } => "Image",
             EnvelopeKind::MultiPart(_) => "MultiPart",
+            EnvelopeKind::ChoiceRequest(_) => "ChoiceRequest",
+            EnvelopeKind::ChoiceScores(_) => "ChoiceScores",
         }
     }
 
@@ -1119,6 +1135,8 @@ impl EnvelopeKind {
     /// For Audio, returns the length of the byte vector.
     /// For Text, returns the byte length of the string.
     /// For Embedding, returns the byte length of the float vector.
+    /// For a choice request, the context plus every choice's id and text; for
+    /// choice scores, every id plus its logit and score.
     pub fn payload_size(&self) -> usize {
         match self {
             EnvelopeKind::Audio(data) => data.len(),
@@ -1126,6 +1144,37 @@ impl EnvelopeKind {
             EnvelopeKind::Embedding(data) => data.len() * std::mem::size_of::<f32>(),
             EnvelopeKind::Image { source } => source.byte_len(),
             EnvelopeKind::MultiPart(parts) => parts.iter().map(Envelope::payload_size).sum(),
+            EnvelopeKind::ChoiceRequest(request) => {
+                request.context().payload_size()
+                    + request
+                        .choices()
+                        .iter()
+                        .map(|choice| choice.id.len() + choice.text.len())
+                        .sum::<usize>()
+            }
+            EnvelopeKind::ChoiceScores(scores) => scores
+                .entries
+                .iter()
+                .map(|entry| entry.id.len() + 2 * std::mem::size_of::<f32>())
+                .sum(),
+        }
+    }
+
+    /// Whether a choice request or choice scores appear anywhere in this
+    /// payload, including inside multi-part fragments.
+    ///
+    /// Models other than choice scorers refuse such input wherever it sits,
+    /// so no path can turn a request into text.
+    pub fn contains_choice_kind(&self) -> bool {
+        match self {
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => true,
+            EnvelopeKind::MultiPart(parts) => {
+                parts.iter().any(|part| part.kind.contains_choice_kind())
+            }
+            EnvelopeKind::Audio(_)
+            | EnvelopeKind::Text(_)
+            | EnvelopeKind::Embedding(_)
+            | EnvelopeKind::Image { .. } => false,
         }
     }
 }
@@ -1297,6 +1346,30 @@ impl Envelope {
         parts.extend(images);
 
         Ok(Self::new(EnvelopeKind::MultiPart(parts)).with_role(super::MessageRole::User))
+    }
+
+    /// Creates a choice-scoring request: score `choices` against `context`.
+    ///
+    /// Send it to a `ChoiceScorer` model through a batch run. The scorer
+    /// appends its fixed choices after `choices` and returns
+    /// [`EnvelopeKind::ChoiceScores`] in that order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use xybrid_core::ir::{Choice, Envelope, EnvelopeKind};
+    ///
+    /// let context = Envelope::new(EnvelopeKind::Text("FORM Intake".into()));
+    /// let request = Envelope::choice_request(
+    ///     context,
+    ///     vec![Choice::new("tel", "fill Tel: (503) 555-0142")],
+    /// );
+    /// assert_eq!(request.as_choice_request().unwrap().choices().len(), 1);
+    /// ```
+    pub fn choice_request(context: Envelope, choices: Vec<Choice>) -> Self {
+        Self::new(EnvelopeKind::ChoiceRequest(ChoiceRequest::new(
+            context, choices,
+        )))
     }
 
     /// Creates a tool-continuation envelope: the follow-up turn after the
@@ -1613,7 +1686,13 @@ impl Envelope {
                     part.collect_image_summaries(summaries);
                 }
             }
-            EnvelopeKind::Audio(_) | EnvelopeKind::Text(_) | EnvelopeKind::Embedding(_) => {}
+            EnvelopeKind::ChoiceRequest(request) => {
+                request.context().collect_image_summaries(summaries);
+            }
+            EnvelopeKind::Audio(_)
+            | EnvelopeKind::Text(_)
+            | EnvelopeKind::Embedding(_)
+            | EnvelopeKind::ChoiceScores(_) => {}
         }
     }
 
@@ -1648,7 +1727,13 @@ impl Envelope {
                 }
                 Ok(())
             }
-            EnvelopeKind::Audio(_) | EnvelopeKind::Text(_) | EnvelopeKind::Embedding(_) => Ok(()),
+            EnvelopeKind::ChoiceRequest(request) => {
+                request.context().validate_image_tree_with_limits(limits)
+            }
+            EnvelopeKind::Audio(_)
+            | EnvelopeKind::Text(_)
+            | EnvelopeKind::Embedding(_)
+            | EnvelopeKind::ChoiceScores(_) => Ok(()),
         }
     }
 
@@ -1656,6 +1741,22 @@ impl Envelope {
     pub fn as_multipart(&self) -> Option<&[Envelope]> {
         match &self.kind {
             EnvelopeKind::MultiPart(parts) => Some(parts),
+            _ => None,
+        }
+    }
+
+    /// Returns the request if this is a choice-scoring request.
+    pub fn as_choice_request(&self) -> Option<&ChoiceRequest> {
+        match &self.kind {
+            EnvelopeKind::ChoiceRequest(request) => Some(request),
+            _ => None,
+        }
+    }
+
+    /// Returns the scores if this envelope carries a choice scorer's result.
+    pub fn as_choice_scores(&self) -> Option<&ChoiceScores> {
+        match &self.kind {
+            EnvelopeKind::ChoiceScores(scores) => Some(scores),
             _ => None,
         }
     }
@@ -2214,6 +2315,178 @@ mod tests {
             envelope.get_metadata(Envelope::ROLE_METADATA_KEY),
             Some(&"user".to_string())
         );
+    }
+
+    // =========================================================================
+    // Choice kinds
+    // =========================================================================
+
+    fn choice_request_envelope() -> Envelope {
+        Envelope::choice_request(
+            Envelope::new(EnvelopeKind::Text("FORM Intake".to_string())),
+            vec![
+                Choice::new("tel", "fill Tel: (503) 555-0142"),
+                Choice::new("name", "fill Name: Jane Doe"),
+            ],
+        )
+    }
+
+    fn choice_scores_kind() -> EnvelopeKind {
+        EnvelopeKind::ChoiceScores(ChoiceScores {
+            entries: vec![
+                crate::ir::ChoiceScore {
+                    id: "tel".to_string(),
+                    logit: 2.0,
+                    score: 0.88,
+                    fixed: false,
+                },
+                crate::ir::ChoiceScore {
+                    id: "skip".to_string(),
+                    logit: 0.0,
+                    score: 0.12,
+                    fixed: true,
+                },
+            ],
+            label_mass: None,
+        })
+    }
+
+    /// A 1×1 RGB raw image.
+    fn raw_pixel() -> Envelope {
+        Envelope::image_raw(
+            vec![7, 7, 7],
+            PixelFormat::Rgb8,
+            1,
+            1,
+            vec![ImagePlane {
+                offset: 0,
+                row_stride: 3,
+                pixel_stride: 3,
+                width: 1,
+                height: 1,
+            }],
+            None,
+        )
+        .expect("a 1x1 RGB image is valid")
+    }
+
+    /// The bincode variant index of a kind: bincode 1 writes it as a
+    /// little-endian `u32` before the payload.
+    fn bincode_ordinal(kind: &EnvelopeKind) -> u32 {
+        let bytes = bincode::serialize(kind).unwrap();
+        u32::from_le_bytes(bytes[..4].try_into().unwrap())
+    }
+
+    #[test]
+    fn existing_kinds_keep_their_bincode_ordinals() {
+        assert_eq!(bincode_ordinal(&EnvelopeKind::Audio(vec![1])), 0);
+        assert_eq!(bincode_ordinal(&EnvelopeKind::Text("t".into())), 1);
+        assert_eq!(bincode_ordinal(&EnvelopeKind::Embedding(vec![1.0])), 2);
+        assert_eq!(bincode_ordinal(&raw_pixel().kind), 3);
+        assert_eq!(bincode_ordinal(&EnvelopeKind::MultiPart(vec![])), 4);
+        assert_eq!(bincode_ordinal(&choice_request_envelope().kind), 5);
+        assert_eq!(bincode_ordinal(&choice_scores_kind()), 6);
+    }
+
+    #[test]
+    fn choice_kinds_round_trip_through_bincode_and_json() -> Result<(), EnvelopeError> {
+        for envelope in [
+            choice_request_envelope(),
+            Envelope::new(choice_scores_kind()),
+        ] {
+            assert_eq!(Envelope::from_bytes(&envelope.to_bytes()?)?, envelope);
+            assert_eq!(Envelope::from_json(&envelope.to_json()?)?, envelope);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn choice_kinds_name_and_size_themselves() {
+        let request = choice_request_envelope();
+        assert_eq!(request.kind_str(), "ChoiceRequest");
+        let expected = "FORM Intake".len()
+            + "tel".len()
+            + "fill Tel: (503) 555-0142".len()
+            + "name".len()
+            + "fill Name: Jane Doe".len();
+        assert_eq!(request.payload_size(), expected);
+
+        let scores = choice_scores_kind();
+        assert_eq!(scores.as_str(), "ChoiceScores");
+        assert_eq!(scores.payload_size(), "tel".len() + "skip".len() + 16);
+    }
+
+    #[test]
+    fn choice_accessors_match_their_kind_only() {
+        let request = choice_request_envelope();
+        assert_eq!(request.as_choice_request().unwrap().choices().len(), 2);
+        assert!(request.as_choice_scores().is_none());
+
+        let scores = Envelope::new(choice_scores_kind());
+        assert_eq!(scores.as_choice_scores().unwrap().entries.len(), 2);
+        assert!(scores.as_choice_request().is_none());
+        assert!(Envelope::new(EnvelopeKind::Text("t".into()))
+            .as_choice_request()
+            .is_none());
+    }
+
+    #[test]
+    fn contains_choice_kind_searches_multipart_trees() {
+        assert!(choice_request_envelope().kind.contains_choice_kind());
+        assert!(choice_scores_kind().contains_choice_kind());
+        assert!(!EnvelopeKind::Text("t".into()).contains_choice_kind());
+        assert!(!raw_pixel().kind.contains_choice_kind());
+
+        let nested = EnvelopeKind::MultiPart(vec![
+            Envelope::new(EnvelopeKind::Text("t".into())),
+            Envelope::new(EnvelopeKind::MultiPart(vec![choice_request_envelope()])),
+        ]);
+        assert!(nested.contains_choice_kind());
+        let plain = EnvelopeKind::MultiPart(vec![
+            Envelope::new(EnvelopeKind::Text("t".into())),
+            raw_pixel(),
+        ]);
+        assert!(!plain.contains_choice_kind());
+    }
+
+    #[test]
+    fn image_tree_checks_reach_into_a_request_context() {
+        let request = Envelope::choice_request(raw_pixel(), vec![Choice::new("a", "a")]);
+        assert_eq!(request.image_summaries().len(), 1);
+        assert!(request.validate_image_tree().is_ok());
+
+        // A forged image (as a deserializer could produce) inside the context
+        // must fail validation just as it would at the top level.
+        let mut forged = raw_pixel();
+        if let EnvelopeKind::Image {
+            source: ImageSource::Raw { planes, .. },
+        } = &mut forged.kind
+        {
+            planes[0].row_stride = 1;
+        }
+        assert!(forged.validate_image_tree().is_err());
+        let request = Envelope::choice_request(forged, vec![Choice::new("a", "a")]);
+        assert!(request.validate_image_tree().is_err());
+    }
+
+    #[test]
+    fn choice_kind_debug_prints_no_caller_content() {
+        const CANARY: &str = "canary-41b7e2";
+        let request = Envelope::choice_request(
+            Envelope::new(EnvelopeKind::Text(format!("ctx {CANARY}"))),
+            vec![Choice::new(CANARY, CANARY)],
+        );
+        let scores = EnvelopeKind::ChoiceScores(ChoiceScores {
+            entries: vec![crate::ir::ChoiceScore {
+                id: CANARY.to_string(),
+                logit: 1.0,
+                score: 1.0,
+                fixed: false,
+            }],
+            label_mass: None,
+        });
+        let rendered = format!("{:?} {scores:?}", request.kind);
+        assert!(!rendered.contains(CANARY), "{rendered}");
     }
 
     #[test]

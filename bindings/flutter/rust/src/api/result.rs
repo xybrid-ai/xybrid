@@ -98,6 +98,8 @@ pub(crate) fn ensure_ffi_payload(kind: &EnvelopeKind) -> Result<(), String> {
         }
         EnvelopeKind::Image { .. } => "an image",
         EnvelopeKind::MultiPart(_) => "a multi-part message",
+        EnvelopeKind::ChoiceRequest(_) => "a choice request",
+        EnvelopeKind::ChoiceScores(_) => "choice scores",
     };
     Err(facade::Error::UnsupportedModelCapability {
         message: format!("{payload} cannot be returned through the Flutter bindings yet"),
@@ -210,6 +212,21 @@ mod tests {
                 result_of(EnvelopeKind::MultiPart(vec![])),
             ),
             ("an image", InferenceResult::new(raw_pixel_image(), "m", 0)),
+            (
+                "a choice request",
+                InferenceResult::new(
+                    Envelope::choice_request(Envelope::new(EnvelopeKind::Text("c".into())), vec![]),
+                    "m",
+                    0,
+                ),
+            ),
+            (
+                "choice scores",
+                result_of(EnvelopeKind::ChoiceScores(xybrid_sdk::ChoiceScores {
+                    entries: vec![],
+                    label_mass: None,
+                })),
+            ),
         ];
         for (payload, result) in unsupported {
             let Err(error) = FfiResult::try_from_inference_result(&result) else {

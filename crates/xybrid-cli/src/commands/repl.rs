@@ -829,7 +829,14 @@ fn handle_special_command(
                     let role = envelope.role().map(|r| r.as_str()).unwrap_or("unknown");
                     let text = match &envelope.kind {
                         EnvelopeKind::Text(t) => t.as_str(),
-                        _ => "[non-text]",
+                        // Core refuses a conversation that holds a choice
+                        // request, so label it rather than fold it into text.
+                        EnvelopeKind::ChoiceRequest(_) => "[choice request]",
+                        EnvelopeKind::ChoiceScores(_) => "[choice scores]",
+                        EnvelopeKind::Audio(_)
+                        | EnvelopeKind::Embedding(_)
+                        | EnvelopeKind::Image { .. }
+                        | EnvelopeKind::MultiPart(_) => "[non-text]",
                     };
                     let display_text = if verbose == 0 && text.len() > 100 {
                         format!("{}...", &text[..100])
@@ -1286,6 +1293,10 @@ fn execute_batch(
                     }
                     EnvelopeKind::MultiPart(parts) => {
                         ui::ok(&format!("Multi-part output: {} parts", parts.len()));
+                    }
+                    // Pipelines refuse choice kinds before and after every stage.
+                    EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                        ui::err("Pipeline stages do not return choice requests or scores");
                     }
                 }
             }

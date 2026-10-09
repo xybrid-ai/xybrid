@@ -1,5 +1,5 @@
-//! Choice-scoring primitives: candidate rules, input encoding, score math and
-//! the ONNX byte scorer.
+//! Choice-scoring primitives: entry guards, candidate rules, input encoding,
+//! score math and the ONNX byte scorer.
 //!
 //! A choice scorer reads one context and a closed list of candidates and
 //! returns one score per candidate. This module holds the pieces every scorer
@@ -7,14 +7,31 @@
 //!
 //! | Module | Contents |
 //! |--------|----------|
-//! | (this) | [`ChoiceError`], [`effective_candidates`], [`validate_scorer_spec`] |
+//! | (this) | [`ChoiceError`], [`validate_choice_request`], [`ensure_no_choice_kinds`], [`effective_candidates`], [`validate_scorer_spec`] |
 //! | [`encode`] | UTF-8 byte-id rows and masks for byte scorers |
 //! | [`math`] | Softmax with temperature, tie and non-finite rules |
 //! | [`onnx`] | Binding a byte-scorer spec to an ONNX session and running it |
 //!
-//! Nothing here is reachable through [`crate::ir::EnvelopeKind`] or
-//! [`crate::execution::ExecutionTemplate`] yet: these are the primitives the
-//! executor integration builds on.
+//! # Where requests may go
+//!
+//! A [`ChoiceRequest`] runs only on a
+//! [`ChoiceScorer`](crate::execution::ExecutionTemplate::ChoiceScorer) model,
+//! through a batch run ([`EntryPoint::Batch`]). Every executor and SDK entry
+//! point calls [`validate_choice_request`] before any backend, cloud or
+//! pipeline work, so a request sent anywhere else, any other input sent to a
+//! scorer, and a choice kind buried in a multi-part message or in conversation
+//! history are refused before anything runs. This build validates requests
+//! but does not execute scorers yet: a valid request is refused as an
+//! unsupported capability.
+//!
+//! # One readout per request
+//!
+//! A scorer returns one raw logit per candidate from a single readout of the
+//! model, and [`ChoiceScores`](crate::ir::ChoiceScores) carries exactly that.
+//! Scorers that aggregate several passes (an ensemble over option orders, for
+//! example) are outside this contract: averaging their logits, or picking one
+//! pass's, would not be a raw logit. They need their own result type first and
+//! are refused until then.
 //!
 //! # Candidates
 //!
@@ -56,9 +73,10 @@ pub mod onnx;
 mod tests;
 
 use crate::execution::template::{
-    ByteFieldSpec, ByteOverflow, ChoiceScorerSpec, OnnxByteOptionScorerSpec,
+    ByteFieldSpec, ByteOverflow, ChoiceScorerSpec, ExecutionTemplate, ModelMetadata,
+    OnnxByteOptionScorerSpec,
 };
-use crate::ir::Choice;
+use crate::ir::{Choice, ChoiceRequest, Envelope, EnvelopeKind};
 use crate::runtime_adapter::AdapterError;
 use std::collections::HashMap;
 use std::fmt;
@@ -139,6 +157,15 @@ pub enum ChoiceError {
     /// which the exported models do not reproduce faithfully.
     #[error("the context is empty; a byte choice scorer needs at least one byte")]
     EmptyContext,
+    /// The context is not text.
+    #[error("the context envelope is {kind}; a choice scorer reads Text")]
+    UnsupportedContext {
+        /// The context's envelope kind.
+        kind: &'static str,
+    },
+    /// A choice request or choice scores sit inside the request's context.
+    #[error("the context contains a choice request or choice scores")]
+    NestedChoiceKind,
     /// A field is longer than its spec allows and the spec says `Reject`.
     #[error("{field} is {len} bytes; this scorer rejects more than {max_len}")]
     InputTooLong {
@@ -197,6 +224,147 @@ impl From<ChoiceError> for AdapterError {
             | ChoiceError::NoCandidates
             | ChoiceError::InferenceFailed => Self::InferenceFailed(error.to_string()),
             _ => Self::InvalidInput(error.to_string()),
+        }
+    }
+}
+
+/// How an input reaches a model. A choice scorer accepts only
+/// [`EntryPoint::Batch`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryPoint {
+    /// One input, one result: `execute` and the SDK's batch `run` calls.
+    Batch,
+    /// Token or chunk streaming.
+    Streaming,
+    /// A run with conversation history.
+    Conversation,
+    /// A pipeline stage.
+    Pipeline,
+}
+
+impl EntryPoint {
+    /// The capability a choice scorer lacks on this entry point, for
+    /// [`AdapterError::UnsupportedModelCapability`].
+    fn capability(self) -> &'static str {
+        match self {
+            Self::Batch => "batch runs",
+            Self::Streaming => "streaming",
+            Self::Conversation => "conversation context",
+            Self::Pipeline => "pipeline stages",
+        }
+    }
+}
+
+const CHOICE_ROUTE_HINT: &str =
+    "send a ChoiceRequest only to a ChoiceScorer model, through a batch run";
+
+fn unsupported(model_id: &str, capability: impl Into<String>, hint: &str) -> AdapterError {
+    AdapterError::UnsupportedModelCapability {
+        model_id: model_id.to_string(),
+        capability: capability.into(),
+        hint: hint.to_string(),
+    }
+}
+
+/// Checks an input against the model and entry point before anything runs.
+///
+/// - A model that is not a `ChoiceScorer` refuses a choice request or choice
+///   scores anywhere in the input, multi-part fragments included.
+/// - A `ChoiceScorer` refuses every entry point but [`EntryPoint::Batch`] and
+///   every input but a [`ChoiceRequest`]. The request needs a valid spec, a
+///   text context with no choice kind inside it (non-empty for a byte
+///   scorer), candidates that pass [`effective_candidates`], and every
+///   `Reject` field within its `max_len`.
+///
+/// Conversation history is checked separately, with [`ensure_no_choice_kinds`].
+///
+/// # Errors
+///
+/// [`AdapterError::UnsupportedModelCapability`] for a refused entry point or
+/// input; [`AdapterError::InvalidInput`] (from [`ChoiceError`]) for an invalid
+/// request or spec. Messages never quote the caller's ids, texts or context.
+pub fn validate_choice_request(
+    metadata: &ModelMetadata,
+    input: &Envelope,
+    entry: EntryPoint,
+) -> Result<(), AdapterError> {
+    let ExecutionTemplate::ChoiceScorer { scorer } = &metadata.execution_template else {
+        return ensure_no_choice_kinds(&metadata.model_id, std::iter::once(input));
+    };
+    if entry != EntryPoint::Batch {
+        return Err(unsupported(
+            &metadata.model_id,
+            entry.capability(),
+            "run a choice scorer through a batch run with a ChoiceRequest",
+        ));
+    }
+    let EnvelopeKind::ChoiceRequest(request) = &input.kind else {
+        return Err(unsupported(
+            &metadata.model_id,
+            format!("{} input", input.kind_str()),
+            "a choice scorer accepts only a ChoiceRequest",
+        ));
+    };
+    validate_scorer_spec(scorer)?;
+    check_request(scorer, request)?;
+    Ok(())
+}
+
+/// Refuses a choice request or choice scores anywhere in `envelopes`.
+///
+/// For the places no scorer reads: conversation history, pipeline stage
+/// inputs and outputs, and input to any model that is not a `ChoiceScorer`.
+///
+/// # Errors
+///
+/// [`AdapterError::UnsupportedModelCapability`] naming `model_id`.
+pub fn ensure_no_choice_kinds<'a>(
+    model_id: &str,
+    envelopes: impl IntoIterator<Item = &'a Envelope>,
+) -> Result<(), AdapterError> {
+    if envelopes
+        .into_iter()
+        .any(|envelope| envelope.kind.contains_choice_kind())
+    {
+        return Err(unsupported(model_id, "choice requests", CHOICE_ROUTE_HINT));
+    }
+    Ok(())
+}
+
+/// What a runtime returns for a choice request or choice scores.
+///
+/// The entry guards refuse both before any runtime runs, so this is the
+/// last line: a runtime never turns one into text, tensors or a prompt.
+pub(crate) fn choice_kind_not_runtime_input() -> AdapterError {
+    AdapterError::InvalidInput(format!(
+        "choice requests and choice scores are not runtime input; {CHOICE_ROUTE_HINT}"
+    ))
+}
+
+/// The refusal for a valid request while scorer execution is not enabled.
+pub(crate) fn scoring_not_enabled(model_id: &str) -> AdapterError {
+    unsupported(
+        model_id,
+        "choice scoring",
+        "this build validates choice requests but does not run choice scorers yet",
+    )
+}
+
+fn check_request(spec: &ChoiceScorerSpec, request: &ChoiceRequest) -> ChoiceResult<()> {
+    let context = request.context();
+    if context.kind.contains_choice_kind() {
+        return Err(ChoiceError::NestedChoiceKind);
+    }
+    let EnvelopeKind::Text(text) = &context.kind else {
+        return Err(ChoiceError::UnsupportedContext {
+            kind: context.kind_str(),
+        });
+    };
+    match spec {
+        ChoiceScorerSpec::OnnxByteOptionScorer(onnx) => {
+            let candidates =
+                effective_candidates(request.choices(), &onnx.fixed_choices, onnx.max_choices)?;
+            encode::check_fields(onnx, text, &candidates)
         }
     }
 }

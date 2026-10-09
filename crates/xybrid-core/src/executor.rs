@@ -35,6 +35,7 @@
 //! - **Cloud/Server**: Xybrid-hosted inference (future)
 
 use crate::context::StageDescriptor;
+use crate::execution::choice::{ensure_no_choice_kinds, validate_choice_request, EntryPoint};
 use crate::execution::{ModelMetadata, TemplateExecutor};
 use crate::ir::Envelope;
 use crate::runtime_adapter::{AdapterError, CloudRuntimeAdapter, RuntimeAdapter};
@@ -232,6 +233,10 @@ impl Executor {
         input: &Envelope,
         target: &str,
     ) -> ExecutorResult<(Envelope, StageMetadata)> {
+        // Public entry: callers may skip `prepare_stage_input`, so refuse
+        // choice kinds here too, before any target runs.
+        ensure_no_choice_kinds(&stage.name, std::iter::once(input))
+            .map_err(ExecutorError::AdapterError)?;
         let start_time = Instant::now();
         match target {
             "cloud" => {
@@ -348,6 +353,10 @@ impl Executor {
                             "Found model_metadata.json in directory. Template: {:?}",
                             model_metadata.execution_template
                         );
+
+                        // A choice scorer is never a pipeline stage.
+                        validate_choice_request(&model_metadata, input, EntryPoint::Pipeline)
+                            .map_err(ExecutorError::AdapterError)?;
 
                         // Use TemplateExecutor for metadata-driven inference
                         let base_path = bundle_path.to_str().ok_or_else(|| {
@@ -702,6 +711,9 @@ const SHARED_GENERATION_OPTIONS: [&str; 4] =
 /// adapter read the resulting metadata keys, so a hybrid stage generates
 /// with the same settings on either leg.
 pub fn prepare_stage_input(stage: &StageDescriptor, input: &Envelope) -> ExecutorResult<Envelope> {
+    // Pipelines never carry choice requests or scores, on either leg.
+    ensure_no_choice_kinds(&stage.name, std::iter::once(input))
+        .map_err(ExecutorError::AdapterError)?;
     let Some(options) = stage.options.as_ref() else {
         return Ok(input.clone());
     };
@@ -1502,5 +1514,111 @@ mod tests {
             "Should mention ensure_extracted()"
         );
         assert!(msg.contains("SDK"), "Should mention SDK layer");
+    }
+
+    // =====================================================================
+    // Choice requests never run as a pipeline stage
+    // =====================================================================
+
+    fn choice_request() -> Envelope {
+        Envelope::choice_request(
+            Envelope::new(EnvelopeKind::Text("FORM Intake".to_string())),
+            vec![
+                crate::ir::Choice::new("tel", "fill Tel"),
+                crate::ir::Choice::new("name", "fill Name"),
+            ],
+        )
+    }
+
+    fn assert_choice_refusal<T: std::fmt::Debug>(result: ExecutorResult<T>, capability: &str) {
+        match result {
+            Err(ExecutorError::AdapterError(AdapterError::UnsupportedModelCapability {
+                capability: refused,
+                ..
+            })) => assert_eq!(refused, capability),
+            other => panic!("expected a `{capability}` refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stage_input_preparation_refuses_choice_kinds() {
+        let buried = Envelope::new(EnvelopeKind::MultiPart(vec![choice_request()]));
+        // With options (the merge path) and without (the early return).
+        for stage in [hybrid_stage(None), StageDescriptor::new("asr")] {
+            for input in [choice_request(), buried.clone()] {
+                assert_choice_refusal(prepare_stage_input(&stage, &input), "choice requests");
+            }
+        }
+    }
+
+    #[test]
+    fn prepared_execution_refuses_choice_kinds_on_every_target() {
+        let mut executor = Executor::new();
+        let mut cloud = MockRuntimeAdapter::with_text_output("cloud").with_name("cloud");
+        cloud.load_model("/mock/cloud").unwrap();
+        let cloud = Arc::new(cloud);
+        executor.register_adapter(cloud.clone());
+        let mut local = MockRuntimeAdapter::with_text_output("local").with_name("onnx");
+        local.load_model("/mock/model.onnx").unwrap();
+        let local = Arc::new(local);
+        executor.register_adapter(local.clone());
+
+        // `execute_prepared` is public, so callers can skip
+        // `prepare_stage_input`; it refuses on its own, on every target.
+        let cases = [
+            (hybrid_stage(None), "cloud"),
+            (StageDescriptor::new("asr"), "cloud"),
+            (StageDescriptor::new("asr"), "local"),
+            (StageDescriptor::new("asr"), "edge"),
+        ];
+        for (stage, target) in cases {
+            assert_choice_refusal(
+                executor.execute_prepared(&stage, &choice_request(), target),
+                "choice requests",
+            );
+            assert_choice_refusal(
+                executor.execute_stage(&stage, &choice_request(), target),
+                "choice requests",
+            );
+        }
+        assert_eq!(cloud.call_count(), 0);
+        assert_eq!(local.call_count(), 0);
+    }
+
+    #[test]
+    fn a_scorer_bundle_is_never_a_pipeline_stage() {
+        // The runtime CARGO_MANIFEST_DIR, not `env!`: under Bazel the test
+        // runs in a sandbox where the compile-time path points nowhere.
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let spec_path = std::path::Path::new(&manifest_dir)
+            .join("../../integration-tests/fixtures/choice/specs/cua-s1-forms.json");
+        let spec: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&spec_path).unwrap()).unwrap();
+        let metadata = serde_json::json!({
+            "model_id": "forms-scorer",
+            "version": "1.0",
+            "execution_template": { "type": "ChoiceScorer", "scorer": spec },
+            "files": [],
+        });
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("model_metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        let mut executor = Executor::new();
+        let mut stage = StageDescriptor::new("forms");
+        stage.bundle_path = Some(dir.path().to_string_lossy().to_string());
+        let text = Envelope::new(EnvelopeKind::Text("FORM Intake".to_string()));
+        assert_choice_refusal(
+            executor.execute_stage(&stage, &text, "local"),
+            "pipeline stages",
+        );
+        assert_choice_refusal(
+            executor.execute_stage(&stage, &choice_request(), "local"),
+            "choice requests",
+        );
     }
 }

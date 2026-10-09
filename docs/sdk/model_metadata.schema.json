@@ -101,6 +101,144 @@
     "files"
   ],
   "$defs": {
+    "ByteFieldSpec": {
+      "description": "How one text field becomes a row of byte ids and its mask.\n\nEach UTF-8 byte `b` becomes the id `b + offset`. The row is cut at\n`max_len` bytes (possibly inside a multi-byte character) and zero padded;\nthe mask is `true` exactly where an id was written.",
+      "type": "object",
+      "properties": {
+        "ids_input": {
+          "description": "Int64 input receiving the ids.",
+          "type": "string"
+        },
+        "mask_input": {
+          "description": "Bool input receiving the mask.",
+          "type": "string"
+        },
+        "max_len": {
+          "description": "Row length in bytes.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "offset": {
+          "description": "Added to every byte. At least 1, so a byte id is never the padding id 0.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "overflow": {
+          "description": "What to do with text longer than `max_len` bytes.",
+          "$ref": "#/$defs/ByteOverflow"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "offset",
+        "max_len",
+        "overflow",
+        "ids_input",
+        "mask_input"
+      ]
+    },
+    "ByteOverflow": {
+      "description": "What a byte field does with text longer than its `max_len`.",
+      "oneOf": [
+        {
+          "description": "Keep the first `max_len` bytes.",
+          "type": "string",
+          "const": "Truncate"
+        },
+        {
+          "description": "Refuse the request.",
+          "type": "string",
+          "const": "Reject"
+        }
+      ]
+    },
+    "Choice": {
+      "description": "One candidate offered to a choice scorer.\n\n`id` names the candidate in the result; `text` is what the model reads.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Caller-chosen identifier, unique within one request.",
+          "type": "string"
+        },
+        "text": {
+          "description": "The candidate as the model sees it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ]
+    },
+    "ChoiceScorerSpec": {
+      "description": "How a choice scorer reads its inputs and produces one logit per candidate.\n\nSerialized with a `\"type\"` tag naming the variant. New scorer kinds are\nadded as variants, so match with a wildcard arm.",
+      "oneOf": [
+        {
+          "description": "An ONNX model that reads the context and every candidate as UTF-8\nbyte ids and returns a `[1, N]` float32 logit per candidate.",
+          "type": "object",
+          "properties": {
+            "choice": {
+              "description": "Encoding of each candidate's text.",
+              "$ref": "#/$defs/ByteFieldSpec"
+            },
+            "choice_mask_input": {
+              "description": "Bool input marking which of the `N` candidate rows are offered.",
+              "type": "string"
+            },
+            "context": {
+              "description": "Encoding of the context.",
+              "$ref": "#/$defs/ByteFieldSpec"
+            },
+            "fixed_choices": {
+              "description": "Candidates the model always offers, appended after the caller's.\nTheir ids are reserved: a caller choice may not reuse one.",
+              "type": "array",
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Choice"
+              }
+            },
+            "logits_output": {
+              "description": "Float32 output holding one logit per candidate row.",
+              "type": "string"
+            },
+            "max_choices": {
+              "description": "Most candidates one request may offer, counting the fixed choices.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "model_file": {
+              "description": "ONNX file, relative to the model directory.",
+              "type": "string"
+            },
+            "scoring_temperature": {
+              "description": "Divides every logit before the softmax. Finite and greater than zero;\n`None` means 1.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "float"
+            },
+            "type": {
+              "type": "string",
+              "const": "OnnxByteOptionScorer"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "model_file",
+            "context",
+            "choice",
+            "choice_mask_input",
+            "logits_output",
+            "max_choices"
+          ]
+        }
+      ]
+    },
     "ExecutionMode": {
       "description": "Execution mode for a pipeline stage",
       "oneOf": [
@@ -434,6 +572,43 @@
           ]
         },
         {
+          "description": "GGML-format Whisper speech recognition, executed by whisper.cpp on the\nsame ggml the local LLM backend already links.\n\nDistinct from [`ExecutionTemplate::SafeTensors`] with\n`architecture: \"whisper\"`, which routes to the pure-Rust Candle\nimplementation. Both transcribe; they differ in weight format (GGML\nquantized vs F32 safetensors) and therefore in cost, which is the whole\nreason this variant exists.",
+          "type": "object",
+          "properties": {
+            "audio_ctx": {
+              "description": "Encoder context in mel frames, where 1500 covers the full 30 s\nwindow. `0` (the default) means no truncation.\n\nTruncating is the largest single speed lever for live streaming,\nbut truncating too far makes the decoder emit repetition loops.\nMeasured on a Pixel 8 with `tiny.en` Q5_1: 500 is safe for a 5 s\nwindow and 2.8x faster than full context; 250 degenerates. So a\nmodel opts in here after its own quality check rather than\ninheriting a fast-but-fragile default.",
+              "type": "integer",
+              "format": "uint32",
+              "default": 0,
+              "minimum": 0
+            },
+            "language": {
+              "description": "Language code to force (e.g. `\"en\"`). Absent means auto-detect.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model_file": {
+              "description": "Path to the GGML model file (relative to bundle root), e.g.\n`ggml-base.en-q5_1.bin`.",
+              "type": "string"
+            },
+            "translate": {
+              "description": "Translate into English instead of transcribing in the source\nlanguage.",
+              "type": "boolean",
+              "default": false
+            },
+            "type": {
+              "type": "string",
+              "const": "GgmlWhisper"
+            }
+          },
+          "required": [
+            "type",
+            "model_file"
+          ]
+        },
+        {
           "description": "Vision-language model execution for image+text LLM inputs.",
           "type": "object",
           "properties": {
@@ -476,6 +651,85 @@
           "required": [
             "type",
             "model_file"
+          ]
+        },
+        {
+          "description": "zzz CPU engine execution, pinned Kitten TTS 2 profile, via the\nquietly staged `libzzz_embed.a` (see `crates/zzz-sys`). Model\nweights and both voice JSONs are bundle files resolved like other\ntemplate paths.\n\nDistinct from the ONNX `KittenTTS-Nano` path: the zzz engine links\nthe pinned engine binary (feature `tts-zzz`) and takes the four\nassets directly, without phonemize preprocessing steps.",
+          "type": "object",
+          "properties": {
+            "decoder_file": {
+              "description": "S3 waveform-decoder GGUF, relative to bundle root.",
+              "type": "string",
+              "default": ""
+            },
+            "decoder_voice_file": {
+              "description": "S3 decoder voice JSON (`zzz.kitten_s3.voice.v1`), relative to\nbundle root.",
+              "type": "string",
+              "default": ""
+            },
+            "language": {
+              "description": "Forced language; the engine's PoC accepts prepared English only,\nso absent (its default) is also the correct value there.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "language_voice_file": {
+              "description": "Language-model voice JSON, relative to bundle root.",
+              "type": "string",
+              "default": ""
+            },
+            "max_tokens": {
+              "description": "Generation token cap (0 = engine default of 128; 1..=1023\nexplicit).",
+              "type": "integer",
+              "format": "uint32",
+              "default": 0,
+              "minimum": 0
+            },
+            "model_file": {
+              "description": "Language (speech-token) GGUF, relative to bundle root.",
+              "type": "string"
+            },
+            "seed": {
+              "description": "Waveform-stage seed; 0 is valid.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 0,
+              "minimum": 0
+            },
+            "threads": {
+              "description": "Threads (0 = engine default of 4; explicit range 1..=64).",
+              "type": "integer",
+              "format": "uint32",
+              "default": 0,
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "ZzzEmbed"
+            }
+          },
+          "required": [
+            "type",
+            "model_file"
+          ]
+        },
+        {
+          "description": "A decision model: scores one context against a closed list of\ncandidates in a single forward pass, without generating text.\n\nAccepts only an\n[`EnvelopeKind::ChoiceRequest`](crate::ir::EnvelopeKind::ChoiceRequest)\nthrough a batch run and answers with\n[`EnvelopeKind::ChoiceScores`](crate::ir::EnvelopeKind::ChoiceScores).\nThe scores are relative preferences among the offered candidates, not\ncalibrated probabilities of being correct.",
+          "type": "object",
+          "properties": {
+            "scorer": {
+              "description": "How the scorer encodes the request and which output holds the\ncandidate logits.",
+              "$ref": "#/$defs/ChoiceScorerSpec"
+            },
+            "type": {
+              "type": "string",
+              "const": "ChoiceScorer"
+            }
+          },
+          "required": [
+            "type",
+            "scorer"
           ]
         }
       ]

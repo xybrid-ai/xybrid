@@ -25,10 +25,13 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use tokio_stream::wrappers::ReceiverStream;
 use xybrid_core::conversation::ConversationContext;
+use xybrid_core::execution::choice::{
+    ensure_no_choice_kinds, validate_choice_request, validate_scorer_spec, EntryPoint,
+};
 use xybrid_core::execution::{
     ExecutionTemplate, ModelMetadata, TemplateExecutor, VoiceConfig, VoiceInfo,
 };
-use xybrid_core::ir::Envelope;
+use xybrid_core::ir::{Choice, Envelope};
 use xybrid_core::orchestrator::authority::{
     ExecutionOutcome, LocalAuthority, OrchestrationAuthority, OutcomeCategory, PolicyOutcome,
     PolicyRequest, ResolvedTarget, SignalContext, StageContext,
@@ -362,6 +365,17 @@ impl xybrid_core::http::RetryableError for SdkError {
     }
 }
 
+/// The refusal for warming up a choice scorer: this build validates choice
+/// requests but does not run scorers yet.
+fn choice_scoring_unavailable(model_id: &str) -> SdkError {
+    SdkError::UnsupportedModelCapability {
+        model_id: model_id.to_string(),
+        capability: "choice scoring".to_string(),
+        hint: "this build validates choice requests but does not run choice scorers yet"
+            .to_string(),
+    }
+}
+
 fn streaming_execution_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
     match error {
         xybrid_core::runtime_adapter::AdapterError::AbortedForCloudFallback { reason } => {
@@ -431,6 +445,7 @@ pub struct SeamInfo {
 
 const FALLBACK_POLICY_RESOURCE_MAX_AGE: Duration = Duration::from_millis(500);
 const CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON: &str = "cloud_fallback_unsupported_tools";
+const CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON: &str = "cloud_fallback_unsupported_choice_request";
 
 static FALLBACK_AUTHORITY: OnceLock<LocalAuthority> = OnceLock::new();
 
@@ -643,6 +658,37 @@ where
                     "Execution aborted: {}",
                     crate::run_options::AbortReason::UserCancelled
                 )));
+            }
+
+            // Choice requests never leave the device: no cloud leg scores
+            // candidates, and the gateway would read the request as text. The
+            // entry guards refuse them before a local run can abort, so this
+            // only backs them up.
+            if envelope.kind.contains_choice_kind() {
+                crate::telemetry::publish_cloud_denied_by_policy(
+                    &correlation_id,
+                    cloud_model_id,
+                    reason,
+                    CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON,
+                    local_latency_ms,
+                );
+                record_cloud_outcome(
+                    authority,
+                    cloud_model_id,
+                    cloud_provider.as_deref(),
+                    0,
+                    false,
+                    Some(CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON.to_string()),
+                    OutcomeCategory::HardFail {
+                        reason: CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON.to_string(),
+                    },
+                    signal_context,
+                );
+                return Err(SdkError::UnsupportedModelCapability {
+                    model_id: model_id.to_string(),
+                    capability: "cloud fallback for choice requests".to_string(),
+                    hint: "choice requests run only on the device".to_string(),
+                });
             }
 
             // Tool-bearing requests fail closed before policy or cloud
@@ -3085,6 +3131,12 @@ impl ModelLoader {
         let browser_format = match &metadata.execution_template {
             ExecutionTemplate::TfLite { .. } => "TFLite",
             ExecutionTemplate::LiteRtLm { .. } => "LiteRT-LM",
+            // Checked once at load, so a bad spec fails here rather than on
+            // the first run.
+            ExecutionTemplate::ChoiceScorer { scorer } => {
+                return validate_scorer_spec(scorer)
+                    .map_err(|e| SdkError::MetadataInvalid(e.to_string()));
+            }
             _ => return Ok(()),
         };
 
@@ -3105,6 +3157,13 @@ impl ModelLoader {
     fn check_streaming_support(metadata: &ModelMetadata) -> bool {
         if Self::is_llm_template(metadata) {
             return true;
+        }
+        // A scorer answers one batch run, whatever task its bundle declares.
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ChoiceScorer { .. }
+        ) {
+            return false;
         }
 
         // Check if this is an ASR model (supports streaming)
@@ -3136,6 +3195,12 @@ impl ModelLoader {
     fn infer_output_type(metadata: &ModelMetadata) -> OutputType {
         if Self::is_llm_template(metadata) {
             return OutputType::Text;
+        }
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ChoiceScorer { .. }
+        ) {
+            return OutputType::ChoiceScores;
         }
 
         // Check metadata hints (metadata is HashMap<String, serde_json::Value>)
@@ -3329,6 +3394,69 @@ impl XybridModel {
     /// registry or with other models.
     fn touch(&self) {
         crate::model_registry::touch(&self.last_accessed);
+    }
+
+    /// Refuses input this entry point must not run, before any cloud leg or
+    /// backend call: a choice request (or choice scores) for a model that is
+    /// not a choice scorer, any other input for a scorer, and a scorer reached
+    /// through anything but a batch run (see [`validate_choice_request`]).
+    ///
+    /// Reads the installed metadata, so a speculative model is checked
+    /// against the model that answers now. Called right after
+    /// [`Self::touch`] at every run entry point.
+    fn guard_input(&self, envelope: &Envelope, entry: EntryPoint) -> SdkResult<()> {
+        let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
+        validate_choice_request(&handle.metadata, envelope, entry)
+            .map_err(|e| sdk_execution_error("Execution failed", e))
+    }
+
+    /// [`Self::guard_input`] plus the conversation history, where no model
+    /// reads a choice request.
+    fn guard_context_input(
+        &self,
+        envelope: &Envelope,
+        context: &ConversationContext,
+        entry: EntryPoint,
+    ) -> SdkResult<()> {
+        self.guard_input(envelope, entry)?;
+        ensure_no_choice_kinds(
+            &self.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )
+        .map_err(|e| sdk_execution_error("Execution failed", e))
+    }
+
+    /// Whether this model is a choice scorer: it scores the candidates of an
+    /// [`Envelope::choice_request`] instead of generating output.
+    ///
+    /// A scorer accepts only a choice request, and only through [`Self::run`],
+    /// [`Self::run_with_options`] or [`Self::run_async`]; every other entry
+    /// point refuses it.
+    pub fn is_choice_scorer(&self) -> bool {
+        self.handle.read().ok().is_some_and(|h| {
+            matches!(
+                h.metadata.execution_template,
+                ExecutionTemplate::ChoiceScorer { .. }
+            )
+        })
+    }
+
+    /// The candidates a choice scorer appends after the caller's, in order.
+    ///
+    /// Their ids are reserved: a caller choice may not reuse one. Empty for a
+    /// model that is not a choice scorer.
+    pub fn fixed_choices(&self) -> Vec<Choice> {
+        self.handle
+            .read()
+            .ok()
+            .and_then(|h| match &h.metadata.execution_template {
+                ExecutionTemplate::ChoiceScorer { scorer } => Some(scorer.fixed_choices().to_vec()),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     /// Whether this run should be served speculatively from the cloud.
@@ -3692,6 +3820,8 @@ impl XybridModel {
 
         // Create a minimal input based on expected input type
         let warmup_input = match self.output_type {
+            // Scorers do not run in this build, so there is nothing to warm.
+            OutputType::ChoiceScores => return Err(choice_scoring_unavailable(&self.model_id)),
             // For TTS models, use a short text
             OutputType::Audio => Envelope {
                 kind: EnvelopeKind::Text("Hi".to_string()),
@@ -3806,6 +3936,8 @@ impl XybridModel {
 
             // Create a minimal input based on expected input type
             let warmup_input = match output_type {
+                // Scorers do not run in this build, so there is nothing to warm.
+                OutputType::ChoiceScores => return Err(choice_scoring_unavailable(&model_id)),
                 OutputType::Audio => Envelope {
                     kind: EnvelopeKind::Text("Hi".to_string()),
                     metadata: std::collections::HashMap::new(),
@@ -3921,6 +4053,7 @@ impl XybridModel {
     ) -> SdkResult<InferenceResult> {
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
+        self.guard_input(envelope, EntryPoint::Batch)?;
 
         // Speculative cloud: serve from the gateway until the local handle is
         // ready (see `cloud_serve`).
@@ -4012,6 +4145,7 @@ impl XybridModel {
     {
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
+        self.guard_input(envelope, EntryPoint::Streaming)?;
         let start = Instant::now();
         let resource_guard = crate::telemetry::begin_resource_run();
         let trace_id = uuid::Uuid::new_v4();
@@ -4131,6 +4265,7 @@ impl XybridModel {
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
         self.touch();
+        self.guard_context_input(envelope, context, EntryPoint::Conversation)?;
 
         // Speculative cloud: serve from the gateway until the local handle is
         // ready. The gateway leg is stateless — `context` is not replayed (the
@@ -4292,6 +4427,7 @@ impl XybridModel {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         self.touch();
+        self.guard_context_input(envelope, context, EntryPoint::Streaming)?;
 
         // Speculative cloud: stream from the gateway until the local handle is
         // ready. The gateway leg is stateless (`context` not replayed, matching
@@ -4511,6 +4647,7 @@ impl XybridModel {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         self.touch();
+        self.guard_input(envelope, EntryPoint::Streaming)?;
 
         // Speculative cloud: stream from the gateway until the local handle is
         // ready (see `cloud_serve`).
@@ -4846,6 +4983,10 @@ impl XybridModel {
         use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
 
+        // Before the resource scope: a refused input starts nothing. The
+        // local leg below checks again, as every streaming entry does.
+        self.guard_input(envelope, EntryPoint::Streaming)?;
+
         let correlation_id = options
             .correlation_id
             .clone()
@@ -4927,6 +5068,10 @@ impl XybridModel {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         self.touch();
+        // A refused input yields one error event; nothing is spawned.
+        if let Err(error) = self.guard_input(&envelope, EntryPoint::Streaming) {
+            return Box::pin(tokio_stream::iter([StreamEvent::Error(error.to_string())]));
+        }
         let (tx, rx) = mpsc::channel::<StreamEvent>(100);
         let handle = self.handle.clone();
         let model_id = self.model_id.clone();
@@ -5120,6 +5265,7 @@ impl XybridModel {
     ) -> SdkResult<InferenceResult> {
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
+        self.guard_input(envelope, EntryPoint::Batch)?;
 
         // Speculative cloud: serve from the gateway (off the runtime via
         // spawn_blocking, like the local path) until the local handle is ready.
@@ -8688,5 +8834,144 @@ mod tests {
         }
         assert!(!seam_fired.load(std::sync::atomic::Ordering::SeqCst));
         assert_eq!(cloud.call_count(), 0);
+    }
+
+    // =====================================================================
+    // Choice requests never reach a cloud leg
+    // =====================================================================
+
+    fn choice_request_envelope() -> Envelope {
+        Envelope::choice_request(
+            text_envelope("FORM Intake"),
+            vec![
+                Choice::new("tel", "fill Tel: (503) 555-0142"),
+                Choice::new("name", "fill Name: Jane Doe"),
+            ],
+        )
+    }
+
+    #[test]
+    fn dispatch_after_local_refuses_choice_requests_before_the_cloud() {
+        let cloud = FakeCloudAdapter::new("must not run");
+        let authority = FakeAuthority::allow();
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &choice_request_envelope(),
+            &cloud,
+            "corr-choice".to_string(),
+            "local-model",
+            0,
+            50,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            None,
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::UnsupportedModelCapability { capability, .. }) => {
+                assert_eq!(capability, "cloud fallback for choice requests");
+            }
+            other => panic!("expected a choice refusal, got {other:?}"),
+        }
+        assert_eq!(cloud.call_count(), 0);
+        assert!(authority.policy_requests().is_empty());
+        let outcomes = authority.outcomes();
+        assert_eq!(outcomes.len(), 2);
+        assert!(matches!(
+            outcomes[1].category,
+            Some(xybrid_core::orchestrator::authority::OutcomeCategory::HardFail { ref reason })
+                if reason == CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON
+        ));
+    }
+
+    /// A speculative placeholder serves runs from the gateway until its
+    /// download lands. A choice request must be refused before that leg, both
+    /// while the download runs and after it has failed (when the placeholder
+    /// keeps serving from the cloud).
+    #[test]
+    fn speculative_placeholders_refuse_choice_requests_before_the_gateway() {
+        use httpmock::prelude::*;
+
+        let gateway = MockServer::start();
+        let any_request = gateway.mock(|_, then| {
+            then.status(200).json_body(serde_json::json!({}));
+        });
+        let download = Arc::new(SpeculativeDownload::default());
+        let mut placeholder = ModelMetadata::onnx("spec-chat", "", "");
+        placeholder.execution_template = ExecutionTemplate::Gguf {
+            model_file: String::new(),
+            chat_template: None,
+            context_length: 2048,
+            generation_params: None,
+        };
+        let model = XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
+                metadata: placeholder,
+                model_dir: PathBuf::from("."),
+                state: LoadState::Unloaded,
+            })),
+            model_id: "spec-chat".to_string(),
+            version: String::new(),
+            output_type: OutputType::Text,
+            supports_streaming: true,
+            default_generation_config: GenerationConfig::default(),
+            current_run: Arc::new(Mutex::new(None)),
+            speculative: Some(Arc::clone(&download)),
+            last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+        };
+        // Point any cloud leg at the mock, with a key, so a leaked request
+        // would be counted rather than fail before sending.
+        let mut request = choice_request_envelope();
+        request
+            .metadata
+            .insert("gateway_url".to_string(), gateway.url("/v1"));
+        request
+            .metadata
+            .insert("api_key".to_string(), "test-key".to_string());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+
+        for downloaded in [None, Some(false)] {
+            if let Some(installed) = downloaded {
+                download.finish(installed);
+            }
+            assert!(
+                model.is_cloud_serving(),
+                "the placeholder serves from the cloud"
+            );
+            let refusals = [
+                model.run(&request, None).unwrap_err(),
+                runtime
+                    .block_on(model.run_async(&request, None))
+                    .unwrap_err(),
+                model.run_streaming(&request, None, |_| Ok(())).unwrap_err(),
+                model
+                    .run_with_context(&request, &ConversationContext::new(), None)
+                    .unwrap_err(),
+            ];
+            for error in refusals {
+                assert!(
+                    matches!(
+                        &error,
+                        SdkError::UnsupportedModelCapability { capability, .. }
+                            if capability == "choice requests"
+                    ),
+                    "{error:?}"
+                );
+            }
+        }
+        any_request.assert_hits(0);
     }
 }

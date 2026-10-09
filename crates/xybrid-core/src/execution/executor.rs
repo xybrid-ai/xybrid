@@ -43,6 +43,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::choice::{
+    ensure_no_choice_kinds, scoring_not_enabled, validate_choice_request, EntryPoint,
+};
 use super::listener::ExecutionGuard;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::llm_telemetry::{
@@ -351,7 +354,13 @@ impl TemplateExecutor {
             EnvelopeKind::MultiPart(parts) => {
                 parts.iter().any(Self::requires_multimodal_generation)
             }
-            EnvelopeKind::Audio(_) | EnvelopeKind::Text(_) | EnvelopeKind::Embedding(_) => false,
+            // Choice kinds never reach generation: every entry refuses them
+            // first (see `validate_choice_request`).
+            EnvelopeKind::Audio(_)
+            | EnvelopeKind::Text(_)
+            | EnvelopeKind::Embedding(_)
+            | EnvelopeKind::ChoiceRequest(_)
+            | EnvelopeKind::ChoiceScores(_) => false,
         }
     }
 
@@ -503,6 +512,8 @@ impl TemplateExecutor {
             ExecutionTemplate::TfLite { model_file } => ("tflite", model_file),
             #[cfg(feature = "asr-whispercpp")]
             ExecutionTemplate::GgmlWhisper { model_file, .. } => ("whispercpp", model_file),
+            // Scorers do not run yet, so none is ever loaded.
+            ExecutionTemplate::ChoiceScorer { .. } => return false,
             _ => return false,
         };
         let model_full_path = Path::new(&self.base_path).join(model_file);
@@ -539,6 +550,13 @@ impl TemplateExecutor {
         input: &Envelope,
         #[allow(unused_variables)] config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        // A choice request runs only on a choice scorer, through this batch
+        // entry. Refuse anything else before any span, runtime or backend.
+        validate_choice_request(metadata, input, EntryPoint::Batch)?;
+        if let ExecutionTemplate::ChoiceScorer { .. } = &metadata.execution_template {
+            return Err(scoring_not_enabled(&metadata.model_id));
+        }
+
         debug!(
             target: "xybrid_core",
             "TemplateExecutor.execute START: model_id={}, template={:?}",
@@ -807,6 +825,12 @@ impl TemplateExecutor {
             ExecutionTemplate::VisionLanguage { .. } => {
                 return Err(AdapterError::RuntimeError(
                     "VisionLanguage execution should dispatch before the single-model path"
+                        .to_string(),
+                ));
+            }
+            ExecutionTemplate::ChoiceScorer { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "ChoiceScorer execution should dispatch before the single-model path"
                         .to_string(),
                 ));
             }
@@ -1093,6 +1117,17 @@ impl TemplateExecutor {
         context: &ConversationContext,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        // History is never scored, so a choice kind there is refused like one
+        // in the input — for every model, scorers included.
+        validate_choice_request(metadata, input, EntryPoint::Conversation)?;
+        ensure_no_choice_kinds(
+            &metadata.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )?;
+
         debug!(
             target: "xybrid_core",
             "TemplateExecutor.execute_with_context START: model_id={}, context_id={}",
@@ -1312,6 +1347,8 @@ impl TemplateExecutor {
         #[allow(unused_variables)] on_token: StreamingCallback<'_>,
         #[allow(unused_variables)] config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        validate_choice_request(metadata, input, EntryPoint::Streaming)?;
+
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
             if let super::template::ExecutionTemplate::VisionLanguage {
@@ -1489,6 +1526,15 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        validate_choice_request(metadata, input, EntryPoint::Streaming)?;
+        ensure_no_choice_kinds(
+            &metadata.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )?;
+
         debug!(
             target: "xybrid_core",
             "TemplateExecutor.execute_streaming_with_context START: model_id={}, context_id={}",
@@ -3188,6 +3234,12 @@ impl TemplateExecutor {
             ExecutionTemplate::CoreMl { model_file } => model_file.clone(),
             ExecutionTemplate::TfLite { model_file } => model_file.clone(),
             ExecutionTemplate::SafeTensors { model_file, .. } => model_file.clone(),
+            // A scorer is refused before this point; it synthesizes nothing.
+            ExecutionTemplate::ChoiceScorer { .. } => {
+                return Err(AdapterError::InvalidInput(
+                    "Streaming TTS requires a single-model execution template".to_string(),
+                ))
+            }
             _ => {
                 return Err(AdapterError::InvalidInput(
                     "Streaming TTS requires a single-model execution template".to_string(),
@@ -3231,6 +3283,8 @@ impl TemplateExecutor {
         on_chunk: &mut dyn FnMut(Vec<u8>, u32) -> bool,
     ) -> ExecutorResult<()> {
         use crate::ir::EnvelopeKind;
+
+        validate_choice_request(metadata, input, EntryPoint::Streaming)?;
 
         const DEFAULT_MAX_TTS_CHARS: usize = 350;
         let max_tts_chars = metadata.max_chunk_chars.unwrap_or(DEFAULT_MAX_TTS_CHARS);
@@ -3462,6 +3516,8 @@ pub fn model_default_gen_config(metadata: &ModelMetadata) -> GenerationConfig {
             context_length,
             ..
         } => (generation_params.as_ref(), *context_length),
+        // A scorer generates nothing, so it has no sampling parameters.
+        ExecutionTemplate::ChoiceScorer { .. } => (None, 0),
         _ => (None, 0),
     };
 
@@ -3562,7 +3618,6 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn test_model_metadata(execution_template: ExecutionTemplate) -> ModelMetadata {
         ModelMetadata {
             model_id: "test-model".to_string(),
@@ -5723,5 +5778,384 @@ mod tests {
         let mut pcm = 1234i16.to_le_bytes().to_vec();
         fade_pcm16_edges(&mut pcm, 4);
         assert_eq!(i16::from_le_bytes([pcm[0], pcm[1]]), 1234);
+    }
+
+    // =========================================================================
+    // Choice requests: refused before any runtime, backend or model file
+    // =========================================================================
+
+    fn text_input(text: &str) -> Envelope {
+        Envelope::new(EnvelopeKind::Text(text.to_string()))
+    }
+
+    fn choice_request_input() -> Envelope {
+        Envelope::choice_request(
+            text_input("FORM Intake"),
+            vec![
+                crate::ir::Choice::new("tel", "fill Tel: (503) 555-0142"),
+                crate::ir::Choice::new("name", "fill Name: Jane Doe"),
+            ],
+        )
+    }
+
+    fn choice_scores_input() -> Envelope {
+        Envelope::new(EnvelopeKind::ChoiceScores(crate::ir::ChoiceScores {
+            entries: vec![crate::ir::ChoiceScore {
+                id: "tel".to_string(),
+                logit: 1.0,
+                score: 1.0,
+                fixed: false,
+            }],
+            label_mass: None,
+        }))
+    }
+
+    /// Every choice kind a non-scorer must refuse, including one buried in a
+    /// multi-part message.
+    fn choice_kind_inputs() -> [Envelope; 3] {
+        [
+            choice_request_input(),
+            Envelope::new(EnvelopeKind::MultiPart(vec![
+                text_input("look at this"),
+                choice_request_input(),
+            ])),
+            choice_scores_input(),
+        ]
+    }
+
+    /// The capability an `UnsupportedModelCapability` refusal names.
+    fn refused_capability<T: std::fmt::Debug>(result: ExecutorResult<T>) -> String {
+        match result {
+            Err(AdapterError::UnsupportedModelCapability { capability, .. }) => capability,
+            other => panic!("expected UnsupportedModelCapability, got {other:?}"),
+        }
+    }
+
+    fn no_tokens() -> StreamingCallback<'static> {
+        Box::new(|_| panic!("a refused request must not stream a token"))
+    }
+
+    fn mock_runtime(executor: &TemplateExecutor) -> &crate::testing::mocks::MockRuntime {
+        executor
+            .get_runtime("onnx")
+            .and_then(|runtime| runtime.as_any().downcast_ref())
+            .expect("the test registered a MockRuntime as `onnx`")
+    }
+
+    fn executor_with_mock_onnx() -> TemplateExecutor {
+        let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
+        runtimes.insert(
+            "onnx".to_string(),
+            Box::new(crate::testing::mocks::MockRuntime::with_text("ran")),
+        );
+        TemplateExecutor::with_runtimes("", runtimes)
+    }
+
+    fn forms_scorer_metadata() -> ModelMetadata {
+        // The runtime CARGO_MANIFEST_DIR, not `env!`: under Bazel the test
+        // runs in a sandbox where the compile-time path points nowhere.
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let spec_path = Path::new(&manifest_dir)
+            .join("../../integration-tests/fixtures/choice/specs/cua-s1-forms.json");
+        let spec = std::fs::read_to_string(&spec_path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", spec_path.display()));
+        test_model_metadata(ExecutionTemplate::ChoiceScorer {
+            scorer: serde_json::from_str(&spec).expect("the committed FORMS spec parses"),
+        })
+    }
+
+    #[test]
+    fn choice_kinds_never_reach_a_runtime() {
+        let metadata = test_model_metadata(ExecutionTemplate::Onnx {
+            model_file: "model.onnx".to_string(),
+        });
+        let mut executor = executor_with_mock_onnx();
+        let context = ConversationContext::new();
+
+        for input in choice_kind_inputs() {
+            let refusals = [
+                refused_capability(executor.execute(&metadata, &input, None)),
+                refused_capability(executor.execute_streaming(
+                    &metadata,
+                    &input,
+                    no_tokens(),
+                    None,
+                )),
+                refused_capability(
+                    executor.execute_with_context(&metadata, &input, &context, None),
+                ),
+                refused_capability(executor.execute_streaming_with_context(
+                    &metadata,
+                    &input,
+                    &context,
+                    no_tokens(),
+                    None,
+                )),
+                refused_capability(executor.execute_tts_streaming(
+                    &metadata,
+                    &input,
+                    &mut |_, _| panic!("a refused request must not synthesize"),
+                )),
+            ];
+            assert!(
+                refusals.iter().all(|c| c == "choice requests"),
+                "{refusals:?}"
+            );
+        }
+        let runtime = mock_runtime(&executor);
+        assert_eq!(runtime.call_count(), 0);
+        assert_eq!(runtime.loaded_model(), None);
+
+        // Control: the same executor does reach the runtime for text, so the
+        // zero above is the guard's doing.
+        executor
+            .execute(&metadata, &text_input("hello"), None)
+            .expect("text runs on the mock");
+        assert_eq!(mock_runtime(&executor).call_count(), 1);
+    }
+
+    #[test]
+    fn choice_kinds_in_history_are_refused_before_any_runtime() {
+        let metadata = test_model_metadata(ExecutionTemplate::Onnx {
+            model_file: "model.onnx".to_string(),
+        });
+        let mut executor = executor_with_mock_onnx();
+
+        let mut in_history = ConversationContext::new();
+        in_history.push(text_input("earlier").with_role(MessageRole::User));
+        in_history.push(Envelope::new(EnvelopeKind::MultiPart(vec![
+            choice_request_input(),
+        ])));
+        let as_system = ConversationContext::new().with_system(choice_scores_input());
+
+        for context in [&in_history, &as_system] {
+            let input = text_input("hello").with_role(MessageRole::User);
+            assert_eq!(
+                refused_capability(executor.execute_with_context(&metadata, &input, context, None)),
+                "choice requests"
+            );
+            assert_eq!(
+                refused_capability(executor.execute_streaming_with_context(
+                    &metadata,
+                    &input,
+                    context,
+                    no_tokens(),
+                    None,
+                )),
+                "choice requests"
+            );
+        }
+        assert_eq!(mock_runtime(&executor).call_count(), 0);
+    }
+
+    #[test]
+    fn a_valid_scorer_request_is_refused_until_scorers_run() {
+        let metadata = forms_scorer_metadata();
+        // An empty model directory: opening the scorer would fail with a file
+        // error, so getting the capability refusal shows nothing was opened.
+        let dir = tempfile::tempdir().unwrap();
+        let mut executor = TemplateExecutor::new(dir.path().to_str().unwrap());
+
+        assert_eq!(
+            refused_capability(executor.execute(&metadata, &choice_request_input(), None)),
+            "choice scoring"
+        );
+        let fixed_only = Envelope::choice_request(text_input("FORM Intake"), Vec::new());
+        assert_eq!(
+            refused_capability(executor.execute(&metadata, &fixed_only, None)),
+            "choice scoring"
+        );
+        assert!(!executor.is_model_loaded(&metadata));
+    }
+
+    #[test]
+    fn scorers_refuse_other_entries_and_other_input() {
+        let metadata = forms_scorer_metadata();
+        let dir = tempfile::tempdir().unwrap();
+        let mut executor = TemplateExecutor::new(dir.path().to_str().unwrap());
+        let request = choice_request_input();
+        let context = ConversationContext::new();
+
+        assert_eq!(
+            refused_capability(executor.execute(&metadata, &text_input("hello"), None)),
+            "Text input"
+        );
+        assert_eq!(
+            refused_capability(executor.execute_streaming(&metadata, &request, no_tokens(), None)),
+            "streaming"
+        );
+        assert_eq!(
+            refused_capability(executor.execute_with_context(&metadata, &request, &context, None)),
+            "conversation context"
+        );
+        assert_eq!(
+            refused_capability(executor.execute_streaming_with_context(
+                &metadata,
+                &request,
+                &context,
+                no_tokens(),
+                None,
+            )),
+            "streaming"
+        );
+        assert_eq!(
+            refused_capability(executor.execute_tts_streaming(
+                &metadata,
+                &request,
+                &mut |_, _| panic!("a scorer must not synthesize"),
+            )),
+            "streaming"
+        );
+    }
+
+    #[test]
+    fn invalid_scorer_requests_are_invalid_input() {
+        let metadata = forms_scorer_metadata();
+        let mut executor = TemplateExecutor::new("");
+        let empty_context =
+            Envelope::choice_request(text_input(""), vec![crate::ir::Choice::new("a", "x")]);
+        let reserved = Envelope::choice_request(
+            text_input("FORM Intake"),
+            vec![crate::ir::Choice::new("skip", "x")],
+        );
+        for input in [empty_context, reserved] {
+            assert!(matches!(
+                executor.execute(&metadata, &input, None),
+                Err(AdapterError::InvalidInput(_))
+            ));
+        }
+    }
+
+    /// LLM backend that counts every call, so a test can prove a refused
+    /// request reached none.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[derive(Default)]
+    struct CountingBackend {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    impl CountingBackend {
+        fn record(&self) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(sample_generation_output(1))
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    struct CountingHandle(std::sync::Arc<CountingBackend>);
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    impl crate::runtime_adapter::LlmBackend for CountingHandle {
+        fn name(&self) -> &str {
+            "counting"
+        }
+
+        fn supported_formats(&self) -> Vec<&'static str> {
+            vec!["gguf"]
+        }
+
+        fn load(&mut self, _config: &crate::runtime_adapter::LlmConfig) -> ExecutorResult<()> {
+            Ok(())
+        }
+
+        fn is_loaded(&self) -> bool {
+            true
+        }
+
+        fn unload(&mut self) -> ExecutorResult<()> {
+            Ok(())
+        }
+
+        fn generate(
+            &self,
+            _messages: &[ChatMessage],
+            _config: &GenerationConfig,
+        ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            self.0.record()
+        }
+
+        fn generate_streaming(
+            &self,
+            _messages: &[ChatMessage],
+            _config: &GenerationConfig,
+            _on_token: StreamingCallback<'_>,
+        ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            self.0.record()
+        }
+
+        fn render_chat_prompt(
+            &self,
+            _messages: &[ChatMessage],
+            _config: &GenerationConfig,
+        ) -> ExecutorResult<String> {
+            self.0.record().map(|output| output.text)
+        }
+
+        fn generate_raw(
+            &self,
+            _prompt: &str,
+            _config: &GenerationConfig,
+        ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            self.0.record()
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn choice_kinds_never_reach_an_llm_backend() {
+        let metadata = llm_metadata_for_continuation_tests();
+        let mut executor = TemplateExecutor::default();
+        let backend = std::sync::Arc::new(CountingBackend::default());
+        executor.llm_adapter_cache = Some((
+            LlmAdapterCacheKey::new("model.gguf".to_string(), None, 2048, None, None),
+            crate::runtime_adapter::LlmRuntimeAdapter::with_backend(Box::new(CountingHandle(
+                backend.clone(),
+            ))),
+        ));
+        let mut in_history = ConversationContext::new();
+        in_history.push(choice_request_input());
+        let empty = ConversationContext::new();
+
+        for input in choice_kind_inputs() {
+            let refusals = [
+                refused_capability(executor.execute(&metadata, &input, None)),
+                refused_capability(executor.execute_streaming(
+                    &metadata,
+                    &input,
+                    no_tokens(),
+                    None,
+                )),
+                refused_capability(executor.execute_with_context(&metadata, &input, &empty, None)),
+                refused_capability(executor.execute_streaming_with_context(
+                    &metadata,
+                    &input,
+                    &empty,
+                    no_tokens(),
+                    None,
+                )),
+            ];
+            assert!(
+                refusals.iter().all(|c| c == "choice requests"),
+                "{refusals:?}"
+            );
+        }
+        let text = text_input("hello").with_role(MessageRole::User);
+        assert_eq!(
+            refused_capability(executor.execute_with_context(&metadata, &text, &in_history, None)),
+            "choice requests"
+        );
+        assert_eq!(backend.calls(), 0);
+
+        // Control: text reaches the backend through the same executor.
+        executor
+            .execute(&metadata, &text, None)
+            .expect("text runs on the counting backend");
+        assert!(backend.calls() > 0);
     }
 }

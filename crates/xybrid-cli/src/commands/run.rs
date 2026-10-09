@@ -657,6 +657,10 @@ fn print_pipeline_results(
             EnvelopeKind::MultiPart(parts) => {
                 ui::kv("  Parts", &format!("{}", parts.len()));
             }
+            // Pipelines refuse choice kinds before and after every stage.
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                anyhow::bail!("pipeline stages do not return choice requests or scores");
+            }
         }
         println!();
     }
@@ -699,6 +703,9 @@ fn save_pipeline_output(
                 }
                 EnvelopeKind::MultiPart(_) => {
                     save_envelope_json(path, &last_result.output)?;
+                }
+                EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                    anyhow::bail!("pipeline stages do not return choice requests or scores");
                 }
             }
         }
@@ -1490,6 +1497,11 @@ fn print_output_payload(output: &Envelope, output_path: Option<&PathBuf>) -> Res
             if let Some(path) = output_path {
                 save_envelope_json(path, output)?;
             }
+        }
+        // No run returns these yet: choice scorers do not execute in this
+        // build, and nothing else produces them.
+        EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+            anyhow::bail!("this CLI does not display choice requests or choice scores yet");
         }
     }
     Ok(())

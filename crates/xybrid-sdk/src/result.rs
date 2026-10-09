@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use xybrid_core::gateway::ToolCall;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::ir::{ChoiceScores, Envelope, EnvelopeKind};
 
 /// Per-stage latency entry for pipeline runs.
 ///
@@ -95,6 +95,9 @@ pub enum OutputType {
     Embedding,
     /// Unknown or custom output type
     Unknown,
+    /// Scores from a choice scorer, one per candidate (see
+    /// [`InferenceResult::choice_scores`]).
+    ChoiceScores,
 }
 
 impl std::fmt::Display for OutputType {
@@ -104,6 +107,7 @@ impl std::fmt::Display for OutputType {
             OutputType::Audio => write!(f, "audio"),
             OutputType::Embedding => write!(f, "embedding"),
             OutputType::Unknown => write!(f, "unknown"),
+            OutputType::ChoiceScores => write!(f, "choice_scores"),
         }
     }
 }
@@ -127,6 +131,7 @@ impl std::fmt::Display for OutputType {
 ///     OutputType::Text => println!("Text: {}", result.unwrap_text()),
 ///     OutputType::Audio => println!("Audio: {} bytes", result.unwrap_audio().len()),
 ///     OutputType::Embedding => println!("Embedding: {} dims", result.unwrap_embedding().len()),
+///     OutputType::ChoiceScores => println!("{} candidates", result.choice_scores().unwrap().entries.len()),
 ///     OutputType::Unknown => println!("Unknown output"),
 /// }
 ///
@@ -353,6 +358,16 @@ impl InferenceResult {
         }
     }
 
+    /// Get a choice scorer's scores if available, one entry per candidate in
+    /// the order offered (the caller's choices, then the model's fixed ones).
+    ///
+    /// Scores are relative preferences among the offered candidates, not
+    /// calibrated probabilities of being correct. Returns `None` if the output
+    /// is not choice scores.
+    pub fn choice_scores(&self) -> Option<&ChoiceScores> {
+        self.envelope.as_choice_scores()
+    }
+
     // ========================================================================
     // Unwrap Accessors (panic on wrong type)
     // ========================================================================
@@ -421,7 +436,10 @@ pub(crate) fn output_type_for_envelope(envelope: &Envelope) -> OutputType {
         EnvelopeKind::Text(_) => OutputType::Text,
         EnvelopeKind::Audio(_) => OutputType::Audio,
         EnvelopeKind::Embedding(_) => OutputType::Embedding,
-        EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => OutputType::Unknown,
+        EnvelopeKind::ChoiceScores(_) => OutputType::ChoiceScores,
+        EnvelopeKind::Image { .. }
+        | EnvelopeKind::MultiPart(_)
+        | EnvelopeKind::ChoiceRequest(_) => OutputType::Unknown,
     }
 }
 
