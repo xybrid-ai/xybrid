@@ -9,12 +9,15 @@ namespace XybridBolt
 {
     public readonly struct XybridRunOptions
     {
-        public XybridRunOptions(XybridGenerationConfig? GenerationConfig, XybridAbortSignal[] AbortOn, bool FallbackToCloud, uint MaxGraceTokens, string? CorrelationId) { this.GenerationConfig = GenerationConfig; this.AbortOn = AbortOn; this.FallbackToCloud = FallbackToCloud; this.MaxGraceTokens = MaxGraceTokens; this.CorrelationId = CorrelationId; }
+        public XybridRunOptions(XybridGenerationConfig? GenerationConfig, XybridAbortSignal[] AbortOn, bool FallbackToCloud, uint MaxGraceTokens, string? CorrelationId, string? CloudProvider = null, string? CloudModel = null, string? CloudGatewayUrl = null) { this.GenerationConfig = GenerationConfig; this.AbortOn = AbortOn; this.FallbackToCloud = FallbackToCloud; this.MaxGraceTokens = MaxGraceTokens; this.CorrelationId = CorrelationId; this.CloudProvider = CloudProvider; this.CloudModel = CloudModel; this.CloudGatewayUrl = CloudGatewayUrl; }
         public XybridGenerationConfig? GenerationConfig { get; }
         public XybridAbortSignal[] AbortOn { get; }
         public bool FallbackToCloud { get; }
         public uint MaxGraceTokens { get; }
         public string? CorrelationId { get; }
+        public string? CloudProvider { get; }
+        public string? CloudModel { get; }
+        public string? CloudGatewayUrl { get; }
 
         internal static XybridRunOptions Decode(WireReader reader) =>
             new XybridRunOptions(
@@ -22,6 +25,9 @@ namespace XybridBolt
                 reader.ReadArray(reader => (XybridAbortSignal)reader.ReadI32()),
                 reader.ReadBool(),
                 reader.ReadU32(),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
                 reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
             );
 
@@ -53,6 +59,39 @@ namespace XybridBolt
             }
             {
                 if (this.CorrelationId is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.CloudProvider is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.CloudModel is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.CloudGatewayUrl is { } boltffiValue0)
                 {
                     writer.WriteU8(1);
                     writer.WriteString(boltffiValue0);

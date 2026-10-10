@@ -82,8 +82,9 @@ export interface Spec extends TurboModule {
 
   // -- Inference --
   // `options` is the wire form of `RunOptions`: sampling config, platform
-  // knobs, plus `context` (a conversation handle) and `cancel` (a
-  // cancellation-token handle) resolved natively.
+  // knobs, optional cloud provider/model/gateway, plus `context` (a
+  // conversation handle) and `cancel` (a cancellation-token handle)
+  // resolved natively.
   run(model: string, envelope: Object, options: Object | null): Promise<Object>;
   // Pull-based token streaming. `streamNext` resolves each event
   // (`{ kind: 'token', token }` or `{ kind: 'complete', result }`) and `null`

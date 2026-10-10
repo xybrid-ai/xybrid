@@ -67,6 +67,28 @@ def test_speculative_cloud_toggle_round_trips() -> None:
         bolt.set_speculative_cloud(previous)
 
 
+def test_run_options_cloud_tail_preserves_old_construction_and_explicit_values() -> None:
+    legacy = bolt.XybridRunOptions(None, [], False, 0, None)
+    assert (legacy.cloud_provider, legacy.cloud_model, legacy.cloud_gateway_url) == (
+        None, None, None
+    )
+    assert legacy.fallback_to_cloud is False
+
+    selected = bolt.XybridRunOptions(
+        None,
+        [],
+        True,
+        7,
+        "request-1",
+        cloud_provider="openai",
+        cloud_model="gpt-4o-mini",
+        cloud_gateway_url="https://api.xybrid.dev/v1",
+    )
+    decoded = bolt.XybridRunOptions._boltffi_from_wire(selected._boltffi_wire())
+    assert decoded == selected
+    assert bolt.XybridRunOptions._boltffi_from_wire(legacy._boltffi_wire()) == legacy
+
+
 def test_will_speculate_is_false_without_an_api_key() -> None:
     """Speculation needs a resolvable key; absent one it must not engage."""
 

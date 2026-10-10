@@ -97,6 +97,25 @@ for await (const token of model.runStreaming(Envelope.text('Tell me a story'), {
 // Elsewhere (a Stop button, unmount): controller.abort();
 ```
 
+Pass a cloud destination and the existing fallback policy in the same options
+object:
+
+```ts
+await model.run(Envelope.text('Hello'), {
+  fallbackToCloud: true,
+  cloudProvider: 'openai',
+  cloudModel: 'gpt-4o-mini',
+  cloudGatewayUrl: 'https://api.xybrid.dev/v1',
+});
+```
+
+The three cloud fields are optional and have no React Native defaults. An
+omitted field preserves the SDK's existing behavior. A destination does not
+enable fallback by itself; `fallbackToCloud` must be `true`. The shared facade
+validates a supplied gateway URL.
+These options configure supported fallback paths; ordinary model runs do not
+gain a new automatic cloud retry from setting them.
+
 Generation stops natively when the loop ends — completion, `break`, an
 error, or `abort()`. An aborted run rejects with `xybrid_cancelled`. A loop that
 is simply abandoned is never cleaned up (JavaScript runs no `finally` on
