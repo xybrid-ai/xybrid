@@ -175,3 +175,27 @@ context position masked, the model averages over all padding positions, and its
 position embeddings make that average depend on the padded length (224 in the
 export, 1 in the reference collator), so the logits differ by about 1.5. xybrid
 refuses an empty context instead.
+
+## Same-artifact harness
+
+`llama_harness/` is a `llama.h`-only C++ program that scores a prompt the way
+`xybrid-llama`'s `LlamaContext::score_final_position` does: the same context
+settings, a cleared memory, the prompt decoded in chunks of
+`llama_n_batch(ctx)` with output on the last token only, and the log-sum-exp
+of the final row summed in `f64` in index order. Linked against the same
+llama.cpp libraries as the Rust test, it must print the same final row bit for
+bit, so a mismatch points at the Rust readout rather than at the model or
+llama.cpp.
+
+```bash
+tools/conformance/prepare.sh qwen3.5-0.8b-f16-cf
+XYBRID_LLAMA_HARNESS="$(tools/conformance/llama_harness/build.sh)" \
+  cargo test -p xybrid-llama --features bindings --test choice_logits
+```
+
+`build.sh [FEATURES]` builds that test, without running it, with
+`xybrid-llama`'s features `FEATURES` (`bindings` by default), then links the
+harness against exactly the archives and system libraries cargo reports for
+llama.cpp: a downloaded or staged natives slice, or a source build. Pass the
+features you test with, such as `build.sh bindings,vision`. It needs `python3`
+and writes `target/llama-harness/llama_harness`.
