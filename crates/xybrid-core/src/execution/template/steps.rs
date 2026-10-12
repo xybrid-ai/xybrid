@@ -373,6 +373,12 @@ pub enum PostprocessingStep {
         dim: usize,
     },
 
+    /// Scale each vector along the last axis to unit length (L2 norm of 1)
+    ///
+    /// Use for: Sentence embeddings compared by cosine similarity, after
+    /// `MeanPool` (sentence-transformers' `normalize_embeddings=True`)
+    L2Normalize,
+
     /// CTC (Connectionist Temporal Classification) decoding for ASR
     ///
     /// Use for: Wav2Vec2, Hubert, other CTC-based ASR models
@@ -440,6 +446,7 @@ impl PostprocessingStep {
             PostprocessingStep::TemperatureSample { .. } => "TemperatureSample",
             PostprocessingStep::Denormalize { .. } => "Denormalize",
             PostprocessingStep::MeanPool { .. } => "MeanPool",
+            PostprocessingStep::L2Normalize => "L2Normalize",
             PostprocessingStep::CTCDecode { .. } => "CTCDecode",
             PostprocessingStep::TTSAudioEncode { .. } => "TTSAudioEncode",
             PostprocessingStep::WhisperDecode { .. } => "WhisperDecode",
@@ -714,6 +721,17 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn l2_normalize_is_a_bare_type_tag() {
+        let step: PostprocessingStep = serde_json::from_str(r#"{"type": "L2Normalize"}"#).unwrap();
+
+        assert!(matches!(step, PostprocessingStep::L2Normalize));
+        assert_eq!(
+            serde_json::to_value(&step).unwrap(),
+            serde_json::json!({"type": "L2Normalize"})
+        );
     }
 
     #[test]
