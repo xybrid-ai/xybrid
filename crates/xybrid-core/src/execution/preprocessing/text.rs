@@ -16,12 +16,15 @@ use crate::runtime_adapter::AdapterError;
 /// - `tokenizer_path`: Path to tokenizer.json file
 /// - `tokenizer_type`: Type of tokenizer (WordPiece, BPE, SentencePiece)
 /// - `max_length`: Optional maximum sequence length
+/// - `add_special_tokens`: Add the post-processor's special tokens (e.g.
+///   `<bos>`/`<eos>`); truncation then keeps the closing ones
 /// - `tokenizers`: The executor's cache; the file is parsed only on a miss
 pub fn tokenize_step(
     data: PreprocessedData,
     tokenizer_path: &str,
     tokenizer_type: &TokenizerType,
     max_length: Option<usize>,
+    add_special_tokens: bool,
     tokenizers: &mut TokenizerCache,
 ) -> ExecutorResult<PreprocessedData> {
     let text = match data {
@@ -50,7 +53,7 @@ pub fn tokenize_step(
     };
 
     let encoding = tokenizer
-        .encode(text.clone(), false)
+        .encode(text.clone(), add_special_tokens)
         .map_err(|e| AdapterError::InvalidInput(format!("Tokenization failed: {}", e)))?;
 
     let mut ids: Vec<usize> = encoding.get_ids().iter().map(|&id| id as usize).collect();
@@ -67,9 +70,18 @@ pub fn tokenize_step(
 
     if let Some(max_len) = max_length {
         if ids.len() > max_len {
-            ids.truncate(max_len);
-            attention_mask.truncate(max_len);
-            token_type_ids.truncate(max_len);
+            // Cut the text, not the closing special tokens (`<eos>`, `[SEP]`):
+            // a sequence that lost them is not one the model was trained on.
+            let closing = if add_special_tokens {
+                trailing_special_tokens(encoding.get_special_tokens_mask()).min(max_len)
+            } else {
+                0
+            };
+            for values in [&mut ids, &mut attention_mask, &mut token_type_ids] {
+                let tail = values.split_off(values.len() - closing);
+                values.truncate(max_len - closing);
+                values.extend(tail);
+            }
         }
     }
 
@@ -80,6 +92,16 @@ pub fn tokenize_step(
         vocab_file: tokenizer_path.to_string(),
         original_text: text,
     })
+}
+
+/// Number of special tokens closing an encoding: the run of `1`s at the end of
+/// its special-tokens mask.
+fn trailing_special_tokens(special_tokens_mask: &[u32]) -> usize {
+    special_tokens_mask
+        .iter()
+        .rev()
+        .take_while(|&&special| special == 1)
+        .count()
 }
 
 /// Silence token ID in the Kokoro vocabulary.
@@ -1248,5 +1270,118 @@ mod tests {
                 details.join("\n")
             );
         }
+    }
+
+    // ============================================================================
+    // Tokenize Tests
+    // ============================================================================
+
+    const BOS: usize = 1;
+    const EOS: usize = 2;
+
+    /// Writes a word-level `tokenizer.json` whose post-processor wraps a
+    /// sequence as `<bos> … <eos>`, the way Gemma's does.
+    fn write_bos_eos_tokenizer(dir: &std::path::Path) -> String {
+        use tokenizers::models::wordlevel::WordLevel;
+        use tokenizers::pre_tokenizers::whitespace::Whitespace;
+        use tokenizers::processors::template::TemplateProcessing;
+        use tokenizers::Tokenizer;
+
+        let words = ["<unk>", "<bos>", "<eos>", "one", "two", "three", "four"];
+        let vocab = words
+            .iter()
+            .enumerate()
+            .map(|(id, word)| (word.to_string(), id as u32))
+            .collect();
+        let model = WordLevel::builder()
+            .vocab(vocab)
+            .unk_token("<unk>".to_string())
+            .build()
+            .expect("word-level model builds");
+        let post_processor = TemplateProcessing::builder()
+            .try_single("<bos> $A <eos>")
+            .expect("template parses")
+            .special_tokens(vec![("<bos>", BOS as u32), ("<eos>", EOS as u32)])
+            .build()
+            .expect("template processing builds");
+
+        let mut tokenizer = Tokenizer::new(model);
+        tokenizer.with_pre_tokenizer(Some(Whitespace {}));
+        tokenizer.with_post_processor(Some(post_processor));
+        let path = dir.join("tokenizer.json");
+        tokenizer
+            .save(&path, false)
+            .expect("tokenizer.json is written");
+        path.to_string_lossy().into_owned()
+    }
+
+    /// Tokenizes `text` and returns `(ids, attention_mask, token_type_ids)`.
+    fn tokenize(
+        text: &str,
+        max_length: Option<usize>,
+        add_special_tokens: bool,
+    ) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = write_bos_eos_tokenizer(dir.path());
+        let output = tokenize_step(
+            PreprocessedData::Text(text.to_string()),
+            &path,
+            &TokenizerType::BPE,
+            max_length,
+            add_special_tokens,
+            &mut TokenizerCache::default(),
+        )
+        .expect("tokenizes");
+        match output {
+            PreprocessedData::TokenIds {
+                ids,
+                attention_mask,
+                token_type_ids,
+                ..
+            } => (ids, attention_mask, token_type_ids),
+            other => panic!("expected token ids, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tokenize_leaves_out_special_tokens_by_default() {
+        let (ids, _, _) = tokenize("one two three", None, false);
+
+        assert_eq!(ids, vec![3, 4, 5]);
+    }
+
+    #[test]
+    fn tokenize_adds_the_post_processor_special_tokens_when_asked() {
+        let (ids, attention_mask, token_type_ids) = tokenize("one two three", None, true);
+
+        assert_eq!(ids, vec![BOS, 3, 4, 5, EOS]);
+        assert_eq!(attention_mask, vec![1; 5]);
+        assert_eq!(token_type_ids, vec![0; 5]);
+    }
+
+    #[test]
+    fn truncation_keeps_the_closing_special_token() {
+        let (ids, attention_mask, token_type_ids) = tokenize("one two three four", Some(4), true);
+
+        assert_eq!(ids, vec![BOS, 3, 4, EOS]);
+        assert_eq!(attention_mask.len(), 4);
+        assert_eq!(token_type_ids.len(), 4);
+    }
+
+    #[test]
+    fn truncation_without_special_tokens_cuts_the_end() {
+        let (ids, attention_mask, token_type_ids) = tokenize("one two three four", Some(2), false);
+
+        assert_eq!(ids, vec![3, 4]);
+        assert_eq!(attention_mask.len(), 2);
+        assert_eq!(token_type_ids.len(), 2);
+    }
+
+    #[test]
+    fn trailing_special_tokens_counts_only_the_closing_run() {
+        assert_eq!(trailing_special_tokens(&[1, 0, 0, 1]), 1);
+        assert_eq!(trailing_special_tokens(&[1, 0, 1, 1]), 2);
+        assert_eq!(trailing_special_tokens(&[0, 0]), 0);
+        assert_eq!(trailing_special_tokens(&[]), 0);
     }
 }
