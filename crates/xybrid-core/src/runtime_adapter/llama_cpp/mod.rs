@@ -1503,13 +1503,7 @@ impl LlmBackend for LlamaCppBackend {
                 context.kv_cache_clear();
                 self.clear_cached_prefix_state();
                 xybrid_trace::add_metadata("tokens_in", summary.helper_total_tokens.to_string());
-                let n_batch = self.config.as_ref().map_or(512, |config| {
-                    if config.n_batch == 0 {
-                        512
-                    } else {
-                        config.n_batch
-                    }
-                });
+                let n_batch = context.n_batch();
                 let new_n_past = xybrid_llama::mtmd_helper_eval_chunks(
                     mtmd_context,
                     context,
@@ -1688,13 +1682,7 @@ impl LlmBackend for LlamaCppBackend {
                 context.kv_cache_clear();
                 self.clear_cached_prefix_state();
                 xybrid_trace::add_metadata("tokens_in", summary.helper_total_tokens.to_string());
-                let n_batch = self.config.as_ref().map_or(512, |config| {
-                    if config.n_batch == 0 {
-                        512
-                    } else {
-                        config.n_batch
-                    }
-                });
+                let n_batch = context.n_batch();
                 let new_n_past = xybrid_llama::mtmd_helper_eval_chunks(
                     mtmd_context,
                     context,

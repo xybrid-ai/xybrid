@@ -32,7 +32,7 @@ pub(crate) struct ModelHandle {
 
 impl ModelHandle {
     #[inline]
-    fn as_ptr(&self) -> *mut c_void {
+    pub(crate) fn as_ptr(&self) -> *mut c_void {
         self.ptr
     }
 }
