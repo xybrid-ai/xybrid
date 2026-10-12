@@ -15,6 +15,25 @@ use llama_cpp_sys::bindings as sys;
 
 use crate::error::LlamaError;
 
+// Counts this thread's calls into the wrappers that the generation and mtmd
+// evaluation entry points use, so tests can prove their input checks run
+// before any native call.
+#[cfg(test)]
+thread_local! {
+    static NATIVE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn record_native_call() {
+    NATIVE_CALLS.with(|count| count.set(count.get() + 1));
+}
+
+/// This thread's calls into the counted wrappers so far.
+#[cfg(test)]
+pub(crate) fn native_calls() -> usize {
+    NATIVE_CALLS.with(std::cell::Cell::get)
+}
+
 #[cfg(feature = "vision")]
 pub(crate) type MtmdContextRaw = sys::mtmd_context;
 #[cfg(feature = "vision")]
@@ -63,7 +82,8 @@ pub(crate) unsafe fn free_model(ptr: *mut c_void) {
 /// # Safety
 ///
 /// `model` must be a live, non-null pointer returned by
-/// [`load_model_from_file`]. Returns null on failure.
+/// [`load_model_from_file`], and must stay live until the returned context
+/// is freed: the context keeps reading it. Returns null on failure.
 pub(crate) unsafe fn new_context_with_model(
     model: *mut c_void,
     n_ctx: usize,
@@ -159,6 +179,8 @@ pub(crate) unsafe fn tokenize_probe(
     add_special: bool,
     parse_special: bool,
 ) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     sys::llama_tokenize_c(
         model,
         text.as_ptr(),
@@ -185,6 +207,8 @@ pub(crate) unsafe fn tokenize_into(
     add_special: bool,
     parse_special: bool,
 ) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     sys::llama_tokenize_c(
         model,
         text.as_ptr(),
@@ -285,9 +309,11 @@ pub(crate) unsafe fn format_chat_with_model(
 ///
 /// # Safety
 ///
-/// `ctx` and `model` must be live, non-null pointers. `input_tokens`
-/// valid for `n_input` elements. `output_tokens` writable for `max_tokens`
-/// elements. `stop_seqs` and `stop_lens` either both null with
+/// `ctx` and `model` must each be live or null, and a live `ctx` must have
+/// been created from `model`. The native wrapper returns an error for a null
+/// handle before using either. `input_tokens` valid for `n_input` elements.
+/// `output_tokens` writable for `max_tokens` elements. `stop_seqs` and
+/// `stop_lens` either both null with
 /// `n_stop_seqs == 0`, or both valid. `grammar` / `grammar_root` are either
 /// null (unconstrained generation) or NUL-terminated C strings that outlive
 /// the call.
@@ -311,6 +337,8 @@ pub(crate) unsafe fn generate(
     stop_lens: *const c_int,
     n_stop_seqs: c_int,
 ) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     sys::llama_generate_c(
         ctx,
         model,
@@ -362,6 +390,8 @@ pub(crate) unsafe fn generate_streaming(
     user_data: *mut c_void,
     n_past_in: usize,
 ) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     sys::llama_generate_streaming_c(
         ctx,
         model,
@@ -391,9 +421,11 @@ pub(crate) unsafe fn generate_streaming(
 ///
 /// # Safety
 ///
-/// `ctx` and `model` must be live, non-null pointers. `output_tokens`
-/// writable for `max_tokens` elements. Stop arrays and callback/user_data
-/// follow the same contract as [`generate_streaming`].
+/// `ctx` and `model` must each be live or null, and a live `ctx` must have
+/// been created from `model`. The native wrapper returns an error for a null
+/// handle before using either. `output_tokens` writable for `max_tokens`
+/// elements. Stop arrays and callback/user_data follow the same contract as
+/// [`generate_streaming`].
 #[allow(clippy::too_many_arguments)]
 #[cfg(feature = "vision")]
 pub(crate) unsafe fn generate_from_current_logits(
@@ -416,6 +448,8 @@ pub(crate) unsafe fn generate_from_current_logits(
     user_data: *mut c_void,
     n_past: usize,
 ) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     sys::llama_generate_from_current_logits_c(
         ctx,
         model,
@@ -453,7 +487,8 @@ pub(crate) unsafe fn log_get_verbosity() -> i32 {
 /// # Safety
 ///
 /// `path` must be a live C string. `model` must be a live llama model
-/// pointer. The returned handle must be freed with [`mtmd_free`].
+/// pointer that stays live until the returned handle is freed with
+/// [`mtmd_free`]: the projector keeps reading it.
 #[cfg(feature = "vision")]
 pub(crate) unsafe fn mtmd_init_from_file(
     path: &CString,
@@ -663,7 +698,9 @@ pub(crate) unsafe fn mtmd_tokenize(
     )
 }
 
-/// # Safety: all handles/pointers must be live for the call duration.
+/// # Safety: each handle/pointer must be live for the call duration or null,
+/// and live `ctx` and `lctx` must have been created from the same model. The
+/// native wrapper returns an error for a null handle before using any.
 #[allow(clippy::too_many_arguments)]
 #[cfg(feature = "vision")]
 pub(crate) unsafe fn mtmd_helper_eval_chunks(
@@ -676,6 +713,8 @@ pub(crate) unsafe fn mtmd_helper_eval_chunks(
     logits_last: bool,
     new_n_past: *mut i32,
 ) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     sys::mtmd_helper_eval_chunks_c(
         ctx,
         lctx,

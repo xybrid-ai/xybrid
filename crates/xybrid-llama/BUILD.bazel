@@ -63,6 +63,7 @@ rust_test(
 # them is the entire value of having them here.
 _LLAMA_INTEGRATION_TESTS = {
     "callback_stop_boundaries": ["bindings"],
+    "model_lifetime_smoke": ["bindings"],
     "prefix_cache_hit_smoke": ["bindings"],
     "recurrent_gating_smoke": ["bindings"],
     "state_seq_snapshot_smoke": ["bindings"],

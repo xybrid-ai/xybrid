@@ -258,6 +258,7 @@ pub fn generate_with_stops(
     stop_sequences: &[String],
     grammar: Option<&str>,
 ) -> LlamaResult<Vec<i32>> {
+    ctx.ensure_created_from(model)?;
     let (stop_tokens, stop_lens, mut output_tokens) =
         prepare_generation(model, input_tokens, max_tokens, stop_sequences)?;
     let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = stop_array_ptrs(&stop_tokens, &stop_lens);
@@ -307,6 +308,9 @@ pub fn generate_with_stops(
 /// `n_past_in` is the KV-cache prefix position the caller has prepared
 /// via [`LlamaContext::kv_cache_seq_rm`] (`0` = fresh prefill). The
 /// returned bool indicates whether the closure stopped generation early.
+///
+/// Like every generation entry point, this fails with
+/// [`LlamaError::InvalidInput`] when `ctx` was not created from `model`.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_streaming<F>(
     ctx: &LlamaContext,
@@ -326,6 +330,7 @@ pub fn generate_streaming<F>(
 where
     F: FnMut(i32, &str) -> Result<(), Box<dyn StdError + Send + Sync>>,
 {
+    ctx.ensure_created_from(model)?;
     let (stop_tokens, stop_lens, mut output_tokens) =
         prepare_generation(model, input_tokens, max_tokens, stop_sequences)?;
     let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = stop_array_ptrs(&stop_tokens, &stop_lens);
@@ -404,6 +409,7 @@ pub fn generate_from_current_logits_streaming<F>(
 where
     F: FnMut(i32, &str) -> Result<(), Box<dyn StdError + Send + Sync>>,
 {
+    ctx.ensure_created_from(model)?;
     if max_tokens == 0 {
         return Err(LlamaError::InvalidInput(
             "max_tokens must be greater than zero".to_string(),
@@ -610,6 +616,77 @@ mod tests {
 
     fn abort_callback(_token_id: i32, _text: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
         Err(Box::new(MarkerError("marker preserved through trampoline")))
+    }
+
+    fn is_model_mismatch<T>(result: Result<T, LlamaError>) -> bool {
+        matches!(
+            result,
+            Err(LlamaError::InvalidInput(message)) if message.contains("different model")
+        )
+    }
+
+    /// A context paired with a model it was not created from fails before
+    /// any native call, stop-sequence tokenization included: a later check
+    /// would show in the counter, or crash on the stubs' null handles. The
+    /// control shows the counter does see these calls when the model matches.
+    #[test]
+    fn generation_refuses_a_model_the_context_was_not_created_from() {
+        use crate::ffi::native_calls;
+        use crate::{LlamaContext, LlamaModel};
+
+        let model = LlamaModel::test_stub();
+        let other = LlamaModel::test_stub();
+        let ctx = LlamaContext::test_stub(&model);
+        let stops = ["</s>".to_string()];
+
+        let batch =
+            super::generate_with_stops(&ctx, &other, &[1], 4, 0.0, 1.0, 0.0, 0, 1.0, &stops, None);
+        assert!(is_model_mismatch(batch));
+
+        let streaming = super::generate_streaming(
+            &ctx,
+            &other,
+            &[1],
+            4,
+            0.0,
+            1.0,
+            0.0,
+            0,
+            1.0,
+            &stops,
+            None,
+            |_, _| Ok(()),
+            0,
+        );
+        assert!(is_model_mismatch(streaming));
+
+        #[cfg(feature = "vision")]
+        {
+            let from_logits = super::generate_from_current_logits_streaming(
+                &ctx,
+                &other,
+                4,
+                0.0,
+                1.0,
+                0.0,
+                0,
+                1.0,
+                &stops,
+                None,
+                0,
+                |_, _| Ok(()),
+            );
+            assert!(is_model_mismatch(from_logits));
+        }
+        assert_eq!(native_calls(), 0, "a native call ran before the check");
+
+        // Control: the matching model reaches the native wrapper, which
+        // rejects the stubs' null handles. No stop sequences, because
+        // tokenizing with a null model is not guarded.
+        let reached =
+            super::generate_with_stops(&ctx, &model, &[1], 4, 0.0, 1.0, 0.0, 0, 1.0, &[], None);
+        assert!(reached.is_err());
+        assert_eq!(native_calls(), 1);
     }
 
     #[test]

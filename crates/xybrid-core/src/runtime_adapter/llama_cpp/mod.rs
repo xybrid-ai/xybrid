@@ -99,9 +99,9 @@ pub struct LlamaCppBackend {
     kv_state: Mutex<KvCacheState>,
     /// Backend-owned mtmd projector context for vision-language models.
     ///
-    /// The mtmd context references the loaded llama text model, so `Drop`,
-    /// `unload`, and model replacement always take this before dropping the
-    /// llama context/model pair.
+    /// The mtmd context references the loaded llama text model and holds
+    /// its handle. `Drop`, `unload`, and model replacement still take this
+    /// before the llama context/model pair, so it is freed first.
     #[cfg(feature = "llm-llamacpp-vision")]
     mtmd_context: Mutex<Option<MtmdContextState>>,
 }
@@ -277,9 +277,10 @@ impl LlamaCppBackend {
 
 impl Drop for LlamaCppBackend {
     fn drop(&mut self) {
-        // Drop mtmd first, then context, then model (order matters: both mtmd
-        // and llama context reference the model).
-        // LlamaContext and LlamaModel implement Drop, so take() + drop handles cleanup.
+        // Drop mtmd first, then context, then model, so each native object is
+        // freed here. The order is no longer needed for safety: mtmd and the
+        // llama context hold the model's handle, which keeps it loaded.
+        // Dropping each handle frees its native object, so take() handles cleanup.
         // get_mut() doesn't lock — safe because Drop has &mut self.
         #[cfg(feature = "llm-llamacpp-vision")]
         let _ = self.mtmd_context.get_mut().unwrap().take(); // drops MtmdContext
@@ -889,8 +890,8 @@ impl LlmBackend for LlamaCppBackend {
     }
 
     fn unload(&mut self) -> LlmResult<()> {
-        // Drop mtmd first, then context, then model (order matters).
-        // LlamaContext and LlamaModel implement Drop, so take() handles cleanup.
+        // Drop mtmd first, then context, then model, as in `Drop`. Dropping
+        // each handle frees its native object, so take() handles cleanup.
         #[cfg(feature = "llm-llamacpp-vision")]
         let _ = self.mtmd_context.get_mut().unwrap().take();
         let _ = self.context.get_mut().unwrap().take();

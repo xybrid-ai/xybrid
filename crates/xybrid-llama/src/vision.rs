@@ -6,11 +6,12 @@
 
 use std::ffi::CStr;
 use std::ptr;
+use std::sync::Arc;
 
 use crate::context::LlamaContext;
 use crate::error::{LlamaError, LlamaResult};
 use crate::ffi;
-use crate::model::LlamaModel;
+use crate::model::{LlamaModel, ModelHandle};
 
 const MTMD_INPUT_CHUNK_TYPE_TEXT: i32 = 0;
 const MTMD_INPUT_CHUNK_TYPE_IMAGE: i32 = 1;
@@ -19,18 +20,24 @@ const MTMD_INPUT_CHUNK_TYPE_AUDIO: i32 = 2;
 /// Opaque handle to an mtmd multimodal projector context.
 ///
 /// The context owns projector-side state that references the loaded llama
-/// model, so callers must drop it before dropping the text model.
+/// model, so it shares that model's native handle: the model stays loaded
+/// until the projector is dropped too.
 pub struct MtmdContext {
     ptr: *mut ffi::MtmdContextRaw,
+    /// The text model the projector reads; `None` only for
+    /// [`Self::test_stub`]. Drops after [`Drop::drop`] frees the projector.
+    model: Option<Arc<ModelHandle>>,
 }
 
 impl MtmdContext {
-    /// Test-only null handle for wrapper-state tests that never cross FFI.
+    /// Test-only null handle for wrapper-state tests. Native wrappers that
+    /// take a projector reject the null pointer.
     #[cfg(any(test, debug_assertions))]
     #[doc(hidden)]
     pub fn test_stub() -> Self {
         Self {
             ptr: ptr::null_mut(),
+            model: None,
         }
     }
 
@@ -61,7 +68,10 @@ impl MtmdContext {
                 "failed to initialize mtmd context from {path}"
             )));
         }
-        Ok(Self { ptr })
+        Ok(Self {
+            ptr,
+            model: Some(Arc::clone(model.handle())),
+        })
     }
 
     #[inline]
@@ -73,13 +83,17 @@ impl MtmdContext {
 impl Drop for MtmdContext {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
-            // SAFETY: ptr came from mtmd_init_from_file and Drop runs once.
+            // SAFETY: ptr came from mtmd_init_from_file and Drop runs once;
+            // `self.model` drops after it, so the model outlives the projector.
             unsafe { ffi::mtmd_free(self.ptr) };
             self.ptr = ptr::null_mut();
         }
     }
 }
 
+// SAFETY: like `LlamaContext`, the projector may move between threads as
+// long as one thread uses it at a time. It is not `Sync`, so callers
+// serialize access; the shared model handle is `Send + Sync`.
 unsafe impl Send for MtmdContext {}
 
 /// Opaque handle to an mtmd decoded bitmap.
@@ -426,6 +440,14 @@ pub fn mtmd_helper_eval_chunks(
     n_batch: usize,
     logits_last: bool,
 ) -> LlamaResult<i32> {
+    if let Some(model) = &ctx.model {
+        if !Arc::ptr_eq(model, lctx.model_handle()) {
+            return Err(LlamaError::InvalidInput(
+                "the mtmd projector and the llama context were created from different models"
+                    .to_string(),
+            ));
+        }
+    }
     let mut new_n_past = n_past;
     // SAFETY: handles are live; new_n_past is writable for the call.
     let result = unsafe {
@@ -451,6 +473,58 @@ pub fn mtmd_helper_eval_chunks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A projector stub tied to `model`, with no native handle.
+    fn projector_for(model: &LlamaModel) -> MtmdContext {
+        MtmdContext {
+            ptr: ptr::null_mut(),
+            model: Some(Arc::clone(model.handle())),
+        }
+    }
+
+    #[test]
+    fn a_projector_keeps_its_model_loaded_until_both_are_dropped() {
+        let model = LlamaModel::test_stub();
+        let handle = Arc::downgrade(model.handle());
+        let projector = projector_for(&model);
+
+        drop(model);
+        assert!(
+            handle.upgrade().is_some(),
+            "the projector must keep the model"
+        );
+
+        drop(projector);
+        assert!(handle.upgrade().is_none(), "the last owner frees the model");
+    }
+
+    /// The model check runs before the native call. The control shows the
+    /// counter does see that call when the models match.
+    #[test]
+    fn eval_refuses_a_context_from_another_model() {
+        use crate::ffi::native_calls;
+
+        let model = LlamaModel::test_stub();
+        let other = LlamaModel::test_stub();
+        let projector = projector_for(&model);
+        let chunks = MtmdInputChunks {
+            ptr: ptr::null_mut(),
+        };
+
+        let foreign = LlamaContext::test_stub(&other);
+        match mtmd_helper_eval_chunks(&projector, &foreign, &chunks, 0, 0, 512, true) {
+            Err(LlamaError::InvalidInput(message)) => {
+                assert!(message.contains("different models"), "{message}");
+            }
+            result => panic!("expected InvalidInput, got {result:?}"),
+        }
+        assert_eq!(native_calls(), 0, "a native call ran before the check");
+
+        // Control: the native wrapper rejects the stubs' null handles.
+        let own = LlamaContext::test_stub(&model);
+        assert!(mtmd_helper_eval_chunks(&projector, &own, &chunks, 0, 0, 512, true).is_err());
+        assert_eq!(native_calls(), 1);
+    }
 
     /// Length validation runs before any FFI call, so a wrong-sized buffer is
     /// rejected with a null (test-stub) context without crossing the boundary.

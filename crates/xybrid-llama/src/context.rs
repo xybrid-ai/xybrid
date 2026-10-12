@@ -1,7 +1,9 @@
 //! Safe RAII wrapper for a llama.cpp inference context.
 //!
-//! Owns `llama_context*` via [`Drop`]. Inherent methods cover the
-//! KV-cache manipulation surface the multi-turn prefix-reuse path needs.
+//! Owns `llama_context*` via [`Drop`], and shares the native handle of the
+//! model it was created from, so that model stays loaded while the context
+//! reads it. Inherent methods cover the KV-cache manipulation surface the
+//! multi-turn prefix-reuse path needs.
 //!
 //! # Threading
 //!
@@ -15,10 +17,11 @@
 use std::ffi::c_void;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use crate::error::{LlamaError, LlamaResult};
 use crate::ffi;
-use crate::model::LlamaModel;
+use crate::model::{LlamaModel, ModelHandle};
 
 /// Source of [`LlamaContext::id`]: identifies the context a snapshot came
 /// from without trusting a pointer that could be reused after a free.
@@ -28,6 +31,9 @@ static NEXT_CONTEXT_ID: AtomicU64 = AtomicU64::new(0);
 pub struct LlamaContext {
     ptr: *mut c_void,
     id: u64,
+    /// The model this context was created from. Fields drop after
+    /// [`Drop::drop`] frees the native context, so the model outlives it.
+    model: Arc<ModelHandle>,
 }
 
 /// A saved copy of one sequence's state, from
@@ -61,6 +67,9 @@ impl fmt::Debug for LlamaSeqSnapshot {
 impl LlamaContext {
     /// Create a new context bound to `model`.
     ///
+    /// The context keeps `model` loaded until it is dropped too, so the two
+    /// may be dropped in either order.
+    ///
     /// `n_threads = 0` means "auto-detect"; `n_batch = 0` means "use the
     /// 512-token llama.cpp default". `flash_attn` enables Flash Attention
     /// (2-4× speedup on longer contexts) where supported.
@@ -90,13 +99,45 @@ impl LlamaContext {
         Ok(Self {
             ptr,
             id: NEXT_CONTEXT_ID.fetch_add(1, Ordering::Relaxed),
+            model: Arc::clone(model.handle()),
         })
+    }
+
+    /// A context with no native handle, for tests. Only native wrappers that
+    /// reject a null context may receive it.
+    #[cfg(test)]
+    pub(crate) fn test_stub(model: &LlamaModel) -> Self {
+        Self {
+            ptr: std::ptr::null_mut(),
+            id: NEXT_CONTEXT_ID.fetch_add(1, Ordering::Relaxed),
+            model: Arc::clone(model.handle()),
+        }
     }
 
     /// Raw pointer for the in-crate generation paths.
     #[inline]
     pub(crate) fn as_ptr(&self) -> *mut c_void {
         self.ptr
+    }
+
+    /// The native handle of the model this context was created from.
+    #[inline]
+    pub(crate) fn model_handle(&self) -> &Arc<ModelHandle> {
+        &self.model
+    }
+
+    /// Errors unless this context was created from `model`.
+    ///
+    /// Generation reads `model`'s vocabulary against this context's
+    /// buffers, so it must run before any native call that takes both.
+    pub(crate) fn ensure_created_from(&self, model: &LlamaModel) -> LlamaResult<()> {
+        if Arc::ptr_eq(self.model_handle(), model.handle()) {
+            Ok(())
+        } else {
+            Err(LlamaError::InvalidInput(
+                "the context was created from a different model".to_string(),
+            ))
+        }
     }
 
     /// Context length (tokens).
@@ -221,7 +262,9 @@ impl Drop for LlamaContext {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
             // SAFETY: ptr came from `ffi::new_context_with_model`,
-            // checked non-null on construction. Drop runs at most once.
+            // checked non-null on construction. Drop runs at most once,
+            // and `self.model` drops after it, so the model outlives the
+            // context.
             unsafe { ffi::free_context(self.ptr) };
             self.ptr = std::ptr::null_mut();
         }
@@ -233,3 +276,37 @@ impl Drop for LlamaContext {
 // concurrently. NOT Sync — see the type-level rationale at the top of
 // this file. The caller is responsible for serializing access.
 unsafe impl Send for LlamaContext {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_context_keeps_its_model_loaded_until_both_are_dropped() {
+        let model = LlamaModel::test_stub();
+        let handle = Arc::downgrade(model.handle());
+        let ctx = LlamaContext::test_stub(&model);
+
+        drop(model);
+        assert!(
+            handle.upgrade().is_some(),
+            "the context must keep the model"
+        );
+
+        drop(ctx);
+        assert!(handle.upgrade().is_none(), "the last owner frees the model");
+    }
+
+    #[test]
+    fn a_context_knows_which_model_created_it() {
+        let model = LlamaModel::test_stub();
+        let other = LlamaModel::test_stub();
+        let ctx = LlamaContext::test_stub(&model);
+
+        assert!(ctx.ensure_created_from(&model).is_ok());
+        assert!(matches!(
+            ctx.ensure_created_from(&other),
+            Err(LlamaError::InvalidInput(_))
+        ));
+    }
+}
