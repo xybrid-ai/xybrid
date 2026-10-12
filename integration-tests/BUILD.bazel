@@ -80,6 +80,17 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# Reference embeddings for embedding_parity, written by
+# tools/scripts/gen_embedding_goldens.py from the model's own ONNX graph.
+filegroup(
+    name = "embedding_fixtures",
+    srcs = glob(
+        ["fixtures/embedding/**"],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)
+
 filegroup(
     name = "coreml_model_fixture",
     srcs = glob(["fixtures/coreml/xybrid_linear.mlpackage/**"]),
@@ -101,6 +112,7 @@ _E2E_TESTS = {
     "asr_integration": [],
     "coreml_native": ["coreml"],
     "context_budget_clamp": ["llm-llamacpp"],
+    "embedding_parity": [],
     "integration_check": [],
     "llamacpp_release": ["llm-llamacpp"],
     "llm_chat_template": ["llm-llamacpp"],
@@ -112,6 +124,7 @@ _E2E_TESTS = {
 
 _E2E_TEST_DATA = {
     "coreml_native": [":coreml_model_fixture"],
+    "embedding_parity": [":embedding_fixtures"],
 }
 
 # local_llm is absent on purpose: it is gated on `llm-mistral`, and xybrid-core's
