@@ -391,6 +391,9 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 **工具调用：** 本地模型调用你定义的函数——工具就是普通数据，循环由你的代码掌控。
 参见[工具调用指南](https://docs.xybrid.dev/zh/docs/guides/tool-calling)。
 
+**嵌入模型：** 文本嵌入模型（如 EmbeddingGemma 2、all-MiniLM）已可作为自带模型运行，
+参见[自定义模型指南](docs/guides/custom-models.zh.md#句子嵌入)。注册表中的嵌入模型即将推出。
+
 ---
 
 ## 为什么选择 Xybrid？
