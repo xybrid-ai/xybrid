@@ -1,0 +1,208 @@
+{
+  "host": "Apple M1 Pro / macOS arm64",
+  "boundary": "first callback is audio delivery to the host process, not first audible speaker output",
+  "upstream": {
+    "version": "0.4.0rc1",
+    "threads": 6,
+    "device": "CPU",
+    "quant": "q8",
+    "temperature": 0.3,
+    "seed": 0,
+    "clone_registration_seconds": 0.00045708398101851344
+  },
+  "voice_format": {
+    "tensor": "speaker_wavs",
+    "dtype": "F32",
+    "shape": [
+      1,
+      512,
+      125
+    ],
+    "encoder": "ba7a5a45@300",
+    "checkpoint": "7e71a02d@200",
+    "source_model_config_tokenizer_pins_validated": true,
+    "gguf_dimensions": [
+      125,
+      512,
+      1
+    ],
+    "payload_transposed": false
+  },
+  "native_pin": {
+    "tag": "v0.1.0-rc.4",
+    "profile": "Phonon",
+    "source_commit": "56385c4a3fbab8bc503341947af37e96ebb0071d",
+    "abi": 1,
+    "options": {
+      "size": 24,
+      "max_frames_per_chunk": 512,
+      "max_chunk_tokens": 256,
+      "temperature": 0.4000000059604645,
+      "seed": 42
+    },
+    "threads": "not exposed by this C ABI; defaults retained"
+  },
+  "rows": [
+    {
+      "engine": "zzz-rc4",
+      "kind": "open",
+      "voice": "freya",
+      "total": 0.0007508749840781093,
+      "code": -3,
+      "error": "InvalidRequiredMetadata"
+    },
+    {
+      "engine": "zzz-rc4",
+      "kind": "open",
+      "voice": "trola_clone",
+      "total": 0.0009508329967502505,
+      "code": -3,
+      "error": "InvalidRequiredMetadata"
+    },
+    {
+      "engine": "ptts",
+      "kind": "open",
+      "total": 0.06426541699329391
+    },
+    {
+      "engine": "ptts",
+      "kind": "warmup",
+      "voice": "trola_clone",
+      "text": "Hrm. Listen.",
+      "repeat": 0,
+      "first_callback": 0.07514674999401905,
+      "first_nonzero_callback": 0.0756017499952577,
+      "total": 0.18633883399888873,
+      "audio": 2.32,
+      "samples": 55680,
+      "finite": true,
+      "peak": 0.22642627358436584,
+      "rms": 0.020345354452729225,
+      "rtf": 0.08031846293055549,
+      "valid": true
+    },
+    {
+      "engine": "ptts",
+      "kind": "voice",
+      "voice": "trola_clone",
+      "text": "Give me your name.",
+      "repeat": 1,
+      "first_callback": 0.01223187500727363,
+      "first_nonzero_callback": 0.012286958022741601,
+      "total": 0.10915987502085045,
+      "audio": 1.84,
+      "samples": 44160,
+      "finite": true,
+      "peak": 0.39677831530570984,
+      "rms": 0.08873844891786575,
+      "rtf": 0.059326019033070894,
+      "valid": true
+    },
+    {
+      "engine": "ptts",
+      "kind": "voice",
+      "voice": "trola_clone",
+      "text": "The gate is open, Mira. Keep those turnips away from my boots.",
+      "repeat": 1,
+      "first_callback": 0.019103625003481284,
+      "first_nonzero_callback": 0.0191584579879418,
+      "total": 0.28113645801204257,
+      "audio": 4.56,
+      "samples": 109440,
+      "finite": true,
+      "peak": 0.4190724790096283,
+      "rms": 0.07468534260988235,
+      "rtf": 0.06165273202018478,
+      "valid": true
+    },
+    {
+      "engine": "ptts",
+      "kind": "voice",
+      "voice": "trola_clone",
+      "text": "You tried a bribe, and I let you through. Sell your turnips in the camp, then leave me to guard this gate in peace.",
+      "repeat": 1,
+      "first_callback": 0.020475458004511893,
+      "first_nonzero_callback": 0.02052812499459833,
+      "total": 0.38428249998833053,
+      "audio": 7.6,
+      "samples": 182400,
+      "finite": true,
+      "peak": 0.4783603549003601,
+      "rms": 0.07619059830904007,
+      "rtf": 0.050563486840569806,
+      "valid": true
+    },
+    {
+      "engine": "ptts",
+      "kind": "voice",
+      "voice": "trola_clone",
+      "text": "Give me your name.",
+      "repeat": 2,
+      "first_callback": 0.009375791996717453,
+      "first_nonzero_callback": 0.00943233398720622,
+      "total": 0.09055537500535138,
+      "audio": 1.84,
+      "samples": 44160,
+      "finite": true,
+      "peak": 0.39677831530570984,
+      "rms": 0.08873844891786575,
+      "rtf": 0.04921487772029966,
+      "valid": true
+    },
+    {
+      "engine": "ptts",
+      "kind": "voice",
+      "voice": "trola_clone",
+      "text": "The gate is open, Mira. Keep those turnips away from my boots.",
+      "repeat": 2,
+      "first_callback": 0.01418608397943899,
+      "first_nonzero_callback": 0.014275583991548046,
+      "total": 0.20045120900613256,
+      "audio": 4.56,
+      "samples": 109440,
+      "finite": true,
+      "peak": 0.4190727174282074,
+      "rms": 0.07468534260988235,
+      "rtf": 0.043958598466257146,
+      "valid": true
+    },
+    {
+      "engine": "ptts",
+      "kind": "voice",
+      "voice": "trola_clone",
+      "text": "You tried a bribe, and I let you through. Sell your turnips in the camp, then leave me to guard this gate in peace.",
+      "repeat": 2,
+      "first_callback": 0.017335042008198798,
+      "first_nonzero_callback": 0.017383667000103742,
+      "total": 0.31762283301213756,
+      "audio": 7.6,
+      "samples": 182400,
+      "finite": true,
+      "peak": 0.47836050391197205,
+      "rms": 0.07619059085845947,
+      "rtf": 0.04179247802791284,
+      "valid": true
+    }
+  ],
+  "original_beta_baseline": {
+    "engine": "zzz-rc4",
+    "model": "a5e53131@800 / 202605-beta1",
+    "voice": "marlowe",
+    "open_seconds": 0.32907758399960585,
+    "open_code": 0,
+    "synthesis_code": 0,
+    "first_callback": 0.10151887501706369,
+    "total_including_watchdog_join_and_close": 0.39282483301940374,
+    "audio": 1.76,
+    "limited_chunks": 0,
+    "callback_errors": [],
+    "finite": true,
+    "rms": 0.07244106857032613
+  },
+  "limitations": [
+    "Standalone native/Python processes; no Phonon Unity playback or player validation.",
+    "No first audible-output measurement or subjective clone fidelity rating.",
+    "Original voice assets, custom model and private receipts are not committed.",
+    "Kitten survey ran under different host conditions; no causal cross-engine speedup is claimed."
+  ]
+}
