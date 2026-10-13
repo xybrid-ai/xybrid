@@ -57,6 +57,10 @@ mod error;
 mod params;
 mod segment;
 
+// Pairing a model with its Core ML encoder (iOS). Unconditional so its pure
+// helpers' tests run on any host; see the module for what each build gets.
+mod coreml;
+
 pub use error::{WhisperError, WhisperResult};
 pub use params::{Task, TranscribeParams, FULL_AUDIO_CTX, SAMPLE_RATE};
 pub use segment::Segment;

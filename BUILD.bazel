@@ -6,7 +6,7 @@ exports_files([
 ])
 
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "objc_library")
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("//bazel/ggml:android.bzl", "ANDROID_ARM64_CPU_VARIANTS", "ANDROID_ARM64_GGML_LIBS")
 
@@ -770,7 +770,14 @@ cc_library(
         # replacement matches upstream's later definition without a warning.
         "_USE_MATH_DEFINES=",
         'WHISPER_VERSION=\\"1.9.2\\"',
-    ],
+    ] + select({
+        # Core ML encoder, see :whisper_coreml.
+        "@platforms//os:ios": [
+            "WHISPER_USE_COREML",
+            "WHISPER_COREML_ALLOW_FALLBACK",
+        ],
+        "//conditions:default": [],
+    }),
     includes = [
         "vendor/whisper-cpp/include",
         "vendor/whisper-cpp/src",
@@ -780,8 +787,43 @@ cc_library(
         "//:vulkan_enabled": ["//:llama_vulkan"],
         "//bazel/ggml:cpu_variants_enabled": ["//:llama_android_dl"],
         "//conditions:default": ["//:llama"],
+    }) + select({
+        "@platforms//os:ios": [":whisper_coreml"],
+        "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
+)
+
+# whisper.cpp's Core ML encoder bridge: the Bazel half of xybrid-whisper-sys's
+# `coreml` feature. With WHISPER_USE_COREML on //:whisper, a model whose
+# `<name>-encoder.mlmodelc` sits beside its `.bin` runs the encoder through
+# Core ML; WHISPER_COREML_ALLOW_FALLBACK keeps every other model on the ggml
+# encoder. The source is xybrid's own (crates/whisper-cpp-sys/native), which
+# implements the C ABI of upstream's coreml/whisper-encoder.h; none of
+# upstream's src/coreml/* is compiled — its bridge ignores prediction errors
+# and copies unchecked output, and its compat category replaces Core ML's
+# async prediction methods process-wide. iOS only: on macOS Metal is the faster
+# encoder. objc_library compiles `srcs` with ARC.
+objc_library(
+    name = "whisper_coreml",
+    srcs = ["//crates/whisper-cpp-sys:native/xybrid-whisper-coreml.mm"],
+    hdrs = [
+        "vendor/whisper-cpp/src/coreml/whisper-encoder.h",
+        "//crates/whisper-cpp-sys:native/xybrid-whisper-coreml.h",
+    ],
+    copts = [
+        "-std=c++17",
+        # Consumers may target older iOS than the bridge needs (the Flutter pod
+        # declares 13.0); every newer API must sit behind @available.
+        "-Werror=unguarded-availability-new",
+    ],
+    # The bridge includes upstream's ABI header as "coreml/whisper-encoder.h".
+    includes = ["vendor/whisper-cpp/src"],
+    sdk_frameworks = [
+        "CoreML",
+        "Foundation",
+    ],
+    target_compatible_with = ["@platforms//os:ios"],
 )
 
 # The `//:ndk_smoke` PoC (a trivial cc_library that proved the NDK

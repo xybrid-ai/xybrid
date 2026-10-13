@@ -50,6 +50,28 @@ pub enum WhisperError {
         code: i32,
     },
 
+    /// The model's encoder runs on Core ML, which is converted for the full
+    /// window, and the request asked for a shorter `audio_ctx`. A caller
+    /// error: drop the setting, or remove the encoder to keep truncation.
+    #[error(
+        "audio_ctx {requested} is not supported by this model's Core ML encoder, \
+         which takes the full {supported}-frame window"
+    )]
+    CoreMlAudioCtx {
+        /// Encoder frames the request asked for.
+        requested: u32,
+        /// The only context length the Core ML encoder accepts.
+        supported: u32,
+    },
+
+    /// The Core ML encoder failed while transcribing, so whisper.cpp decoded
+    /// zeroed encoder output and its transcript was discarded.
+    #[error("Core ML encoder failed on {failures} window(s); the transcript was discarded")]
+    CoreMlEncoderFailed {
+        /// Encoder runs that failed during the call.
+        failures: u32,
+    },
+
     /// A segment's text was not valid UTF-8. whisper.cpp emits UTF-8, so this
     /// indicates a truncated multi-byte sequence at a segment boundary rather
     /// than caller error.
