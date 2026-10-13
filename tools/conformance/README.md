@@ -39,10 +39,12 @@ nothing needs rebuilding, for regenerating goldens.
 | `qwen3.5-0.8b-f16-cf` | `Qwen3.5-0.8B-F16.gguf` | `convert_gguf.sh f16` | `Qwen/Qwen3.5-0.8B` snapshot |
 | `qwen3.5-0.8b-q4km-cf` | `Qwen3.5-0.8B-Q4_K_M.gguf` | `convert_gguf.sh q4_k_m` | the F16 GGUF |
 
-The staged directories hold only the artifacts, with no `model_metadata.json`
-until the scorer template exists. Gate a test on the artifact file itself:
-`integration-tests`' `model_available` requires the metadata file and would
-report these models missing.
+`cua-s1-forms` commits its `model_metadata.json` (a `ChoiceScorer`), so the
+SDK loads it from `integration-tests/fixtures/models/cua-s1-forms` once the
+export is staged; the GGUF directories hold only their artifacts. Gate a test
+on the artifact file itself (`testing::model_fixtures::staged_artifact`):
+`integration-tests`' `model_available` looks only for the metadata file, so it
+reports FORMS present before the export is staged and the GGUFs missing after.
 
 ## Why regenerated, not downloaded
 

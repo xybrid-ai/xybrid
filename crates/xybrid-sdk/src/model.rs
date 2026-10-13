@@ -28,10 +28,11 @@ use xybrid_core::conversation::ConversationContext;
 use xybrid_core::execution::choice::{
     ensure_no_choice_kinds, validate_choice_request, validate_scorer_spec, EntryPoint,
 };
+use xybrid_core::execution::template::backend_label_from_template;
 use xybrid_core::execution::{
     ExecutionTemplate, ModelMetadata, TemplateExecutor, VoiceConfig, VoiceInfo,
 };
-use xybrid_core::ir::{Choice, Envelope};
+use xybrid_core::ir::{Choice, Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::authority::{
     ExecutionOutcome, LocalAuthority, OrchestrationAuthority, OutcomeCategory, PolicyOutcome,
     PolicyRequest, ResolvedTarget, SignalContext, StageContext,
@@ -365,15 +366,32 @@ impl xybrid_core::http::RetryableError for SdkError {
     }
 }
 
-/// The refusal for warming up a choice scorer: this build validates choice
-/// requests but does not run scorers yet.
-fn choice_scoring_unavailable(model_id: &str) -> SdkError {
-    SdkError::UnsupportedModelCapability {
-        model_id: model_id.to_string(),
-        capability: "choice scoring".to_string(),
-        hint: "this build validates choice requests but does not run choice scorers yet"
-            .to_string(),
+/// A request any choice scorer accepts, to warm one up: a one-byte context
+/// and as many empty candidates as it takes to offer two alongside the fixed
+/// choices, under ids no fixed choice uses. Every spec allows at least two
+/// candidates and fields of at least one byte, so no limit can refuse it.
+fn choice_warmup_request(fixed: &[Choice]) -> Envelope {
+    let caller = (0..)
+        .map(|n| format!("warmup-{n}"))
+        .filter(|id| fixed.iter().all(|choice| &choice.id != id))
+        .take(2usize.saturating_sub(fixed.len()))
+        .map(|id| Choice::new(id, ""))
+        .collect();
+    Envelope::choice_request(Envelope::new(EnvelopeKind::Text(".".to_string())), caller)
+}
+
+/// Adds a choice scorer's decision fields to its `ModelComplete` data: the
+/// task, the backend and how many candidates were scored. Never their ids,
+/// texts or scores. Other models' data is left as it is.
+fn add_choice_telemetry(data: &mut serde_json::Value, metadata: &ModelMetadata, output: &Envelope) {
+    let EnvelopeKind::ChoiceScores(scores) = &output.kind else {
+        return;
+    };
+    data["task"] = "decision".into();
+    if let Some(backend) = backend_label_from_template(&metadata.execution_template, None) {
+        data["backend"] = backend.into();
     }
+    data["choice_count"] = scores.entries.len().into();
 }
 
 fn streaming_execution_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
@@ -3792,6 +3810,8 @@ impl XybridModel {
     ///
     /// This pre-loads the model into memory, ensuring that the first real inference
     /// is fast. For LLM models, this loads the model weights and creates the context.
+    /// A choice scorer scores a synthetic request (a one-byte context and empty
+    /// candidates), which loads its model and checks it against its spec.
     ///
     /// Call this at app startup or after `load()` to eliminate cold-start latency.
     ///
@@ -3812,16 +3832,13 @@ impl XybridModel {
     /// # }
     /// ```
     pub fn warmup(&self) -> SdkResult<()> {
-        use xybrid_core::ir::EnvelopeKind;
-
         self.touch();
         log::info!(target: "xybrid_sdk", "Warming up model: {}", self.model_id);
         let is_llm = self.is_llm();
 
         // Create a minimal input based on expected input type
         let warmup_input = match self.output_type {
-            // Scorers do not run in this build, so there is nothing to warm.
-            OutputType::ChoiceScores => return Err(choice_scoring_unavailable(&self.model_id)),
+            OutputType::ChoiceScores => choice_warmup_request(&self.fixed_choices()),
             // For TTS models, use a short text
             OutputType::Audio => Envelope {
                 kind: EnvelopeKind::Text("Hi".to_string()),
@@ -3928,16 +3945,14 @@ impl XybridModel {
         let output_type = self.output_type;
         let supports_streaming = self.supports_streaming;
         let is_llm = self.is_llm();
+        let fixed_choices = self.fixed_choices();
 
         tokio::task::spawn_blocking(move || {
-            use xybrid_core::ir::EnvelopeKind;
-
             log::info!(target: "xybrid_sdk", "Warming up model (async): {}", model_id);
 
             // Create a minimal input based on expected input type
             let warmup_input = match output_type {
-                // Scorers do not run in this build, so there is nothing to warm.
-                OutputType::ChoiceScores => return Err(choice_scoring_unavailable(&model_id)),
+                OutputType::ChoiceScores => choice_warmup_request(&fixed_choices),
                 OutputType::Audio => Envelope {
                     kind: EnvelopeKind::Text("Hi".to_string()),
                     metadata: std::collections::HashMap::new(),
@@ -4097,20 +4112,19 @@ impl XybridModel {
         let latency_ms = start.elapsed().as_millis() as u32;
 
         // Emit ModelComplete telemetry event
+        let mut data = serde_json::json!({
+            "model_id": self.model_id,
+            "version": self.version,
+            "output_type": format!("{:?}", self.output_type),
+        });
+        add_choice_telemetry(&mut data, &metadata, &output);
         let event = crate::telemetry::TelemetryEvent {
             event_type: "ModelComplete".to_string(),
             stage_name: Some(self.model_id.clone()),
             target: Some("local".to_string()),
             latency_ms: Some(latency_ms),
             error: None,
-            data: Some(
-                serde_json::json!({
-                    "model_id": self.model_id,
-                    "version": self.version,
-                    "output_type": format!("{:?}", self.output_type),
-                })
-                .to_string(),
-            ),
+            data: Some(data.to_string()),
             timestamp_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
@@ -5319,20 +5333,19 @@ impl XybridModel {
             let latency_ms = start.elapsed().as_millis() as u32;
 
             // Emit ModelComplete telemetry event
+            let mut data = serde_json::json!({
+                "model_id": model_id,
+                "version": version,
+                "output_type": format!("{:?}", output_type),
+            });
+            add_choice_telemetry(&mut data, &metadata, &output);
             let event = crate::telemetry::TelemetryEvent {
                 event_type: "ModelComplete".to_string(),
                 stage_name: Some(model_id.clone()),
                 target: Some("local".to_string()),
                 latency_ms: Some(latency_ms),
                 error: None,
-                data: Some(
-                    serde_json::json!({
-                        "model_id": model_id,
-                        "version": version,
-                        "output_type": format!("{:?}", output_type),
-                    })
-                    .to_string(),
-                ),
+                data: Some(data.to_string()),
                 timestamp_ms: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis() as u64)
@@ -8834,6 +8847,87 @@ mod tests {
         }
         assert!(!seam_fired.load(std::sync::atomic::Ordering::SeqCst));
         assert_eq!(cloud.call_count(), 0);
+    }
+
+    // =====================================================================
+    // Choice scorers: warmup request and decision telemetry
+    // =====================================================================
+
+    /// A scorer's metadata: one-byte fields that reject longer text, and
+    /// `fixed` as its fixed choices.
+    fn tight_scorer_metadata(fixed: &[Choice]) -> ModelMetadata {
+        let spec = serde_json::json!({
+            "type": "OnnxByteOptionScorer",
+            "model_file": "scorer.onnx",
+            "context": { "offset": 1, "max_len": 1, "overflow": "Reject",
+                         "ids_input": "context_ids", "mask_input": "context_mask" },
+            "choice": { "offset": 1, "max_len": 1, "overflow": "Reject",
+                        "ids_input": "option_ids", "mask_input": "option_token_mask" },
+            "choice_mask_input": "option_mask",
+            "logits_output": "logits",
+            "max_choices": fixed.len().max(2),
+            "fixed_choices": fixed,
+        });
+        let mut metadata = ModelMetadata::onnx("scorer", "1.0", "scorer.onnx");
+        metadata.execution_template = ExecutionTemplate::ChoiceScorer {
+            scorer: serde_json::from_value(spec).unwrap(),
+        };
+        metadata
+    }
+
+    #[test]
+    fn the_warmup_request_suits_every_scorer_spec() {
+        let choice = |id: &str| Choice::new(id, "x");
+        let fixed_sets = [
+            Vec::new(),
+            vec![choice("warmup-0")],
+            vec![choice("skip"), choice("warmup-1")],
+            vec![choice("check"), choice("click"), choice("skip")],
+        ];
+        for fixed in fixed_sets {
+            let metadata = tight_scorer_metadata(&fixed);
+            validate_scorer_spec(match &metadata.execution_template {
+                ExecutionTemplate::ChoiceScorer { scorer } => scorer,
+                _ => unreachable!(),
+            })
+            .unwrap();
+            let request = choice_warmup_request(&fixed);
+            validate_choice_request(&metadata, &request, EntryPoint::Batch)
+                .unwrap_or_else(|e| panic!("{} fixed choice(s): {e}", fixed.len()));
+        }
+    }
+
+    #[test]
+    fn decision_telemetry_counts_candidates_and_nothing_else() {
+        let metadata = tight_scorer_metadata(&[]);
+        let output = Envelope::new(EnvelopeKind::ChoiceScores(xybrid_core::ir::ChoiceScores {
+            entries: ["secret-a", "secret-b"]
+                .into_iter()
+                .map(|id| xybrid_core::ir::ChoiceScore {
+                    id: id.to_string(),
+                    logit: 0.0,
+                    score: 0.5,
+                    fixed: false,
+                })
+                .collect(),
+            label_mass: None,
+        }));
+        let mut data = serde_json::json!({ "model_id": "scorer" });
+        add_choice_telemetry(&mut data, &metadata, &output);
+        assert_eq!(
+            data,
+            serde_json::json!({
+                "model_id": "scorer",
+                "task": "decision",
+                "backend": "ort",
+                "choice_count": 2,
+            })
+        );
+
+        // Any other output leaves the data as it was.
+        let mut untouched = serde_json::json!({ "model_id": "scorer" });
+        add_choice_telemetry(&mut untouched, &metadata, &text_envelope("hello"));
+        assert_eq!(untouched, serde_json::json!({ "model_id": "scorer" }));
     }
 
     // =====================================================================

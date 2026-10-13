@@ -258,11 +258,13 @@ impl PreparedChoices {
     /// # Errors
     ///
     /// [`ChoiceError::InferenceFailed`] when ONNX Runtime fails (its message is
-    /// withheld: it can quote input values, which are bytes of the request);
-    /// [`ChoiceError::Runtime`] when the logits output is missing or not
-    /// float32; [`ChoiceError::OutputShape`] unless the logits are `[1, rows]`
-    /// for the encoded rows; [`ChoiceError::NonFiniteLogit`] for a NaN or
-    /// infinite logit on an offered candidate.
+    /// withheld: it can quote input values, which are bytes of the request,
+    /// and the run is made with ONNX Runtime's own logging at fatal, so it
+    /// doesn't log the message either); [`ChoiceError::Runtime`] when the
+    /// logits output is missing or not float32; [`ChoiceError::OutputShape`]
+    /// unless the logits are `[1, rows]` for the encoded rows;
+    /// [`ChoiceError::NonFiniteLogit`] for a NaN or infinite logit on an
+    /// offered candidate.
     pub fn run(self, session: &ONNXSession) -> ChoiceResult<ChoiceScores> {
         let spec = &self.spec;
         let rows = self.encoded.choice_mask.len();
@@ -283,7 +285,7 @@ impl PreparedChoices {
         ]);
 
         let logits = session
-            .run_single_output_f32(inputs, &spec.logits_output)
+            .run_single_output_f32_unlogged(inputs, &spec.logits_output)
             .map_err(|error| match error {
                 AdapterError::InferenceFailed(_) => ChoiceError::InferenceFailed,
                 other => ChoiceError::Runtime(other),

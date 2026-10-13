@@ -43,20 +43,21 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::choice::{
-    ensure_no_choice_kinds, scoring_not_enabled, validate_choice_request, EntryPoint,
-};
+use super::choice::onnx::OnnxChoiceScorer;
+use super::choice::{ensure_no_choice_kinds, validate_choice_request, EntryPoint};
 use super::listener::ExecutionGuard;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::llm_telemetry::{
     insert_llm_streaming_metrics, mirror_llm_metrics_to_span, stamp_llm_runtime_backend,
     stamp_llm_span_cost_attribution,
 };
+use super::template::{ChoiceScorerSpec, OnnxByteOptionScorerSpec};
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::tool_continuation::{
     reject_nested_tool_continuation_parts, run_tool_continuation, run_tool_continuation_streaming,
     text_messages_from_multimodal, ToolContinuation,
 };
+use crate::ir::ChoiceRequest;
 
 fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     if error.cloud_fallback_abort_reason().is_some() {
@@ -237,6 +238,19 @@ struct TtsSessionCache {
     session: Arc<ONNXSession>,
 }
 
+/// A choice scorer's ONNX session and the spec bound to it, reused across
+/// runs. Keyed like [`TtsSessionCache`] by the model file's path and
+/// `(len, mtime)`, and also by the spec: the scorer was checked against this
+/// session, so the two are only ever used together.
+struct ChoiceScorerCache {
+    model_path: PathBuf,
+    /// `(len, modified)` of the model file at build time; `None` forces a
+    /// rebuild, as for the TTS cache.
+    file_identity: Option<FileIdentity>,
+    session: Arc<ONNXSession>,
+    scorer: OnnxChoiceScorer,
+}
+
 pub struct TemplateExecutor {
     /// Configured runtimes (e.g., "onnx", "candle")
     runtimes: HashMap<String, Box<dyn ModelRuntime>>,
@@ -257,6 +271,10 @@ pub struct TemplateExecutor {
     /// the executor's lifetime — i.e. the TTS model's load — and drops on unload,
     /// exactly like `llm_adapter_cache`; no separate eviction needed.
     tts_session_cache: Option<TtsSessionCache>,
+    /// Session and bound spec of the last choice scorer run (see
+    /// [`ChoiceScorerCache`]). Lives for the executor's lifetime, like the TTS
+    /// session.
+    choice_scorer_cache: Option<ChoiceScorerCache>,
     /// Parsed `tokenizer.json` files for the `Tokenize` and `WhisperDecode`
     /// steps (see [`TokenizerCache`]). Lives for the executor's lifetime, like
     /// the caches above, so each tokenizer is parsed once per loaded model.
@@ -321,6 +339,7 @@ impl TemplateExecutor {
             base_path: base_path.into(),
             llm_adapter_cache: None,
             tts_session_cache: None,
+            choice_scorer_cache: None,
             tokenizer_cache: TokenizerCache::default(),
             vision_encoders: HashMap::new(),
         }
@@ -512,8 +531,10 @@ impl TemplateExecutor {
             ExecutionTemplate::TfLite { model_file } => ("tflite", model_file),
             #[cfg(feature = "asr-whispercpp")]
             ExecutionTemplate::GgmlWhisper { model_file, .. } => ("whispercpp", model_file),
-            // Scorers do not run yet, so none is ever loaded.
-            ExecutionTemplate::ChoiceScorer { .. } => return false,
+            // A scorer's session lives in the executor's own cache.
+            ExecutionTemplate::ChoiceScorer {
+                scorer: ChoiceScorerSpec::OnnxByteOptionScorer(spec),
+            } => return self.cached_choice_scorer(spec).is_some(),
             _ => return false,
         };
         let model_full_path = Path::new(&self.base_path).join(model_file);
@@ -553,9 +574,6 @@ impl TemplateExecutor {
         // A choice request runs only on a choice scorer, through this batch
         // entry. Refuse anything else before any span, runtime or backend.
         validate_choice_request(metadata, input, EntryPoint::Batch)?;
-        if let ExecutionTemplate::ChoiceScorer { .. } = &metadata.execution_template {
-            return Err(scoring_not_enabled(&metadata.model_id));
-        }
 
         debug!(
             target: "xybrid_core",
@@ -622,6 +640,18 @@ impl TemplateExecutor {
         // omitted. See `quantization_label_from_metadata`.
         if let Some(quant) = quantization_label_from_metadata(metadata) {
             xybrid_trace::add_metadata("quantization", quant);
+        }
+
+        // A choice scorer answers its request in one batch run. The validator
+        // above has already checked the request against the spec.
+        if let ExecutionTemplate::ChoiceScorer { scorer } = &metadata.execution_template {
+            return match &input.kind {
+                EnvelopeKind::ChoiceRequest(request) => self.execute_choice_scorer(scorer, request),
+                // Unreachable: the validator admits only a choice request.
+                _ => Err(AdapterError::InvalidInput(
+                    "a choice scorer accepts only a ChoiceRequest".to_string(),
+                )),
+            };
         }
 
         // Step 1: Handling ModelGraph (multi-model DAG)
@@ -2955,6 +2985,78 @@ impl TemplateExecutor {
             session: Arc::clone(&session),
         });
         Ok(session)
+    }
+
+    /// Scores a validated choice request on the scorer `scorer` describes.
+    ///
+    /// The session and the spec bound to it come from [`ChoiceScorerCache`];
+    /// the request is encoded for the bound model, run, and its logits checked
+    /// and normalised. When ONNX Runtime fails, its message is withheld.
+    fn execute_choice_scorer(
+        &mut self,
+        scorer: &ChoiceScorerSpec,
+        request: &ChoiceRequest,
+    ) -> ExecutorResult<Envelope> {
+        let ChoiceScorerSpec::OnnxByteOptionScorer(spec) = scorer;
+        let EnvelopeKind::Text(context) = &request.context().kind else {
+            // Unreachable: the validator admits only a text context.
+            return Err(super::choice::ChoiceError::UnsupportedContext {
+                kind: request.context().kind_str(),
+            }
+            .into());
+        };
+
+        let _span = xybrid_trace::SpanGuard::new("choice_scoring");
+        xybrid_trace::add_metadata(
+            "choice_count",
+            (request.choices().len() + spec.fixed_choices.len()).to_string(),
+        );
+        let (session, bound) = self.choice_scorer_session(spec)?;
+        let scores = bound.prepare(context, request.choices())?.run(&session)?;
+        Ok(Envelope::new(EnvelopeKind::ChoiceScores(scores)))
+    }
+
+    /// The cached scorer for `spec`, if its model file is unchanged since the
+    /// spec was bound to it.
+    fn cached_choice_scorer(&self, spec: &OnnxByteOptionScorerSpec) -> Option<&ChoiceScorerCache> {
+        let cache = self.choice_scorer_cache.as_ref()?;
+        let model_path = Path::new(&self.base_path).join(&spec.model_file);
+        let identity = file_identity(&model_path);
+        // As for the TTS cache, an unreadable identity forces a rebuild.
+        (cache.model_path == model_path
+            && identity.is_some()
+            && cache.file_identity == identity
+            && cache.scorer.spec() == spec)
+            .then_some(cache)
+    }
+
+    /// The session for `spec`'s model and the spec bound to it: cached, or
+    /// built, bound and cached on a miss. A scorer is only ever run on the
+    /// session it was bound to.
+    fn choice_scorer_session(
+        &mut self,
+        spec: &OnnxByteOptionScorerSpec,
+    ) -> ExecutorResult<(Arc<ONNXSession>, OnnxChoiceScorer)> {
+        if let Some(cache) = self.cached_choice_scorer(spec) {
+            return Ok((Arc::clone(&cache.session), cache.scorer.clone()));
+        }
+        // Release the previous session before loading the next one.
+        self.choice_scorer_cache = None;
+        let model_path = Path::new(&self.base_path).join(&spec.model_file);
+        let identity = file_identity(&model_path);
+        let session = Arc::new(OnnxSessionFactory::create_session(
+            &model_path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?);
+        let scorer = OnnxChoiceScorer::bind(&session, spec)?;
+        self.choice_scorer_cache = Some(ChoiceScorerCache {
+            model_path,
+            file_identity: identity,
+            session: Arc::clone(&session),
+            scorer: scorer.clone(),
+        });
+        Ok((session, scorer))
     }
 
     fn execute_tts_chunked(
@@ -5950,22 +6052,23 @@ mod tests {
     }
 
     #[test]
-    fn a_valid_scorer_request_is_refused_until_scorers_run() {
+    fn scorer_execution_fails_without_its_model_file() {
         let metadata = forms_scorer_metadata();
-        // An empty model directory: opening the scorer would fail with a file
-        // error, so getting the capability refusal shows nothing was opened.
+        // An empty model directory: the request is valid, so the executor
+        // opens the scorer and reports the missing file.
         let dir = tempfile::tempdir().unwrap();
         let mut executor = TemplateExecutor::new(dir.path().to_str().unwrap());
 
-        assert_eq!(
-            refused_capability(executor.execute(&metadata, &choice_request_input(), None)),
-            "choice scoring"
-        );
         let fixed_only = Envelope::choice_request(text_input("FORM Intake"), Vec::new());
-        assert_eq!(
-            refused_capability(executor.execute(&metadata, &fixed_only, None)),
-            "choice scoring"
-        );
+        for input in [choice_request_input(), fixed_only] {
+            assert!(
+                matches!(
+                    executor.execute(&metadata, &input, None),
+                    Err(AdapterError::ModelNotFound(_))
+                ),
+                "a missing scorer file must fail the load"
+            );
+        }
         assert!(!executor.is_model_loaded(&metadata));
     }
 
@@ -6025,6 +6128,281 @@ mod tests {
                 Err(AdapterError::InvalidInput(_))
             ));
         }
+    }
+
+    // =========================================================================
+    // Choice scorers: run through the executor on the fake ONNX scorers
+    // =========================================================================
+
+    /// Whether ONNX Runtime can run here; without it these tests skip, unless
+    /// models are required (`XYBRID_REQUIRE_MODELS`), where they fail.
+    fn onnx_runtime_for_test() -> bool {
+        if crate::runtime_adapter::onnx::ort_runtime_available() {
+            return true;
+        }
+        assert!(
+            !crate::testing::model_fixtures::models_required(),
+            "XYBRID_REQUIRE_MODELS is set but ONNX Runtime is not loadable; set ORT_DYLIB_PATH"
+        );
+        eprintln!("Skipping test: ONNX Runtime is not loadable (set ORT_DYLIB_PATH)");
+        false
+    }
+
+    fn fake_scorer_dir() -> PathBuf {
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        Path::new(&manifest_dir).join("../../integration-tests/fixtures/choice/fake")
+    }
+
+    /// The FORMS spec over the fake scorer `model_file`, edited by `edit`.
+    fn fake_scorer_metadata(
+        model_file: &str,
+        edit: impl FnOnce(&mut OnnxByteOptionScorerSpec),
+    ) -> ModelMetadata {
+        let mut metadata = forms_scorer_metadata();
+        let ExecutionTemplate::ChoiceScorer { scorer } = &mut metadata.execution_template else {
+            unreachable!("forms_scorer_metadata builds a ChoiceScorer");
+        };
+        let ChoiceScorerSpec::OnnxByteOptionScorer(spec) = scorer;
+        spec.model_file = model_file.to_string();
+        edit(spec);
+        metadata
+    }
+
+    /// The scores a scorer bound straight to a fresh session of `model`
+    /// returns for `input`: what the executor must reproduce.
+    fn scored_directly(
+        model: &Path,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+    ) -> crate::ir::ChoiceScores {
+        let ExecutionTemplate::ChoiceScorer {
+            scorer: ChoiceScorerSpec::OnnxByteOptionScorer(spec),
+        } = &metadata.execution_template
+        else {
+            unreachable!("a scorer's metadata");
+        };
+        let EnvelopeKind::ChoiceRequest(request) = &input.kind else {
+            unreachable!("a choice request");
+        };
+        let EnvelopeKind::Text(context) = &request.context().kind else {
+            unreachable!("a text context");
+        };
+        let session = ONNXSession::build(
+            model.to_str().unwrap(),
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )
+        .unwrap();
+        OnnxChoiceScorer::bind(&session, spec)
+            .unwrap()
+            .score(&session, context, request.choices())
+            .unwrap()
+    }
+
+    fn choice_scores(result: ExecutorResult<Envelope>) -> crate::ir::ChoiceScores {
+        match result.map(|envelope| envelope.kind) {
+            Ok(EnvelopeKind::ChoiceScores(scores)) => scores,
+            other => panic!("expected choice scores, got {other:?}"),
+        }
+    }
+
+    /// The session the executor holds for its last scorer. A test keeps the
+    /// clone across later runs, so a rebuilt session cannot reuse its address
+    /// and `Arc::ptr_eq` tells reuse from a rebuild.
+    fn cached_session(executor: &TemplateExecutor) -> Arc<ONNXSession> {
+        Arc::clone(&executor.choice_scorer_cache.as_ref().unwrap().session)
+    }
+
+    /// A request whose option bytes all stay below the byte table's 64
+    /// entries, so `byte_table.onnx` scores it like `dynamic.onnx`.
+    fn digits_request() -> Envelope {
+        Envelope::choice_request(
+            text_input("FORM Intake"),
+            vec![
+                crate::ir::Choice::new("first", "(503) 555-0142"),
+                crate::ir::Choice::new("second", "03/14/1987"),
+            ],
+        )
+    }
+
+    #[test]
+    fn scorer_execution_keeps_the_bound_session() {
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let dir = fake_scorer_dir();
+        let metadata = fake_scorer_metadata("dynamic.onnx", |_| {});
+        let mut executor = TemplateExecutor::new(dir.to_str().unwrap());
+        assert!(!executor.is_model_loaded(&metadata));
+
+        let request = choice_request_input();
+        let expected = scored_directly(&dir.join("dynamic.onnx"), &metadata, &request);
+        assert_eq!(
+            choice_scores(executor.execute(&metadata, &request, None)),
+            expected
+        );
+        assert!(executor.is_model_loaded(&metadata));
+        let session = cached_session(&executor);
+
+        // Later requests reuse the bound session.
+        assert_eq!(
+            choice_scores(executor.execute(&metadata, &request, None)),
+            expected
+        );
+        let fixed_only = Envelope::choice_request(text_input("FORM Intake"), Vec::new());
+        let ids: Vec<String> = choice_scores(executor.execute(&metadata, &fixed_only, None))
+            .entries
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect();
+        assert_eq!(ids, ["check", "click", "skip"]);
+        assert!(Arc::ptr_eq(&cached_session(&executor), &session));
+    }
+
+    #[test]
+    fn scorer_execution_binds_a_replaced_file_or_a_new_spec_again() {
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("scorer.onnx");
+        std::fs::copy(fake_scorer_dir().join("dynamic.onnx"), &model).unwrap();
+        // No fixed choices: theirs are words, which the byte table refuses.
+        let metadata = fake_scorer_metadata("scorer.onnx", |spec| spec.fixed_choices.clear());
+        let mut executor = TemplateExecutor::new(dir.path().to_str().unwrap());
+
+        let request = digits_request();
+        let before = choice_scores(executor.execute(&metadata, &request, None));
+        let session = cached_session(&executor);
+
+        // `byte_table.onnx` scores these bytes like `dynamic.onnx` but fails
+        // on a letter, which shows the new file is the one running.
+        std::fs::copy(fake_scorer_dir().join("byte_table.onnx"), &model).unwrap();
+        assert_eq!(
+            choice_scores(executor.execute(&metadata, &request, None)),
+            before
+        );
+        let replaced = cached_session(&executor);
+        assert!(!Arc::ptr_eq(&replaced, &session));
+        assert!(matches!(
+            executor.execute(&metadata, &choice_request_input(), None),
+            Err(AdapterError::InferenceFailed(_))
+        ));
+
+        // A different spec over the same file is bound again too.
+        let warmer = fake_scorer_metadata("scorer.onnx", |spec| {
+            spec.fixed_choices.clear();
+            spec.scoring_temperature = Some(2.0);
+        });
+        let tempered = choice_scores(executor.execute(&warmer, &request, None));
+        assert!(!Arc::ptr_eq(&cached_session(&executor), &replaced));
+        assert_eq!(
+            tempered,
+            scored_directly(&model, &warmer, &request),
+            "the cached scorer must not keep the old temperature"
+        );
+        assert_ne!(tempered, before);
+    }
+
+    #[test]
+    fn scorer_execution_never_shares_a_session_between_models() {
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let dir = fake_scorer_dir();
+        let dynamic = fake_scorer_metadata("dynamic.onnx", |_| {});
+        // Eight static rows: a scorer bound to the dynamic model would encode
+        // five and ONNX Runtime would refuse the run.
+        let fixed = fake_scorer_metadata("static_masked.onnx", |spec| spec.max_choices = 8);
+        let mut executor = TemplateExecutor::new(dir.to_str().unwrap());
+
+        let request = choice_request_input();
+        let expected_dynamic = scored_directly(&dir.join("dynamic.onnx"), &dynamic, &request);
+        let expected_fixed = scored_directly(&dir.join("static_masked.onnx"), &fixed, &request);
+        for (metadata, expected) in [
+            (&dynamic, &expected_dynamic),
+            (&fixed, &expected_fixed),
+            (&dynamic, &expected_dynamic),
+        ] {
+            assert_eq!(
+                &choice_scores(executor.execute(metadata, &request, None)),
+                expected
+            );
+        }
+    }
+
+    /// Set in the child process that
+    /// `scorer_execution_failure_writes_nothing_to_stderr` starts.
+    const STDERR_CHILD: &str = "XYBRID_TEST_FAILED_SCORER_RUN_CHILD";
+
+    /// Runs a request the byte-table scorer fails on and returns the error,
+    /// after checking that ONNX Runtime itself failed the run: 'l' is byte
+    /// 108, id 109, outside the 64-entry table, so ONNX Runtime fails it with
+    /// a message that quotes the id, and that message is withheld.
+    fn failed_byte_table_run() -> AdapterError {
+        let metadata = fake_scorer_metadata("byte_table.onnx", |spec| spec.fixed_choices.clear());
+        let mut executor = TemplateExecutor::new(fake_scorer_dir().to_str().unwrap());
+        let request = Envelope::choice_request(
+            text_input("FORM Intake"),
+            vec![
+                crate::ir::Choice::new("first", "0"),
+                crate::ir::Choice::new("second", "l"),
+            ],
+        );
+        let error = executor.execute(&metadata, &request, None).unwrap_err();
+        assert!(
+            matches!(&error, AdapterError::InferenceFailed(message) if message.contains("withheld")),
+            "ONNX Runtime was meant to fail the run: {error:?}"
+        );
+        error
+    }
+
+    #[test]
+    fn scorer_execution_withholds_the_runtime_message() {
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let error = failed_byte_table_run();
+        let rendered = format!("{error} {error:?}");
+        assert!(
+            !rendered.contains("idx=") && !rendered.contains("out of data bounds"),
+            "{rendered}"
+        );
+    }
+
+    /// ONNX Runtime logs a failed run's message itself, to stderr (and the
+    /// system log on Apple and Android), outside the error it returns. A child
+    /// copy of this test binary fails a run, so the test can read the child's
+    /// stderr and check that ONNX Runtime's message is not in it.
+    #[test]
+    fn scorer_execution_failure_writes_nothing_to_stderr() {
+        if std::env::var_os(STDERR_CHILD).is_some() {
+            failed_byte_table_run();
+            return;
+        }
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "execution::executor::tests::scorer_execution_failure_writes_nothing_to_stderr",
+                "--exact",
+                "--nocapture",
+            ])
+            .env(STDERR_CHILD, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "the child run failed or matched no test:\n{stdout}\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("idx=") && !stderr.contains("out of data bounds"),
+            "ONNX Runtime logged the failed run:\n{stderr}"
+        );
     }
 
     /// LLM backend that counts every call, so a test can prove a refused
