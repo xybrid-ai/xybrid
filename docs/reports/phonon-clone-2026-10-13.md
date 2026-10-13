@@ -1,5 +1,7 @@
 # Phonon cloned-voice test — 13 October 2026
 
+Follow-up: the [Gemma3NPC / Gemma4NPC E2B / E4B Q4 comparison](npc-q4-phonon-2026-10-13.md) tested this clone with each AI resident. The native Unity compatibility blocker described here remains unresolved.
+
 The supplied voice synthesizes successfully with **upstream Phonon `ptts 0.4.0rc1`** and the available **7e71a02d@200 checkpoint**. Six measured replies generated finite, non-silent 24 kHz mono PCM in **0.09–0.38 seconds**, after warm-up. The existing zzz-integrations rc.4 native library rejected both the official newer GGUF and the custom clone GGUF with `InvalidRequiredMetadata`. Its original beta checkpoint still opens and synthesizes successfully.
 
 Tests began after the voice survey and talking GIF were complete and committed as `eb3eca07`. This is an isolated runtime trial, not a Phonon integration into the Unity character.

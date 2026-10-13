@@ -1,5 +1,7 @@
 # Orc demo voice latency — 13 October 2026
 
+Follow-up: the user selected Phonon as the voice direction. See the [clone compatibility trial](phonon-clone-2026-10-13.md) and [three-model Q4 comparison with Phonon resident](npc-q4-phonon-2026-10-13.md) for subsequent measurements and the current recommendation.
+
 Voice synthesis and memory pressure dominate the observed waits. Changing the AI alone can shorten reply generation, but the fastest tested AI models also failed the character's recall or speaker-role requirements. Keep the current voice until a listening review accepts an alternative; first address shared-memory pressure and expired native work.
 
 This is a survey and recommendation, with no production runtime change. The consumer is the Mac `orc-demo`, Unity 6000.6.4f1 Editor, Xybrid Unity SDK 0.9.0 and direct zzz Kitten profile v0.1.0-rc.4, on an M1 Pro with 10 CPU cores and 16 GiB unified memory. Cloud workspace checks use the repository's own version and do not validate that installed SDK.
