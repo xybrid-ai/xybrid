@@ -128,7 +128,7 @@ before committing. A new artifact digest goes into both `models.json` and
 | `goldens/forms.json` | G0 encoded byte ids and the PyTorch reference logits, scores, best and margin |
 | `goldens/labels.json` | G0 rendered prompt, token ids and label ids, and the Transformers reference label logits, logsumexp, scores and `label_mass` |
 | `templates/qwen3.5.jinja` | The pinned Qwen3.5-0.8B chat template, byte-identical to the one both GGUFs embed |
-| `fake/*.onnx` | Five-input fake scorers: dynamic, static with a NaN-masked tail, an N-1 output, and a float64 output |
+| `fake/*.onnx` | Five-input fake scorers: dynamic, static with a NaN-masked tail, an N-1 output, a float64 output, and a byte lookup that fails inside ONNX Runtime on any byte id of 64 or more |
 
 When `enable_thinking` is omitted, the Qwen3.5-0.8B template ends a generation
 prompt with `<think>\n\n</think>\n\n`, unlike the Qwen3.5-4B template, which

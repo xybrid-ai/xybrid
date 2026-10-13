@@ -12,6 +12,10 @@ Each fake takes the five named tensors of the FORMS scorer spec
   NaN, so a caller must drop the padding tail before checking active logits.
 - ``short_output.onnx``: dynamic axis, output ``[1, N - 1]``.
 - ``wrong_dtype.onnx``: dynamic axis, float64 output.
+- ``byte_table.onnx``: dynamic axis, output ``[1, N]``; looks option byte ids up
+  in a table of 64 entries that hold their own index, so the logit is the same
+  for ids below 64 and a larger id (a byte of 63 or more, such as a letter)
+  fails the run inside ONNX Runtime, with a message that quotes the id.
 
 Built with the ONNX helper API, so the bytes depend only on the pinned ``onnx``.
 """
@@ -32,6 +36,7 @@ DEFAULT_OUT = REPO_ROOT / "integration-tests/fixtures/choice/fake"
 CONTEXT_LEN = 224
 CHOICE_LEN = 96
 STATIC_CHOICES = 8
+BYTE_TABLE = 64
 OPSET = 18
 # IR version 8 is the one ONNX pairs with opset 18; ONNX Runtime 1.23 loads it.
 IR_VERSION = 8
@@ -55,15 +60,33 @@ def _scalar(name: str, value: float) -> onnx.TensorProto:
     return helper.make_tensor(name, TensorProto.FLOAT, [], [value])
 
 
-def _score_nodes() -> tuple[list[onnx.NodeProto], list[onnx.TensorProto]]:
-    """Nodes computing ``raw`` ([1, N] float32) from the five inputs."""
+def _score_nodes(
+    byte_table: bool = False,
+) -> tuple[list[onnx.NodeProto], list[onnx.TensorProto]]:
+    """Nodes computing ``raw`` ([1, N] float32) from the five inputs.
+
+    With ``byte_table`` the option byte ids are looked up in ``BYTE_TABLE``
+    entries that hold their own index instead of being cast to float.
+    """
     initializers = [
         _scalar("option_weight", OPTION_WEIGHT),
         _scalar("context_weight", CONTEXT_WEIGHT),
         helper.make_tensor("last_axis", TensorProto.INT64, [1], [-1]),
     ]
+    if byte_table:
+        table = [float(index) for index in range(BYTE_TABLE)]
+        initializers.append(
+            helper.make_tensor("byte_table", TensorProto.FLOAT, [BYTE_TABLE], table)
+        )
+        option_ids = helper.make_node(
+            "Gather", ["byte_table", "option_ids"], ["option_ids_f"], axis=0
+        )
+    else:
+        option_ids = helper.make_node(
+            "Cast", ["option_ids"], ["option_ids_f"], to=TensorProto.FLOAT
+        )
     nodes = [
-        helper.make_node("Cast", ["option_ids"], ["option_ids_f"], to=TensorProto.FLOAT),
+        option_ids,
         helper.make_node(
             "Cast", ["option_token_mask"], ["option_token_mask_f"], to=TensorProto.FLOAT
         ),
@@ -88,8 +111,9 @@ def _model(
     tail: list[onnx.NodeProto],
     extra_initializers: list[onnx.TensorProto],
     output_type: int = TensorProto.FLOAT,
+    byte_table: bool = False,
 ) -> onnx.ModelProto:
-    nodes, initializers = _score_nodes()
+    nodes, initializers = _score_nodes(byte_table)
     graph = helper.make_graph(
         nodes + tail,
         name,
@@ -160,6 +184,14 @@ def build_models() -> dict[str, onnx.ModelProto]:
             ],
             [neg_inf],
             output_type=TensorProto.DOUBLE,
+        ),
+        "byte_table.onnx": _model(
+            "fake_byte_table",
+            "choices",
+            [1, "choices"],
+            [_masked("logits", "neg_inf")],
+            [neg_inf],
+            byte_table=True,
         ),
     }
 
