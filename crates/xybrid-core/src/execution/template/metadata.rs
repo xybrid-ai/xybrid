@@ -108,6 +108,14 @@ pub enum ExecutionTemplate {
     /// implementation. Both transcribe; they differ in weight format (GGML
     /// quantized vs F32 safetensors) and therefore in cost, which is the whole
     /// reason this variant exists.
+    ///
+    /// A bundle may also ship whisper.cpp's Core ML encoder beside the model
+    /// file: `model_file` with its extension and any `-qX_Y` tag replaced by
+    /// `-encoder.mlmodelc` (`ggml-base.en-q5_1.bin` →
+    /// `ggml-base.en-encoder.mlmodelc`). On iOS 16 and later, in builds with
+    /// the `coreml` feature (the `platform-ios` preset), the encoder then runs
+    /// through Core ML and the decoder stays on ggml. Older iOS versions and
+    /// other platforms ignore the file and keep the ggml encoder.
     GgmlWhisper {
         /// Path to the GGML model file (relative to bundle root), e.g.
         /// `ggml-base.en-q5_1.bin`.
@@ -126,6 +134,10 @@ pub enum ExecutionTemplate {
         /// window and 2.8x faster than full context; 250 degenerates. So a
         /// model opts in here after its own quality check rather than
         /// inheriting a fast-but-fragile default.
+        ///
+        /// Leave it at `0` in a bundle that ships a Core ML encoder: that
+        /// encoder only takes the full window, so a truncated context is
+        /// rejected while it is active.
         #[serde(default)]
         audio_ctx: u32,
 
