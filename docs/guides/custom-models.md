@@ -189,6 +189,11 @@ for a query and `title: none | text: ` for a document. Use the `q4`, quantized
 or full-precision export: the `fp16` and `q4f16` ones return NaN or degraded
 vectors. Only text runs today; image, video and audio input are not supported.
 
+To try it on a small multilingual corpus, or on your own documents, run the SDK
+example from the repository root:
+`cargo run --release -p xybrid-sdk --example semantic_search` (add
+`-- --docs my_docs.txt "your question"` for your own data).
+
 For the full field reference, see [MODEL_METADATA.md](../sdk/MODEL_METADATA.md). For editor autocomplete and validation, use the [JSON Schema](../sdk/model_metadata.schema.json).
 
 ## Step 3: Load with fromDirectory()

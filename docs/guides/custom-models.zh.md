@@ -183,6 +183,10 @@ curl -L "$BASE/tokenizer.json" -o embeddinggemma-2/tokenizer.json
 `title: none | text: `。请使用 `q4`、quantized 或全精度导出：`fp16` 和 `q4f16`
 导出会返回 NaN 或质量下降的向量。目前只支持文本，不支持图像、视频和音频输入。
 
+如需在一个小型多语言语料或你自己的文档上试用，请在仓库根目录运行 SDK 示例：
+`cargo run --release -p xybrid-sdk --example semantic_search`（使用自己的数据时追加
+`-- --docs my_docs.txt "你的问题"`）。
+
 完整字段参考见 [MODEL_METADATA.md](../sdk/MODEL_METADATA.md)。如需编辑器自动补全和验证，请使用 [JSON Schema](../sdk/model_metadata.schema.json)。
 
 ## 第三步：使用 fromDirectory() 加载
