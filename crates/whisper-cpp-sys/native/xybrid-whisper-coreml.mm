@@ -1,31 +1,12 @@
-// xybrid's Core ML encoder bridge for whisper.cpp.
-//
-// Implements the C ABI whisper.cpp calls when built with WHISPER_USE_COREML
-// (vendor/whisper-cpp/src/coreml/whisper-encoder.h), replacing upstream's
-// src/coreml/whisper-encoder.mm, which this crate does not compile. Upstream's
-// bridge ignores prediction errors and copies the encoder output into
-// whisper.cpp's buffer without checking its size or element type. This one:
-//
-//  - vets the encoder against the context being initialised. Rust reads that
-//    context's dimensions from the loaded model (not the file, which could be
-//    replaced in between) and declares them, with the exact encoder path,
-//    through xybrid_whisper_coreml_begin_load. Init declines an encoder whose
-//    input differs, and every prediction's output is checked against those
-//    dimensions before anything is copied. The encoder's output shape is not
-//    part of its model description, so the per-prediction check is what stops
-//    a mismatched `-encoder.mlmodelc` from writing past whisper.cpp's buffer.
-//  - counts failed runs per thread and zero-fills the output, so a failure
-//    never decodes a previous window's encoder state.
-//  - drains every Objective-C temporary in an autorelease pool: the calling
-//    thread is a Rust or tokio worker, which has no pool of its own.
-//  - calls MLModel directly, so neither upstream's generated encoder class nor
-//    its MLModel compat category (which replaces Core ML's async prediction
-//    methods process-wide) is linked into the host app.
-//  - requires iOS 16 (Float16 outputs, `getBytesWithHandler:`) and declines
-//    below it, so the ggml encoder keeps working on older systems. Consumers
-//    may target lower (the Flutter pod declares iOS 13), so every newer API is
-//    behind an availability check; both builds compile this file with
-//    -Werror=unguarded-availability-new to keep it that way.
+// xybrid's Core ML encoder bridge for whisper.cpp (WHISPER_USE_COREML),
+// replacing upstream's src/coreml/whisper-encoder.mm. Unlike upstream, it:
+//  - checks every output against the loaded model before copying, so a
+//    mismatched -encoder.mlmodelc cannot write past whisper.cpp's buffer;
+//  - zero-fills the output and counts the failure when a run fails;
+//  - drains temporaries in autorelease pools (Rust threads have none);
+//  - calls MLModel directly, without upstream's app-wide MLModel category;
+//  - declines below iOS 16. The Flutter pod targets iOS 13, so newer APIs sit
+//    behind availability checks, enforced by -Werror=unguarded-availability-new.
 
 #if !__has_feature(objc_arc)
 #error This file must be compiled with automatic reference counting enabled (-fobjc-arc)
@@ -44,8 +25,7 @@
 
 namespace {
 
-// Reasons go to unified logging (Console, `log stream`); Rust only sees the
-// status codes and failure counts.
+// Failure reasons go to unified logging; Rust sees only status and counts.
 os_log_t coreml_log() {
     static os_log_t log = os_log_create("ai.xybrid.whisper", "coreml");
     return log;
@@ -55,14 +35,12 @@ os_log_t coreml_log() {
 NSString *const kInputName = @"logmel_data";
 NSString *const kOutputName = @"output";
 
-// Far above any released Whisper (80/128 mels, 1500 frames, 1280 wide) and
-// small enough that every size product below fits comfortably in 64 bits.
+// Above any released Whisper; keeps every size product within 64 bits.
 constexpr int32_t kMaxDimension = 1 << 16;
 
 bool in_range(int32_t value) { return value > 0 && value <= kMaxDimension; }
 
-// One begin_load / end_load bracket. Only an init for `encoder_path` may
-// consume it, and only once.
+// One begin_load / end_load bracket; at most one init for its path claims it.
 struct Expectation {
     std::string encoder_path;
     int32_t n_mels;
@@ -72,9 +50,7 @@ struct Expectation {
     int32_t status = XYBRID_WHISPER_COREML_NOT_REQUESTED;
 };
 
-// A deque, not a vector: init holds a pointer to its claimed entry across the
-// Core ML load, and push_back on a deque never moves existing elements, so a
-// nested bracket opened meanwhile cannot leave that pointer dangling.
+// A deque: push_back never moves the entry init holds across the load.
 thread_local std::deque<Expectation> t_loads;
 thread_local uint64_t t_failures = 0;
 
@@ -89,8 +65,7 @@ Expectation *claim(const char *path) {
     return nullptr;
 }
 
-// Checks that `description` is a multi-array input of exactly
-// [1, n_mels, n_frames] Float32, the only layout whisper.cpp hands over.
+// Input must be [1, n_mels, n_frames] Float32, the layout whisper.cpp sends.
 bool input_matches(MLFeatureDescription *description, int64_t n_mels, int64_t n_frames) {
     if (description == nil || description.type != MLFeatureTypeMultiArray) {
         return false;
@@ -104,12 +79,8 @@ bool input_matches(MLFeatureDescription *description, int64_t n_mels, int64_t n_
            shape[2].longLongValue == n_frames;
 }
 
-// Copies a prediction's output into whisper.cpp's buffer of `dst_count`
-// floats, laid out frame by frame with `n_audio_state` values each. Rejects
-// anything that does not fill it exactly: another size, a last dimension other
-// than the model's state width, a non-contiguous layout, or an element type
-// other than Float32 or Float16. Size products are checked as they grow, so
-// no shape can overflow the arithmetic.
+// Copies the output into whisper.cpp's buffer only if it fills it exactly:
+// `dst_count` contiguous Float32/Float16 values, last dimension n_audio_state.
 API_AVAILABLE(ios(16.0))
 bool copy_output(MLMultiArray *output, float *out, size_t dst_count, int32_t n_audio_state) {
     NSArray<NSNumber *> *shape = output.shape;
@@ -124,8 +95,7 @@ bool copy_output(MLMultiArray *output, float *out, size_t dst_count, int32_t n_a
         if (dim <= 0) {
             return false;
         }
-        // Row-major contiguous means each stride equals the element count of
-        // the dimensions after it; a size-1 dimension's stride is irrelevant.
+        // Contiguous: each stride equals the size of the dimensions after it.
         if (dim > 1 && strides[(NSUInteger)i].longLongValue != static_cast<long long>(count)) {
             return false;
         }
@@ -171,8 +141,7 @@ extern "C" {
 
 void xybrid_whisper_coreml_begin_load(const char *encoder_path, int32_t n_mels, int32_t n_audio_ctx,
                                       int32_t n_audio_state) {
-    // Out-of-range dimensions or no path leave an entry nothing can claim, so
-    // the bracket still balances and the encoder simply stays off.
+    // Bad input still pushes an entry, pre-claimed, so the bracket balances.
     t_loads.push_back(Expectation{encoder_path != nullptr ? encoder_path : "", n_mels, n_audio_ctx,
                                   n_audio_state, encoder_path == nullptr ||
                                       !(in_range(n_mels) && in_range(n_audio_ctx) && in_range(n_audio_state))});
@@ -193,8 +162,7 @@ struct whisper_coreml_context *whisper_coreml_init(const char *path_model) {
     if (path_model == nullptr) {
         return nullptr;
     }
-    // Only a declared load of exactly this encoder proceeds; anything else
-    // keeps the ggml encoder without touching Core ML.
+    // Undeclared loads keep the ggml encoder without touching Core ML.
     Expectation *expected = claim(path_model);
     if (expected == nullptr) {
         return nullptr;
@@ -250,18 +218,14 @@ void whisper_coreml_free(struct whisper_coreml_context *ctx) {
 
 void whisper_coreml_encode(const whisper_coreml_context *ctx, int64_t n_ctx, int64_t n_mel,
                            float *mel, float *out) {
-    // whisper.cpp passes the window's mel frame count as `n_ctx` and sizes
-    // `out` as (n_ctx / 2) frames of the context's state width, which is the
-    // width init accepted. Both factors are bounded (n_ctx by kMaxDimension
-    // through the frame check below, or by whisper.cpp's own allocation), so
-    // the product cannot overflow.
+    // `n_ctx` is the window's mel frames; whisper.cpp sizes `out` as
+    // (n_ctx / 2) * n_audio_state floats. Both factors are bounded.
     const size_t frames = n_ctx > 0 ? static_cast<size_t>(n_ctx / 2) : 0;
     const size_t dst_count = frames * static_cast<size_t>(ctx->n_audio_state);
 
     bool ok = false;
     @autoreleasepool {
-        // A truncated audio context arrives as fewer frames than the encoder
-        // was converted for; Core ML would reject it, so refuse it here.
+        // A truncated audio_ctx sends fewer frames than the encoder takes.
         if (n_mel == ctx->n_mels && n_ctx == ctx->n_frames) {
             NSError *error = nil;
             MLMultiArray *input = [[MLMultiArray alloc]
@@ -279,8 +243,7 @@ void whisper_coreml_encode(const whisper_coreml_context *ctx, int64_t n_ctx, int
             id<MLFeatureProvider> result =
                 features == nil ? nil : [ctx->model predictionFromFeatures:features error:&error];
             MLMultiArray *output = [result featureValueForName:kOutputName].multiArrayValue;
-            // Init declined below iOS 16, so a context here implies it; the
-            // check is what lets the compiler prove it.
+            // Always true here (init declines below iOS 16); the compiler needs it.
             if (@available(iOS 16.0, *)) {
                 ok = output != nil && copy_output(output, out, dst_count, ctx->n_audio_state);
             }
