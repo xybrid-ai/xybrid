@@ -1,25 +1,13 @@
 //! Pairing a loaded GGML model with its Core ML encoder (iOS).
 //!
-//! whisper.cpp built with `WHISPER_USE_COREML` loads `<name>-encoder.mlmodelc`
-//! from beside the model while initialising a state, and copies the encoder's
-//! output into a buffer sized from the model. xybrid's bridge
-//! (`xybrid-whisper-sys/native`) refuses to copy output that does not fit, but
-//! it needs the model's dimensions to know what fits. [`LoadScope`] declares
-//! them around `whisper_init_state`, read from the context whisper.cpp already
-//! loaded — never from a second read of the file, which could have been
-//! replaced in between — together with the exact encoder path whisper.cpp
-//! will ask for ([`encoder_path`]).
-//!
-//! The path helper compiles on every host so its tests run anywhere; the
-//! bridge calls exist only on iOS with the `coreml` feature, and every other
-//! `bindings` build gets no-op stand-ins.
+//! [`LoadScope`] declares the loaded context's dimensions (never re-read from
+//! the file) and the encoder path ([`encoder_path`]) around
+//! `whisper_init_state`, so xybrid's bridge never copies output that doesn't
+//! fit. Builds without the bridge get no-op stand-ins.
 
-/// The encoder path whisper.cpp derives from `model`: drop the extension,
-/// then a trailing `-qX_Y` quantization tag, then append `-encoder.mlmodelc`.
-///
-/// A byte-for-byte port of `whisper_get_coreml_path_encoder`, quirks included
-/// (the extension cut is the last `.` anywhere in the path), because the
-/// bridge only serves an init that asks for exactly this path.
+/// The encoder path whisper.cpp derives from `model` (drop the extension and
+/// any `-qX_Y` tag, append `-encoder.mlmodelc`). Ported byte for byte, quirks
+/// included, because the bridge only serves an init for exactly this path.
 #[cfg(any(test, all(feature = "coreml", target_os = "ios")))]
 pub(crate) fn encoder_path(model: &str) -> String {
     let mut base = model.rfind('.').map_or(model, |dot| &model[..dot]);
@@ -43,14 +31,8 @@ mod bridge {
     use xybrid_whisper_sys::coreml as sys;
 
     /// Brackets one `whisper_init_state` so the bridge knows what the encoder
-    /// must match.
-    ///
-    /// Create it immediately before the init and [`finish`] it immediately
-    /// after, on the same thread: whisper.cpp loads the encoder synchronously
-    /// inside the init, and the bridge's declarations are per thread. It is
-    /// not `Send`, and dropping it unfinished still closes the declaration.
-    ///
-    /// [`finish`]: LoadScope::finish
+    /// must match. Begin right before the init and `finish` right after, on
+    /// the same thread; dropping it unfinished still closes the declaration.
     pub(crate) struct LoadScope {
         encoder: String,
         /// The context's encoder frames per window, as declared.
@@ -61,19 +43,15 @@ mod bridge {
     }
 
     impl LoadScope {
-        /// Declare `ctx`'s dimensions for the encoder beside `model`, if
-        /// there is one.
+        /// Declares `ctx`'s dimensions if `model` has an encoder beside it.
         pub(crate) fn begin(ctx: NonNull<whisper::whisper_context>, model: &str) -> Self {
             let encoder = encoder_path(model);
-            // SAFETY: `ctx` is a live context just returned by
-            // `whisper_init_*_no_state`; the accessor only reads its loaded
-            // hyper-parameters.
+            // SAFETY: `ctx` is live; the accessor only reads loaded hyper-parameters.
             let n_audio_ctx = unsafe { whisper::whisper_model_n_audio_ctx(ctx.as_ptr()) };
             let declared = Path::new(&encoder).exists()
                 && match CString::new(encoder.as_str()) {
                     Ok(c_encoder) => {
-                        // SAFETY: as above for `ctx`. The bridge copies the
-                        // path before returning, so `c_encoder` may drop after.
+                        // SAFETY: as above; the bridge copies the path before returning.
                         unsafe {
                             sys::xybrid_whisper_coreml_begin_load(
                                 c_encoder.as_ptr(),
@@ -94,8 +72,7 @@ mod bridge {
             }
         }
 
-        /// The encoder context length when the Core ML encoder came up — it
-        /// only accepts that full window — or `None` on the ggml encoder.
+        /// The full-window `audio_ctx` if Core ML runs the encoder, else `None`.
         pub(crate) fn finish(mut self) -> Option<u32> {
             if !self.open {
                 return None;
@@ -137,15 +114,13 @@ mod bridge {
     impl Drop for LoadScope {
         fn drop(&mut self) {
             if self.open {
-                // SAFETY: as in `finish`; keeps the per-thread bracket balanced
-                // even if this scope is abandoned.
+                // SAFETY: as in `finish`; keeps the bracket balanced if abandoned.
                 unsafe { sys::xybrid_whisper_coreml_end_load() };
             }
         }
     }
 
-    /// Total Core ML encoder runs that have failed on this thread. Compare
-    /// the value before and after a call; it never resets.
+    /// Failed Core ML encoder runs on this thread; compare before and after a call.
     pub(crate) fn failure_count() -> u64 {
         // SAFETY: no arguments; reads this thread's counter.
         unsafe { sys::xybrid_whisper_coreml_failure_count() }

@@ -70,12 +70,8 @@ pub mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-/// Hooks into xybrid's Core ML encoder bridge (`native/xybrid-whisper-coreml.h`).
-///
-/// Present on iOS with the `coreml` feature, where whisper.cpp is built with
-/// `WHISPER_USE_COREML` and this crate supplies the bridge. Hand-written rather
-/// than generated: the functions are xybrid's, not upstream's, and the Bazel
-/// path compiles against committed bindings.
+/// Hooks into xybrid's Core ML encoder bridge (`native/xybrid-whisper-coreml.h`),
+/// on iOS with the `coreml` feature. Hand-written: the bridge is xybrid's.
 #[cfg(all(feature = "coreml", target_os = "ios"))]
 pub mod coreml {
     use std::os::raw::c_char;
@@ -88,13 +84,12 @@ pub mod coreml {
     pub const XYBRID_WHISPER_COREML_LOAD_FAILED: i32 = 2;
     /// The encoder's input does not match the model.
     pub const XYBRID_WHISPER_COREML_MISMATCH: i32 = 3;
-    /// The system is older than iOS 16, which the bridge requires.
+    /// The system is older than iOS 16.
     pub const XYBRID_WHISPER_COREML_UNSUPPORTED_OS: i32 = 4;
 
     extern "C" {
-        /// Declare, for the next `whisper_init_state` on this thread, the
-        /// encoder path whisper.cpp will ask for and the loaded context's
-        /// dimensions. Pair with [`xybrid_whisper_coreml_end_load`].
+        /// Declares the encoder path and model dimensions for the next
+        /// `whisper_init_state` on this thread. Pair with [`xybrid_whisper_coreml_end_load`].
         pub fn xybrid_whisper_coreml_begin_load(
             encoder_path: *const c_char,
             n_mels: i32,
@@ -102,8 +97,7 @@ pub mod coreml {
             n_audio_state: i32,
         );
 
-        /// Close the innermost declaration on this thread and return its
-        /// `XYBRID_WHISPER_COREML_*` outcome.
+        /// Closes the innermost declaration on this thread and returns its outcome.
         pub fn xybrid_whisper_coreml_end_load() -> i32;
 
         /// Total failed encoder runs on this thread (monotonic).
