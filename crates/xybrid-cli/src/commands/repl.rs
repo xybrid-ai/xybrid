@@ -30,8 +30,8 @@ use targeting::{
 use warmup::warmup_models;
 
 use super::utils::{
-    load_speculative_model, maybe_warn_thinking_budget, thinking_budget_exhausted,
-    THINKING_BUDGET_HINT,
+    load_speculative_model, maybe_warn_thinking_budget, refuse_choice_scorer,
+    thinking_budget_exhausted, THINKING_BUDGET_HINT,
 };
 use crate::ui;
 
@@ -285,6 +285,13 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
             conversation_context = Some(ctx);
             loaded_model = Some(model);
         }
+    }
+
+    // A choice scorer cannot answer a turn: the chat route needs an LLM and
+    // the orchestrator refuses a scorer stage. Refuse now, before warmup
+    // reports it ready.
+    if let Some(model) = loaded_model.as_ref() {
+        refuse_choice_scorer(model, "the REPL runs text turns")?;
     }
 
     // Tool calling: on by default when the bundle's metadata declares
