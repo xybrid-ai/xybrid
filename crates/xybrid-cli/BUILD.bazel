@@ -48,6 +48,14 @@ rust_binary(
 # deps, and the binary is staged into the test's runfiles at the same path the
 # compile-time variable records.
 _CLI_INTEGRATION_TESTS = {
+    # `run --choice` on the fake ONNX scorers and CUA-S1-FORMS, compared with
+    # the same request run through the SDK in the test process.
+    "choice_cli_test": [
+        "//crates/xybrid-core:xybrid-core",
+        "//crates/xybrid-sdk:xybrid-sdk",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
     "init_json_test": [
         "@crates//:serde_json",
         "@crates//:tempfile",
@@ -72,13 +80,21 @@ _CLI_TEST_FEATURES = {
     "vlm_cli_test": ["llm-llamacpp"],
 }
 
+# Fixture files a test reads off disk, beyond the binary. Cargo reads them
+# straight from the worktree; Bazel sandboxes the test, so they must be
+# declared inputs. The staged FORMS export is not one, so that case skips here,
+# as do the scored cases wherever ONNX Runtime is not loadable.
+_CLI_TEST_DATA = {
+    "choice_cli_test": ["//integration-tests:choice_fixtures"],
+}
+
 [
     rust_test(
         name = name,
         version = XYBRID_VERSION,
         srcs = ["tests/{}.rs".format(name)],
         crate_features = _CLI_TEST_FEATURES.get(name, []),
-        data = [":xybrid"],
+        data = [":xybrid"] + _CLI_TEST_DATA.get(name, []),
         edition = "2021",
         deps = deps,
     )
