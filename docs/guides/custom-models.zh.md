@@ -136,11 +136,13 @@ GGUF 模型通过 llama.cpp 内部处理分词，无需预处理步骤。
       "type": "Tokenize",
       "vocab_file": "tokenizer.json",
       "tokenizer_type": "WordPiece",
-      "max_length": 512
+      "max_length": 512,
+      "add_special_tokens": true
     }
   ],
   "postprocessing": [
-    { "type": "MeanPool", "dim": 1 }
+    { "type": "MeanPool", "dim": 1 },
+    { "type": "L2Normalize" }
   ],
   "files": ["model.onnx", "tokenizer.json"],
   "metadata": {
@@ -149,6 +151,41 @@ GGUF 模型通过 llama.cpp 内部处理分词，无需预处理步骤。
   }
 }
 ```
+
+以下两项设置让向量与 sentence-transformers 对同一模型的输出一致：
+
+- `"add_special_tokens": true` 会加上模型训练时使用的特殊 token，例如
+  `[CLS]`/`[SEP]` 或 `<bos>`/`<eos>`。不加时文本会被直接编码：对
+  all-MiniLM-L6-v2 而言，向量与参考结果的余弦相似度会降到 0.85–0.95。
+- `L2Normalize` 把每个向量缩放为单位长度。当模型的 `modules.json` 中包含
+  `Normalize` 模块时添加它；此时两个向量的点积就是它们的余弦相似度。
+
+两者都是可选项，不含这两项的元数据仍按原来的方式运行。
+
+### 多语言嵌入（EmbeddingGemma 2）
+
+[EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) 可将 100
+多种语言的文本以及代码嵌入为 768 维向量。它的 ONNX 导出包含三个文件；请把
+`model_q4.onnx_data` 放在 `model_q4.onnx` 旁边，因为计算图会从该文件加载权重：
+
+```bash
+mkdir -p embeddinggemma-2/
+BASE="https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/main"
+curl -L "$BASE/onnx/model_q4.onnx" -o embeddinggemma-2/model_q4.onnx
+curl -L "$BASE/onnx/model_q4.onnx_data" -o embeddinggemma-2/model_q4.onnx_data
+curl -L "$BASE/tokenizer.json" -o embeddinggemma-2/tokenizer.json
+```
+
+元数据与上面的句子嵌入示例相同，只需改为 `"tokenizer_type": "BPE"`、
+`"max_length": 8192`、`"model_file": "model_q4.onnx"`，并在 `files` 中列出全部三个文件；完整文件见
+[MODEL_METADATA.md](../sdk/MODEL_METADATA.md#onnx-text-embedding-embeddinggemma-2)。
+模型要求在文本前加提示词：查询前加 `task: search result | query: `，文档前加
+`title: none | text: `。请使用 `q4`、quantized 或全精度导出：`fp16` 和 `q4f16`
+导出会返回 NaN 或质量下降的向量。目前只支持文本，不支持图像、视频和音频输入。
+
+如需在一个小型多语言语料或你自己的文档上试用，请在仓库根目录运行 SDK 示例：
+`cargo run --release -p xybrid-sdk --example semantic_search`（使用自己的数据时追加
+`-- --docs my_docs.txt "你的问题"`）。
 
 完整字段参考见 [MODEL_METADATA.md](../sdk/MODEL_METADATA.md)。如需编辑器自动补全和验证，请使用 [JSON Schema](../sdk/model_metadata.schema.json)。
 
@@ -372,11 +409,13 @@ cat > my-minilm/model_metadata.json << 'EOF'
       "type": "Tokenize",
       "vocab_file": "tokenizer.json",
       "tokenizer_type": "WordPiece",
-      "max_length": 256
+      "max_length": 256,
+      "add_special_tokens": true
     }
   ],
   "postprocessing": [
-    { "type": "MeanPool", "dim": 1 }
+    { "type": "MeanPool", "dim": 1 },
+    { "type": "L2Normalize" }
   ],
   "files": ["model.onnx", "tokenizer.json"],
   "metadata": {
@@ -386,6 +425,8 @@ cat > my-minilm/model_metadata.json << 'EOF'
 }
 EOF
 ```
+
+`add_special_tokens` 和 `L2Normalize` 让输出与 sentence-transformers 一致（见[句子嵌入](#句子嵌入)）。
 
 ### 3. 运行推理
 
@@ -404,7 +445,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let output = model.run(&input)?;
 
-    // output.kind 为 EnvelopeKind::Embedding(Vec<f32>)，共 384 维
+    // output.kind 为 EnvelopeKind::Embedding(Vec<f32>)，共 384 维，单位长度
     if let EnvelopeKind::Embedding(embedding) = &output.kind {
         println!("Embedding dimensions: {}", embedding.len());
         println!("First 5 values: {:?}", &embedding[..5]);
@@ -477,7 +518,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | **语音识别（Whisper）** | SafeTensors | `SafeTensors` | _(内置)_ | _(内置)_ |
 | **文字转语音** | ONNX | `Onnx` | `Phonemize` | `TTSAudioEncode` |
 | **文本生成（LLM）** | GGUF | `Gguf` | _(无)_ | _(无)_ |
-| **句子嵌入** | ONNX | `Onnx` | `Tokenize` | `MeanPool` |
+| **句子嵌入** | ONNX | `Onnx` | `Tokenize`（`add_special_tokens`） | `MeanPool` → `L2Normalize` |
 | **文本分类 / NER** | ONNX | `Onnx` | `Tokenize` | `ArgMax` |
 | **目标检测 / 视觉** | ONNX | `Onnx` | `Resize` → `Normalize` | `TopK` 或 `Threshold` |
 
@@ -530,7 +571,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 规则：
 - execution_template.type 必须为以下之一：Onnx、Gguf、SafeTensors、CoreMl、TfLite、ModelGraph
 - 可用的预处理步骤：AudioDecode、MelSpectrogram、Phonemize、Tokenize、Normalize、Resize、CenterCrop、Reshape
-- 可用的后处理步骤：CTCDecode、TTSAudioEncode、WhisperDecode、BPEDecode、ArgMax、Softmax、TopK、Threshold、TemperatureSample、MeanPool、Denormalize
+- 可用的后处理步骤：CTCDecode、TTSAudioEncode、WhisperDecode、BPEDecode、ArgMax、Softmax、TopK、Threshold、TemperatureSample、MeanPool、L2Normalize、Denormalize
 - 对于 GGUF 模型：预处理和后处理留为空数组（llama.cpp 内部处理分词）
 - 对于 SafeTensors Whisper 模型：预处理和后处理留空，将 architecture 设为 "whisper"
 - 所有引用的文件（vocab_file、tokens_file、tokenizer_file 等）必须列在 "files" 数组中
@@ -541,7 +582,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - 语音识别（Whisper）：SafeTensors 模板，architecture 为 "whisper"（无需步骤）
 - 文字转语音：Phonemize（backend: MisakiDictionary）→ 模型 → TTSAudioEncode
 - 图像分类：Reshape + Normalize → 模型 → Softmax 或 ArgMax
-- 句子嵌入：Tokenize → 模型 → MeanPool
+- 句子嵌入：Tokenize（add_special_tokens: true）→ 模型 → MeanPool → L2Normalize（当模型的 modules.json 含 Normalize 模块时）
 - 文本分类 / NER：Tokenize → 模型 → ArgMax
 - 文本生成（GGUF）：Gguf 模板，无步骤
 

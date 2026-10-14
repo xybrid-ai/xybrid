@@ -98,6 +98,9 @@ pub(crate) mod path;
 // Loaded tokenizer.json cache, one per executor (internal)
 pub(crate) mod tokenizer_cache;
 
+// Last executor-built ONNX session, one per executor (internal)
+pub(crate) mod session_cache;
+
 // TTS text chunking (internal)
 pub(crate) mod text_chunking;
 

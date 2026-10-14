@@ -8,7 +8,7 @@
 //!
 //! [`TokenizerCache`] lives on the `TemplateExecutor`, which the SDK keeps for
 //! as long as a model is loaded, so a tokenizer is parsed once per loaded
-//! model. Like the TTS session cache, an entry is reused only while the file's
+//! model. Like the ONNX session cache, an entry is reused only while the file's
 //! `(len, modified)` is readable and unchanged: a `tokenizer.json` replaced in
 //! place is reloaded rather than served stale.
 

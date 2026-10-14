@@ -1178,6 +1178,19 @@
           ]
         },
         {
+          "description": "Scale each vector along the last axis to unit length (L2 norm of 1)\n\nUse for: Sentence embeddings compared by cosine similarity, after\n`MeanPool` (sentence-transformers' `normalize_embeddings=True`)",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "L2Normalize"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
           "description": "CTC (Connectionist Temporal Classification) decoding for ASR\n\nUse for: Wav2Vec2, Hubert, other CTC-based ASR models",
           "type": "object",
           "properties": {
@@ -1358,6 +1371,10 @@
           "description": "Tokenize text using a vocabulary file\n\nUse for: Language models, text classifiers",
           "type": "object",
           "properties": {
+            "add_special_tokens": {
+              "description": "Wrap the text in the special tokens the tokenizer's post-processor\ndefines, such as `<bos>`/`<eos>` or `[CLS]`/`[SEP]` (default:\nfalse). Truncation to `max_length` keeps the closing ones.",
+              "type": "boolean"
+            },
             "max_length": {
               "description": "Optional: Maximum sequence length",
               "type": [

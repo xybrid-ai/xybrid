@@ -161,7 +161,6 @@ fn elapsed_millis_floor_one(start: std::time::Instant) -> u32 {
 
 // Internal: ONNX-specific types needed for optimized execution paths
 // These are implementation details, not part of the public API
-use crate::execution::session_factory::OnnxSessionFactory;
 use crate::runtime_adapter::onnx::{
     ExecutionProviderKind, ONNXSession, OnnxRuntime, SessionOptions,
 };
@@ -186,9 +185,24 @@ use super::modes::{
 use super::path::{file_identity, FileIdentity};
 use super::postprocessing;
 use super::preprocessing;
+use super::session_cache::OnnxSessionCache;
 use super::tokenizer_cache::TokenizerCache;
 use super::types::{ExecutorResult, PreprocessedData, RawOutputs};
 use super::voice_loader::TtsVoiceLoader;
+
+/// A choice scorer's ONNX session and the spec bound to it, reused across
+/// runs. Keyed by the model file's path and `(len, mtime)`, and also by the
+/// spec: the scorer was checked against this session, so the two are only
+/// ever used together. Unlike [`OnnxSessionCache`], it does not check
+/// external weight files.
+struct ChoiceScorerCache {
+    model_path: PathBuf,
+    /// `(len, modified)` of the model file at build time; `None` forces a
+    /// rebuild.
+    file_identity: Option<FileIdentity>,
+    session: Arc<ONNXSession>,
+    scorer: OnnxChoiceScorer,
+}
 
 /// Template Executor implementation.
 ///
@@ -225,32 +239,6 @@ use super::voice_loader::TtsVoiceLoader;
 /// # Ok(())
 /// # }
 /// ```
-/// A cached ONNX session for the TTS path, reused across runs to avoid the
-/// per-call graph load + Level-3 optimization that otherwise dominates short-TTS
-/// latency. Keyed by the model file path; the captured `(len, mtime)` identity
-/// self-invalidates the cache if the file at that path is replaced in place.
-struct TtsSessionCache {
-    model_path: PathBuf,
-    /// `(len, modified)` of the model file at build time. `None` when the file
-    /// metadata couldn't be read — treated as "unverifiable", forcing a rebuild
-    /// rather than trusting a possibly-stale session.
-    file_identity: Option<FileIdentity>,
-    session: Arc<ONNXSession>,
-}
-
-/// A choice scorer's ONNX session and the spec bound to it, reused across
-/// runs. Keyed like [`TtsSessionCache`] by the model file's path and
-/// `(len, mtime)`, and also by the spec: the scorer was checked against this
-/// session, so the two are only ever used together.
-struct ChoiceScorerCache {
-    model_path: PathBuf,
-    /// `(len, modified)` of the model file at build time; `None` forces a
-    /// rebuild, as for the TTS cache.
-    file_identity: Option<FileIdentity>,
-    session: Arc<ONNXSession>,
-    scorer: OnnxChoiceScorer,
-}
-
 pub struct TemplateExecutor {
     /// Configured runtimes (e.g., "onnx", "candle")
     runtimes: HashMap<String, Box<dyn ModelRuntime>>,
@@ -267,13 +255,14 @@ pub struct TemplateExecutor {
     /// This ensures the struct has consistent fields regardless of features.
     #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
     llm_adapter_cache: Option<()>,
-    /// Cached ONNX session for the TTS path (see [`TtsSessionCache`]). Lives for
-    /// the executor's lifetime — i.e. the TTS model's load — and drops on unload,
-    /// exactly like `llm_adapter_cache`; no separate eviction needed.
-    tts_session_cache: Option<TtsSessionCache>,
+    /// The CPU session the TTS and token-ID paths build themselves (see
+    /// [`OnnxSessionCache`]). Lives for the executor's lifetime — i.e. the
+    /// model's load — and drops on unload, exactly like `llm_adapter_cache`;
+    /// no separate eviction needed.
+    onnx_session_cache: OnnxSessionCache,
     /// Session and bound spec of the last choice scorer run (see
-    /// [`ChoiceScorerCache`]). Lives for the executor's lifetime, like the TTS
-    /// session.
+    /// [`ChoiceScorerCache`]). Lives for the executor's lifetime, like the
+    /// session above.
     choice_scorer_cache: Option<ChoiceScorerCache>,
     /// Parsed `tokenizer.json` files for the `Tokenize` and `WhisperDecode`
     /// steps (see [`TokenizerCache`]). Lives for the executor's lifetime, like
@@ -338,7 +327,7 @@ impl TemplateExecutor {
             runtimes,
             base_path: base_path.into(),
             llm_adapter_cache: None,
-            tts_session_cache: None,
+            onnx_session_cache: OnnxSessionCache::default(),
             choice_scorer_cache: None,
             tokenizer_cache: TokenizerCache::default(),
             vision_encoders: HashMap::new(),
@@ -942,12 +931,9 @@ impl TemplateExecutor {
                 .as_token_ids()
                 .ok_or_else(|| AdapterError::InvalidInput("Expected token IDs".to_string()))?;
 
-            // Create and run BERT session through the shared factory entry.
-            let session = OnnxSessionFactory::create_session(
-                &model_full_path,
-                ExecutionProviderKind::Cpu,
-                SessionOptions::default(),
-            )?;
+            // Reuse the CPU session across calls: building it dominates a
+            // short embedding.
+            let session = self.onnx_session_cache.get_or_build(&model_full_path)?;
             let raw_outputs =
                 execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
 
@@ -2952,41 +2938,6 @@ impl TemplateExecutor {
         super::path::resolve_file_path(&self.base_path, file)
     }
 
-    /// Execute TTS with automatic chunking for long text.
-    ///
-    /// Splits input text into chunks, processes each through preprocessing + TTS,
-    /// and concatenates the audio output.
-    /// Returns the cached TTS ONNX session for `model_path`, building and caching
-    /// it on a miss. Caching skips the per-call `commit_from_file` + Level-3 graph
-    /// optimization — the dominant latency for short TTS. The cache invalidates if
-    /// the model file's `(len, mtime)` changes. TTS always runs on CPU with
-    /// default options, so path + file identity is a sufficient key.
-    fn tts_session(&mut self, model_path: &Path) -> ExecutorResult<Arc<ONNXSession>> {
-        let identity = file_identity(model_path);
-        if let Some(cache) = &self.tts_session_cache {
-            // Reuse only when the path matches AND the file identity is both
-            // readable and unchanged — an unreadable identity (`None`) forces a
-            // rebuild rather than trusting a possibly-stale session.
-            if cache.model_path == model_path
-                && identity.is_some()
-                && cache.file_identity == identity
-            {
-                return Ok(Arc::clone(&cache.session));
-            }
-        }
-        let session = Arc::new(OnnxSessionFactory::create_session(
-            model_path,
-            ExecutionProviderKind::Cpu,
-            SessionOptions::default(),
-        )?);
-        self.tts_session_cache = Some(TtsSessionCache {
-            model_path: model_path.to_path_buf(),
-            file_identity: identity,
-            session: Arc::clone(&session),
-        });
-        Ok(session)
-    }
-
     /// Scores a validated choice request on the scorer `scorer` describes.
     ///
     /// The session and the spec bound to it come from [`ChoiceScorerCache`];
@@ -3064,6 +3015,10 @@ impl TemplateExecutor {
         Ok((session, scorer))
     }
 
+    /// Execute TTS with automatic chunking for long text.
+    ///
+    /// Splits input text into chunks, processes each through preprocessing + TTS,
+    /// and concatenates the audio output.
     fn execute_tts_chunked(
         &mut self,
         metadata: &ModelMetadata,
@@ -3116,7 +3071,7 @@ impl TemplateExecutor {
         // Reuse the cached session across runs (and across chunks within this
         // run); the graph load is paid once, not per call. The voice embedding is
         // identical for every chunk, so load it once here.
-        let session = self.tts_session(model_path)?;
+        let session = self.onnx_session_cache.get_or_build(model_path)?;
         let waveform_output = tts_waveform_output(session.output_names())?;
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
@@ -3166,7 +3121,7 @@ impl TemplateExecutor {
     ) -> ExecutorResult<Envelope> {
         // Reuse the cached TTS session — the first run builds it, later runs skip
         // the graph load + Level-3 optimization (the dominant short-TTS latency).
-        let session = self.tts_session(model_path)?;
+        let session = self.onnx_session_cache.get_or_build(model_path)?;
         let waveform_output = tts_waveform_output(session.output_names())?;
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
@@ -3412,7 +3367,7 @@ impl TemplateExecutor {
         let sample_rate = Self::tts_output_sample_rate(metadata);
         let fade_samples = (sample_rate as usize * 5) / 1000; // ~5ms edge fade
         let chunks = super::text_chunking::chunk_text_for_tts(&text, max_tts_chars);
-        let session = self.tts_session(&model_path)?;
+        let session = self.onnx_session_cache.get_or_build(&model_path)?;
         let waveform_output = tts_waveform_output(session.output_names())?;
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;

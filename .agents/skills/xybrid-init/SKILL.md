@@ -145,9 +145,11 @@ Backends: `MisakiDictionary` (default, pure Rust), `EspeakNG` (multi-language, n
 
 **Text embedding / NLP:**
 ```json
-[{ "type": "Tokenize", "vocab_file": "tokenizer.json", "tokenizer_type": "WordPiece", "max_length": 512 }]
+[{ "type": "Tokenize", "vocab_file": "tokenizer.json", "tokenizer_type": "WordPiece", "max_length": 512, "add_special_tokens": true }]
 ```
 Tokenizer types: `WordPiece` (BERT), `BPE` (GPT), `SentencePiece` (T5)
+
+For a sentence-transformers embedding model, set `add_special_tokens: true`: the tokenizer's `post_processor` then adds the tokens the model was trained with (`[CLS]`/`[SEP]`, `<bos>`/`<eos>`). Without them the vectors drift from the reference (all-MiniLM-L6-v2: cosine 0.85–0.95). An ONNX export that also declares `image_features`, `video_features` and `audio_features` inputs (multimodal embedding models such as EmbeddingGemma 2) runs on text alone: those inputs get zero rows.
 
 **Image classification / vision:**
 ```json
@@ -176,8 +178,9 @@ Use ImageNet normalization values unless model card specifies otherwise.
 
 **Text embedding:**
 ```json
-[{ "type": "MeanPool", "dim": 1 }]
+[{ "type": "MeanPool", "dim": 1 }, { "type": "L2Normalize" }]
 ```
+Add `L2Normalize` when the model's `modules.json` lists a `Normalize` module, so the vectors have unit length like sentence-transformers' output.
 
 **Image classification:**
 ```json
@@ -255,10 +258,24 @@ Before presenting the result, verify:
   "model_id": "all-minilm",
   "version": "L6-v2",
   "execution_template": { "type": "Onnx", "model_file": "model.onnx" },
-  "preprocessing": [{ "type": "Tokenize", "vocab_file": "tokenizer.json", "tokenizer_type": "WordPiece", "max_length": 512 }],
-  "postprocessing": [{ "type": "MeanPool", "dim": 1 }],
+  "preprocessing": [{ "type": "Tokenize", "vocab_file": "tokenizer.json", "tokenizer_type": "WordPiece", "max_length": 512, "add_special_tokens": true }],
+  "postprocessing": [{ "type": "MeanPool", "dim": 1 }, { "type": "L2Normalize" }],
   "files": ["model.onnx", "vocab.txt", "tokenizer.json", "config.json"],
   "metadata": { "task": "text-embedding", "embedding_dim": 384 }
+}
+```
+
+### Text Embedding (EmbeddingGemma 2, `onnx-community/embeddinggemma-2-ONNX`)
+List the external weights file: the graph loads it from next to the `.onnx`. Never pick the `fp16` or `q4f16` exports (NaN or degraded vectors). Callers prefix queries with `task: search result | query: ` and documents with `title: none | text: `.
+```json
+{
+  "model_id": "embeddinggemma-2",
+  "version": "q4",
+  "execution_template": { "type": "Onnx", "model_file": "model_q4.onnx" },
+  "preprocessing": [{ "type": "Tokenize", "vocab_file": "tokenizer.json", "tokenizer_type": "BPE", "max_length": 8192, "add_special_tokens": true }],
+  "postprocessing": [{ "type": "MeanPool", "dim": 1 }, { "type": "L2Normalize" }],
+  "files": ["model_q4.onnx", "model_q4.onnx_data", "tokenizer.json"],
+  "metadata": { "task": "text-embedding", "embedding_dim": 768 }
 }
 ```
 
