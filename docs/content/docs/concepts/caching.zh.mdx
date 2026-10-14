@@ -113,7 +113,7 @@ flowchart LR
 
 ### 解压
 
-解压操作是一次性的——如果 `extracted/{model_id}/` 目录已存在，SDK 会跳过重新解压。因此新模型的首次运行稍慢（下载 + 解压），后续运行均可立即启动。
+解压操作是幂等的——如果 `extracted/{model_id}/` 目录已存在，SDK 会跳过重新解压。因此新模型的首次运行稍慢（下载 + 解压），后续运行均可立即启动。
 
 ### TTL 与清理
 
@@ -141,22 +141,54 @@ xybrid cache clear
 
 ### 编程方式
 
+所有移动端与桌面端绑定都暴露同一套存储管理约定：
+
+- 汇总字节数，以及物理条目数与不重复的模型数；
+- 每个受管理的缓存位置（注册表、解压、Hugging Face 直接下载或 Hub 缓存）各对应一个条目；
+- 一个首选本地路径，以及一份单独的、已解压且可直接运行的模型 ID 列表；
+- 按模型定向删除，以及全部清除。
+
+同一个模型可能对应多个物理条目。例如，已下载的 Bundle 与解压后的运行时目录都会占用存储空间，并且会分别列出。`hasCachedModelData` 检查是否存在任意一个这样的条目，并不保证该模型已经解压。删除方法返回被移除的物理根路径数量，且不得与模型加载并发执行。
+
+```dart
+final status = await Xybrid.modelCacheStatus();
+for (final entry in await Xybrid.modelCacheEntries()) {
+  print('${entry.modelId}: ${entry.sizeBytes} bytes at ${entry.path}');
+}
+
+// 只移除一个模型，不影响缓存中的其他内容。
+final removed = await Xybrid.removeCachedModel('kokoro-82m');
+```
+
+在 Kotlin 与 Swift 上，对应的入口是 `Xybrid.modelCacheStatus()`；在 Unity C# 中是 `XybridClient.ModelCacheStatus()`。Python 直接导出生成的 snake_case 函数（`cache_status`、`cache_entries`、`cache_remove_model` 与 `cache_clear`）。
+
+Flutter 新增的缓存操作返回 Future，并在 UI isolate 之外执行文件系统操作。Swift 与 Kotlin 为每个调用都配有一个 `…Async` 版本（`modelCacheStatusAsync()`、`removeCachedModelAsync(...)`），在调用线程之外运行；Unity 的调用是同步的，因此大规模的扫描或删除请放到工作线程中执行。
+
+各绑定中没有过期清理：SDK 目前尚未持久化保留期元数据，因此重启后无法区分已过期的下载与本地模型。请使用定向清除；文件的存在时长本身并不构成删除离线模型的理由。
+
+对于 Rust 调用方，`CacheManager` 暴露了底层操作：
+
 ```rust
 use xybrid_sdk::CacheManager;
 
-let cache = CacheManager::new()?;
+let mut cache = CacheManager::new()?;
 
 // 检查模型是否已缓存
 if cache.is_cached("kokoro-82m") {
     println!("Model path: {:?}", cache.get_cached_path("kokoro-82m"));
 }
 
-// 获取缓存统计信息
+// 获取旧版注册表 Bundle 的统计信息
 let status = cache.status()?;
-println!("Models: {}, Size: {} MB", status.model_count, status.size_bytes / 1_000_000);
+println!("Models: {}, Size: {} MB", status.total_models, status.total_size_bytes / 1_000_000);
 
-// 删除过期的云端模型
-cache.clean_expired()?;
+// 查看每一个受管理的物理缓存条目
+for entry in cache.cache_entries()? {
+    println!("{}: {} bytes", entry.model_id, entry.size_bytes);
+}
+
+// 在所有受管理的缓存位置中移除一个模型
+cache.clear_model("kokoro-82m")?;
 
 // 清除所有内容
 cache.clear()?;

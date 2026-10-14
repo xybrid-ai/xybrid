@@ -25,8 +25,7 @@
 | **ort-download** | 下载预编译的 ONNX Runtime 二进制文件 | `ort/download-binaries`、`ort/tls-native` |
 | **ort-dynamic** | 在运行时加载 ONNX Runtime 的 .so | `ort/load-dynamic` |
 | **ort-coreml** | Apple Neural Engine 加速 | `ort/coreml` |
-| **candle** | 纯 Rust ML 框架 — SafeTensors Whisper 路径。**仅可显式启用**，自 whisper.cpp 取代其 ASR 角色后已从所有平台预设中移除 | `candle-core`、`candle-nn`、`candle-transformers`、`safetensors`、`byteorder`、`num-traits` |
-| **asr-whispercpp** | whisper.cpp 语音识别，运行在 llama.cpp 已链接的 ggml 上。需要 `llm-llamacpp` —— ggml 正是由它提供 | `xybrid-whisper`、`xybrid-whisper-sys` |
+| **candle** | 纯 Rust ML 框架 — SafeTensors Whisper 路径。**仅可显式启用**：没有任何 `platform-*` 预设启用它（实际发布的 ASR 后端是 `asr-whispercpp` / whisper.cpp）。兼容 Android | `candle-core`、`candle-nn`、`candle-transformers`、`safetensors`、`byteorder`、`num-traits`、`rayon` |
 | **candle-hub** | Candle + HuggingFace Hub 下载支持 | `candle`、`hf-hub`（需要 OpenSSL — **不适用于 Android**） |
 | **candle-metal** | 带 Metal 显卡加速的 Candle | `candle`、`candle-core/metal`、`candle-nn/metal` |
 | **candle-cuda** | 带 CUDA 显卡加速的 Candle | `candle`、`candle-core/cuda` |
@@ -35,7 +34,8 @@
 | **llm-mistral-cuda** | 带 CUDA 加速的 mistral.rs | `llm-mistral`、`mistralrs/cuda` |
 | **vision** | 图像 Envelope 原语与图像预处理 | *（无额外依赖；使用始终存在的 `image` crate）* |
 | **llm-llamacpp** | llama.cpp 后端（cmake 构建 + 链接） | `llama-cpp-sys/bindings`、`xybrid-llama/bindings` |
-| **llm-llamacpp-vision** | 支持 `mmproj` / `mtmd` 的 llama.cpp VLM 路径 | `llm-llamacpp`、`vision`、`llama-cpp-sys/vision`、`xybrid-llama/vision` |
+| **llm-llamacpp-vision** | 构建在 `llm-llamacpp` 之上的原生 llama 多模态（`mmproj` / `mtmd`）后端 | `llm-llamacpp`、`xybrid-llama-sys/vision`、`xybrid-llama/vision` |
+| **asr-whispercpp** | whisper.cpp 语音识别。需要 `llm-llamacpp` —— whisper.cpp 链接的是 llama.cpp 构建出的 ggml，而不是另一份副本 | `llm-llamacpp`、`xybrid-whisper/bindings` |
 
 ### 说明
 
@@ -50,6 +50,18 @@
 - 单独启用 `vision` 可获得图像 Envelope 与图像预处理。本地 llama.cpp
   VLM 生成需要 `llm-llamacpp-vision`，它将 `vision` 与 llama.cpp 后端组合，
   并链接随附的 `mtmd` 辅助库。
+- Vulkan 是构建期的可选项，而不是 Cargo feature。在 Linux 上构建
+  `platform-desktop`（或其他包含 `llm-llamacpp` 的特性组合）时设置
+  `XYBRID_LLAMA_CPP_VULKAN=1`。这会设置 `GGML_VULKAN=ON`，并要求 CMake
+  与链接器能够找到 Vulkan SDK/loader。Windows 暂不支持：ggml 将
+  `vulkan-shaders-gen` 作为嵌套的 CMake 项目构建，在 cargo 的 `OUT_DIR` 下，
+  MSBuild 为它生成的路径会超出 260 个字符的 `MAX_PATH` 限制。
+  其他所有目标都会在构建期拒绝该变量。
+- Bazel 有自己的 Vulkan 开关 `--config=linux-vulkan`（它会设置
+  `--//:vulkan=true`），因为 Bazel 直接写入 llama.cpp 的 cmake 定义，从不读取
+  `XYBRID_LLAMA_CPP_VULKAN`。它会选择 `//:llama_vulkan`，这是一个本地执行的目标 —
+  执行机器需要 `glslc`、Vulkan 头文件和 loader。对实际发布的 Linux 构件而言，
+  这条通道才是关键，因为 CLI 是用 Bazel 构建的；已发布的二进制文件目前仍仅支持 CPU。
 
 ---
 
@@ -73,6 +85,7 @@
 | **llm-mistral-metal** | 转发到 core | `xybrid-core/llm-mistral-metal` |
 | **llm-mistral-cuda** | 转发到 core | `xybrid-core/llm-mistral-cuda` |
 | **llm-llamacpp** | 转发到 core | `xybrid-core/llm-llamacpp` |
+| **asr-whispercpp** | 转发到 core（会传递性地引入 `llm-llamacpp`） | `xybrid-core/asr-whispercpp` |
 | **vision** | 转发到 core | `xybrid-core/vision` |
 | **llm-llamacpp-vision** | 转发到 core 的 VLM 路径 | `xybrid-core/llm-llamacpp-vision`、`llm-llamacpp`、`vision` |
 
@@ -86,7 +99,8 @@
 | **huggingface** | 为 `xybrid run --huggingface` 提供直接的 HuggingFace 加载 | `xybrid-sdk/huggingface` |
 | **onnx-inspect** | 为 `xybrid init` 提供 ONNX 元数据检查 | `xybrid-sdk/onnx-inspect` |
 | **vision** | 为 VLM 对话提供 `xybrid run --input-image` 和 REPL `/image` 的 Envelope 构建 | `xybrid-core/vision`、`xybrid-sdk/vision` |
-| **llm-llamacpp-vision** | llama.cpp VLM 运行时以及 CLI 图像输入支持 | `llm-llamacpp`、`vision`、`xybrid-sdk/llm-llamacpp-vision` |
+| **llm-llamacpp-vision** | 用于图像对话的原生 llama.cpp VLM 运行时 | `llm-llamacpp`、`xybrid-sdk/llm-llamacpp-vision` |
+| **asr-whispercpp** | 为 `xybrid run --input-audio` 提供 whisper.cpp 语音识别 | `xybrid-sdk/asr-whispercpp` |
 | **platform-android** | Android 发布预设 — 转发到 `xybrid-sdk/platform-android` | `ort-dynamic`、`llm-llamacpp-vision`、`asr-whispercpp`、`llm-llamacpp`、`huggingface` |
 | **platform-ios** | iOS 发布预设 — 转发到 `xybrid-sdk/platform-ios` | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp`、`llm-llamacpp`、`huggingface` |
 | **platform-macos** | macOS 发布预设 — 转发到 `xybrid-sdk/platform-macos` | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp`、`llm-llamacpp`、`huggingface` |
@@ -98,7 +112,7 @@
 
 平台预设是平台专属特性组合的**单一事实来源**。它们定义在 `xybrid-sdk/Cargo.toml` 中，并通过 crate 层级向下转发。
 
-四个平台预设均已包含视觉语言 llama.cpp 路径（`llm-llamacpp-vision`）与 whisper.cpp 语音识别（`asr-whispercpp`，在 Android `.so` 代理上约 0.2 MiB，已 strip）。VLM 与 ASR 开箱即用，无需额外组合。
+四个平台预设均已包含视觉语言 llama.cpp 路径（`llm-llamacpp-vision`，在 Android `.so` 代理上 strip 后约 0.7 MiB / 在 iOS 静态库代理上约 1.5 MiB）**以及** whisper.cpp 语音识别（`asr-whispercpp`，strip 后约 0.2 MiB）。VLM 与 ASR 开箱即用，无需额外组合。
 
 Candle **不在**任何预设中。在同一 Android 代理上它约占 1.3 MiB（Apple 形态因额外链接 `candle-metal` 约占 1.9 MiB），即其替代方案的 6.5–9.5 倍；在 Pixel 8 上首个部分结果需 9871 ms，而 whisper.cpp 为 2724 ms。`candle*` 特性仍然保留且可编译，需要 SafeTensors 路径的用户可显式启用 —— 只是不再默认开启。
 
@@ -107,15 +121,27 @@ Candle **不在**任何预设中。在同一 Android 代理上它约占 1.3 MiB�
 | **platform-android** | Android（所有 ABI） | `ort-dynamic`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 用于 AAR 分发的动态 ORT 加载；Whisper ASR 由 whisper.cpp 承担，复用 llama.cpp 已链接的 ggml（strip 后约 0.2 MiB）；llama.cpp 具备运行时 SIMD 检测；mistral.rs 在不具备 ARMv8.2-A FP16 的设备上会导致 SIGILL |
 | **platform-ios** | iOS（arm64、模拟器） | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 静态 ORT 链接；用于 ANE 加速的 CoreML；llama.cpp 在实体设备上使用 Metal，在模拟器上使用 CPU |
 | **platform-macos** | macOS（arm64、x86_64） | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 与 iOS 相同 — 统一的 Apple 平台特性 |
-| **platform-desktop** | Linux、Windows | `ort-download`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 静态 ORT 链接；LLM 推理用 llama.cpp，ASR 用 whisper.cpp（所有平台统一） |
+| **platform-desktop** | Linux、Windows | `ort-download`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 静态 ORT 链接；LLM 推理用 llama.cpp，ASR 用 whisper.cpp（所有平台统一）；在 Linux 上设置 `XYBRID_LLAMA_CPP_VULKAN=1` 可获得启用 Vulkan 的自定义构建 |
 
 > **注意**：CLI（`xybrid-cli`）会为其所有平台预设添加 `huggingface`，使 `xybrid run --huggingface` 在发布构建中可用。SDK/FFI 预设默认不包含 `huggingface` — 如有需要请单独添加。
 
-VLM 构建示例：
+预设已包含 `llm-llamacpp-vision` 与 `asr-whispercpp`，因此直接使用预设的构建就是 VLM + ASR 构建：
 
 ```bash
-cargo build -p xybrid-cli --features platform-macos,llm-llamacpp-vision
-cargo check -p xybrid-sdk --features platform-desktop,llm-llamacpp-vision
+cargo build -p xybrid-cli --features platform-macos
+cargo check -p xybrid-sdk --features platform-desktop
+```
+
+在 Linux 上，可选择启用 Vulkan 加速的 llama.cpp 构建：
+
+```bash
+XYBRID_LLAMA_CPP_VULKAN=1 cargo build -p xybrid-cli --features platform-desktop
+```
+
+如需在预设之上重新启用 Candle SafeTensors 路径：
+
+```bash
+cargo check -p xybrid-sdk --features platform-macos,candle-metal
 ```
 
 ### 为什么 llm-mistral 不用于 Android
@@ -135,7 +161,8 @@ llama.cpp 通过 ggml 使用**运行时 SIMD 检测**，因此对所有 Android 
 | 模块 | 条件 | 说明 |
 |--------|-----------|-------------|
 | `coreml` | `target_os = "macos" OR target_os = "ios" OR test` | CoreML 运行时适配器 |
-| `candle` | `feature = "candle"` | Candle（纯 Rust）运行时适配器 |
+| `candle` | `feature = "candle"` | Candle（纯 Rust）运行时适配器 — 需显式启用，不在任何预设中 |
+| `whisper_cpp` | `feature = "asr-whispercpp"` | whisper.cpp ASR 运行时适配器（与 llama.cpp 共用 ggml） |
 | `llm` | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | LLM 共享类型与适配器 |
 | `mistral` | `feature = "llm-mistral"` | MistralBackend 实现 |
 | `llama_cpp` | `feature = "llm-llamacpp"` | LlamaCppBackend 实现 |
@@ -147,6 +174,8 @@ llama.cpp 通过 ggml 使用**运行时 SIMD 检测**，因此对所有 Android 
 | `LlmRuntimeAdapter` 导入 | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | LLM 适配器导入 |
 | `llm_adapter_cache` 字段 | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | TemplateExecutor 中缓存的 LLM 适配器 |
 | `ExecutionTemplate::Gguf` 处理 | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | GGUF 模型执行路径 |
+| `ExecutionTemplate::GgmlWhisper` 处理 | `feature = "asr-whispercpp"` | GGML Whisper（whisper.cpp）执行路径。字段：`model_file`、`language`（`null` = 自动检测）、`audio_ctx`（`0` = 不截断）、`translate`。未启用该特性时，此分支会报错 `GGML Whisper execution requires the 'asr-whispercpp' feature` |
+| `ExecutionTemplate::SafeTensors` 处理 | `feature = "candle"` | Candle SafeTensors 路径。未启用该特性时，此分支会报错 `SafeTensors execution requires the 'candle' feature…`，并在错误信息中提示改用 GGML Bundle |
 | `execute_streaming()` 完整实现 | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | 带回调的流式 |
 | `execute_streaming()` 桩 | `NOT (llm-mistral OR llm-llamacpp)` | 回退到常规执行 |
 | `execute_streaming_with_context()` | 同上 | 带对话上下文的流式 |
@@ -160,6 +189,7 @@ llama.cpp 通过 ggml 使用**运行时 SIMD 检测**，因此对所有 Android 
 | `ONNXMobileRuntimeAdapter` | `target_os = "android" OR test` |
 | `CoreMLRuntimeAdapter` | `target_os = "macos" OR target_os = "ios" OR test` |
 | `CandleBackend`、`CandleRuntimeAdapter` | `feature = "candle"` |
+| `WhisperCppRuntime` | `feature = "asr-whispercpp"` |
 | `ChatMessage`、`GenerationConfig`、`GenerationOutput`、`LlmBackend`、`LlmConfig`、`LlmResult`、`LlmRuntimeAdapter` | `feature = "llm-mistral" OR feature = "llm-llamacpp"` |
 | `MistralBackend` | `feature = "llm-mistral"` |
 | `LlamaCppBackend` | `feature = "llm-llamacpp"` |
@@ -180,7 +210,7 @@ llama.cpp 通过 ggml 使用**运行时 SIMD 检测**，因此对所有 Android 
 | 在非 Apple 目标上使用 `ort-coreml` | CoreML 仅限 Apple | 使用 `ort-download` |
 | `cargo … --all-features` | 因目标而异：在每个受支持的目标三元组上，`--all-features` 都会触发上面至少一行（ORT 加载模式冲突是普遍的；Candle Metal/CUDA + ORT CoreML 这几行会在其受支持目标的相反目标上触发）。它还会启用仅作标记的 `llm-mistral*` 特性，而其背后的 crate 目前已从 workspace 中注释掉，因此无论目标如何，构建都会因缺少 `mistralrs` 导入而失败。 | 使用下方的[发布门禁](#发布门禁)；切勿将 `--all-features` 用作 CI 门禁。 |
 
-**注意**：上表中列出的逐行 `compile_error!` 守卫已在 [`crates/xybrid-core/src/lib.rs`](../crates/xybrid-core/src/lib.rs) 中**实现**。每个冲突都会触发一个带修复提示信息的类型化编译错误 — 参见针对 Android 上 `llm-mistral`、`ort-download` 与 `ort-dynamic`、非 Apple 上 `candle-metal`、Apple 上 `candle-cuda`、以及非 Apple 上 `ort-coreml` 的 `compile_error!` 代码块。`--all-features` 这一行通过这些逐行守卫外加仅作标记的 `llm-mistral*` 构建中断来强制约束。
+**注意**：上表中列出的逐行 `compile_error!` 守卫已在 [`crates/xybrid-core/src/lib.rs`](../crates/xybrid-core/src/lib.rs) 中**实现**。每个冲突都会触发一个带修复提示信息的类型化编译错误 — 参见针对 Android 上 `llm-mistral`、`ort-download` 与 `ort-dynamic`、非 Apple 上 `candle-metal`、Apple 上 `candle-cuda`、以及非 Apple 上 `ort-coreml` 的 `compile_error!` 代码块。`--all-features` 这一行通过这些逐行守卫外加仅作标记的 `llm-mistral*` 构建中断来强制约束。无效的 Vulkan 环境变量取值以及不受支持的 Vulkan 目标则由 `llama-cpp-sys/build.rs` 拒绝。
 
 ---
 
@@ -194,6 +224,8 @@ llama.cpp 通过 ggml 使用**运行时 SIMD 检测**，因此对所有 Android 
 |------|---------|--------|
 | 默认特性的工作区 clippy | `cargo clippy --workspace -- -D warnings` | 默认的 `ort-download` 形态；在不启用其他任何特性时，随附的 crate 也能干净编译。 |
 | Vision 总括的工作区 clippy | `cargo clippy --workspace --features llm-llamacpp-vision --tests --examples -- -D warnings` | 经由 llama.cpp `mtmd` 的完整 VLM 路径，包括以 `llm-llamacpp-vision` 为门禁的 vision 测试/示例。 |
+| llama.cpp Vulkan 检查 | `XYBRID_LLAMA_CPP_VULKAN=1 cargo check -p xybrid-sdk --features platform-desktop` | Linux CI 先安装 Vulkan SDK/loader，再验证可选启用的 llama.cpp Vulkan 构建。 |
+| Bazel Vulkan 通道 | `bazel build --config=remote --config=linux-vulkan -c opt //crates/xybrid-cli:xybrid` | 同一后端在 Bazel 构建图上的版本 — 即发布构件会出自的那条通道。它会链接 CLI 并做冒烟测试，因此与上一行的 `cargo check` 不同，它还能验证 loader 的链接。 |
 | **禁止使用 `--all-features`。** | — | 参见上文的冲突表。 |
 
 ### 平台预设矩阵

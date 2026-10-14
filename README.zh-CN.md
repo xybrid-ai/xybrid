@@ -12,7 +12,7 @@
 
 <p align="center">
   <strong>在应用与游戏中原生运行 LLM、ASR 与 TTS。</strong><br/>
-  <a href="#flutter">Flutter</a> · <a href="#swift">Swift</a> · <a href="#kotlin">Kotlin</a> · <a href="#unity">Unity</a> · <a href="#rust">Rust</a><br/>
+  <a href="#flutter">Flutter</a> · <a href="#swift">Swift</a> · <a href="#kotlin">Kotlin</a> · <a href="#react-native">React Native</a> · <a href="#unity">Unity</a> · <a href="#rust">Rust</a><br/>
   隐私优先，离线可用，无需云端。
 </p>
 
@@ -36,6 +36,7 @@
 [![crates.io][crates-shield]][crates-url]
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
+[![npm][npm-shield]][npm-url]
 [![Swift Package Manager][spm-shield]][spm-url]
 <br>
 [![Ask DeepWiki][deepwiki-shield]][deepwiki-url]
@@ -71,6 +72,8 @@
 [pubdev-url]: https://pub.dev/packages/xybrid_flutter
 [maven-shield]: https://img.shields.io/maven-central/v/ai.xybrid/xybrid-kotlin?style=flat-square&label=Maven%20Central
 [maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
+[npm-shield]: https://img.shields.io/npm/v/%40xybrid%2Freact-native?style=flat-square&label=npm&logo=npm
+[npm-url]: https://www.npmjs.com/package/@xybrid/react-native
 [spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat-square&logo=swift&logoColor=white
 [spm-url]: https://github.com/xybrid-ai/xybrid
 
@@ -78,7 +81,7 @@
 [deepwiki-shield]: https://deepwiki.com/badge.svg
 [deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
 [stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square
-[stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
+[stars-url]: https://github.com/xybrid-ai/xybrid#star-history
 [twitter-shield]: https://img.shields.io/badge/Follow-%40xybrid__ai-000000?style=for-the-badge&logo=x&logoColor=white
 [twitter-url]: https://x.com/xybrid_ai
 [visitors-shield]: https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid
@@ -100,6 +103,7 @@
   <a href="https://docs.xybrid.dev/zh/docs/sdks/flutter"><img src="https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Flutter SDK"></a>
   <a href="https://docs.xybrid.dev/zh/docs/sdks/ios"><img src="https://img.shields.io/badge/Swift-F05138?style=for-the-badge&logo=swift&logoColor=white" alt="Swift SDK"></a>
   <a href="https://docs.xybrid.dev/zh/docs/sdks/kotlin"><img src="https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin SDK"></a>
+  <a href="https://docs.xybrid.dev/zh/docs/sdks/react-native"><img src="https://img.shields.io/badge/React_Native-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React Native SDK"></a>
   <a href="https://docs.xybrid.dev/zh/docs/sdks/unity"><img src="https://img.shields.io/badge/Unity-000000?style=for-the-badge&logo=unity&logoColor=white" alt="Unity SDK"></a>
   <br>
   <a href="https://crates.io/crates/xybrid"><img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust crate"></a>
@@ -137,7 +141,7 @@ xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.6.0
+  xybrid_flutter: ^0.11.0
 ```
 
 **运行模型：**
@@ -154,7 +158,7 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.6.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.11.0")
 }
 ```
 
@@ -172,7 +176,7 @@ val result = model.runAsync(Envelope.text("国破山河在，城春草木深"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.6.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.11.0")
 ]
 ```
 
@@ -183,6 +187,31 @@ let model = try await Xybrid.model("kokoro-82m").load()
 let result = try await model.runAsync(envelope: Envelope.text("国破山河在，城春草木深"))
 // 输出 → 24kHz WAV 音频
 ```
+
+### React Native
+
+**安装** 到启用了新架构的 React Native 0.76+ 应用（或 Expo SDK 52+ 的开发构建）中：
+
+```sh
+npm install @xybrid/react-native@0.11.0
+```
+
+原生 React Native 应用请运行 `cd ios && pod install`；Expo 应用请运行 `npx expo prebuild`。Expo Go 无法加载该原生模块。
+
+**运行模型：**
+
+```ts
+import { Envelope, GenerationConfigs, ModelLoader } from '@xybrid/react-native';
+
+const model = await ModelLoader.fromRegistry('lfm2.5-230m').load();
+const result = await model.run(Envelope.text('Name three rivers.'), {
+  generationConfig: GenerationConfigs.greedy({ maxTokens: 64 }),
+});
+console.log(result.text);
+await model.release();
+```
+
+Expo 配置、流式输出与取消请参阅 [React Native 指南](https://docs.xybrid.dev/zh/docs/sdks/react-native)。在 iOS 模拟器上，llama.cpp 使用 CPU 以保证推理可靠；iOS 实体设备仍使用 Metal 加速。
 
 ### Unity
 
@@ -221,7 +250,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 ```toml
 [dependencies]
-xybrid = "0.6.0"
+xybrid = "0.11.0"
 ```
 
 **运行模型：**
@@ -231,8 +260,6 @@ let model = Xybrid::model("kokoro-82m").load()?;
 let result = model.run(&Envelope::text("国破山河在，城春草木深"))?;
 // 输出 → 24kHz WAV 音频
 ```
-
-完整安装选项、硬件加速与 CLI 参考请参阅 [安装指南](docs/INSTALLATION.zh.md)。各平台的详细设置请参阅对应 SDK 的 README：[Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
 
 <details>
 <summary><h3>多模型推理流水线 — MMP（实验性）</h3></summary>
@@ -261,17 +288,23 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 
 **Kotlin:**
 ```kotlin
-// 多模型流水线（MMP）支持即将推出，当前请使用单模型加载
+val pipeline = XybridPipeline.fromYamlAsync(yamlString)
+val result = pipeline.runAsync(inputEnvelope)
+val transcript = result.stage("asr")?.text  // 每个阶段的输出，而不只是最后一个
 ```
 
 **Swift:**
 ```swift
-// 多模型流水线（MMP）支持即将推出，当前请使用单模型加载
+let pipeline = try await XybridPipeline.fromYamlAsync(yamlString)
+let result = try await pipeline.runAsync(envelope: inputEnvelope)
+let transcript = result.stage("asr")?.text  // 每个阶段的输出，而不只是最后一个
 ```
 
 **Unity (C#):**
 ```csharp
-// 多模型流水线（MMP）支持即将推出，当前请使用单模型加载
+using var pipeline = Pipeline.FromYaml(yamlString);
+PipelineResult result = pipeline.Run(inputEnvelope);
+string transcript = result.Stage("asr")?.Text;  // 每个阶段的输出，而不只是最后一个
 ```
 
 **Rust:**
@@ -384,9 +417,9 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 | 嵌入模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 多模型流水线（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 硬件加速 | Metal, ANE | CPU | Metal, ANE | CPU，可选 Vulkan | CPU |
+| 硬件加速 | 实体设备上为 Metal, ANE；模拟器上为 CPU llama.cpp | CPU | Metal, ANE | CPU，可选 Vulkan | CPU |
 
-**SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+**SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
 **工具调用：** 本地模型调用你定义的函数——工具就是普通数据，循环由你的代码掌控。
 参见[工具调用指南](https://docs.xybrid.dev/zh/docs/guides/tool-calling)。
@@ -403,7 +436,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 - **无需发版即可更换模型** — 模型在运行时从注册表解析并缓存在设备上。
 - **云端回退** — 按次调用选择启用（[文档](https://docs.xybrid.dev/zh/docs/concepts/hybrid-execution)）。
 - **可控的遥测** — 需通过 API 密钥主动启用（[文档](docs/telemetry/registry.md)）。
-- **硬件加速** — Apple 平台支持 Metal 与 Apple Neural Engine，Linux 可选启用 Vulkan；Android 与 Windows 目前为 CPU（[文档](docs/INSTALLATION.md#platform-features)）。
+- **硬件加速** — Apple 平台支持 Metal 与 Apple Neural Engine，Linux 可选启用 Vulkan；Android 与 Windows 目前为 CPU（[文档](docs/INSTALLATION.zh.md#平台特性)）。
 
 ### 与其他方案对比
 
@@ -429,9 +462,14 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 
 我们欢迎贡献！请参阅 [CONTRIBUTING.md](./CONTRIBUTING.md) 了解开发环境设置、提交 PR 和添加新模型的指南。
 
+**初次参与？** 可以浏览 [`good first issue`](https://github.com/xybrid-ai/xybrid/labels/good%20first%20issue) 标签，找一些小而独立的任务。任务还按领域分组：[`area: core`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20core)、[`area: sdk`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20sdk)、[`area: examples`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20examples)、[`area: bindings`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20bindings)、[`area: tests`](https://github.com/xybrid-ai/xybrid/labels/area%3A%20tests)。中等难度的任务归在 [`help wanted`](https://github.com/xybrid-ai/xybrid/labels/help%20wanted) 标签下。
+
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=xybrid-ai/xybrid&type=date&legend=bottom-right)](https://www.star-history.com/#xybrid-ai/xybrid&type=date&legend=bottom-right)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/xybrid-ai/xybrid/star-history/star-history-dark.svg">
+  <img alt="xybrid-ai/xybrid 的 Star 历史" src="https://raw.githubusercontent.com/xybrid-ai/xybrid/star-history/star-history.svg">
+</picture>
 
 ## 许可证
 

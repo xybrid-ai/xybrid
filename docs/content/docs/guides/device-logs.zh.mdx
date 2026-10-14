@@ -1,0 +1,72 @@
+---
+title: 设备日志
+description: xybrid 日志在 Android 和 iOS 上出现在哪里，以及遇到静默失败时如何查看这些日志
+---
+
+SDK 通过各平台的原生日志系统报告问题——遥测批次无法送达上报端点、注册表端点发生故障切换、模型解析出错。网络被屏蔽或 API 密钥有误时，不会发生任何崩溃；SDK 会优雅降级，并在日志中说明原因。本页告诉你该去哪里看。
+
+你的应用初始化 SDK 的那一刻（`Xybrid.init` / `Xybrid.initialize`——任意入口点均可），日志记录就会自动开始。什么都不需要启用。
+
+## 日志出现在哪里
+
+| 平台 | 输出位置 | 过滤条件 |
+|----------|-------------|--------|
+| Android | logcat | 标签 `xybrid` |
+| iOS / macOS 应用 | 统一日志（Console.app） | 子系统 `dev.xybrid.sdk` |
+| 桌面端（Rust、Python、CLI） | 宿主进程 | 自行注册 `log` 后端 |
+
+在移动端，SDK 会自行注册日志接收器（sink）。在桌面端的宿主进程中，除非宿主注册了日志器（`env_logger`、带 `log` 桥接的 `tracing` subscriber 等），否则 SDK 保持静默——SDK 绝不会从拥有全局日志器的应用手中把它抢走。
+
+## 查看日志
+
+<Tabs items={['Android', 'iOS']}>
+  <Tab value="Android">
+
+```bash
+# 实时查看 SDK 输出的全部日志：
+adb logcat -s xybrid
+
+# 只看警告和错误：
+adb logcat -s xybrid:W
+```
+
+  </Tab>
+  <Tab value="iOS">
+
+```bash
+# 模拟器：
+xcrun simctl spawn booted log stream --predicate 'subsystem == "dev.xybrid.sdk"'
+
+# 实体设备（或使用 Console.app 并按子系统过滤）：
+log stream --device --predicate 'subsystem == "dev.xybrid.sdk"'
+```
+
+在 Console.app 中，启用 **Action → Include Info Messages**——SDK 以 Info 及以下级别记录日志，而 Console 默认会隐藏这些级别的消息。
+
+  </Tab>
+</Tabs>
+
+## 该关注什么
+
+**遥测数据未送达控制台。** 每次导出失败，都会记录尝试次数和底层的传输错误：
+
+```
+W/xybrid: Transport error sending telemetry batch (attempt 1/3): Connection Failed
+```
+
+如果什么都看不到，说明遥测没有启用——只有在初始化时配置了 API 密钥，遥测才会启动。
+
+**模型下载失败。** 注册表客户端在放弃之前，会记录它尝试过的每一个端点：
+
+```
+W/xybrid: URL https://registry.xybrid.dev failed: Registry unreachable:
+          Failed to resolve model (connection refused or host unreachable), trying next
+```
+
+上面这两条日志有一个共同原因，值得尽早排查：**屏蔽出站 TCP 443 的网络**（企业 Wi-Fi 和访客 Wi-Fi 最为常见）。设备可能看起来“在线”——ping 得通、强制门户认证也已通过——而应用发出的每一个 HTTPS 连接却都会超时。在进一步调试之前，先换一个网络或换用热点试试。
+
+**模型执行。** 加载和推理步骤会以 Info 级别记录日志（执行提供程序的选择、预处理步骤、执行完成），这样在怀疑更深层的问题之前，可以很容易先确认 SDK 确实被调用到了。
+
+## 日志级别
+
+日志接收器以 **Info** 级别注册：警告和错误始终会出现；每个请求的调试细节（HTTP 连接追踪、缓存探测）以 Debug 级别编译在内，但不会输出。目前没有可在运行时提升详细等级的开关——如果 Info 级别的日志无法解释某次失败，请附上你手头的日志行提交 issue。

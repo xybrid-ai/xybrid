@@ -1,0 +1,102 @@
+---
+title: React Native
+description: 面向 React Native 应用（iOS 和 Android）的本地 ML 推理
+---
+
+React Native 包（`@xybrid/react-native`）用 TurboModule 封装了与 Swift 和 Kotlin SDK 相同的 Rust 核心，因此 API、模型和错误码与其他所有绑定一致。它目前处于**预览**阶段：接口已完整并经过测试，但在 1.0 之前仍可能变化。
+
+## 要求
+
+- React Native 0.76+，并启用新架构（Expo SDK 52+ 需使用开发构建——而非 Expo Go）
+- iOS 16.0+（模拟器构建需要 Apple Silicon Mac）
+- Android API 24+（`arm64-v8a`、`armeabi-v7a`、`x86_64`）
+
+## 安装
+
+```bash
+npm install @xybrid/react-native@0.11.0
+```
+
+原生 React Native 应用运行 `cd ios && pod install`。Expo 应用运行 `npx expo prebuild` 并使用开发构建；Expo Go 无法加载该原生模块。不需要任何配置插件（config plugin）。
+
+在 iOS 上，`pod install` 会从对应的 GitHub Release 下载 Rust 核心，并校验其 SHA-256。离线或需要通过代理联网时，请设置 `XYBRID_NATIVES_BASE_URL`（镜像）或 `XYBRID_XCFRAMEWORK_PATH`（本地副本）。在 Android 上，Gradle 从 Maven Central 解析 Kotlin SDK。
+
+在 iOS 模拟器上，llama.cpp 使用 CPU 运行，以避免出现无效的特殊 token 输出。实体 iOS 设备仍使用 Metal 加速。此变更已包含在 0.10.1 中。
+
+## 初始化
+
+本地推理无需任何配置。传入 API 密钥，即可在同一个本地运行时之上启用云端回退、推测式云端服务（speculative cloud serving）和[控制台](https://dashboard.xybrid.dev)遥测：
+
+```ts
+import { Xybrid } from '@xybrid/react-native';
+
+await Xybrid.initialize({ apiKey: XYBRID_API_KEY });
+```
+
+选项在每个应用进程中只生效一次；之后以不同选项发起的调用会被拒绝，错误码为 `xybrid_config_error`。
+
+## 运行模型
+
+```ts
+import { Envelope, GenerationConfigs, ModelLoader } from '@xybrid/react-native';
+
+const model = await ModelLoader.fromRegistry('qwen3.5-0.8b').load();
+const result = await model.run(Envelope.text('Name three rivers.'), {
+  generationConfig: GenerationConfigs.greedy({ maxTokens: 64 }),
+});
+console.log(result.text, result.metrics.tokensPerSecond);
+await model.release(); // 权重驻留在原生内存中
+```
+
+## 流式输出与取消
+
+`runStreaming` 是一个异步生成器。传入一个 `AbortSignal` 充当停止按钮；当你用 `break` 跳出循环时，生成也会停止：
+
+```ts
+const controller = new AbortController();
+for await (const token of model.runStreaming(Envelope.text('Tell me a story'), {
+  signal: controller.signal,
+})) {
+  append(token.token);
+}
+// controller.abort() → 运行会在下一个 token 处停止并被拒绝，错误码为 xybrid_cancelled
+```
+
+## 对话
+
+```ts
+import { ConversationContext, Envelope } from '@xybrid/react-native';
+
+const chat = await ConversationContext.create();
+await chat.setSystem('You are concise.');
+const question = Envelope.user('What is the capital of France?');
+const reply = await model.run(question, { context: chat });
+await chat.push(question);       // 运行绝不会修改上下文：
+await chat.push(reply.envelope); // 请在运行结束后 push 这两个轮次
+```
+
+## 更多能力
+
+该包覆盖完整的 SDK 接口——每一项的示例请参阅[包的 README](https://github.com/xybrid-ai/xybrid/tree/master/bindings/react-native#readme)：
+
+- 结构化输出（`jsonSchemaToGbnf` + `generationConfig.grammar`）
+- 工具调用（`generationConfig.tools`、`result.toolCalls`、`Envelope.toolResults`）
+- 视觉（`Envelope.image`、`Envelope.userMessage`）
+- 文本转语音音色，以及批量与实时（`model.stream()`）语音识别
+- 多阶段流水线（`Pipeline.fromYaml` / `fromFile`）
+- 带进度的后台下载、推测式云端服务、模型缓存管理与内存释放
+
+## 错误
+
+每次拒绝都带有一个稳定的 `code`，iOS 和 Android 上是同一套：
+
+```ts
+import { isRetryable, isXybridError } from '@xybrid/react-native';
+
+try {
+  await model.run(envelope);
+} catch (error) {
+  if (isXybridError(error) && error.code === 'xybrid_model_not_found') { /* … */ }
+  if (isRetryable(error)) { /* 稍后重试：网络、限流、超时、离线 */ }
+}
+```

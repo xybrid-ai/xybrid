@@ -150,7 +150,7 @@ GGUF 模型通过 llama.cpp 内部处理分词，无需预处理步骤。
 }
 ```
 
-完整字段参考见 [MODEL_METADATA.md](../sdk/MODEL_METADATA.md)。如需编辑器自动补全和验证，请使用 [JSON Schema](../sdk/model_metadata.schema.json)。
+完整字段参考见 [MODEL_METADATA.zh.md](../sdk/MODEL_METADATA.zh.md)。如需编辑器自动补全和验证，请使用 [JSON Schema](../sdk/model_metadata.schema.json)。
 
 ## 第三步：使用 fromDirectory() 加载
 
@@ -545,13 +545,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - 文本分类 / NER：Tokenize → 模型 → ArgMax
 - 文本生成（GGUF）：Gguf 模板，无步骤
 
-完整字段参考：https://github.com/xybrid-ai/xybrid/blob/main/docs/sdk/MODEL_METADATA.md
+完整字段参考：https://github.com/xybrid-ai/xybrid/blob/main/docs/sdk/MODEL_METADATA.zh.md
 JSON Schema：https://github.com/xybrid-ai/xybrid/blob/main/docs/sdk/model_metadata.schema.json
 ````
 
 ### 实战示例：配置 BERT NER 模型
 
-假设你下载了 ONNX 格式的 [dslim/bert-base-NER](https://huggingface.co/dslim/bert-base-NER)，但不确定如何配置。
+下面是一次真实的交互过程。假设你下载了 ONNX 格式的 [dslim/bert-base-NER](https://huggingface.co/dslim/bert-base-NER)，但不确定如何配置。
 
 **第一步：检查模型**
 
@@ -604,6 +604,8 @@ Outputs:
 
 **第三步：AI Agent生成配置**
 
+Agent 生成的结果：
+
 ```json
 {
   "model_id": "bert-base-ner",
@@ -655,6 +657,6 @@ AI Agent的输出是尽力而为的起点。如果推理结果不符合预期，
 
 ## 下一步
 
-- **[MODEL_METADATA.md](../sdk/MODEL_METADATA.md)** — 每种执行模板类型、预处理步骤和后处理步骤的完整字段参考
+- **[MODEL_METADATA.zh.md](../sdk/MODEL_METADATA.zh.md)** — 每种执行模板类型、预处理步骤和后处理步骤的完整字段参考
 - **[JSON Schema](../sdk/model_metadata.schema.json)** — 在编辑器中使用，获得自动补全和验证
 - **[API Reference](../sdk/API_REFERENCE.md)** — 所有平台的完整 SDK API 文档

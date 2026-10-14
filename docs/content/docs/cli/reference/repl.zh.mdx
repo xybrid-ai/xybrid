@@ -1,0 +1,76 @@
+---
+title: xybrid repl
+description: 与本地模型的交互式对话 — 模型保持常驻，支持工具调用
+---
+
+启动与本地模型的交互式会话。模型只加载一次并保持常驻；LLM 会获得跨轮次的对话上下文，并在支持时启用内置的工具调用。
+
+## 用法
+
+```bash
+xybrid repl --model <id>
+xybrid repl --model-file <path.gguf>
+xybrid repl --huggingface <repo[:variant]>
+xybrid repl --config <pipeline.yaml>
+```
+
+## 选项
+
+| 选项 | 说明 |
+|--------|-------------|
+| `--model` | 注册表中的模型 ID（例如 `lfm2.5-350m`） |
+| `--model-file` | 本地 GGUF 文件的路径（缺少元数据时自动生成） |
+| `--huggingface` | HuggingFace 仓库，`:VARIANT` 用于选择 GGUF 量化版本 |
+| `--config` | 流水线 YAML（多阶段会话） |
+| `--system` | 助手的系统提示词 |
+| `--stream` | 生成时流式输出 token（LLM） |
+| `--show-reasoning` | 打印模型的 `<think>` 思维链（默认会从答案中剥离）；会禁用 token 流式输出 |
+| `--no-tools` | 即使模型支持，也禁用工具调用 |
+| `--tools-file` | 从 JSON/YAML 文件添加用户自定义工具 |
+| `--voice` | TTS 模型的音色 ID |
+| `--target` | 执行目标（`auto`、`local`、`cloud`、`server`） |
+
+## 会话内命令
+
+| 命令 | 说明 |
+|---------|-------------|
+| `help`、`?` | 显示命令列表 |
+| `history` | 显示对话（LLM） |
+| `clear` | 重置对话 |
+| `/image <path>` | 为下一条消息附加一张图像（VLM） |
+| `/tools` | 列出可用工具及其状态 |
+| `/tools on\|off` | 切换本次会话的工具调用开关 |
+| `quit`、`exit`、`q` | 退出 REPL |
+
+## 工具调用
+
+对于 Bundle 元数据声明了 `tool_calling: true` 的模型，默认提供三个内置工具 — `web_search`、`fetch_url` 和 `current_time` — 并附带一条启动横幅（web_search / fetch_url 会访问网络）：
+
+```
+✔ Tool calling: on
+› web_search / fetch_url reach the network; current_time stays local
+Search           wikipedia (keyless)
+
+❯ who won the 2022 fifa world cup final?
+  ⚙ web_search("2022 FIFA World Cup final winner") · 614ms
+    Search "2022 FIFA World Cup final winner": The 2022 FIFA World Cup final…
+  The 2022 FIFA World Cup final was won by Argentina.
+```
+
+搜索提供商可插拔，通过环境变量配置：
+
+| 变量 | 取值 |
+|----------|--------|
+| `XYBRID_SEARCH_PROVIDER` | `wikipedia`（默认，无需密钥）· `tavily` · `brave` |
+| `TAVILY_API_KEY` | 提供商为 `tavily` 时的 API 密钥 |
+| `BRAVE_API_KEY` | 提供商为 `brave` 时的 API 密钥 |
+
+使用 `--tools-file` 添加你自己的工具 — 每个条目将一个带 JSON Schema 的函数映射到你编写的命令（参数以 stdin 上的 JSON 形式到达，stdout 即结果）。传入该选项是一种显式的选择加入（opt-in），它还会为元数据未作声明的模型启用工具。文件格式与完整约定请参阅[工具调用指南](/zh/docs/guides/tool-calling)。
+
+使用 `--stream` 时，普通答案逐 token 流式输出；带工具的轮次则在工具结果之后将答案整块打印（续接轮次为非流式），并在切换发生时给出提示。
+
+## 说明
+
+- 模型在启动时加载一次，并在各轮次之间保持常驻 — 多次查询会完全跳过加载延迟。
+- 对于 LLM，对话上下文会自动启用；`history` 和 `clear` 用于管理它。
+- 工具是否可用因模型而异：Bundle 在 `model_metadata.json` 中声明 `tool_calling: true`；当工具处于关闭状态时，`/tools` 会说明原因。

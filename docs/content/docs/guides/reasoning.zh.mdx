@@ -1,0 +1,133 @@
+---
+title: 思维链
+description: 读取思考型模型的思维链——在设备端，不混入答案
+---
+
+有些本地模型经过训练，会*先思考，再作答*：它们先输出一段思维链，再给出最终回复。Xybrid 把这段思维链排除在答案文本之外，并将其单独呈现，这样你既能得到干净的答案，又可以选择查看模型是如何得出答案的——这一切都在设备端完成。
+
+Xybrid 的设计准则是**能力是数据，而非入口点**。思维链复用既有类型，**不新增任何 run 方法**：
+
+1. 加载一个推理模型（其元数据中带有 `reasoning: true` 标志）。
+2. 照常 `run` 该请求——什么都不需要启用。
+3. 从 `text` 读取答案，从 `reasoningContent` 读取思维链。
+
+`text` 中的答案绝不包含 `<think>…</think>` 标记；对于非推理模型（或没有输出任何思维链的模型），`reasoningContent` 为 `null`。这纯粹是新增功能：读取 `text` 的现有代码不受影响。
+
+<Callout type="info">
+思维链捕获运行在本地 llama.cpp 后端上。思考型模型的 `<think>` 块由一个聊天模板标志门控，而 llama.cpp 的旧版模板应用器不会渲染这个标志，因此对于带有 `reasoning: true` 标志的模型，xybrid 会自行预先开启（prime）该通道——你什么都不需要启用，只需决定是否读取 `reasoningContent`。
+</Callout>
+
+## 支持的模型
+
+任何 `model_metadata.json` 中设置了 `reasoning: true` 的 Bundle 都支持。参考模型是 **`lfm2.5-1.2b-thinking`**（Liquid AI 的 1.2B 推理模型），它在每次作答之前都会输出一段思维链。
+
+| 模型 | 输出思维链 | 说明 |
+|-------|-----------------|-------|
+| `lfm2.5-1.2b-thinking` | 是 | 混合卷积+注意力推理模型，约 697 MB |
+| `qwen3.5-0.8b` / `qwen3.5-2b` | 有时 | Qwen 3.5 thinking 模式 |
+
+## 读取思维链
+
+同样的 `run`，同样的结果——思维链是 `text` 的同级字段。
+
+### Swift
+
+```swift
+let model = try await Xybrid.model("lfm2.5-1.2b-thinking").load()
+let result = try await model.runAsync(envelope: XybridEnvelope.text(
+    "Is 97 a prime number? Reason, then answer."))
+
+if let answer = result.text { print("Answer:", answer) }
+if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
+```
+
+### Kotlin
+
+```kotlin
+val model = Xybrid.model("lfm2.5-1.2b-thinking").load()
+val result = model.runAsync(Envelope.text("Is 97 a prime number? Reason, then answer."))
+
+result.text?.let { println("Answer: $it") }
+result.reasoningContent?.let { println("Reasoning: $it") }
+```
+
+### Dart (Flutter)
+
+```dart
+final model = await XybridModelLoader.fromRegistry('lfm2.5-1.2b-thinking').load();
+final result = await model.run(XybridEnvelope.text(
+    'Is 97 a prime number? Reason, then answer.'));
+
+if (result.text != null) print('Answer: ${result.text}');
+if (result.reasoningContent != null) print('Reasoning: ${result.reasoningContent}');
+```
+
+### Rust
+
+```rust
+use xybrid_sdk::ModelLoader;
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+
+let model = ModelLoader::from_registry("lfm2.5-1.2b-thinking").load()?;
+let result = model.run(
+    &Envelope::new(EnvelopeKind::Text("Is 97 a prime number? Reason, then answer.".into())),
+    None,
+)?;
+
+println!("Answer: {}", result.text().unwrap_or_default());
+if let Some(reasoning) = result.reasoning_content() {
+    println!("Reasoning: {reasoning}");
+}
+```
+
+该值在每个 SDK 中都相同（`String?` / `Option<&str>`，不存在时为 `null`/`None`）。C ABI 以 `xybrid_result_reasoning_content()` 的形式暴露它，React Native 与 Unity 绑定也同样提供 `reasoningContent`。
+
+## 在 CLI 中查看思维链（`xybrid run`）
+
+`--show-reasoning` 选项会将思维链打印在答案下方的独立区段中：
+
+```bash
+xybrid run --model lfm2.5-1.2b-thinking \
+  --input-text "Is 97 a prime number? Reason, then answer." \
+  --show-reasoning
+```
+
+```text
+  ── Results ──
+    …no divisors other than 1 and itself. Thus, 97 is prime.
+    \boxed{Yes}
+
+  ── Reasoning ──
+    Check divisibility by primes ≤ √97 ≈ 9.85: 2, 3, 5, 7. None divide 97…
+```
+
+非推理模型则改为打印 `No reasoning emitted`。`xybrid repl` 也支持 `--show-reasoning`，会将每个轮次的思维链以暗色块打印在该轮次产出内容的上方。
+
+## 在你自己的 Bundle 中声明支持
+
+在 `model_metadata.json` 中标记推理模型，这样 xybrid 就会预先开启并捕获它的思维链（`/xybrid-init` skill 可以生成元数据）：
+
+```json
+{
+  "metadata": {
+    "reasoning": true
+  }
+}
+```
+
+没有该标志时，xybrid 会把模型当作普通 LLM：模型自行输出的任何 `<think>` 块仍会从 `text` 中剥离并被捕获，但 xybrid 不会预先开启该通道，因此只在*被要求时*才思考的模型会保持沉默。
+
+## 可识别的格式
+
+思维链依据以下定界符捕获（在答案文本中捕获，并在流式输出期间从实时回调中抑制）：
+
+- `<think>…</think>`——Qwen 3 / DeepSeek-R1 / LFM2.5-thinking（xybrid 预先开启的就是这种形式）。
+- `<thinking>…</thinking>`——Anthropic 风格。
+- `<|channel>thought … <channel|>`——gemma-4 的思考通道。可以识别，但 xybrid 目前在禁用思考的情况下运行 gemma-4，因此这条路径尚未端到端地实际运行过。
+
+其他定制的思维链定界符不会被解析。
+
+## 不算思维链的情况
+
+- **仅含空白的块**——模型打开一个块后立即将其关闭、其中没有任何内容时，`reasoningContent` 不存在（为 `null`），而不是空字符串。
+- **流式输出**——思维链随最终的（非流式）结果返回；流式输出期间，它会从 token 回调中被抑制，因此绝不会泄漏到实时答案中。
