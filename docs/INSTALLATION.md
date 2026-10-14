@@ -362,8 +362,9 @@ The `run` command accepts multiple input sources (mutually exclusive):
 | `--input-text <text>` | Text input (for TTS, LLM) |
 | `--input-audio <file>` | Audio input WAV file (for ASR) |
 | `--input-image <file>` | Image input for vision-language models; repeatable |
+| `--choice <id>=<text>` | Candidate for a choice-scoring model to score against `--input-text`; repeatable |
 | `--voice <id>` | TTS voice ID (e.g., `af_bella`) |
-| `--output <file>` | Output file (.wav for audio, .txt for text) |
+| `--output <file>` | Output file (.wav for audio, .txt for text, .json for choice scores) |
 | `--target <format>` | Target format (onnx, coreml, tflite) |
 | `--dry-run` | Validate without executing |
 | `--trace` | Enable execution tracing |

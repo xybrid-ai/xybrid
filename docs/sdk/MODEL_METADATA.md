@@ -188,8 +188,9 @@ Each stage in a `ModelGraph` has an `execution_mode`:
 
 A decision model: it reads one context and a closed list of candidates and
 returns one score per candidate instead of generating output. It accepts only a
-choice request (`Envelope::choice_request` in Rust), and only through a batch
-run (`run`, `run_with_options`, `run_async`). Streaming, conversation history
+choice request (`Envelope::choice_request` in Rust, `xybrid run --choice` from
+the CLI), and only through a batch run (`run`, `run_with_options`,
+`run_async`). Streaming, conversation history
 and pipelines refuse it, as does every other model, and the language bindings
 refuse to load it. `scorer` says how a request becomes
 model input, and its `"type"` names the kind of scorer. `OnnxByteOptionScorer`
