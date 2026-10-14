@@ -20,8 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its spec once and keeps that session for later runs, and `warmup()` scores a
   synthetic request. Telemetry reports the decision task, the backend and the
   number of candidates, never ids, texts or scores. When ONNX Runtime fails a
-  scorer run, its message is withheld from the error, and the run sets ONNX
-  Runtime's own log level to fatal, so ONNX Runtime doesn't log it either. The
+  scorer run, its message is withheld from the error. Scorer sessions and runs
+  set ONNX Runtime's own log level to fatal, so ONNX Runtime doesn't log that
+  message, or a warning that quotes what the request produced, either. The
   language bindings still refuse to load a scorer.
 
 ### Changed

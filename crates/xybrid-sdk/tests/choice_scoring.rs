@@ -543,9 +543,16 @@ impl log::Log for RecordingLogger {
     fn flush(&self) {}
 }
 
-/// What ONNX Runtime says when the byte-table scorer fails: it quotes the
-/// offending byte id.
-const RUNTIME_MESSAGE: [&str; 2] = ["out of data bounds", "idx="];
+/// What ONNX Runtime logs about the fake scorers' runs, when it logs them:
+/// the byte table's failure quotes the offending byte id, and
+/// `shape_warning.onnx`'s warning quotes a length taken from the first context
+/// byte.
+const RUNTIME_MESSAGES: [&str; 4] = [
+    "out of data bounds",
+    "idx=",
+    "VerifyOutputSizes",
+    "actual shape",
+];
 
 /// Set in the child process that `caller_content_reaches_only_the_result`
 /// starts.
@@ -559,7 +566,9 @@ const PRIVACY_CHILD: &str = "XYBRID_TEST_CHOICE_PRIVACY_CHILD";
 /// listener are process-wide, and another test's telemetry resets the span
 /// collector, which could drop this test's spans before they are checked. So
 /// the checks run alone, in a child copy of this test binary; this test reads
-/// the child's result and stderr.
+/// the child's result and stderr. The child starts ONNX Runtime with its
+/// environment logging warnings (`ORT_LOG=warning`), so a scorer that let
+/// ONNX Runtime log would show on that stderr.
 #[test]
 fn caller_content_reaches_only_the_result() {
     if std::env::var_os(PRIVACY_CHILD).is_some() {
@@ -573,6 +582,7 @@ fn caller_content_reaches_only_the_result() {
             "--nocapture",
         ])
         .env(PRIVACY_CHILD, "1")
+        .env("ORT_LOG", "warning")
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -581,7 +591,7 @@ fn caller_content_reaches_only_the_result() {
         output.status.success() && stdout.contains("1 passed"),
         "the child run failed or matched no test:\n{stdout}\n{stderr}"
     );
-    for leak in std::iter::once(CANARY).chain(RUNTIME_MESSAGE) {
+    for leak in std::iter::once(CANARY).chain(RUNTIME_MESSAGES) {
         assert!(
             !stderr.contains(leak),
             "the child's stderr carries {leak:?}:\n{stderr}"
@@ -668,16 +678,21 @@ fn check_every_surface_for_caller_content() {
     );
     assert!(errors.len() >= 17, "{errors:#?}");
 
-    // A scored request, through the SDK and the executor, and a run ONNX
+    // A request scored through the SDK and the executor, and a run ONNX
     // Runtime fails: the byte table refuses letters with a message quoting
-    // the byte.
+    // the byte. The SDK also scores it with `shape_warning.onnx`, whose extra
+    // output is as long as the first context byte id (100, for 'c'), which
+    // ONNX Runtime warns about at the child's log level.
     let ran = onnx_runtime();
     if ran {
-        let scored = scorer
-            .run(&canary_request, None)
-            .expect("a valid request is scored");
-        let first = &scored.choice_scores().expect("scores").entries[0];
-        assert_eq!(first.id, CANARY, "the result names the candidates");
+        let (_warning_dir, warning) = scorer_with("shape_warning.onnx");
+        for model in [&scorer, &warning] {
+            let scored = model
+                .run(&canary_request, None)
+                .expect("a valid request is scored");
+            let first = &scored.choice_scores().expect("scores").entries[0];
+            assert_eq!(first.id, CANARY, "the result names the candidates");
+        }
         assert!(executor.execute(&metadata, &canary_request, None).is_ok());
 
         let (_table_dir, table) = scorer_with("byte_table.onnx");
@@ -694,10 +709,11 @@ fn check_every_surface_for_caller_content() {
     let logs = LOG_LINES.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let listened = listened.lock().unwrap_or_else(|e| e.into_inner()).clone();
 
-    // The scored request's own completion names the decision, counts its
-    // five candidates and carries its spans; the executor's run and the
-    // failed one leave theirs in the trace. Both are then checked below, so
-    // this is the evidence that those checks saw the scorer's trace.
+    // Each request the SDK scored has its own completion, which names the
+    // decision, counts its five candidates and carries its spans; the
+    // executor's run and the failed one leave theirs in the trace. Both are
+    // then checked below, so this is the evidence that those checks saw the
+    // scorers' traces.
     let decisions: Vec<serde_json::Value> = telemetry
         .iter()
         .filter(|event| event.event_type == "ModelComplete")
@@ -706,21 +722,21 @@ fn check_every_surface_for_caller_content() {
         .collect();
     let scoring_span = |span: &serde_json::Value| span["name"] == "choice_scoring";
     if ran && !xybrid_sdk::is_telemetry_opted_out() {
-        let [data] = decisions.as_slice() else {
-            panic!("one scored request, one decision: {decisions:?}");
-        };
-        assert_eq!(data["task"], "decision", "{data}");
-        assert_eq!(data["backend"], "ort", "{data}");
-        assert_eq!(data["choice_count"], 5, "{data}");
-        let spans = data["spans"]
-            .as_array()
-            .expect("the completion carries its spans");
-        assert!(
-            spans
-                .iter()
-                .any(|span| scoring_span(span) && span["metadata"]["choice_count"] == "5"),
-            "{data}"
-        );
+        assert_eq!(decisions.len(), 2, "two scored requests: {decisions:?}");
+        for data in &decisions {
+            assert_eq!(data["task"], "decision", "{data}");
+            assert_eq!(data["backend"], "ort", "{data}");
+            assert_eq!(data["choice_count"], 5, "{data}");
+            let spans = data["spans"]
+                .as_array()
+                .expect("the completion carries its spans");
+            assert!(
+                spans
+                    .iter()
+                    .any(|span| scoring_span(span) && span["metadata"]["choice_count"] == "5"),
+                "{data}"
+            );
+        }
     } else {
         assert!(decisions.is_empty(), "{decisions:?}");
     }
@@ -744,7 +760,7 @@ fn check_every_surface_for_caller_content() {
                 !line.contains(CANARY),
                 "{surface} leaked caller content: {line}"
             );
-            for message in RUNTIME_MESSAGE {
+            for message in RUNTIME_MESSAGES {
                 assert!(
                     !line.contains(message),
                     "{surface} carries ONNX Runtime's message: {line}"

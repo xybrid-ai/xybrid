@@ -3044,8 +3044,13 @@ impl TemplateExecutor {
         self.choice_scorer_cache = None;
         let model_path = Path::new(&self.base_path).join(&spec.model_file);
         let identity = file_identity(&model_path);
-        let session = Arc::new(OnnxSessionFactory::create_session(
-            &model_path,
+        let path = model_path
+            .to_str()
+            .ok_or_else(|| AdapterError::InvalidInput("Invalid model path encoding".to_string()))?;
+        // ONNX Runtime may quote what the request's bytes produced, so neither
+        // this session's log nor its runs' may carry anything below fatal.
+        let session = Arc::new(ONNXSession::build_unlogged(
+            path,
             ExecutionProviderKind::Cpu,
             SessionOptions::default(),
         )?);
@@ -6332,9 +6337,32 @@ mod tests {
         }
     }
 
-    /// Set in the child process that
-    /// `scorer_execution_failure_writes_nothing_to_stderr` starts.
-    const STDERR_CHILD: &str = "XYBRID_TEST_FAILED_SCORER_RUN_CHILD";
+    /// Set in the child processes the `scorer_execution_*_to_stderr` tests
+    /// start.
+    const LOG_CHILD: &str = "XYBRID_TEST_SCORER_LOG_CHILD";
+
+    /// Runs `test` alone in a child copy of this test binary and returns its
+    /// stderr, after checking that the test ran and passed.
+    ///
+    /// ONNX Runtime writes its own log to stderr (and the system log on Apple
+    /// and Android), outside the errors it returns. The child starts ONNX
+    /// Runtime with its environment logging warnings (`ORT_LOG=warning`, read
+    /// once per process), so anything a scorer let through would show here.
+    fn stderr_of_child_test(test: &str) -> String {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([test, "--exact", "--nocapture"])
+            .env(LOG_CHILD, "1")
+            .env("ORT_LOG", "warning")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "the child run failed or matched no test:\n{stdout}\n{stderr}"
+        );
+        stderr
+    }
 
     /// Runs a request the byte-table scorer fails on and returns the error,
     /// after checking that ONNX Runtime itself failed the run: 'l' is byte
@@ -6371,37 +6399,61 @@ mod tests {
         );
     }
 
-    /// ONNX Runtime logs a failed run's message itself, to stderr (and the
-    /// system log on Apple and Android), outside the error it returns. A child
-    /// copy of this test binary fails a run, so the test can read the child's
-    /// stderr and check that ONNX Runtime's message is not in it.
+    /// A failed run's message, logged by ONNX Runtime through the run's
+    /// logger, does not reach stderr.
     #[test]
     fn scorer_execution_failure_writes_nothing_to_stderr() {
-        if std::env::var_os(STDERR_CHILD).is_some() {
+        if std::env::var_os(LOG_CHILD).is_some() {
             failed_byte_table_run();
             return;
         }
         if !onnx_runtime_for_test() {
             return;
         }
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "execution::executor::tests::scorer_execution_failure_writes_nothing_to_stderr",
-                "--exact",
-                "--nocapture",
-            ])
-            .env(STDERR_CHILD, "1")
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            output.status.success() && stdout.contains("1 passed"),
-            "the child run failed or matched no test:\n{stdout}\n{stderr}"
+        let stderr = stderr_of_child_test(
+            "execution::executor::tests::scorer_execution_failure_writes_nothing_to_stderr",
         );
         assert!(
             !stderr.contains("idx=") && !stderr.contains("out of data bounds"),
             "ONNX Runtime logged the failed run:\n{stderr}"
+        );
+    }
+
+    /// A warning ONNX Runtime logs through the session's logger does not
+    /// reach stderr either: `shape_warning.onnx`'s extra output is as long
+    /// as the first context byte id, 85 for 'T', against a declared length
+    /// of one, and ONNX Runtime warns about that, quoting the length, while
+    /// the scorer still scores.
+    #[test]
+    fn scorer_execution_warnings_write_nothing_to_stderr() {
+        if std::env::var_os(LOG_CHILD).is_some() {
+            let dir = fake_scorer_dir();
+            let metadata = fake_scorer_metadata("shape_warning.onnx", |_| {});
+            let mut executor = TemplateExecutor::new(dir.to_str().unwrap());
+            let request = Envelope::choice_request(
+                text_input("TASK fill the form"),
+                vec![
+                    crate::ir::Choice::new("tel", "fill Tel: (503) 555-0142"),
+                    crate::ir::Choice::new("name", "fill Name: Jane Doe"),
+                ],
+            );
+            // Its logits are dynamic.onnx's, which has no extra output.
+            let expected = scored_directly(&dir.join("dynamic.onnx"), &metadata, &request);
+            assert_eq!(
+                choice_scores(executor.execute(&metadata, &request, None)),
+                expected
+            );
+            return;
+        }
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let stderr = stderr_of_child_test(
+            "execution::executor::tests::scorer_execution_warnings_write_nothing_to_stderr",
+        );
+        assert!(
+            !stderr.contains("VerifyOutputSizes") && !stderr.contains("actual shape"),
+            "ONNX Runtime logged the session's warning:\n{stderr}"
         );
     }
 

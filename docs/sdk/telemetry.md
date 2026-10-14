@@ -242,7 +242,7 @@ For local LLM events `provider` is always absent; for cloud events it is always 
 
 `prompt_cached_tokens` is the local-LLM analogue of cloud's `cache_read_input_tokens`. Multi-turn workloads with a stable system prompt and conversation prefix routinely see 70-90% of the prompt served from the backend's KV cache on every call after the first — that's the difference between a 7B model feeling responsive and feeling sluggish, and it's also a billing-correctness signal (prefill is the expensive part; cached tokens shouldn't count toward "tokens processed"). Stack with `cache_read_input_tokens` on the same dashboard axis to compare local vs cloud cache savings.
 
-A choice scorer's `ModelComplete` carries `task = "decision"`, `backend` and `choice_count` in its `data` and on the payload top level, with or without span tracing. Candidate ids and texts, the context and the scores are never sent. When ONNX Runtime fails a scorer run, its message is withheld from the error, and the run sets ONNX Runtime's own log level to fatal, so ONNX Runtime doesn't log it either:
+A choice scorer's `ModelComplete` carries `task = "decision"`, `backend` and `choice_count` in its `data` and on the payload top level, with or without span tracing. Candidate ids and texts, the context and the scores are never sent. When ONNX Runtime fails a scorer run, its message is withheld from the error. Scorer sessions and runs set ONNX Runtime's own log level to fatal, so ONNX Runtime doesn't log that message, or a warning that quotes what the request produced, either:
 
 ```json
 {

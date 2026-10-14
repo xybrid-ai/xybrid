@@ -147,8 +147,8 @@ pub struct ONNXSession {
 impl ONNXSession {
     /// Builds a new ONNX session.
     ///
-    /// This is the single construction entry point on `ONNXSession`. It
-    /// loads the model file, configures the requested execution
+    /// This is the single public construction entry point on `ONNXSession`.
+    /// It loads the model file, configures the requested execution
     /// provider, extracts input/output metadata, and — when
     /// `options.capture_resolved_ep` is set — turns on ORT profiling so
     /// the resolved EP can be harvested after the first inference.
@@ -199,6 +199,43 @@ impl ONNXSession {
         execution_provider: ExecutionProviderKind,
         options: SessionOptions,
     ) -> AdapterResult<Self> {
+        Self::build_with_log_level(model_path, execution_provider, options, None)
+    }
+
+    /// [`ONNXSession::build`] for a session whose inputs must not reach a log.
+    ///
+    /// ONNX Runtime logs through two loggers while it runs a model: the run's
+    /// (see [`ONNXSession::run_single_output_f32_unlogged`]) and the
+    /// session's, which carries messages such as a warning that an output's
+    /// shape differs from the model's declaration, quoting the shape the
+    /// inputs produced. This session's log level is fatal, so it logs nothing
+    /// below that. Messages ONNX Runtime sends to its process-wide logger are
+    /// not affected.
+    ///
+    /// # Errors
+    ///
+    /// As [`ONNXSession::build`], and when the log level cannot be set.
+    pub(crate) fn build_unlogged(
+        model_path: &str,
+        execution_provider: ExecutionProviderKind,
+        options: SessionOptions,
+    ) -> AdapterResult<Self> {
+        Self::build_with_log_level(
+            model_path,
+            execution_provider,
+            options,
+            Some(LogLevel::Fatal),
+        )
+    }
+
+    /// Builds the session, with `log_level` as its own log level when given
+    /// (otherwise ONNX Runtime's environment level applies).
+    fn build_with_log_level(
+        model_path: &str,
+        execution_provider: ExecutionProviderKind,
+        options: SessionOptions,
+        log_level: Option<LogLevel>,
+    ) -> AdapterResult<Self> {
         let path = Path::new(model_path);
         if !path.exists() {
             return Err(AdapterError::ModelNotFound(format!(
@@ -222,6 +259,11 @@ impl ONNXSession {
             .map_err(|e| {
                 AdapterError::RuntimeError(format!("Failed to set optimization level: {}", e))
             })?;
+        if let Some(level) = log_level {
+            builder = builder.with_log_level(level).map_err(|e| {
+                AdapterError::RuntimeError(format!("Failed to set the session log level: {e}"))
+            })?;
+        }
 
         let resolved_state = if options.capture_resolved_ep {
             let tempdir = tempfile::tempdir().map_err(|e| {
@@ -469,7 +511,9 @@ impl ONNXSession {
     /// system log on Apple and Android), before returning it, and the message
     /// can quote input values, such as a gather index read from the input.
     /// This run sets ONNX Runtime's run log level to fatal, so the message
-    /// stays in the returned error.
+    /// stays in the returned error. Messages ONNX Runtime logs through the
+    /// session follow the session's level: build the session with
+    /// [`ONNXSession::build_unlogged`] to silence them too.
     ///
     /// # Errors
     ///

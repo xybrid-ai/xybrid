@@ -212,6 +212,7 @@ jobs:
             execution::executor::tests::scorer_execution_failure_writes_nothing_to_stderr \
             execution::executor::tests::scorer_execution_keeps_the_bound_session \
             execution::executor::tests::scorer_execution_never_shares_a_session_between_models \
+            execution::executor::tests::scorer_execution_warnings_write_nothing_to_stderr \
             execution::executor::tests::scorer_execution_withholds_the_runtime_message \
             ir::choice::tests::best_breaks_rounded_score_ties_by_logit \
             ir::choice::tests::best_prefers_the_first_of_equal_scores \

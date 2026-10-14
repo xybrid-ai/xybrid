@@ -16,6 +16,10 @@ Each fake takes the five named tensors of the FORMS scorer spec
   in a table of 64 entries that hold their own index, so the logit is the same
   for ids below 64 and a larger id (a byte of 63 or more, such as a letter)
   fails the run inside ONNX Runtime, with a message that quotes the id.
+- ``shape_warning.onnx``: ``dynamic.onnx`` plus an output ``auxiliary`` whose
+  length is the first context byte id while its declared shape is ``[1]``, so
+  ONNX Runtime warns about the mismatch, quoting that length, when its log
+  level is warning or lower.
 
 Built with the ONNX helper API, so the bytes depend only on the pinned ``onnx``.
 """
@@ -112,13 +116,15 @@ def _model(
     extra_initializers: list[onnx.TensorProto],
     output_type: int = TensorProto.FLOAT,
     byte_table: bool = False,
+    extra_outputs: list[onnx.ValueInfoProto] | None = None,
 ) -> onnx.ModelProto:
     nodes, initializers = _score_nodes(byte_table)
     graph = helper.make_graph(
         nodes + tail,
         name,
         _inputs(choices),
-        [helper.make_tensor_value_info("logits", output_type, output_shape)],
+        [helper.make_tensor_value_info("logits", output_type, output_shape)]
+        + (extra_outputs or []),
         initializer=initializers + extra_initializers,
     )
     model = helper.make_model(
@@ -192,6 +198,25 @@ def build_models() -> dict[str, onnx.ModelProto]:
             [_masked("logits", "neg_inf")],
             [neg_inf],
             byte_table=True,
+        ),
+        "shape_warning.onnx": _model(
+            "fake_shape_warning",
+            "choices",
+            [1, "choices"],
+            [
+                _masked("logits", "neg_inf"),
+                # A scalar index drops the axis, leaving a one-element shape:
+                # the first context byte id, so the output holds that many
+                # zeros.
+                helper.make_node(
+                    "Gather", ["context_ids", "first_index"], ["first_byte"], axis=1
+                ),
+                helper.make_node("ConstantOfShape", ["first_byte"], ["auxiliary"]),
+            ],
+            [neg_inf, helper.make_tensor("first_index", TensorProto.INT64, [], [0])],
+            extra_outputs=[
+                helper.make_tensor_value_info("auxiliary", TensorProto.FLOAT, [1])
+            ],
         ),
     }
 
