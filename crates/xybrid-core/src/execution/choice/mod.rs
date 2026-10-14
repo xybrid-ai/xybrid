@@ -187,14 +187,16 @@ pub enum ChoiceError {
     /// The model does not have the inputs or output the spec names.
     #[error("model does not match its choice scorer spec: {0}")]
     ModelContract(String),
-    /// The model returned logits of an unexpected shape.
-    #[error("output '{output}' has shape {actual:?}, expected {expected:?}")]
+    /// The model returned logits of an unexpected shape. The message names
+    /// only the shape the request implies: a model can derive its output's
+    /// shape from the request's bytes.
+    #[error("output '{output}' does not have shape {expected:?} (its shape is withheld)")]
     OutputShape {
         /// Output name from the spec.
         output: String,
         /// The shape the request implies.
         expected: Vec<usize>,
-        /// The shape the model returned.
+        /// The shape the model returned. Not in the message.
         actual: Vec<usize>,
     },
     /// An offered candidate got a NaN or infinite logit.

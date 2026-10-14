@@ -92,7 +92,12 @@ fn load(id: &str, template: serde_json::Value) -> (tempfile::TempDir, XybridMode
 /// A scorer with the FORMS spec whose model file is a copy of the fake scorer
 /// `fake`; the directory must outlive it.
 fn scorer_with(fake: &str) -> (tempfile::TempDir, XybridModel) {
-    let spec = forms_spec();
+    scorer_with_spec(fake, forms_spec())
+}
+
+/// A scorer with `spec` whose model file is a copy of the fake scorer `fake`;
+/// the directory must outlive it.
+fn scorer_with_spec(fake: &str, spec: serde_json::Value) -> (tempfile::TempDir, XybridModel) {
     let dir = model_dir(
         "forms-scorer",
         serde_json::json!({ "type": "ChoiceScorer", "scorer": spec }),
@@ -554,6 +559,11 @@ const RUNTIME_MESSAGES: [&str; 4] = [
     "actual shape",
 ];
 
+/// The shape of `shape_warning.onnx`'s extra output for the canary request,
+/// whose context starts with 'c' (byte id 100). Read as the logits, it fails
+/// the run, and nothing may quote it.
+const CANARY_SHAPE: &str = "[100]";
+
 /// Set in the child process that `caller_content_reaches_only_the_result`
 /// starts.
 const PRIVACY_CHILD: &str = "XYBRID_TEST_CHOICE_PRIVACY_CHILD";
@@ -591,7 +601,7 @@ fn caller_content_reaches_only_the_result() {
         output.status.success() && stdout.contains("1 passed"),
         "the child run failed or matched no test:\n{stdout}\n{stderr}"
     );
-    for leak in std::iter::once(CANARY).chain(RUNTIME_MESSAGES) {
+    for leak in [CANARY, CANARY_SHAPE].into_iter().chain(RUNTIME_MESSAGES) {
         assert!(
             !stderr.contains(leak),
             "the child's stderr carries {leak:?}:\n{stderr}"
@@ -701,6 +711,16 @@ fn check_every_surface_for_caller_content() {
             .expect_err("the byte table refuses letters");
         assert!(format!("{error:?}").contains("withheld"), "{error:?}");
         errors.push(format!("{error} {error:?}"));
+
+        // Read as the logits, `shape_warning.onnx`'s extra output has a shape
+        // taken from the context, which fails the run.
+        let mut spec = forms_spec();
+        spec["logits_output"] = serde_json::json!("auxiliary");
+        let (_shape_dir, shape) = scorer_with_spec("shape_warning.onnx", spec);
+        let error = shape
+            .run(&canary_request, None)
+            .expect_err("a wrong-shaped output fails the run");
+        errors.push(format!("{error} {error:?}"));
     }
 
     xybrid_sdk::clear_execution_listener();
@@ -741,6 +761,15 @@ fn check_every_surface_for_caller_content() {
         assert!(decisions.is_empty(), "{decisions:?}");
     }
     if ran {
+        // The wrong-shaped run's failure, which names its output, reached the
+        // execution listener, which hands telemetry the same message, so the
+        // checks below saw it.
+        assert!(
+            listened
+                .iter()
+                .any(|event| event.contains("output 'auxiliary'")),
+            "{listened:?}"
+        );
         let spans = trace["spans"]
             .as_array()
             .expect("the trace lists its spans");
@@ -759,6 +788,10 @@ fn check_every_surface_for_caller_content() {
             assert!(
                 !line.contains(CANARY),
                 "{surface} leaked caller content: {line}"
+            );
+            assert!(
+                !line.contains(CANARY_SHAPE),
+                "{surface} quotes a shape taken from the request: {line}"
             );
             for message in RUNTIME_MESSAGES {
                 assert!(

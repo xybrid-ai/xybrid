@@ -795,9 +795,12 @@ println!("{} {:.3}", best.id, best.score);
   `max_choices` candidates, or an empty, repeated or reserved id) fails with
   `SdkError::InferenceError`. Errors name positions and counts, never ids,
   texts or the context. When ONNX Runtime fails, its own message, which can
-  quote input bytes, is withheld. Scorer sessions and runs set ONNX Runtime's
-  own log level to fatal, so it doesn't log that message, or a warning that
-  quotes what the request produced, either.
+  quote input bytes, is withheld, and so is the shape of a wrong-shaped output,
+  which a model can derive from the request. Scorer sessions and runs set ONNX
+  Runtime's own log level to fatal, so ONNX Runtime logs nothing below fatal
+  for them, such as that message or a warning that quotes what the request
+  produced. Its process-wide logger is not covered; by default it follows
+  `ORT_LOG`.
 - The language bindings refuse to load a choice scorer.
 
 ### Implementation Status

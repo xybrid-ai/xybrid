@@ -6,13 +6,16 @@
 //! - Handles execution provider selection (CPU, CoreML, etc.)
 //! - Provides a clean interface for running inference
 //!
-//! Construction goes through a single entry point — [`ONNXSession::build`] —
-//! taking the model path, the requested [`ExecutionProviderKind`], and a
-//! [`SessionOptions`] flag bag. The default options keep the session on
-//! the cheap path; opting in to `capture_resolved_ep` enables ORT
-//! profiling so the *actual* execution provider that ran each op can be
-//! harvested after the first inference (see
-//! [`ONNXSession::resolved_providers`]).
+//! Construction goes through a single public entry point —
+//! [`ONNXSession::build`] — taking the model path, the requested
+//! [`ExecutionProviderKind`], and a [`SessionOptions`] flag bag. The
+//! default options keep the session on the cheap path; opting in to
+//! `capture_resolved_ep` enables ORT profiling so the *actual* execution
+//! provider that ran each op can be harvested after the first inference
+//! (see [`ONNXSession::resolved_providers`]). Choice scorers use a
+//! crate-internal variant, `ONNXSession::build_unlogged`, which also sets
+//! the session's ONNX Runtime log level to fatal; both share one
+//! implementation.
 //!
 //! # Example
 //!

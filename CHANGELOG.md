@@ -20,10 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its spec once and keeps that session for later runs, and `warmup()` scores a
   synthetic request. Telemetry reports the decision task, the backend and the
   number of candidates, never ids, texts or scores. When ONNX Runtime fails a
-  scorer run, its message is withheld from the error. Scorer sessions and runs
-  set ONNX Runtime's own log level to fatal, so ONNX Runtime doesn't log that
-  message, or a warning that quotes what the request produced, either. The
-  language bindings still refuse to load a scorer.
+  scorer run, its message is withheld from the error, and so is the shape of a
+  wrong-shaped output, which a model can derive from the request. Scorer
+  sessions and runs set ONNX Runtime's own log level to fatal, so ONNX Runtime
+  logs nothing below fatal for them, such as that message or a warning that
+  quotes what the request produced. Its process-wide logger is not covered; by
+  default it follows `ORT_LOG`. The language bindings still refuse to load a
+  scorer.
 
 ### Changed
 

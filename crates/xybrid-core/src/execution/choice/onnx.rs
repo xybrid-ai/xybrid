@@ -267,8 +267,9 @@ impl PreparedChoices {
     /// withheld: it can quote input values, which are bytes of the request);
     /// [`ChoiceError::Runtime`] when the logits output is missing or not
     /// float32; [`ChoiceError::OutputShape`] unless the logits are `[1, rows]`
-    /// for the encoded rows; [`ChoiceError::NonFiniteLogit`] for a NaN or
-    /// infinite logit on an offered candidate.
+    /// for the encoded rows (its message withholds the model's shape, which a
+    /// model can derive from the request); [`ChoiceError::NonFiniteLogit`] for
+    /// a NaN or infinite logit on an offered candidate.
     pub fn run(self, session: &ONNXSession) -> ChoiceResult<ChoiceScores> {
         let spec = &self.spec;
         let rows = self.encoded.choice_mask.len();

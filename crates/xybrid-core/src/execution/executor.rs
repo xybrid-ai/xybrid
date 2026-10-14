@@ -6399,6 +6399,36 @@ mod tests {
         );
     }
 
+    /// A wrong-shaped logits output fails the run, and the error withholds
+    /// its shape: read as the logits, `shape_warning.onnx`'s `auxiliary`
+    /// output is as long as the first context byte id, 85 for 'T', so its
+    /// shape would quote a byte of the request.
+    #[test]
+    fn scorer_execution_withholds_the_output_shape() {
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let metadata = fake_scorer_metadata("shape_warning.onnx", |spec| {
+            spec.logits_output = "auxiliary".to_string();
+        });
+        let mut executor = TemplateExecutor::new(fake_scorer_dir().to_str().unwrap());
+        let request = Envelope::choice_request(
+            text_input("TASK fill the form"),
+            vec![
+                crate::ir::Choice::new("tel", "fill Tel: (503) 555-0142"),
+                crate::ir::Choice::new("name", "fill Name: Jane Doe"),
+            ],
+        );
+        let error = executor.execute(&metadata, &request, None).unwrap_err();
+        let AdapterError::InferenceFailed(message) = &error else {
+            panic!("a wrong-shaped output fails the run: {error:?}");
+        };
+        assert_eq!(
+            message,
+            "output 'auxiliary' does not have shape [1, 5] (its shape is withheld)"
+        );
+    }
+
     /// A failed run's message, logged by ONNX Runtime through the run's
     /// logger, does not reach stderr.
     #[test]
