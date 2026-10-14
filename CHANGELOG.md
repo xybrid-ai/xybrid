@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quotes what the request produced. Its process-wide logger is not covered; by
   default it follows `ORT_LOG`. The language bindings still refuse to load a
   scorer.
+- **`xybrid run --choice` scores candidates from the CLI.** Pass the context as
+  `--input-text` and each candidate as `--choice ID=TEXT` (repeatable) to a
+  choice scorer from `--directory`, `--model`, `--bundle` or `--huggingface`.
+  The CLI prints every candidate's score and raw logit in the order offered,
+  the scorer's fixed choices last, marks the best one and prints the margin;
+  `--output` saves the scores as JSON. A scorer given no `--choice` scores its
+  fixed choices. Requests are checked before the model runs, and errors number
+  candidates from 0 without quoting ids or texts. Other models refuse
+  `--choice`, and `xybrid repl` and `--speculative-cloud` refuse a scorer.
 - **EmbeddingGemma 2 runs as a local text-embedding model.** Google's open
   (Apache 2.0) embedding model returns 768-dimensional unit vectors for text
   in over 100 languages and for code. Its ONNX export also declares image,

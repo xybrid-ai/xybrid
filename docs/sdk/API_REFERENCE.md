@@ -802,6 +802,9 @@ println!("{} {:.3}", best.id, best.score);
   produced. Its process-wide logger is not covered; by default it follows
   `ORT_LOG`.
 - The language bindings refuse to load a choice scorer.
+- From the command line, `xybrid run --input-text <context> --choice ID=TEXT`
+  sends the same request and prints the scores; see the
+  [CLI reference](../content/docs/cli/reference/run.mdx#choice-scoring).
 
 ### Implementation Status
 
