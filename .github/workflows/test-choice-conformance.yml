@@ -1,4 +1,4 @@
-# Purpose: Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core and the Rust SDK; daily cold rebuild.
+# Purpose: Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI; daily cold rebuild.
 name: "CI: Choice conformance"
 
 # Choice-scoring conformance inputs (integration-tests/fixtures/choice). The
@@ -16,8 +16,9 @@ name: "CI: Choice conformance"
 # The forms job then runs xybrid's ONNX choice-scoring tests against the staged
 # model (G0 encoding, fake-model contract, G1 numerics within the frozen
 # provenance.json bounds), the executor's scorer tests and the Rust SDK suite
-# on the fake scorers, and the goldens again through ModelLoader and
-# XybridModel::run, with XYBRID_REQUIRE_MODELS set, so a missing model or ONNX
+# on the fake scorers, the goldens again through ModelLoader and
+# XybridModel::run, and `xybrid run --choice` on the fake scorers and FORMS
+# against the SDK, with XYBRID_REQUIRE_MODELS set, so a missing model or ONNX
 # Runtime fails instead of skipping. The label-token (llama.cpp) runtime tests
 # join that job with the label scorer.
 on:
@@ -39,6 +40,7 @@ on:
       - 'crates/llama-cpp-sys/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
+      - 'crates/xybrid-cli/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.cargo/**'
@@ -62,6 +64,7 @@ on:
       - 'crates/llama-cpp-sys/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
+      - 'crates/xybrid-cli/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.cargo/**'
@@ -261,6 +264,32 @@ jobs:
           done
           cargo test -p xybrid-sdk --test choice_scoring -- --nocapture
           cargo test -p integration-tests --test choice_forms_conformance -- --nocapture
+
+      # `xybrid run --choice` as a user runs it: the built binary on the fake
+      # scorers and on FORMS (the plan's pinned command), each result compared
+      # exactly with the same request through the SDK, plus the refusals that
+      # must fire before anything loads.
+      - name: FORMS through the CLI
+        env:
+          ORT_DYLIB_PATH: ${{ runner.temp }}/ort/libonnxruntime.so
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          CLI="$(cargo test -p xybrid-cli --test choice_cli_test -- --list)"
+          printf '%s\n' "$CLI"
+          for test in \
+            a_cached_scorer_runs_by_model_id \
+            a_scorer_without_choices_scores_its_fixed_choices \
+            choice_flags_fail_before_anything_loads \
+            forms_scores_the_pinned_command_like_the_sdk \
+            identical_choices_put_best_on_the_first \
+            other_models_refuse_choices_before_opening_their_files \
+            scorers_print_and_save_scores_in_offered_order \
+            scorers_refuse_invalid_requests_before_running \
+            speculative_cloud_refuses_a_cached_scorer; do
+            printf '%s\n' "$CLI" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          cargo test -p xybrid-cli --test choice_cli_test -- --nocapture
 
   label-token:
     name: Qwen3.5-0.8B GGUF (regenerate or verify)
