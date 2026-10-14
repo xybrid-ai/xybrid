@@ -7,11 +7,15 @@ rust_library(
     name = "xybrid_whisper",
     version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
-    # Plain list, no select: unlike llama's `vision`, this crate has no
-    # per-platform Rust feature delta. The wrapper requests the Metal backend
-    # via a target cfg on Apple-silicon macOS; //:whisper already selects the
-    # matching ggml implementation through the top-level build config.
-    crate_features = ["bindings"],
+    # One per-platform Rust feature delta: `coreml` on iOS, where //:whisper
+    # links the Core ML encoder bridge and this crate drives its hooks. The
+    # Metal backend is requested via a target cfg on Apple-silicon macOS;
+    # //:whisper already selects the matching ggml implementation through the
+    # top-level build config.
+    crate_features = ["bindings"] + select({
+        "@platforms//os:ios": ["coreml"],
+        "//conditions:default": [],
+    }),
     edition = "2021",
     deps = [
         "//crates/whisper-cpp-sys:xybrid_whisper_sys",
@@ -21,13 +25,19 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-# Inline `#[cfg(test)] mod tests` in params.rs / segment.rs. `crate = ` inherits
-# srcs, edition and deps; crate_features is a plain list here, which does
-# inherit (the loss on `crate = ` affects selects, see xybrid-llama's note).
+# Inline `#[cfg(test)] mod tests` (params.rs, segment.rs, coreml.rs, model.rs).
+# `crate = ` inherits srcs, edition and deps. crate_features is restated: the
+# library computes it as `["bindings"] + select(...)`, and as xybrid-llama's
+# note records, such a select does not propagate through `crate =` — the test
+# target would come out with no features at all, silently dropping model.rs.
 rust_test(
     name = "xybrid_whisper_test",
     version = XYBRID_VERSION,
     crate = ":xybrid_whisper",
+    crate_features = ["bindings"] + select({
+        "@platforms//os:ios": ["coreml"],
+        "//conditions:default": [],
+    }),
 )
 
 # Integration test. Opens with `#![cfg(feature = "bindings")]`, so without that
