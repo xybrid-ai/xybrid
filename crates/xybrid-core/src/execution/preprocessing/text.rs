@@ -19,6 +19,12 @@ use crate::runtime_adapter::AdapterError;
 /// - `add_special_tokens`: Add the post-processor's special tokens (e.g.
 ///   `<bos>`/`<eos>`); truncation then keeps the closing ones
 /// - `tokenizers`: The executor's cache; the file is parsed only on a miss
+///
+/// # Errors
+///
+/// Returns `InvalidInput` for non-text input, a SentencePiece tokenizer (not
+/// supported yet), a tokenizer that fails to load or encode, or a `max_length`
+/// that leaves no room for text before the closing special tokens (or is `0`).
 pub fn tokenize_step(
     data: PreprocessedData,
     tokenizer_path: &str,
@@ -72,13 +78,29 @@ pub fn tokenize_step(
         if ids.len() > max_len {
             // Cut the text, not the closing special tokens (`<eos>`, `[SEP]`):
             // a sequence that lost them is not one the model was trained on.
-            let closing = if add_special_tokens {
-                trailing_special_tokens(encoding.get_special_tokens_mask()).min(max_len)
+            // Padding from the tokenizer's own config comes after them, masked
+            // out but also marked special, so they end where the mask ends.
+            let end = attention_mask
+                .iter()
+                .rposition(|&mask| mask == 1)
+                .map_or(0, |last| last + 1);
+            let closing = if add_special_tokens && end > max_len {
+                trailing_special_tokens(&encoding.get_special_tokens_mask()[..end])
             } else {
                 0
             };
+            if closing >= max_len {
+                return Err(AdapterError::InvalidInput(if max_len == 0 {
+                    "Tokenize max_length must be at least 1".to_string()
+                } else {
+                    format!(
+                        "Tokenize max_length {max_len} leaves no room for text before \
+                         the {closing} special token(s) that close the sequence"
+                    )
+                }));
+            }
             for values in [&mut ids, &mut attention_mask, &mut token_type_ids] {
-                let tail = values.split_off(values.len() - closing);
+                let tail = values[end - closing..end].to_vec();
                 values.truncate(max_len - closing);
                 values.extend(tail);
             }
@@ -1278,16 +1300,20 @@ mod tests {
 
     const BOS: usize = 1;
     const EOS: usize = 2;
+    const PAD: usize = 7;
 
     /// Writes a word-level `tokenizer.json` whose post-processor wraps a
-    /// sequence as `<bos> … <eos>`, the way Gemma's does.
-    fn write_bos_eos_tokenizer(dir: &std::path::Path) -> String {
+    /// sequence as `<bos> … <eos>`, the way Gemma's does, and that pads every
+    /// encoding to `pad_to` tokens when set.
+    fn write_bos_eos_tokenizer(dir: &std::path::Path, pad_to: Option<usize>) -> String {
         use tokenizers::models::wordlevel::WordLevel;
         use tokenizers::pre_tokenizers::whitespace::Whitespace;
         use tokenizers::processors::template::TemplateProcessing;
-        use tokenizers::Tokenizer;
+        use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer};
 
-        let words = ["<unk>", "<bos>", "<eos>", "one", "two", "three", "four"];
+        let words = [
+            "<unk>", "<bos>", "<eos>", "one", "two", "three", "four", "<pad>",
+        ];
         let vocab = words
             .iter()
             .enumerate()
@@ -1308,6 +1334,14 @@ mod tests {
         let mut tokenizer = Tokenizer::new(model);
         tokenizer.with_pre_tokenizer(Some(Whitespace {}));
         tokenizer.with_post_processor(Some(post_processor));
+        if let Some(length) = pad_to {
+            tokenizer.with_padding(Some(PaddingParams {
+                strategy: PaddingStrategy::Fixed(length),
+                pad_id: PAD as u32,
+                pad_token: "<pad>".to_string(),
+                ..PaddingParams::default()
+            }));
+        }
         let path = dir.join("tokenizer.json");
         tokenizer
             .save(&path, false)
@@ -1316,13 +1350,14 @@ mod tests {
     }
 
     /// Tokenizes `text` and returns `(ids, attention_mask, token_type_ids)`.
-    fn tokenize(
+    fn try_tokenize(
         text: &str,
         max_length: Option<usize>,
         add_special_tokens: bool,
-    ) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
+        pad_to: Option<usize>,
+    ) -> ExecutorResult<(Vec<usize>, Vec<usize>, Vec<usize>)> {
         let dir = tempfile::tempdir().expect("temp dir");
-        let path = write_bos_eos_tokenizer(dir.path());
+        let path = write_bos_eos_tokenizer(dir.path(), pad_to);
         let output = tokenize_step(
             PreprocessedData::Text(text.to_string()),
             &path,
@@ -1330,17 +1365,25 @@ mod tests {
             max_length,
             add_special_tokens,
             &mut TokenizerCache::default(),
-        )
-        .expect("tokenizes");
+        )?;
         match output {
             PreprocessedData::TokenIds {
                 ids,
                 attention_mask,
                 token_type_ids,
                 ..
-            } => (ids, attention_mask, token_type_ids),
+            } => Ok((ids, attention_mask, token_type_ids)),
             other => panic!("expected token ids, got {other:?}"),
         }
+    }
+
+    /// [`try_tokenize`] with a tokenizer that does not pad.
+    fn tokenize(
+        text: &str,
+        max_length: Option<usize>,
+        add_special_tokens: bool,
+    ) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
+        try_tokenize(text, max_length, add_special_tokens, None).expect("tokenizes")
     }
 
     #[test]
@@ -1375,6 +1418,34 @@ mod tests {
         assert_eq!(ids, vec![3, 4]);
         assert_eq!(attention_mask.len(), 2);
         assert_eq!(token_type_ids.len(), 2);
+    }
+
+    #[test]
+    fn truncation_keeps_the_text_when_the_tokenizer_pads() {
+        // Padded to 8, the encoding ends `<eos> <pad> <pad>`, and the padding
+        // is marked special too: only `<eos>` closes the text.
+        let (ids, attention_mask, token_type_ids) =
+            try_tokenize("one two three four", Some(4), true, Some(8)).expect("tokenizes");
+
+        assert_eq!(ids, vec![BOS, 3, 4, EOS]);
+        assert_eq!(attention_mask, vec![1; 4]);
+        assert_eq!(token_type_ids, vec![0; 4]);
+    }
+
+    #[test]
+    fn truncation_cuts_only_padding_when_the_text_fits() {
+        let (ids, attention_mask, _) =
+            try_tokenize("one two", Some(6), true, Some(8)).expect("tokenizes");
+
+        assert_eq!(ids, vec![BOS, 3, 4, EOS, PAD, PAD]);
+        assert_eq!(attention_mask, vec![1, 1, 1, 1, 0, 0]);
+    }
+
+    #[test]
+    fn max_length_without_room_for_text_is_rejected() {
+        // Cut to one token, `<bos> one two <eos>` would be `<eos>` alone.
+        assert!(try_tokenize("one two", Some(1), true, None).is_err());
+        assert!(try_tokenize("one two", Some(0), false, None).is_err());
     }
 
     #[test]

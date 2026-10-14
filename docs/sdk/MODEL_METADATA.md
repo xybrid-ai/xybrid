@@ -256,7 +256,7 @@ Tokenizes text using a vocabulary file.
 | `vocab_file` | string | — | Path to vocabulary file |
 | `tokenizer_type` | string | — | `"BPE"`, `"WordPiece"`, or `"SentencePiece"` |
 | `max_length` | integer | `null` | Maximum sequence length (truncate if exceeded) |
-| `add_special_tokens` | boolean | `false` | Wrap the text in the special tokens the tokenizer's post-processor defines, such as `<bos>`/`<eos>` or `[CLS]`/`[SEP]`. Truncation keeps the closing ones |
+| `add_special_tokens` | boolean | `false` | Wrap the text in the special tokens the tokenizer's post-processor defines, such as `<bos>`/`<eos>` or `[CLS]`/`[SEP]`. Truncation keeps the closing ones; a `max_length` with no room for text before them is an error |
 
 **Input**: `Envelope::Text(string)` → **Output**: Token IDs
 
