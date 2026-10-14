@@ -617,6 +617,69 @@
         }
       }
     },
+    "embeddinggemma-2": {
+      "description": "Google EmbeddingGemma 2, text only - multilingual text and code embeddings (768-dim, ONNX q4)",
+      "source": "url",
+      "size_mb": 207,
+      "task": "text-embedding",
+      "files": [
+        {
+          "url": "https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/daa72c51243991dfcaf9f9137d2c573d8f7790c0/onnx/model_q4.onnx",
+          "output": "model_q4.onnx",
+          "sha256": "f9eeba97acddf139b8ee2ddf04bc30dceafa88de93fadf74d7644e0d61a477a9"
+        },
+        {
+          "url": "https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/daa72c51243991dfcaf9f9137d2c573d8f7790c0/onnx/model_q4.onnx_data",
+          "output": "model_q4.onnx_data",
+          "sha256": "c3975f2d1ab7a1878ae31a7d7a9b7804a827aff3800b60dfceafce21cac3df49"
+        },
+        {
+          "url": "https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/daa72c51243991dfcaf9f9137d2c573d8f7790c0/tokenizer.json",
+          "output": "tokenizer.json",
+          "sha256": "4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "embeddinggemma-2",
+        "version": "q4",
+        "description": "EmbeddingGemma 2 text model (Apache 2.0). Prefix queries with 'task: search result | query: ' and documents with 'title: none | text: '.",
+        "execution_template": {
+          "type": "Onnx",
+          "model_file": "model_q4.onnx"
+        },
+        "preprocessing": [
+          {
+            "type": "Tokenize",
+            "vocab_file": "tokenizer.json",
+            "tokenizer_type": "BPE",
+            "max_length": 8192,
+            "add_special_tokens": true
+          }
+        ],
+        "postprocessing": [
+          {
+            "type": "MeanPool",
+            "dim": 1
+          },
+          {
+            "type": "L2Normalize"
+          }
+        ],
+        "files": [
+          "model_q4.onnx",
+          "model_q4.onnx_data",
+          "tokenizer.json"
+        ],
+        "metadata": {
+          "task": "text-embedding",
+          "embedding_dim": 768,
+          "architecture": "EmbeddingGemma2Model",
+          "license": "Apache-2.0",
+          "quantization": "q4",
+          "max_position_embeddings": 8192
+        }
+      }
+    },
     "ministral-3-3b": {
       "description": "Ministral 3 3B Instruct - Mistral AI's edge-optimized LLM (GGUF Q4_K_M, 2.15GB)",
       "source": "url",

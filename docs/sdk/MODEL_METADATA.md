@@ -256,8 +256,15 @@ Tokenizes text using a vocabulary file.
 | `vocab_file` | string | — | Path to vocabulary file |
 | `tokenizer_type` | string | — | `"BPE"`, `"WordPiece"`, or `"SentencePiece"` |
 | `max_length` | integer | `null` | Maximum sequence length (truncate if exceeded) |
+| `add_special_tokens` | boolean | `false` | Wrap the text in the special tokens the tokenizer's post-processor defines, such as `<bos>`/`<eos>` or `[CLS]`/`[SEP]`. Truncation keeps the closing ones; a `max_length` with no room for text before them is an error |
 
 **Input**: `Envelope::Text(string)` → **Output**: Token IDs
+
+An ONNX model fed token IDs gets `input_ids`, `attention_mask` and
+`token_type_ids`, whichever it declares. A multimodal embedding model's
+`image_features`, `video_features` and `audio_features` inputs (EmbeddingGemma
+2's ONNX export has them) get zero rows, so its text model runs alone. Any
+other input fails to run. The ONNX session is kept between calls.
 
 ### `MelSpectrogram`
 
@@ -434,6 +441,17 @@ Mean pooling over token embeddings to produce a sentence embedding.
 { "type": "MeanPool", "dim": 1 }
 ```
 
+### `L2Normalize`
+
+Scales each vector along the last axis to unit length. Put it after `MeanPool`
+for a model whose sentence-transformers pipeline ends in `Normalize`: the
+vectors then match the reference, and cosine similarity is a dot product. An
+all-zero vector is left as is.
+
+```json
+{ "type": "L2Normalize" }
+```
+
 ---
 
 ## Voice Configuration
@@ -530,6 +548,44 @@ The `metadata` field is freeform, but these keys are conventional:
   "metadata": {
     "task": "image_classification",
     "num_classes": 10
+  }
+}
+```
+
+### ONNX Text Embedding (EmbeddingGemma 2)
+
+The text model of [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2)
+from `onnx-community/embeddinggemma-2-ONNX`. Keep `model_q4.onnx_data` next to
+`model_q4.onnx`: the graph reads its weights from that file. Avoid the `fp16`
+and `q4f16` exports: the model returns NaN or degraded vectors in float16.
+Callers add the prompt: `task: search result | query: ` before a query and
+`title: none | text: ` before a document.
+
+```json
+{
+  "model_id": "embeddinggemma-2",
+  "version": "q4",
+  "execution_template": {
+    "type": "Onnx",
+    "model_file": "model_q4.onnx"
+  },
+  "preprocessing": [
+    {
+      "type": "Tokenize",
+      "vocab_file": "tokenizer.json",
+      "tokenizer_type": "BPE",
+      "max_length": 8192,
+      "add_special_tokens": true
+    }
+  ],
+  "postprocessing": [
+    { "type": "MeanPool", "dim": 1 },
+    { "type": "L2Normalize" }
+  ],
+  "files": ["model_q4.onnx", "model_q4.onnx_data", "tokenizer.json"],
+  "metadata": {
+    "task": "text-embedding",
+    "embedding_dim": 768
   }
 }
 ```
