@@ -33,9 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The CLI prints every candidate's score and raw logit in the order offered,
   the scorer's fixed choices last, marks the best one and prints the margin;
   `--output` saves the scores as JSON. A scorer given no `--choice` scores its
-  fixed choices. Requests are checked before the model runs, and errors number
-  candidates from 0 without quoting ids or texts. Other models refuse
-  `--choice`, and `xybrid repl` and `--speculative-cloud` refuse a scorer.
+  fixed choices. Requests are checked before the model runs, also by
+  `--dry-run`, and the refusals number candidates from 0 without quoting ids
+  or texts. Other models refuse `--choice`; a scorer refuses `--input-audio`,
+  `--input-image`, `--voice` and `--max-tokens`; and `xybrid repl` and
+  `--speculative-cloud` refuse a scorer.
 - **EmbeddingGemma 2 runs as a local text-embedding model.** Google's open
   (Apache 2.0) embedding model returns 768-dimensional unit vectors for text
   in over 100 languages and for code. Its ONNX export also declares image,

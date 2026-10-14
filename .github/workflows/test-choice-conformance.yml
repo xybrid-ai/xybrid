@@ -280,10 +280,12 @@ jobs:
             a_cached_scorer_runs_by_model_id \
             a_scorer_without_choices_scores_its_fixed_choices \
             choice_flags_fail_before_anything_loads \
+            dry_runs_check_choice_requests_like_runs \
             forms_scores_the_pinned_command_like_the_sdk \
             identical_choices_put_best_on_the_first \
             other_models_refuse_choices_before_opening_their_files \
             scorers_print_and_save_scores_in_offered_order \
+            scorers_refuse_flags_they_cannot_use \
             scorers_refuse_invalid_requests_before_running \
             speculative_cloud_refuses_a_cached_scorer; do
             printf '%s\n' "$CLI" | grep -qE "^${test}: test$" \

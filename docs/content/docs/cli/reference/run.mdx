@@ -180,17 +180,20 @@ full precision, without the rounding:
 FORMS reads the first 224 bytes of the context and the first 96 bytes of each
 candidate, and cuts longer input without saying so.
 
-A request is checked before the model runs. It is refused when the context is
-empty, when an id is empty, repeated or one of the model's fixed ids, and when
-there are fewer than two candidates or more than the model accepts (64 for
-FORMS), fixed ones included. Error messages number candidates from 0 in the
-order offered, and never quote your ids or texts. A model that is not a choice
-scorer refuses `--choice`.
+A request is checked before the model runs, and by `--dry-run` too. It is
+refused when the context is empty, when an id is empty, repeated or one of the
+model's fixed ids, and when there are fewer than two candidates or more than the
+model accepts (64 for FORMS), fixed ones included. These refusals number
+candidates from 0 in the order offered and never quote your ids or texts. A
+`--choice` with no `=`, or nothing before it, is a usage error, which repeats
+the argument like any other. A model that is not a choice scorer refuses
+`--choice`.
 
 `--choice` needs `--input-text`, and cannot be combined with `--config`,
 `--pipeline`, `--input-audio`, `--input-image`, `--voice`, `--max-tokens` or
-`--speculative-cloud`. `xybrid repl` and `--speculative-cloud` refuse a choice
-scorer.
+`--speculative-cloud`. A choice scorer refuses `--input-audio`,
+`--input-image`, `--voice` and `--max-tokens` without `--choice` too, and
+`xybrid repl` and `--speculative-cloud` refuse a choice scorer.
 
 ## Pipeline Format
 

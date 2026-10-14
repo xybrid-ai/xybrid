@@ -137,6 +137,8 @@ impl Cli {
             .env("HOME", self.home.path())
             .env("XYBRID_REGISTRY_URL", &self.registry_url)
             .env("NO_COLOR", "1")
+            // Would override NO_COLOR and color the table the tests parse.
+            .env_remove("CLICOLOR_FORCE")
             .env("XYBRID_TELEMETRY_OPTOUT", "1")
             .env_remove("XYBRID_API_KEY")
             .env_remove("XYBRID_GATEWAY_URL")
@@ -489,6 +491,97 @@ fn scorers_refuse_invalid_requests_before_running() {
         assert!(err.contains(numbering), "{err}");
         assert!(!err.contains(CANARY), "caller text in stderr:\n{err}");
     }
+}
+
+#[test]
+fn scorers_refuse_flags_they_cannot_use() {
+    let cli = Cli::new();
+    let forms = scorer(None);
+    let forms = forms.path().to_str().unwrap();
+    // Without --choice, clap's conflicts do not apply; the scorer refuses the
+    // flags itself, before reading the audio file (which does not exist).
+    let output = cli.run([
+        "--directory",
+        forms,
+        "--input-text",
+        CANARY,
+        "--input-audio",
+        "missing.wav",
+        "--voice",
+        "af_bella",
+        "--max-tokens",
+        "8",
+    ]);
+    assert_refused(
+        &output,
+        1,
+        "'forms-scorer' is a choice scorer, which reads only --input-text and --choice; it \
+         cannot use --input-audio, --voice, --max-tokens",
+    );
+    assert!(!stderr(&output).contains(CANARY));
+}
+
+#[test]
+fn dry_runs_check_choice_requests_like_runs() {
+    let cli = Cli::new();
+    let forms = scorer(None);
+    let forms = forms.path().to_str().unwrap();
+    let chat = tempfile::tempdir().unwrap();
+    let metadata = serde_json::json!({
+        "model_id": "chat",
+        "version": "1.0",
+        "execution_template": { "type": "Gguf", "model_file": "model.gguf" },
+        "files": [],
+    });
+    std::fs::write(
+        chat.path().join("model_metadata.json"),
+        metadata.to_string(),
+    )
+    .unwrap();
+
+    let valid = cli.run([
+        "--directory",
+        forms,
+        "--input-text",
+        CANARY,
+        "--choice",
+        "tel=fill Tel",
+        "--dry-run",
+    ]);
+    assert_success(&valid);
+    assert!(
+        stdout(&valid).contains("Model is valid and ready for execution"),
+        "{}",
+        stdout(&valid)
+    );
+
+    let reserved = cli.run([
+        "--directory",
+        forms,
+        "--input-text",
+        CANARY,
+        "--choice",
+        "skip=skip it",
+        "--dry-run",
+    ]);
+    assert_refused(
+        &reserved,
+        1,
+        "caller choice 0 reuses the id of fixed choice 2",
+    );
+    assert!(!stdout(&reserved).contains("ready for execution"));
+
+    let other = cli.run([
+        "--directory",
+        chat.path().to_str().unwrap(),
+        "--input-text",
+        CANARY,
+        "--choice",
+        "a=b",
+        "--dry-run",
+    ]);
+    assert_refused(&other, 1, "'chat' is not a choice scorer");
+    assert!(!stdout(&other).contains("ready for execution"));
 }
 
 #[cfg(unix)]

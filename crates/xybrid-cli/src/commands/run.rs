@@ -346,6 +346,7 @@ fn build_model_input(
     voice: Option<&str>,
     max_tokens: Option<usize>,
 ) -> Result<Envelope> {
+    check_scorer_flags(metadata, input_audio, input_images, voice, max_tokens)?;
     let input = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
     let fixed = match &metadata.execution_template {
         ExecutionTemplate::ChoiceScorer { scorer } => Some(scorer.fixed_choices().len()),
@@ -361,6 +362,68 @@ fn build_model_input(
     };
     ui::kv("Choices", &count);
     Ok(Envelope::choice_request(input, choices.to_vec()))
+}
+
+/// Refuses the input flags a choice scorer cannot use: its input is a choice
+/// request whose context is `--input-text`. Clap keeps these flags away from
+/// `--choice`; this covers a scorer run without it, before any file is read.
+fn check_scorer_flags(
+    metadata: &ModelMetadata,
+    input_audio: Option<&PathBuf>,
+    input_images: &[PathBuf],
+    voice: Option<&str>,
+    max_tokens: Option<usize>,
+) -> Result<()> {
+    if !matches!(
+        metadata.execution_template,
+        ExecutionTemplate::ChoiceScorer { .. }
+    ) {
+        return Ok(());
+    }
+    let refused: Vec<&str> = [
+        ("--input-audio", input_audio.is_some()),
+        ("--input-image", !input_images.is_empty()),
+        ("--voice", voice.is_some()),
+        ("--max-tokens", max_tokens.is_some()),
+    ]
+    .into_iter()
+    .filter_map(|(flag, set)| set.then_some(flag))
+    .collect();
+    if refused.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "'{}' is a choice scorer, which reads only --input-text and --choice; it cannot use {}",
+        metadata.model_id,
+        refused.join(", ")
+    )
+}
+
+/// What a dry run checks for choice scoring, without reading any file: the
+/// flags a scorer cannot use and, when there is text to build it from, the
+/// choice request a run would send. A run would refuse the same input.
+fn check_choice_dry_run(
+    metadata: &ModelMetadata,
+    input_audio: Option<&PathBuf>,
+    input_text: Option<&str>,
+    input_images: &[PathBuf],
+    choices: &[Choice],
+    voice: Option<&str>,
+    max_tokens: Option<usize>,
+) -> Result<()> {
+    check_scorer_flags(metadata, input_audio, input_images, voice, max_tokens)?;
+    let scorer = matches!(
+        metadata.execution_template,
+        ExecutionTemplate::ChoiceScorer { .. }
+    );
+    let Some(text) = input_text.filter(|_| scorer || !choices.is_empty()) else {
+        return Ok(());
+    };
+    let request = Envelope::choice_request(
+        Envelope::new(EnvelopeKind::Text(text.to_string())),
+        choices.to_vec(),
+    );
+    check_choice_input(metadata, &request)
 }
 
 /// Core's choice-request check, run before the executor so a refused request
@@ -1341,6 +1404,15 @@ pub(crate) fn run_model_file(
     emit_pipeline_start_event(&metadata, "model-file");
 
     if dry_run {
+        check_choice_dry_run(
+            &metadata,
+            input_audio,
+            input_text,
+            input_images,
+            choices,
+            voice,
+            max_tokens,
+        )?;
         ui::section("Dry Run");
         println!();
         ui::ok("Model is valid and ready for execution");
@@ -1442,6 +1514,15 @@ fn prepare_bundle_execution(
     println!();
 
     if dry_run {
+        check_choice_dry_run(
+            &metadata,
+            input_audio,
+            input_text,
+            input_images,
+            choices,
+            voice,
+            max_tokens,
+        )?;
         return Ok((metadata, None));
     }
 
@@ -2279,6 +2360,93 @@ mod tests {
             assert!(!message.contains(CANARY), "{message}");
             assert!(!message.contains("fill Tel"), "{message}");
         }
+    }
+
+    #[test]
+    fn scorers_refuse_flags_they_cannot_use_before_reading_files() {
+        // Paths that do not exist: the refusal comes before any read.
+        let audio = PathBuf::from("missing.wav");
+        let image = PathBuf::from("missing.png");
+        let refused = build_model_input(
+            &forms_metadata(),
+            Some(&audio),
+            Some("FORM"),
+            std::slice::from_ref(&image),
+            &[],
+            Some("af_bella"),
+            Some(8),
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            refused,
+            "'scorer' is a choice scorer, which reads only --input-text and --choice; it \
+             cannot use --input-audio, --input-image, --voice, --max-tokens"
+        );
+
+        let max_tokens = build_model_input(
+            &forms_metadata(),
+            None,
+            Some("FORM"),
+            &[],
+            &[],
+            None,
+            Some(8),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            max_tokens.ends_with("it cannot use --max-tokens"),
+            "{max_tokens}"
+        );
+
+        // Other models keep taking them.
+        let input = build_model_input(
+            &chat_metadata(),
+            None,
+            Some("hi"),
+            &[],
+            &[],
+            Some("af_bella"),
+            Some(8),
+        )
+        .unwrap();
+        assert_eq!(
+            input.metadata.get("voice_id").map(String::as_str),
+            Some("af_bella")
+        );
+    }
+
+    #[test]
+    fn dry_runs_check_choice_requests_without_reading_files() {
+        let dry_run = |metadata: &ModelMetadata, text: Option<&str>, choices: &[Choice]| {
+            check_choice_dry_run(metadata, None, text, &[], choices, None, None)
+                .map_err(|err| format!("{err:#}"))
+        };
+
+        // A valid request, and a scorer dry run with no input at all, pass.
+        dry_run(&forms_metadata(), Some("FORM"), &offered()).expect("a valid request");
+        dry_run(&forms_metadata(), None, &[]).expect("nothing to check");
+        dry_run(&chat_metadata(), Some("hi"), &[]).expect("no choice request");
+
+        // A run would refuse these, so the dry run does too.
+        let empty = dry_run(&forms_metadata(), Some(""), &offered()).unwrap_err();
+        assert!(empty.contains("the context is empty"), "{empty}");
+        let reserved =
+            dry_run(&forms_metadata(), Some("FORM"), &[Choice::new("skip", "x")]).unwrap_err();
+        assert!(
+            reserved.contains("caller choice 0 reuses the id of fixed choice 2"),
+            "{reserved}"
+        );
+        let chat = dry_run(&chat_metadata(), Some("hi"), &offered()).unwrap_err();
+        assert!(chat.contains("'chat' is not a choice scorer"), "{chat}");
+
+        let audio = PathBuf::from("missing.wav");
+        let flags =
+            check_choice_dry_run(&forms_metadata(), Some(&audio), None, &[], &[], None, None)
+                .unwrap_err()
+                .to_string();
+        assert!(flags.ends_with("it cannot use --input-audio"), "{flags}");
     }
 
     fn score(id: &str, logit: f32, score: f32, fixed: bool) -> xybrid_core::ir::ChoiceScore {
