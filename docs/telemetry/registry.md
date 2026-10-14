@@ -12,7 +12,7 @@ Set the environment variable before any registry call is made:
 export XYBRID_TELEMETRY_OPTOUT=1
 ```
 
-When the variable is set to any of `1`, `true`, or `yes` (case-insensitive, surrounding whitespace ignored), the SDK omits `X-Xybrid-Client` from every registry request. The opt-out also disables the platform telemetry exporter described in [telemetry.md](../sdk/telemetry.md).
+When the variable is set to any of `1`, `true`, or `yes` (case-insensitive, surrounding whitespace ignored), the SDK omits `X-Xybrid-Client` from every registry request. The opt-out also disables the platform telemetry exporter described in [telemetry.md](../sdk/telemetry.md). It does not remove `&backends=` from resolve requests, because that parameter decides which file the registry serves; see [When the header is sent](#when-the-header-is-sent).
 
 The value is read once per process and cached, so changing it after the first registry call has no effect for that run.
 
@@ -37,7 +37,7 @@ The command exits 0 in both cases — it is a status report, not an error.
 The header is a single line, semicolon-separated:
 
 ```
-X-Xybrid-Client: binding=flutter; sdk_version=0.11.0; core_version=0.11.0; platform=ios-arm64; backends=asr-whispercpp,llm-llamacpp,llm-llamacpp-vision,ort-coreml,ort-download,vision
+X-Xybrid-Client: binding=flutter; sdk_version=0.11.0; core_version=0.11.0; platform=ios-arm64; backends=asr-whispercpp,asr-whispercpp-coreml,llm-llamacpp,llm-llamacpp-vision,ort-coreml,ort-download,vision
 ```
 
 | Field | Type | Description |
@@ -88,6 +88,7 @@ Source: `xybrid_sdk::current_platform()` (`crates/xybrid-sdk/src/platform.rs`). 
 | Value | Cargo feature | Notes |
 |-------|---------------|-------|
 | `asr-whispercpp` | `asr-whispercpp` | whisper.cpp speech recognition; in every `platform-*` preset. Pulls `llm-llamacpp` transitively — whisper.cpp links the ggml that llama.cpp builds |
+| `asr-whispercpp-coreml` | `asr-whispercpp` + `coreml`, iOS only | The build can run whisper.cpp's encoder through Core ML (iOS 16 and later). The registry serves the `ios-arm64` Whisper bundles, which carry the encoder, only to clients that list it, so `resolve` also sends it in its query (see [When the header is sent](#when-the-header-is-sent)) |
 | `candle-cuda` | `candle-cuda` | Candle backend with CUDA acceleration. Opt-in only — no `platform-*` preset enables it |
 | `candle-metal` | `candle-metal` | Candle backend with Metal acceleration. Opt-in only — no `platform-*` preset enables it |
 | `espeak` | `espeak` | espeak-ng phonemizer (multi-language TTS) |
@@ -136,6 +137,8 @@ The SDK adds `X-Xybrid-Client` to the three metadata calls:
 | `RegistryClient::list_models` | `GET /v1/models` | List published models |
 | `RegistryClient::get_model` | `GET /v1/models/{mask}` | Fetch metadata for one model |
 | `RegistryClient::resolve` | `GET /v1/models/{mask}/resolve?platform=…` | Resolve a model+platform to a bundle URL |
+
+`resolve` also lists, as `&backends=` in its query, the backends that decide which file the registry serves; today that is only `asr-whispercpp-coreml`. Unlike the header, it is sent when telemetry is opted out too: without it, an opted-out iOS client would get the plain `.bin` instead of the bundle with the Core ML encoder. The registry does not record it in analytics.
 
 Bundle download requests are intentionally **not** instrumented in this version. They are downloads, not metadata calls, and a per-byte header is not interesting in aggregate.
 

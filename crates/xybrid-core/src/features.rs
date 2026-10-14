@@ -5,6 +5,13 @@
 
 use std::sync::OnceLock;
 
+/// The registry serves the `ios-arm64` whisper bundles (Core ML encoder
+/// included) only to clients that list this backend.
+#[cfg(feature = "asr-whispercpp")]
+const WHISPER_COREML: bool = xybrid_whisper::COREML_ENCODER;
+#[cfg(not(feature = "asr-whispercpp"))]
+const WHISPER_COREML: bool = false;
+
 // Forward-compatible feature names: some entries (`ort-cuda`, `espeak`) are
 // not yet declared in Cargo.toml. The `cfg!()` checks resolve to `false`
 // for any feature that does not exist, and `#[allow(unexpected_cfgs)]`
@@ -13,6 +20,7 @@ use std::sync::OnceLock;
 #[allow(unexpected_cfgs)]
 const ALL_FEATURES: &[(&str, bool)] = &[
     ("asr-whispercpp", cfg!(feature = "asr-whispercpp")),
+    ("asr-whispercpp-coreml", WHISPER_COREML),
     ("candle-cuda", cfg!(feature = "candle-cuda")),
     ("candle-metal", cfg!(feature = "candle-metal")),
     ("espeak", cfg!(feature = "espeak")),
@@ -126,5 +134,14 @@ mod tests {
     #[test]
     fn llamacpp_reports_enabled() {
         assert!(enabled().contains(&"llm-llamacpp"));
+    }
+
+    #[cfg(feature = "asr-whispercpp")]
+    #[test]
+    fn whisper_coreml_follows_the_encoder_bridge() {
+        assert_eq!(
+            enabled().contains(&"asr-whispercpp-coreml"),
+            xybrid_whisper::COREML_ENCODER
+        );
     }
 }

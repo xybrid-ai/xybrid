@@ -113,6 +113,30 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
     ))
 }
 
+/// Backends that pick which file the registry serves (`requires_backends`).
+/// Sent as `?backends=` because telemetry opt-out drops the header; only
+/// artifact-selecting names go here, never the full feature list.
+const ARTIFACT_BACKENDS: &[&str] = &["asr-whispercpp-coreml"];
+
+/// URL for `GET /v1/models/{mask}/resolve`.
+///
+/// Takes the feature list as a parameter (the caller passes
+/// [`xybrid_core::features::enabled`]) so unit tests can cover both branches;
+/// only names in [`ARTIFACT_BACKENDS`] reach the query.
+fn resolve_url(api_url: &str, mask: &str, platform: &str, features: &[&str]) -> String {
+    let mut url = format!("{api_url}/v1/models/{mask}/resolve?platform={platform}");
+    let backends: Vec<&str> = features
+        .iter()
+        .copied()
+        .filter(|b| ARTIFACT_BACKENDS.contains(b))
+        .collect();
+    if !backends.is_empty() {
+        url.push_str("&backends=");
+        url.push_str(&backends.join(","));
+    }
+    url
+}
+
 /// Header identifying which version of a file a partial download holds, so a
 /// resumed request can prove it continues the same bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -564,10 +588,7 @@ impl RegistryClient {
         let platform = platform.map(String::from).unwrap_or_else(detect_platform);
 
         self.execute_with_fallback(|api_url| {
-            let url = format!(
-                "{}/v1/models/{}/resolve?platform={}",
-                api_url, mask, platform
-            );
+            let url = resolve_url(api_url, mask, &platform, xybrid_core::features::enabled());
             let req = self.apply_client_header(self.agent.get(&url));
             let response = req.call();
             self.handle_response_with_404(response, "resolve model", || {
@@ -3489,6 +3510,29 @@ mod tests {
             !header.contains("backends=,"),
             "leading comma in backends list: {}",
             header
+        );
+    }
+
+    #[test]
+    fn resolve_url_sends_only_artifact_backends() {
+        let features = [
+            "asr-whispercpp",
+            "asr-whispercpp-coreml",
+            "ort-coreml",
+            "vision",
+        ];
+        assert_eq!(
+            resolve_url("http://r", "whisper", "ios-arm64", &features),
+            "http://r/v1/models/whisper/resolve?platform=ios-arm64&backends=asr-whispercpp-coreml"
+        );
+    }
+
+    #[test]
+    fn resolve_url_omits_backends_without_an_artifact_backend() {
+        let features = ["asr-whispercpp", "ort-coreml", "vision"];
+        assert_eq!(
+            resolve_url("http://r", "whisper", "macos-arm64", &features),
+            "http://r/v1/models/whisper/resolve?platform=macos-arm64"
         );
     }
 
