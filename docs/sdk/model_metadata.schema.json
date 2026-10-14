@@ -572,11 +572,11 @@
           ]
         },
         {
-          "description": "GGML-format Whisper speech recognition, executed by whisper.cpp on the\nsame ggml the local LLM backend already links.\n\nDistinct from [`ExecutionTemplate::SafeTensors`] with\n`architecture: \"whisper\"`, which routes to the pure-Rust Candle\nimplementation. Both transcribe; they differ in weight format (GGML\nquantized vs F32 safetensors) and therefore in cost, which is the whole\nreason this variant exists.",
+          "description": "GGML-format Whisper speech recognition, executed by whisper.cpp on the\nsame ggml the local LLM backend already links.\n\nDistinct from [`ExecutionTemplate::SafeTensors`] with\n`architecture: \"whisper\"`, which routes to the pure-Rust Candle\nimplementation. Both transcribe; they differ in weight format (GGML\nquantized vs F32 safetensors) and therefore in cost, which is the whole\nreason this variant exists.\n\nA bundle may also ship whisper.cpp's Core ML encoder beside the model\nfile: `model_file` with its extension and any `-qX_Y` tag replaced by\n`-encoder.mlmodelc` (`ggml-base.en-q5_1.bin` →\n`ggml-base.en-encoder.mlmodelc`). On iOS 16 and later, in builds with\nthe `coreml` feature (the `platform-ios` preset), the encoder then runs\nthrough Core ML and the decoder stays on ggml. Older iOS versions and\nother platforms ignore the file and keep the ggml encoder.",
           "type": "object",
           "properties": {
             "audio_ctx": {
-              "description": "Encoder context in mel frames, where 1500 covers the full 30 s\nwindow. `0` (the default) means no truncation.\n\nTruncating is the largest single speed lever for live streaming,\nbut truncating too far makes the decoder emit repetition loops.\nMeasured on a Pixel 8 with `tiny.en` Q5_1: 500 is safe for a 5 s\nwindow and 2.8x faster than full context; 250 degenerates. So a\nmodel opts in here after its own quality check rather than\ninheriting a fast-but-fragile default.",
+              "description": "Encoder context in mel frames, where 1500 covers the full 30 s\nwindow. `0` (the default) means no truncation.\n\nTruncating is the largest single speed lever for live streaming,\nbut truncating too far makes the decoder emit repetition loops.\nMeasured on a Pixel 8 with `tiny.en` Q5_1: 500 is safe for a 5 s\nwindow and 2.8x faster than full context; 250 degenerates. So a\nmodel opts in here after its own quality check rather than\ninheriting a fast-but-fragile default.\n\nLeave it at `0` in a bundle that ships a Core ML encoder: that\nencoder only takes the full window, so a truncated context is\nrejected while it is active.",
               "type": "integer",
               "format": "uint32",
               "default": 0,
