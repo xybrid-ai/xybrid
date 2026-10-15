@@ -24,8 +24,8 @@ use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_sdk::registry_client::RegistryClient;
 
 use super::utils::{
-    display_stage_name, format_size, load_speculative_model, maybe_warn_thinking_budget,
-    refuse_choice_scorer, save_wav_file,
+    choice_scorer_refusal, display_stage_name, format_size, load_speculative_model,
+    maybe_warn_thinking_budget, refuse_choice_scorer, save_wav_file, SPECULATIVE_CLOUD_STREAMS,
 };
 use crate::ui;
 
@@ -429,9 +429,11 @@ fn check_choice_dry_run(
 /// Core's choice-request check, run before the executor so a refused request
 /// never starts one. Core runs it again inside `execute`.
 ///
-/// Its errors name candidates by position from 0 across E, the `--choice`
-/// flags in order and then the model's fixed choices, so the context lists
-/// the fixed ids (from the metadata, never the caller).
+/// Its errors name positions from 0 in three lists: a candidate in E (the
+/// `--choice` flags in order, then the model's fixed choices), a caller
+/// choice among the flags alone and a fixed choice among the fixed choices
+/// alone. The context spells out each list, with the fixed ids from the
+/// metadata, never the caller.
 fn check_choice_input(metadata: &ModelMetadata, input: &Envelope) -> Result<()> {
     let Err(error) = validate_choice_request(metadata, input, EntryPoint::Batch) else {
         return Ok(());
@@ -444,12 +446,15 @@ fn check_choice_input(metadata: &ModelMetadata, input: &Envelope) -> Result<()> 
                 .map(|choice| choice.id.as_str())
                 .collect();
             if fixed.is_empty() {
-                "choice request refused (candidates count from 0, in --choice order)".to_string()
+                "choice request refused (counting from 0, candidates are the --choice flags in \
+                 order)"
+                    .to_string()
             } else {
+                let fixed = fixed.join(", ");
                 format!(
-                    "choice request refused (candidates count from 0: the --choice flags in \
-                     order, then the model's fixed choices {})",
-                    fixed.join(", ")
+                    "choice request refused (counting from 0, candidates are the --choice flags \
+                     in order and then the model's fixed choices {fixed}; caller choices are the \
+                     --choice flags; fixed choices are {fixed})"
                 )
             }
         }
@@ -991,6 +996,10 @@ fn print_llm_trace_block(output: &Envelope, trace_enabled: bool) {
 }
 
 /// Run inference on a model directly from the registry.
+///
+/// `--speculative-cloud --dry-run` plans here rather than in
+/// [`run_model_speculative`], so `speculative_cloud` lets its dry run refuse
+/// a choice scorer as the speculative run would.
 pub(crate) fn run_model(
     model_id: &str,
     input_audio: Option<&PathBuf>,
@@ -1001,6 +1010,7 @@ pub(crate) fn run_model(
     output_path: Option<&PathBuf>,
     platform: Option<&str>,
     dry_run: bool,
+    speculative_cloud: bool,
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
@@ -1103,6 +1113,17 @@ pub(crate) fn run_model(
     emit_pipeline_start_event(&metadata, "registry");
 
     if dry_run {
+        if speculative_cloud
+            && matches!(
+                metadata.execution_template,
+                ExecutionTemplate::ChoiceScorer { .. }
+            )
+        {
+            return Err(choice_scorer_refusal(
+                &metadata.model_id,
+                SPECULATIVE_CLOUD_STREAMS,
+            ));
+        }
         ui::section("Dry Run");
         println!();
         ui::ok("Model is valid and ready for execution");
@@ -1157,8 +1178,9 @@ pub(crate) fn run_model_speculative(
     let model = load_speculative_model(model_id)?;
     // This path streams and a scorer answers only a batch run. Clap keeps
     // --choice away from --speculative-cloud; this covers a scorer run
-    // without it, which would score the fixed choices alone.
-    refuse_choice_scorer(&model, "--speculative-cloud streams a text answer")?;
+    // without it, which would score the fixed choices alone. Its dry run
+    // plans in `run_model`, which refuses a scorer the same way.
+    refuse_choice_scorer(&model, SPECULATIVE_CLOUD_STREAMS)?;
 
     let envelope = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
 
@@ -1692,6 +1714,8 @@ fn print_output_payload(output: &Envelope, output_path: Option<&PathBuf>) -> Res
 /// One row of the choice-score table.
 #[derive(Debug, PartialEq)]
 struct ChoiceScoreRow {
+    /// The id with its control characters escaped: a newline or a terminal
+    /// escape would break the table. `--output` keeps the id as given.
     id: String,
     /// Four decimals.
     score: String,
@@ -1711,7 +1735,17 @@ fn choice_score_rows(scores: &ChoiceScores) -> Vec<ChoiceScoreRow> {
         .iter()
         .enumerate()
         .map(|(index, entry)| ChoiceScoreRow {
-            id: entry.id.clone(),
+            id: entry
+                .id
+                .chars()
+                .map(|c| {
+                    if c.is_control() {
+                        c.escape_default().to_string()
+                    } else {
+                        c.to_string()
+                    }
+                })
+                .collect(),
             score: format!("{:.4}", entry.score),
             logit: format!("{:.4}", entry.logit),
             note: match (best == Some(index), entry.fixed) {
@@ -2311,21 +2345,19 @@ mod tests {
         check_choice_input(&chat_metadata(), &text("hi")).expect("ordinary input passes");
 
         // Core's message, numbered as the context explains, and no caller text.
+        // A caller choice and a fixed choice each count in their own list:
+        // fixed choice 2 is `skip`, though `click` is candidate 2 here.
         let reserved = check(
             &forms_metadata(),
             vec![Choice::new("skip", format!("skip {CANARY}"))],
         )
         .unwrap_err();
-        assert!(
-            reserved.contains("caller choice 0 reuses the id of fixed choice 2"),
-            "{reserved}"
-        );
-        assert!(
-            reserved.contains(
-                "candidates count from 0: the --choice flags in order, then the model's fixed \
-                 choices check, click, skip"
-            ),
-            "{reserved}"
+        assert_eq!(
+            reserved,
+            "choice request refused (counting from 0, candidates are the --choice flags in \
+             order and then the model's fixed choices check, click, skip; caller choices are \
+             the --choice flags; fixed choices are check, click, skip): Invalid input: caller \
+             choice 0 reuses the id of fixed choice 2"
         );
         let repeated = check(
             &forms_metadata(),
@@ -2341,7 +2373,10 @@ mod tests {
         let unfixed = scorer_metadata(serde_json::json!([]));
         let too_few = check(&unfixed, vec![Choice::new("a", CANARY)]).unwrap_err();
         assert!(
-            too_few.contains("candidates count from 0, in --choice order"),
+            too_few.starts_with(
+                "choice request refused (counting from 0, candidates are the --choice flags in \
+                 order): "
+            ),
             "{too_few}"
         );
         assert!(too_few.contains("1 candidate(s) offered"), "{too_few}");
@@ -2515,6 +2550,26 @@ mod tests {
             label_mass: None,
         };
         assert_eq!(notes(&rounded), ["", "best, fixed"]);
+    }
+
+    #[test]
+    fn choice_score_rows_escape_control_characters_in_ids() {
+        let scores = ChoiceScores {
+            entries: vec![
+                score("two\nlines", 1.0, 0.7, false),
+                score("tab\there \u{1b}[31mred", 0.0, 0.3, false),
+                score("plain id é", -1.0, 0.0, false),
+            ],
+            label_mass: None,
+        };
+        let ids: Vec<String> = choice_score_rows(&scores)
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(
+            ids,
+            [r"two\nlines", r"tab\there \u{1b}[31mred", "plain id é"]
+        );
     }
 
     #[test]

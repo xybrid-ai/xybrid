@@ -27,7 +27,7 @@ use targeting::{
     parse_repl_target, parse_stage_config_target, stage_config_allows_local_cache,
     stage_is_locally_available, target_allows_local,
 };
-use warmup::warmup_models;
+use warmup::{refuse_choice_scorer_stages, warmup_models};
 
 use super::utils::{
     load_speculative_model, maybe_warn_thinking_budget, refuse_choice_scorer,
@@ -372,6 +372,9 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
     let mut orchestrator = Orchestrator::new();
     let bridge = xybrid_sdk::bridge_orchestrator_events(&orchestrator);
 
+    // A pipeline's scorer stage, too, would warm and then be refused on the
+    // first turn; the single-model check above covers only one stage.
+    refuse_choice_scorer_stages(&stages)?;
     warmup_models(&stages);
 
     println!();

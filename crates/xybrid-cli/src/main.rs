@@ -662,6 +662,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     output.as_ref(),
                     target.as_deref(),
                     dry_run,
+                    speculative_cloud,
                     trace,
                     show_reasoning,
                     max_tokens,

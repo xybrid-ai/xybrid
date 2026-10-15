@@ -118,6 +118,10 @@ pub(crate) fn load_speculative_model(model_id: &str) -> anyhow::Result<XybridMod
     Ok(model)
 }
 
+/// Why `--speculative-cloud` refuses a choice scorer, as the `mode` of
+/// [`refuse_choice_scorer`].
+pub(crate) const SPECULATIVE_CLOUD_STREAMS: &str = "--speculative-cloud streams a text answer";
+
 /// Refuse a choice scorer in a mode that cannot run one; `mode` says why.
 ///
 /// A scorer answers only a batch run with a choice request, which
@@ -127,10 +131,15 @@ pub(crate) fn refuse_choice_scorer(model: &XybridModel, mode: &str) -> anyhow::R
     if !model.is_choice_scorer() {
         return Ok(());
     }
-    anyhow::bail!(
-        "'{}' is a choice scorer; {mode}. Score candidates with \
-         `xybrid run --input-text <context> --choice ID=TEXT`",
-        model.model_id()
+    Err(choice_scorer_refusal(model.model_id(), mode))
+}
+
+/// The error [`refuse_choice_scorer`] returns, for a caller that holds the
+/// scorer's metadata rather than a loaded model.
+pub(crate) fn choice_scorer_refusal(model_id: &str, mode: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "'{model_id}' is a choice scorer; {mode}. Score candidates with \
+         `xybrid run --input-text <context> --choice ID=TEXT`"
     )
 }
 

@@ -183,17 +183,19 @@ candidate, and cuts longer input without saying so.
 A request is checked before the model runs, and by `--dry-run` too. It is
 refused when the context is empty, when an id is empty, repeated or one of the
 model's fixed ids, and when there are fewer than two candidates or more than the
-model accepts (64 for FORMS), fixed ones included. These refusals number
-candidates from 0 in the order offered and never quote your ids or texts. A
-`--choice` with no `=`, or nothing before it, is a usage error, which repeats
-the argument like any other. A model that is not a choice scorer refuses
-`--choice`.
+model accepts (64 for FORMS), fixed ones included. These refusals count
+positions from 0: a candidate in the order offered, a caller choice among your
+`--choice` flags and a fixed choice among the model's fixed choices. They never
+quote your ids or texts. A `--choice` with no `=`, or nothing before it, is a
+usage error, which repeats the argument like any other. A model that is not a
+choice scorer refuses `--choice`.
 
 `--choice` needs `--input-text`, and cannot be combined with `--config`,
 `--pipeline`, `--input-audio`, `--input-image`, `--voice`, `--max-tokens` or
 `--speculative-cloud`. A choice scorer refuses `--input-audio`,
-`--input-image`, `--voice` and `--max-tokens` without `--choice` too, and
-`xybrid repl` and `--speculative-cloud` refuse a choice scorer.
+`--input-image`, `--voice` and `--max-tokens` without `--choice` too.
+`xybrid repl` refuses a choice scorer, also as a pipeline stage, and so does
+`--speculative-cloud`, also with `--dry-run`.
 
 ## Pipeline Format
 

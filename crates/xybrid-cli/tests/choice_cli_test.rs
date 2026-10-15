@@ -32,8 +32,10 @@ const FORMS_CONTEXT: &str = "TASK fill the form from the document, then submit\n
                              ELEMENT Edit \"Phone\" value=\"\"";
 
 /// The message every refusal of a FORMS-shaped scorer opens with.
-const NUMBERING: &str = "choice request refused (candidates count from 0: the --choice flags \
-                         in order, then the model's fixed choices check, click, skip)";
+const NUMBERING: &str = "choice request refused (counting from 0, candidates are the --choice \
+                         flags in order and then the model's fixed choices check, click, skip; \
+                         caller choices are the --choice flags; fixed choices are check, \
+                         click, skip)";
 
 fn xybrid_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_xybrid"))
@@ -484,7 +486,7 @@ fn scorers_refuse_invalid_requests_before_running() {
 
         let err = stderr(&output);
         let numbering = if case.scorer == unfixed.path() {
-            "choice request refused (candidates count from 0, in --choice order)"
+            "choice request refused (counting from 0, candidates are the --choice flags in order)"
         } else {
             NUMBERING
         };
@@ -592,19 +594,26 @@ fn speculative_cloud_refuses_a_cached_scorer() {
 
     // Clap keeps --choice away from --speculative-cloud; a scorer run without
     // it would score the fixed choices alone, so the CLI refuses the scorer.
-    let output = cli.run([
-        "--model",
-        "cached-scorer",
-        "--input-text",
-        CANARY,
-        "--speculative-cloud",
-    ]);
-    assert_refused(
-        &output,
-        1,
-        "'cached-scorer' is a choice scorer; --speculative-cloud streams a text answer",
-    );
-    assert!(!stderr(&output).contains(CANARY));
+    // Its dry run plans on another path and must refuse it too.
+    for dry_run in [false, true] {
+        let mut args = vec!["--model", "cached-scorer", "--input-text", CANARY];
+        args.push("--speculative-cloud");
+        if dry_run {
+            args.push("--dry-run");
+        }
+        let output = cli.run(&args);
+        assert_refused(
+            &output,
+            1,
+            "'cached-scorer' is a choice scorer; --speculative-cloud streams a text answer",
+        );
+        assert!(!stderr(&output).contains(CANARY));
+        assert!(
+            !stdout(&output).contains("ready for execution"),
+            "{}",
+            stdout(&output)
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
