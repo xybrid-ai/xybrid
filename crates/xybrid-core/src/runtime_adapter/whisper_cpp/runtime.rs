@@ -309,13 +309,14 @@ fn native_error(err: NativeError) -> AdapterError {
     match err {
         NativeError::InvalidInput(_)
         | NativeError::UnsupportedLanguage { .. }
-        | NativeError::AudioTooShort { .. } => AdapterError::InvalidInput(err.to_string()),
+        | NativeError::AudioTooShort { .. }
+        | NativeError::CoreMlAudioCtx { .. } => AdapterError::InvalidInput(err.to_string()),
         NativeError::LoadFailed(_) | NativeError::NotCompiledIn => {
             AdapterError::ModelNotLoaded(err.to_string())
         }
-        NativeError::InferenceFailed { .. } | NativeError::InvalidUtf8 { .. } => {
-            AdapterError::RuntimeError(err.to_string())
-        }
+        NativeError::InferenceFailed { .. }
+        | NativeError::InvalidUtf8 { .. }
+        | NativeError::CoreMlEncoderFailed { .. } => AdapterError::RuntimeError(err.to_string()),
         // `WhisperError` is `#[non_exhaustive]`: a future variant must map to
         // something rather than break the build, and a runtime failure is the
         // safe assumption.

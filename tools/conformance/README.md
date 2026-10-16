@@ -39,10 +39,12 @@ nothing needs rebuilding, for regenerating goldens.
 | `qwen3.5-0.8b-f16-cf` | `Qwen3.5-0.8B-F16.gguf` | `convert_gguf.sh f16` | `Qwen/Qwen3.5-0.8B` snapshot |
 | `qwen3.5-0.8b-q4km-cf` | `Qwen3.5-0.8B-Q4_K_M.gguf` | `convert_gguf.sh q4_k_m` | the F16 GGUF |
 
-The staged directories hold only the artifacts, with no `model_metadata.json`
-until the scorer template exists. Gate a test on the artifact file itself:
-`integration-tests`' `model_available` requires the metadata file and would
-report these models missing.
+`cua-s1-forms` commits its `model_metadata.json` (a `ChoiceScorer`), so the
+SDK loads it from `integration-tests/fixtures/models/cua-s1-forms` once the
+export is staged; the GGUF directories hold only their artifacts. Gate a test
+on the artifact file itself (`testing::model_fixtures::staged_artifact`):
+`integration-tests`' `model_available` looks only for the metadata file, so it
+reports FORMS present before the export is staged and the GGUFs missing after.
 
 ## Why regenerated, not downloaded
 
@@ -128,7 +130,7 @@ before committing. A new artifact digest goes into both `models.json` and
 | `goldens/forms.json` | G0 encoded byte ids and the PyTorch reference logits, scores, best and margin |
 | `goldens/labels.json` | G0 rendered prompt, token ids and label ids, and the Transformers reference label logits, logsumexp, scores and `label_mass` |
 | `templates/qwen3.5.jinja` | The pinned Qwen3.5-0.8B chat template, byte-identical to the one both GGUFs embed |
-| `fake/*.onnx` | Five-input fake scorers: dynamic, static with a NaN-masked tail, an N-1 output, and a float64 output |
+| `fake/*.onnx` | Five-input fake scorers: dynamic, static with a NaN-masked tail, an N-1 output, a float64 output, a byte lookup that fails inside ONNX Runtime on any byte id of 64 or more, and an extra output whose length is the first context byte id, which ONNX Runtime warns about |
 
 When `enable_thinking` is omitted, the Qwen3.5-0.8B template ends a generation
 prompt with `<think>\n\n</think>\n\n`, unlike the Qwen3.5-4B template, which

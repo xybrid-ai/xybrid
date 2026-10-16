@@ -20,9 +20,14 @@
 //! point calls [`validate_choice_request`] before any backend, cloud or
 //! pipeline work, so a request sent anywhere else, any other input sent to a
 //! scorer, and a choice kind buried in a multi-part message or in conversation
-//! history are refused before anything runs. This build validates requests
-//! but does not execute scorers yet: a valid request is refused as an
-//! unsupported capability.
+//! history are refused before anything runs.
+//!
+//! A valid request then runs through
+//! [`TemplateExecutor::execute`](crate::execution::TemplateExecutor::execute):
+//! the executor binds the spec to the model's ONNX session once per model file
+//! ([`onnx::OnnxChoiceScorer::bind`]), reuses both for later requests, and
+//! returns [`ChoiceScores`](crate::ir::ChoiceScores) in an
+//! [`EnvelopeKind::ChoiceScores`] envelope.
 //!
 //! # One readout per request
 //!
@@ -182,14 +187,16 @@ pub enum ChoiceError {
     /// The model does not have the inputs or output the spec names.
     #[error("model does not match its choice scorer spec: {0}")]
     ModelContract(String),
-    /// The model returned logits of an unexpected shape.
-    #[error("output '{output}' has shape {actual:?}, expected {expected:?}")]
+    /// The model returned logits of an unexpected shape. The message names
+    /// only the shape the request implies: a model can derive its output's
+    /// shape from the request's bytes.
+    #[error("output '{output}' does not have shape {expected:?} (its shape is withheld)")]
     OutputShape {
         /// Output name from the spec.
         output: String,
         /// The shape the request implies.
         expected: Vec<usize>,
-        /// The shape the model returned.
+        /// The shape the model returned. Not in the message.
         actual: Vec<usize>,
     },
     /// An offered candidate got a NaN or infinite logit.
@@ -339,15 +346,6 @@ pub(crate) fn choice_kind_not_runtime_input() -> AdapterError {
     AdapterError::InvalidInput(format!(
         "choice requests and choice scores are not runtime input; {CHOICE_ROUTE_HINT}"
     ))
-}
-
-/// The refusal for a valid request while scorer execution is not enabled.
-pub(crate) fn scoring_not_enabled(model_id: &str) -> AdapterError {
-    unsupported(
-        model_id,
-        "choice scoring",
-        "this build validates choice requests but does not run choice scorers yet",
-    )
 }
 
 fn check_request(spec: &ChoiceScorerSpec, request: &ChoiceRequest) -> ChoiceResult<()> {

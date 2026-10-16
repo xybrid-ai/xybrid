@@ -7,9 +7,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use xybrid_core::context::{DeviceMetrics, StageDescriptor, DEVICE_CLASS_SCHEMA_VERSION};
 use xybrid_core::device::ResourceMonitor;
+use xybrid_core::execution::choice::{validate_choice_request, EntryPoint};
+use xybrid_core::execution::ExecutionTemplate;
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::executor::prepare_stage_input;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::ir::{Choice, ChoiceScores, Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 use xybrid_core::orchestrator::{
     LocalAuthority, OrchestrationAuthority, Orchestrator, PolicyOutcome, PolicyRequest,
@@ -22,8 +24,8 @@ use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_sdk::registry_client::RegistryClient;
 
 use super::utils::{
-    display_stage_name, format_size, load_speculative_model, maybe_warn_thinking_budget,
-    save_wav_file,
+    choice_scorer_refusal, display_stage_name, format_size, load_speculative_model,
+    maybe_warn_thinking_budget, refuse_choice_scorer, save_wav_file, SPECULATIVE_CLOUD_STREAMS,
 };
 use crate::ui;
 
@@ -326,6 +328,142 @@ fn build_input_envelope(
     }
 
     Ok(input)
+}
+
+/// The input a single-model run sends: the envelope the flags describe or,
+/// when the caller passed `--choice` or the model is a choice scorer, a
+/// choice request with that envelope as its context.
+///
+/// A model that is not a scorer refuses the request in core before it opens
+/// anything, so `--choice` has one owner for that rule. A scorer given no
+/// `--choice` scores its fixed choices alone.
+fn build_model_input(
+    metadata: &ModelMetadata,
+    input_audio: Option<&PathBuf>,
+    input_text: Option<&str>,
+    input_images: &[PathBuf],
+    choices: &[Choice],
+    voice: Option<&str>,
+    max_tokens: Option<usize>,
+) -> Result<Envelope> {
+    check_scorer_flags(metadata, input_audio, input_images, voice, max_tokens)?;
+    let input = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
+    let fixed = match &metadata.execution_template {
+        ExecutionTemplate::ChoiceScorer { scorer } => Some(scorer.fixed_choices().len()),
+        _ => None,
+    };
+    if choices.is_empty() && fixed.is_none() {
+        return Ok(input);
+    }
+    // Counts only: the ids and texts are the caller's own flags.
+    let count = match fixed {
+        Some(fixed) if fixed > 0 => format!("{} (+{fixed} fixed)", choices.len()),
+        _ => choices.len().to_string(),
+    };
+    ui::kv("Choices", &count);
+    Ok(Envelope::choice_request(input, choices.to_vec()))
+}
+
+/// Refuses the input flags a choice scorer cannot use: its input is a choice
+/// request whose context is `--input-text`. Clap keeps these flags away from
+/// `--choice`; this covers a scorer run without it, before any file is read.
+fn check_scorer_flags(
+    metadata: &ModelMetadata,
+    input_audio: Option<&PathBuf>,
+    input_images: &[PathBuf],
+    voice: Option<&str>,
+    max_tokens: Option<usize>,
+) -> Result<()> {
+    if !matches!(
+        metadata.execution_template,
+        ExecutionTemplate::ChoiceScorer { .. }
+    ) {
+        return Ok(());
+    }
+    let refused: Vec<&str> = [
+        ("--input-audio", input_audio.is_some()),
+        ("--input-image", !input_images.is_empty()),
+        ("--voice", voice.is_some()),
+        ("--max-tokens", max_tokens.is_some()),
+    ]
+    .into_iter()
+    .filter_map(|(flag, set)| set.then_some(flag))
+    .collect();
+    if refused.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "'{}' is a choice scorer, which reads only --input-text and --choice; it cannot use {}",
+        metadata.model_id,
+        refused.join(", ")
+    )
+}
+
+/// What a dry run checks for choice scoring, without reading any file: the
+/// flags a scorer cannot use and, when there is text to build it from, the
+/// choice request a run would send. A run would refuse the same input.
+fn check_choice_dry_run(
+    metadata: &ModelMetadata,
+    input_audio: Option<&PathBuf>,
+    input_text: Option<&str>,
+    input_images: &[PathBuf],
+    choices: &[Choice],
+    voice: Option<&str>,
+    max_tokens: Option<usize>,
+) -> Result<()> {
+    check_scorer_flags(metadata, input_audio, input_images, voice, max_tokens)?;
+    let scorer = matches!(
+        metadata.execution_template,
+        ExecutionTemplate::ChoiceScorer { .. }
+    );
+    let Some(text) = input_text.filter(|_| scorer || !choices.is_empty()) else {
+        return Ok(());
+    };
+    let request = Envelope::choice_request(
+        Envelope::new(EnvelopeKind::Text(text.to_string())),
+        choices.to_vec(),
+    );
+    check_choice_input(metadata, &request)
+}
+
+/// Core's choice-request check, run before the executor so a refused request
+/// never starts one. Core runs it again inside `execute`.
+///
+/// Its errors name positions from 0 in three lists: a candidate in E (the
+/// `--choice` flags in order, then the model's fixed choices), a caller
+/// choice among the flags alone and a fixed choice among the fixed choices
+/// alone. The context spells out each list, with the fixed ids from the
+/// metadata, never the caller.
+fn check_choice_input(metadata: &ModelMetadata, input: &Envelope) -> Result<()> {
+    let Err(error) = validate_choice_request(metadata, input, EntryPoint::Batch) else {
+        return Ok(());
+    };
+    let context = match &metadata.execution_template {
+        ExecutionTemplate::ChoiceScorer { scorer } => {
+            let fixed: Vec<&str> = scorer
+                .fixed_choices()
+                .iter()
+                .map(|choice| choice.id.as_str())
+                .collect();
+            if fixed.is_empty() {
+                "choice request refused (counting from 0, candidates are the --choice flags in \
+                 order)"
+                    .to_string()
+            } else {
+                let fixed = fixed.join(", ");
+                format!(
+                    "choice request refused (counting from 0, candidates are the --choice flags \
+                     in order and then the model's fixed choices {fixed}; caller choices are the \
+                     --choice flags; fixed choices are {fixed})"
+                )
+            }
+        }
+        _ => format!(
+            "'{}' is not a choice scorer, so it cannot score --choice candidates",
+            metadata.model_id
+        ),
+    };
+    Err(anyhow::Error::new(error).context(context))
 }
 
 fn build_multimodal_input_envelope(
@@ -742,6 +880,7 @@ pub(crate) fn run_bundle(
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
     input_images: &[PathBuf],
+    choices: &[Choice],
     voice: Option<&str>,
     output_path: Option<&PathBuf>,
     dry_run: bool,
@@ -784,6 +923,7 @@ pub(crate) fn run_bundle(
         input_audio,
         input_text,
         input_images,
+        choices,
         voice,
         dry_run,
         max_tokens,
@@ -856,15 +996,21 @@ fn print_llm_trace_block(output: &Envelope, trace_enabled: bool) {
 }
 
 /// Run inference on a model directly from the registry.
+///
+/// `--speculative-cloud --dry-run` plans here rather than in
+/// [`run_model_speculative`], so `speculative_cloud` lets its dry run refuse
+/// a choice scorer as the speculative run would.
 pub(crate) fn run_model(
     model_id: &str,
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
     input_images: &[PathBuf],
+    choices: &[Choice],
     voice: Option<&str>,
     output_path: Option<&PathBuf>,
     platform: Option<&str>,
     dry_run: bool,
+    speculative_cloud: bool,
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
@@ -958,6 +1104,7 @@ pub(crate) fn run_model(
         input_audio,
         input_text,
         input_images,
+        choices,
         voice,
         dry_run,
         max_tokens,
@@ -966,6 +1113,17 @@ pub(crate) fn run_model(
     emit_pipeline_start_event(&metadata, "registry");
 
     if dry_run {
+        if speculative_cloud
+            && matches!(
+                metadata.execution_template,
+                ExecutionTemplate::ChoiceScorer { .. }
+            )
+        {
+            return Err(choice_scorer_refusal(
+                &metadata.model_id,
+                SPECULATIVE_CLOUD_STREAMS,
+            ));
+        }
         ui::section("Dry Run");
         println!();
         ui::ok("Model is valid and ready for execution");
@@ -1018,6 +1176,11 @@ pub(crate) fn run_model_speculative(
     // Serve the registry model itself: the gateway routes its id to xycloud
     // (the CPU cluster that runs the edge model) while it downloads locally.
     let model = load_speculative_model(model_id)?;
+    // This path streams and a scorer answers only a batch run. Clap keeps
+    // --choice away from --speculative-cloud; this covers a scorer run
+    // without it, which would score the fixed choices alone. Its dry run
+    // plans in `run_model`, which refuses a scorer the same way.
+    refuse_choice_scorer(&model, SPECULATIVE_CLOUD_STREAMS)?;
 
     let envelope = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
 
@@ -1067,6 +1230,7 @@ pub(crate) fn run_directory(
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
     input_images: &[PathBuf],
+    choices: &[Choice],
     voice: Option<&str>,
     output_path: Option<&PathBuf>,
     dry_run: bool,
@@ -1091,6 +1255,7 @@ pub(crate) fn run_directory(
         input_audio,
         input_text,
         input_images,
+        choices,
         voice,
         dry_run,
         max_tokens,
@@ -1130,6 +1295,7 @@ pub(crate) fn run_huggingface(
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
     input_images: &[PathBuf],
+    choices: &[Choice],
     voice: Option<&str>,
     output_path: Option<&PathBuf>,
     dry_run: bool,
@@ -1169,6 +1335,7 @@ pub(crate) fn run_huggingface(
         input_audio,
         input_text,
         input_images,
+        choices,
         voice,
         dry_run,
         max_tokens,
@@ -1208,6 +1375,7 @@ pub(crate) fn run_model_file(
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
     input_images: &[PathBuf],
+    choices: &[Choice],
     voice: Option<&str>,
     output_path: Option<&PathBuf>,
     dry_run: bool,
@@ -1258,6 +1426,15 @@ pub(crate) fn run_model_file(
     emit_pipeline_start_event(&metadata, "model-file");
 
     if dry_run {
+        check_choice_dry_run(
+            &metadata,
+            input_audio,
+            input_text,
+            input_images,
+            choices,
+            voice,
+            max_tokens,
+        )?;
         ui::section("Dry Run");
         println!();
         ui::ok("Model is valid and ready for execution");
@@ -1267,7 +1444,15 @@ pub(crate) fn run_model_file(
     }
 
     let input = if input_audio.is_some() || input_text.is_some() || !input_images.is_empty() {
-        build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?
+        build_model_input(
+            &metadata,
+            input_audio,
+            input_text,
+            input_images,
+            choices,
+            voice,
+            max_tokens,
+        )?
     } else {
         return Err(anyhow::anyhow!(
             "No input provided. Use --input-audio <file>, --input-text <text>, or --input-image <file>"
@@ -1322,6 +1507,7 @@ fn prepare_bundle_execution(
     input_audio: Option<&PathBuf>,
     input_text: Option<&str>,
     input_images: &[PathBuf],
+    choices: &[Choice],
     voice: Option<&str>,
     dry_run: bool,
     max_tokens: Option<usize>,
@@ -1350,6 +1536,15 @@ fn prepare_bundle_execution(
     println!();
 
     if dry_run {
+        check_choice_dry_run(
+            &metadata,
+            input_audio,
+            input_text,
+            input_images,
+            choices,
+            voice,
+            max_tokens,
+        )?;
         return Ok((metadata, None));
     }
 
@@ -1357,7 +1552,15 @@ fn prepare_bundle_execution(
         return Ok((metadata, None));
     }
 
-    let input = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
+    let input = build_model_input(
+        &metadata,
+        input_audio,
+        input_text,
+        input_images,
+        choices,
+        voice,
+        max_tokens,
+    )?;
     println!();
 
     Ok((metadata, Some(input)))
@@ -1369,6 +1572,8 @@ fn run_inference(
     input: &Envelope,
     trace_enabled: bool,
 ) -> Result<(Envelope, std::time::Duration)> {
+    check_choice_input(metadata, input)?;
+
     let sp = ui::spinner("Running inference...");
 
     let base_path = extract_dir
@@ -1498,11 +1703,95 @@ fn print_output_payload(output: &Envelope, output_path: Option<&PathBuf>) -> Res
                 save_envelope_json(path, output)?;
             }
         }
-        // No run returns these yet: choice scorers do not execute in this
-        // build, and nothing else produces them.
-        EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
-            anyhow::bail!("this CLI does not display choice requests or choice scores yet");
+        EnvelopeKind::ChoiceScores(scores) => print_choice_scores(scores, output_path)?,
+        EnvelopeKind::ChoiceRequest(_) => {
+            anyhow::bail!("a run never returns a choice request");
         }
+    }
+    Ok(())
+}
+
+/// One row of the choice-score table.
+#[derive(Debug, PartialEq)]
+struct ChoiceScoreRow {
+    /// The id with its control characters escaped: a newline or a terminal
+    /// escape would break the table. `--output` keeps the id as given.
+    id: String,
+    /// Four decimals.
+    score: String,
+    /// Four decimals.
+    logit: String,
+    /// `best`, `fixed`, both or neither.
+    note: &'static str,
+}
+
+/// The table rows for `scores`, in result order: the caller's choices, then
+/// the model's fixed choices. [`ChoiceScores::best`] picks the best row, so
+/// its tie rules hold here too.
+fn choice_score_rows(scores: &ChoiceScores) -> Vec<ChoiceScoreRow> {
+    let best = scores.best();
+    scores
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| ChoiceScoreRow {
+            id: entry
+                .id
+                .chars()
+                .map(|c| {
+                    if c.is_control() {
+                        c.escape_default().to_string()
+                    } else {
+                        c.to_string()
+                    }
+                })
+                .collect(),
+            score: format!("{:.4}", entry.score),
+            logit: format!("{:.4}", entry.logit),
+            note: match (best == Some(index), entry.fixed) {
+                (true, true) => "best, fixed",
+                (true, false) => "best",
+                (false, true) => "fixed",
+                (false, false) => "",
+            },
+        })
+        .collect()
+}
+
+/// Print the scores of a choice request as a table and, when asked, save
+/// them to `output_path` as JSON (`entries` and `label_mass`).
+fn print_choice_scores(scores: &ChoiceScores, output_path: Option<&PathBuf>) -> Result<()> {
+    let rows = choice_score_rows(scores);
+    // Right-align the logits, which can be negative, on their decimal point.
+    let logit_width = rows.iter().map(|row| row.logit.len()).max().unwrap_or(0);
+    let logits: Vec<String> = rows
+        .iter()
+        .map(|row| format!("{:>logit_width$}", row.logit))
+        .collect();
+    let mut table = ui::Table::new(vec!["ID", "Score", "Logit", ""]);
+    for (row, logit) in rows.iter().zip(&logits) {
+        table.row(vec![&row.id, &row.score, logit, row.note]);
+    }
+    println!();
+    table.print();
+    println!();
+    if let Some(margin) = scores.margin() {
+        ui::kv("Margin", &format!("{margin:.4}"));
+    }
+    if let Some(label_mass) = scores.label_mass {
+        ui::kv("Label mass", &format!("{label_mass:.4}"));
+    }
+    ui::hint(
+        "Scores rank these candidates against each other; they are not calibrated probabilities",
+    );
+
+    if let Some(path) = output_path {
+        let json =
+            serde_json::to_string_pretty(scores).context("Failed to serialize choice scores")?;
+        fs::write(path, json)
+            .with_context(|| format!("Failed to write choice scores to {}", path.display()))?;
+        println!();
+        ui::ok(&format!("Scores saved to {}", path.display()));
     }
     Ok(())
 }
@@ -1952,5 +2241,355 @@ mod tests {
         let text = Envelope::new(EnvelopeKind::Text("final".into()));
         finish_speculative_output(&text, "streamed answer", Some(&txt)).unwrap();
         assert_eq!(fs::read_to_string(&txt).unwrap(), "streamed answer");
+    }
+
+    // ── choice requests and scores ──────────────────────────────────────────
+
+    const CANARY: &str = "canary-5e2b81";
+
+    /// A FORMS-shaped scorer with `fixed` as its fixed choices.
+    fn scorer_metadata(fixed: serde_json::Value) -> ModelMetadata {
+        let field = |ids: &str, mask: &str, max_len: usize| {
+            serde_json::json!({
+                "offset": 1,
+                "max_len": max_len,
+                "overflow": "Truncate",
+                "ids_input": ids,
+                "mask_input": mask,
+            })
+        };
+        serde_json::from_value(serde_json::json!({
+            "model_id": "scorer",
+            "version": "1.0",
+            "execution_template": {
+                "type": "ChoiceScorer",
+                "scorer": {
+                    "type": "OnnxByteOptionScorer",
+                    "model_file": "scorer.onnx",
+                    "context": field("context_ids", "context_mask", 224),
+                    "choice": field("option_ids", "option_token_mask", 96),
+                    "choice_mask_input": "option_mask",
+                    "logits_output": "logits",
+                    "max_choices": 64,
+                    "fixed_choices": fixed,
+                },
+            },
+            "files": [],
+        }))
+        .expect("scorer metadata parses")
+    }
+
+    fn forms_metadata() -> ModelMetadata {
+        scorer_metadata(serde_json::json!([
+            { "id": "check", "text": "check" },
+            { "id": "click", "text": "click" },
+            { "id": "skip", "text": "skip" },
+        ]))
+    }
+
+    fn chat_metadata() -> ModelMetadata {
+        serde_json::from_value(serde_json::json!({
+            "model_id": "chat",
+            "version": "1.0",
+            "execution_template": { "type": "Gguf", "model_file": "model.gguf" },
+            "files": [],
+        }))
+        .expect("chat metadata parses")
+    }
+
+    fn offered() -> Vec<Choice> {
+        vec![
+            Choice::new("tel", "fill Tel: (503) 555-0142"),
+            Choice::new("name", "fill Name: Jane Doe"),
+        ]
+    }
+
+    #[test]
+    fn model_input_is_a_choice_request_for_scorers_and_for_choices() {
+        let choices = offered();
+        let request = |metadata: &ModelMetadata, choices: &[Choice]| {
+            let input =
+                build_model_input(metadata, None, Some("FORM"), &[], choices, None, None).unwrap();
+            let EnvelopeKind::ChoiceRequest(request) = input.kind else {
+                panic!("expected a choice request, got {}", input.kind_str());
+            };
+            request
+        };
+
+        // The text becomes the context; the choices keep their order.
+        let scored = request(&forms_metadata(), &choices);
+        assert_eq!(scored.context().as_text(), Some("FORM"));
+        assert_eq!(scored.choices(), choices.as_slice());
+
+        // A scorer given no --choice scores its fixed choices alone.
+        assert!(request(&forms_metadata(), &[]).choices().is_empty());
+
+        // Another model given --choice gets the request too, for core to refuse.
+        assert_eq!(request(&chat_metadata(), &choices).choices(), choices);
+
+        // Without --choice it gets the same input as before.
+        let input =
+            build_model_input(&chat_metadata(), None, Some("hi"), &[], &[], None, None).unwrap();
+        assert_eq!(input.as_text(), Some("hi"));
+    }
+
+    #[test]
+    fn choice_input_is_checked_before_anything_runs() {
+        let check = |metadata: &ModelMetadata, choices: Vec<Choice>| {
+            let input = Envelope::choice_request(text(&format!("context {CANARY}")), choices);
+            check_choice_input(metadata, &input).map_err(|err| format!("{err:#}"))
+        };
+
+        check(&forms_metadata(), offered()).expect("a valid request passes");
+        check(&forms_metadata(), Vec::new()).expect("three fixed choices are enough");
+        check_choice_input(&chat_metadata(), &text("hi")).expect("ordinary input passes");
+
+        // Core's message, numbered as the context explains, and no caller text.
+        // A caller choice and a fixed choice each count in their own list:
+        // fixed choice 2 is `skip`, though `click` is candidate 2 here.
+        let reserved = check(
+            &forms_metadata(),
+            vec![Choice::new("skip", format!("skip {CANARY}"))],
+        )
+        .unwrap_err();
+        assert_eq!(
+            reserved,
+            "choice request refused (counting from 0, candidates are the --choice flags in \
+             order and then the model's fixed choices check, click, skip; caller choices are \
+             the --choice flags; fixed choices are check, click, skip): Invalid input: caller \
+             choice 0 reuses the id of fixed choice 2"
+        );
+        let repeated = check(
+            &forms_metadata(),
+            vec![Choice::new(CANARY, "a"), Choice::new(CANARY, "b")],
+        )
+        .unwrap_err();
+        assert!(
+            repeated.contains("candidate 1 repeats the id of candidate 0"),
+            "{repeated}"
+        );
+
+        // A scorer without fixed choices numbers the --choice flags alone.
+        let unfixed = scorer_metadata(serde_json::json!([]));
+        let too_few = check(&unfixed, vec![Choice::new("a", CANARY)]).unwrap_err();
+        assert!(
+            too_few.starts_with(
+                "choice request refused (counting from 0, candidates are the --choice flags in \
+                 order): "
+            ),
+            "{too_few}"
+        );
+        assert!(too_few.contains("1 candidate(s) offered"), "{too_few}");
+
+        let refused = check(&chat_metadata(), offered()).unwrap_err();
+        assert!(
+            refused.contains("'chat' is not a choice scorer"),
+            "{refused}"
+        );
+        assert!(
+            refused.contains("does not support choice requests"),
+            "{refused}"
+        );
+
+        for message in [reserved, repeated, too_few, refused] {
+            assert!(!message.contains(CANARY), "{message}");
+            assert!(!message.contains("fill Tel"), "{message}");
+        }
+    }
+
+    #[test]
+    fn scorers_refuse_flags_they_cannot_use_before_reading_files() {
+        // Paths that do not exist: the refusal comes before any read.
+        let audio = PathBuf::from("missing.wav");
+        let image = PathBuf::from("missing.png");
+        let refused = build_model_input(
+            &forms_metadata(),
+            Some(&audio),
+            Some("FORM"),
+            std::slice::from_ref(&image),
+            &[],
+            Some("af_bella"),
+            Some(8),
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            refused,
+            "'scorer' is a choice scorer, which reads only --input-text and --choice; it \
+             cannot use --input-audio, --input-image, --voice, --max-tokens"
+        );
+
+        let max_tokens = build_model_input(
+            &forms_metadata(),
+            None,
+            Some("FORM"),
+            &[],
+            &[],
+            None,
+            Some(8),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            max_tokens.ends_with("it cannot use --max-tokens"),
+            "{max_tokens}"
+        );
+
+        // Other models keep taking them.
+        let input = build_model_input(
+            &chat_metadata(),
+            None,
+            Some("hi"),
+            &[],
+            &[],
+            Some("af_bella"),
+            Some(8),
+        )
+        .unwrap();
+        assert_eq!(
+            input.metadata.get("voice_id").map(String::as_str),
+            Some("af_bella")
+        );
+    }
+
+    #[test]
+    fn dry_runs_check_choice_requests_without_reading_files() {
+        let dry_run = |metadata: &ModelMetadata, text: Option<&str>, choices: &[Choice]| {
+            check_choice_dry_run(metadata, None, text, &[], choices, None, None)
+                .map_err(|err| format!("{err:#}"))
+        };
+
+        // A valid request, and a scorer dry run with no input at all, pass.
+        dry_run(&forms_metadata(), Some("FORM"), &offered()).expect("a valid request");
+        dry_run(&forms_metadata(), None, &[]).expect("nothing to check");
+        dry_run(&chat_metadata(), Some("hi"), &[]).expect("no choice request");
+
+        // A run would refuse these, so the dry run does too.
+        let empty = dry_run(&forms_metadata(), Some(""), &offered()).unwrap_err();
+        assert!(empty.contains("the context is empty"), "{empty}");
+        let reserved =
+            dry_run(&forms_metadata(), Some("FORM"), &[Choice::new("skip", "x")]).unwrap_err();
+        assert!(
+            reserved.contains("caller choice 0 reuses the id of fixed choice 2"),
+            "{reserved}"
+        );
+        let chat = dry_run(&chat_metadata(), Some("hi"), &offered()).unwrap_err();
+        assert!(chat.contains("'chat' is not a choice scorer"), "{chat}");
+
+        let audio = PathBuf::from("missing.wav");
+        let flags =
+            check_choice_dry_run(&forms_metadata(), Some(&audio), None, &[], &[], None, None)
+                .unwrap_err()
+                .to_string();
+        assert!(flags.ends_with("it cannot use --input-audio"), "{flags}");
+    }
+
+    fn score(id: &str, logit: f32, score: f32, fixed: bool) -> xybrid_core::ir::ChoiceScore {
+        xybrid_core::ir::ChoiceScore {
+            id: id.to_string(),
+            logit,
+            score,
+            fixed,
+        }
+    }
+
+    fn notes(scores: &ChoiceScores) -> Vec<&'static str> {
+        choice_score_rows(scores)
+            .into_iter()
+            .map(|row| row.note)
+            .collect()
+    }
+
+    #[test]
+    fn choice_score_rows_keep_result_order_and_mark_best_and_fixed() {
+        let scores = ChoiceScores {
+            entries: vec![
+                score("tel", 1.5, 0.6, false),
+                score("name", -0.25, 0.1, false),
+                score("check", 0.75, 0.3, true),
+            ],
+            label_mass: None,
+        };
+        assert_eq!(
+            choice_score_rows(&scores),
+            [
+                ChoiceScoreRow {
+                    id: "tel".into(),
+                    score: "0.6000".into(),
+                    logit: "1.5000".into(),
+                    note: "best",
+                },
+                ChoiceScoreRow {
+                    id: "name".into(),
+                    score: "0.1000".into(),
+                    logit: "-0.2500".into(),
+                    note: "",
+                },
+                ChoiceScoreRow {
+                    id: "check".into(),
+                    score: "0.3000".into(),
+                    logit: "0.7500".into(),
+                    note: "fixed",
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn choice_score_rows_follow_the_tie_rules_of_best() {
+        // An exact tie goes to the first entry.
+        let exact = ChoiceScores {
+            entries: vec![score("a", 0.0, 0.5, false), score("b", 0.0, 0.5, false)],
+            label_mass: None,
+        };
+        assert_eq!(notes(&exact), ["best", ""]);
+
+        // A tie in the rounded score goes to the higher logit, here a fixed one.
+        let rounded = ChoiceScores {
+            entries: vec![score("a", 0.0, 0.5, false), score("skip", 1e-8, 0.5, true)],
+            label_mass: None,
+        };
+        assert_eq!(notes(&rounded), ["", "best, fixed"]);
+    }
+
+    #[test]
+    fn choice_score_rows_escape_control_characters_in_ids() {
+        let scores = ChoiceScores {
+            entries: vec![
+                score("two\nlines", 1.0, 0.7, false),
+                score("tab\there \u{1b}[31mred", 0.0, 0.3, false),
+                score("plain id é", -1.0, 0.0, false),
+            ],
+            label_mass: None,
+        };
+        let ids: Vec<String> = choice_score_rows(&scores)
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(
+            ids,
+            [r"two\nlines", r"tab\there \u{1b}[31mred", "plain id é"]
+        );
+    }
+
+    #[test]
+    fn choice_scores_save_as_json_without_the_envelope() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scores.json");
+        let scores = ChoiceScores {
+            entries: vec![
+                score("tel", 2.0, 0.75, false),
+                score("skip", 0.5, 0.25, true),
+            ],
+            label_mass: None,
+        };
+        let output = Envelope::new(EnvelopeKind::ChoiceScores(scores.clone()));
+        print_output_payload(&output, Some(&path)).unwrap();
+
+        let saved: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved, serde_json::to_value(&scores).unwrap());
+        assert_eq!(saved["label_mass"], serde_json::Value::Null);
+        assert_eq!(saved["entries"][1]["fixed"], true);
     }
 }

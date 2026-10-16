@@ -18,6 +18,10 @@ path = "src/lib.rs"
 # clippy` on lean runners stays green.
 default = []
 bindings = ["xybrid-whisper-sys/bindings"]
+# Run the encoder through Core ML when the model ships a
+# `<name>-encoder.mlmodelc` beside its `.bin`. iOS only; see
+# `xybrid-whisper-sys`'s feature of the same name.
+coreml = ["bindings", "xybrid-whisper-sys/coreml"]
 
 [dependencies]
 xybrid-whisper-sys = { path = "../whisper-cpp-sys", version = "0.11.0" }

@@ -33,6 +33,13 @@ bindings = ["xybrid-llama-sys/bindings"]
 # bindgen output in $OUT_DIR. Exists for the Bazel path, which has no build
 # script and therefore no bindgen/libclang. Cargo builds should not enable it.
 committed-bindings = ["bindings"]
+# whisper.cpp's Core ML encoder, on iOS only (a no-op elsewhere). Defines
+# WHISPER_USE_COREML and compiles xybrid's bridge (`native/`), so a model whose
+# `<name>-encoder.mlmodelc` sits beside its `.bin` runs the encoder through
+# Core ML; WHISPER_COREML_ALLOW_FALLBACK keeps every other model on the ggml
+# encoder. Also exposes the bridge's hooks in `coreml`. Bazel mirrors this in
+# `//:whisper` and this crate's BUILD.bazel.
+coreml = ["bindings"]
 
 [dependencies]
 # Not for its Rust API — for its ggml. This dependency is what makes the

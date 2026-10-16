@@ -72,6 +72,12 @@ pub enum PreprocessingStep {
         /// Optional: Maximum sequence length
         #[serde(default)]
         max_length: Option<usize>,
+
+        /// Wrap the text in the special tokens the tokenizer's post-processor
+        /// defines, such as `<bos>`/`<eos>` or `[CLS]`/`[SEP]` (default:
+        /// false). Truncation to `max_length` keeps the closing ones.
+        #[serde(default, skip_serializing_if = "is_false")]
+        add_special_tokens: bool,
     },
 
     /// Normalize tensor values
@@ -367,6 +373,12 @@ pub enum PostprocessingStep {
         dim: usize,
     },
 
+    /// Scale each vector along the last axis to unit length (L2 norm of 1)
+    ///
+    /// Use for: Sentence embeddings compared by cosine similarity, after
+    /// `MeanPool` (sentence-transformers' `normalize_embeddings=True`)
+    L2Normalize,
+
     /// CTC (Connectionist Temporal Classification) decoding for ASR
     ///
     /// Use for: Wav2Vec2, Hubert, other CTC-based ASR models
@@ -434,6 +446,7 @@ impl PostprocessingStep {
             PostprocessingStep::TemperatureSample { .. } => "TemperatureSample",
             PostprocessingStep::Denormalize { .. } => "Denormalize",
             PostprocessingStep::MeanPool { .. } => "MeanPool",
+            PostprocessingStep::L2Normalize => "L2Normalize",
             PostprocessingStep::CTCDecode { .. } => "CTCDecode",
             PostprocessingStep::TTSAudioEncode { .. } => "TTSAudioEncode",
             PostprocessingStep::WhisperDecode { .. } => "WhisperDecode",
@@ -634,6 +647,10 @@ fn default_tts_postprocess() -> bool {
     true
 }
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -659,6 +676,62 @@ mod tests {
         let deserialized: PreprocessingStep = serde_json::from_str(&serialized).unwrap();
         let reserialized = serde_json::to_string(&deserialized).unwrap();
         assert_eq!(serialized, reserialized);
+    }
+
+    #[test]
+    fn tokenize_adds_no_special_tokens_unless_asked() {
+        let json = r#"{
+            "type": "Tokenize",
+            "vocab_file": "tokenizer.json",
+            "tokenizer_type": "BPE"
+        }"#;
+
+        let step: PreprocessingStep = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            step,
+            PreprocessingStep::Tokenize {
+                add_special_tokens: false,
+                ..
+            }
+        ));
+        // Left out when false, so existing metadata serializes as before.
+        let serialized = serde_json::to_value(&step).unwrap();
+        assert!(serialized.get("add_special_tokens").is_none());
+    }
+
+    #[test]
+    fn tokenize_add_special_tokens_round_trips() {
+        let json = r#"{
+            "type": "Tokenize",
+            "vocab_file": "tokenizer.json",
+            "tokenizer_type": "BPE",
+            "max_length": 2048,
+            "add_special_tokens": true
+        }"#;
+
+        let step: PreprocessingStep = serde_json::from_str(json).unwrap();
+        let serialized = serde_json::to_value(&step).unwrap();
+
+        assert_eq!(serialized["add_special_tokens"], serde_json::json!(true));
+        assert!(matches!(
+            serde_json::from_value(serialized).unwrap(),
+            PreprocessingStep::Tokenize {
+                add_special_tokens: true,
+                max_length: Some(2048),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn l2_normalize_is_a_bare_type_tag() {
+        let step: PostprocessingStep = serde_json::from_str(r#"{"type": "L2Normalize"}"#).unwrap();
+
+        assert!(matches!(step, PostprocessingStep::L2Normalize));
+        assert_eq!(
+            serde_json::to_value(&step).unwrap(),
+            serde_json::json!({"type": "L2Normalize"})
+        );
     }
 
     #[test]

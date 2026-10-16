@@ -1072,6 +1072,16 @@ fn convert_to_platform_event(
                 // them (byte-identical to the pre-live-mode payload).
                 "live_mode",
                 "frame_session_id",
+                // Choice-scorer decisions: `XybridModel::run` stamps
+                // `data.task = "decision"`, `data.backend` and
+                // `data.choice_count` (how many candidates were scored, never
+                // their ids, texts or scores) on its `ModelComplete`, so a
+                // decision is attributed even without a span tree. No other
+                // event puts these keys in `data`, so the hoist is a no-op
+                // for them.
+                "task",
+                "backend",
+                "choice_count",
             ]
             .iter()
             {
@@ -3343,6 +3353,37 @@ mod tests {
     }
 
     #[test]
+    fn choice_decision_fields_hoist_to_platform_event_top_level() {
+        // A choice scorer's ModelComplete carries its decision fields in
+        // `data`; they surface on the wire payload top level even when no
+        // span tree is attached.
+        let event = TelemetryEvent {
+            event_type: "ModelComplete".to_string(),
+            stage_name: Some("cua-s1-forms".to_string()),
+            target: Some("local".to_string()),
+            latency_ms: Some(3),
+            error: None,
+            data: Some(
+                serde_json::json!({
+                    "model_id": "cua-s1-forms",
+                    "output_type": "ChoiceScores",
+                    "task": "decision",
+                    "backend": "ort",
+                    "choice_count": 5,
+                })
+                .to_string(),
+            ),
+            timestamp_ms: 1_700_000_000_000,
+        };
+        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
+        let platform = convert_to_platform_event(&event, &config, None, None, None);
+
+        assert_eq!(platform.payload["task"], serde_json::json!("decision"));
+        assert_eq!(platform.payload["backend"], serde_json::json!("ort"));
+        assert_eq!(platform.payload["choice_count"], serde_json::json!(5));
+    }
+
+    #[test]
     fn non_live_event_payload_is_byte_identical_without_live_keys() {
         // Regression guard: a non-live (no live tag) ModelComplete event must
         // convert to a wire payload that carries NEITHER `live_mode` nor
@@ -3378,6 +3419,10 @@ mod tests {
         // And the nested data object likewise stays free of the live keys.
         assert!(platform.payload["data"].get("live_mode").is_none());
         assert!(platform.payload["data"].get("frame_session_id").is_none());
+        // Nor does a run that is not a decision gain the decision fields.
+        for key in ["task", "backend", "choice_count"] {
+            assert!(platform.payload.get(key).is_none(), "{key}: {payload_json}");
+        }
     }
 
     #[test]

@@ -21,6 +21,7 @@
 //! - [`TranscribeParams`] / [`Task`] — validated inference parameters
 //! - [`Segment`] — one span of transcript with millisecond offsets
 //! - [`WhisperError`] / [`WhisperResult`] — error surface
+//! - [`COREML_ENCODER`] — whether this build has the Core ML encoder
 //!
 //! Zero `unsafe` appears on the public surface. Every `unsafe` block lives in
 //! [`mod@model`] with a `# Safety` comment, mirroring `xybrid-llama`'s
@@ -57,9 +58,17 @@ mod error;
 mod params;
 mod segment;
 
+// Pairing a model with its Core ML encoder (iOS). Unconditional so its pure
+// helpers' tests run on any host; see the module for what each build gets.
+mod coreml;
+
 pub use error::{WhisperError, WhisperResult};
 pub use params::{Task, TranscribeParams, FULL_AUDIO_CTX, SAMPLE_RATE};
 pub use segment::Segment;
+
+/// Whether this build runs the encoder through Core ML (iOS 16 and later)
+/// when a model ships `<name>-encoder.mlmodelc` beside its `.bin`.
+pub const COREML_ENCODER: bool = cfg!(all(feature = "coreml", target_os = "ios"));
 
 #[cfg(feature = "bindings")]
 mod model;

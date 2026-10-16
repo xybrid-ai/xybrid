@@ -151,6 +151,8 @@ coreml = [
     "objc2-core-ml/MLModel_MLModelCompilation",
     "objc2-core-ml/MLMultiArray",
     "objc2-core-ml/MLMultiArrayConstraint",
+    # whisper.cpp's Core ML encoder (iOS), when `asr-whispercpp` is also on.
+    "xybrid-whisper?/coreml",
 ]
 
 # Candle (Pure Rust ML)

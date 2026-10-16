@@ -333,7 +333,15 @@
       "cases": "cases/labels.json",
       "template": "templates/qwen3.5.jinja"
     },
+    "fake/byte_table.onnx": {
+      "generator": "tools/conformance/gen_fake_scorers.py",
+      "environment": "forms"
+    },
     "fake/dynamic.onnx": {
+      "generator": "tools/conformance/gen_fake_scorers.py",
+      "environment": "forms"
+    },
+    "fake/shape_warning.onnx": {
       "generator": "tools/conformance/gen_fake_scorers.py",
       "environment": "forms"
     },
@@ -380,7 +388,9 @@
   "fixtures": {
     "cases/forms.json": "84e1bfbb5e256bd6ef3702b731a0471507c3b594e849f8facc938a7522a99138",
     "cases/labels.json": "b4e3b9e17e9f35b24391472b67cb391d9b982538d8a43270a7460f36b90092fa",
+    "fake/byte_table.onnx": "9287b29ea4e125bc92e5a4f8a95437513260e486272ffb8bae472e828ad0ddcb",
     "fake/dynamic.onnx": "6708155f0e9a51eb1e77563baed3f2d44749b3f990a7b9bd159782b09fc104aa",
+    "fake/shape_warning.onnx": "004f14403d1d15fed0804957ec83141ffdd4aeb879a3ff2d59e228ad05b78e1b",
     "fake/short_output.onnx": "7f9885e0b1218956733c64545c71a5c4c66c47d97c20164894d73b78bd630670",
     "fake/static_masked.onnx": "e7b8b9dd4113067f88babb7b65020bc5eb054afc3ebba23e6335445cc188c817",
     "fake/wrong_dtype.onnx": "e47a63c7a13dd56966150a0de6cf1233734480f987e1e19cb0b546d1207faf4b",

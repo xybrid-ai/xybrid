@@ -424,6 +424,11 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 data and the loop is your code. See the
 [Tool Calling guide](https://docs.xybrid.dev/en/docs/guides/tool-calling).
 
+**Embeddings:** text embedding models (e.g. EmbeddingGemma 2,
+all-MiniLM) already run as bring-your-own models: see the
+[custom models guide](docs/guides/custom-models.md#sentence-embeddings).
+Registry models are coming.
+
 ---
 
 ## Why Xybrid?

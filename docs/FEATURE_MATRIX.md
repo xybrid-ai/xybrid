@@ -36,6 +36,7 @@ This document provides a comprehensive reference for all feature flags, platform
 | **llm-llamacpp** | llama.cpp backend (cmake build + link) | `llama-cpp-sys/bindings`, `xybrid-llama/bindings` |
 | **llm-llamacpp-vision** | Native llama multimodal (`mmproj` / `mtmd`) backend on top of `llm-llamacpp` | `llm-llamacpp`, `xybrid-llama-sys/vision`, `xybrid-llama/vision` |
 | **asr-whispercpp** | whisper.cpp speech recognition. Requires `llm-llamacpp` — whisper.cpp links the ggml that llama.cpp builds rather than a second copy | `llm-llamacpp`, `xybrid-whisper/bindings` |
+| **coreml** | Native Core ML runtime adapter (Apple). With `asr-whispercpp` on iOS 16+, whisper.cpp runs its encoder through Core ML when the model ships `<name>-encoder.mlmodelc` beside its `.bin`; without that file, or on older iOS, the ggml encoder | `objc2-core-ml`, `xybrid-whisper/coreml` (when `asr-whispercpp` is on) |
 
 ### Notes
 
