@@ -592,6 +592,42 @@ public struct XybridStreamToken: Hashable, Equatable, Sendable {
     }
 }
 
+/// Owned PCM16 LE packet. Offsets count samples per channel.
+public struct XybridTtsAudioChunk: Hashable, Equatable, Sendable {
+    public var pcm: Data
+    public var sampleRate: UInt32
+    public var channels: UInt32
+    public var firstSample: UInt64
+
+    public init(
+        pcm: Data,
+        sampleRate: UInt32,
+        channels: UInt32,
+        firstSample: UInt64
+    ) {
+        self.pcm = pcm
+        self.sampleRate = sampleRate
+        self.channels = channels
+        self.firstSample = firstSample
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridTtsAudioChunk {
+        XybridTtsAudioChunk(
+            pcm: reader.readBytes(),
+            sampleRate: reader.readU32(),
+            channels: reader.readU32(),
+            firstSample: reader.readU64()
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeBytes(self.pcm)
+        writer.writeU32(self.sampleRate)
+        writer.writeU32(self.channels)
+        writer.writeU64(self.firstSample)
+    }
+}
+
 /// One pull from a streaming inference session.
 ///
 /// This is a flat record instead of a data-carrying enum because the pinned
@@ -603,19 +639,22 @@ public struct XybridStreamToken: Hashable, Equatable, Sendable {
 public struct XybridStreamEvent: Hashable, Equatable, Sendable {
     public var kind: XybridStreamEventKind
     public var token: XybridStreamToken?
+    public var audio: XybridTtsAudioChunk?
 
-    public init(kind: XybridStreamEventKind, token: XybridStreamToken?) {
+    public init(kind: XybridStreamEventKind, token: XybridStreamToken?, audio: XybridTtsAudioChunk?) {
         self.kind = kind
         self.token = token
+        self.audio = audio
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridStreamEvent {
-        XybridStreamEvent(kind: XybridStreamEventKind(rawValue: reader.readI32())!, token: reader.readOptional { reader in XybridStreamToken.decode(from: &reader) })
+        XybridStreamEvent(kind: XybridStreamEventKind(rawValue: reader.readI32())!, token: reader.readOptional { reader in XybridStreamToken.decode(from: &reader) }, audio: reader.readOptional { reader in XybridTtsAudioChunk.decode(from: &reader) })
     }
 
     @inlinable func encode(to writer: inout WireWriter) {
         writer.writeI32(self.kind.rawValue)
         writer.writeOptional(self.token) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        writer.writeOptional(self.audio) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
     }
 }
 
@@ -1122,6 +1161,7 @@ public enum XybridDownloadState: Int32, Hashable, Sendable, CaseIterable {
 public enum XybridStreamEventKind: Int32, Hashable, Sendable, CaseIterable {
     case token = 0
     case complete = 1
+    case audio = 2
 
     @usableFromInline init(fromC c: Int32) {
         self = XybridStreamEventKind(rawValue: c)!

@@ -3,6 +3,7 @@
 
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Xybrid
 {
@@ -393,6 +394,80 @@ namespace Xybrid
             var result = RunStreaming(envelope, context, onToken);
             result.ThrowIfFailed();
             return result.Text;
+        }
+
+        /// <summary>Deliver speech packets on the calling thread; blocks until synthesis ends.</summary>
+        /// <remarks>
+        /// Call on a worker. Packets are owned PCM16 LE; queue them for playback.
+        /// Cancellation discards queued native packets and stops active Kitten
+        /// inference; invalidate audio already scheduled by your playback queue.
+        /// The native protocol is pull-based, so no managed delegate crosses FFI
+        /// and no callback rooting or MonoPInvokeCallback attribute is required.
+        /// Dispose the model after this call returns.
+        /// </remarks>
+        public TtsStreamResult RunTtsStreaming(Envelope envelope, Action<TtsAudioChunk> onAudio = null,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            if (envelope == null) throw new ArgumentNullException(nameof(envelope));
+            if (cancellationToken.IsCancellationRequested)
+                return new TtsStreamResult(TtsStatus.Cancelled);
+            using (var cancel = BoltCancellation.From(cancellationToken))
+            {
+                ulong? streamId = null;
+                bool terminal = false;
+                try
+                {
+                    streamId = _bolt.RunStream(envelope.Bolt, null, cancel.Token);
+                    while (true)
+                    {
+                        var item = _bolt.StreamNext(streamId.Value);
+                        if (item.Kind == XybridBolt.XybridStreamEventKind.Complete) { terminal = true; break; }
+                        if (item.Kind != XybridBolt.XybridStreamEventKind.Audio)
+                            throw new InvalidOperationException("RunTtsStreaming requires an audio model");
+                        if (!cancellationToken.IsCancellationRequested && item.Audio.HasValue)
+                            onAudio?.Invoke(new TtsAudioChunk(item.Audio.Value));
+                    }
+                    var result = TtsStreamResult.FromBolt(_bolt.StreamResult(streamId.Value));
+                    return cancellationToken.IsCancellationRequested
+                        ? new TtsStreamResult(TtsStatus.Cancelled, result.SampleRate, result.Channels,
+                            result.Samples, result.Chunks, result.LimitedChunks)
+                        : result;
+                }
+                catch (XybridBolt.XybridErrorException ex)
+                {
+                    return new TtsStreamResult(TtsStatus.Failed, error: BoltErrors.Describe(ex.Error));
+                }
+                finally
+                {
+                    // Also cancels on callback exceptions or a broken consumer.
+                    cancel.Token.Cancel();
+                    if (streamId.HasValue)
+                    {
+                        // Even when the host callback throws, retire the native
+                        // worker before the caller can dispose/switch providers.
+                        if (!terminal)
+                        {
+                            try
+                            {
+                                while (_bolt.StreamNext(streamId.Value).Kind !=
+                                    XybridBolt.XybridStreamEventKind.Complete) { }
+                            }
+                            catch (XybridBolt.XybridErrorException) { }
+                        }
+                        _bolt.StreamClose(streamId.Value);
+                    }
+                }
+            }
+        }
+
+        /// <summary>Run speech delivery on a worker, including callbacks.</summary>
+        public Task<TtsStreamResult> RunTtsStreamingAsync(Envelope envelope,
+            Action<TtsAudioChunk> onAudio = null, CancellationToken cancellationToken = default)
+        {
+            // Do not pass the token to Task.Run: a queued cancellation must
+            // return the explicit Cancelled outcome, not skip the delegate.
+            return Task.Run(() => RunTtsStreaming(envelope, onAudio, cancellationToken));
         }
 
         // ================================================================

@@ -14,16 +14,12 @@ use xybrid_zzz_sys::{
     KittenSession, KittenSettings, SYNTHESIS_CHANNELS, SYNTHESIS_SAMPLE_RATE, ZZZ_EMBED_ABI_VERSION,
 };
 
-use crate::audio::samples_to_wav;
+use crate::audio::f32_to_pcm16;
+use crate::execution::{TtsAudioChunk, TtsStatus, TtsStreamResult};
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::{AdapterError, AdapterResult, ModelRuntime};
-
-/// Default per-chunk character budget before text is split.
-///
-/// Mirrors the executor's ONNX TTS default. Kitten's language-model window
-/// is 1024 positions, so a larger chunk risks the engine's documented
-/// LIMIT_REACHED partial-audio case on ordinary sentences.
-const DEFAULT_MAX_TTS_CHARS: usize = 350;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 /// The bundle-declared assets a `ZzzEmbed` template resolves to: full paths
 /// (base_path joined because the [`ModelRuntime`] surface has no base-path
@@ -42,17 +38,13 @@ pub struct ZzzDefaults {
     pub language: Option<String>,
     /// Threads, token cap (0 selects engine defaults) and waveform seed.
     pub settings: KittenSettings,
-    /// The bundle-declared per-chunk character budget (mirrors
-    /// `ModelMetadata.max_chunk_chars` threaded by the dispatcher).
-    pub max_chunk_chars: Option<usize>,
 }
 
 /// zzz-engine-backed runtime (Kitten TTS 2).
 ///
 /// Holds at most one loaded session. The engine forbids concurrent
-/// synthesis on one session, so the session sits in a `Mutex` that is
-/// uncontended in practice: every public method takes `&mut self`, matching
-/// [`crate::runtime_adapter::WhisperCppRuntime`]'s discipline.
+/// synthesis on one session, so a `Mutex` serializes synthesis. Cancellation
+/// uses a separate lifetime-safe handle without taking that mutex.
 pub struct ZzzKittenRuntime {
     session: Mutex<Option<KittenSession>>,
     /// Identity tuple backing the open session: the resolved defaults.
@@ -83,7 +75,7 @@ impl ZzzKittenRuntime {
     /// `&` downcast (the executor carries `Box<dyn ModelRuntime>`) can
     /// configure the runtime before its `&mut` trait calls.
     pub fn apply_defaults(&self, defaults: ZzzDefaults) {
-        *self.pending.lock().unwrap() = Some(defaults);
+        *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = Some(defaults);
     }
 
     /// Open (or reuse) the session, keyed on the resolved defaults.
@@ -92,8 +84,17 @@ impl ZzzKittenRuntime {
     /// session: it holds GGUF mappings and activation buffers, not reusable
     /// graphs, so a real path change has nothing to preserve.
     fn open(&mut self, defaults: &ZzzDefaults, primary: &Path) -> AdapterResult<()> {
-        if self.loaded_identity.lock().unwrap().as_ref() == Some(defaults)
-            && self.session.lock().unwrap().is_some()
+        if self
+            .loaded_identity
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            == Some(defaults)
+            && self
+                .session
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_some()
         {
             return Ok(());
         }
@@ -105,10 +106,120 @@ impl ZzzKittenRuntime {
             defaults.settings,
         )
         .map_err(|error| AdapterError::RuntimeError(error.to_string()))?;
-        *self.session.lock().unwrap() = Some(session);
-        *self.loaded_identity.lock().unwrap() = Some(defaults.clone());
+        *self.session.lock().unwrap_or_else(|e| e.into_inner()) = Some(session);
+        *self
+            .loaded_identity
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(defaults.clone());
         let _ = primary;
         Ok(())
+    }
+}
+
+impl ZzzKittenRuntime {
+    /// Deliver packets during synthesis. The engine owns all text splitting.
+    pub fn execute_stream(
+        &self,
+        input: &Envelope,
+        cancelled: &(dyn Fn() -> bool + Sync),
+        on_chunk: &mut dyn FnMut(TtsAudioChunk) -> bool,
+    ) -> AdapterResult<TtsStreamResult> {
+        let EnvelopeKind::Text(text) = &input.kind else {
+            return Err(AdapterError::InvalidInput(
+                "zzz TTS requires text input".into(),
+            ));
+        };
+        let defaults = self
+            .loaded_identity
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .ok_or_else(|| AdapterError::RuntimeError("zzz engine session is not loaded".into()))?;
+        let mut guard = self.session.lock().unwrap_or_else(|e| e.into_inner());
+        let session = guard
+            .as_mut()
+            .ok_or_else(|| AdapterError::RuntimeError("zzz engine session is not loaded".into()))?;
+        let mut summary = TtsStreamResult {
+            status: TtsStatus::Cancelled,
+            sample_rate: SYNTHESIS_SAMPLE_RATE,
+            channels: SYNTHESIS_CHANNELS,
+            samples: 0,
+            chunks: 0,
+            limited_chunks: 0,
+        };
+        if cancelled() {
+            return Ok(summary);
+        }
+        let cancel = session.cancellation_handle();
+        let finished = AtomicBool::new(false);
+        // The watcher never takes the session/model lock. Repeated cancel covers
+        // native's idle-cancel/start race; the scoped join precedes session close.
+        let mut delivered_end = 0;
+        let outcome = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !finished.load(Ordering::Acquire) {
+                    if cancelled() {
+                        cancel.cancel();
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            });
+            struct FinishOnDrop<'a>(&'a AtomicBool);
+            impl Drop for FinishOnDrop<'_> {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::Release);
+                }
+            }
+            let finish_guard = FinishOnDrop(&finished);
+            let result = session.synthesize_stream_outcome(
+                text,
+                defaults.language.as_deref(),
+                &mut |samples, info| {
+                    if cancelled() {
+                        cancel.cancel();
+                        return false;
+                    }
+                    // Copy/convert before the native borrowed buffer expires. No
+                    // trim, normalization or fade is applied to delivery packets.
+                    summary.sample_rate = info.sample_rate;
+                    summary.channels = info.channels;
+                    delivered_end =
+                        info.first_sample + samples.len() as u64 / u64::from(info.channels.max(1));
+                    let pcm = f32_to_pcm16(samples);
+                    let keep_going = on_chunk(TtsAudioChunk {
+                        pcm,
+                        sample_rate: info.sample_rate,
+                        channels: info.channels,
+                        first_sample: info.first_sample,
+                    });
+                    if !keep_going || cancelled() {
+                        cancel.cancel();
+                        return false;
+                    }
+                    true
+                },
+            );
+            drop(finish_guard);
+            result
+        })
+        .map_err(|error| AdapterError::RuntimeError(error.to_string()))?;
+        // Native return is authoritative. A new predicate poll here could
+        // turn completed/limited speech into cancellation after synthesis ends.
+        summary.status = match outcome.status {
+            xybrid_zzz_sys::SynthesisStatus::Completed => TtsStatus::Completed,
+            xybrid_zzz_sys::SynthesisStatus::Cancelled => TtsStatus::Cancelled,
+            xybrid_zzz_sys::SynthesisStatus::Limited => TtsStatus::Limited,
+        };
+        if outcome.result.sample_rate != 0 {
+            summary.sample_rate = outcome.result.sample_rate;
+        }
+        if outcome.result.channels != 0 {
+            summary.channels = outcome.result.channels;
+        }
+        summary.samples = outcome.result.samples.max(delivered_end);
+        summary.chunks = outcome.result.chunks;
+        summary.limited_chunks = outcome.result.limited_chunks;
+        Ok(summary)
     }
 }
 
@@ -124,7 +235,12 @@ impl ModelRuntime for ZzzKittenRuntime {
     /// Install the pending defaults and open the engine session for
     /// `model_path` (the bundle's primary language GGUF).
     fn load(&mut self, model_path: &Path) -> AdapterResult<()> {
-        let Some(mut defaults) = self.pending.lock().unwrap().take() else {
+        let Some(mut defaults) = self
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        else {
             return Err(AdapterError::InvalidInput(
                 "zzz execution requires the dispatcher to apply the bundle's \
                  ZzzEmbed defaults before load"
@@ -143,7 +259,7 @@ impl ModelRuntime for ZzzKittenRuntime {
     fn is_loaded(&self, model_path: &Path) -> bool {
         self.loaded_identity
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .as_ref()
             .is_some_and(|defaults| defaults.language_model == model_path)
     }
@@ -152,98 +268,15 @@ impl ModelRuntime for ZzzKittenRuntime {
         self
     }
 
-    /// Synthesize `EnvelopeKind::Text` into WAV audio.
-    ///
-    /// Long text is split with the executor's TTS chunker and the chunk
-    /// audio is concatenated; the engine resets its waveform seed per
-    /// utterance, keeping chunks reproducible within a build. The engine's
-    /// token-limit case (`limited_chunks`) is carried on the envelope as
-    /// `zzz_limited_chunks` metadata rather than dropped silently.
+    /// Collect native packets once, retaining explicit terminal metadata.
     fn execute(&mut self, input: &Envelope) -> AdapterResult<Envelope> {
-        let text = match &input.kind {
-            EnvelopeKind::Text(text) => text.clone(),
-            _ => {
-                return Err(AdapterError::InvalidInput(
-                    "zzz TTS requires text input".to_string(),
-                ))
-            }
-        };
-
-        let defaults = self
-            .loaded_identity
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| {
-                AdapterError::RuntimeError("zzz engine session is not loaded".to_string())
-            })?;
-        let mut guard = self.session.lock().unwrap();
-        let Some(session) = guard.as_mut() else {
-            return Err(AdapterError::RuntimeError(
-                "zzz engine session is not loaded".to_string(),
-            ));
-        };
-        // The bundle's `max_chunk_chars` (dispatched via `ZzzDefaults`) is
-        // the default; a request-level `max_chunk_chars` envelope key wins
-        // over it, mirroring the request-over-bundle restore semantics
-        // elsewhere in the executor.
-        let bundle_chars = defaults.max_chunk_chars.unwrap_or(DEFAULT_MAX_TTS_CHARS);
-        let max_chars = input
-            .metadata
-            .get("max_chunk_chars")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(bundle_chars);
-
-        let chunks = if text.chars().count() <= max_chars {
-            vec![text]
-        } else {
-            crate::execution::text_chunking::chunk_text_for_tts(&text, max_chars)
-        };
-        let mut all = Vec::new();
-        // Census across chunks: a per-chunk cap does not erase earlier
-        // capped chunks, and the partial audio of a capped chunk is real
-        // delivered audio (the engine cannot retract it), so it is kept.
-        let mut limited_chunks = 0_u32;
-        for chunk in chunks {
-            let mut delivered = Vec::new();
-            if let Err(error) = session.synthesize_stream(
-                &chunk,
-                defaults.language.as_deref(),
-                &mut |chunk_samples, _info| {
-                    delivered.extend_from_slice(chunk_samples);
-                    true
-                },
-            ) {
-                let limited = matches!(
-                    error,
-                    xybrid_zzz_sys::ZzzError::LimitReached { .. } if !delivered.is_empty()
-                );
-                if !limited {
-                    return Err(AdapterError::RuntimeError(error.to_string()));
-                }
-                limited_chunks += 1;
-            }
-            if delivered.is_empty() {
-                // Matching the ONNX chunking invariant: the degenerate
-                // empty case never enters concatenation.
-                continue;
-            }
-            all.extend(delivered);
-        }
-
-        let wav = samples_to_wav(&all, SYNTHESIS_SAMPLE_RATE);
-        let mut result = Envelope::new(EnvelopeKind::Audio(wav));
-        result
-            .metadata
-            .insert("sample_rate".to_string(), SYNTHESIS_SAMPLE_RATE.to_string());
-        result
-            .metadata
-            .insert("channels".to_string(), SYNTHESIS_CHANNELS.to_string());
-        if limited_chunks > 0 {
-            result
-                .metadata
-                .insert("zzz_limited_chunks".to_string(), limited_chunks.to_string());
-        }
+        let mut pcm = Vec::new();
+        let summary = self.execute_stream(input, &|| false, &mut |packet| {
+            pcm.extend(packet.pcm);
+            true
+        })?;
+        let mut result = summary.into_envelope();
+        result.kind = EnvelopeKind::Audio(pcm);
         Ok(result)
     }
 }
@@ -273,7 +306,6 @@ mod tests {
             decoder_voice: PathBuf::from("s3-voice.json"),
             language: Some("en".to_string()),
             settings: KittenSettings::default(),
-            max_chunk_chars: None,
         }
     }
 

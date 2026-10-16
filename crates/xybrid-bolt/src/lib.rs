@@ -820,6 +820,7 @@ impl From<facade::PipelineResult> for XybridPipelineResult {
 pub enum XybridStreamEventKind {
     Token,
     Complete,
+    Audio,
 }
 
 #[data]
@@ -863,6 +864,26 @@ impl From<facade::StreamToken> for XybridStreamToken {
     }
 }
 
+/// Owned PCM16 LE packet. Offsets count samples per channel.
+#[data]
+#[derive(Clone)]
+pub struct XybridTtsAudioChunk {
+    pub pcm: Vec<u8>,
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub first_sample: u64,
+}
+impl From<facade::TtsAudioChunk> for XybridTtsAudioChunk {
+    fn from(packet: facade::TtsAudioChunk) -> Self {
+        Self {
+            pcm: packet.pcm,
+            sample_rate: packet.sample_rate,
+            channels: packet.channels,
+            first_sample: packet.first_sample,
+        }
+    }
+}
+
 /// One pull from a streaming inference session.
 ///
 /// This is a flat record instead of a data-carrying enum because the pinned
@@ -876,6 +897,7 @@ impl From<facade::StreamToken> for XybridStreamToken {
 pub struct XybridStreamEvent {
     pub kind: XybridStreamEventKind,
     pub token: Option<XybridStreamToken>,
+    pub audio: Option<XybridTtsAudioChunk>,
 }
 
 impl From<facade::StreamEvent> for XybridStreamEvent {
@@ -884,10 +906,17 @@ impl From<facade::StreamEvent> for XybridStreamEvent {
             facade::StreamEvent::Token(token) => Self {
                 kind: XybridStreamEventKind::Token,
                 token: Some(token.into()),
+                audio: None,
+            },
+            facade::StreamEvent::Audio(packet) => Self {
+                kind: XybridStreamEventKind::Audio,
+                token: None,
+                audio: Some(packet.into()),
             },
             facade::StreamEvent::Complete(_) => Self {
                 kind: XybridStreamEventKind::Complete,
                 token: None,
+                audio: None,
             },
             facade::StreamEvent::Error(_) => {
                 unreachable!("stream errors are returned before event conversion")
@@ -1881,13 +1910,16 @@ impl XybridModel {
                 Ok(XybridStreamEvent {
                     kind: XybridStreamEventKind::Complete,
                     token: None,
+                    audio: None,
                 })
             }
             Some(facade::StreamEvent::Error(error)) => {
                 self.stream_close(stream_id);
                 Err(error.into())
             }
-            Some(event @ facade::StreamEvent::Token(_)) => Ok(event.into()),
+            Some(event @ (facade::StreamEvent::Token(_) | facade::StreamEvent::Audio(_))) => {
+                Ok(event.into())
+            }
             None => {
                 self.stream_close(stream_id);
                 Err(XybridError::InferenceError {

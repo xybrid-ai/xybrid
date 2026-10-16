@@ -19,6 +19,9 @@ asr-whispercpp = ["xybrid-core/asr-whispercpp"]
 # Native Apple Core ML adapter and its real-model integration test.
 coreml = ["xybrid-core/coreml"]
 
+# Kitten TTS resource-abort checks against a locally prepared rc.4 bundle.
+tts-zzz = ["xybrid-sdk/tts-zzz"]
+
 # Local LLM inference
 llm-mistral = ["xybrid-core/llm-mistral"]              # mistral.rs (CPU)
 llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]  # mistral.rs + Metal (macOS)

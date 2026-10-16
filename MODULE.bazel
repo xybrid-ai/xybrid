@@ -499,3 +499,9 @@ crate.annotation(
 # -Cdlltool=<exec-correct path> into every windows-gnu rust toolchain. See
 # .context/bazel-windows-cli-progress.md for the full history.
 use_repo(crate, "crates")
+
+# Lazy repositories: ordinary builds never fetch private Kitten inputs.
+zzz_prebuilt_repository = use_repo_rule("//bazel/zzz:repositories.bzl", "zzz_prebuilt_repository")
+zzz_prebuilt_repository(name = "zzz_linux", target = "x86_64-unknown-linux-gnu")
+zzz_prebuilt_repository(name = "zzz_macos", target = "aarch64-apple-darwin")
+zzz_prebuilt_repository(name = "zzz_android", target = "aarch64-linux-android")

@@ -826,6 +826,9 @@ fun XybridModel.streamTokens(
                 when (event.kind) {
                     XybridStreamEventKind.TOKEN -> event.token?.let { emit(it) }
                     XybridStreamEventKind.COMPLETE -> break
+                    XybridStreamEventKind.AUDIO -> throw XybridError.InferenceError(
+                        "Token streams cannot deliver audio; use runAsync for batch speech"
+                    )
                 }
             }
         } finally {

@@ -648,6 +648,11 @@ private final class XybridTokenStreamState: @unchecked Sendable {
         case .complete:
             close()
             return nil
+        case .audio:
+            close()
+            throw XybridError.inferenceError(
+                message: "Token streams cannot deliver audio; use run for batch speech"
+            )
         }
     }
 

@@ -31,7 +31,9 @@ fn resolved_assets() -> Option<BundleAssets> {
     let decoder_model = env::var_os("ZZZ_TEST_DECODER_MODEL")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".zzz/models/kitten-s3-meanflow-f32.gguf"));
-    let zzz_root = env::var_os("ZZZ_TEST_ZZZ_ROOT").map(PathBuf::from)?;
+    let zzz_root = env::var_os("ZZZ_TEST_ZZZ_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     let language_voice = env::var_os("ZZZ_TEST_LANGUAGE_VOICE")
         .map(PathBuf::from)
         .or_else(|| Some(zzz_root.join("fixtures/reference/kitten-tts-2/bruno-short.json")))?;
@@ -83,9 +85,11 @@ fn synthetic_bundle() -> Option<SyntheticBundle> {
             language_voice_file: alias(&assets.language_voice, "lm-voice.json"),
             decoder_voice_file: alias(&assets.decoder_voice, "s3-voice.json"),
             language: Some("en".into()),
-            threads: 0,
+            threads: 6,
             max_tokens: 0,
             seed: 0,
+            sentence_chunks: true,
+            accelerate: false,
         },
         preprocessing: Vec::new(),
         postprocessing: Vec::new(),
@@ -122,25 +126,24 @@ fn executor_routes_zzz_embed_to_non_silent_24k_audio() {
         .execute(
             &bundle.metadata,
             &Envelope::new(EnvelopeKind::Text(
-                "Hello from the xybrid zzz engine.".to_string(),
+                "Your name sounds like trouble.".to_string(),
             )),
             None,
         )
         .expect("zzz execution");
-    let EnvelopeKind::Audio(wav) = output.kind else {
+    let EnvelopeKind::Audio(pcm) = output.kind else {
         panic!(
             "zzz execution must yield an audio envelope, got {:?}",
             output.kind_str()
         );
     };
-    // WAV container: "RIFF" header, "WAVE" form, fmt chunk, 24 kHz.
-    assert_eq!(&wav[..4], b"RIFF");
-    assert_eq!(&wav[8..12], b"WAVE");
-    assert_eq!(
-        u32::from_le_bytes([wav[24], wav[25], wav[26], wav[27]]),
-        24000
-    );
-    assert!(wav.len() > 8000, "utterance above trivial length");
+    assert_eq!(pcm.len() % 2, 0);
+    assert!(pcm
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .any(|s| i16::from_le_bytes([s[0], s[1]]) != 0));
+    assert!(pcm.len() > 8000, "utterance above trivial length");
     assert_eq!(
         output.metadata.get("sample_rate").map(String::as_str),
         Some("24000")
@@ -180,8 +183,7 @@ fn executor_rejects_non_text_input_for_zzz_embed() {
 
 #[test]
 fn executor_chunks_long_text_into_a_concatenated_utterance() {
-    // Above the default 350-char budget: exercises the chunker and the
-    // accumulated census (partial capped chunks still deliver audio).
+    // zzz owns sentence packing; Xybrid collects the already produced packets.
     let Some(bundle) = synthetic_bundle() else {
         return;
     };
@@ -194,7 +196,7 @@ fn executor_chunks_long_text_into_a_concatenated_utterance() {
         panic!("temp bundle path is not valid UTF-8");
     };
     let mut executor = TemplateExecutor::new(&base_path);
-    let text = "The quick speech engine speaks a compact sentence. ".repeat(12);
+    let text = "Tell me your name. Then explain your business. The village gate stays closed until I know who you are and what you want here today.".to_string();
     let output = executor
         .execute(
             &bundle.metadata,
@@ -202,16 +204,11 @@ fn executor_chunks_long_text_into_a_concatenated_utterance() {
             None,
         )
         .expect("chunked zzz execution");
-    let EnvelopeKind::Audio(wav) = output.kind else {
+    let EnvelopeKind::Audio(pcm) = output.kind else {
         panic!("expected audio, got {:?}", output.kind_str());
     };
-    assert!(wav.len() > 40_000, "twelve sentences of speech");
-    // Either every chunk fit or the census reports the capped ones; in
-    // both cases audio was delivered and the flag is consistent.
-    if let Some(limited) = output.metadata.get("zzz_limited_chunks") {
-        assert!(
-            limited.parse::<u32>().expect("census parses") >= 1,
-            "the census only appears when a cap was hit"
-        );
-    }
+    assert!(pcm.len() > 40_000, "three sentences of speech");
+    assert_eq!(output.metadata["chunks"], "3");
+    assert_eq!(output.metadata["tts_status"], "completed");
+    assert_eq!(output.metadata["zzz_limited_chunks"], "0");
 }

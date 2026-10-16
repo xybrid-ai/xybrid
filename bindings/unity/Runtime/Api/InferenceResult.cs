@@ -72,6 +72,11 @@ namespace Xybrid
         /// <summary>Gets whether the inference was successful.</summary>
         public bool Success { get; }
 
+        /// <summary>Kitten batch outcome, when present in the native result.</summary>
+        public TtsStatus? SpeechStatus { get; private set; }
+        /// <summary>Number of Kitten chunks that reached a speech-token limit.</summary>
+        public uint? LimitedChunks { get; private set; }
+
         /// <summary>Gets the error message if inference failed, or null if successful.</summary>
         public string Error { get; }
 
@@ -161,9 +166,14 @@ namespace Xybrid
         {
             DecodePayload(result.Envelope, out string text, out byte[] audio, out float[] embedding);
 
+            var speech = TtsStreamResult.FromBolt(result);
+            bool hasSpeechStatus = false;
+            foreach (var entry in result.Envelope.Metadata)
+                if (entry.Key == "tts_status") { hasSpeechStatus = true; break; }
+            bool partial = hasSpeechStatus && speech.Status != TtsStatus.Completed;
             return new InferenceResult(
-                success: true,
-                error: null,
+                success: !partial,
+                error: partial ? "TTS " + speech.Status.ToString().ToLowerInvariant() + "; partial audio retained" : null,
                 text: text,
                 latencyMs: result.LatencyMs,
                 outputType: MapOutputType(result.OutputType),
@@ -172,7 +182,11 @@ namespace Xybrid
                 metrics: MapMetrics(result.Metrics),
                 reasoningContent: result.ReasoningContent,
                 executionTarget: result.ExecutionTarget,
-                toolCalls: result.ToolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>());
+                toolCalls: result.ToolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>())
+            {
+                SpeechStatus = hasSpeechStatus ? speech.Status : (TtsStatus?)null,
+                LimitedChunks = hasSpeechStatus ? speech.LimitedChunks : (uint?)null,
+            };
         }
 
         /// <summary>

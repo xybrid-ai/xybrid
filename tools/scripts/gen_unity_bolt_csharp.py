@@ -103,7 +103,7 @@ RECORD_STRUCT_RE = re.compile(
 # XybridCacheStatus).
 # Bump this deliberately: the count is a tripwire for unreviewed boltffi output
 # drift, not a value to auto-sync.
-EXPECTED_RECORD_STRUCTS = 20
+EXPECTED_RECORD_STRUCTS = 21
 
 
 # --- Transform (g): Unsafe.SizeOf<T>() -> Marshal.SizeOf<T>(). boltffi's wire
