@@ -169,8 +169,8 @@ reverts to `provisional`.
 |Δlogit| 1.9e-5 and |Δscore| 4.4e-7 on macOS arm64, and 1.2e-5 and 2.0e-6 on
 Linux x86_64, the same at 1, 4 and 8 threads and bit-identical across repeats.
 G1 allows 8e-5 and 1e-5: the larger of the export bound and four times the
-worst measurement. `labels` stays provisional until the label scorer's runtime
-tests freeze it.
+worst measurement. `labels` stays provisional until the label scorer's spread,
+measured on the pinned GGUFs (see "Label scorer" below), freezes it.
 
 One input is outside what these gates prove: an empty context. With every
 context position masked, the model averages over all padding positions, and its
@@ -201,3 +201,30 @@ harness against exactly the archives and system libraries cargo reports for
 llama.cpp: a downloaded or staged natives slice, or a source build. Pass the
 features you test with, such as `build.sh bindings,vision`. It needs `python3`
 and writes `target/llama-harness/llama_harness`.
+
+## Label scorer
+
+`LlmBackend::score_labels` on llama.cpp renders the messages through the GGUF's
+own chat template, prefills the prompt and reads the label tokens' logits at
+the last position. Its tests, `runtime_adapter::llama_cpp::choice_scoring_tests`
+in `xybrid-core`, run on the staged Qwen3.5-0.8B GGUFs:
+
+```bash
+tools/conformance/prepare.sh qwen3.5-0.8b-f16-cf qwen3.5-0.8b-q4km-cf
+export XYBRID_LLAMA_HARNESS="$(tools/conformance/llama_harness/build.sh bindings | tail -n 1)"
+cargo test -p xybrid-core --features llm-llamacpp --lib -- \
+  runtime_adapter::llama_cpp::choice_scoring_tests --test-threads=1
+```
+
+| Test | What it checks |
+|---|---|
+| G0 | The embedded template is `templates/qwen3.5.jinja`, and the prompts, prompt tokens and label tokens equal `goldens/labels.json` |
+| G1 | The F16 GGUF with the backend's default settings against the reference, within `gates.labels.g1` |
+| G2 | The backend against the harness on the same GGUF, context and batch size, on the CPU, within `gates.labels.g2` |
+| G3 | The Q4_K_M GGUF against the reference, written to `target/choice-conformance/g3.json`; a report that never fails |
+| Spread | The F16 GGUF at 1, 4 and 8 threads, on the CPU and with the default GPU offload, five repeats each, written to `target/choice-conformance/label-spread.json`: what `gates.labels` is frozen from |
+
+Build the harness with the `xybrid-llama` features the test links: `bindings`
+for `llm-llamacpp`, `bindings,vision` for `llm-llamacpp-vision`. With
+`XYBRID_REQUIRE_MODELS` set, a missing GGUF or harness fails instead of
+skipping.

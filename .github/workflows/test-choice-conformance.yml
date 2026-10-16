@@ -1,4 +1,4 @@
-# Purpose: Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI; daily cold rebuild.
+# Purpose: Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI, and Qwen3.5 labels through llama.cpp; daily cold rebuild.
 name: "CI: Choice conformance"
 
 # Choice-scoring conformance inputs (integration-tests/fixtures/choice). The
@@ -19,8 +19,10 @@ name: "CI: Choice conformance"
 # on the fake scorers, the goldens again through ModelLoader and
 # XybridModel::run, and `xybrid run --choice` on the fake scorers and FORMS
 # against the SDK, with XYBRID_REQUIRE_MODELS set, so a missing model or ONNX
-# Runtime fails instead of skipping. The label-token (llama.cpp) runtime tests
-# join that job with the label scorer.
+# Runtime fails instead of skipping. The label-token job does the same for
+# llama.cpp: xybrid-llama's final-position logits and the label scorer's
+# G0-G3 gates, state tests and spread report on the staged Qwen3.5 GGUFs, with
+# the C++ harness built against the same llama.cpp libraries.
 on:
   push:
     branches: [master]
@@ -38,6 +40,7 @@ on:
       - 'tools/scripts/stage_unity_desktop_ort.py'
       - 'vendor/llama-cpp'
       - 'crates/llama-cpp-sys/**'
+      - 'crates/xybrid-llama/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
       - 'crates/xybrid-cli/**'
@@ -62,6 +65,7 @@ on:
       - 'tools/scripts/stage_unity_desktop_ort.py'
       - 'vendor/llama-cpp'
       - 'crates/llama-cpp-sys/**'
+      - 'crates/xybrid-llama/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
       - 'crates/xybrid-cli/**'
@@ -353,3 +357,91 @@ jobs:
 
       - name: Verify the staged artifacts against provenance
         run: python3 tools/scripts/check_choice_provenance.py --staged qwen3.5-0.8b-f16-cf qwen3.5-0.8b-q4km-cf
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: choice-label-token
+
+      # The G2 harness links exactly the llama.cpp archives cargo links into
+      # xybrid-llama with `bindings`: the prebuilt slice natives-manifest.txt
+      # names, the same one xybrid-core links with `llm-llamacpp`.
+      - name: Build the same-artifact harness
+        run: |
+          harness="$(tools/conformance/llama_harness/build.sh bindings | tail -n 1)"
+          test -x "$harness"
+          echo "XYBRID_LLAMA_HARNESS=$harness" >> "$GITHUB_ENV"
+
+      - name: Final-position logits (xybrid-llama)
+        env:
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          # Enumerate and assert every required test: cargo test exits 0 on an
+          # empty set, so a renamed or compiled-out test would pass silently.
+          LIST="$(cargo test -p xybrid-llama --features bindings --test choice_logits -- --list)"
+          printf '%s\n' "$LIST"
+          for test in \
+            a_small_context_cuts_at_the_size_it_was_asked_for \
+            refused_requests_leave_the_memory_empty \
+            scores_do_not_depend_on_what_ran_before \
+            the_final_row_is_the_next_token_distribution \
+            the_harness_reads_the_same_row; do
+            printf '%s\n' "$LIST" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          # a_model_without_memory_is_refused needs an encoder-only GGUF,
+          # which this job does not stage: skipped by name, not silently.
+          cargo test -p xybrid-llama --features bindings --test choice_logits -- \
+            --skip a_model_without_memory_is_refused --test-threads=1 --nocapture
+
+      # G0-G3, the spread report and the state tests on the F16 and Q4_K_M
+      # GGUFs, plus the model-free label math and render tests.
+      - name: Label scoring runtime conformance
+        env:
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          FILTERS=(
+            runtime_adapter::llama_cpp::choice_scoring_tests::
+            execution::choice::tests::label_
+            runtime_adapter::llm::tests::default_label_scoring_is_unsupported
+            runtime_adapter::llm::tests::scoring_requests_debug_without_their_text
+          )
+          LIST="$(cargo test -p xybrid-core --features ort-download,llm-llamacpp --lib -- "${FILTERS[@]}" --list)"
+          printf '%s\n' "$LIST"
+          for test in \
+            execution::choice::tests::label_groups_score_their_largest_logit \
+            execution::choice::tests::label_scores_match_the_label_goldens \
+            runtime_adapter::llama_cpp::choice_scoring_tests::g0_prompts_tokens_and_labels_match_the_goldens \
+            runtime_adapter::llama_cpp::choice_scoring_tests::g1_f16_scores_match_the_reference \
+            runtime_adapter::llama_cpp::choice_scoring_tests::g2_scores_match_the_harness_on_the_same_gguf \
+            runtime_adapter::llama_cpp::choice_scoring_tests::g3_reports_the_q4_k_m_drift \
+            runtime_adapter::llama_cpp::choice_scoring_tests::generation_after_scoring_matches_a_fresh_generation \
+            runtime_adapter::llama_cpp::choice_scoring_tests::groups_read_each_label_from_the_same_row \
+            runtime_adapter::llama_cpp::choice_scoring_tests::label_spread_report \
+            runtime_adapter::llama_cpp::choice_scoring_tests::refused_requests_leave_the_backend_as_it_was \
+            runtime_adapter::llama_cpp::choice_scoring_tests::reordered_groups_permute_the_logits \
+            runtime_adapter::llama_cpp::choice_scoring_tests::scores_do_not_depend_on_what_ran_before \
+            runtime_adapter::llama_cpp::choice_scoring_tests::scoring_returns_within_a_deadline \
+            runtime_adapter::llama_cpp::choice_scoring_tests::the_scoring_render_is_the_template_alone \
+            runtime_adapter::llama_cpp::choice_scoring_tests::the_scoring_render_refuses_without_quoting_the_request \
+            runtime_adapter::llm::tests::default_label_scoring_is_unsupported \
+            runtime_adapter::llm::tests::scoring_requests_debug_without_their_text; do
+            printf '%s\n' "$LIST" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          cargo test -p xybrid-core --features ort-download,llm-llamacpp --lib -- "${FILTERS[@]}" \
+            --test-threads=1 --nocapture
+
+      # The Q4_K_M drift report (G3) and the F16 spread gates.labels is frozen
+      # from. Uploaded even when a gate fails, to show its numbers.
+      - name: Upload the label reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: label-token-reports
+          path: |
+            target/choice-conformance/g3.json
+            target/choice-conformance/label-spread.json
+          if-no-files-found: warn

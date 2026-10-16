@@ -28,6 +28,8 @@
 // `crate::telemetry::events` and the `runtime_adapter::mod` re-export
 // keep their existing identifiers.
 mod chat;
+#[cfg(test)]
+mod choice_scoring_tests;
 mod jinja_template;
 pub use xybrid_llama::{
     get_verbosity as llama_log_get_verbosity, set_verbosity as llama_log_set_verbosity,
