@@ -8,6 +8,10 @@
 //! cannot carry tool definitions — and render the embedded template directly
 //! with the definitions in the Jinja context. In every case the policy is
 //! the same: never silently substitute a different prompt family.
+//!
+//! Label scoring has its own entry point, [`render_scoring_prompt`]: the
+//! embedded template alone, with no fallback, because label scores are pinned
+//! to the exact bytes the model's template renders.
 
 mod functiongemma;
 
@@ -77,6 +81,68 @@ pub(super) fn format_chat_prompt(
     Ok(prompt)
 }
 
+/// Render `messages` as the prompt a label scorer reads: the model's own
+/// embedded chat template, rendered through minijinja, with the assistant
+/// turn opened.
+///
+/// Unlike [`format_chat_prompt`] there is no fallback: llama.cpp's native
+/// matcher and ChatML only approximate a template, and label scores are
+/// pinned to the bytes the template renders. As in [`render_embedded`], the
+/// template's `bos_token` is empty and its `eos_token` is the model's; the
+/// scorer then tokenizes without adding special tokens, so the prompt is
+/// exactly what the template wrote. `enable_thinking` reaches the template as
+/// given (`None` omits the key, as Hugging Face's `apply_chat_template` does
+/// without the keyword), and the `<think>` prime is never appended: the
+/// scorer reads the next token where the template leaves the turn.
+///
+/// # Errors
+///
+/// As [`render_scoring_template`].
+pub(super) fn render_scoring_prompt(
+    model: &xybrid_llama::LlamaModel,
+    messages: &[ChatMessage],
+    enable_thinking: Option<bool>,
+) -> LlmResult<String> {
+    let eos_token = detokenize_special(model, model.token_eos());
+    render_scoring_template(
+        model.chat_template().as_deref(),
+        eos_token,
+        messages,
+        enable_thinking,
+    )
+}
+
+/// The model-free half of [`render_scoring_prompt`], with the embedded
+/// template and the EOS text already read off the model.
+///
+/// # Errors
+///
+/// [`AdapterError::InvalidInput`] when there is no template, and
+/// [`AdapterError::RuntimeError`] when it fails to render. The template
+/// engine's message is withheld: a scoring prompt carries the caller's
+/// context and choices, and nothing stops template code from quoting them.
+pub(super) fn render_scoring_template(
+    template: Option<&str>,
+    eos_token: Option<String>,
+    messages: &[ChatMessage],
+    enable_thinking: Option<bool>,
+) -> LlmResult<String> {
+    let Some(template) = template else {
+        return Err(AdapterError::InvalidInput(
+            "model has no embedded chat template; label scoring renders only the model's own \
+             template"
+                .to_string(),
+        ));
+    };
+    render_embedded_template(template, eos_token, messages, None, enable_thinking).map_err(|_| {
+        AdapterError::RuntimeError(
+            "the embedded chat template failed to render the scoring prompt (template message \
+             withheld)"
+                .to_string(),
+        )
+    })
+}
+
 /// Render the model's own embedded chat template through minijinja and return
 /// it as a raw prompt. This is the fallback for when llama.cpp's non-Jinja
 /// matcher rejects an otherwise-valid embedded template (e.g. gemma-4, which
@@ -100,7 +166,7 @@ fn render_embedded_fallback(
         return Err(err.into());
     };
 
-    match render_embedded(model, &template, messages, None) {
+    match render_embedded(model, &template, messages, None, Some(false)) {
         Ok(prompt) => Ok(prompt),
         Err(render_err) => {
             tracing::warn!(
@@ -169,6 +235,7 @@ fn render_with_tools(
         &template,
         messages.as_ref(),
         Some(serde_json::Value::Array(entries)),
+        Some(false),
     )
     .map_err(|render_err| {
         AdapterError::RuntimeError(format!(
@@ -200,9 +267,9 @@ fn ensure_tool_names_rendered(prompt: &str, tools: &[Tool]) -> LlmResult<()> {
     }
 }
 
-/// Shared minijinja plumbing for both embedded-template entry points
-/// ([`render_embedded_fallback`] and [`render_with_tools`]), so their
-/// BOS/EOS handling and thinking policy cannot drift.
+/// Shared minijinja plumbing for every embedded-template entry point
+/// ([`render_embedded_fallback`], [`render_with_tools`] and
+/// [`render_scoring_prompt`]), so their BOS/EOS handling cannot drift.
 ///
 /// BOS is deliberately suppressed (passed as `None`): `tokenize_chat_prompt`
 /// tokenizes this prompt with `add_special = true`, so llama.cpp prepends the
@@ -219,39 +286,43 @@ fn ensure_tool_names_rendered(prompt: &str, tools: &[Tool]) -> LlmResult<()> {
 /// `<turn|>` marker and never references `eos_token`, so this is a no-op for
 /// the motivating model but keeps other templates correct.)
 ///
-/// `enable_thinking: Some(false)`: xybrid's llama.cpp backend is a raw
-/// tokenize → generate → detokenize loop with no parser for gemma-4's
-/// `<|channel>thought … <channel|>` reasoning blocks (unlike llama.cpp's own
-/// chat server). Requesting a reasoning channel would leak its markers and
-/// reasoning text into the user-facing output, which the post-processing
-/// stop/strip patterns don't yet understand. Asking for a direct answer makes
-/// gemma-4's template pre-fill an empty thought and emit the response
-/// straight away. The flag is passed explicitly, never omitted (`None`):
-/// templates such as Qwen3's close the think block only for an explicit
-/// `false`, and treat a missing flag as thinking on.
+/// The chat paths pass `enable_thinking: Some(false)`: xybrid's llama.cpp
+/// backend is a raw tokenize → generate → detokenize loop with no parser for
+/// gemma-4's `<|channel>thought … <channel|>` reasoning blocks (unlike
+/// llama.cpp's own chat server). Requesting a reasoning channel would leak
+/// its markers and reasoning text into the user-facing output, which the
+/// post-processing stop/strip patterns don't yet understand. Asking for a
+/// direct answer makes gemma-4's template pre-fill an empty thought and emit
+/// the response straight away. The flag is passed explicitly, never omitted
+/// (`None`): templates such as Qwen3's close the think block only for an
+/// explicit `false`, and treat a missing flag as thinking on. Label scoring
+/// passes its request's flag through instead: its prompt must match the
+/// render it is checked against exactly, an omitted key included.
 fn render_embedded(
     model: &xybrid_llama::LlamaModel,
     template: &str,
     messages: &[ChatMessage],
     tools: Option<serde_json::Value>,
+    enable_thinking: Option<bool>,
 ) -> Result<String, JinjaTemplateError> {
     let eos_token = detokenize_special(model, model.token_eos());
-    render_embedded_template(template, eos_token, messages, tools)
+    render_embedded_template(template, eos_token, messages, tools, enable_thinking)
 }
 
-/// The model-free half of [`render_embedded`]: applies its BOS, EOS and
-/// thinking policy, with the EOS text already read off the model. Kept
-/// separate so tests can pin the exact output without loading a GGUF.
+/// The model-free half of [`render_embedded`]: applies its BOS and EOS
+/// policy, with the EOS text already read off the model. Kept separate so
+/// tests can pin the exact output without loading a GGUF.
 fn render_embedded_template(
     template: &str,
     eos_token: Option<String>,
     messages: &[ChatMessage],
     tools: Option<serde_json::Value>,
+    enable_thinking: Option<bool>,
 ) -> Result<String, JinjaTemplateError> {
     let tpl = JinjaChatTemplate::new(template, None, eos_token);
     let options = RenderOptions {
         add_generation_prompt: true,
-        enable_thinking: Some(false),
+        enable_thinking,
         tools,
     };
     tpl.render(messages, &options)
@@ -365,6 +436,7 @@ mod tests {
                 case.eos_token.clone(),
                 &case.messages,
                 case.tools.clone(),
+                Some(false),
             )
             .unwrap_or_else(|e| panic!("{}: {e}", case.id));
             assert_eq!(rendered, case.rendered, "{}: render changed", case.id);

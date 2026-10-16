@@ -9,7 +9,7 @@
 //! |--------|----------|
 //! | (this) | [`ChoiceError`], [`validate_choice_request`], [`ensure_no_choice_kinds`], [`effective_candidates`], [`validate_scorer_spec`] |
 //! | [`encode`] | UTF-8 byte-id rows and masks for byte scorers |
-//! | [`math`] | Softmax with temperature, tie and non-finite rules |
+//! | [`math`] | Softmax with temperature, tie and non-finite rules, label-group scores |
 //! | [`onnx`] | Binding a byte-scorer spec to an ONNX session and running it |
 //!
 //! # Where requests may go
@@ -208,6 +208,9 @@ pub enum ChoiceError {
     /// No logits to normalise.
     #[error("no candidate logits to score")]
     NoCandidates,
+    /// A label scorer's next-token row has no finite log-sum-exp.
+    #[error("the model's next-token row has no finite log-sum-exp")]
+    NonFiniteLogSumExp,
     /// ONNX Runtime failed to run the model. Its message is withheld because
     /// it can quote input values, which are bytes of the request.
     #[error("the choice scorer failed to run (runtime message withheld)")]
@@ -229,6 +232,7 @@ impl From<ChoiceError> for AdapterError {
             ChoiceError::OutputShape { .. }
             | ChoiceError::NonFiniteLogit { .. }
             | ChoiceError::NoCandidates
+            | ChoiceError::NonFiniteLogSumExp
             | ChoiceError::InferenceFailed => Self::InferenceFailed(error.to_string()),
             _ => Self::InvalidInput(error.to_string()),
         }

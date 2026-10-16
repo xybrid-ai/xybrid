@@ -133,7 +133,9 @@ pub use candle::{CandleBackend, CandleRuntimeAdapter};
 // LLM exports - adapter types only (ChatMessage, GenerationConfig, LlmConfig
 // are re-exported from types.rs unconditionally below)
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-pub use llm::{GenerationOutput, LlmBackend, LlmResult, LlmRuntimeAdapter};
+pub use llm::{
+    GenerationOutput, LabelLogits, LlmBackend, LlmResult, LlmRuntimeAdapter, ScoringRequest,
+};
 
 // MistralBackend export (desktop only)
 #[cfg(feature = "llm-mistral")]

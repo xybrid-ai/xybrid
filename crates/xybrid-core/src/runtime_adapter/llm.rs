@@ -21,6 +21,7 @@ use crate::runtime_adapter::{
     AdapterError, AdapterResult, ModelMetadata, RuntimeAdapter, RuntimeAdapterExt,
 };
 use std::collections::HashMap;
+use std::fmt;
 use std::path::Path;
 
 // Re-export types from the always-available types module
@@ -167,6 +168,99 @@ pub struct GenerationOutput {
     /// always excludes it. `None` when the model produced no reasoning block
     /// or the backend doesn't surface one. vLLM-style `reasoning_content`.
     pub reasoning_content: Option<String>,
+}
+
+// =============================================================================
+// Label Scoring
+// =============================================================================
+
+/// A request to score label tokens at the end of a chat prompt, without
+/// generating.
+///
+/// The backend renders `messages` through the model's own chat template, with
+/// the assistant turn opened, prefills the prompt from an empty state and reads
+/// the logit of every label in `label_groups` at the last position. Each group
+/// holds one candidate's labels. Every label must be exactly one token in the
+/// model's vocabulary, and no token may appear twice in a request.
+///
+/// The messages are caller content, so [`Debug`] prints counts only.
+///
+/// # Example
+///
+/// ```
+/// use xybrid_core::runtime_adapter::llm::{ChatMessage, ScoringRequest};
+///
+/// let request = ScoringRequest::new(
+///     vec![ChatMessage::user(
+///         "Is the sky blue?\n\nOptions:\nA. yes\nB. no\n\nAnswer with a single letter.",
+///     )],
+///     vec![vec!["A".into()], vec!["B".into()]],
+/// );
+/// assert_eq!(request.enable_thinking, None);
+/// assert!(!format!("{request:?}").contains("sky"));
+/// ```
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct ScoringRequest {
+    /// The conversation to render.
+    pub messages: Vec<ChatMessage>,
+    /// The chat template's `enable_thinking` flag. `None` omits the key, as
+    /// Hugging Face's `apply_chat_template` does when the caller passes no
+    /// such keyword; what that means is up to the template.
+    pub enable_thinking: Option<bool>,
+    /// One group of label strings per candidate, in candidate order.
+    pub label_groups: Vec<Vec<String>>,
+}
+
+impl ScoringRequest {
+    /// Creates a request that leaves the template's thinking flag unset.
+    pub fn new(messages: Vec<ChatMessage>, label_groups: Vec<Vec<String>>) -> Self {
+        Self {
+            messages,
+            enable_thinking: None,
+            label_groups,
+        }
+    }
+
+    /// Sets the chat template's `enable_thinking` flag; `None` omits it.
+    pub fn with_enable_thinking(mut self, enable_thinking: Option<bool>) -> Self {
+        self.enable_thinking = enable_thinking;
+        self
+    }
+}
+
+impl fmt::Debug for ScoringRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let group_sizes: Vec<usize> = self.label_groups.iter().map(Vec::len).collect();
+        f.debug_struct("ScoringRequest")
+            .field("messages", &self.messages.len())
+            .field("enable_thinking", &self.enable_thinking)
+            .field("label_groups", &group_sizes)
+            .finish()
+    }
+}
+
+/// Label logits read at the last position of a scoring prompt.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct LabelLogits {
+    /// Each label's logit, grouped and ordered as the request's
+    /// `label_groups`.
+    pub label_logits: Vec<Vec<f32>>,
+    /// `ln Σ exp(logit)` over the model's whole vocabulary at that position,
+    /// so a label's log-probability is its logit minus this.
+    pub logsumexp: f32,
+}
+
+impl LabelLogits {
+    /// Creates label logits from their grouped values and the row's
+    /// log-sum-exp.
+    pub fn new(label_logits: Vec<Vec<f32>>, logsumexp: f32) -> Self {
+        Self {
+            label_logits,
+            logsumexp,
+        }
+    }
 }
 
 // =============================================================================
@@ -342,6 +436,30 @@ pub trait LlmBackend: Send + Sync {
         _on_token: StreamingCallback<'_>,
     ) -> LlmResult<GenerationOutput> {
         Err(unsupported_vision_input_error(self.name()))
+    }
+
+    /// Score label tokens at the end of a chat prompt, without generating.
+    ///
+    /// Renders `request.messages` through the model's own chat template with
+    /// the assistant turn opened, prefills the prompt from an empty state and
+    /// returns the logit of every label in `request.label_groups` at its last
+    /// position, grouped as requested, with the log-sum-exp of that whole
+    /// row. Scoring can drop the prompt prefix a backend cached for its next
+    /// generation. Backends that cannot read a vocabulary row return the
+    /// default invalid-input error.
+    ///
+    /// # Errors
+    ///
+    /// [`AdapterError::InvalidInput`] for a request the model cannot score:
+    /// no labels, an empty group, a label that is not exactly one token, a
+    /// token used twice, or a prompt that leaves no free position in the
+    /// context window. The messages name positions and counts, never the
+    /// request's text.
+    fn score_labels(&self, _request: &ScoringRequest) -> LlmResult<LabelLogits> {
+        Err(AdapterError::InvalidInput(format!(
+            "backend '{}' does not support label scoring",
+            self.name()
+        )))
     }
 
     /// Check if this backend supports true streaming.
@@ -1267,6 +1385,78 @@ mod tests {
 
         assert_eq!(batch_error, streaming_error);
         assert!(batch_error.contains("does not support vision input"));
+    }
+
+    const CANARY: &str = "canary-7f3a9c";
+
+    #[test]
+    fn default_label_scoring_is_unsupported() {
+        struct TextOnly;
+
+        impl LlmBackend for TextOnly {
+            fn name(&self) -> &str {
+                "text-only"
+            }
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["test"]
+            }
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
+                Ok(())
+            }
+            fn is_loaded(&self) -> bool {
+                true
+            }
+            fn unload(&mut self) -> LlmResult<()> {
+                Ok(())
+            }
+            fn generate(
+                &self,
+                _messages: &[ChatMessage],
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                unreachable!("label scoring must not fall back to generation")
+            }
+            fn generate_raw(
+                &self,
+                _prompt: &str,
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                unreachable!("label scoring must not fall back to generation")
+            }
+        }
+
+        let request = ScoringRequest::new(
+            vec![ChatMessage::user(CANARY)],
+            vec![vec!["A".into()], vec!["B".into()]],
+        );
+        match TextOnly.score_labels(&request) {
+            Err(AdapterError::InvalidInput(message)) => {
+                assert!(
+                    message.contains("'text-only' does not support label scoring"),
+                    "{message}"
+                );
+                assert!(!message.contains(CANARY), "{message}");
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scoring_requests_debug_without_their_text() {
+        let request = ScoringRequest::new(
+            vec![ChatMessage::system(CANARY), ChatMessage::user(CANARY)],
+            vec![
+                vec![format!("{CANARY}-a")],
+                vec![format!("{CANARY}-b"), "B".into()],
+            ],
+        )
+        .with_enable_thinking(Some(false));
+
+        let debug = format!("{request:?}");
+        assert_eq!(
+            debug,
+            "ScoringRequest { messages: 2, enable_thinking: Some(false), label_groups: [1, 2] }"
+        );
     }
 
     #[test]

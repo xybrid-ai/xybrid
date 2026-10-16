@@ -13,7 +13,7 @@
 //! model, unless `XYBRID_REQUIRE_MODELS` is set, where both fail instead.
 
 use super::encode::encode_request;
-use super::math::{choice_scores, softmax_scores};
+use super::math::{choice_scores, label_scores, softmax_scores};
 use super::onnx::{ChoiceAxis, OnnxChoiceScorer};
 use super::*;
 use crate::execution::template::{
@@ -476,6 +476,133 @@ fn softmax_is_stable_and_ties_go_to_the_first_candidate() {
 }
 
 // ---------------------------------------------------------------------------
+// Label groups: the label-token readout's score math
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct LabelGoldens {
+    cases: Vec<LabelGolden>,
+}
+
+#[derive(Deserialize)]
+struct LabelGolden {
+    id: String,
+    labels: Vec<String>,
+    label_logits: Vec<f64>,
+    logsumexp: f64,
+    scores: Vec<f64>,
+    label_mass: f64,
+    best: usize,
+    margin: f64,
+}
+
+#[test]
+fn label_groups_score_their_largest_logit() {
+    let ids = vec![("a".to_string(), false), ("b".to_string(), true)];
+    let groups = [vec![1.0_f32, 3.0], vec![2.0]];
+    let logsumexp = 4.0_f32;
+
+    let scores = label_scores(ids.clone(), &groups, logsumexp, None).unwrap();
+    assert_eq!(
+        scores.entries,
+        choice_scores(ids.clone(), &[3.0, 2.0], None)
+            .unwrap()
+            .entries,
+        "each candidate scores the largest logit in its group"
+    );
+    assert!(scores.entries[1].fixed);
+    let mass: f64 = [1.0_f64, 3.0, 2.0].iter().map(|l| (l - 4.0).exp()).sum();
+    assert!((f64::from(scores.label_mass.unwrap()) - mass).abs() < 1e-7);
+    assert_eq!(
+        label_scores(ids.clone(), &groups, logsumexp, Some(2.0))
+            .unwrap()
+            .entries,
+        choice_scores(ids.clone(), &[3.0, 2.0], Some(2.0))
+            .unwrap()
+            .entries,
+        "the temperature divides the pooled logits"
+    );
+
+    // A non-finite logit is refused even where the maximum would hide it.
+    assert!(matches!(
+        label_scores(
+            ids.clone(),
+            &[vec![1.0], vec![f32::NAN, 2.0]],
+            logsumexp,
+            None
+        ),
+        Err(ChoiceError::NonFiniteLogit { index: 1 })
+    ));
+    assert!(matches!(
+        label_scores(
+            ids.clone(),
+            &[vec![f32::NEG_INFINITY, 1.0], vec![2.0]],
+            logsumexp,
+            None
+        ),
+        Err(ChoiceError::NonFiniteLogit { index: 0 })
+    ));
+    assert!(matches!(
+        label_scores(ids, &groups, f32::INFINITY, None),
+        Err(ChoiceError::NonFiniteLogSumExp)
+    ));
+    assert!(matches!(
+        label_scores(Vec::new(), &[], logsumexp, None),
+        Err(ChoiceError::NoCandidates)
+    ));
+}
+
+/// The Qwen3.5 label goldens' scores, label mass, best label and margin
+/// follow from their own label logits and log-sum-exp, read back in `f32` as
+/// a backend returns them.
+#[test]
+fn label_scores_match_the_label_goldens() {
+    let LabelGoldens { cases } = read_json("goldens/labels.json");
+    assert!(!cases.is_empty());
+    for case in cases {
+        // The goldens write float32 logits as the doubles they widen to;
+        // `as f32` recovers them even where serde_json's default parser lands
+        // one double ulp away.
+        let groups: Vec<Vec<f32>> = case
+            .label_logits
+            .iter()
+            .map(|&logit| vec![logit as f32])
+            .collect();
+        let ids = case
+            .labels
+            .iter()
+            .map(|label| (label.clone(), false))
+            .collect();
+
+        let scores = label_scores(ids, &groups, case.logsumexp as f32, None)
+            .unwrap_or_else(|e| panic!("{}: {e}", case.id));
+        for (entry, &golden) in scores.entries.iter().zip(&case.scores) {
+            assert!(
+                (f64::from(entry.score) - golden).abs() < 1e-7,
+                "{}: score {} against {golden}",
+                case.id,
+                entry.score
+            );
+        }
+        // The log-sum-exp is read back in f32, which moves the mass by up to
+        // its relative rounding (about 1e-6 at these magnitudes).
+        let mass = f64::from(scores.label_mass.unwrap());
+        assert!(
+            (mass - case.label_mass).abs() < 2e-6,
+            "{}: label mass {mass} against {}",
+            case.id,
+            case.label_mass
+        );
+        assert_eq!(scores.best(), Some(case.best), "{}", case.id);
+        assert!(
+            (f64::from(scores.margin().unwrap()) - case.margin).abs() < 1e-6,
+            "{}",
+            case.id
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
 
@@ -538,11 +665,15 @@ fn choice_errors_map_onto_adapter_errors() {
         AdapterError::from(contract),
         AdapterError::InvalidInput(_)
     ));
-    let output = ChoiceError::NonFiniteLogit { index: 0 };
-    assert!(matches!(
-        AdapterError::from(output),
-        AdapterError::InferenceFailed(_)
-    ));
+    for output in [
+        ChoiceError::NonFiniteLogit { index: 0 },
+        ChoiceError::NonFiniteLogSumExp,
+    ] {
+        assert!(matches!(
+            AdapterError::from(output),
+            AdapterError::InferenceFailed(_)
+        ));
+    }
     let runtime = ChoiceError::Runtime(AdapterError::ModelNotLoaded("m".into()));
     assert!(matches!(
         AdapterError::from(runtime),

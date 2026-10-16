@@ -34,8 +34,8 @@ pub use xybrid_llama::{
 };
 
 use crate::runtime_adapter::llm::{
-    local_execution_provider, ChatMessage, GenerationConfig, GenerationOutput, LlmBackend,
-    LlmConfig, LlmResult, PartialToken,
+    local_execution_provider, ChatMessage, GenerationConfig, GenerationOutput, LabelLogits,
+    LlmBackend, LlmConfig, LlmResult, PartialToken, ScoringRequest,
 };
 use crate::runtime_adapter::llm_telemetry::{StreamingTelemetry, StreamingTelemetryFields};
 use crate::runtime_adapter::streaming_postprocess::{
@@ -46,6 +46,7 @@ use crate::runtime_adapter::AdapterError;
 #[cfg(feature = "llm-llamacpp-vision")]
 use crate::runtime_adapter::{MultimodalChatMessage, MultimodalMessagePart};
 use crate::tracing as xybrid_trace;
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 // Backend init is idempotent through `xybrid_llama::backend_init`; the OS
@@ -299,6 +300,14 @@ impl Default for LlamaCppBackend {
 }
 
 impl LlamaCppBackend {
+    /// The loaded model. Reading it needs no lock: only `load` and `unload`
+    /// replace it, and they take `&mut self`.
+    fn loaded_model(&self) -> LlmResult<&xybrid_llama::LlamaModel> {
+        self.model.as_ref().ok_or_else(|| {
+            AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
+        })
+    }
+
     /// Acquire the model + context under the context mutex and hand both
     /// to `f`. Replaces three copies of the same five-line dance across
     /// `generate`, `generate_raw`, and `generate_streaming`. The guard
@@ -309,9 +318,7 @@ impl LlamaCppBackend {
     where
         F: FnOnce(&xybrid_llama::LlamaModel, &xybrid_llama::LlamaContext) -> LlmResult<R>,
     {
-        let model = self.model.as_ref().ok_or_else(|| {
-            AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
-        })?;
+        let model = self.loaded_model()?;
         let ctx_guard = self
             .context
             .lock()
@@ -781,6 +788,78 @@ fn compute_reusable_prefix_len(cached: &[i32], new_tokens: &[i32]) -> usize {
         .count()
 }
 
+/// The token id of every label, flattened in request order.
+///
+/// Each label must be exactly one token of `model`'s vocabulary, tokenized as
+/// plain text with nothing added, and no token may appear twice in a request:
+/// two candidates would then share one logit. Errors name positions and
+/// counts, never a label's text.
+fn label_token_ids(
+    model: &xybrid_llama::LlamaModel,
+    groups: &[Vec<String>],
+) -> LlmResult<Vec<i32>> {
+    if groups.is_empty() {
+        return Err(AdapterError::InvalidInput(
+            "a scoring request needs at least one label group".to_string(),
+        ));
+    }
+    let mut ids = Vec::with_capacity(groups.iter().map(Vec::len).sum());
+    let mut first_use: HashMap<i32, (usize, usize)> = HashMap::new();
+    for (group, labels) in groups.iter().enumerate() {
+        if labels.is_empty() {
+            return Err(AdapterError::InvalidInput(format!(
+                "label group {group} is empty"
+            )));
+        }
+        for (label, text) in labels.iter().enumerate() {
+            let tokens = model.tokenize(text, false)?;
+            let &[id] = tokens.as_slice() else {
+                return Err(AdapterError::InvalidInput(format!(
+                    "label {label} of group {group} is {} tokens; label scoring reads \
+                     single-token labels",
+                    tokens.len()
+                )));
+            };
+            if let Some(&(first_group, first_label)) = first_use.get(&id) {
+                return Err(AdapterError::InvalidInput(format!(
+                    "label {label} of group {group} is the same token as label {first_label} \
+                     of group {first_group}"
+                )));
+            }
+            first_use.insert(id, (group, label));
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+/// Splits the primitive's flat label logits back into the request's groups.
+fn regroup(logits: xybrid_llama::FinalLogits, groups: &[Vec<String>]) -> LabelLogits {
+    assert_eq!(
+        logits.label_logits.len(),
+        groups.iter().map(Vec::len).sum::<usize>(),
+        "score_final_position returns one logit per label"
+    );
+    let mut flat = logits.label_logits.into_iter();
+    let label_logits = groups
+        .iter()
+        .map(|labels| flat.by_ref().take(labels.len()).collect())
+        .collect();
+    LabelLogits::new(label_logits, logits.logsumexp)
+}
+
+/// The adapter error for a failed scoring call. A decode failure gets
+/// scoring's own wording, where the shared conversion would call it a failed
+/// generation; the rest convert as usual. No message quotes the prompt.
+fn scoring_error(error: xybrid_llama::LlamaError) -> AdapterError {
+    match error {
+        xybrid_llama::LlamaError::DecodeFailed { code, detail, .. } => {
+            AdapterError::RuntimeError(format!("label scoring failed (code {code}): {detail}"))
+        }
+        other => other.into(),
+    }
+}
+
 impl LlmBackend for LlamaCppBackend {
     fn name(&self) -> &str {
         "llama-cpp"
@@ -1220,10 +1299,32 @@ impl LlmBackend for LlamaCppBackend {
         // metadata), not the decode context — so read the model directly
         // instead of going through `with_model_and_context`, and never
         // queue behind an in-flight generation holding the context mutex.
-        let model = self.model.as_ref().ok_or_else(|| {
-            AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
-        })?;
+        let model = self.loaded_model()?;
         chat::format_chat_prompt(model, messages, self.reasoning_enabled(), &config.tools)
+    }
+
+    fn score_labels(&self, request: &ScoringRequest) -> LlmResult<LabelLogits> {
+        // Rendering and tokenizing need only the model, as in
+        // `render_chat_prompt`, so they run before the context lock.
+        let model = self.loaded_model()?;
+        let prompt =
+            chat::render_scoring_prompt(model, &request.messages, request.enable_thinking)?;
+        // Control tokens are parsed and nothing is added: the template wrote
+        // the whole prompt, and the conformance goldens are tokenized the same
+        // way.
+        let tokens = model.tokenize_special(&prompt, false)?;
+        let label_ids = label_token_ids(model, &request.label_groups)?;
+
+        self.with_model_and_context(|_, context| {
+            // Scoring clears the context's memory on entry and on every
+            // return, so the prefix the last generation cached is gone; a
+            // stale record would let the next generation reuse it.
+            self.clear_cached_prefix_state();
+            let logits = context
+                .score_final_position(&tokens, &label_ids)
+                .map_err(scoring_error)?;
+            Ok(regroup(logits, &request.label_groups))
+        })
     }
 
     fn generate_streaming(

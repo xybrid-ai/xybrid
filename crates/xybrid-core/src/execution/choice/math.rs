@@ -8,6 +8,11 @@
 //! an error, never a silently skewed distribution. A static model's padding
 //! rows must be dropped **before** calling in here: they may be NaN.
 //!
+//! A label-token scorer reads a group of label tokens per candidate:
+//! [`label_scores`] takes the largest logit in each group as the candidate's
+//! logit and reports how much of the whole next-token distribution the labels
+//! hold.
+//!
 //! # Example
 //!
 //! ```
@@ -93,4 +98,56 @@ pub fn choice_scores(
         entries,
         label_mass: None,
     })
+}
+
+/// Scores a label-token readout: each candidate's logit is the largest logit
+/// in its label group, scored as in [`choice_scores`]. `label_mass` is the
+/// share of the whole next-token distribution the labels hold,
+/// `Σ exp(logit − logsumexp)` over every label token, summed in `f64`.
+///
+/// `ids` and `groups` are both in E order, one group per candidate;
+/// `logsumexp` is that of the full vocabulary row the logits were read from.
+///
+/// # Errors
+///
+/// [`ChoiceError::NonFiniteLogit`] with the candidate's index when any of its
+/// label logits is NaN or infinite, [`ChoiceError::NonFiniteLogSumExp`] when
+/// `logsumexp` is, and otherwise as [`softmax_scores`].
+///
+/// # Panics
+///
+/// When `ids` and `groups` differ in length or a group is empty: the caller
+/// builds one non-empty group per candidate.
+pub fn label_scores(
+    ids: Vec<(String, bool)>,
+    groups: &[Vec<f32>],
+    logsumexp: f32,
+    temperature: Option<f32>,
+) -> ChoiceResult<ChoiceScores> {
+    assert_eq!(
+        ids.len(),
+        groups.len(),
+        "label_scores needs one label group per candidate"
+    );
+    let mut logits = Vec::with_capacity(groups.len());
+    for (index, group) in groups.iter().enumerate() {
+        assert!(!group.is_empty(), "label group {index} is empty");
+        if group.iter().any(|logit| !logit.is_finite()) {
+            return Err(ChoiceError::NonFiniteLogit { index });
+        }
+        logits.push(group.iter().copied().fold(f32::NEG_INFINITY, f32::max));
+    }
+    if !logsumexp.is_finite() {
+        return Err(ChoiceError::NonFiniteLogSumExp);
+    }
+
+    let mut scores = choice_scores(ids, &logits, temperature)?;
+    let logsumexp = f64::from(logsumexp);
+    let mass: f64 = groups
+        .iter()
+        .flatten()
+        .map(|&logit| (f64::from(logit) - logsumexp).exp())
+        .sum();
+    scores.label_mass = Some(mass as f32);
+    Ok(scores)
 }
