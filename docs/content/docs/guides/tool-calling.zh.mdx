@@ -38,6 +38,7 @@ Xybrid 的设计准则是**能力是数据，而非入口点**。工具端到端
 |-----------------|--------|----------------|
 | LFM2 系列 | `<\|tool_call_start\|>[name(k=v)]<\|tool_call_end\|>`（Python 风格） | LFM2.5 230M / 350M |
 | gemma-4 系列 | `<\|tool_call>call:name{...}<tool_call\|>` | gemma-4 E2B |
+| FunctionGemma | `<start_function_call>call:name{...}<end_function_call>` | FunctionGemma 270M IT |
 
 Bundle 通过 `model_metadata.json` 中一个建议性的 `tool_calling: true` 标志来
 宣告支持（由 `ModelMetadata::supports_tool_calling()` /
@@ -106,7 +107,14 @@ println!("{}", final_turn.text().unwrap_or_default());
 这就是全部接口。多步循环（预算、重试、并行工具）都是普通的应用代码——完整的
 参考循环（含流式）见
 [`crates/xybrid-core/examples/lfm2_230m_tools.rs`](https://github.com/xybrid-ai/xybrid/blob/master/crates/xybrid-core/examples/lfm2_230m_tools.rs)
-和 `gemma4_e2b_tools.rs`。
+和 `gemma4_e2b_tools.rs`。可运行的 `functiongemma_tools.rs` 示例则通过标准的
+`GenerationConfig::with_tools` 与 `Envelope::tool_results` 流程，使用固定版本的
+Q8_0 fixture：
+
+```bash
+./integration-tests/download.sh functiongemma-270m-it
+cargo run -p xybrid-core --example functiongemma_tools --features llm-llamacpp
+```
 
 ### 循环必须遵守的规则（v1）
 
@@ -120,7 +128,7 @@ println!("{}", final_turn.text().unwrap_or_default());
   因此流式调用方完全无需解析原始文本。
 - **续接可以流式，也能保留上下文。** 把 `tool_results` Envelope 通过你最初
   使用的同一个方法送回去即可，无论是否流式、是否带 `ConversationContext`。
-  仅包含图像的对话会被拒绝（见上方提示框）。
+  只有包含图像的对话会被拒绝（见上方提示框）。
 - **在循环结束后再写入历史，而不是在轮次之间。** 续接 Envelope 自身会回放
   该用户轮次，因此提前把它 push 进上下文会让问题在提示中出现两次。等循环
   收敛后，再一次性提交用户消息与最终答案。参考循环见
@@ -294,7 +302,7 @@ if !first.toolCalls.isEmpty {
         priorAssistantText: first.text ?? "",  // 原始输出，包含工具调用块
         results: results
     )
-    // same options — the continuation must carry the same tools
+    // 相同的 options——续接必须携带相同的工具
     let answer = try model.run(envelope: continuation, options: options)
 }
 ```

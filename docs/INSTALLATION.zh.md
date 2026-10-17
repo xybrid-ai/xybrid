@@ -52,9 +52,40 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features pl
 
 # Linux / Windows — ONNX + llama.cpp
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-desktop
+
+# Linux — ONNX + llama.cpp，启用 Vulkan 加速
+XYBRID_LLAMA_CPP_VULKAN=1 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-desktop
 ```
 
-安装脚本提供的预编译二进制已经为每个平台包含了正确的特性。
+Vulkan 是构建期设置，而不是 Cargo feature，并且目前**仅支持 Linux**。启用前请先安装 Vulkan SDK；构建在解析 loader 时会读取 `VULKAN_SDK/lib`。取消设置 `XYBRID_LLAMA_CPP_VULKAN`（或将其设为 `0`）即可回到普通的 CPU 构建。任何非 Linux 目标都会以明确的错误使构建失败，而不是悄悄忽略该变量。
+
+Windows 暂不支持 Vulkan。ggml 使用 `vulkan-shaders-gen` 编译其 GLSL 着色器，而后者是作为嵌套的 CMake 项目构建的；在 cargo 的 `target/<profile>/build/<crate>-<hash>/out/` 前缀下，MSBuild 的 FileTracker 为它生成的路径会超出 Windows 260 个字符的 `MAX_PATH` 限制，留给仓库根目录的只有大约 17 个字符。无论检出到哪个现实可行的位置，它都会失败，因此 Windows 上的 Vulkan 支持被直接禁用，而不是带着问题发布。
+
+在 Bazel 下，这个开关是构建标志而不是环境变量——Bazel 自行设置 llama.cpp 的 cmake 定义，从不读取 `XYBRID_LLAMA_CPP_VULKAN`：
+
+```bash
+bazel build --config=remote --config=linux-vulkan -c opt //crates/xybrid-cli:xybrid
+```
+
+该配置要求驱动构建的机器上装有 Vulkan SDK——ggml 通过嵌套的 `vulkan-shaders-gen` 项目编译其 GLSL 着色器，因此 `//:llama_vulkan` 被固定为本地执行，而构建图的其余部分仍在远程构建。需要先准备两件事：
+
+```bash
+sudo apt-get install glslc libvulkan-dev spirv-headers
+
+# //:llama_vulkan 从固定路径读取 Vulkan 头文件；这些头文件是另行暂存的，而不是
+# 原地使用，这样 cmake 为它们添加的 `-I` 就不会遮蔽密闭（hermetic）工具链的
+# libc 头文件。如果你安装了 LunarG SDK，请使用 $VULKAN_SDK/include。
+sudo mkdir -p /opt/xybrid-vulkan-include
+for tree in vulkan vk_video spirv; do
+  sudo ln -sfn "/usr/include/$tree" "/opt/xybrid-vulkan-include/$tree"
+done
+```
+
+构建时不会使用你系统中的 loader：`//bazel/vulkan` 会构建一个带有真实 `libvulkan.so.1` SONAME 的链接期桩（stub），因此二进制文件会绑定到运行它的机器上所安装的 Vulkan loader。
+
+Vulkan 构建会动态链接 `libvulkan.so.1`，因此*运行*它的机器同样需要 Vulkan loader，以及一个能访问 GPU 的驱动。
+
+预编译二进制文件使用发布版的平台配置，在 Linux 上仅支持 CPU——目前尚未发布任何 Vulkan 产物。上述两种 Vulkan 方式都只影响你自己编译的二进制文件。
 
 <details>
 <summary>所有可用的 Feature 标志</summary>
@@ -123,6 +154,9 @@ warning: llama.cpp: linked prebuilt natives for aarch64-apple-darwin (vision); s
 | `XYBRID_NATIVES_PREBUILT_DIR` | 链接你自行准备的切片，路径为 `<dir>/<target>/{lib,include}` |
 | `XYBRID_NATIVES_PKG` | 从其他 OCI 仓库拉取 |
 | `XYBRID_NATIVES_TOKEN` | Bearer token，用于私有镜像 |
+
+下载替代的是 CMake 编译，而不是整个原生构建：xybrid 自带的小型 `wrapper.cpp` shim
+仍需要 C++ 编译器，bindgen 仍需要 libclang。
 
 ### 从本地克隆构建
 

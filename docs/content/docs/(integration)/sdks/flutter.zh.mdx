@@ -38,6 +38,8 @@ await Xybrid.init(
 
 未提供密钥时，遥测处于禁用状态，首次推理会打印一条一次性提示指向控制台（可通过环境变量 `XYBRID_QUIET=1` 关闭）。在 [dashboard.xybrid.dev](https://dashboard.xybrid.dev) 免费获取密钥。若使用自托管控制台，请额外传入 `ingestUrl`；若需 CPU/内存采样，请传入 `resourceTelemetry`。
 
+`Xybrid.init()` 还会在 iOS 和 Android 上通过 `battery_plus` 订阅系统电池状态，并将每次读数转发给路由引擎。
+
 ## 核心模式：加载 → 运行
 
 所有推理遵循相同模式：
