@@ -8,40 +8,27 @@ name: "CI: zzz engine"
 # libzzz_embed.a into a Rust test binary on every pinned target.
 #
 # Design contract (crates/zzz-sys/README.md): default and fork builds never
-# require private assets. Fork and Dependabot runs never receive the
-# secrets, so they take the notice job instead; the secrets-gated steps
-# below also skip (with a loud notice) if ZZZ_GITHUB_TOKEN is unset. Every
-# other CI lane treats the zzz crate as its no-op default build.
+# require private assets. The secrets-gated steps below skip (with a loud
+# notice) if ZZZ_GITHUB_TOKEN is unset. Every other CI lane treats the zzz
+# crate as its no-op default build.
 #
-# Both secrets live only in the `zzz-engine` environment, which has a
-# required reviewer: a job naming it waits for approval before it receives
-# them, so a branch that edits this workflow cannot read them unreviewed.
-# Approve only runs whose workflow and zzz code you have read.
+# Both secrets live only in the `zzz-engine` environment, which admits
+# refs/heads/master and nothing else. GitHub matches that rule against the
+# run's ref, so a pull_request run (refs/pull/N/merge), a branch push or a
+# dispatch on a branch is refused the secrets even if it edits this file.
+# Only code that has landed on master runs with them, which is why this
+# lane has no pull_request trigger and no approval step. A pin or delivery
+# tool change is proven by the push to master that lands it; stage it
+# locally first with `zzz_pull.py --use-gh-auth`.
 #
 # Weights stay out of scope here: the real-synthesis tests loudly skip
 # without the converted Kitten GGUFs + voice fixture pair, which are private
-# model-store assets (the zzz-research repo owns that e2e coverage today).
-# Adding weights to CI is a follow-up with its own distribution decision.
+# model-store assets (the engine's private repository owns that e2e coverage
+# today). Adding weights to CI is a follow-up with its own distribution
+# decision.
 
 on:
   push:
-    branches: [master]
-    paths:
-      - 'crates/zzz-sys/**'
-      - 'crates/xybrid-core/src/runtime_adapter/zzz/**'
-      - 'crates/xybrid-core/src/runtime_adapter/mod.rs'
-      - 'crates/xybrid-core/src/execution/executor.rs'
-      - 'crates/xybrid-core/src/execution/template/metadata.rs'
-      - 'crates/xybrid-core/src/features.rs'
-      - 'crates/xybrid-core/tests/zzz_tts_integration.rs'
-      - 'crates/xybrid-core/Cargo.toml'
-      - 'tools/scripts/zzz_pull.py'
-      - 'tools/scripts/tests/test_zzz_pull.py'
-      - '.github/workflows/test-zzz-engine.yml'
-      - 'Cargo.lock'
-      # Markdown cannot affect this build.
-      - "!**.md"
-  pull_request:
     branches: [master]
     paths:
       - 'crates/zzz-sys/**'
@@ -76,9 +63,6 @@ env:
 jobs:
   test-zzz-engine:
     name: ${{ matrix.name }}
-    # Same-repo runs only: forks and Dependabot get no secrets, and asking
-    # for an approval there could only end in the no-op build.
-    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork
     environment: zzz-engine
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
@@ -115,38 +99,16 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # The staging step is the only consumer of the private credentials.
-      # Without them (forks, unset secrets) the lane stays green and prints
-      # a notice — the default-build contract, not a silent pass.
+      # Without them (unset secrets) the lane stays green and prints a
+      # notice — the default-build contract, not a silent pass.
       #
       # It runs straight after checkout, before the toolchain and any cache
       # restore: the gh and python3 it calls come from the runner image, not
-      # from a cached ~/.cargo/bin an earlier run of this change could have
-      # written.
+      # from a cached ~/.cargo/bin an earlier run could have written.
       #
-      # Delivery-file guard: on a same-repo PR the checkout holds the PR's
-      # code, so a change to the delivery tool (or the pins it dereferences)
-      # must not run with the private token while it is being changed. Any
-      # edit to the tool, its tests or the manifest fails the lane before
-      # the token is used; the push to master that lands them runs the lane
-      # against the merged files.
-      #
-      # Scope: this stops an in-flight tool or pin edit from reaching the
-      # token. Someone who can push a branch can edit this workflow itself;
-      # the boundary against that is the zzz-engine environment's required
-      # reviewer, not this step.
-      - name: Guard the delivery tool and pins
-        if: env.ZZZ_CI_ENABLED == 'true'
-        run: |
-          set -euo pipefail
-          # The tree comparison needs master's tip, not its history.
-          git fetch --quiet --depth=1 origin master
-          if ! git diff --exit-code origin/master -- \
-            'tools/scripts/zzz_pull.py' \
-            'tools/scripts/tests/test_zzz_pull.py' \
-            'crates/zzz-sys/natives-manifest.json'; then
-            echo "::error title=zzz delivery files changed::tools/scripts/zzz_pull.py, its tests, or natives-manifest.json differ from master. This lane does not run the private fetch while those files are being edited, on any trigger; land them through review and the push to master runs this lane against them."
-            exit 1
-          fi
+      # The checkout is always a master commit (the environment refuses any
+      # other ref), so the delivery tool and pins it runs are the reviewed
+      # ones; an in-flight edit to them never reaches the token.
 
       - name: Stage pinned engine slice
         if: env.ZZZ_CI_ENABLED == 'true'
@@ -230,14 +192,4 @@ jobs:
       - name: Notice — secrets absent, lane skipped
         if: env.ZZZ_CI_ENABLED != 'true'
         run: |
-          echo "::notice title=zzz engine lane skipped::ZZZ_GITHUB_TOKEN/ZZZ_RELEASE_REPOSITORY not available on this run (fork or unset secrets); the zzz crate stays in its default no-op build, per the private-assets contract."
-
-  untrusted-notice:
-    name: zzz engine lane (no secrets on this run)
-    if: github.actor == 'dependabot[bot]' || github.event.pull_request.head.repo.fork
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Notice — fork or Dependabot run, lane skipped
-        run: |
-          echo "::notice title=zzz engine lane skipped::Fork and Dependabot runs never receive the zzz-engine secrets; the zzz crate stays in its default no-op build, per the private-assets contract."
+          echo "::notice title=zzz engine lane skipped::ZZZ_GITHUB_TOKEN/ZZZ_RELEASE_REPOSITORY not available on this run (secrets unset); the zzz crate stays in its default no-op build, per the private-assets contract."

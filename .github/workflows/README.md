@@ -64,7 +64,7 @@ Workspace validation, pull-request gates and backend test suites.
 | [`test-policy-routing.yml`](test-policy-routing.yml) | CI: Policy routing | push to `master`, pull_request to `master`, workflow_dispatch | none | Drive the xybrid binary through a policy-routed hybrid stage: local GGUF leg, fake DeepSeek cloud leg. |
 | [`test-whispercpp.yml`](test-whispercpp.yml) | CI: whisper.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Exercise whisper.cpp with real multilingual weights: translation, per-request language, long windows, non-speech suppression. |
 | [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master` | none | Rust format, lint, tests and feature matrix, plus binding drift, API contract, Python and Web SDK checks. Gates merges. |
-| [`test-zzz-engine.yml`](test-zzz-engine.yml) | CI: zzz engine | push to `master`, pull_request to `master`, workflow_dispatch | none | Fetch and verify the pinned zzz (Kitten TTS) engine slices and link them into Rust tests on each pinned target. |
+| [`test-zzz-engine.yml`](test-zzz-engine.yml) | CI: zzz engine | push to `master`, workflow_dispatch | none | Fetch and verify the pinned zzz (Kitten TTS) engine slices and link them into Rust tests on each pinned target. |
 
 ### SDK
 
