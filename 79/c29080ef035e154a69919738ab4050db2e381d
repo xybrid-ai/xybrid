@@ -1,0 +1,19 @@
+hermetic_llvm.patch
+  s_db21060e221c97::t_b92064453bfa3e 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "79c29080ef035e154a69919738ab4050db2e381d",
+  "prompts": {},
+  "sessions": {
+    "s_db21060e221c97": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15138-d903-7132-9388-bc16729c22c4",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
