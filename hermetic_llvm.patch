@@ -1,3 +1,26 @@
+diff --git a/rbe.bzl b/rbe.bzl
+--- a/rbe.bzl
++++ b/rbe.bzl
+@@ -16,7 +16,9 @@
+         "@llvm//constraints/libc:gnu.2.28",
+     ],
+     exec_properties = {{
+-        "container-image": "docker://ubuntu:22.04",
++        # xybrid: use the Docker Hub mirror so worker startup does not need
++        # to contact auth.docker.io before any remote action can run.
++        "container-image": "docker://mirror.gcr.io/library/ubuntu:22.04",
+         "Arch": "amd64",
+         "OSFamily": "Linux",
+     }},
+@@ -31,7 +33,7 @@
+         "@llvm//constraints/libc:gnu.2.28",
+     ],
+     exec_properties = {{
+-        "container-image": "docker://ubuntu:22.04",
++        "container-image": "docker://mirror.gcr.io/library/ubuntu:22.04",
+         "Arch": "arm64",
+         "OSFamily": "Linux",
+     }},
 diff --git a/toolchain/features/legacy/BUILD.bazel b/toolchain/features/legacy/BUILD.bazel
 index 0000000..0000000 100644
 --- a/toolchain/features/legacy/BUILD.bazel
