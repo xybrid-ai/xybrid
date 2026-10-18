@@ -265,7 +265,7 @@ fn refusals(model: &XybridModel, input: &Envelope, context: &ConversationContext
                 input, context, &preempt, true, no_token,
             ),
         ),
-        capability(model.run_tts_streaming(input, &options, |_, _| {
+        capability(model.run_tts_streaming(input, &options, |_| {
             panic!("a refused request must not synthesize")
         })),
         capability(model.run_streaming_with_fallback(
