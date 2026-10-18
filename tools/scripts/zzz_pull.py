@@ -67,8 +67,6 @@ def json_object(data: bytes, label: str) -> dict:
 class Pin:
     release_tag: str
     entry: dict
-    source_repository: str
-    source_commit: str
 
     @property
     def files(self) -> set[str]:
@@ -91,6 +89,13 @@ class Pin:
 def select_pin(target: str, manifest: Path = DEFAULT_MANIFEST) -> Pin:
     require(target in ZIG_TARGETS, "unsupported zzz target")
     data = json_object(manifest.read_bytes(), "engine manifest")
+    # The manifest is public: it pins archives by checksum and names nothing
+    # about where the engine is built. The archive checksum already fixes the
+    # receipt bytes, so a source pin here would add no safety.
+    require(
+        set(data) == {"schema_version", "engine", "release_tag", "archives"},
+        "unexpected engine manifest keys",
+    )
     expect(data, "schema_version", 1, "manifest")
     expect(data, "engine", "zzz", "manifest")
     tag = data.get("release_tag")
@@ -141,11 +146,7 @@ def select_pin(target: str, manifest: Path = DEFAULT_MANIFEST) -> Pin:
         isinstance(libs, list) and libs and all(isinstance(v, str) and v for v in libs),
         "invalid system library pins",
     )
-    source = data.get("source_commit")
-    require(isinstance(source, str) and re.fullmatch(r"[0-9a-f]{40}", source), "invalid source revision")
-    repository = data.get("source_repository")
-    require(isinstance(repository, str) and bool(repository), "invalid source repository")
-    return Pin(tag, entry, repository, source)
+    return Pin(tag, entry)
 
 
 def validate_receipt(receipt: dict, metadata: dict, pin: Pin) -> None:
@@ -157,8 +158,6 @@ def validate_receipt(receipt: dict, metadata: dict, pin: Pin) -> None:
         "abi_version": entry["apis"]["zzz_embed"],
         "target": ZIG_TARGETS[entry["target"]],
         "position_independent": True,
-        "source_repository": pin.source_repository,
-        "source_commit": pin.source_commit,
         "header": entry["headers"][0],
     }.items():
         expect(receipt, field, value, "receipt")

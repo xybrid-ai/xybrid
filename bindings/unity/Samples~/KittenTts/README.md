@@ -36,10 +36,9 @@ waveform decoding of speech tokens.
 ## Build the local plugin
 
 Native artifacts use Bazel. Private engine slices are verified by `zzz_pull.py`
-against the rc.4 manifest, receipt, source revision, ABI, profile and target.
-Keep engine archives, receipts and staging directories outside public artifacts
-and caches. Engine source is
-`xybrid-ai/zzz-research@56385c4a3fbab8bc503341947af37e96ebb0071d`.
+against the rc.4 manifest checksum, receipt, ABI, profile and target. Keep
+engine archives, receipts and staging directories outside public artifacts and
+caches.
 
 ```bash
 # Python 3.11+, authenticated access to the pinned release as needed.
