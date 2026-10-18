@@ -27,11 +27,11 @@ use targeting::{
     parse_repl_target, parse_stage_config_target, stage_config_allows_local_cache,
     stage_is_locally_available, target_allows_local,
 };
-use warmup::warmup_models;
+use warmup::{refuse_choice_scorer_stages, warmup_models};
 
 use super::utils::{
-    load_speculative_model, maybe_warn_thinking_budget, thinking_budget_exhausted,
-    THINKING_BUDGET_HINT,
+    load_speculative_model, maybe_warn_thinking_budget, refuse_choice_scorer,
+    thinking_budget_exhausted, THINKING_BUDGET_HINT,
 };
 use crate::ui;
 
@@ -287,6 +287,13 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         }
     }
 
+    // A choice scorer cannot answer a turn: the chat route needs an LLM and
+    // the orchestrator refuses a scorer stage. Refuse now, before warmup
+    // reports it ready.
+    if let Some(model) = loaded_model.as_ref() {
+        refuse_choice_scorer(model, "the REPL runs text turns")?;
+    }
+
     // Tool calling: on by default when the bundle's metadata declares
     // support (`tool_calling: true`), off via --no-tools or `/tools off`.
     // The flag is advisory and per-model — most bundles do not declare it,
@@ -365,6 +372,9 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
     let mut orchestrator = Orchestrator::new();
     let bridge = xybrid_sdk::bridge_orchestrator_events(&orchestrator);
 
+    // A pipeline's scorer stage, too, would warm and then be refused on the
+    // first turn; the single-model check above covers only one stage.
+    refuse_choice_scorer_stages(&stages)?;
     warmup_models(&stages);
 
     println!();
@@ -829,7 +839,14 @@ fn handle_special_command(
                     let role = envelope.role().map(|r| r.as_str()).unwrap_or("unknown");
                     let text = match &envelope.kind {
                         EnvelopeKind::Text(t) => t.as_str(),
-                        _ => "[non-text]",
+                        // Core refuses a conversation that holds a choice
+                        // request, so label it rather than fold it into text.
+                        EnvelopeKind::ChoiceRequest(_) => "[choice request]",
+                        EnvelopeKind::ChoiceScores(_) => "[choice scores]",
+                        EnvelopeKind::Audio(_)
+                        | EnvelopeKind::Embedding(_)
+                        | EnvelopeKind::Image { .. }
+                        | EnvelopeKind::MultiPart(_) => "[non-text]",
                     };
                     let display_text = if verbose == 0 && text.len() > 100 {
                         format!("{}...", &text[..100])
@@ -1286,6 +1303,10 @@ fn execute_batch(
                     }
                     EnvelopeKind::MultiPart(parts) => {
                         ui::ok(&format!("Multi-part output: {} parts", parts.len()));
+                    }
+                    // Pipelines refuse choice kinds before and after every stage.
+                    EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                        ui::err("Pipeline stages do not return choice requests or scores");
                     }
                 }
             }

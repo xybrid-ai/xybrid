@@ -119,6 +119,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::MultiPart(_) => {
             println!("📦 Multipart output (unexpected for MobileNetV2)");
         }
+        EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+            println!("Choice output (unexpected for MobileNetV2)");
+        }
     }
 
     println!();

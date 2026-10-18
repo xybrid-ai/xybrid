@@ -68,6 +68,29 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# Byte fixtures for the llama.cpp adapter's embedded chat-template render,
+# read by xybrid-core's inline chat tests. Two of their cases render the
+# Qwen3.5 template from choice_fixtures.
+filegroup(
+    name = "chat_render_fixtures",
+    srcs = glob(
+        ["fixtures/chat_render/**"],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+# Reference embeddings for embedding_parity, written by
+# tools/scripts/gen_embedding_goldens.py from the model's own ONNX graph.
+filegroup(
+    name = "embedding_fixtures",
+    srcs = glob(
+        ["fixtures/embedding/**"],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)
+
 filegroup(
     name = "coreml_model_fixture",
     srcs = glob(["fixtures/coreml/xybrid_linear.mlpackage/**"]),
@@ -87,8 +110,10 @@ filegroup(
 # already builds with llm-llamacpp, so enabling it here lines up.
 _E2E_TESTS = {
     "asr_integration": [],
+    "choice_forms_conformance": [],
     "coreml_native": ["coreml"],
     "context_budget_clamp": ["llm-llamacpp"],
+    "embedding_parity": [],
     "integration_check": [],
     "llamacpp_release": ["llm-llamacpp"],
     "llm_chat_template": ["llm-llamacpp"],
@@ -99,17 +124,28 @@ _E2E_TESTS = {
 }
 
 _E2E_TEST_DATA = {
+    "choice_forms_conformance": [":choice_fixtures"],
     "coreml_native": [":coreml_model_fixture"],
+    "embedding_parity": [":embedding_fixtures"],
+}
+
+# Crates a test links beyond the defaults below. choice_forms_conformance runs
+# CUA-S1-FORMS through the public SDK.
+_E2E_TEST_DEPS = {
+    "choice_forms_conformance": [
+        "//crates/xybrid-sdk:xybrid-sdk",
+        "@crates//:serde",
+    ],
 }
 
 # local_llm is absent on purpose: it is gated on `llm-mistral`, and xybrid-core's
 # Bazel target does not build the mistral backend at all, so the feature cannot
 # be satisfied here the way llm-llamacpp can. whisper_candle_integration is
 # absent for the same reason — it is gated on `candle`, which xybrid-core's
-# crate_features above do not enable. It runs under cargo, in the Test Candle
-# workflow. whisper.cpp is included because core's Bazel target enables it;
-# the real weights remain a cargo-only CI download, while this target proves
-# the test and skip path compile in the Bazel graph.
+# crate_features above do not enable. It runs under cargo, in the
+# test-candle.yml workflow. whisper.cpp is included because core's Bazel target
+# enables it; the real weights remain a cargo-only CI download, while this
+# target proves the test and skip path compile in the Bazel graph.
 
 [
     rust_test(
@@ -126,7 +162,9 @@ _E2E_TEST_DATA = {
         deps = [
             ":integration-tests",
             "//crates/xybrid-core:xybrid-core",
-        ] + (["@crates//:tokio"] if name == "integration_check" else ["@crates//:serde_json"]),
+        ] + _E2E_TEST_DEPS.get(name, []) + (
+            ["@crates//:tokio"] if name == "integration_check" else ["@crates//:serde_json"]
+        ),
     )
     for name, features in _E2E_TESTS.items()
 ]

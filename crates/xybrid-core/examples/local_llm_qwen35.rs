@@ -109,6 +109,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
             println!("Unexpected: Got vision output instead of text");
         }
+        EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+            println!("Unexpected: Got choice output instead of text");
+        }
     }
 
     Ok(())

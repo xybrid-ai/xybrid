@@ -136,11 +136,13 @@ For a sentence transformer model (e.g., all-MiniLM-L6-v2):
       "type": "Tokenize",
       "vocab_file": "tokenizer.json",
       "tokenizer_type": "WordPiece",
-      "max_length": 512
+      "max_length": 512,
+      "add_special_tokens": true
     }
   ],
   "postprocessing": [
-    { "type": "MeanPool", "dim": 1 }
+    { "type": "MeanPool", "dim": 1 },
+    { "type": "L2Normalize" }
   ],
   "files": ["model.onnx", "tokenizer.json"],
   "metadata": {
@@ -149,6 +151,48 @@ For a sentence transformer model (e.g., all-MiniLM-L6-v2):
   }
 }
 ```
+
+Two settings make the vectors match what sentence-transformers returns for the
+same model:
+
+- `"add_special_tokens": true` adds the tokens the model was trained with,
+  such as `[CLS]`/`[SEP]` or `<bos>`/`<eos>`. Leave it out and the text is
+  encoded bare: for all-MiniLM-L6-v2 that moves the vectors to a cosine of
+  0.85–0.95 from the reference.
+- `L2Normalize` scales each vector to unit length. Add it when the model's
+  `modules.json` lists a `Normalize` module; a dot product of two vectors is
+  then their cosine similarity.
+
+Both are optional, so metadata written without them keeps working as before.
+
+### Multilingual Embeddings (EmbeddingGemma 2)
+
+[EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) embeds text
+in over 100 languages, and code, into 768 dimensions. Its ONNX export takes
+three files; keep `model_q4.onnx_data` next to `model_q4.onnx`, because the
+graph loads its weights from it:
+
+```bash
+mkdir -p embeddinggemma-2/
+BASE="https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/main"
+curl -L "$BASE/onnx/model_q4.onnx" -o embeddinggemma-2/model_q4.onnx
+curl -L "$BASE/onnx/model_q4.onnx_data" -o embeddinggemma-2/model_q4.onnx_data
+curl -L "$BASE/tokenizer.json" -o embeddinggemma-2/tokenizer.json
+```
+
+The metadata is the sentence-embedding one above with `"tokenizer_type": "BPE"`,
+`"max_length": 8192`, `"model_file": "model_q4.onnx"` and all three files in
+`files`; the full file is in
+[MODEL_METADATA.md](../sdk/MODEL_METADATA.md#onnx-text-embedding-embeddinggemma-2).
+The model expects a prompt before the text: `task: search result | query: `
+for a query and `title: none | text: ` for a document. Use the `q4`, quantized
+or full-precision export: the `fp16` and `q4f16` ones return NaN or degraded
+vectors. Only text runs today; image, video and audio input are not supported.
+
+To try it on a small multilingual corpus, or on your own documents, run the SDK
+example from the repository root:
+`cargo run --release -p xybrid-sdk --example semantic_search` (add
+`-- --docs my_docs.txt "your question"` for your own data).
 
 For the full field reference, see [MODEL_METADATA.md](../sdk/MODEL_METADATA.md). For editor autocomplete and validation, use the [JSON Schema](../sdk/model_metadata.schema.json).
 
@@ -372,11 +416,13 @@ cat > my-minilm/model_metadata.json << 'EOF'
       "type": "Tokenize",
       "vocab_file": "tokenizer.json",
       "tokenizer_type": "WordPiece",
-      "max_length": 256
+      "max_length": 256,
+      "add_special_tokens": true
     }
   ],
   "postprocessing": [
-    { "type": "MeanPool", "dim": 1 }
+    { "type": "MeanPool", "dim": 1 },
+    { "type": "L2Normalize" }
   ],
   "files": ["model.onnx", "tokenizer.json"],
   "metadata": {
@@ -386,6 +432,9 @@ cat > my-minilm/model_metadata.json << 'EOF'
 }
 EOF
 ```
+
+`add_special_tokens` and `L2Normalize` make the output match
+sentence-transformers' (see [Sentence Embeddings](#sentence-embeddings)).
 
 ### 3. Run inference
 
@@ -404,7 +453,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let output = model.run(&input)?;
 
-    // output.kind is EnvelopeKind::Embedding(Vec<f32>) with 384 dimensions
+    // output.kind is EnvelopeKind::Embedding(Vec<f32>): 384 dimensions, unit length
     if let EnvelopeKind::Embedding(embedding) = &output.kind {
         println!("Embedding dimensions: {}", embedding.len());
         println!("First 5 values: {:?}", &embedding[..5]);
@@ -477,7 +526,7 @@ Use this table to find the right configuration for your model type. Pick the row
 | **Speech recognition (Whisper)** | SafeTensors | `SafeTensors` | _(built-in)_ | _(built-in)_ |
 | **Text-to-speech** | ONNX | `Onnx` | `Phonemize` | `TTSAudioEncode` |
 | **Text generation (LLM)** | GGUF | `Gguf` | _(none)_ | _(none)_ |
-| **Sentence embeddings** | ONNX | `Onnx` | `Tokenize` | `MeanPool` |
+| **Sentence embeddings** | ONNX | `Onnx` | `Tokenize` (`add_special_tokens`) | `MeanPool` → `L2Normalize` |
 | **Text classification / NER** | ONNX | `Onnx` | `Tokenize` | `ArgMax` |
 | **Object detection / Vision** | ONNX | `Onnx` | `Resize` → `Normalize` | `TopK` or `Threshold` |
 
@@ -530,7 +579,7 @@ Generate a model_metadata.json file for the xybrid ML inference framework.
 Rules:
 - execution_template.type must be one of: Onnx, Gguf, SafeTensors, CoreMl, TfLite, ModelGraph
 - Available preprocessing steps: AudioDecode, MelSpectrogram, Phonemize, Tokenize, Normalize, Resize, CenterCrop, Reshape
-- Available postprocessing steps: CTCDecode, TTSAudioEncode, WhisperDecode, BPEDecode, ArgMax, Softmax, TopK, Threshold, TemperatureSample, MeanPool, Denormalize
+- Available postprocessing steps: CTCDecode, TTSAudioEncode, WhisperDecode, BPEDecode, ArgMax, Softmax, TopK, Threshold, TemperatureSample, MeanPool, L2Normalize, Denormalize
 - For GGUF models: leave preprocessing and postprocessing as empty arrays (llama.cpp handles tokenization internally)
 - For SafeTensors Whisper models: leave preprocessing and postprocessing empty, set architecture to "whisper"
 - All referenced files (vocab_file, tokens_file, tokenizer_file, etc.) must be listed in the "files" array
@@ -541,7 +590,7 @@ Task-to-step mapping:
 - Speech recognition (Whisper): SafeTensors template with architecture "whisper" (no steps needed)
 - Text-to-speech: Phonemize (backend: MisakiDictionary) → model → TTSAudioEncode
 - Image classification: Reshape + Normalize → model → Softmax or ArgMax
-- Sentence embeddings: Tokenize → model → MeanPool
+- Sentence embeddings: Tokenize (add_special_tokens: true) → model → MeanPool → L2Normalize (when the model's modules.json has a Normalize module)
 - Text classification / NER: Tokenize → model → ArgMax
 - Text generation (GGUF): Gguf template, no steps
 

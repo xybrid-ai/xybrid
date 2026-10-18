@@ -262,8 +262,11 @@ pub use pipeline::{
 pub use result::{
     ExecutionProvenance, InferenceMetrics, InferenceResult, OutputType, StageLatency,
 };
+// Choice scoring: the request a caller sends to a decision model and the
+// scores it returns.
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
+pub use xybrid_core::ir::{Choice, ChoiceRequest, ChoiceScore, ChoiceScores};
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)
 pub use streaming::{FfiPartialResult, FfiStreamState, FfiStreamStats, FfiStreamingConfig};
 pub use telemetry::{

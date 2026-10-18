@@ -774,6 +774,61 @@ as `defaultGenerationConfig()` / `DefaultGenerationConfig()`. These reads use
 load-time metadata snapshots, so they do not wait behind an in-flight
 inference's model write lock.
 
+### Choice scoring (Rust)
+
+A `ChoiceScorer` model (see [`MODEL_METADATA.md`](MODEL_METADATA.md#choicescorer))
+scores a closed list of candidates against one context instead of generating
+output. Build the input with `Envelope::choice_request` and run it through
+`run`, `run_with_options` or `run_async`; the scores come back in
+`InferenceResult::choice_scores()`.
+
+```rust
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::{Choice, ModelLoader};
+
+let model = ModelLoader::from_directory("models/cua-s1-forms")?.load()?;
+model.warmup()?; // loads the scorer and checks the model against its spec
+
+let request = Envelope::choice_request(
+    Envelope::new(EnvelopeKind::Text("FORM Intake\nELEMENT Edit \"Phone\" value=\"\"".into())),
+    vec![
+        Choice::new("tel", "fill Tel: (503) 555-0142"),
+        Choice::new("name", "fill Name: Jane Doe"),
+    ],
+);
+let result = model.run(&request, None)?;
+let scores = result.choice_scores().expect("a scorer returns choice scores");
+let best = &scores.entries[scores.best().expect("at least two candidates")];
+println!("{} {:.3}", best.id, best.score);
+```
+
+- `is_choice_scorer()` tells a scorer apart, and `fixed_choices()` lists the
+  candidates it appends after the caller's; their ids are reserved.
+- `ChoiceScores.entries` holds one `ChoiceScore { id, logit, score, fixed }`
+  per candidate, the caller's choices first, then the fixed ones. `best()` is
+  the index of the highest score and `margin()` its lead over the runner-up.
+  Scores rank the offered candidates against each other; they are not
+  calibrated probabilities.
+- Every other entry point (streaming, `*_with_context`, pipelines) refuses a
+  scorer, every other model refuses a choice request, and a scorer refuses any
+  other input, all before any backend or cloud call; the `run*` methods report
+  `SdkError::UnsupportedModelCapability`. Choice requests never go to the
+  cloud.
+- An invalid request (an empty context, fewer than two or more than
+  `max_choices` candidates, or an empty, repeated or reserved id) fails with
+  `SdkError::InferenceError`. Errors name positions and counts, never ids,
+  texts or the context. When ONNX Runtime fails, its own message, which can
+  quote input bytes, is withheld, and so is the shape of a wrong-shaped output,
+  which a model can derive from the request. Scorer sessions and runs set ONNX
+  Runtime's own log level to fatal, so ONNX Runtime logs nothing below fatal
+  for them, such as that message or a warning that quotes what the request
+  produced. Its process-wide logger is not covered; by default it follows
+  `ORT_LOG`.
+- The language bindings refuse to load a choice scorer.
+- From the command line, `xybrid run --input-text <context> --choice ID=TEXT`
+  sends the same request and prints the scores; see the
+  [CLI reference](../content/docs/cli/reference/run.mdx#choice-scoring).
+
 ### Implementation Status
 
 | Method | Dart | Kotlin | Swift | C# |

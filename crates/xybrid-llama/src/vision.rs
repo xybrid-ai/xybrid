@@ -6,11 +6,12 @@
 
 use std::ffi::CStr;
 use std::ptr;
+use std::sync::Arc;
 
 use crate::context::LlamaContext;
 use crate::error::{LlamaError, LlamaResult};
 use crate::ffi;
-use crate::model::LlamaModel;
+use crate::model::{LlamaModel, ModelHandle};
 
 const MTMD_INPUT_CHUNK_TYPE_TEXT: i32 = 0;
 const MTMD_INPUT_CHUNK_TYPE_IMAGE: i32 = 1;
@@ -19,18 +20,24 @@ const MTMD_INPUT_CHUNK_TYPE_AUDIO: i32 = 2;
 /// Opaque handle to an mtmd multimodal projector context.
 ///
 /// The context owns projector-side state that references the loaded llama
-/// model, so callers must drop it before dropping the text model.
+/// model, so it shares that model's native handle: the model stays loaded
+/// until the projector is dropped too.
 pub struct MtmdContext {
     ptr: *mut ffi::MtmdContextRaw,
+    /// The text model the projector reads; `None` only for
+    /// [`Self::test_stub`]. Drops after [`Drop::drop`] frees the projector.
+    model: Option<Arc<ModelHandle>>,
 }
 
 impl MtmdContext {
-    /// Test-only null handle for wrapper-state tests that never cross FFI.
+    /// Test-only null handle for wrapper-state tests. Native wrappers that
+    /// take a projector reject the null pointer.
     #[cfg(any(test, debug_assertions))]
     #[doc(hidden)]
     pub fn test_stub() -> Self {
         Self {
             ptr: ptr::null_mut(),
+            model: None,
         }
     }
 
@@ -61,7 +68,10 @@ impl MtmdContext {
                 "failed to initialize mtmd context from {path}"
             )));
         }
-        Ok(Self { ptr })
+        Ok(Self {
+            ptr,
+            model: Some(Arc::clone(model.handle())),
+        })
     }
 
     #[inline]
@@ -73,14 +83,47 @@ impl MtmdContext {
 impl Drop for MtmdContext {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
-            // SAFETY: ptr came from mtmd_init_from_file and Drop runs once.
+            // SAFETY: ptr came from mtmd_init_from_file and Drop runs once;
+            // `self.model` drops after it, so the model outlives the projector.
             unsafe { ffi::mtmd_free(self.ptr) };
             self.ptr = ptr::null_mut();
         }
     }
 }
 
+// SAFETY: like `LlamaContext`, the projector may move between threads as
+// long as one thread uses it at a time. It is not `Sync`, so callers
+// serialize access; the shared model handle is `Send + Sync`.
 unsafe impl Send for MtmdContext {}
+
+/// Leading bytes of the images decoded without a projector: every format the
+/// vendored stb_image reads that starts with a signature (PNG, JPEG, GIF,
+/// BMP, PSD, HDR, PIC and binary PNM). TGA has none, so it is refused.
+///
+/// mtmd's buffer decoder treats bytes it recognizes as audio as audio and
+/// reads the projector's sample rate, so with no projector only bytes that
+/// start like one of these images reach it. None of these prefixes is an
+/// audio header mtmd recognizes, and unlike a list of audio headers the
+/// allow-list needs no update when mtmd learns an audio format that starts
+/// differently.
+const IMAGE_SIGNATURES: [&[u8]; 10] = [
+    b"\x89PNG",
+    b"\xFF\xD8\xFF",
+    b"GIF8",
+    b"BM",
+    b"8BPS",
+    b"#?RADIANCE\n",
+    b"#?RGBE\n",
+    b"\x53\x80\xF6\x34",
+    b"P5",
+    b"P6",
+];
+
+fn starts_like_an_image(bytes: &[u8]) -> bool {
+    IMAGE_SIGNATURES
+        .iter()
+        .any(|signature| bytes.starts_with(signature))
+}
 
 /// Opaque handle to an mtmd decoded bitmap.
 pub struct MtmdBitmap {
@@ -95,8 +138,10 @@ impl MtmdBitmap {
 
     /// Decode encoded image bytes without an mtmd context.
     ///
-    /// Valid only for image bytes; audio inputs need a context so mtmd can
-    /// read the model's expected sample rate.
+    /// Accepts the image formats that start with a signature: PNG, JPEG,
+    /// GIF, BMP, PSD, HDR, PIC and binary PNM. Anything else, TGA and audio
+    /// included, fails with [`LlamaError::InvalidInput`]: mtmd decodes audio
+    /// through the projector, which this path does not have.
     pub fn from_encoded_image_bytes(bytes: &[u8]) -> LlamaResult<Self> {
         Self::from_encoded_bytes_with_context(ptr::null_mut(), bytes)
     }
@@ -110,9 +155,16 @@ impl MtmdBitmap {
                 "encoded image bytes must not be empty".to_string(),
             ));
         }
+        if ctx.is_null() && !starts_like_an_image(bytes) {
+            return Err(LlamaError::InvalidInput(
+                "without an mtmd projector only image bytes with a known signature can be decoded"
+                    .to_string(),
+            ));
+        }
 
         // SAFETY: bytes pointer is valid for bytes.len(); ctx is either a
-        // live mtmd context or null for image-only decode.
+        // live mtmd context, or null with bytes that start like an image,
+        // which mtmd decodes without reading the context.
         let ptr = unsafe { ffi::mtmd_bitmap_init_from_buf(ctx, bytes.as_ptr(), bytes.len()) };
         if ptr.is_null() {
             return Err(LlamaError::InvalidInput(
@@ -426,6 +478,14 @@ pub fn mtmd_helper_eval_chunks(
     n_batch: usize,
     logits_last: bool,
 ) -> LlamaResult<i32> {
+    if let Some(model) = &ctx.model {
+        if !Arc::ptr_eq(model, lctx.model_handle()) {
+            return Err(LlamaError::InvalidInput(
+                "the mtmd projector and the llama context were created from different models"
+                    .to_string(),
+            ));
+        }
+    }
     let mut new_n_past = n_past;
     // SAFETY: handles are live; new_n_past is writable for the call.
     let result = unsafe {
@@ -451,6 +511,118 @@ pub fn mtmd_helper_eval_chunks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A projector stub tied to `model`, with no native handle.
+    fn projector_for(model: &LlamaModel) -> MtmdContext {
+        MtmdContext {
+            ptr: ptr::null_mut(),
+            model: Some(Arc::clone(model.handle())),
+        }
+    }
+
+    #[test]
+    fn a_projector_keeps_its_model_loaded_until_both_are_dropped() {
+        let model = LlamaModel::test_stub();
+        let handle = Arc::downgrade(model.handle());
+        let projector = projector_for(&model);
+
+        drop(model);
+        assert!(
+            handle.upgrade().is_some(),
+            "the projector must keep the model"
+        );
+
+        drop(projector);
+        assert!(handle.upgrade().is_none(), "the last owner frees the model");
+    }
+
+    /// The model check runs before the native call. The control shows the
+    /// counter does see that call when the models match.
+    #[test]
+    fn eval_refuses_a_context_from_another_model() {
+        use crate::ffi::native_calls;
+
+        let model = LlamaModel::test_stub();
+        let other = LlamaModel::test_stub();
+        let projector = projector_for(&model);
+        let chunks = MtmdInputChunks {
+            ptr: ptr::null_mut(),
+        };
+
+        let foreign = LlamaContext::test_stub(&other);
+        match mtmd_helper_eval_chunks(&projector, &foreign, &chunks, 0, 0, 512, true) {
+            Err(LlamaError::InvalidInput(message)) => {
+                assert!(message.contains("different models"), "{message}");
+            }
+            result => panic!("expected InvalidInput, got {result:?}"),
+        }
+        assert_eq!(native_calls(), 0, "a native call ran before the check");
+
+        // Control: the native wrapper rejects the stubs' null handles.
+        let own = LlamaContext::test_stub(&model);
+        assert!(mtmd_helper_eval_chunks(&projector, &own, &chunks, 0, 0, 512, true).is_err());
+        assert_eq!(native_calls(), 1);
+    }
+
+    /// A 1x1 RGB PNG (one green pixel).
+    const ONE_PIXEL_PNG: [u8; 69] = [
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90,
+        0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0xf8,
+        0xcf, 0xc0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0xf7, 0x03, 0x41, 0x43, 0x00, 0x00, 0x00,
+        0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    /// Headers mtmd's buffer decoder treats as audio (WAV, MP3 with an ID3
+    /// tag, a bare MP3 frame, FLAC). Audio decoding reads the projector's
+    /// sample rate, which was a null read with no projector.
+    const AUDIO_HEADERS: [&[u8]; 4] = [
+        b"RIFF\0\0\0\0WAVE",
+        b"ID3\x04\0\0\0\0\0\0\0\0",
+        b"\xFF\xFB\x90\x00\0\0\0\0\0\0\0\0",
+        b"fLaC\0\0\0\x22\0\0\0\0",
+    ];
+
+    #[test]
+    fn decoding_without_a_projector_refuses_audio_bytes() {
+        let stub = MtmdContext::test_stub();
+        for header in AUDIO_HEADERS {
+            assert!(
+                matches!(
+                    MtmdBitmap::from_encoded_image_bytes(header),
+                    Err(LlamaError::InvalidInput(_))
+                ),
+                "{header:?}"
+            );
+            assert!(
+                matches!(
+                    MtmdBitmap::from_encoded_bytes(&stub, header),
+                    Err(LlamaError::InvalidInput(_))
+                ),
+                "{header:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn decoding_without_a_projector_still_reads_images() {
+        let png = MtmdBitmap::from_encoded_image_bytes(&ONE_PIXEL_PNG).expect("decode the PNG");
+        assert_eq!((png.width(), png.height()), (1, 1));
+        let pnm = MtmdBitmap::from_encoded_image_bytes(b"P6\n1 1\n255\n\xff\0\0")
+            .expect("decode the PNM");
+        assert_eq!((pnm.width(), pnm.height()), (1, 1));
+    }
+
+    /// TGA has no signature to tell it from audio, so it needs a projector.
+    #[test]
+    fn decoding_without_a_projector_refuses_tga() {
+        let mut tga = vec![0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 24, 0];
+        tga.extend_from_slice(&[0, 0, 255]);
+        assert!(matches!(
+            MtmdBitmap::from_encoded_image_bytes(&tga),
+            Err(LlamaError::InvalidInput(_))
+        ));
+    }
 
     /// Length validation runs before any FFI call, so a wrong-sized buffer is
     /// rejected with a null (test-stub) context without crossing the boundary.

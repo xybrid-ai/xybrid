@@ -118,6 +118,31 @@ pub(crate) fn load_speculative_model(model_id: &str) -> anyhow::Result<XybridMod
     Ok(model)
 }
 
+/// Why `--speculative-cloud` refuses a choice scorer, as the `mode` of
+/// [`refuse_choice_scorer`].
+pub(crate) const SPECULATIVE_CLOUD_STREAMS: &str = "--speculative-cloud streams a text answer";
+
+/// Refuse a choice scorer in a mode that cannot run one; `mode` says why.
+///
+/// A scorer answers only a batch run with a choice request, which
+/// `xybrid run --choice` sends. Without this a scorer would load and warm up,
+/// then fail on its first input.
+pub(crate) fn refuse_choice_scorer(model: &XybridModel, mode: &str) -> anyhow::Result<()> {
+    if !model.is_choice_scorer() {
+        return Ok(());
+    }
+    Err(choice_scorer_refusal(model.model_id(), mode))
+}
+
+/// The error [`refuse_choice_scorer`] returns, for a caller that holds the
+/// scorer's metadata rather than a loaded model.
+pub(crate) fn choice_scorer_refusal(model_id: &str, mode: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "'{model_id}' is a choice scorer; {mode}. Score candidates with \
+         `xybrid run --input-text <context> --choice ID=TEXT`"
+    )
+}
+
 /// Save raw PCM audio bytes as a WAV file with proper headers.
 ///
 /// # Arguments
@@ -171,7 +196,69 @@ pub fn save_wav_file(
 
 #[cfg(test)]
 mod tests {
-    use super::thinking_budget_exhausted;
+    use super::{refuse_choice_scorer, thinking_budget_exhausted};
+    use xybrid_sdk::{ModelLoader, XybridModel};
+
+    /// A model whose directory holds only its metadata; loading one opens no
+    /// weights. The directory must outlive the model.
+    fn metadata_only(id: &str, template: serde_json::Value) -> (tempfile::TempDir, XybridModel) {
+        let dir = tempfile::tempdir().unwrap();
+        let metadata = serde_json::json!({
+            "model_id": id,
+            "version": "1.0",
+            "execution_template": template,
+            "files": [],
+        });
+        std::fs::write(dir.path().join("model_metadata.json"), metadata.to_string()).unwrap();
+        let model = ModelLoader::from_directory(dir.path())
+            .unwrap()
+            .load()
+            .unwrap();
+        (dir, model)
+    }
+
+    #[test]
+    fn refuse_choice_scorer_refuses_only_scorers() {
+        let field = |ids: &str, mask: &str| {
+            serde_json::json!({
+                "offset": 1, "max_len": 8, "overflow": "Truncate",
+                "ids_input": ids, "mask_input": mask,
+            })
+        };
+        let (_scorer_dir, scorer) = metadata_only(
+            "forms",
+            serde_json::json!({
+                "type": "ChoiceScorer",
+                "scorer": {
+                    "type": "OnnxByteOptionScorer",
+                    "model_file": "forms.onnx",
+                    "context": field("context_ids", "context_mask"),
+                    "choice": field("option_ids", "option_token_mask"),
+                    "choice_mask_input": "option_mask",
+                    "logits_output": "logits",
+                    "max_choices": 4,
+                    "fixed_choices": [{ "id": "skip", "text": "skip" }],
+                },
+            }),
+        );
+        let message = refuse_choice_scorer(&scorer, "the REPL runs text turns")
+            .expect_err("a scorer is refused")
+            .to_string();
+        assert!(
+            message.starts_with("'forms' is a choice scorer; the REPL runs text turns."),
+            "{message}"
+        );
+        assert!(
+            message.contains("`xybrid run --input-text <context> --choice ID=TEXT`"),
+            "{message}"
+        );
+
+        let (_chat_dir, chat) = metadata_only(
+            "chat",
+            serde_json::json!({ "type": "Gguf", "model_file": "model.gguf" }),
+        );
+        refuse_choice_scorer(&chat, "the REPL runs text turns").expect("other models pass");
+    }
 
     #[test]
     fn thinking_budget_exhausted_requires_all_three_signals() {

@@ -34,6 +34,7 @@ use commands::{CacheCommand, ModelsCommand, TelemetryCommand};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use xybrid_core::ir::Choice;
 use xybrid_core::target::Platform;
 use xybrid_sdk::SdkError;
 
@@ -192,11 +193,33 @@ enum Commands {
         #[arg(long = "input-image", value_name = "FILE")]
         input_images: Vec<PathBuf>,
 
+        /// A candidate for a choice-scoring model to score against
+        /// --input-text (repeatable). The id names the candidate in the
+        /// result; the model reads the text. The model's own fixed choices
+        /// are scored after these.
+        #[arg(
+            long = "choice",
+            value_name = "ID=TEXT",
+            value_parser = parse_choice,
+            requires = "input_text",
+            conflicts_with_all = [
+                "config",
+                "pipeline",
+                "input_audio",
+                "input_images",
+                "voice",
+                "max_tokens",
+                "speculative_cloud",
+            ]
+        )]
+        choices: Vec<Choice>,
+
         /// Voice ID for TTS models (e.g., "af_bella", "am_adam")
         #[arg(long, value_name = "VOICE")]
         voice: Option<String>,
 
-        /// Output file path for saving results (audio: .wav, text: .txt)
+        /// Output file path for saving results (audio: .wav, text: .txt,
+        /// choice scores: .json)
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
 
@@ -358,6 +381,17 @@ fn parse_max_tokens(s: &str) -> Result<usize, String> {
         Ok(0) => Err("must be at least 1".to_string()),
         Ok(n) => Ok(n),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+/// `--choice ID=TEXT`: split at the first `=`, so the text may hold more of
+/// them. The text may be empty and nothing is trimmed. Repeated and reserved
+/// ids are left to the scorer's own check, which knows the fixed choices.
+fn parse_choice(s: &str) -> Result<Choice, String> {
+    match s.split_once('=') {
+        None => Err("expected ID=TEXT".to_string()),
+        Some(("", _)) => Err("the id before '=' is empty".to_string()),
+        Some((id, text)) => Ok(Choice::new(id, text)),
     }
 }
 
@@ -566,6 +600,7 @@ fn run_command(cli: Cli) -> Result<()> {
             input_audio,
             input_text,
             input_images,
+            choices,
             voice,
             output,
             target,
@@ -585,6 +620,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     input_audio.as_ref(),
                     input_text.as_deref(),
                     &input_images,
+                    &choices,
                     voice.as_deref(),
                     output.as_ref(),
                     dry_run,
@@ -621,10 +657,12 @@ fn run_command(cli: Cli) -> Result<()> {
                     input_audio.as_ref(),
                     input_text.as_deref(),
                     &input_images,
+                    &choices,
                     voice.as_deref(),
                     output.as_ref(),
                     target.as_deref(),
                     dry_run,
+                    speculative_cloud,
                     trace,
                     show_reasoning,
                     max_tokens,
@@ -638,6 +676,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     input_audio.as_ref(),
                     input_text.as_deref(),
                     &input_images,
+                    &choices,
                     voice.as_deref(),
                     output.as_ref(),
                     dry_run,
@@ -654,6 +693,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     input_audio.as_ref(),
                     input_text.as_deref(),
                     &input_images,
+                    &choices,
                     voice.as_deref(),
                     output.as_ref(),
                     dry_run,
@@ -670,6 +710,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     input_audio.as_ref(),
                     input_text.as_deref(),
                     &input_images,
+                    &choices,
                     voice.as_deref(),
                     output.as_ref(),
                     dry_run,
@@ -867,6 +908,106 @@ mod tests {
             panic!("expected repl command");
         };
         assert_eq!(max_tokens, Some(64));
+    }
+
+    #[test]
+    fn run_collects_repeated_choices_in_order() {
+        let cli = Cli::try_parse_from([
+            "xybrid",
+            "run",
+            "--directory",
+            "scorer",
+            "--input-text",
+            "FORM Intake",
+            "--choice",
+            "tel=fill Tel: (503) 555-0142",
+            "--choice",
+            "name=fill Name: Jane Doe",
+        ])
+        .unwrap_or_else(|err| panic!("run should accept --choice: {err}"));
+        let Commands::Run { choices, .. } = cli.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(
+            choices,
+            [
+                Choice::new("tel", "fill Tel: (503) 555-0142"),
+                Choice::new("name", "fill Name: Jane Doe"),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_choice_splits_at_the_first_equals_sign() {
+        assert_eq!(parse_choice("a=b"), Ok(Choice::new("a", "b")));
+        assert_eq!(parse_choice("a=b=c"), Ok(Choice::new("a", "b=c")));
+        assert_eq!(parse_choice("a="), Ok(Choice::new("a", "")));
+        assert_eq!(parse_choice(" a = b "), Ok(Choice::new(" a ", " b ")));
+        assert_eq!(parse_choice("=b"), Err("the id before '=' is empty".into()));
+        assert_eq!(parse_choice("ab"), Err("expected ID=TEXT".into()));
+    }
+
+    #[test]
+    fn malformed_choices_fail_at_parse_time() {
+        for (value, expected) in [
+            ("ab", "expected ID=TEXT"),
+            ("=b", "the id before '=' is empty"),
+        ] {
+            let result = Cli::try_parse_from([
+                "xybrid",
+                "run",
+                "--model",
+                "m",
+                "--input-text",
+                "ctx",
+                "--choice",
+                value,
+            ]);
+            let Err(err) = result else {
+                panic!("--choice {value} must be rejected before any model loads");
+            };
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+            assert!(err.to_string().contains(expected), "{err}");
+        }
+    }
+
+    #[test]
+    fn choice_needs_input_text() {
+        let result = Cli::try_parse_from(["xybrid", "run", "--model", "m", "--choice", "a=b"]);
+        let Err(err) = result else {
+            panic!("--choice without --input-text must be rejected");
+        };
+        assert_eq!(
+            err.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument,
+            "{err}"
+        );
+        assert!(err.to_string().contains("--input-text"), "{err}");
+    }
+
+    #[test]
+    fn choice_conflicts_with_flags_a_scorer_cannot_use() {
+        let cases: [&[&str]; 7] = [
+            &["--config", "pipeline.yml"],
+            &["--pipeline", "hiiipe"],
+            &["--model", "m", "--input-audio", "speech.wav"],
+            &["--model", "m", "--input-image", "page.png"],
+            &["--model", "m", "--voice", "af_bella"],
+            &["--model", "m", "--max-tokens", "8"],
+            &["--model", "m", "--speculative-cloud"],
+        ];
+        for extra in cases {
+            let mut args = vec!["xybrid", "run", "--input-text", "ctx", "--choice", "a=b"];
+            args.extend_from_slice(extra);
+            let Err(err) = Cli::try_parse_from(&args) else {
+                panic!("{extra:?} must conflict with --choice");
+            };
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::ArgumentConflict,
+                "{extra:?}: {err}"
+            );
+        }
     }
 
     #[test]

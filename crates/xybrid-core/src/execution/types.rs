@@ -90,6 +90,9 @@ impl PreprocessedData {
             EnvelopeKind::MultiPart(_) => Err(AdapterError::InvalidInput(
                 "MultiPart envelopes require multimodal preprocessing".to_string(),
             )),
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                Err(crate::execution::choice::choice_kind_not_runtime_input())
+            }
         }
     }
 
@@ -298,6 +301,9 @@ impl RawOutputs {
             EnvelopeKind::MultiPart(_) => Err(AdapterError::InvalidInput(
                 "MultiPart envelopes cannot be converted directly to raw outputs".to_string(),
             )),
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                Err(crate::execution::choice::choice_kind_not_runtime_input())
+            }
         }
     }
 }

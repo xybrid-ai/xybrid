@@ -1,4 +1,5 @@
-name: Test choice conformance
+# Purpose: Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI; daily cold rebuild.
+name: "CI: Choice conformance"
 
 # Choice-scoring conformance inputs (integration-tests/fixtures/choice). The
 # model artifacts are not published anywhere: tools/conformance/prepare.sh
@@ -14,16 +15,23 @@ name: Test choice conformance
 #
 # The forms job then runs xybrid's ONNX choice-scoring tests against the staged
 # model (G0 encoding, fake-model contract, G1 numerics within the frozen
-# provenance.json bounds) with XYBRID_REQUIRE_MODELS set, so a missing model or
-# ONNX Runtime fails instead of skipping. The label-token (llama.cpp) runtime
-# tests join that job with the label scorer.
+# provenance.json bounds), the executor's scorer tests and the Rust SDK suite
+# on the fake scorers, the goldens again through ModelLoader and
+# XybridModel::run, and `xybrid run --choice` on the fake scorers and FORMS
+# against the SDK, with XYBRID_REQUIRE_MODELS set, so a missing model or ONNX
+# Runtime fails instead of skipping. The label-token (llama.cpp) runtime tests
+# join that job with the label scorer.
 on:
   push:
     branches: [master]
     paths:
       - 'integration-tests/fixtures/choice/**'
       - 'integration-tests/fixtures/models/models.json'
+      - 'integration-tests/fixtures/models/cua-s1-forms/**'
       - 'integration-tests/download.sh'
+      - 'integration-tests/Cargo.toml'
+      - 'integration-tests/src/**'
+      - 'integration-tests/tests/choice_forms_conformance.rs'
       - 'tools/conformance/**'
       - 'tools/scripts/check_choice_provenance.py'
       - 'tools/scripts/tests/test_check_choice_provenance.py'
@@ -31,6 +39,8 @@ on:
       - 'vendor/llama-cpp'
       - 'crates/llama-cpp-sys/**'
       - 'crates/xybrid-core/**'
+      - 'crates/xybrid-sdk/**'
+      - 'crates/xybrid-cli/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.cargo/**'
@@ -41,7 +51,11 @@ on:
     paths:
       - 'integration-tests/fixtures/choice/**'
       - 'integration-tests/fixtures/models/models.json'
+      - 'integration-tests/fixtures/models/cua-s1-forms/**'
       - 'integration-tests/download.sh'
+      - 'integration-tests/Cargo.toml'
+      - 'integration-tests/src/**'
+      - 'integration-tests/tests/choice_forms_conformance.rs'
       - 'tools/conformance/**'
       - 'tools/scripts/check_choice_provenance.py'
       - 'tools/scripts/tests/test_check_choice_provenance.py'
@@ -49,6 +63,8 @@ on:
       - 'vendor/llama-cpp'
       - 'crates/llama-cpp-sys/**'
       - 'crates/xybrid-core/**'
+      - 'crates/xybrid-sdk/**'
+      - 'crates/xybrid-cli/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.cargo/**'
@@ -60,7 +76,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: test-choice-conformance-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all
@@ -97,11 +113,13 @@ jobs:
           echo "digest=$(sha256sum "$RUNNER_TEMP/recipe" | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       # Skipped on the nightly schedule, so that run always rebuilds from cold.
+      # Only the export: the directory also holds the committed
+      # model_metadata.json, which must come from the checkout.
       - name: Cache cua-s1-forms
         if: github.event_name != 'schedule'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: integration-tests/fixtures/models/cua-s1-forms
+          path: integration-tests/fixtures/models/cua-s1-forms/cua-s1-forms.onnx
           key: choice-cua-s1-forms-${{ steps.recipe.outputs.digest }}-${{ hashFiles('tools/conformance/prepare.sh', 'tools/conformance/export_forms_onnx.py', 'tools/conformance/common.py', 'tools/conformance/requirements-forms.txt', 'integration-tests/fixtures/choice/cases/forms.json', '.github/workflows/test-choice-conformance.yml') }}
 
       # A miss, or a restored artifact that fails its digest, needs a rebuild.
@@ -163,8 +181,9 @@ jobs:
           # Enumerate and assert every required test: cargo test exits 0 on an
           # empty set, so a renamed or compiled-out test would pass silently.
           # `choice::` selects ir::choice, execution::template::choice and
-          # execution::choice together.
-          LIST="$(cargo test -p xybrid-core --features ort-download --lib choice:: -- --list)"
+          # execution::choice together; `scorer_execution_` the executor's
+          # scorer tests.
+          LIST="$(cargo test -p xybrid-core --features ort-download --lib -- choice:: execution::executor::tests::scorer_execution_ --list)"
           printf '%s\n' "$LIST"
           for test in \
             execution::choice::tests::candidates_count_after_the_fixed_choices_are_appended \
@@ -191,6 +210,14 @@ jobs:
             execution::choice::tests::the_committed_forms_spec_is_valid \
             execution::template::choice::tests::the_committed_forms_spec_deserializes \
             execution::template::choice::tests::unknown_fields_and_types_are_rejected \
+            execution::executor::tests::scorer_execution_binds_a_replaced_file_or_a_new_spec_again \
+            execution::executor::tests::scorer_execution_fails_without_its_model_file \
+            execution::executor::tests::scorer_execution_failure_writes_nothing_to_stderr \
+            execution::executor::tests::scorer_execution_keeps_the_bound_session \
+            execution::executor::tests::scorer_execution_never_shares_a_session_between_models \
+            execution::executor::tests::scorer_execution_warnings_write_nothing_to_stderr \
+            execution::executor::tests::scorer_execution_withholds_the_output_shape \
+            execution::executor::tests::scorer_execution_withholds_the_runtime_message \
             ir::choice::tests::best_breaks_rounded_score_ties_by_logit \
             ir::choice::tests::best_prefers_the_first_of_equal_scores \
             ir::choice::tests::debug_never_prints_ids_or_text \
@@ -199,7 +226,72 @@ jobs:
             printf '%s\n' "$LIST" | grep -qE "^${test}: test$" \
               || { echo "missing required test: ${test}" >&2; exit 1; }
           done
-          cargo test -p xybrid-core --features ort-download --lib choice:: -- --nocapture
+          cargo test -p xybrid-core --features ort-download --lib -- choice:: execution::executor::tests::scorer_execution_ --nocapture
+
+      # The same scorer through the public Rust SDK: the fake-scorer suite
+      # (batch runs, warmup, the refusal matrix and the privacy canaries,
+      # including a run ONNX Runtime fails) and the FORMS goldens through
+      # ModelLoader and XybridModel::run.
+      - name: FORMS through the Rust SDK
+        env:
+          ORT_DYLIB_PATH: ${{ runner.temp }}/ort/libonnxruntime.so
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          SDK="$(cargo test -p xybrid-sdk --test choice_scoring -- --list)"
+          E2E="$(cargo test -p integration-tests --test choice_forms_conformance -- --list)"
+          printf '%s\n%s\n' "$SDK" "$E2E"
+          for test in \
+            a_scorer_loads_and_describes_itself \
+            an_invalid_scorer_spec_fails_at_load \
+            caller_content_reaches_only_the_result \
+            choice_kinds_in_history_are_refused \
+            choice_scores_results_are_typed \
+            invalid_requests_are_inference_errors_without_caller_content \
+            other_models_refuse_choice_kinds_on_every_entry_point \
+            scorers_keep_their_own_models \
+            scorers_refuse_every_input_but_a_request \
+            scorers_refuse_every_other_entry_point \
+            scorers_warm_up_on_a_request_they_accept \
+            valid_requests_are_scored_through_every_batch_entry; do
+            printf '%s\n' "$SDK" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          for test in \
+            forms_cases_match_the_reference_through_the_sdk \
+            the_forms_metadata_carries_the_pinned_spec; do
+            printf '%s\n' "$E2E" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          cargo test -p xybrid-sdk --test choice_scoring -- --nocapture
+          cargo test -p integration-tests --test choice_forms_conformance -- --nocapture
+
+      # `xybrid run --choice` as a user runs it: the built binary on the fake
+      # scorers and on FORMS (the plan's pinned command), each result compared
+      # exactly with the same request through the SDK, plus the refusals that
+      # must fire before anything loads.
+      - name: FORMS through the CLI
+        env:
+          ORT_DYLIB_PATH: ${{ runner.temp }}/ort/libonnxruntime.so
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          CLI="$(cargo test -p xybrid-cli --test choice_cli_test -- --list)"
+          printf '%s\n' "$CLI"
+          for test in \
+            a_cached_scorer_runs_by_model_id \
+            a_scorer_without_choices_scores_its_fixed_choices \
+            choice_flags_fail_before_anything_loads \
+            dry_runs_check_choice_requests_like_runs \
+            forms_scores_the_pinned_command_like_the_sdk \
+            identical_choices_put_best_on_the_first \
+            other_models_refuse_choices_before_opening_their_files \
+            scorers_print_and_save_scores_in_offered_order \
+            scorers_refuse_flags_they_cannot_use \
+            scorers_refuse_invalid_requests_before_running \
+            speculative_cloud_refuses_a_cached_scorer; do
+            printf '%s\n' "$CLI" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          cargo test -p xybrid-cli --test choice_cli_test -- --nocapture
 
   label-token:
     name: Qwen3.5-0.8B GGUF (regenerate or verify)

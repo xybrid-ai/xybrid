@@ -15,6 +15,25 @@ use llama_cpp_sys::bindings as sys;
 
 use crate::error::LlamaError;
 
+// Counts this thread's calls into the wrappers that the generation and mtmd
+// evaluation entry points use, so tests can prove their input checks run
+// before any native call.
+#[cfg(test)]
+thread_local! {
+    static NATIVE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn record_native_call() {
+    NATIVE_CALLS.with(|count| count.set(count.get() + 1));
+}
+
+/// This thread's calls into the counted wrappers so far.
+#[cfg(test)]
+pub(crate) fn native_calls() -> usize {
+    NATIVE_CALLS.with(std::cell::Cell::get)
+}
+
 #[cfg(feature = "vision")]
 pub(crate) type MtmdContextRaw = sys::mtmd_context;
 #[cfg(feature = "vision")]
@@ -63,21 +82,16 @@ pub(crate) unsafe fn free_model(ptr: *mut c_void) {
 /// # Safety
 ///
 /// `model` must be a live, non-null pointer returned by
-/// [`load_model_from_file`]. Returns null on failure.
+/// [`load_model_from_file`], and must stay live until the returned context
+/// is freed: the context keeps reading it. Returns null on failure.
 pub(crate) unsafe fn new_context_with_model(
     model: *mut c_void,
-    n_ctx: usize,
-    n_threads: usize,
-    n_batch: usize,
+    n_ctx: c_int,
+    n_threads: c_int,
+    n_batch: c_int,
     flash_attn: bool,
 ) -> *mut c_void {
-    sys::llama_new_context_with_model_c(
-        model,
-        n_ctx as c_int,
-        n_threads as c_int,
-        n_batch as c_int,
-        flash_attn,
-    )
+    sys::llama_new_context_with_model_c(model, n_ctx, n_threads, n_batch, flash_attn)
 }
 
 /// Free a context handle.
@@ -111,6 +125,25 @@ pub(crate) unsafe fn kv_cache_clear(ctx: *mut c_void) {
 pub(crate) unsafe fn kv_cache_seq_rm(ctx: *mut c_void, seq_id: i32, p_keep: usize) {
     let p_keep_c = p_keep.min(c_int::MAX as usize) as c_int;
     let _ = sys::llama_kv_cache_seq_rm_c(ctx, seq_id, p_keep_c);
+}
+
+/// Clear the whole memory of `ctx`: its KV cache and any recurrent state.
+///
+/// Returns `false`, clearing nothing, when the context has no memory:
+/// llama.cpp creates none for encoder-only and diffusion models, and decodes
+/// their batches with the encoder.
+///
+/// # Safety
+///
+/// `ctx` must be a live, non-null context pointer.
+pub(crate) unsafe fn clear_memory(ctx: *mut c_void) -> bool {
+    // The shim's seq_rm returns -1 when the context has no memory. Dropping
+    // sequence 0 first costs nothing: the full clear empties every sequence.
+    if sys::llama_kv_cache_seq_rm_c(ctx, 0, 0) < 0 {
+        return false;
+    }
+    sys::llama_kv_cache_clear_c(ctx);
+    true
 }
 
 /// Byte size of a state snapshot of `seq_id`. Zero on failure, including
@@ -159,6 +192,8 @@ pub(crate) unsafe fn tokenize_probe(
     add_special: bool,
     parse_special: bool,
 ) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     sys::llama_tokenize_c(
         model,
         text.as_ptr(),
@@ -185,6 +220,8 @@ pub(crate) unsafe fn tokenize_into(
     add_special: bool,
     parse_special: bool,
 ) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     sys::llama_tokenize_c(
         model,
         text.as_ptr(),
@@ -285,9 +322,11 @@ pub(crate) unsafe fn format_chat_with_model(
 ///
 /// # Safety
 ///
-/// `ctx` and `model` must be live, non-null pointers. `input_tokens`
-/// valid for `n_input` elements. `output_tokens` writable for `max_tokens`
-/// elements. `stop_seqs` and `stop_lens` either both null with
+/// `ctx` and `model` must each be live or null, and a live `ctx` must have
+/// been created from `model`. The native wrapper returns an error for a null
+/// handle before using either. `input_tokens` valid for `n_input` elements.
+/// `output_tokens` writable for `max_tokens` elements. `stop_seqs` and
+/// `stop_lens` either both null with
 /// `n_stop_seqs == 0`, or both valid. `grammar` / `grammar_root` are either
 /// null (unconstrained generation) or NUL-terminated C strings that outlive
 /// the call.
@@ -311,6 +350,8 @@ pub(crate) unsafe fn generate(
     stop_lens: *const c_int,
     n_stop_seqs: c_int,
 ) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     sys::llama_generate_c(
         ctx,
         model,
@@ -362,6 +403,8 @@ pub(crate) unsafe fn generate_streaming(
     user_data: *mut c_void,
     n_past_in: usize,
 ) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     sys::llama_generate_streaming_c(
         ctx,
         model,
@@ -391,9 +434,11 @@ pub(crate) unsafe fn generate_streaming(
 ///
 /// # Safety
 ///
-/// `ctx` and `model` must be live, non-null pointers. `output_tokens`
-/// writable for `max_tokens` elements. Stop arrays and callback/user_data
-/// follow the same contract as [`generate_streaming`].
+/// `ctx` and `model` must each be live or null, and a live `ctx` must have
+/// been created from `model`. The native wrapper returns an error for a null
+/// handle before using either. `output_tokens` writable for `max_tokens`
+/// elements. Stop arrays and callback/user_data follow the same contract as
+/// [`generate_streaming`].
 #[allow(clippy::too_many_arguments)]
 #[cfg(feature = "vision")]
 pub(crate) unsafe fn generate_from_current_logits(
@@ -416,6 +461,8 @@ pub(crate) unsafe fn generate_from_current_logits(
     user_data: *mut c_void,
     n_past: usize,
 ) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     sys::llama_generate_from_current_logits_c(
         ctx,
         model,
@@ -438,6 +485,127 @@ pub(crate) unsafe fn generate_from_current_logits(
     )
 }
 
+/// Decode `batch` on `ctx`. Returns llama.cpp's status: `0` on success.
+///
+/// # Safety
+///
+/// `ctx` must be a live context. Every token id in `batch` must be inside the
+/// context's vocabulary and every position inside its window, and the batch
+/// must not be longer than the context's native batch size (its
+/// `decode_limit`): llama.cpp aborts the process on a longer batch.
+pub(crate) unsafe fn decode(ctx: *mut c_void, batch: &mut TokenBatch) -> c_int {
+    // The view points into `batch`, which stays borrowed for the call;
+    // llama.cpp reads the arrays during the call and keeps no pointer to them.
+    let view = batch.view();
+    sys::llama_decode_c(ctx, &view)
+}
+
+/// The logits of the last decode's output rows, owned by `ctx`.
+///
+/// # Safety
+///
+/// `ctx` must be a live context. The pointer, when not null, holds one row of
+/// `n_vocab` floats per token the last decode flagged for output, and stays
+/// valid until the next decode or the context's destruction.
+pub(crate) unsafe fn logits(ctx: *mut c_void) -> *const f32 {
+    sys::llama_get_logits_c(ctx)
+}
+
+/// A batch of tokens from sequence `0`, in memory Rust owns.
+///
+/// [`TokenBatch::set`] fills it and [`decode`] hands llama.cpp a view of it.
+/// It does not use `llama_batch_init`, which writes through its allocations
+/// without checking them, so sizes and allocation stay on the Rust side.
+pub(crate) struct TokenBatch {
+    capacity: usize,
+    tokens: Vec<sys::llama_token>,
+    positions: Vec<sys::llama_pos>,
+    seq_counts: Vec<i32>,
+    seq_ids: Vec<sys::llama_seq_id>,
+    seq_id_ptrs: Vec<*mut sys::llama_seq_id>,
+    outputs: Vec<i8>,
+}
+
+impl TokenBatch {
+    /// An empty batch with room for `capacity` tokens.
+    ///
+    /// # Panics
+    ///
+    /// When `capacity` is zero or does not fit a C `int`: a caller sizes the
+    /// batch from the context's decode limit, which is positive and fits.
+    pub(crate) fn new(capacity: usize) -> Self {
+        assert!(
+            capacity > 0 && c_int::try_from(capacity).is_ok(),
+            "a batch holds between one token and c_int::MAX, not {capacity}"
+        );
+        Self {
+            capacity,
+            tokens: Vec::with_capacity(capacity),
+            positions: Vec::with_capacity(capacity),
+            seq_counts: Vec::with_capacity(capacity),
+            seq_ids: Vec::with_capacity(capacity),
+            seq_id_ptrs: Vec::with_capacity(capacity),
+            outputs: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// The most tokens [`TokenBatch::set`] accepts.
+    pub(crate) fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// Fill the batch with `tokens` at positions `first_pos..`, in sequence
+    /// `0`, flagging only the last token for output when `output_last`.
+    ///
+    /// # Panics
+    ///
+    /// When `tokens` is longer than the batch's capacity, or a position does
+    /// not fit llama.cpp's `i32`: both are bugs in the caller.
+    pub(crate) fn set(&mut self, tokens: &[i32], first_pos: usize, output_last: bool) {
+        assert!(
+            tokens.len() <= self.capacity,
+            "{} tokens do not fit a batch of {}",
+            tokens.len(),
+            self.capacity
+        );
+        let n = tokens.len();
+        self.tokens.clear();
+        self.tokens.extend_from_slice(tokens);
+        self.positions.clear();
+        self.positions.extend(
+            (first_pos..first_pos + n)
+                .map(|pos| sys::llama_pos::try_from(pos).expect("token positions fit an i32")),
+        );
+        self.seq_counts.clear();
+        self.seq_counts.resize(n, 1);
+        self.seq_ids.clear();
+        self.seq_ids.resize(n, 0);
+        self.outputs.clear();
+        self.outputs
+            .extend((0..n).map(|i| i8::from(output_last && i + 1 == n)));
+    }
+
+    /// The llama.cpp view of the batch: its length and pointers into these
+    /// arrays, valid until the batch is next changed or dropped.
+    pub(crate) fn view(&mut self) -> sys::llama_batch {
+        self.seq_id_ptrs.clear();
+        self.seq_id_ptrs.extend(
+            self.seq_ids
+                .iter_mut()
+                .map(|id| id as *mut sys::llama_seq_id),
+        );
+        sys::llama_batch {
+            n_tokens: c_int::try_from(self.tokens.len()).expect("the capacity fits a C int"),
+            token: self.tokens.as_mut_ptr(),
+            embd: std::ptr::null_mut(),
+            pos: self.positions.as_mut_ptr(),
+            n_seq_id: self.seq_counts.as_mut_ptr(),
+            seq_id: self.seq_id_ptrs.as_mut_ptr(),
+            logits: self.outputs.as_mut_ptr(),
+        }
+    }
+}
+
 /// # Safety: callable from any thread at any time.
 pub(crate) unsafe fn log_set_verbosity(level: i32) {
     sys::llama_log_set_verbosity_c(level as c_int);
@@ -453,7 +621,8 @@ pub(crate) unsafe fn log_get_verbosity() -> i32 {
 /// # Safety
 ///
 /// `path` must be a live C string. `model` must be a live llama model
-/// pointer. The returned handle must be freed with [`mtmd_free`].
+/// pointer that stays live until the returned handle is freed with
+/// [`mtmd_free`]: the projector keeps reading it.
 #[cfg(feature = "vision")]
 pub(crate) unsafe fn mtmd_init_from_file(
     path: &CString,
@@ -663,7 +832,9 @@ pub(crate) unsafe fn mtmd_tokenize(
     )
 }
 
-/// # Safety: all handles/pointers must be live for the call duration.
+/// # Safety: each handle/pointer must be live for the call duration or null,
+/// and live `ctx` and `lctx` must have been created from the same model. The
+/// native wrapper returns an error for a null handle before using any.
 #[allow(clippy::too_many_arguments)]
 #[cfg(feature = "vision")]
 pub(crate) unsafe fn mtmd_helper_eval_chunks(
@@ -676,6 +847,8 @@ pub(crate) unsafe fn mtmd_helper_eval_chunks(
     logits_last: bool,
     new_n_past: *mut i32,
 ) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     sys::mtmd_helper_eval_chunks_c(
         ctx,
         lctx,

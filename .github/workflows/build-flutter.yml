@@ -1,4 +1,5 @@
-name: Build Flutter
+# Purpose: Analyze and test the Dart wrapper, build the native libraries, and build a consumer app against the packaged layout.
+name: "SDK: Flutter"
 
 on:
   pull_request:
@@ -29,7 +30,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-flutter-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all

@@ -8,6 +8,7 @@ use std::ptr::NonNull;
 
 use xybrid_whisper_sys::bindings as sys;
 
+use crate::coreml;
 use crate::error::{WhisperError, WhisperResult};
 use crate::params::{Task, TranscribeParams, SAMPLE_RATE};
 use crate::segment::Segment;
@@ -35,24 +36,27 @@ fn default_context_params() -> sys::whisper_context_params {
     params
 }
 
-/// An owning handle to a whisper.cpp context.
+/// An owning handle to a whisper.cpp context and its inference state.
 ///
-/// Dropping frees the native context. Transcription takes `&mut self` because
-/// whisper.cpp documents `whisper_full` as *not thread safe for the same
-/// context* — the borrow checker enforces that for us without a lock.
+/// Dropping frees both. Transcription takes `&mut self` because whisper.cpp is
+/// *not thread safe for the same context*; the borrow checker enforces that.
 pub struct WhisperModel {
     ctx: NonNull<sys::whisper_context>,
+    /// `None` after a Core ML failure until a new state is created.
+    state: Option<NonNull<sys::whisper_state>>,
+    /// The model path, kept to recreate the state (and re-find its encoder).
+    path: String,
     multilingual: bool,
     last_detected_language: Option<String>,
+    /// Full-window `audio_ctx` when Core ML runs the encoder, else `None`.
+    coreml_audio_ctx: Option<u32>,
 }
 
-// SAFETY: a `whisper_context` owns only heap allocations reachable through the
-// pointer; nothing in it is bound to the creating thread (no TLS, no thread
-// handles). Moving the handle between threads is therefore sound. `Sync` is
-// deliberately NOT implemented: `whisper_full` mutates context-internal state,
-// and upstream documents it as unsafe to call concurrently on one context. The
-// `&mut self` receiver on [`WhisperModel::transcribe`] plus the absence of
-// `Sync` means shared concurrent use cannot be spelled.
+// SAFETY: the context and state own only heap memory with no thread affinity;
+// on iOS the state also holds an `MLModel`, which has none either, and the
+// bridge's per-thread data is not part of the handle. `Sync` is deliberately
+// not implemented: `whisper_full` is not safe to call concurrently on one
+// context, so `transcribe` takes `&mut self`.
 unsafe impl Send for WhisperModel {}
 
 impl WhisperModel {
@@ -77,18 +81,27 @@ impl WhisperModel {
         // SAFETY: `c_path` is a valid null-terminated string that outlives the
         // call, and `cparams` is a by-value POD struct. A null return is the
         // documented failure signal and is checked immediately below.
-        let raw = unsafe { sys::whisper_init_from_file_with_params(c_path.as_ptr(), cparams) };
-
+        let raw =
+            unsafe { sys::whisper_init_from_file_with_params_no_state(c_path.as_ptr(), cparams) };
         let ctx = NonNull::new(raw)
             .ok_or_else(|| WhisperError::LoadFailed(path.display().to_string()))?;
+
+        let Some((state, coreml_audio_ctx)) = new_state(ctx, path_str) else {
+            // SAFETY: `ctx` is live and owned here; nothing else references it.
+            unsafe { sys::whisper_free(ctx.as_ptr()) };
+            return Err(WhisperError::LoadFailed(path.display().to_string()));
+        };
 
         // SAFETY: `ctx` was just checked non-null and is a live context.
         let multilingual = unsafe { sys::whisper_is_multilingual(ctx.as_ptr()) } != 0;
 
         Ok(Self {
             ctx,
+            state: Some(state),
+            path: path_str.to_owned(),
             multilingual,
             last_detected_language: None,
+            coreml_audio_ctx,
         })
     }
 
@@ -124,7 +137,13 @@ impl WhisperModel {
     ///   language this model has no token for.
     /// - [`WhisperError::InvalidInput`] if the language string contains a null
     ///   byte.
+    /// - [`WhisperError::CoreMlAudioCtx`] if the encoder runs on Core ML and
+    ///   `params.audio_ctx` asks for less than the full window.
     /// - [`WhisperError::InferenceFailed`] if `whisper_full` returned non-zero.
+    /// - [`WhisperError::CoreMlEncoderFailed`] if the Core ML encoder failed on
+    ///   any window. The transcript is discarded and the state rebuilt.
+    /// - [`WhisperError::LoadFailed`] if a state lost to such a failure still
+    ///   can't be recreated; every later call tries again.
     /// - [`WhisperError::InvalidUtf8`] if a segment's bytes were not UTF-8.
     pub fn transcribe(
         &mut self,
@@ -140,6 +159,20 @@ impl WhisperModel {
                 samples: pcm.len(),
                 minimum: MIN_SAMPLES,
             });
+        }
+
+        // Recreates the state if a Core ML failure left none.
+        let state = self.ensure_state()?;
+
+        // A Core ML encoder only takes the full window; refuse anything shorter.
+        if let Some(supported) = self.coreml_audio_ctx {
+            let requested = params.normalized_audio_ctx();
+            if requested != supported {
+                return Err(WhisperError::CoreMlAudioCtx {
+                    requested,
+                    supported,
+                });
+            }
         }
 
         // Keep the CString alive for the whole call: `whisper_full_params`
@@ -180,35 +213,74 @@ impl WhisperModel {
         wparams.temperature_inc = 0.0;
         wparams.language = language.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
 
-        // SAFETY: `self.ctx` is live for the duration; `pcm` is a valid slice
-        // whose length is passed alongside it; `wparams` is a by-value POD
-        // whose `language` pointer is kept alive by `language` above. Exclusive
-        // access is guaranteed by the `&mut self` receiver, which is what makes
-        // this sound given upstream's "not thread safe for same context".
+        // The encoder runs on this thread, so the counter's growth is this call's.
+        let failures_before = coreml::failure_count();
+        // SAFETY: `self.ctx` and its `state` are live; `pcm`'s length is passed
+        // with it; `language` outlives `wparams`; `&mut self` gives the exclusive
+        // access whisper.cpp requires per context.
         let code = unsafe {
-            sys::whisper_full(
+            sys::whisper_full_with_state(
                 self.ctx.as_ptr(),
+                state.as_ptr(),
                 wparams,
                 pcm.as_ptr(),
                 i32::try_from(pcm.len()).unwrap_or(i32::MAX),
             )
         };
+        let coreml_failures = coreml::failure_count().wrapping_sub(failures_before);
+        // A Core ML failure explains any accompanying error code, so it wins.
+        if coreml_failures > 0 {
+            // The state's text context now holds a decode of zeros and can't be
+            // cleared, so replace it. Free it first: two states at once is a
+            // memory spike when memory may be what failed.
+            self.release_state();
+            if self.ensure_state().is_err() {
+                tracing::warn!(
+                    model = %self.path,
+                    "could not recreate the whisper state after a Core ML failure; retrying on the next call"
+                );
+            }
+            return Err(WhisperError::CoreMlEncoderFailed {
+                failures: u32::try_from(coreml_failures).unwrap_or(u32::MAX),
+            });
+        }
         if code != 0 {
             return Err(WhisperError::InferenceFailed { code });
         }
 
-        let segments = self.collect_segments()?;
+        let segments = Self::collect_segments(state)?;
         if params.language.is_none() {
-            self.last_detected_language = self.read_detected_language();
+            self.last_detected_language = Self::read_detected_language(state);
         }
         Ok(segments)
     }
 
+    /// The live state, created (with its Core ML encoder) if none is left.
+    fn ensure_state(&mut self) -> WhisperResult<NonNull<sys::whisper_state>> {
+        if let Some(state) = self.state {
+            return Ok(state);
+        }
+        let (state, coreml_audio_ctx) = new_state(self.ctx, &self.path)
+            .ok_or_else(|| WhisperError::LoadFailed(self.path.clone()))?;
+        self.state = Some(state);
+        self.coreml_audio_ctx = coreml_audio_ctx;
+        Ok(state)
+    }
+
+    /// Free the inference state, if any.
+    fn release_state(&mut self) {
+        if let Some(state) = self.state.take() {
+            // SAFETY: the state belongs to `self.ctx`, nothing borrows it
+            // (`&mut self` or Drop), and `take` prevents any reuse.
+            unsafe { sys::whisper_free_state(state.as_ptr()) };
+        }
+        self.coreml_audio_ctx = None;
+    }
+
     /// Read the language selected by the preceding auto-detecting inference.
-    fn read_detected_language(&self) -> Option<String> {
-        // SAFETY: `self.ctx` is live and `whisper_full_lang_id` only reads the
-        // state populated by the preceding successful `whisper_full` call.
-        let id = unsafe { sys::whisper_full_lang_id(self.ctx.as_ptr()) };
+    fn read_detected_language(state: NonNull<sys::whisper_state>) -> Option<String> {
+        // SAFETY: `state` is live; this only reads the last transcription's result.
+        let id = unsafe { sys::whisper_full_lang_id_from_state(state.as_ptr()) };
         if id < 0 {
             return None;
         }
@@ -260,21 +332,19 @@ impl WhisperModel {
     }
 
     /// Read back the segments produced by the last `whisper_full` call.
-    fn collect_segments(&self) -> WhisperResult<Vec<Segment>> {
-        // SAFETY: `self.ctx` is live; the call reads a counter set by the
-        // preceding `whisper_full`.
-        let n = unsafe { sys::whisper_full_n_segments(self.ctx.as_ptr()) };
+    fn collect_segments(state: NonNull<sys::whisper_state>) -> WhisperResult<Vec<Segment>> {
+        // SAFETY: `state` is live; this reads a counter the last run set.
+        let n = unsafe { sys::whisper_full_n_segments_from_state(state.as_ptr()) };
         let n = usize::try_from(n).unwrap_or(0);
 
         let mut out = Vec::with_capacity(n);
         for i in 0..n {
             let idx = i32::try_from(i).unwrap_or(i32::MAX);
 
-            // SAFETY: `idx` is in `0..n_segments`, so whisper returns a pointer
-            // to a null-terminated buffer it owns. The buffer stays valid until
-            // the next `whisper_full` on this context; we copy out of it before
-            // returning, and `&self` prevents an intervening call.
-            let text_ptr = unsafe { sys::whisper_full_get_segment_text(self.ctx.as_ptr(), idx) };
+            // SAFETY: `idx` is in `0..n_segments`, so whisper returns a
+            // null-terminated buffer valid until the next run; we copy it first.
+            let text_ptr =
+                unsafe { sys::whisper_full_get_segment_text_from_state(state.as_ptr(), idx) };
             if text_ptr.is_null() {
                 return Err(WhisperError::InvalidUtf8 { index: i });
             }
@@ -288,8 +358,8 @@ impl WhisperModel {
             // SAFETY: same index bounds as the text call above.
             let (t0, t1) = unsafe {
                 (
-                    sys::whisper_full_get_segment_t0(self.ctx.as_ptr(), idx),
-                    sys::whisper_full_get_segment_t1(self.ctx.as_ptr(), idx),
+                    sys::whisper_full_get_segment_t0_from_state(state.as_ptr(), idx),
+                    sys::whisper_full_get_segment_t1_from_state(state.as_ptr(), idx),
                 )
             };
 
@@ -305,10 +375,25 @@ impl WhisperModel {
     }
 }
 
+/// Creates a state for `ctx`, vetting any Core ML encoder beside `model`, and
+/// returns it with the encoder's full-window `audio_ctx` if Core ML runs it.
+fn new_state(
+    ctx: NonNull<sys::whisper_context>,
+    model: &str,
+) -> Option<(NonNull<sys::whisper_state>, Option<u32>)> {
+    // whisper.cpp loads the encoder inside this init, on this thread.
+    let coreml = coreml::LoadScope::begin(ctx, model);
+    // SAFETY: `ctx` is live; a null return becomes `None` for the caller.
+    let raw = unsafe { sys::whisper_init_state(ctx.as_ptr()) };
+    let coreml_audio_ctx = coreml.finish();
+    NonNull::new(raw).map(|state| (state, coreml_audio_ctx))
+}
+
 impl Drop for WhisperModel {
     fn drop(&mut self) {
-        // SAFETY: `self.ctx` was produced by `whisper_init_*` and has not been
-        // freed — `WhisperModel` is the sole owner and is not `Clone`.
+        // The state goes first: it belongs to this context.
+        self.release_state();
+        // SAFETY: `self.ctx` is unfreed and solely owned (`WhisperModel` is not `Clone`).
         unsafe { sys::whisper_free(self.ctx.as_ptr()) };
     }
 }

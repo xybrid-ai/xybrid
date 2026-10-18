@@ -188,7 +188,7 @@ impl ONNXMobileRuntimeAdapter {
     /// 4. Convert output tensors back to Envelope
     /// 5. Handle throttling based on battery/thermal state
     #[allow(dead_code)]
-    fn simulate_inference(&self, input: &Envelope) -> Envelope {
+    fn simulate_inference(&self, input: &Envelope) -> AdapterResult<Envelope> {
         // Mock inference: transform input kind to output kind
         // Mobile-optimized inference with battery awareness
         let output_text = if self.should_throttle() {
@@ -200,6 +200,9 @@ impl ONNXMobileRuntimeAdapter {
                 EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                     "onnx-mobile-throttled-vision-unsupported".to_string()
                 }
+                EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                    return Err(crate::execution::choice::choice_kind_not_runtime_input())
+                }
             }
         } else {
             // Normal execution: full performance
@@ -210,10 +213,13 @@ impl ONNXMobileRuntimeAdapter {
                 EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                     "onnx-mobile-vision-unsupported".to_string()
                 }
+                EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                    return Err(crate::execution::choice::choice_kind_not_runtime_input())
+                }
             }
         };
 
-        Envelope::new(EnvelopeKind::Text(output_text))
+        Ok(Envelope::new(EnvelopeKind::Text(output_text)))
     }
 
     /// Runs real ONNX Runtime inference.

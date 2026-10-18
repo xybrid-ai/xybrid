@@ -48,6 +48,16 @@ pub enum ChoiceScorerSpec {
     OnnxByteOptionScorer(OnnxByteOptionScorerSpec),
 }
 
+impl ChoiceScorerSpec {
+    /// The candidates the scorer appends after the caller's, in order. Their
+    /// ids are reserved: a caller choice may not reuse one.
+    pub fn fixed_choices(&self) -> &[Choice] {
+        match self {
+            Self::OnnxByteOptionScorer(spec) => &spec.fixed_choices,
+        }
+    }
+}
+
 /// An ONNX choice scorer over UTF-8 byte ids.
 ///
 /// The model takes five tensors:

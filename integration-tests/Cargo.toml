@@ -9,7 +9,7 @@ default = []
 
 # Candle (pure-Rust ML) backend — gates tests/whisper_candle_integration.rs.
 # Off by default because it pulls candle-core/nn/transformers into the build;
-# CI turns it on in the Test Candle workflow.
+# CI turns it on in test-candle.yml.
 candle = ["xybrid-core/candle"]
 
 # whisper.cpp ASR backend — gates tests/whispercpp_integration.rs. The real

@@ -26,6 +26,17 @@ fn metadata_with_template(id: &str, template: Value) -> Value {
     })
 }
 
+/// The committed CUA-S1-FORMS scorer spec.
+fn forms_spec() -> Value {
+    // The runtime CARGO_MANIFEST_DIR, not `env!`: under Bazel the test runs in
+    // a sandbox where the compile-time path points nowhere.
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+    let path = std::path::Path::new(&manifest_dir)
+        .join("../../integration-tests/fixtures/choice/specs/cua-s1-forms.json");
+    serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
+}
+
 fn gguf_metadata(id: &str) -> Value {
     metadata_with_template(id, json!({ "type": "Gguf", "model_file": "model.gguf" }))
 }
@@ -200,6 +211,16 @@ fn a_passthrough_variant_without_chat_metadata_loads_normally() {
                 json!({ "type": "ChoiceScorer", "scorer": {} }),
             )),
             false,
+        ),
+        // A choice scorer is never speculated: the gateway cannot score
+        // candidates, so it loads on the device like any other non-chat model.
+        (
+            "choice-scorer",
+            Some(metadata_with_template(
+                "choice-scorer",
+                json!({ "type": "ChoiceScorer", "scorer": forms_spec() }),
+            )),
+            true,
         ),
     ];
 

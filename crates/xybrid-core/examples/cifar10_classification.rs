@@ -133,6 +133,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::MultiPart(_) => {
             println!("📦 Multipart output (unexpected for CIFAR10-ResNet)");
         }
+        EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+            println!("Choice output (unexpected for CIFAR10-ResNet)");
+        }
     }
 
     println!();

@@ -1,0 +1,49 @@
+{
+  "model_id": "cua-s1-forms",
+  "version": "1.0",
+  "description": "CUA-S1-FORMS byte-level option scorer (706K parameters): scores candidate form actions against one page context. Exported to ONNX from cua-ai/cua-s1-forms@4a7a9f42 by tools/conformance; integration-tests/download.sh cua-s1-forms regenerates it.",
+  "execution_template": {
+    "type": "ChoiceScorer",
+    "scorer": {
+      "type": "OnnxByteOptionScorer",
+      "model_file": "cua-s1-forms.onnx",
+      "context": {
+        "offset": 1,
+        "max_len": 224,
+        "overflow": "Truncate",
+        "ids_input": "context_ids",
+        "mask_input": "context_mask"
+      },
+      "choice": {
+        "offset": 1,
+        "max_len": 96,
+        "overflow": "Truncate",
+        "ids_input": "option_ids",
+        "mask_input": "option_token_mask"
+      },
+      "choice_mask_input": "option_mask",
+      "logits_output": "logits",
+      "max_choices": 64,
+      "fixed_choices": [
+        {
+          "id": "check",
+          "text": "check"
+        },
+        {
+          "id": "click",
+          "text": "click"
+        },
+        {
+          "id": "skip",
+          "text": "skip"
+        }
+      ]
+    }
+  },
+  "files": [
+    "cua-s1-forms.onnx"
+  ],
+  "metadata": {
+    "task": "decision"
+  }
+}

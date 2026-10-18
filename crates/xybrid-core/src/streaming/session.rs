@@ -539,6 +539,8 @@ impl StreamSession {
                 architecture.as_deref() == Some("whisper")
             }
             ExecutionTemplate::GgmlWhisper { .. } => true,
+            // Not a speech model; choice scorers are refused before streaming.
+            ExecutionTemplate::ChoiceScorer { .. } => false,
             _ => false,
         };
 

@@ -6,7 +6,7 @@
 //! | Module | Operations |
 //! |--------|-----------|
 //! | [`decode`] | `CTCDecode`, `BPEDecode`, `WhisperDecode` |
-//! | [`tensor_ops`] | `Argmax`, `Softmax`, `TopK`, `TemperatureSample`, `Threshold`, `MeanPool`, `Denormalize` |
+//! | [`tensor_ops`] | `Argmax`, `Softmax`, `TopK`, `TemperatureSample`, `Threshold`, `MeanPool`, `L2Normalize`, `Denormalize` |
 //! | [`audio`] | `TTSAudioEncode` |
 
 pub mod audio;
@@ -59,6 +59,8 @@ pub fn apply_postprocessing_step(
         } => tensor_ops::threshold_step(data, *threshold, *return_indices),
 
         PostprocessingStep::MeanPool { dim } => tensor_ops::meanpool_step(data, *dim),
+
+        PostprocessingStep::L2Normalize => tensor_ops::l2_normalize_step(data),
 
         PostprocessingStep::TemperatureSample {
             temperature,

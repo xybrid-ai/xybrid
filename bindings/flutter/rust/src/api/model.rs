@@ -753,11 +753,11 @@ impl FfiModelLoader {
 
     /// Load the model without progress updates.
     pub async fn load(&self) -> Result<FfiModel, String> {
-        self.0
-            .load_async()
-            .await
-            .map(|m| FfiModel(Arc::new(m)))
-            .map_err(|e| e.to_string())
+        let model = self.0.load_async().await.map_err(|e| e.to_string())?;
+        // Flutter loads through the SDK, not the facade's loader, so it
+        // applies the facade's FFI refusal itself.
+        facade::ensure_ffi_supported(&model).map_err(|e| e.to_string())?;
+        Ok(FfiModel(Arc::new(model)))
     }
 
     /// Load the model with download progress updates.
@@ -779,13 +779,16 @@ impl FfiModelLoader {
                 let _ = sink.add(FfiLoadEvent::Progress(FfiDownloadStatus::from_sdk(status)));
             });
 
-            match result {
-                Ok(_) => {
+            match result
+                .map_err(|e| e.to_string())
+                .and_then(|model| facade::ensure_ffi_supported(&model).map_err(|e| e.to_string()))
+            {
+                Ok(()) => {
                     // Model is now cached, send complete event
                     let _ = sink.add(FfiLoadEvent::Complete);
                 }
-                Err(e) => {
-                    let _ = sink.add(FfiLoadEvent::Error(e.to_string()));
+                Err(message) => {
+                    let _ = sink.add(FfiLoadEvent::Error(message));
                 }
             }
         };
