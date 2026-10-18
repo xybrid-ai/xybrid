@@ -1,0 +1,25 @@
+bindings/unity/Samples~/KittenTts/README.md
+  s_d8ea476eacfee7::t_567fd40d0ccbde 39-41
+crates/zzz-sys/natives-manifest.json
+  s_d8ea476eacfee7::t_f9d2a360fda322 83
+tools/scripts/tests/test_zzz_pull.py
+  s_d8ea476eacfee7::t_f91177a3680c35 147-158
+tools/scripts/zzz_pull.py
+  s_d8ea476eacfee7::t_eb5a788a3d1212 92-98,149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5b62463dbdeb12590d2d2d8c32fdc1418d4e509f",
+  "prompts": {},
+  "sessions": {
+    "s_d8ea476eacfee7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "08c6a1a8-6152-4d85-acd5-8b7ed5bea6ce",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
