@@ -421,9 +421,10 @@ mod tests {
     #[test]
     fn invalid_prompt_is_rejected_without_echoing_its_contents() {
         let runtime = WhisperCppRuntime::new();
-        let private_prompt = "PRIVATE_PROMPT_SENTINEL_7c1f\0";
+        let private_prompt = "PRIVATE_PROMPT_SENTINEL_7c1f";
+        let invalid_prompt = format!("{private_prompt}\0");
         let err = runtime
-            .params_for(&meta(&[("prompt", private_prompt)]))
+            .params_for(&meta(&[("prompt", &invalid_prompt)]))
             .expect_err("C strings cannot contain null bytes");
 
         assert!(matches!(err, AdapterError::InvalidInput(_)), "{err:?}");
