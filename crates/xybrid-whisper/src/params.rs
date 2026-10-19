@@ -43,6 +43,12 @@ pub enum Task {
 /// inheriting a fast-but-fragile default.
 #[derive(Debug, Clone)]
 pub struct TranscribeParams {
+    /// Optional vocabulary or preceding text to guide transcription.
+    ///
+    /// Passed as whisper.cpp's `initial_prompt` on this request. This is text
+    /// context for recognition, not an instruction for an assistant to follow.
+    /// Interior null bytes are rejected without echoing the prompt.
+    pub prompt: Option<String>,
     /// Language code (e.g. `"en"`). `None` auto-detects.
     pub language: Option<String>,
     /// Transcribe or translate.
@@ -68,6 +74,7 @@ pub struct TranscribeParams {
 impl Default for TranscribeParams {
     fn default() -> Self {
         Self {
+            prompt: None,
             language: None,
             task: Task::Transcribe,
             audio_ctx: FULL_AUDIO_CTX,

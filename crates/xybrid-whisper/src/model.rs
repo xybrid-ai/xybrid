@@ -135,8 +135,8 @@ impl WhisperModel {
     ///   rather than passed through.
     /// - [`WhisperError::UnsupportedLanguage`] if `params.language` names a
     ///   language this model has no token for.
-    /// - [`WhisperError::InvalidInput`] if the language string contains a null
-    ///   byte.
+    /// - [`WhisperError::InvalidInput`] if the language or prompt string contains
+    ///   a null byte.
     /// - [`WhisperError::CoreMlAudioCtx`] if the encoder runs on Core ML and
     ///   `params.audio_ctx` asks for less than the full window.
     /// - [`WhisperError::InferenceFailed`] if `whisper_full` returned non-zero.
@@ -178,6 +178,13 @@ impl WhisperModel {
         // Keep the CString alive for the whole call: `whisper_full_params`
         // borrows the language pointer rather than copying it.
         let language = self.resolve_language(params.language.as_deref())?;
+        // Native parameters borrow both strings until whisper_full returns.
+        let prompt = params
+            .prompt
+            .as_deref()
+            .map(CString::new)
+            .transpose()
+            .map_err(|_| WhisperError::InvalidInput("prompt contains a null byte".into()))?;
 
         // SAFETY: pure value constructor, no preconditions.
         let mut wparams = unsafe {
@@ -212,12 +219,14 @@ impl WhisperModel {
         // cadence. Better to surface a poor partial than to blow the budget.
         wparams.temperature_inc = 0.0;
         wparams.language = language.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        wparams.initial_prompt = prompt.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
 
         // The encoder runs on this thread, so the counter's growth is this call's.
         let failures_before = coreml::failure_count();
         // SAFETY: `self.ctx` and its `state` are live; `pcm`'s length is passed
-        // with it; `language` outlives `wparams`; `&mut self` gives the exclusive
-        // access whisper.cpp requires per context.
+        // with it; `language` and `prompt` outlive the call that borrows their
+        // pointers; `&mut self` gives the exclusive access whisper.cpp requires
+        // per context.
         let code = unsafe {
             sys::whisper_full_with_state(
                 self.ctx.as_ptr(),
