@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Phonon `phonon-31m-en` through the opt-in `tts-zzz` backend.** Gradium's
+  public English checkpoint (Apache-2.0) loads as one converted GGUF with the
+  existing `ZzzPhonon` template and audio APIs. It carries 38 voices:
+  `default`, used when no voice is set, plus the 37 English voices of the
+  `gradium/phonon-voices` catalog. Its default temperature is 0.3 and it
+  speaks English at 24 kHz mono. The two earlier private Phonon previews
+  still load. See [Phonon speech](docs/sdk/PHONON.md).
+- **`zzz-phonon-31m` registry backend.** Every `tts-zzz` build reports it,
+  and `resolve` sends it in its `&backends=` query even when telemetry is
+  opted out, so the registry can serve `phonon-31m-en` only to builds whose
+  engine loads it. 0.12.0 builds report `tts-zzz` but cannot load that model.
+
+### Changed
+
+- **zzz engine pin bumped to `v0.1.0-rc.7`**, the first engine release that
+  loads `phonon-31m-en`; `v0.1.0-rc.6` rejects it. The engine's C ABI is
+  unchanged, so the SDK exposes no new Phonon options.
+  <!-- TODO before merge: crates/zzz-sys/natives-manifest.json still pins
+  v0.1.0-rc.6 on this branch; fill in the rc.7 release tag, archive names
+  and SHA-256s once that engine release exists. -->
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

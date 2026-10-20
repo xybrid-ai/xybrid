@@ -87,10 +87,11 @@ fn invalid_settings_and_nul_are_rejected_before_open() {
 }
 
 #[test]
-fn both_generations_use_bundle_defaults_and_reset_seed_on_reuse() {
+fn every_generation_uses_bundle_defaults_and_resets_seed_on_reuse() {
     for (file, voice, temperature) in [
         (CURRENT, "freya", 0.3),
         ("Phonon-202605-beta1.gguf", "marlowe", 0.4),
+        ("Phonon-31m-en.gguf", "default", 0.3),
     ] {
         let Some(mut session) = open(file, None, PhononSettings::default()) else {
             continue;

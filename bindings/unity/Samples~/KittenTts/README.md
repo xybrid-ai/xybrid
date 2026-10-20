@@ -36,14 +36,14 @@ waveform decoding of speech tokens.
 ## Build the local plugin
 
 Native artifacts use Bazel. Private engine slices are verified by `zzz_pull.py`
-against the rc.6 combined-profile checksum, receipt, ABI and target. Keep
+against the rc.7 combined-profile checksum, receipt, ABI and target. Keep
 engine archives, receipts and staging directories outside public artifacts and
 caches.
 
 ```bash
 # Python 3.11+, authenticated access to the pinned release as needed.
 python3 tools/scripts/zzz_pull.py --target aarch64-apple-darwin \
-  --archive /private/path/zzz-macos-arm64-v0.1.0-rc.6.tar.gz \
+  --archive /private/path/zzz-macos-arm64-v0.1.0-rc.7.tar.gz \
   > /tmp/xybrid-kitten-slice.txt
 bazel build -c opt --config=macos --//:tts_zzz=true \
   --repo_env=XYBRID_ZZZ_PREBUILT_DIR="$(cat /tmp/xybrid-kitten-slice.txt)" \

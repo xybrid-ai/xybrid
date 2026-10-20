@@ -99,7 +99,9 @@ Source: `xybrid_sdk::current_platform()` (`crates/xybrid-sdk/src/platform.rs`). 
 | `ort-cuda` | `ort-cuda` | ONNX Runtime with CUDA execution provider |
 | `ort-download` | `ort-download` | ONNX Runtime resolved via prebuilt downloads |
 | `ort-dynamic` | `ort-dynamic` | ONNX Runtime loaded dynamically at runtime (Android) |
+| `tts-zzz` | `tts-zzz` | Kitten TTS 2 and Phonon through the pinned zzz CPU engine (macOS ARM64, Linux x86-64-v3, Android ARM64). Opt-in only — no `platform-*` preset enables it |
 | `vision` | _(none — always on)_ | Vision envelopes + preprocessing pipeline; compiled in unconditionally, so this value appears on every build |
+| `zzz-phonon-31m` | `tts-zzz` | The build's pinned zzz engine loads Gradium's `phonon-31m-en` ([Phonon speech](../sdk/PHONON.md)). 0.12.0 builds report `tts-zzz` too, but their engine rejects that model, so the registry serves `phonon-31m-en` only to clients that list `zzz-phonon-31m`, and `resolve` also sends it in its query (see [When the header is sent](#when-the-header-is-sent)) |
 
 Source: `xybrid_core::features::enabled()` (`crates/xybrid-core/src/features.rs`). The list is computed once per process from `cfg!(feature = "...")` checks and cached.
 
@@ -138,7 +140,7 @@ The SDK adds `X-Xybrid-Client` to the three metadata calls:
 | `RegistryClient::get_model` | `GET /v1/models/{mask}` | Fetch metadata for one model |
 | `RegistryClient::resolve` | `GET /v1/models/{mask}/resolve?platform=…` | Resolve a model+platform to a bundle URL |
 
-`resolve` also lists, as `&backends=` in its query, the backends that decide which file the registry serves; today that is only `asr-whispercpp-coreml`. Unlike the header, it is sent when telemetry is opted out too: without it, an opted-out iOS client would get the plain `.bin` instead of the bundle with the Core ML encoder. The registry does not record it in analytics.
+`resolve` also lists, as `&backends=` in its query, the backends that decide which file the registry serves; today those are `asr-whispercpp-coreml` and `zzz-phonon-31m`. Unlike the header, it is sent when telemetry is opted out too: without it, an opted-out iOS client would get the plain `.bin` instead of the bundle with the Core ML encoder, and an opted-out `tts-zzz` client could not resolve `phonon-31m-en`. The registry does not record it in analytics.
 
 Bundle download requests are intentionally **not** instrumented in this version. They are downloads, not metadata calls, and a per-byte header is not interesting in aggregate.
 

@@ -83,10 +83,11 @@ fn collect(
 }
 
 #[test]
-fn zzz_phonon_both_bundles_batch_stream_defaults_and_reuse() {
+fn zzz_phonon_every_bundle_batch_stream_defaults_and_reuse() {
     for (file, voice, temperature) in [
         (CURRENT, "freya", 0.3),
         ("Phonon-202605-beta1.gguf", "marlowe", 0.4),
+        ("Phonon-31m-en.gguf", "default", 0.3),
     ] {
         let Some((_directory, model)) = load_model(file, json!({})) else {
             continue;

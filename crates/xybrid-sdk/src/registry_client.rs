@@ -116,7 +116,7 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
 /// Backends that pick which file the registry serves (`requires_backends`).
 /// Sent as `?backends=` because telemetry opt-out drops the header; only
 /// artifact-selecting names go here, never the full feature list.
-const ARTIFACT_BACKENDS: &[&str] = &["asr-whispercpp-coreml"];
+const ARTIFACT_BACKENDS: &[&str] = &["asr-whispercpp-coreml", "zzz-phonon-31m"];
 
 /// URL for `GET /v1/models/{mask}/resolve`.
 ///
@@ -3533,6 +3533,30 @@ mod tests {
         assert_eq!(
             resolve_url("http://r", "whisper", "macos-arm64", &features),
             "http://r/v1/models/whisper/resolve?platform=macos-arm64"
+        );
+    }
+
+    #[test]
+    fn resolve_url_sends_the_phonon_31m_backend_but_not_tts_zzz() {
+        let features = ["asr-whispercpp", "tts-zzz", "vision", "zzz-phonon-31m"];
+        assert_eq!(
+            resolve_url("http://r", "phonon-31m-en", "android-arm64", &features),
+            "http://r/v1/models/phonon-31m-en/resolve?platform=android-arm64&backends=zzz-phonon-31m"
+        );
+    }
+
+    #[test]
+    fn resolve_url_joins_every_artifact_backend_in_feature_order() {
+        let features = [
+            "asr-whispercpp",
+            "asr-whispercpp-coreml",
+            "tts-zzz",
+            "vision",
+            "zzz-phonon-31m",
+        ];
+        assert_eq!(
+            resolve_url("http://r", "m", "p", &features),
+            "http://r/v1/models/m/resolve?platform=p&backends=asr-whispercpp-coreml,zzz-phonon-31m"
         );
     }
 

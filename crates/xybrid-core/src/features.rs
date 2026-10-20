@@ -35,6 +35,10 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     // Vision (image envelopes + preprocessing pipeline) is always compiled in;
     // the heavy native VLM backend is reported via `llm-llamacpp-vision`.
     ("vision", true),
+    // The registry serves `phonon-31m-en` only to clients that list this
+    // backend. Every `tts-zzz` build pins a zzz engine that loads it; the
+    // rc.6 engine pinned by 0.12.0 rejects it, so `tts-zzz` alone cannot gate it.
+    ("zzz-phonon-31m", cfg!(feature = "tts-zzz")),
 ];
 
 /// Return the sorted list of enabled runtime feature names.
@@ -142,6 +146,14 @@ mod tests {
         assert_eq!(
             enabled().contains(&"asr-whispercpp-coreml"),
             xybrid_whisper::COREML_ENCODER
+        );
+    }
+
+    #[test]
+    fn zzz_phonon_31m_follows_tts_zzz() {
+        assert_eq!(
+            enabled().contains(&"zzz-phonon-31m"),
+            cfg!(feature = "tts-zzz")
         );
     }
 }
