@@ -4165,14 +4165,15 @@ impl XybridModel {
 
     /// Deliver owned PCM16 audio packets during synthesis.
     ///
-    /// Kitten uses native callbacks and supports cancellation during inference.
-    /// Sentence mode computes each sentence waveform before delivering it.
+    /// Phonon and Kitten use native callbacks and support cancellation during inference.
+    /// Phonon decodes incrementally; Kitten sentence mode computes each sentence
+    /// waveform before delivering it.
     /// ONNX backends check cancellation at chunk boundaries; one ONNX forward
     /// cannot be interrupted. Returning `false` also cancels delivery. The
     /// terminal summary distinguishes completed, cancelled and limited audio;
     /// failures use `SdkError`. The model remains resident and reusable.
     /// Resource abort policies apply before synthesis and during delivery;
-    /// Kitten also polls them during inference. Resource aborts preserve the
+    /// Native zzz backends also poll them during inference. Resource aborts preserve the
     /// cloud-fallback decision. `max_grace_tokens` counts audio packets here,
     /// while user cancellation stops delivery without grace or cloud fallback.
     /// Completed and limited backend outcomes take precedence over late

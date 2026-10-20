@@ -2,12 +2,18 @@
 #![cfg(all(feature = "tts-zzz", unix))]
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::{json, Value};
+use xybrid_core::device::{MemoryPressure, ResourceSnapshot, ResourceSnapshotProvider};
 use xybrid_core::execution::{TtsStatus, TtsStreamResult};
 use xybrid_sdk::ir::{Envelope, EnvelopeKind};
-use xybrid_sdk::{CancellationToken, GenerationConfig, ModelLoader, RunOptions, XybridModel};
+use xybrid_sdk::{
+    AbortPolicy, AbortSignal, CancellationToken, GenerationConfig, ModelLoader, RunOptions,
+    SdkError, XybridModel,
+};
 
 const CURRENT: &str = "Phonon-7e71a02d-200.gguf";
 
@@ -231,4 +237,60 @@ fn zzz_phonon_sync_and_async_share_request_controls() {
         assert_eq!(summary.status, TtsStatus::Completed);
     });
     assert_eq!(expected, *pcm.lock().unwrap());
+}
+
+#[derive(Debug, Default)]
+struct Pressure(AtomicBool);
+
+impl ResourceSnapshotProvider for Pressure {
+    fn current_snapshot(&self, _: Duration) -> ResourceSnapshot {
+        ResourceSnapshot {
+            memory_pressure: if self.0.load(Ordering::Acquire) {
+                MemoryPressure::Critical
+            } else {
+                MemoryPressure::Normal
+            },
+            ..ResourceSnapshot::unknown()
+        }
+    }
+}
+
+#[test]
+fn zzz_phonon_resource_abort_preserves_fallback_and_session_reuse() {
+    let Some((_directory, model)) = load_model(CURRENT, json!({})) else {
+        return;
+    };
+    let input = Envelope::new(EnvelopeKind::Text(
+        "Hello there. Please tell me your name and explain what brought you to the village today, before the gate closes for the night.".into(),
+    ));
+    for fallback in [false, true] {
+        let pressure = Arc::new(Pressure::default());
+        let options = RunOptions::new()
+            .with_abort_policy(
+                AbortPolicy::default()
+                    .stop_on(AbortSignal::MemoryPressureCritical)
+                    .with_cloud_fallback(fallback),
+            )
+            .with_resource_provider(pressure.clone());
+        let mut packets = 0;
+        let error = model
+            .run_tts_streaming(&input, &options, |_| {
+                packets += 1;
+                pressure.0.store(true, Ordering::Release);
+                // Cross the resource poll interval while native delivery is active.
+                std::thread::sleep(Duration::from_millis(150));
+                true
+            })
+            .unwrap_err();
+        assert_eq!(packets, 1);
+        if fallback {
+            assert!(matches!(error, SdkError::AbortedForCloudFallback { .. }));
+        } else {
+            assert!(error.to_string().contains("memory_pressure_critical"));
+        }
+        assert_eq!(
+            collect(&model, &text(), &RunOptions::default()).1.status,
+            TtsStatus::Completed
+        );
+    }
 }

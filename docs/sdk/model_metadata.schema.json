@@ -751,7 +751,7 @@
                 "integer",
                 "null"
               ],
-              "minimum": 0,
+              "minimum": 1,
               "format": "uint32"
             },
             "max_chunk_tokens": {
@@ -759,7 +759,7 @@
                 "integer",
                 "null"
               ],
-              "minimum": 0,
+              "minimum": 1,
               "format": "uint32"
             },
             "seed": {

@@ -377,7 +377,7 @@ fn part_from_multipart_fragment(
 // Generation Configuration
 // =============================================================================
 
-/// Generation parameters for LLM inference.
+/// Generation parameters for LLM inference and Phonon sampling temperature.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationConfig {
     /// Maximum tokens to generate. Default: 2048
@@ -387,6 +387,7 @@ pub struct GenerationConfig {
     /// Temperature for sampling. Default: 0.0 (deterministic / greedy).
     /// Callers who want sampling must set this explicitly — see `greedy()`
     /// and `creative()` constructors.
+    /// Phonon uses zero to select the GGUF bundle default instead of greedy sampling.
     #[serde(default = "default_temperature")]
     pub temperature: f32,
 

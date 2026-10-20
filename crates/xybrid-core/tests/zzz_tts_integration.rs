@@ -57,6 +57,11 @@ fn resolved_assets() -> Option<BundleAssets> {
     .map(|(_, label)| label)
     .collect();
     if !missing.is_empty() {
+        assert_ne!(
+            env::var("ZZZ_REQUIRE_FIXTURES").as_deref(),
+            Ok("1"),
+            "required Kitten executor fixtures missing: {missing:?}"
+        );
         eprintln!("skipping real zzz TTS execution, missing {missing:?} locally");
         return None;
     }

@@ -114,8 +114,8 @@ impl core::fmt::Debug for EmbedError {
     }
 }
 
-/// Session options. Initialize from [`EmbedOptions::default`], then override
-/// fields using `default_options()` when bindings are enabled. Seed 0 is valid;
+/// Raw session options. `Default` only zero-initializes this storage.
+/// Use `default_options()` for native defaults when bindings are enabled. Seed 0 is valid;
 /// temperature 0 selects the bundle default. Capacities must be positive.
 ///
 /// Mirrors C `zzz_embed_options` field-for-field. `struct_size` must equal

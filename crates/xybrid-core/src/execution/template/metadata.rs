@@ -232,12 +232,15 @@ pub enum ExecutionTemplate {
         language: Option<String>,
         /// Positive per-chunk frame capacity; absent uses the engine default.
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
         max_frames_per_chunk: Option<u32>,
         /// Positive text-token capacity; absent uses the engine default.
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
         max_chunk_tokens: Option<u32>,
         /// Nonnegative finite sampling temperature; zero selects the bundle default.
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(range(min = 0)))]
         temperature: Option<f32>,
         /// Utterance seed; zero is valid and absence uses the engine default.
         #[serde(default, skip_serializing_if = "Option::is_none")]

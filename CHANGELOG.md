@@ -69,6 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Rust:** `ExecutionTemplate` gains `ZzzPhonon`; exhaustive matches need
+  an additional arm. Existing Kitten bundle metadata remains compatible.
+
 - **Embedding models keep their ONNX session between calls.** The token-ID
   (BERT-style) path built a new session on every call and dropped it: 44 of
   about 52 ms for a MiniLM embedding on an M4 Max, against 2 ms of
