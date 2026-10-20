@@ -1,0 +1,21 @@
+.github/workflows/release-publish.yml
+  s_dd77eeb642b0eb::t_793b06ffbf595b 61-64,268
+tools/scripts/tests/test_release_publish.py
+  s_dd77eeb642b0eb::t_793b06ffbf595b 1-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5fc750600b8a87f73738a66e2f91432b78a3dc82",
+  "prompts": {},
+  "sessions": {
+    "s_dd77eeb642b0eb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a157f1-8040-72a0-964a-24bc58209d38",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
