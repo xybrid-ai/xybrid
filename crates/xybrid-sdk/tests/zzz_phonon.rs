@@ -136,6 +136,19 @@ fn zzz_phonon_request_precedence_and_overrides_do_not_leak() {
         .unwrap()
         .to_vec();
     assert_ne!(baseline, changed);
+    let mut speaker = text();
+    speaker.metadata.insert("voice_id".into(), "harper".into());
+    speaker.metadata.insert("language".into(), "fr".into());
+    let spoken = model.run(&speaker, None).unwrap();
+    assert_ne!(baseline, spoken.audio_bytes().unwrap());
+    speaker
+        .metadata
+        .insert("voice_id".into(), "voice-not-in-gguf".into());
+    assert!(model.run(&speaker, None).is_err());
+    assert_eq!(
+        baseline,
+        model.run(&text(), None).unwrap().audio_bytes().unwrap()
+    );
     let mut invalid_temperature = text();
     invalid_temperature
         .metadata

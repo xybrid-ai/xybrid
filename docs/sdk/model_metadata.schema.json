@@ -572,7 +572,7 @@
           ]
         },
         {
-          "description": "GGML-format Whisper speech recognition, executed by whisper.cpp on the\nsame ggml the local LLM backend already links.\n\nDistinct from [`ExecutionTemplate::SafeTensors`] with\n`architecture: \"whisper\"`, which routes to the pure-Rust Candle\nimplementation. Both transcribe; they differ in weight format (GGML\nquantized vs F32 safetensors) and therefore in cost, which is the whole\nreason this variant exists.\n\nA bundle may also ship whisper.cpp's Core ML encoder beside the model\nfile: `model_file` with its extension and any `-qX_Y` tag replaced by\n`-encoder.mlmodelc` (`ggml-base.en-q5_1.bin` \u2192\n`ggml-base.en-encoder.mlmodelc`). On iOS 16 and later, in builds with\nthe `coreml` feature (the `platform-ios` preset), the encoder then runs\nthrough Core ML and the decoder stays on ggml. Older iOS versions and\nother platforms ignore the file and keep the ggml encoder.",
+          "description": "GGML-format Whisper speech recognition, executed by whisper.cpp on the\nsame ggml the local LLM backend already links.\n\nDistinct from [`ExecutionTemplate::SafeTensors`] with\n`architecture: \"whisper\"`, which routes to the pure-Rust Candle\nimplementation. Both transcribe; they differ in weight format (GGML\nquantized vs F32 safetensors) and therefore in cost, which is the whole\nreason this variant exists.\n\nA bundle may also ship whisper.cpp's Core ML encoder beside the model\nfile: `model_file` with its extension and any `-qX_Y` tag replaced by\n`-encoder.mlmodelc` (`ggml-base.en-q5_1.bin` →\n`ggml-base.en-encoder.mlmodelc`). On iOS 16 and later, in builds with\nthe `coreml` feature (the `platform-ios` preset), the encoder then runs\nthrough Core ML and the decoder stays on ggml. Older iOS versions and\nother platforms ignore the file and keep the ggml encoder.",
           "type": "object",
           "properties": {
             "audio_ctx": {
@@ -657,6 +657,11 @@
           "description": "Kitten TTS 2 execution through the pinned combined zzz CPU engine and\nquietly staged `libzzz_embed.a` (see `crates/zzz-sys`). Model\nweights and both voice JSONs are bundle files resolved like other\ntemplate paths.\n\nDistinct from the ONNX `KittenTTS-Nano` path: the zzz engine links\nthe pinned engine binary (feature `tts-zzz`) and takes the four\nassets directly, without phonemize preprocessing steps.",
           "type": "object",
           "properties": {
+            "accelerate": {
+              "description": "Accelerate waveform matrix products on macOS only.",
+              "type": "boolean",
+              "default": false
+            },
             "decoder_file": {
               "description": "S3 waveform-decoder GGUF, relative to bundle root.",
               "type": "string",
@@ -680,7 +685,7 @@
               "default": ""
             },
             "max_tokens": {
-              "description": "Per-chunk speech token cap: 0 uses available LM-window room with the split-chunk runaway guard; explicit range 1..1023.",
+              "description": "Per-chunk speech token cap (0 = available LM-window room,\nsubject to the split-chunk runaway guard; explicit 1..=1023).",
               "type": "integer",
               "format": "uint32",
               "default": 0,
@@ -697,6 +702,11 @@
               "default": 0,
               "minimum": 0
             },
+            "sentence_chunks": {
+              "description": "Emit each sentence separately; default engine packing stays enabled otherwise.",
+              "type": "boolean",
+              "default": false
+            },
             "threads": {
               "description": "Threads (0 = engine default of 4; explicit range 1..=64).",
               "type": "integer",
@@ -707,14 +717,6 @@
             "type": {
               "type": "string",
               "const": "ZzzEmbed"
-            },
-            "sentence_chunks": {
-              "type": "boolean",
-              "default": false
-            },
-            "accelerate": {
-              "type": "boolean",
-              "default": false
             }
           },
           "required": [
@@ -723,60 +725,66 @@
           ]
         },
         {
+          "description": "Phonon speech from one GGUF using the opt-in zzz CPU engine.\n\nVoices are embedded in the GGUF. Omitted options use native defaults;\ntemperature zero selects the loaded bundle's sampling default.",
           "type": "object",
-          "description": "Phonon speech from one GGUF using the opt-in zzz CPU engine. Omitted settings use engine defaults. Voices come from the GGUF.",
           "properties": {
-            "type": {
-              "type": "string",
-              "const": "ZzzPhonon"
-            },
-            "model_file": {
-              "type": "string",
-              "description": "GGUF path relative to the model bundle."
-            },
-            "voice": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "language": {
+              "description": "Language code; absent selects the engine's English default.",
               "type": [
                 "string",
                 "null"
               ]
-            },
-            "max_frames_per_chunk": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "minimum": 1,
-              "format": "uint32"
             },
             "max_chunk_tokens": {
+              "description": "Positive text-token capacity; absent uses the engine default.",
               "type": [
                 "integer",
                 "null"
               ],
-              "minimum": 1,
-              "format": "uint32"
+              "format": "uint32",
+              "minimum": 1
+            },
+            "max_frames_per_chunk": {
+              "description": "Positive per-chunk frame capacity; absent uses the engine default.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1
+            },
+            "model_file": {
+              "description": "GGUF path relative to the model bundle.",
+              "type": "string"
             },
             "seed": {
+              "description": "Utterance seed; zero is valid and absence uses the engine default.",
               "type": [
                 "integer",
                 "null"
               ],
-              "minimum": 0,
-              "format": "uint64"
+              "format": "uint64",
+              "minimum": 0
             },
             "temperature": {
+              "description": "Nonnegative finite sampling temperature; zero selects the bundle default.",
               "type": [
                 "number",
                 "null"
               ],
-              "description": "Zero selects the GGUF bundle default; positive finite values override it.",
+              "format": "float",
               "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "ZzzPhonon"
+            },
+            "voice": {
+              "description": "Bundled voice name; absent lets the engine select its default.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
