@@ -1,0 +1,21 @@
+crates/xybrid-sdk/tests/zzz_phonon.rs
+  s_dd77eeb642b0eb::t_77f6593917ce6e 139-151
+docs/sdk/model_metadata.schema.json
+  s_dd77eeb642b0eb::t_ca1fa0b05bf36c 575,660-664,688,705-709,728,732,738-739,744-745,747-748,753-758,761,766-767,770,775,777-787,2196
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f3ca3f01d00f9c57213d2a56f54ce388094dfc30",
+  "prompts": {},
+  "sessions": {
+    "s_dd77eeb642b0eb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a157f1-8040-72a0-964a-24bc58209d38",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
