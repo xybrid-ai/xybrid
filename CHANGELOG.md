@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.12.0] - 2026-10-20
+
+Phonon joins Kitten behind the opt-in `tts-zzz` feature for custom native
+builds. Both use the existing audio APIs; standard prebuilt SDK packaging
+is unchanged. This release also adds Rust choice scoring and EmbeddingGemma 2
+text embeddings, and keeps embedding sessions resident between calls.
+
+Rust consumers must update exhaustive matches for the new template, envelope
+and output variants, and `Tokenize` struct literals. Existing bundle metadata
+and foreign binding APIs remain compatible; choice scorers remain Rust-only.
+
 ### Added
 
 - **Phonon speech through the opt-in `tts-zzz` backend.** Load a single GGUF
@@ -92,10 +109,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   including inside a multi-part message, conversation history or a pipeline,
   before any backend or cloud call. The bindings refuse to load a choice
   scorer, and an invalid scorer spec fails the load with `MetadataInvalid`.
-
-### Planned
-
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
 
 ---
 

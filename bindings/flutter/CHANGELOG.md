@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.12.0
+
+* Added: custom native builds with `tts-zzz` can load converted Phonon GGUF
+  bundles through `ZzzPhonon` and receive audio through the existing run APIs.
+  Omitted voices and temperature `0` select the GGUF bundle defaults. Standard
+  precompiled Flutter binaries continue to omit this optional backend.
+* Changed: text-embedding models retain their ONNX session between calls.
+  Model metadata can enable tokenizer special tokens and `L2Normalize`,
+  including for EmbeddingGemma 2 text embeddings. The Dart API is unchanged.
+* Changed: choice-scoring models are available in Rust; language bindings
+  reject these bundles at load with an unsupported-capability error.
+
 ## 0.11.0
 
 * Changed: `XybridModelLoader.fromRegistrySpeculative` asks the registry
