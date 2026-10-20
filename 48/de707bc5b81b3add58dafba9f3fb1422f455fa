@@ -1,0 +1,44 @@
+CHANGELOG.md
+  s_3c29f46e28839f::t_f9a636114a452f 10-32
+docs/sdk/PHONON.md
+  s_3c29f46e28839f::t_370d234884b173 11-54,58,62,64,69-89,93-104,110,129-130,145-161,163-165
+bindings/unity/Samples~/KittenTts/README.md
+  s_3c29f46e28839f::t_1886dfca488417 39,46
+crates/zzz-sys/tests/phonon.rs
+  s_3c29f46e28839f::t_4de22605162df6 90,94
+docs/telemetry/registry.md
+  s_3c29f46e28839f::t_49a88dbf6ea33d 102,104
+  s_3c29f46e28839f::t_207d823c2405c1 143
+crates/xybrid-sdk/tests/zzz_phonon.rs
+  s_3c29f46e28839f::t_4de22605162df6 86,90
+crates/xybrid-core/src/features.rs
+  s_3c29f46e28839f::t_8a5a430addd393 38-39,41
+  s_3c29f46e28839f::t_8a1152f0b59b49 40
+  s_3c29f46e28839f::t_5ea5444a3df18b 151-158
+crates/xybrid-sdk/src/registry_client.rs
+  s_72a27b3597503b::t_c6f27389df27d2 119,3539-3562
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "48de707bc5b81b3add58dafba9f3fb1422f455fa",
+  "prompts": {},
+  "sessions": {
+    "s_3c29f46e28839f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bee1ba38-6e5e-4228-9737-6595b064283a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_72a27b3597503b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b18b4769-5839-4661-9dd4-2d82a2eb273a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
