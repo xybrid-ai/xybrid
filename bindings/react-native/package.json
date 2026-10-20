@@ -70,7 +70,7 @@
     "typescript": "^5.9.3"
   },
   "xybrid": {
-    "iosXcframeworkSha256": "e06ef98d147d2f2ebf647213ae12422391ee6e97c6bc76e258595f2773bef72d"
+    "iosXcframeworkSha256": "1a90b311c387245ee4f6f948dd97322fb95eeeef44059e7233d25fec2c71e9c8"
   },
   "codegenConfig": {
     "name": "RNXybridSpec",
