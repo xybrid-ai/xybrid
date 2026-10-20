@@ -1,0 +1,41 @@
+crates/xybrid-sdk/tests/zzz_phonon.rs
+  s_dd77eeb642b0eb::t_1445b31a87d9bd 5,7,10,13-16,241-296
+CHANGELOG.md
+  s_dd77eeb642b0eb::t_fb2ba9f3549f51 72-74
+crates/xybrid-core/src/runtime_adapter/types.rs
+  s_dd77eeb642b0eb::t_ed7643044197e9 380,390
+crates/xybrid-sdk/src/model.rs
+  s_dd77eeb642b0eb::t_ed7643044197e9 4168-4170,4176
+crates/zzz-sys/src/lib.rs
+  s_dd77eeb642b0eb::t_ed7643044197e9 117-118
+crates/xybrid-core/tests/zzz_tts_integration.rs
+  s_dd77eeb642b0eb::t_0e84f7b17d990a 60-64
+crates/xybrid-core/src/execution/template/metadata.rs
+  s_dd77eeb642b0eb::t_1b99b796d0ccea 235,239,243
+docs/sdk/model_metadata.schema.json
+  s_12d4b717a2b30b::t_c94a09fdb7eab2 754,762
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ea3c296c1303dbbbdba320c4afd32b5ba911b991",
+  "prompts": {},
+  "sessions": {
+    "s_12d4b717a2b30b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a157f1-8040-72a0-964a-24bc58209d38",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_dd77eeb642b0eb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a157f1-8040-72a0-964a-24bc58209d38",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
