@@ -58,6 +58,10 @@ permissions: read-all
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_BUILD_JOBS: 2
   RUST_BACKTRACE: 1
 
 jobs:
@@ -261,6 +265,7 @@ jobs:
           # ggml via DEP_LLAMA_*), so it follows llama, and both precede core.
           publish_crate xybrid-whisper-sys
           publish_crate xybrid-whisper
+          publish_crate xybrid-zzz-sys
           publish_crate xybrid-core
           publish_crate xybrid-sdk
           publish_crate xybrid
