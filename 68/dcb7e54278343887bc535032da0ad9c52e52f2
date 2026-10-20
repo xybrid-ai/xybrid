@@ -1,0 +1,19 @@
+crates/xybrid-sdk/tests/choice_scoring.rs
+  s_d8ea476eacfee7::t_4a406cb88478a0 268
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "68dcb7e54278343887bc535032da0ad9c52e52f2",
+  "prompts": {},
+  "sessions": {
+    "s_d8ea476eacfee7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "08c6a1a8-6152-4d85-acd5-8b7ed5bea6ce",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
