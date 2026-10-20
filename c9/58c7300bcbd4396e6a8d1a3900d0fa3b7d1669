@@ -1,0 +1,73 @@
+bindings/web/package.json
+  s_dd77eeb642b0eb::t_7916df2b05874e 3
+bindings/web/src/version.ts
+  s_dd77eeb642b0eb::t_7916df2b05874e 2
+CHANGELOG.md
+  s_12d4b717a2b30b::t_a784d103efcbf6 10-26
+bindings/flutter/CHANGELOG.md
+  s_12d4b717a2b30b::t_a784d103efcbf6 5-16
+bindings/python/xybrid/_bolt/__init__.py
+  s_dd77eeb642b0eb::t_7916df2b05874e 3315
+README.md
+  s_12d4b717a2b30b::t_a784d103efcbf6 122,139,157,174,231
+Cargo.lock
+  s_12d4b717a2b30b::t_b98a0d5c931fd2 2752,6274,6288,6295,6324,6395,6407,6416,6429,6438,6465,6472,6481,6490,6498,6510
+Cargo.toml
+  s_12d4b717a2b30b::t_92b005adb39be5 23
+Package.swift
+  s_12d4b717a2b30b::t_af3211d2b81e7d 40
+bindings/apple/XybridFFI-Info.plist
+  s_12d4b717a2b30b::t_eeca1900e08f0b 10,12
+bindings/flutter/example/pubspec.lock
+  s_12d4b717a2b30b::t_12435a12dcb8e7 422
+bindings/flutter/pubspec.yaml
+  s_12d4b717a2b30b::t_4ca3db6b2c42bd 3
+bindings/flutter/rust/Cargo.toml
+  s_12d4b717a2b30b::t_0243fe0b16688f 3
+bindings/kotlin/build.gradle.kts
+  s_12d4b717a2b30b::t_557ed625a005b5 8
+bindings/python/pyproject.toml
+  s_12d4b717a2b30b::t_eaf19240648340 7
+bindings/react-native/android/build.gradle
+  s_12d4b717a2b30b::t_e98763d1e6264b 60
+bindings/react-native/package.json
+  s_12d4b717a2b30b::t_0170fc7e5abf83 3
+bindings/unity/package.json
+  s_12d4b717a2b30b::t_21e89432bdb0b2 3
+crates/whisper-cpp-sys/Cargo.toml
+  s_dd77eeb642b0eb::t_fc723f81e2f81e 49
+crates/xybrid-core/Cargo.toml
+  s_dd77eeb642b0eb::t_ecd340016881e3 28-29,32-33
+crates/xybrid-llama/Cargo.toml
+  s_dd77eeb642b0eb::t_4dd6d01b09d43e 24
+crates/xybrid-sdk/Cargo.toml
+  s_dd77eeb642b0eb::t_6b28d07f76b14d 17,41,46
+crates/xybrid-whisper/Cargo.toml
+  s_dd77eeb642b0eb::t_fa185db8b5a948 27
+crates/xybrid/Cargo.toml
+  s_dd77eeb642b0eb::t_fabdf88dff0594 17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c958c7300bcbd4396e6a8d1a3900d0fa3b7d1669",
+  "prompts": {},
+  "sessions": {
+    "s_12d4b717a2b30b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a157f1-8040-72a0-964a-24bc58209d38",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_dd77eeb642b0eb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a157f1-8040-72a0-964a-24bc58209d38",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
