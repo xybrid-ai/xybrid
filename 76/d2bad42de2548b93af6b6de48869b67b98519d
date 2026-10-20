@@ -1,0 +1,112 @@
+crates/xybrid-core/src/runtime_adapter/zzz/phonon.rs
+  s_dd77eeb642b0eb::t_322e029e44bd08 1-64,68-69,78-82,84-102,106,111,116-122,125-126,130-135,142-154,158
+  s_dd77eeb642b0eb::t_6de02a5b416f5d 167-177,183-185,188-192,198-201
+  s_dd77eeb642b0eb::t_f01ccf51a85d59 159-166,178-182,186-187,193-197,202-222
+  s_12d4b717a2b30b::t_0edb22a6c8f658 65-67,70-77,83,103-105,107-110,112-115,123-124,127-129,136-141,155-157
+crates/zzz-sys/src/lib.rs
+  s_dd77eeb642b0eb::t_edd2e336c10737 1,10-11,32-33,38
+  s_dd77eeb642b0eb::t_9d28a84d78ddb4 118,231-232
+  s_12d4b717a2b30b::t_0edb22a6c8f658 233
+  s_dd77eeb642b0eb::t_29d00ce6e2655e 119
+.github/workflows/README.md
+  s_dd77eeb642b0eb::t_6de02a5b416f5d 67
+.github/workflows/test-zzz-engine.yml
+  s_dd77eeb642b0eb::t_056e030f4d4c5c 1,4,42-44,62-65,196-200
+  s_12d4b717a2b30b::t_49ca8fbe2c33d1 201
+crates/xybrid-sdk/Cargo.toml
+  s_dd77eeb642b0eb::t_edd2e336c10737 103
+CHANGELOG.md
+  s_dd77eeb642b0eb::t_edd2e336c10737 12-21
+crates/zzz-sys/tests/synthesis.rs
+  s_dd77eeb642b0eb::t_9d28a84d78ddb4 90,103-104
+tools/scripts/zzz_pull.py
+  s_dd77eeb642b0eb::t_056e030f4d4c5c 2,25-31,125,128,130,139
+crates/xybrid-sdk/src/model.rs
+  s_dd77eeb642b0eb::t_a1543cd76e165e 7052
+  s_dd77eeb642b0eb::t_d2a5d436f01d6e 3235,4279,4282,4352,4358,4360
+  s_dd77eeb642b0eb::t_6de02a5b416f5d 7073-7074
+  s_dd77eeb642b0eb::t_89298fc87e3ab8 7070-7072
+  s_dd77eeb642b0eb::t_2eb1e150fa7fcc 7075
+crates/xybrid-sdk/tests/zzz_phonon.rs
+  s_dd77eeb642b0eb::t_509bac966dc07d 1-13,15-39,41-56,58-82,84,86-112,114-162,164-169,171,173-194,196-207,209-234
+  s_12d4b717a2b30b::t_6c78ecb6e4b411 14,40,57,83,85,113,163,170,172,195,208
+crates/xybrid-core/src/execution/executor.rs
+  s_dd77eeb642b0eb::t_0ef5faf9191527 3499-3500
+  s_dd77eeb642b0eb::t_d2a5d436f01d6e 356-360,901,908-910,3177-3186,3199-3200,3204-3205,3215-3217,3224-3227,3231,3238-3240,3251-3252,3260-3264,3483-3496,3507,3512,3519-3521,3787-3792
+  s_12d4b717a2b30b::t_0edb22a6c8f658 911-915,3187-3198,3201-3203,3206-3214,3218-3223,3228-3230,3232-3237,3241-3250,3253-3259,3508-3511,3513-3518
+  s_dd77eeb642b0eb::t_1a98d532a0a56c 528-531
+  s_dd77eeb642b0eb::t_a1543cd76e165e 3498,3501-3506
+  s_12d4b717a2b30b::t_e01893069ff2c6 916
+crates/xybrid-core/src/runtime_adapter/zzz/mod.rs
+  s_dd77eeb642b0eb::t_322e029e44bd08 1,4,6,8
+crates/zzz-sys/Cargo.toml
+  s_dd77eeb642b0eb::t_edd2e336c10737 7
+crates/xybrid-core/src/execution/template/metadata.rs
+  s_dd77eeb642b0eb::t_6de02a5b416f5d 1090-1113
+  s_dd77eeb642b0eb::t_322e029e44bd08 220-246,792,875,959
+  s_dd77eeb642b0eb::t_cbbd187ad11dcb 168
+  s_dd77eeb642b0eb::t_3423a41b040e21 1087-1089
+  s_dd77eeb642b0eb::t_25a13691f3376c 1114-1115
+  s_12d4b717a2b30b::t_08f1990f9d694e 1086
+crates/zzz-sys/build.rs
+  s_dd77eeb642b0eb::t_edd2e336c10737 3
+  s_dd77eeb642b0eb::t_1a98d532a0a56c 64,66-68
+crates/xybrid-core/src/runtime_adapter/zzz/stream.rs
+  s_dd77eeb642b0eb::t_322e029e44bd08 1-6,9-26,30-105
+  s_12d4b717a2b30b::t_0edb22a6c8f658 7-8,27-29
+docs/sdk/MODEL_METADATA.md
+  s_dd77eeb642b0eb::t_a229dd8caa7fa3 79-86
+docs/sdk/PHONON.md
+  s_dd77eeb642b0eb::t_a1543cd76e165e 1-89
+crates/zzz-sys/tests/phonon.rs
+  s_dd77eeb642b0eb::t_9d28a84d78ddb4 1-112,114-185,187-202
+  s_dd77eeb642b0eb::t_cbbd187ad11dcb 203-222
+  s_12d4b717a2b30b::t_bee419224572de 113,186
+crates/xybrid-ffi-facade/tests/zzz_phonon.rs
+  s_dd77eeb642b0eb::t_6de02a5b416f5d 7-110
+  s_dd77eeb642b0eb::t_7e190af22adb3a 1-6,111-112
+bindings/unity/Samples~/KittenTts/README.md
+  s_dd77eeb642b0eb::t_9595a9173a55be 1,39,46,97-98
+crates/zzz-sys/src/session.rs
+  s_dd77eeb642b0eb::t_9d28a84d78ddb4 256,342-343
+  s_12d4b717a2b30b::t_0edb22a6c8f658 211-217
+  s_dd77eeb642b0eb::t_29d00ce6e2655e 69,85-92,148-210,218-255,257-293
+  s_12d4b717a2b30b::t_c9e69fcebd56e6 294
+docs/sdk/model_metadata.schema.json
+  s_dd77eeb642b0eb::t_1795179f8322c5 575,683,710-779
+  s_12d4b717a2b30b::t_d743ae67028d58 657
+crates/zzz-sys/natives-manifest.json
+  s_12d4b717a2b30b::t_e2b3260accab36 4,9-11,14-16,19-28,32-34,46-48,51-53,56-65,69-71,85-87,90-92,95-104,108-110
+crates/zzz-sys/README.md
+  s_dd77eeb642b0eb::t_edd2e336c10737 4,23-24,30-40
+tools/scripts/tests/test_zzz_pull.py
+  s_dd77eeb642b0eb::t_056e030f4d4c5c 93,160,166-194
+  s_dd77eeb642b0eb::t_9595a9173a55be 306-310,328-329
+crates/xybrid-core/src/runtime_adapter/zzz/runtime.rs
+  s_dd77eeb642b0eb::t_09ce3ba98fe3fd 15,137-141,145
+  s_12d4b717a2b30b::t_0edb22a6c8f658 13,142-144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "76d2bad42de2548b93af6b6de48869b67b98519d",
+  "prompts": {},
+  "sessions": {
+    "s_12d4b717a2b30b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a157f1-8040-72a0-964a-24bc58209d38",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_dd77eeb642b0eb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a157f1-8040-72a0-964a-24bc58209d38",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
