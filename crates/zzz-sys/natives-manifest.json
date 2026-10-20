@@ -1,24 +1,37 @@
 {
   "schema_version": 1,
   "engine": "zzz",
-  "release_tag": "v0.1.0-rc.4",
+  "release_tag": "v0.1.0-rc.6",
   "archives": [
     {
       "target": "aarch64-apple-darwin",
       "slice": "macos-arm64",
-      "profile": "kitten-tts2",
-      "archive": "zzz-kitten-tts2-macos-arm64-v0.1.0-rc.4.tar.gz",
-      "sha256": "57757ceca6231af81f39541f34023838c1f03bb2edb97ead537da3aa8f5fdf06",
+      "profile": "combined",
+      "archive": "zzz-macos-arm64-v0.1.0-rc.6.tar.gz",
+      "sha256": "28500d2fcfc512ddfee1b66e206d6cf691891e642b8d6e035f4e08cc44e567fd",
       "receipt_schema": 3,
       "apis": {
-        "zzz_embed": 1
+        "zzz_embed": 1,
+        "zzz": 2,
+        "zzz_engine": 1
       },
       "models": [
-        "kitten-tts2"
+        "phonon",
+        "kitten-tts2",
+        "cpu-llm",
+        "qwen3-tts",
+        "pocket-tts",
+        "dots-tts",
+        "parakeet-tdt",
+        "qwen3-asr",
+        "kitten-asr",
+        "chatterbox-t3"
       ],
       "library": "lib/libzzz_embed.a",
       "headers": [
-        "include/zzz_embed.h"
+        "include/zzz_embed.h",
+        "include/zzz.h",
+        "include/zzz_engine.h"
       ],
       "backend": "cpu",
       "cpu": "apple_m1",
@@ -30,19 +43,32 @@
     {
       "target": "aarch64-linux-android",
       "slice": "android-arm64",
-      "profile": "kitten-tts2",
-      "archive": "zzz-kitten-tts2-android-arm64-v0.1.0-rc.4.tar.gz",
-      "sha256": "7fa1c1fd91f12c277b8535a9d5cd68a7f8444aff6c89adc035dc29efab611b89",
+      "profile": "combined",
+      "archive": "zzz-android-arm64-v0.1.0-rc.6.tar.gz",
+      "sha256": "fda73b28868b8009f19f400a3df538b841ec650a9481468bcbba5b09261a5ee3",
       "receipt_schema": 3,
       "apis": {
-        "zzz_embed": 1
+        "zzz_embed": 1,
+        "zzz": 2,
+        "zzz_engine": 1
       },
       "models": [
-        "kitten-tts2"
+        "phonon",
+        "kitten-tts2",
+        "cpu-llm",
+        "qwen3-tts",
+        "pocket-tts",
+        "dots-tts",
+        "parakeet-tdt",
+        "qwen3-asr",
+        "kitten-asr",
+        "chatterbox-t3"
       ],
       "library": "lib/libzzz_embed.a",
       "headers": [
-        "include/zzz_embed.h"
+        "include/zzz_embed.h",
+        "include/zzz.h",
+        "include/zzz_engine.h"
       ],
       "backend": "cpu",
       "cpu": "baseline",
@@ -56,19 +82,32 @@
     {
       "target": "x86_64-unknown-linux-gnu",
       "slice": "linux-x86_64",
-      "profile": "kitten-tts2",
-      "archive": "zzz-kitten-tts2-linux-x86_64-v0.1.0-rc.4.tar.gz",
-      "sha256": "45783145e532c5dd808595804f5293604cf3d607b48438a14212af9632866704",
+      "profile": "combined",
+      "archive": "zzz-linux-x86_64-v0.1.0-rc.6.tar.gz",
+      "sha256": "b563e40945ca21a8d1f0f06280446b19d555de4c836ef0a2222ffbd6860a9015",
       "receipt_schema": 3,
       "apis": {
-        "zzz_embed": 1
+        "zzz_embed": 1,
+        "zzz": 2,
+        "zzz_engine": 1
       },
       "models": [
-        "kitten-tts2"
+        "phonon",
+        "kitten-tts2",
+        "cpu-llm",
+        "qwen3-tts",
+        "pocket-tts",
+        "dots-tts",
+        "parakeet-tdt",
+        "qwen3-asr",
+        "kitten-asr",
+        "chatterbox-t3"
       ],
       "library": "lib/libzzz_embed.a",
       "headers": [
-        "include/zzz_embed.h"
+        "include/zzz_embed.h",
+        "include/zzz.h",
+        "include/zzz_engine.h"
       ],
       "backend": "cpu",
       "cpu": "x86_64_v3",

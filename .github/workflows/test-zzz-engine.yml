@@ -1,7 +1,7 @@
-# Purpose: Fetch and verify the pinned zzz (Kitten TTS) engine slices and link them into Rust tests on each pinned target.
+# Purpose: Fetch and verify the pinned combined Phonon/Kitten engine slices and link them into Rust tests on each pinned target.
 name: "CI: zzz engine"
 
-# The Kitten TTS 2 pins (crates/zzz-sys/natives-manifest.json) define the
+# The combined speech pins (crates/zzz-sys/natives-manifest.json) define the
 # binary contract; this lane proves the delivery path end to end in CI:
 # authenticated fetch from the pinned release, staged verification by the
 # same trusted tool that stages locally (zzz_pull.py), and real linking of
@@ -39,6 +39,9 @@ on:
       - 'crates/xybrid-core/src/features.rs'
       - 'crates/xybrid-core/tests/zzz_tts_integration.rs'
       - 'crates/xybrid-core/Cargo.toml'
+      - 'crates/xybrid-sdk/src/model.rs'
+      - 'crates/xybrid-sdk/tests/zzz_phonon.rs'
+      - 'crates/xybrid-ffi-facade/**'
       - 'tools/scripts/zzz_pull.py'
       - 'tools/scripts/tests/test_zzz_pull.py'
       - '.github/workflows/test-zzz-engine.yml'
@@ -56,9 +59,10 @@ permissions: read-all
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Pinned release to verify against; the tool refuses anything the committed
-  # manifest does not say, so this only fails fast before the token is used.
-  ZZZ_ENGINE_TAG: v0.1.0-rc.3
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+  CARGO_BUILD_JOBS: '2'
 
 jobs:
   test-zzz-engine:
@@ -188,6 +192,12 @@ jobs:
         env:
           XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
         run: cargo test -p xybrid-core --features tts-zzz --lib zzz
+
+      - name: SDK routing and request tests
+        if: steps.stage.outputs.slice != '' && matrix.native
+        env:
+          XYBRID_ZZZ_PREBUILT_DIR: ${{ steps.stage.outputs.slice }}
+        run: cargo test -p xybrid-sdk --features tts-zzz --lib zzz
 
       - name: Notice — secrets absent, lane skipped
         if: env.ZZZ_CI_ENABLED != 'true'

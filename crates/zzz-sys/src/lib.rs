@@ -1,4 +1,4 @@
-//! Raw FFI bindings to the pinned zzz CPU engine (Kitten TTS 2 slice).
+//! FFI and safe speech sessions for the pinned combined zzz CPU engine.
 //!
 //! `libzzz_embed.a` is a prebuilt, privately staged static archive — see
 //! `build.rs`, `natives-manifest.json` and the crate README. This crate owns
@@ -7,8 +7,8 @@
 //! engine without xybrid's envelopes) may touch.
 //!
 //! The declarations below mirror `include/zzz_embed.h` (ABI version 1)
-//! by hand rather than through bindgen: the surface is six functions and
-//! three structs, the header notes it is experimental, and a generated
+//! by hand rather than through bindgen: the surface is small, the header
+//! notes it is experimental, and a generated
 //! snapshot would add a bindgen/libclang dependency (and a Bazel story) for
 //! zero value at this size. Keep the two in lockstep when the engine's ABI
 //! moves; the compile-time struct-size/link-layout assertions below catch
@@ -29,11 +29,13 @@
 //! - [`KittenSession`] — RAII handle over `zzz_embed_open_kitten`, with
 //!   `synthesize` (audio collected from the C callback, borrowed only for
 //!   the duration of the call, per the header's ownership contract)
+//! - [`PhononSession`] — the same ownership contract over `zzz_embed_open`,
+//!   with GGUF-selected voices and sampling defaults
 //! - [`SynthesisOutcome`] — delivery payload with the capped/partial flags
 //!
 //! Zero `unsafe` on the public surface: every `unsafe` block sits in
 //! [`mod@session`] with a `# Safety` comment, mirroring `xybrid-llama`'s and
-//! `xybrid-whisper`'s discipline. `KittenSession` is deliberately not
+//! `xybrid-whisper`'s discipline. Both session types are deliberately not
 //! `Sync`: the header documents one synthesis at a time per session, with no
 //! re-entrant or concurrent calls.
 
@@ -113,8 +115,8 @@ impl core::fmt::Debug for EmbedError {
 }
 
 /// Session options. Initialize from [`EmbedOptions::default`], then override
-/// fields. Zero is not a default sentinel: seed 0 is valid, while zero
-/// capacities or non-positive temperature are not.
+/// fields using `default_options()` when bindings are enabled. Seed 0 is valid;
+/// temperature 0 selects the bundle default. Capacities must be positive.
 ///
 /// Mirrors C `zzz_embed_options` field-for-field. `struct_size` must equal
 /// `sizeof` for this PoC ABI; both sides stay in lockstep because the engine
@@ -226,6 +228,7 @@ mod session;
 #[cfg(feature = "bindings")]
 pub use session::{
     abi_version, default_options, supports_model, ChunkInfo, KittenCancellation, KittenFlags,
-    KittenSession, KittenSettings, StreamOutcome, SynthesisOutcome, SynthesisStatus, ZzzError,
-    SYNTHESIS_CHANNELS, SYNTHESIS_SAMPLE_RATE,
+    KittenSession, KittenSettings, PhononCancellation, PhononSession, PhononSettings,
+    StreamOutcome, SynthesisOutcome, SynthesisStatus, ZzzError, SYNTHESIS_CHANNELS,
+    SYNTHESIS_SAMPLE_RATE,
 };

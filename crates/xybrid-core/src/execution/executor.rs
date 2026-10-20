@@ -353,6 +353,11 @@ impl TemplateExecutor {
             "zzz".to_string(),
             Box::new(crate::runtime_adapter::zzz::ZzzKittenRuntime::new()),
         );
+        #[cfg(feature = "tts-zzz")]
+        runtimes.insert(
+            "zzz-phonon".to_string(),
+            Box::new(crate::runtime_adapter::zzz::ZzzPhononRuntime::new()),
+        );
         runtimes
     }
 
@@ -520,6 +525,10 @@ impl TemplateExecutor {
             ExecutionTemplate::TfLite { model_file } => ("tflite", model_file),
             #[cfg(feature = "asr-whispercpp")]
             ExecutionTemplate::GgmlWhisper { model_file, .. } => ("whispercpp", model_file),
+            #[cfg(feature = "tts-zzz")]
+            ExecutionTemplate::ZzzEmbed { model_file, .. } => ("zzz", model_file),
+            #[cfg(feature = "tts-zzz")]
+            ExecutionTemplate::ZzzPhonon { model_file, .. } => ("zzz-phonon", model_file),
             // A scorer's session lives in the executor's own cache.
             ExecutionTemplate::ChoiceScorer {
                 scorer: ChoiceScorerSpec::OnnxByteOptionScorer(spec),
@@ -889,12 +898,21 @@ impl TemplateExecutor {
                 return self.execute_zzz(metadata, input);
             }
             #[cfg(not(feature = "tts-zzz"))]
-            ExecutionTemplate::ZzzEmbed { .. } => {
+            ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. } => {
                 return Err(AdapterError::RuntimeError(
                     "zzz execution requires the 'tts-zzz' feature and its \
                      privately staged pinned engine slice"
                         .to_string(),
                 ));
+            }
+            #[cfg(feature = "tts-zzz")]
+            ExecutionTemplate::ZzzPhonon { .. } => {
+                self.prepare_phonon(metadata, input, config)?;
+                return self
+                    .runtimes
+                    .get_mut("zzz-phonon")
+                    .expect("prepared Phonon runtime exists")
+                    .execute(input);
             }
         };
 
@@ -3156,6 +3174,94 @@ impl TemplateExecutor {
         self.run_postprocessing(metadata, RawOutputs::TensorMap(outputs))
     }
 
+    /// Resolve Phonon template defaults and request overrides before opening or reusing a session.
+    #[cfg(feature = "tts-zzz")]
+    fn prepare_phonon(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        config: Option<&GenerationConfig>,
+    ) -> ExecutorResult<()> {
+        use crate::runtime_adapter::zzz::{PhononDefaults, ZzzPhononRuntime};
+        let ExecutionTemplate::ZzzPhonon {
+            model_file,
+            voice,
+            language,
+            max_frames_per_chunk,
+            max_chunk_tokens,
+            temperature,
+            seed,
+        } = &metadata.execution_template
+        else {
+            return Err(AdapterError::InvalidInput(
+                "Phonon requires a ZzzPhonon template".into(),
+            ));
+        };
+        if !matches!(input.kind, EnvelopeKind::Text(_)) {
+            return Err(AdapterError::InvalidInput(
+                "Phonon requires text input".into(),
+            ));
+        }
+        fn parse<T: std::str::FromStr>(input: &Envelope, key: &str) -> ExecutorResult<Option<T>> {
+            input
+                .metadata
+                .get(key)
+                .map(|value| {
+                    value
+                        .parse()
+                        .map_err(|_| AdapterError::InvalidInput(format!("invalid Phonon {key}")))
+                })
+                .transpose()
+        }
+        crate::runtime_adapter::zzz::assert_engine_abi()?;
+        let mut settings = xybrid_zzz_sys::PhononSettings::default();
+        if let Some(value) = max_frames_per_chunk {
+            settings.max_frames_per_chunk = *value;
+        }
+        if let Some(value) = max_chunk_tokens {
+            settings.max_chunk_tokens = *value;
+        }
+        // An explicit generation config owns temperature, matching the LLM
+        // request precedence. Other LLM knobs are not speech frame/token caps.
+        settings.temperature = match config {
+            Some(config) => config.temperature,
+            None => parse::<f32>(input, "temperature")?
+                .or(*temperature)
+                .unwrap_or(settings.temperature),
+        };
+        settings.seed = parse::<u64>(input, "seed")?
+            .or(*seed)
+            .unwrap_or(settings.seed);
+        settings
+            .validate()
+            .map_err(|error| AdapterError::InvalidInput(error.to_string()))?;
+        let primary = Path::new(&self.base_path).join(model_file);
+        let defaults = PhononDefaults {
+            model: primary.clone(),
+            voice: input
+                .metadata
+                .get("voice_id")
+                .cloned()
+                .or_else(|| voice.clone()),
+            language: input
+                .metadata
+                .get("language")
+                .cloned()
+                .or_else(|| language.clone()),
+            settings,
+        };
+        let runtime = self
+            .runtimes
+            .get_mut("zzz-phonon")
+            .ok_or_else(|| AdapterError::RuntimeError("Phonon runtime is not configured".into()))?;
+        runtime
+            .as_any()
+            .downcast_ref::<ZzzPhononRuntime>()
+            .ok_or_else(|| AdapterError::RuntimeError("invalid Phonon runtime".into()))?
+            .apply_defaults(defaults);
+        runtime.load(&primary)
+    }
+
     /// zzz CPU engine execution (Kitten TTS 2), dispatched directly from the
     /// `ZzzEmbed` template arm — like GGUF executions, it bypasses the generic
     /// single-model flow (no phonemize preprocessing, ONNX chunking does not
@@ -3374,7 +3480,45 @@ impl TemplateExecutor {
         cancelled: &(dyn Fn() -> bool + Sync),
         on_chunk: &mut dyn FnMut(super::TtsAudioChunk) -> bool,
     ) -> ExecutorResult<super::TtsStreamResult> {
+        self.execute_tts_streaming_with_config(metadata, input, None, cancelled, on_chunk)
+    }
+
+    /// Stream TTS using the same generation-temperature override as batch execution.
+    pub fn execute_tts_streaming_with_config(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        config: Option<&GenerationConfig>,
+        cancelled: &(dyn Fn() -> bool + Sync),
+        on_chunk: &mut dyn FnMut(super::TtsAudioChunk) -> bool,
+    ) -> ExecutorResult<super::TtsStreamResult> {
+        // Other runtimes currently resolve their own generation configuration.
+        let _ = config;
         use super::{TtsAudioChunk, TtsStatus, TtsStreamResult};
+        #[cfg(not(feature = "tts-zzz"))]
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. }
+        ) {
+            return Err(AdapterError::RuntimeError(
+                "zzz execution requires the 'tts-zzz' feature and its privately staged pinned engine slice".into(),
+            ));
+        }
+        #[cfg(feature = "tts-zzz")]
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ZzzPhonon { .. }
+        ) {
+            self.prepare_phonon(metadata, input, config)?;
+            return self
+                .runtimes
+                .get("zzz-phonon")
+                .expect("prepared Phonon runtime exists")
+                .as_any()
+                .downcast_ref::<crate::runtime_adapter::zzz::ZzzPhononRuntime>()
+                .expect("prepare_phonon checked runtime type")
+                .execute_stream(input, cancelled, on_chunk);
+        }
         #[cfg(feature = "tts-zzz")]
         if matches!(
             metadata.execution_template,
@@ -3640,6 +3784,12 @@ const REASONING_PROMPT_HEADROOM: usize = 512;
 /// `REASONING_PROMPT_HEADROOM` tokens of prompt room inside the model's
 /// operational context and never drops below the global default.
 pub fn model_default_gen_config(metadata: &ModelMetadata) -> GenerationConfig {
+    if let ExecutionTemplate::ZzzPhonon { temperature, .. } = &metadata.execution_template {
+        return GenerationConfig {
+            temperature: temperature.unwrap_or(0.0),
+            ..GenerationConfig::default()
+        };
+    }
     let (generation_params, context_length) = match &metadata.execution_template {
         ExecutionTemplate::Gguf {
             generation_params,

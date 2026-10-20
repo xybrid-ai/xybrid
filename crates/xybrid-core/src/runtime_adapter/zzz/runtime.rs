@@ -10,16 +10,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use xybrid_zzz_sys::{
-    KittenSession, KittenSettings, SYNTHESIS_CHANNELS, SYNTHESIS_SAMPLE_RATE, ZZZ_EMBED_ABI_VERSION,
-};
+use xybrid_zzz_sys::{KittenSession, KittenSettings, ZZZ_EMBED_ABI_VERSION};
 
-use crate::audio::f32_to_pcm16;
-use crate::execution::{TtsAudioChunk, TtsStatus, TtsStreamResult};
+use crate::execution::{TtsAudioChunk, TtsStreamResult};
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::{AdapterError, AdapterResult, ModelRuntime};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 /// The bundle-declared assets a `ZzzEmbed` template resolves to: full paths
 /// (base_path joined because the [`ModelRuntime`] surface has no base-path
@@ -139,87 +134,15 @@ impl ZzzKittenRuntime {
         let session = guard
             .as_mut()
             .ok_or_else(|| AdapterError::RuntimeError("zzz engine session is not loaded".into()))?;
-        let mut summary = TtsStreamResult {
-            status: TtsStatus::Cancelled,
-            sample_rate: SYNTHESIS_SAMPLE_RATE,
-            channels: SYNTHESIS_CHANNELS,
-            samples: 0,
-            chunks: 0,
-            limited_chunks: 0,
-        };
-        if cancelled() {
-            return Ok(summary);
-        }
-        let cancel = session.cancellation_handle();
-        let finished = AtomicBool::new(false);
-        // The watcher never takes the session/model lock. Repeated cancel covers
-        // native's idle-cancel/start race; the scoped join precedes session close.
-        let mut delivered_end = 0;
-        let outcome = std::thread::scope(|scope| {
-            scope.spawn(|| {
-                while !finished.load(Ordering::Acquire) {
-                    if cancelled() {
-                        cancel.cancel();
-                    }
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-            });
-            struct FinishOnDrop<'a>(&'a AtomicBool);
-            impl Drop for FinishOnDrop<'_> {
-                fn drop(&mut self) {
-                    self.0.store(true, Ordering::Release);
-                }
-            }
-            let finish_guard = FinishOnDrop(&finished);
-            let result = session.synthesize_stream_outcome(
-                text,
-                defaults.language.as_deref(),
-                &mut |samples, info| {
-                    if cancelled() {
-                        cancel.cancel();
-                        return false;
-                    }
-                    // Copy/convert before the native borrowed buffer expires. No
-                    // trim, normalization or fade is applied to delivery packets.
-                    summary.sample_rate = info.sample_rate;
-                    summary.channels = info.channels;
-                    delivered_end =
-                        info.first_sample + samples.len() as u64 / u64::from(info.channels.max(1));
-                    let pcm = f32_to_pcm16(samples);
-                    let keep_going = on_chunk(TtsAudioChunk {
-                        pcm,
-                        sample_rate: info.sample_rate,
-                        channels: info.channels,
-                        first_sample: info.first_sample,
-                    });
-                    if !keep_going || cancelled() {
-                        cancel.cancel();
-                        return false;
-                    }
-                    true
-                },
-            );
-            drop(finish_guard);
-            result
-        })
-        .map_err(|error| AdapterError::RuntimeError(error.to_string()))?;
-        // Native return is authoritative. A new predicate poll here could
-        // turn completed/limited speech into cancellation after synthesis ends.
-        summary.status = match outcome.status {
-            xybrid_zzz_sys::SynthesisStatus::Completed => TtsStatus::Completed,
-            xybrid_zzz_sys::SynthesisStatus::Cancelled => TtsStatus::Cancelled,
-            xybrid_zzz_sys::SynthesisStatus::Limited => TtsStatus::Limited,
-        };
-        if outcome.result.sample_rate != 0 {
-            summary.sample_rate = outcome.result.sample_rate;
-        }
-        if outcome.result.channels != 0 {
-            summary.channels = outcome.result.channels;
-        }
-        summary.samples = outcome.result.samples.max(delivered_end);
-        summary.chunks = outcome.result.chunks;
-        summary.limited_chunks = outcome.result.limited_chunks;
-        Ok(summary)
+        super::stream::stream_session(
+            input,
+            cancelled,
+            on_chunk,
+            session.cancellation_handle(),
+            |_, callback| {
+                session.synthesize_stream_outcome(text, defaults.language.as_deref(), callback)
+            },
+        )
     }
 }
 

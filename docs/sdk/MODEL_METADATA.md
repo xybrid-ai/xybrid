@@ -76,6 +76,14 @@ GGUF model execution for local LLMs via llama.cpp.
 | `chat_template` | string | no | `null` | Path to chat template JSON file |
 | `context_length` | integer | no | `4096` | Maximum context length in tokens |
 
+### `ZzzPhonon`
+
+Phonon speech from one GGUF through the opt-in `tts-zzz` CPU backend. The
+`model_file` field is required; optional bundled voice, language and sampling
+settings use the engine defaults when omitted. Temperature `0` selects the
+bundle's default. See [Phonon speech](PHONON.md) for metadata, request overrides,
+streaming, cancellation and custom native builds.
+
 ### `SafeTensors`
 
 SafeTensors model execution via Candle (pure Rust). Used for Whisper models.

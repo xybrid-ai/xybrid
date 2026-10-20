@@ -66,9 +66,7 @@ fn message_of(error: &EmbedError, fallback: &str) -> ZzzError {
     }
 }
 
-/// The linked engine's documented defaults (4 frame/chunk budget, 256-token
-/// chunk budget, temperature 0.4), read from the engine rather than carried
-/// as a parallel constant table.
+/// Read Phonon's defaults from the linked engine, including bundle temperature selection.
 #[must_use]
 pub fn default_options() -> EmbedOptions {
     let mut options = EmbedOptions {
@@ -84,6 +82,14 @@ extern "C" {
     fn zzz_embed_abi_version() -> u32;
     fn zzz_embed_supports_model(model: *const std::os::raw::c_char) -> i32;
     fn zzz_embed_default_options(options: *mut crate::EmbedOptions);
+    fn zzz_embed_open(
+        model: *const std::os::raw::c_char,
+        model_path: *const std::os::raw::c_char,
+        voice: *const std::os::raw::c_char,
+        options: *const EmbedOptions,
+        out_session: *mut *mut core::ffi::c_void,
+        error: *mut EmbedError,
+    ) -> i32;
     fn zzz_embed_open_kitten(
         options: *const KittenOptions,
         out_session: *mut *mut core::ffi::c_void,
@@ -139,6 +145,153 @@ pub struct KittenSettings {
     pub flags: KittenFlags,
 }
 
+/// Phonon open settings, initialized from the linked engine's defaults.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PhononSettings {
+    /// Positive per-chunk frame capacity; reaching it reports partial audio.
+    pub max_frames_per_chunk: u32,
+    /// Positive text-token capacity per chunk.
+    pub max_chunk_tokens: u32,
+    /// Zero selects the GGUF bundle default; positive finite values override it.
+    pub temperature: f32,
+    /// Reset for each utterance; zero is a valid seed.
+    pub seed: u64,
+}
+
+impl Default for PhononSettings {
+    fn default() -> Self {
+        let options = default_options();
+        Self {
+            max_frames_per_chunk: options.max_frames_per_chunk,
+            max_chunk_tokens: options.max_chunk_tokens,
+            temperature: options.temperature,
+            seed: options.seed,
+        }
+    }
+}
+
+impl PhononSettings {
+    /// Check capacities and sampling values before opening any model files.
+    pub fn validate(&self) -> Result<(), ZzzError> {
+        if self.max_frames_per_chunk == 0
+            || self.max_chunk_tokens == 0
+            || !self.temperature.is_finite()
+            || self.temperature < 0.0
+        {
+            return Err(ZzzError::InvalidArgument {
+                message: "capacities must be positive; temperature must be finite and nonnegative"
+                    .into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// A resident Phonon session with exclusive synthesis and lifetime-safe cancellation.
+///
+/// The mapped GGUF must remain unchanged until the session and its cancellation
+/// handles are dropped. Voices come from that GGUF; no external voice is opened.
+/// Like [`KittenSession`], this type is `Send` but deliberately not `Sync`.
+#[derive(Debug)]
+pub struct PhononSession(KittenSession);
+
+impl PhononSession {
+    /// Open a GGUF with a bundled voice, or let the engine select its default.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZzzError`] for invalid settings/strings, missing assets or an
+    /// unknown bundled voice. Strings need only remain alive through this call.
+    pub fn open_phonon(
+        model_path: &Path,
+        voice: Option<&str>,
+        settings: PhononSettings,
+    ) -> Result<Self, ZzzError> {
+        settings.validate()?;
+        let path = c_string(
+            model_path
+                .to_str()
+                .ok_or_else(|| ZzzError::InvalidArgument {
+                    message: "asset path is not valid UTF-8".into(),
+                })?,
+        )?;
+        let voice = voice.map(c_string).transpose()?;
+        let model = c_string("phonon")?;
+        let options = EmbedOptions {
+            struct_size: core::mem::size_of::<EmbedOptions>() as u32,
+            max_frames_per_chunk: settings.max_frames_per_chunk,
+            max_chunk_tokens: settings.max_chunk_tokens,
+            temperature: settings.temperature,
+            seed: settings.seed,
+        };
+        let mut error = EmbedError::zeroed();
+        let mut session = ptr::null_mut();
+        // # Safety: all strings and caller-owned outputs outlive this synchronous
+        // open. The engine owns the resulting generic session; the shared handle
+        // closes it exactly once after synthesis and every cancellation owner end.
+        let code = unsafe {
+            zzz_embed_open(
+                model.as_ptr(),
+                path.as_ptr(),
+                voice.as_ref().map_or(ptr::null(), |value| value.as_ptr()),
+                &options,
+                &mut session,
+                &mut error,
+            )
+        };
+        if code != ZZZ_EMBED_OK {
+            return Err(message_of(&error, "opening the Phonon engine failed"));
+        }
+        let session = ptr::NonNull::new(session).ok_or_else(|| ZzzError::Failed {
+            message: "engine reported success without a session".into(),
+        })?;
+        // Both model families use the same opaque C session and synthesis ABI.
+        Ok(Self(KittenSession {
+            session: Arc::new(SessionHandle(session)),
+            not_sync: PhantomData,
+        }))
+    }
+
+    /// Clone a handle that can cancel concurrently without closing the session.
+    pub fn cancellation_handle(&self) -> PhononCancellation {
+        self.0.cancellation_handle()
+    }
+
+    /// Stream borrowed samples, preserving counters for cancellation and limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine's typed error or a contained callback panic. A returned
+    /// error leaves the session reusable; delivered audio cannot be retracted.
+    pub fn synthesize_stream_outcome(
+        &mut self,
+        text: &str,
+        language: Option<&str>,
+        callback: &mut dyn FnMut(&[f32], ChunkInfo) -> bool,
+    ) -> Result<StreamOutcome, ZzzError> {
+        self.0.synthesize_stream_outcome(text, language, callback)
+    }
+
+    /// Stream samples, reporting cancellation and partial limits as errors.
+    pub fn synthesize_stream(
+        &mut self,
+        text: &str,
+        language: Option<&str>,
+        callback: &mut dyn FnMut(&[f32], ChunkInfo) -> bool,
+    ) -> Result<EmbedResult, ZzzError> {
+        self.0.synthesize_stream(text, language, callback)
+    }
+
+    /// Collect a completed utterance; cancellation or limits discard partial audio.
+    pub fn synthesize(
+        &mut self,
+        text: &str,
+        language: Option<&str>,
+    ) -> Result<SynthesisOutcome, ZzzError> {
+        self.0.synthesize(text, language)
+    }
+}
+
 /// One boxed streaming callback (chunk samples + metadata -> continue?).
 /// Explicit `'a` bound: the boxed closure borrows the caller's callback
 /// only for the synchronous call.
@@ -186,6 +339,8 @@ impl Drop for SessionHandle {
 /// A cancellation-only handle that keeps the native session alive.
 #[derive(Clone)]
 pub struct KittenCancellation(Arc<SessionHandle>);
+/// Cancellation for Phonon uses the same lifetime-safe generic C session handle.
+pub type PhononCancellation = KittenCancellation;
 impl core::fmt::Debug for KittenCancellation {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("KittenCancellation")

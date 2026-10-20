@@ -165,7 +165,7 @@ pub enum ExecutionTemplate {
         generation_params: Option<GenerationParams>,
     },
 
-    /// zzz CPU engine execution, pinned Kitten TTS 2 profile, via the
+    /// Kitten TTS 2 execution through the pinned combined zzz CPU engine and
     /// quietly staged `libzzz_embed.a` (see `crates/zzz-sys`). Model
     /// weights and both voice JSONs are bundle files resolved like other
     /// template paths.
@@ -215,6 +215,33 @@ pub enum ExecutionTemplate {
         /// Accelerate waveform matrix products on macOS only.
         #[serde(default)]
         accelerate: bool,
+    },
+
+    /// Phonon speech from one GGUF using the opt-in zzz CPU engine.
+    ///
+    /// Voices are embedded in the GGUF. Omitted options use native defaults;
+    /// temperature zero selects the loaded bundle's sampling default.
+    ZzzPhonon {
+        /// GGUF path relative to the model bundle.
+        model_file: String,
+        /// Bundled voice name; absent lets the engine select its default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        voice: Option<String>,
+        /// Language code; absent selects the engine's English default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
+        /// Positive per-chunk frame capacity; absent uses the engine default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_frames_per_chunk: Option<u32>,
+        /// Positive text-token capacity; absent uses the engine default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_chunk_tokens: Option<u32>,
+        /// Nonnegative finite sampling temperature; zero selects the bundle default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        temperature: Option<f32>,
+        /// Utterance seed; zero is valid and absence uses the engine default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seed: Option<u64>,
     },
 
     /// A decision model: scores one context against a closed list of
@@ -762,7 +789,7 @@ pub fn backend_label_from_template(
         ExecutionTemplate::GgmlWhisper { .. } => Some("whispercpp"),
         // The template fixes the runtime to the pinned zzz engine slice; no
         // hint participates.
-        ExecutionTemplate::ZzzEmbed { .. } => Some("zzz"),
+        ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. } => Some("zzz"),
         // The only registered scorer kind is an ONNX byte scorer; a new kind
         // states its own runtime here.
         ExecutionTemplate::ChoiceScorer { scorer } => match scorer {
@@ -845,6 +872,7 @@ pub fn quantization_label_from_metadata(metadata: &ModelMetadata) -> Option<Stri
         | ExecutionTemplate::ModelGraph { .. }
         | ExecutionTemplate::GgmlWhisper { .. }
         | ExecutionTemplate::ZzzEmbed { .. }
+        | ExecutionTemplate::ZzzPhonon { .. }
         | ExecutionTemplate::ChoiceScorer { .. } => None,
     };
     if let Some(model_file) = model_file {
@@ -928,7 +956,7 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
                 "cpu"
             }
         }
-        ExecutionTemplate::ZzzEmbed { .. } => {
+        ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. } => {
             // The pinned zzz slice is CPU-only by profile (the Metal LLM
             // remains excluded), so the swim-lane colour is fixed.
             "cpu"
@@ -1053,6 +1081,36 @@ mod tests {
         for name in ["ChoiceScorer", "OnnxByteOptionScorer", "fixed_choices"] {
             assert!(schema.contains(name), "the schema is missing {name}");
         }
+    }
+
+    #[test]
+    fn zzz_phonon_defaults_round_trip_without_kitten_assets() {
+        let template: ExecutionTemplate = serde_json::from_value(serde_json::json!({
+            "type":"ZzzPhonon", "model_file":"phonon.gguf"
+        }))
+        .unwrap();
+        assert!(matches!(
+            &template,
+            ExecutionTemplate::ZzzPhonon {
+                voice: None,
+                language: None,
+                temperature: None,
+                seed: None,
+                max_frames_per_chunk: None,
+                max_chunk_tokens: None,
+                ..
+            }
+        ));
+        assert_eq!(
+            backend_label_from_template(&template, Some("llamacpp")),
+            Some("zzz")
+        );
+        assert_eq!(span_kind_from_template(&template), "cpu");
+        assert_eq!(
+            serde_json::from_str::<ExecutionTemplate>(&serde_json::to_string(&template).unwrap())
+                .unwrap(),
+            template
+        );
     }
 
     #[cfg(not(all(

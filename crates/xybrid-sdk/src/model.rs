@@ -3232,7 +3232,7 @@ impl ModelLoader {
     fn infer_output_type(metadata: &ModelMetadata) -> OutputType {
         if matches!(
             metadata.execution_template,
-            ExecutionTemplate::ZzzEmbed { .. }
+            ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. }
         ) {
             return OutputType::Audio;
         }
@@ -4276,9 +4276,10 @@ impl XybridModel {
             .executor
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .execute_tts_streaming_controlled(
+            .execute_tts_streaming_with_config(
                 &metadata,
                 envelope,
+                options.generation_config.as_ref(),
                 &|| should_stop(false),
                 &mut adapter,
             );
@@ -4348,15 +4349,15 @@ impl XybridModel {
             .map_err(|reason| SdkError::inference(format!("Execution aborted: {reason}")))?;
         #[cfg(feature = "tts-zzz")]
         {
-            let is_kitten = matches!(
+            let is_zzz = matches!(
                 self.handle
                     .read()
                     .unwrap_or_else(|e| e.into_inner())
                     .metadata
                     .execution_template,
-                ExecutionTemplate::ZzzEmbed { .. }
+                ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. }
             );
-            if is_kitten {
+            if is_zzz {
                 let start = Instant::now();
                 let mut pcm = Vec::new();
                 let summary = self.run_tts_streaming(envelope, options, |packet| {
@@ -7048,7 +7049,7 @@ mod tests {
     }
 
     #[test]
-    fn tts_models_do_not_advertise_token_or_asr_streaming() {
+    fn zzz_and_onnx_tts_models_do_not_advertise_token_or_asr_streaming() {
         let mut kokoro = ModelMetadata::onnx("kokoro", "1.0", "model.onnx");
         kokoro
             .metadata
@@ -7066,7 +7067,12 @@ mod tests {
             sentence_chunks: true,
             accelerate: false,
         };
-        for metadata in [kokoro, kitten] {
+        let mut phonon = kokoro.clone();
+        phonon.execution_template = serde_json::from_value(serde_json::json!({
+            "type":"ZzzPhonon", "model_file":"phonon.gguf"
+        }))
+        .unwrap();
+        for metadata in [kokoro, kitten, phonon] {
             let directory = tempfile::tempdir().unwrap();
             std::fs::write(
                 directory.path().join("model_metadata.json"),

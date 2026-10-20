@@ -90,7 +90,7 @@ class ZzzPullTests(unittest.TestCase):
             "RECEIPT.json": json.dumps(receipt).encode(),
             "share/zzz_embed.json": json.dumps(metadata).encode(),
             "lib/libzzz_embed.a": b"!<arch>\nsynthetic-library",
-            "include/zzz_embed.h": b"/* synthetic Kitten TTS 2 header */\n",
+            **{header: b"/* synthetic engine header */\n" for header in entry["headers"]},
         }
         archive_root = entry["archive"].removesuffix(".tar.gz")
         archive = self.root / entry["archive"]
@@ -157,13 +157,41 @@ class ZzzPullTests(unittest.TestCase):
             with self.assertRaisesRegex(zzz.StageError, "unexpected engine manifest keys"):
                 zzz.select_pin(self.target, self.manifest)
 
-    def test_committed_manifest_has_exactly_three_kitten_targets(self):
+    def test_committed_manifest_has_exactly_three_combined_targets(self):
         self.assertEqual(
             set(zzz.ZIG_TARGETS), {e["target"] for e in self.manifest_data["archives"]}
         )
         self.assertEqual(3, len(self.manifest_data["archives"]))
         for target in zzz.ZIG_TARGETS:
-            self.assertEqual([zzz.PROFILE], zzz.select_pin(target).entry["models"])
+            pin = zzz.select_pin(target)
+            self.assertEqual("combined", pin.entry["profile"])
+            self.assertEqual(zzz.MODELS, pin.entry["models"])
+            self.assertEqual(zzz.APIS, pin.entry["apis"])
+            self.assertEqual(zzz.HEADERS, pin.entry["headers"])
+
+    def test_selective_profiles_cannot_substitute_for_combined(self):
+        for profile in ("phonon", "kitten-tts2"):
+            with self.subTest(profile=profile):
+                data = copy.deepcopy(self.manifest_data)
+                for entry in data["archives"]:
+                    entry["profile"] = profile
+                    entry["models"] = [profile]
+                self.manifest.write_text(json.dumps(data))
+                with self.assertRaisesRegex(zzz.StageError, "target/profile pin"):
+                    zzz.select_pin(self.target, self.manifest)
+
+    def test_combined_requires_both_speech_models_and_all_headers(self):
+        for field, value in (
+            ("models", ["phonon"]),
+            ("headers", ["include/zzz_embed.h"]),
+            ("apis", {"zzz_embed": 1}),
+        ):
+            with self.subTest(field=field):
+                data = copy.deepcopy(self.manifest_data)
+                data["archives"][0][field] = value
+                self.manifest.write_text(json.dumps(data))
+                with self.assertRaisesRegex(zzz.StageError, "pin mismatch"):
+                    zzz.select_pin(data["archives"][0]["target"], self.manifest)
 
     def test_all_supported_slices_stage_and_verify_without_credentials(self):
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -275,9 +303,11 @@ class ZzzPullTests(unittest.TestCase):
         self.assertFalse((self.root / "outside").exists())
 
     def test_missing_payload_is_rejected(self):
-        archive, pin = self.make_archive(omit="include/zzz_embed.h")
-        with self.assertRaisesRegex(zzz.StageError, "missing archive payload"):
-            zzz.inspect_archive(archive, pin)
+        for header in zzz.HEADERS:
+            with self.subTest(header=header):
+                archive, pin = self.make_archive(omit=header)
+                with self.assertRaisesRegex(zzz.StageError, "missing archive payload"):
+                    zzz.inspect_archive(archive, pin)
 
     def test_archive_size_limits_are_enforced(self):
         archive, pin = self.make_archive()
@@ -295,6 +325,8 @@ class ZzzPullTests(unittest.TestCase):
         for name in (
             "lib/libzzz_embed.a",
             "include/zzz_embed.h",
+            "include/zzz.h",
+            "include/zzz_engine.h",
             "RECEIPT.json",
             "share/zzz_embed.json",
             zzz.STAGED_ARCHIVE,

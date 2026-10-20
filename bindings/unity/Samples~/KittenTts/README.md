@@ -1,4 +1,4 @@
-# KittenTTS 2 rc.4 local SDK integration
+# KittenTTS 2 local SDK integration
 
 Kitten runs through `ModelLoader.FromDirectory`, the Bolt plugin, and the existing
 Unity audio API. The plugin must be built with `tts-zzz`; installing these
@@ -36,14 +36,14 @@ waveform decoding of speech tokens.
 ## Build the local plugin
 
 Native artifacts use Bazel. Private engine slices are verified by `zzz_pull.py`
-against the rc.4 manifest checksum, receipt, ABI, profile and target. Keep
+against the rc.6 combined-profile checksum, receipt, ABI and target. Keep
 engine archives, receipts and staging directories outside public artifacts and
 caches.
 
 ```bash
 # Python 3.11+, authenticated access to the pinned release as needed.
 python3 tools/scripts/zzz_pull.py --target aarch64-apple-darwin \
-  --archive /private/path/zzz-kitten-tts2-macos-arm64-v0.1.0-rc.4.tar.gz \
+  --archive /private/path/zzz-macos-arm64-v0.1.0-rc.6.tar.gz \
   > /tmp/xybrid-kitten-slice.txt
 bazel build -c opt --config=macos --//:tts_zzz=true \
   --repo_env=XYBRID_ZZZ_PREBUILT_DIR="$(cat /tmp/xybrid-kitten-slice.txt)" \
@@ -94,8 +94,8 @@ Stage/copy the plugin tree into your project's `Assets/Xybrid/Plugins`.
 Remove or park
 old duplicate Xybrid plugins outside `Assets` and the package first; one copy
 must be enabled for the target. Preserve the generated `.meta` files. Write
-`Assets/Xybrid/Plugins/.xybrid-native-macos-version` containing `0.10.1` (the
-managed package version), or the analogous `linux` marker. The existing editor
+`Assets/Xybrid/Plugins/.xybrid-native-macos-version` containing the managed
+package's version, or the analogous `linux` marker. The existing editor
 resolver then retains the local plugin. Its forced Download menu replaces it
 with release natives, so restage the local plugin/marker afterward if used.
 Do not commit local native binaries or model files.

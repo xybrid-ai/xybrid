@@ -1,6 +1,6 @@
 //! Build script for `xybrid-zzz-sys`.
 //!
-//! Locates, re-verifies, and statically links the private Kitten TTS 2 engine
+//! Locates, re-verifies, and statically links the private combined speech engine
 //! slice (`libzzz_embed.a`) that `tools/scripts/zzz_pull.py` staged from the
 //! zzz release pinned in `crates/zzz-sys/natives-manifest.json`.
 //!
@@ -61,8 +61,11 @@ fn main() {
         return;
     }
 
-    println!("cargo:rerun-if-changed=tools/scripts/zzz_pull.py");
+    println!("cargo:rerun-if-changed=../../tools/scripts/zzz_pull.py");
     let slice = verified_slice();
+    // A changed library, receipt or integrity anchor must re-run verification,
+    // even when the manifest and the staging path themselves did not change.
+    println!("cargo:rerun-if-changed={}", slice.display());
     emit_link_directives(&slice);
 }
 

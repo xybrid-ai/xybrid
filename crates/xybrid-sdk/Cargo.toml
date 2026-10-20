@@ -100,7 +100,7 @@ platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "coreml"
 # Desktop (Linux/Windows): CPU with llama.cpp
 platform-desktop = ["xybrid-core/ort-download", "llm-llamacpp-vision", "asr-whispercpp"]
 
-# Kitten TTS 2 via the pinned zzz engine is intentionally NOT in any
+# Phonon and Kitten TTS 2 via the pinned zzz engine are intentionally NOT in any
 # platform-* preset yet: the native slice is only published for
 # (macos-arm64 | android-arm64 | linux-x86_64), so enabling it in presets
 # would fail Windows/iOS SDK builds. Enable explicitly, per target, until

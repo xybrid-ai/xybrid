@@ -572,7 +572,7 @@
           ]
         },
         {
-          "description": "GGML-format Whisper speech recognition, executed by whisper.cpp on the\nsame ggml the local LLM backend already links.\n\nDistinct from [`ExecutionTemplate::SafeTensors`] with\n`architecture: \"whisper\"`, which routes to the pure-Rust Candle\nimplementation. Both transcribe; they differ in weight format (GGML\nquantized vs F32 safetensors) and therefore in cost, which is the whole\nreason this variant exists.\n\nA bundle may also ship whisper.cpp's Core ML encoder beside the model\nfile: `model_file` with its extension and any `-qX_Y` tag replaced by\n`-encoder.mlmodelc` (`ggml-base.en-q5_1.bin` →\n`ggml-base.en-encoder.mlmodelc`). On iOS 16 and later, in builds with\nthe `coreml` feature (the `platform-ios` preset), the encoder then runs\nthrough Core ML and the decoder stays on ggml. Older iOS versions and\nother platforms ignore the file and keep the ggml encoder.",
+          "description": "GGML-format Whisper speech recognition, executed by whisper.cpp on the\nsame ggml the local LLM backend already links.\n\nDistinct from [`ExecutionTemplate::SafeTensors`] with\n`architecture: \"whisper\"`, which routes to the pure-Rust Candle\nimplementation. Both transcribe; they differ in weight format (GGML\nquantized vs F32 safetensors) and therefore in cost, which is the whole\nreason this variant exists.\n\nA bundle may also ship whisper.cpp's Core ML encoder beside the model\nfile: `model_file` with its extension and any `-qX_Y` tag replaced by\n`-encoder.mlmodelc` (`ggml-base.en-q5_1.bin` \u2192\n`ggml-base.en-encoder.mlmodelc`). On iOS 16 and later, in builds with\nthe `coreml` feature (the `platform-ios` preset), the encoder then runs\nthrough Core ML and the decoder stays on ggml. Older iOS versions and\nother platforms ignore the file and keep the ggml encoder.",
           "type": "object",
           "properties": {
             "audio_ctx": {
@@ -654,7 +654,7 @@
           ]
         },
         {
-          "description": "zzz CPU engine execution, pinned Kitten TTS 2 profile, via the\nquietly staged `libzzz_embed.a` (see `crates/zzz-sys`). Model\nweights and both voice JSONs are bundle files resolved like other\ntemplate paths.\n\nDistinct from the ONNX `KittenTTS-Nano` path: the zzz engine links\nthe pinned engine binary (feature `tts-zzz`) and takes the four\nassets directly, without phonemize preprocessing steps.",
+          "description": "Kitten TTS 2 execution through the pinned combined zzz CPU engine and\nquietly staged `libzzz_embed.a` (see `crates/zzz-sys`). Model\nweights and both voice JSONs are bundle files resolved like other\ntemplate paths.\n\nDistinct from the ONNX `KittenTTS-Nano` path: the zzz engine links\nthe pinned engine binary (feature `tts-zzz`) and takes the four\nassets directly, without phonemize preprocessing steps.",
           "type": "object",
           "properties": {
             "decoder_file": {
@@ -680,7 +680,7 @@
               "default": ""
             },
             "max_tokens": {
-              "description": "Generation token cap (0 = engine default of 128; 1..=1023\nexplicit).",
+              "description": "Per-chunk speech token cap: 0 uses available LM-window room with the split-chunk runaway guard; explicit range 1..1023.",
               "type": "integer",
               "format": "uint32",
               "default": 0,
@@ -707,6 +707,76 @@
             "type": {
               "type": "string",
               "const": "ZzzEmbed"
+            },
+            "sentence_chunks": {
+              "type": "boolean",
+              "default": false
+            },
+            "accelerate": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "type",
+            "model_file"
+          ]
+        },
+        {
+          "type": "object",
+          "description": "Phonon speech from one GGUF using the opt-in zzz CPU engine. Omitted settings use engine defaults. Voices come from the GGUF.",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "ZzzPhonon"
+            },
+            "model_file": {
+              "type": "string",
+              "description": "GGUF path relative to the model bundle."
+            },
+            "voice": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "language": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "max_frames_per_chunk": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "format": "uint32"
+            },
+            "max_chunk_tokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "format": "uint32"
+            },
+            "seed": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "format": "uint64"
+            },
+            "temperature": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Zero selects the GGUF bundle default; positive finite values override it.",
+              "minimum": 0
             }
           },
           "required": [

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch and privately stage the pinned Kitten TTS 2 engine before native builds."""
+"""Fetch and privately stage one pinned combined speech engine before native builds."""
 
 from __future__ import annotations
 
@@ -22,7 +22,13 @@ DEFAULT_MANIFEST = (
     Path(__file__).resolve().parents[2] / "crates/zzz-sys/natives-manifest.json"
 )
 DEFAULT_ROOT = Path.home() / ".cache/xybrid/zzz"
-PROFILE = "kitten-tts2"
+PROFILE = "combined"
+MODELS = [
+    "phonon", "kitten-tts2", "cpu-llm", "qwen3-tts", "pocket-tts", "dots-tts",
+    "parakeet-tdt", "qwen3-asr", "kitten-asr", "chatterbox-t3",
+]
+APIS = {"zzz_embed": 1, "zzz": 2, "zzz_engine": 1}
+HEADERS = ["include/zzz_embed.h", "include/zzz.h", "include/zzz_engine.h"]
 STAGED_ARCHIVE = ".pinned-archive.tar.gz"
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_PAYLOAD_BYTES = 256 * 1024 * 1024
@@ -116,12 +122,12 @@ def select_pin(target: str, manifest: Path = DEFAULT_MANIFEST) -> Pin:
     entry = matches[0]
     for field, value in {
         "profile": PROFILE,
-        "models": [PROFILE],
+        "models": MODELS,
         "backend": "cpu",
         "receipt_schema": 3,
-        "apis": {"zzz_embed": 1},
+        "apis": APIS,
         "library": "lib/libzzz_embed.a",
-        "headers": ["include/zzz_embed.h"],
+        "headers": HEADERS,
     }.items():
         expect(entry, field, value, "pin")
     slices = {
@@ -130,7 +136,7 @@ def select_pin(target: str, manifest: Path = DEFAULT_MANIFEST) -> Pin:
         "x86_64-unknown-linux-gnu": "linux-x86_64",
     }
     expect(entry, "slice", slices[target], "pin")
-    expect(entry, "archive", f"zzz-{PROFILE}-{slices[target]}-{tag}.tar.gz", "pin")
+    expect(entry, "archive", f"zzz-{slices[target]}-{tag}.tar.gz", "pin")
     require(
         isinstance(entry.get("sha256"), str)
         and re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]),

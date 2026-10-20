@@ -87,6 +87,7 @@ fn open_session() -> Option<KittenSession> {
 fn abi_and_capability_match_the_pinned_manifest() {
     assert_eq!(abi_version(), ZZZ_EMBED_ABI_VERSION, "engine ABI drift");
     assert!(supports_model("kitten-tts2"));
+    assert!(supports_model("phonon"));
     assert!(!supports_model("another-engine"));
 }
 
@@ -99,7 +100,8 @@ fn engine_defaults_fill_positive_and_finite_fields() {
     );
     assert_eq!(options.max_frames_per_chunk, 512);
     assert_eq!(options.max_chunk_tokens, 256);
-    assert!(options.temperature > 0.0 && options.temperature.is_finite());
+    assert_eq!(options.temperature, 0.0, "zero selects the bundle default");
+    assert_eq!(options.seed, 42);
 }
 
 #[test]
