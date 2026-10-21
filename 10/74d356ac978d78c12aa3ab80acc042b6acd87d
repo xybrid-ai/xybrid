@@ -1,0 +1,35 @@
+docs/content/docs/(integration)/sdks/android.mdx
+  s_3c29f46e28839f::t_a083a93e8fb5ce 14
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_3c29f46e28839f::t_d822f3d7d8b820 14
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_3c29f46e28839f::t_d2ab7d8149c861 14
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_3c29f46e28839f::t_06f1a204e6490d 14
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_3c29f46e28839f::t_2f699dc1497042 18
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_3c29f46e28839f::t_d3ea037cedbc03 18
+docs/content/docs/(integration)/sdks/react-native.mdx
+  s_3c29f46e28839f::t_70992fae39260e 17
+docs/content/docs/quickstart.mdx
+  s_3c29f46e28839f::t_7d49800b15db68 15,57,88,117,148,222
+docs/content/docs/quickstart.zh.mdx
+  s_3c29f46e28839f::t_0a20ae63805f20 15,57,88,117,148,221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1074d356ac978d78c12aa3ab80acc042b6acd87d",
+  "prompts": {},
+  "sessions": {
+    "s_3c29f46e28839f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bee1ba38-6e5e-4228-9737-6595b064283a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
