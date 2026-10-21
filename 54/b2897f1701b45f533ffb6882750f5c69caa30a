@@ -1,0 +1,19 @@
+crates/zzz-sys/natives-manifest.json
+  s_3c29f46e28839f::t_73780bebdc7ff8 4,10-11,47-48,86-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "54b2897f1701b45f533ffb6882750f5c69caa30a",
+  "prompts": {},
+  "sessions": {
+    "s_3c29f46e28839f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bee1ba38-6e5e-4228-9737-6595b064283a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
