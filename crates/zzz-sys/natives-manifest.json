@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "engine": "zzz",
-  "release_tag": "v0.1.0-rc.6",
+  "release_tag": "v0.1.0-rc.7",
   "archives": [
     {
       "target": "aarch64-apple-darwin",
       "slice": "macos-arm64",
       "profile": "combined",
-      "archive": "zzz-macos-arm64-v0.1.0-rc.6.tar.gz",
-      "sha256": "28500d2fcfc512ddfee1b66e206d6cf691891e642b8d6e035f4e08cc44e567fd",
+      "archive": "zzz-macos-arm64-v0.1.0-rc.7.tar.gz",
+      "sha256": "79858278fb133e6dd50e854db78e905ff9485fde10a43940b339e39a938285bc",
       "receipt_schema": 3,
       "apis": {
         "zzz_embed": 1,
@@ -44,8 +44,8 @@
       "target": "aarch64-linux-android",
       "slice": "android-arm64",
       "profile": "combined",
-      "archive": "zzz-android-arm64-v0.1.0-rc.6.tar.gz",
-      "sha256": "fda73b28868b8009f19f400a3df538b841ec650a9481468bcbba5b09261a5ee3",
+      "archive": "zzz-android-arm64-v0.1.0-rc.7.tar.gz",
+      "sha256": "cbfceabface40bbd886d3d6dfb24af67b0737315a441124fcc63fcd36a8ee510",
       "receipt_schema": 3,
       "apis": {
         "zzz_embed": 1,
@@ -83,8 +83,8 @@
       "target": "x86_64-unknown-linux-gnu",
       "slice": "linux-x86_64",
       "profile": "combined",
-      "archive": "zzz-linux-x86_64-v0.1.0-rc.6.tar.gz",
-      "sha256": "b563e40945ca21a8d1f0f06280446b19d555de4c836ef0a2222ffbd6860a9015",
+      "archive": "zzz-linux-x86_64-v0.1.0-rc.7.tar.gz",
+      "sha256": "3dc35b3317b70b3a980c39add8a11e5a0a6d0f2233f717466afbe64d39560b67",
       "receipt_schema": 3,
       "apis": {
         "zzz_embed": 1,

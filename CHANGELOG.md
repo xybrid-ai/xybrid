@@ -26,9 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **zzz engine pin bumped to `v0.1.0-rc.7`**, the first engine release that
   loads `phonon-31m-en`; `v0.1.0-rc.6` rejects it. The engine's C ABI is
   unchanged, so the SDK exposes no new Phonon options.
-  <!-- TODO before merge: crates/zzz-sys/natives-manifest.json still pins
-  v0.1.0-rc.6 on this branch; fill in the rc.7 release tag, archive names
-  and SHA-256s once that engine release exists. -->
 
 ### Planned
 
