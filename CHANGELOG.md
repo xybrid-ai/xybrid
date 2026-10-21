@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.13.0] - 2026-10-21
+
+Gradium's public Phonon checkpoint, `phonon-31m-en` (Apache-2.0), runs through
+the opt-in `tts-zzz` backend on zzz engine `v0.1.0-rc.7`. Standard prebuilt SDK
+packaging is unchanged.
+
 ### Added
 
 - **Phonon `phonon-31m-en` through the opt-in `tts-zzz` backend.** Gradium's
@@ -26,10 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **zzz engine pin bumped to `v0.1.0-rc.7`**, the first engine release that
   loads `phonon-31m-en`; `v0.1.0-rc.6` rejects it. The engine's C ABI is
   unchanged, so the SDK exposes no new Phonon options.
-
-### Planned
-
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
 
 ---
 

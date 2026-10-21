@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.13.0
+
+* Added: custom native builds with `tts-zzz` can load Gradium's public
+  `phonon-31m-en` (Apache-2.0) as a converted GGUF through `ZzzPhonon`; it
+  carries a `default` voice plus 37 English catalog voices. These builds now
+  pin zzz engine `v0.1.0-rc.7` and report the `zzz-phonon-31m` registry
+  backend. Standard precompiled Flutter binaries continue to omit this
+  optional backend.
+
 ## 0.12.0
 
 * Added: custom native builds with `tts-zzz` can load converted Phonon GGUF
