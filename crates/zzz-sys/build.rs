@@ -1,7 +1,7 @@
 //! Build script for `xybrid-zzz-sys`.
 //!
 //! Locates, re-verifies, and statically links the private Phonon/Kitten speech engine
-//! slice (`libzzz_embed.a`) that `tools/scripts/zzz_pull.py` staged from the
+//! slice (`libzzz_embed.a`) that the packaged `zzz_pull.py` staged from the
 //! zzz release pinned in `crates/zzz-sys/natives-manifest.json`.
 //!
 //! # The invariant
@@ -61,7 +61,7 @@ fn main() {
         return;
     }
 
-    println!("cargo:rerun-if-changed=../../tools/scripts/zzz_pull.py");
+    println!("cargo:rerun-if-changed=zzz_pull.py");
     let slice = verified_slice();
     // A changed library, receipt or integrity anchor must re-run verification,
     // even when the manifest and the staging path themselves did not change.
@@ -90,18 +90,15 @@ fn verified_slice() -> PathBuf {
         ));
     }
 
-    // Workspace root: this crate lives one level below `crates/`.
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| fail("cannot determine the workspace root for zzz_pull.py"));
+    // Keep the verifier inside the crate so crates.io consumers use the same
+    // verification contract as workspace and Bazel builds.
+    let crate_dir = env::var_os("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| fail("cargo CARGO_MANIFEST_DIR unset"));
+    let verifier = crate_dir.join("zzz_pull.py");
 
     let mut command = process::Command::new("python3");
-    command
-        .arg(root.join("tools/scripts/zzz_pull.py"))
-        .arg("--target")
-        .arg(&target);
+    command.arg(verifier).arg("--target").arg(&target);
     if env::var_os("XYBRID_ZZZ_PREBUILT_DIR").is_some() {
         command.arg("--verify-only");
     }
@@ -122,8 +119,8 @@ fn verified_slice() -> PathBuf {
             let missing = if reason.is_empty() { "" } else { ": " };
             fail(&format!(
                 "the pinned zzz engine slice for '{target}' is missing or failed \
-                 verification{missing}{reason} — stage it with tools/scripts/zzz_pull.py \
-                 (see crates/zzz-sys/README.md)"
+                 verification{missing}{reason} — stage it with the crate's zzz_pull.py \
+                 (see its README.md)"
             ));
         }
         Err(err) => fail(&format!(

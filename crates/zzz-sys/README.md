@@ -15,7 +15,10 @@ Privately stage a pinned slice before native builds with
 see `--help` for authentication, offline archives and staged verification.
 The tool prints the verified slice path for `XYBRID_ZZZ_PREBUILT_DIR`. Keep its
 archives, receipts and staging directories private. Model weights are supplied
-separately.
+separately. The same verifier is included in the published crate as
+`zzz_pull.py`, beside `natives-manifest.json`; run it with
+`python3 <crate-directory>/zzz_pull.py --target <target>`. It works without this
+workspace and does not include the engine binary or private credentials.
 
 ## Rust bindings
 

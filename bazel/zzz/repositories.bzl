@@ -29,7 +29,7 @@ zzz_prebuilt_repository = repository_rule(
     implementation = _zzz_prebuilt_impl,
     attrs = {
         "target": attr.string(mandatory = True),
-        "verifier": attr.label(default = "//tools/scripts:zzz_pull.py", allow_single_file = True),
+        "verifier": attr.label(default = "//crates/zzz-sys:zzz_pull.py", allow_single_file = True),
         "manifest": attr.label(default = "//crates/zzz-sys:natives-manifest.json", allow_single_file = True),
     },
     environ = ["XYBRID_ZZZ_PREBUILT_DIR", "XYBRID_ZZZ_PYTHON"],

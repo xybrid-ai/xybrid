@@ -3,7 +3,7 @@ load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@crates//:defs.bzl", "all_crate_deps")
 load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
-exports_files(["natives-manifest.json"])
+exports_files(["natives-manifest.json", "zzz_pull.py"])
 
 rust_library(
     name = "xybrid_zzz_sys",
