@@ -1,0 +1,29 @@
+tools/scripts/zzz_producer_verify.py
+  s_33f5e18570f04e::t_32efca92e49443 157,159,161,163-167
+  s_33f5e18570f04e::t_4831c07be26dae 1-141,143-144,148-156,158,160,162,168,172-176,178,182-187,189-388
+  s_33f5e18570f04e::t_d041564202e7d0 142,145,169-171,177,179-181,188
+  s_33f5e18570f04e::t_d307f82d570df5 146-147
+tools/scripts/tests/test_zzz_producer_verify.py
+  s_33f5e18570f04e::t_d307f82d570df5 1-83,85-372,375-403,405-406,409,418-419,421-424
+  s_33f5e18570f04e::t_d041564202e7d0 373-374,404,407-408,410-417,420
+  s_33f5e18570f04e::t_391ed237010c98 84
+tools/scripts/zzz_producer_verify.md
+  s_33f5e18570f04e::t_d041564202e7d0 116-122,151-153
+  s_33f5e18570f04e::t_49c861d6436a88 1-115,123-150,154-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "aeceaeafa3709eabd05f8915e5543e915dd7027a",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
