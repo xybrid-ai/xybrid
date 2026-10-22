@@ -1,0 +1,33 @@
+tools/scripts/tests/test_zzz_producer_verify.py
+  s_33f5e18570f04e::t_c5823a5106333e 95-96,306,326-365
+  s_33f5e18570f04e::t_d041564202e7d0 417-418,448,451-452,454-461,464
+  s_33f5e18570f04e::t_391ed237010c98 84
+  s_33f5e18570f04e::t_d307f82d570df5 1-83,85-94,97-304,307-325,366-416,419-447,449-450,453,462-463,465-468
+  s_33f5e18570f04e::t_37eb53ecc4075c 305
+tools/scripts/zzz_producer_verify.md
+  s_33f5e18570f04e::t_d041564202e7d0 133-139,168-170
+  s_33f5e18570f04e::t_49c861d6436a88 1-14,32-132,140-167,171-200
+  s_33f5e18570f04e::t_701f5ab7ab0d4a 15-31
+tools/scripts/zzz_producer_verify.py
+  s_33f5e18570f04e::t_32efca92e49443 167,169,171,173-177
+  s_33f5e18570f04e::t_c5823a5106333e 55-64,317,340,386
+  s_33f5e18570f04e::t_4831c07be26dae 1-54,65-151,153-154,158-166,168,170,172,178,182-186,188,192-197,199-316,318-339,341-385,387-400
+  s_33f5e18570f04e::t_d307f82d570df5 156-157
+  s_33f5e18570f04e::t_d041564202e7d0 152,155,179-181,187,189-191,198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "79bacb996c8aada2fd0c6be2b7955e7c489ff7bd",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": null
+    }
+  }
+}
