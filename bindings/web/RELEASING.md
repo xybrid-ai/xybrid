@@ -61,6 +61,10 @@ Staging needs Node >= 22.14 and npm >= 11.15; the workflow uses Node 22 and npm
 
 ## Verify locally
 
+To try an already published GitHub release in the browser without compiling the
+runtime or publishing to npm, run `pnpm demo:release 0.13.0`. It verifies the
+release archive and launches the example; see [README.md](./README.md).
+
 ```sh
 cd bindings/web
 pnpm install --frozen-lockfile

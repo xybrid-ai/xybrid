@@ -13,6 +13,14 @@ const disposeButton = element<HTMLButtonElement>("dispose");
 const status = element("status");
 const output = element("output");
 const progress = element<HTMLProgressElement>("progress");
+// Authenticated preview hosts require cookies, which SDK model downloads omit.
+const defaultModelSource = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)
+  ? "local"
+  : "remote";
+const modelUrl =
+  (new URLSearchParams(location.search).get("model-source") ?? defaultModelSource) === "remote"
+    ? MODEL.url
+    : "/model.gguf";
 let model: XybridLlm | undefined;
 const report: Record<string, unknown> = { model: MODEL, userAgent: navigator.userAgent };
 const showReport = (): void => {
@@ -31,7 +39,7 @@ loadButton.onclick = () => {
   loadButton.disabled = true;
   progress.hidden = false;
   setStatus("loading", "Downloading and verifying the GGUF…");
-  void XybridLlm.fromUrl("/model.gguf", {
+  void XybridLlm.fromUrl(modelUrl, {
     wasmPath: "/sdk/runtime",
     sizeBytes: MODEL.bytes,
     sha256: MODEL.sha256,

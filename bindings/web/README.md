@@ -5,6 +5,35 @@ existing `xybrid-llama` Rust wrappers, C++ shim, and pinned llama.cpp into one
 WebAssembly module. A Web Worker streams tokens while the page stays responsive.
 The package includes CPU/WASM SIMD and optional WebGPU execution.
 
+## Try a released package in your browser
+
+With Bun, Node.js, pnpm, and `tar` installed, run from the repository root:
+
+```sh
+cd bindings/web
+pnpm install --frozen-lockfile
+pnpm demo:release 0.13.0
+```
+
+Open the printed localhost URL, click **Load model**, then **Generate**. The page
+streams text locally and provides **Stop**, **Release model**, timing, memory,
+and the actual Rust runtime version. CPU/WASM is the default; WebGPU is experimental.
+The first run downloads the 92 MB test model.
+
+This command downloads the GitHub release archive, verifies its SHA-256, checks
+the package and both WASM modules, and serves the existing example using that
+package. No Rust, Bazel, Emscripten, or npm publishing setup is needed. Pass
+another release version to compare it, or omit the version to use the checkout's
+version. Vite options can follow it, for example `--host 0.0.0.0 --port 5173` for
+a cloud preview. Set `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` to your preview's
+hostname when using a custom host. Downloads are cached under `test-results/`
+and `example/public/`.
+
+Hosted pages download the same pinned model directly from Hugging Face, since
+SDK model downloads intentionally omit cookies required by some preview hosts.
+Localhost uses the cached model. Append `?model-source=local` or
+`?model-source=remote` to override this choice. Runtime assets stay on the page's origin.
+
 ## Build and run
 
 Install Bun, pnpm, and Bazelisk (`bazel` on PATH), then from the repository root:

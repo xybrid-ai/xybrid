@@ -23,6 +23,7 @@
     "build:example": "vite build --config example/vite.config.ts",
     "dev": "vite --config example/vite.config.ts",
     "dev:example": "vite --config example/vite.config.ts",
+    "demo:release": "bun run scripts/serve-release.ts",
     "example:assets": "bun run example/scripts/prepare-assets.ts",
     "lint": "biome check .",
     "pack:release": "node scripts/check-pack.mjs",

@@ -9,6 +9,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const expected = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+// The release demo can verify another published version without changing the checkout.
+const expectedVersion = process.argv[3] ?? expected.version;
 const output = join(root, "test-results/npm");
 await mkdir(output, { recursive: true });
 let archive = process.argv[2];
@@ -56,8 +58,8 @@ try {
   assert.equal(manifest.name, "@xybrid/web");
   assert.equal(
     manifest.version,
-    expected.version,
-    "Release archive version differs from the checkout",
+    expectedVersion,
+    "Release archive version differs from the expected version",
   );
   assert.notEqual(manifest.private, true, "The web package must be public");
   assert.equal(manifest.publishConfig?.access, "public");
