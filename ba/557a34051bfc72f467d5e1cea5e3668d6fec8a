@@ -1,0 +1,49 @@
+.github/workflows/README.md
+  s_ae223208da9d23::t_be73809d9e863e 67
+.github/workflows/test-zzz-engine.yml
+  s_ae223208da9d23::t_944c27e4742d79 1,4
+CHANGELOG.md
+  s_ae223208da9d23::t_f4fce73484b485 10-16
+bindings/flutter/CHANGELOG.md
+  s_ae223208da9d23::t_0718709847309a 5-8
+crates/zzz-sys/Cargo.toml
+  s_ae223208da9d23::t_ba86622eaa76ba 7
+crates/zzz-sys/README.md
+  s_ae223208da9d23::t_6349c4a3878d35 31-36
+crates/zzz-sys/build.rs
+  s_ae223208da9d23::t_641ca86a227d0f 3
+crates/zzz-sys/natives-manifest.json
+  s_ae223208da9d23::t_b2749af70b7829 4,9-12,14,18,22,34-37,39,43,47,61-64,66,70,74
+crates/zzz-sys/src/lib.rs
+  s_ae223208da9d23::t_ad6261c067ce43 1
+docs/sdk/PHONON.md
+  s_33f5e18570f04e::t_92f74fbe0317a3 25-29
+tools/scripts/tests/test_zzz_pull.py
+  s_33f5e18570f04e::t_7c02e6a5a152a7 67,160,167,172-173,183,186-189
+tools/scripts/zzz_pull.py
+  s_33f5e18570f04e::t_d7fd38f48ccecd 2,25-28,124,136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ba557a34051bfc72f467d5e1cea5e3668d6fec8a",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_ae223208da9d23": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
