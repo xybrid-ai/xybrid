@@ -87,8 +87,8 @@ filegroup(
 # and the final JS/WASM link, including the Rust static library.
 py_binary(
     name = "browser_version_tool",
-    srcs = ["tools/scripts/llama_browser_version.py"],
-    main = "tools/scripts/llama_browser_version.py",
+    srcs = ["//tools/scripts:llama_browser_version.py"],
+    main = "//tools/scripts:llama_browser_version.py",
 )
 
 genrule(
