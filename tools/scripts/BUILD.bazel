@@ -1,2 +1,5 @@
 
-exports_files(["zzz_pull.py"])
+exports_files([
+    "llama_browser_version.py",
+    "zzz_pull.py",
+])
