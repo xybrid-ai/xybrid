@@ -1,0 +1,21 @@
+.github/workflows/release-prep.yml
+  s_ae223208da9d23::t_3af302e9605851 1246,1254,1259
+.github/workflows/release-publish.yml
+  s_ae223208da9d23::t_20af0f5d325fdc 686-687
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c013c763e1af127f980242cfcffc1bf45215d42e",
+  "prompts": {},
+  "sessions": {
+    "s_ae223208da9d23": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
