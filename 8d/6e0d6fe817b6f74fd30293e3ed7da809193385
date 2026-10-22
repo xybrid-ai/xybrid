@@ -1,0 +1,41 @@
+crates/zzz-sys/BUILD.bazel
+  s_33f5e18570f04e::t_55ab218e64260b 6
+crates/zzz-sys/README.md
+  s_ae223208da9d23::t_627dc777d24fb0 18-21
+tools/scripts/tests/test_zzz_pull.py
+  s_33f5e18570f04e::t_dfd084a99c580d 16-17,19,147-173
+CHANGELOG.md
+  s_ae223208da9d23::t_37bd10d4293cd2 17-22
+crates/zzz-sys/zzz_pull.py
+  s_33f5e18570f04e::t_75b81060309a74 1-553
+tools/scripts/zzz_pull.py
+  s_33f5e18570f04e::t_52f9050bdec1ef 2,5,9-12
+crates/zzz-sys/build.rs
+  s_ae223208da9d23::t_3b13dd1da905f9 4,64,93-98,101,122-123
+bazel/zzz/repositories.bzl
+  s_33f5e18570f04e::t_a6b225a3a04462 32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "8d6e0d6fe817b6f74fd30293e3ed7da809193385",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_ae223208da9d23": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
