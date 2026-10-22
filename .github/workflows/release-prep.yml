@@ -1243,7 +1243,7 @@ jobs:
             echo "### Artifacts"
             echo
             echo "**Android**"
-            echo "- \`xybrid-android-${TAG}.zip\` — Native .so files for all ABIs"
+            echo "- \`xybrid-android-${TAG}.zip\` — Native .so files for arm64-v8a, armeabi-v7a, and x86_64"
             echo
             echo "**Flutter**"
             echo "- Precompiled native libraries auto-downloaded by cargokit"
@@ -1251,12 +1251,12 @@ jobs:
             echo "**Unity**"
             echo "- Install via OpenUPM (\`openupm add ai.xybrid.sdk\`); native libraries are published as \`xybrid-unity-native-<platform>-${TAG}.zip\` bundles + manifest (uploaded post-release by Build Unity) and fetched at import by the SDK"
             echo
-            echo "**Swift (iOS/macOS)**"
+            echo "**Swift (iOS 16+)**"
             echo "- SPM: \`.package(url: \"https://github.com/${{ github.repository }}\", from: \"${TAG#v}\")\`"
             echo "- \`XybridFFI-${TAG}.xcframework.zip\` — Pre-built XCFramework"
             echo
             echo "**CLI**"
-            echo "- Cross-platform binaries for macOS (arm64, x86_64), Linux (x86_64), and Windows (x86_64)"
+            echo "- Cross-platform binaries for macOS (arm64), Linux (x86_64), and Windows (x86_64)"
             echo
             echo "**Web (GGUF preview)**"
             echo "- \`xybrid-web-${TAG#v}.tgz\` — ESM, TypeScript declarations, worker, CPU/WASM SIMD and experimental WebGPU runtimes"

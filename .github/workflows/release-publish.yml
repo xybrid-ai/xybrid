@@ -683,8 +683,8 @@ jobs:
           let package = Package(
               name: "Xybrid",
               platforms: [
-                  .iOS(.v13),
-                  .macOS(.v10_15)
+                  // Match the published iOS-only XCFramework and its deployment floor.
+                  .iOS(.v16),
               ],
               products: [
                   .library(
