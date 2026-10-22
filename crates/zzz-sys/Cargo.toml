@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license = "MIT"
 repository.workspace = true
-description = "FFI and safe Phonon/Kitten sessions for the pinned combined zzz CPU engine. Statically links the privately staged libzzz_embed.a from crates/zzz-sys/natives-manifest.json pins; never compiles zzz from source."
+description = "FFI and safe Phonon/Kitten sessions for the pinned Phonon/Kitten zzz CPU engine. Statically links the privately staged libzzz_embed.a from crates/zzz-sys/natives-manifest.json pins; never compiles zzz from source."
 # One crate claims the `zzz_embed` links name: mirroring `xybrid-llama-sys`
 # (`links = "llama"`) so that a second zzz binding entering the graph fails
 # resolution loudly instead of static-linking two copies of the engine.

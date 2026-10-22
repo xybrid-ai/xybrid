@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Custom `tts-zzz` builds now pin engine `v0.1.0-rc.8`'s
+  `phonon-kitten-tts2` profile: only Phonon and Kitten TTS 2, with the
+  existing `zzz_embed` ABI. Other engine models and APIs are excluded.
+  Standard prebuilt SDK packaging is unchanged.
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

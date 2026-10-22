@@ -1,7 +1,7 @@
-# Purpose: Fetch and verify the pinned combined Phonon/Kitten engine slices and link them into Rust tests on each pinned target.
+# Purpose: Fetch and verify the pinned Phonon/Kitten-only engine slices and link them into Rust tests on each pinned target.
 name: "CI: zzz engine"
 
-# The combined speech pins (crates/zzz-sys/natives-manifest.json) define the
+# The speech-only pins (crates/zzz-sys/natives-manifest.json) define the
 # binary contract; this lane proves the delivery path end to end in CI:
 # authenticated fetch from the pinned release, staged verification by the
 # same trusted tool that stages locally (zzz_pull.py), and real linking of

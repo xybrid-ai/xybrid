@@ -1,4 +1,4 @@
-//! FFI and safe speech sessions for the pinned combined zzz CPU engine.
+//! FFI and safe speech sessions for the pinned Phonon/Kitten zzz CPU engine.
 //!
 //! `libzzz_embed.a` is a prebuilt, privately staged static archive — see
 //! `build.rs`, `natives-manifest.json` and the crate README. This crate owns

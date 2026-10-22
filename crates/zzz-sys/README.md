@@ -28,10 +28,12 @@ opts local builds into stored gh credentials for activation) and fails the
 build when the target is unsupported or the pinned slice is missing or fails
 verification.
 
-One combined archive supplies both models. The selective archives export
-overlapping symbols and cannot be linked together. Staging verifies all six
-combined payload files, the complete model/API declarations and the archive's
-SHA-256 before either Cargo or Bazel links it.
+The `phonon-kitten-tts2` profile supplies exactly those two models in one
+archive and exposes only the `zzz_embed` API. Single-model archives export
+overlapping symbols and cannot be linked together. Staging verifies all four
+payload files, the exact model/API declarations and the archive's SHA-256
+before either Cargo or Bazel links it. This SDK pins engine `v0.1.0-rc.8`
+with receipt schema 4. The full `combined` engine is not accepted.
 
 `PhononSettings::default()` reads the linked engine's defaults. Temperature `0`
 selects the GGUF's default; a positive finite value overrides it. Seed `0` is

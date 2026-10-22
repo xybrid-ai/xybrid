@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Changed: custom `tts-zzz` builds now pin the Phonon + Kitten TTS 2-only
+  engine profile from `v0.1.0-rc.8`. Standard precompiled Flutter binaries
+  continue to omit this optional backend.
+
 ## 0.13.0
 
 * Added: custom native builds with `tts-zzz` can load Gradium's public

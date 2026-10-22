@@ -1,6 +1,6 @@
 //! Build script for `xybrid-zzz-sys`.
 //!
-//! Locates, re-verifies, and statically links the private combined speech engine
+//! Locates, re-verifies, and statically links the private Phonon/Kitten speech engine
 //! slice (`libzzz_embed.a`) that `tools/scripts/zzz_pull.py` staged from the
 //! zzz release pinned in `crates/zzz-sys/natives-manifest.json`.
 //!

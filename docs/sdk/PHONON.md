@@ -22,9 +22,11 @@ load.
 | 202605 beta | Earlier private preview | `marlowe` | 0.4 |
 
 `phonon-31m-en` needs the zzz engine pinned by this SDK version,
-`v0.1.0-rc.7` ([natives-manifest.json](../../crates/zzz-sys/natives-manifest.json)).
-The `v0.1.0-rc.6` engine pinned by xybrid 0.12.0 rejects it. `tts-zzz` builds
-of this SDK version advertise the `zzz-phonon-31m` registry backend, which is
+`v0.1.0-rc.8` ([natives-manifest.json](../../crates/zzz-sys/natives-manifest.json)).
+The SDK stages the `phonon-kitten-tts2` profile, which contains only Phonon
+and Kitten TTS 2 and exposes the unchanged `zzz_embed` ABI. The
+`v0.1.0-rc.6` engine pinned by xybrid 0.12.0 rejects the public checkpoint.
+`tts-zzz` builds of this SDK version advertise the `zzz-phonon-31m` registry backend, which is
 how the registry tells them apart from 0.12.0 builds (see
 [registry telemetry](../telemetry/registry.md#backends-values)).
 
