@@ -1,0 +1,37 @@
+crates/xybrid-core/src/features.rs
+  s_33f5e18570f04e::t_27717640f6c565 3,51,55-66,69-72,84,95,106,170-181
+  s_33f5e18570f04e::t_209fe0a2b11a50 182-184,186
+crates/zzz-sys/src/cpu.rs
+  s_33f5e18570f04e::t_5eb096630e0f48 1-4,6-22,24-88,95-125,132-152,159-181,187-200,206-218
+  s_33f5e18570f04e::t_52d7e7163e80d4 5,89-94,126-131,153-158,182-186,201-205
+  s_33f5e18570f04e::t_27717640f6c565 23
+crates/zzz-sys/src/lib.rs
+  s_33f5e18570f04e::t_5eb096630e0f48 36-37,226-227
+crates/xybrid-core/src/runtime_adapter/zzz/phonon.rs
+  s_33f5e18570f04e::t_3a0407acc3118f 98
+crates/zzz-sys/README.md
+  s_33f5e18570f04e::t_3a0407acc3118f 13-23
+crates/zzz-sys/src/session.rs
+  s_33f5e18570f04e::t_3001c660920bad 69-77,79-80,87-89,127-129,132-134,140,143-145,230,355-357,376-378,451,544
+  s_33f5e18570f04e::t_3a0407acc3118f 681-742
+  s_33f5e18570f04e::t_c7b03ae888c609 743-755
+crates/xybrid-core/src/runtime_adapter/zzz/runtime.rs
+  s_33f5e18570f04e::t_3a0407acc3118f 161,208,210-218,232-240
+  s_33f5e18570f04e::t_1abf7f7d445f6d 241-245
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f011d0ca18170442c0dc3e00ef0d6bfee13c1569",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
