@@ -17,6 +17,7 @@ import tomllib
 
 
 MAX_METADATA = 2 * 1024 * 1024
+MAX_JSON_DEPTH = 64
 MAX_TREE_OUTPUT = 8 * 1024 * 1024
 # The reviewed tree already tracks an 83,134,752-byte ORT archive and
 # 272,602,448 unique blob bytes. Stream these; retain explicit upper bounds.
@@ -78,9 +79,29 @@ def unique_object(pairs):
 def json_bytes(data, limit):
     require(len(data) <= limit, "JSON input exceeds its byte bound")
     try:
+        text = data.decode("utf-8")
+        depth, quoted, escaped = 0, False, False
+        # Bound containers before parsing, independently of the interpreter's
+        # recursion limit. Brackets inside JSON strings do not count.
+        for character in text:
+            if quoted:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    quoted = False
+            elif character == '"':
+                quoted = True
+            elif character in "[{":
+                depth += 1
+                require(depth <= MAX_JSON_DEPTH, "JSON nesting exceeds its depth bound")
+            elif character in "]}":
+                depth -= 1
+                require(depth >= 0, "invalid JSON input")
         def invalid_constant(_value):
             raise PolicyError("nonfinite JSON value")
-        return json.loads(data, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+        return json.loads(text, object_pairs_hook=unique_object, parse_constant=invalid_constant)
     except (ValueError, UnicodeError, RecursionError) as error:
         raise PolicyError("invalid JSON input") from error
 

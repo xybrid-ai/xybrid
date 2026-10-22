@@ -202,6 +202,41 @@ class Repository:
         return POLICY.source_binding(**options)
 
 
+class JsonParsingTests(unittest.TestCase):
+    def test_container_depth_boundary_is_explicit_and_parser_independent(self):
+        depth = POLICY.MAX_JSON_DEPTH
+        for opening, closing in ((b"[", b"]"), (b'{"a":', b"}")):
+            with self.subTest(opening=opening):
+                valid = opening * depth + b"0" + closing * depth
+                self.assertIsNotNone(POLICY.json_bytes(valid, 8192))
+                invalid = opening * (depth + 1) + b"0" + closing * (depth + 1)
+                with self.assertRaisesRegex(POLICY.PolicyError, "depth bound"):
+                    POLICY.json_bytes(invalid, 8192)
+        with self.assertRaisesRegex(POLICY.PolicyError, "depth bound"):
+            POLICY.json_bytes(b"[" * 2000 + b"0" + b"]" * 2000, 8192)
+        mixed = b'[{"a":' * (depth // 2) + b"0" + b"}]" * (depth // 2)
+        self.assertIsNotNone(POLICY.json_bytes(mixed, 8192))
+        with self.assertRaisesRegex(POLICY.PolicyError, "depth bound"):
+            POLICY.json_bytes(b"[" + mixed + b"]", 8192)
+
+    def test_quoted_escaped_and_unicode_brackets_do_not_count(self):
+        value = '[{' * 2000 + '\\"' + '}]' * 2000 + '\\' + '\u005b'
+        encoded = json.dumps(value).encode()
+        self.assertEqual(POLICY.json_bytes(encoded, len(encoded)), value)
+        # Escaped quotes must not end the string, and escaped backslashes must
+        # not hide the actual closing quote/container that follows.
+        nested = b"[" * POLICY.MAX_JSON_DEPTH + json.dumps(value).encode() + b"]" * POLICY.MAX_JSON_DEPTH
+        self.assertIsNotNone(POLICY.json_bytes(nested, len(nested)))
+        self.assertEqual(POLICY.json_bytes(b'"\\u005b"', 64), "[")
+        self.assertEqual(POLICY.json_bytes(b'["ends\\\\"]', 64), ["ends\\"])
+
+    def test_malformed_duplicate_nonfinite_and_non_utf8_json_still_reject(self):
+        for data in (b'{"a":1,"a":2}', b"NaN", b"Infinity", b"-Infinity", b"[{]}",
+                     b"]", b'"unterminated', b'"\\q"', b'"\xff"', b'\xff\xfe{\x00}\x00'):
+            with self.subTest(data=data), self.assertRaises(POLICY.PolicyError):
+                POLICY.json_bytes(data, 8192)
+
+
 class SourcePolicyTests(unittest.TestCase):
     def setUp(self):
         self.environment = patch.dict(os.environ, {}, clear=True)

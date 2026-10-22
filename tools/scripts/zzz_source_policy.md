@@ -102,7 +102,10 @@ The baseline itself must be reviewed and trusted; this policy constrains changes
 from it rather than proving its code is safe. No arbitrary file allowlist or
 textual Git diff is accepted as evidence. TOML/JSON structural checks and exact
 literal rendering are both required; duplicate JSON keys and nonfinite values
-are rejected. The policy is intentionally conservative: a valid release outside
+are rejected. JSON must be UTF-8 and contain at most 64 nested arrays/objects.
+A quote/escape-aware scan enforces that bound before parsing, independently of
+Python's platform-dependent parser recursion limit; string contents do not count
+as containers. The policy is intentionally conservative: a valid release outside
 these forms needs a separately reviewed policy or trusted baseline change.
 
 ## Resource and credential boundary
