@@ -24,6 +24,6 @@ bindings = ["xybrid-whisper-sys/bindings"]
 coreml = ["bindings", "xybrid-whisper-sys/coreml"]
 
 [dependencies]
-xybrid-whisper-sys = { path = "../whisper-cpp-sys", version = "0.13.0" }
+xybrid-whisper-sys = { path = "../whisper-cpp-sys", version = "0.13.1" }
 thiserror = { workspace = true }
 tracing = "0.1"

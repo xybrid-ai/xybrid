@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.13.1] - 2026-10-22
+
+Custom `tts-zzz` builds use the Phonon + Kitten TTS 2-only engine profile;
+the published Rust sys crate can verify that engine without a source checkout.
+No API changes. Standard prebuilt SDK packaging is unchanged.
+
 ### Changed
 
 - Custom `tts-zzz` builds now pin engine `v0.1.0-rc.8`'s
@@ -19,10 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The published `xybrid-zzz-sys` crate includes its verifier and uses its
   packaged manifest, so an enabled build can verify a privately staged
   engine without the xybrid source workspace.
-
-### Planned
-
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
 
 ---
 
