@@ -744,7 +744,8 @@ fn build_from_source(
     let dst = cmake_config.build();
     if vision_enabled {
         // mtmd now depends on an internal archive that upstream does not install.
-        let name = if ctx.target_os == "windows" {
+        // Only MSVC uses .lib; MinGW uses the same lib*.a names as Unix.
+        let name = if ctx.target.ends_with("-msvc") {
             "vendor-hash.lib"
         } else {
             "libvendor-hash.a"
