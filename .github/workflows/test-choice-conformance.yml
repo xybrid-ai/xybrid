@@ -1,4 +1,4 @@
-# Purpose: Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI; daily cold rebuild.
+# Purpose: Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI, and Qwen3.5 labels through the llama.cpp backend; daily cold rebuild.
 name: "CI: Choice conformance"
 
 # Choice-scoring conformance inputs (integration-tests/fixtures/choice). The
@@ -19,8 +19,13 @@ name: "CI: Choice conformance"
 # on the fake scorers, the goldens again through ModelLoader and
 # XybridModel::run, and `xybrid run --choice` on the fake scorers and FORMS
 # against the SDK, with XYBRID_REQUIRE_MODELS set, so a missing model or ONNX
-# Runtime fails instead of skipping. The label-token (llama.cpp) runtime tests
-# join that job with the label scorer.
+# Runtime fails instead of skipping.
+#
+# The label-token job does the same for llama.cpp label scoring on the
+# Qwen3.5-0.8B GGUFs: xybrid-llama's final-position readout and the backend's
+# label scorer (state isolation, label rules, G0, the F16 G1 bounds, the exact
+# G2 against the C++ harness built on the same natives) with
+# XYBRID_REQUIRE_MODELS set, and it uploads the Q4_K_M drift report (G3).
 on:
   push:
     branches: [master]
@@ -38,6 +43,7 @@ on:
       - 'tools/scripts/stage_unity_desktop_ort.py'
       - 'vendor/llama-cpp'
       - 'crates/llama-cpp-sys/**'
+      - 'crates/xybrid-llama/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
       - 'crates/xybrid-cli/**'
@@ -62,6 +68,7 @@ on:
       - 'tools/scripts/stage_unity_desktop_ort.py'
       - 'vendor/llama-cpp'
       - 'crates/llama-cpp-sys/**'
+      - 'crates/xybrid-llama/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
       - 'crates/xybrid-cli/**'
@@ -296,7 +303,7 @@ jobs:
   label-token:
     name: Qwen3.5-0.8B GGUF (regenerate or verify)
     runs-on: macos-14
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -353,3 +360,68 @@ jobs:
 
       - name: Verify the staged artifacts against provenance
         run: python3 tools/scripts/check_choice_provenance.py --staged qwen3.5-0.8b-f16-cf qwen3.5-0.8b-q4km-cf
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: choice-label-token
+
+      # The harness links exactly the llama.cpp archives cargo links (the
+      # downloaded natives slice, or a cmake build when the manifest is stale),
+      # so G2 compares the Rust readout with llama.h on the same native code.
+      - name: Build the G2 harness
+        run: |
+          harness="$(tools/conformance/llama_harness/build.sh)"
+          echo "XYBRID_LLAMA_HARNESS=$harness" >> "$GITHUB_ENV"
+
+      # GGML_OP_OFFLOAD_MIN_BATCH keeps llama.cpp's operation offload from
+      # sending large matrix products to Metal when a test loads no GPU
+      # layers, so the CPU settings run on the CPU, as CPU-only builds do.
+      - name: Label-token runtime conformance
+        env:
+          XYBRID_REQUIRE_MODELS: 1
+          GGML_OP_OFFLOAD_MIN_BATCH: 1000000
+        run: |
+          # Enumerate and assert every required test: cargo test exits 0 on an
+          # empty set, so a renamed or compiled-out test would pass silently.
+          # `a_model_without_memory_is_refused` is not required: it needs an
+          # encoder-only GGUF this job does not stage.
+          LLAMA="$(cargo test -p xybrid-llama --features bindings --test choice_logits -- --list)"
+          CORE="$(cargo test -p xybrid-core --features llm-llamacpp --lib -- runtime_adapter::llama_cpp::choice_scoring_tests:: --list)"
+          printf '%s\n%s\n' "$LLAMA" "$CORE"
+          for test in \
+            a_small_context_cuts_at_the_size_it_was_asked_for \
+            refused_requests_leave_the_memory_empty \
+            scores_do_not_depend_on_what_ran_before \
+            the_final_row_is_the_next_token_distribution \
+            the_harness_reads_the_same_row; do
+            printf '%s\n' "$LLAMA" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          for test in \
+            a_group_scores_the_largest_of_its_tokens \
+            a_refused_request_leaves_nothing_behind \
+            cpu_scores_do_not_move_with_the_thread_count \
+            g0_template_prompt_and_label_ids_match_the_goldens \
+            g1_f16_scores_match_the_reference \
+            g2_scores_equal_the_harness_on_the_same_artifact \
+            g3_q4_k_m_drift_is_reported \
+            label_groups_must_be_distinct_single_tokens \
+            reordering_the_groups_reorders_the_logits \
+            scoring_and_generation_interleave_as_on_fresh_backends \
+            scoring_forgets_the_cached_prefix \
+            scoring_repeats_bit_for_bit_after_other_scoring; do
+            printf '%s\n' "$CORE" | grep -qE "^runtime_adapter::llama_cpp::choice_scoring_tests::${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          cargo test -p xybrid-llama --features bindings --test choice_logits -- --nocapture
+          cargo test -p xybrid-core --features llm-llamacpp --lib -- runtime_adapter::llama_cpp::choice_scoring_tests:: --nocapture
+
+      - name: Upload the Q4_K_M drift report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: label-token-g3-report
+          path: target/choice-conformance/reports/label-token-g3.json
+          if-no-files-found: error
