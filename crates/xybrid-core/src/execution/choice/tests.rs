@@ -13,7 +13,7 @@
 //! model, unless `XYBRID_REQUIRE_MODELS` is set, where both fail instead.
 
 use super::encode::encode_request;
-use super::math::{choice_scores, softmax_scores};
+use super::math::{choice_scores, label_mass, softmax_scores};
 use super::onnx::{ChoiceAxis, OnnxChoiceScorer};
 use super::*;
 use crate::execution::template::{
@@ -473,6 +473,65 @@ fn softmax_is_stable_and_ties_go_to_the_first_candidate() {
     assert_eq!(scored.best(), Some(1));
     assert_eq!(scored.margin(), Some(0.0));
     assert_eq!(scored.entries[2].id, "c");
+}
+
+#[test]
+fn label_mass_is_the_labels_share_of_the_row() {
+    let row = [2.0_f32, -1.0, 0.5, 3.0];
+    let lse = row.iter().map(|&x| f64::from(x).exp()).sum::<f64>().ln() as f32;
+
+    let whole = label_mass(&row, lse).unwrap();
+    let two = label_mass(&row[..2], lse).unwrap();
+    let expected =
+        (2.0_f64.exp() + (-1.0_f64).exp()) / row.iter().map(|&x| f64::from(x).exp()).sum::<f64>();
+
+    assert!((whole - 1.0).abs() < 1e-6, "every token: {whole}");
+    assert!(
+        (f64::from(two) - expected).abs() < 1e-6,
+        "{two} vs {expected}"
+    );
+    // A logit far below the row's log-sum-exp adds nothing and stays finite.
+    assert_eq!(label_mass(&[-1.0e30], lse), Some(0.0));
+}
+
+#[test]
+fn label_mass_needs_finite_input() {
+    assert_eq!(label_mass(&[], 1.0), None);
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert_eq!(label_mass(&[0.0, bad], 1.0), None);
+        assert_eq!(label_mass(&[0.0], bad), None);
+    }
+}
+
+/// The label goldens' `label_mass` comes from their own float32 label logits
+/// and float64 log-sum-exp; the helper reproduces it from the same logits and
+/// the log-sum-exp rounded to `f32`, as a backend reports it.
+#[test]
+fn label_mass_reproduces_the_label_goldens() {
+    #[derive(Deserialize)]
+    struct LabelGoldens {
+        cases: Vec<LabelGolden>,
+    }
+    #[derive(Deserialize)]
+    struct LabelGolden {
+        id: String,
+        label_logits: Vec<f32>,
+        logsumexp: f64,
+        label_mass: f64,
+    }
+
+    let goldens: LabelGoldens = read_json("goldens/labels.json");
+    assert!(!goldens.cases.is_empty());
+    for case in goldens.cases {
+        let mass = label_mass(&case.label_logits, case.logsumexp as f32)
+            .unwrap_or_else(|| panic!("{}: no mass", case.id));
+        assert!(
+            (f64::from(mass) - case.label_mass).abs() < 1e-5,
+            "{}: {mass} vs {}",
+            case.id,
+            case.label_mass
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

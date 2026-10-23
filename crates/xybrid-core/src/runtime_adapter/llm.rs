@@ -113,6 +113,13 @@ fn unsupported_vision_input_error(backend_name: &str) -> AdapterError {
     ))
 }
 
+fn unsupported_label_scoring_error(backend_name: &str) -> AdapterError {
+    AdapterError::InvalidInput(format!(
+        "LLM backend '{}' does not support label scoring",
+        backend_name
+    ))
+}
+
 /// Tool calls to stamp on a terminal streaming token.
 ///
 /// Parsing runs only for requests that actually offered tools, mirroring
@@ -167,6 +174,141 @@ pub struct GenerationOutput {
     /// always excludes it. `None` when the model produced no reasoning block
     /// or the backend doesn't surface one. vLLM-style `reasoning_content`.
     pub reasoning_content: Option<String>,
+}
+
+// =============================================================================
+// Label Scoring
+// =============================================================================
+
+/// The label tokens that stand for one option of a [`ScoringRequest`].
+///
+/// The option's logit is the largest logit among its tokens at the prompt's
+/// final position. `label` must be exactly one token of the model's
+/// vocabulary. An alternative spelling (a model may answer `A` or ` A`)
+/// joins the group only when it is one token too and not already in it;
+/// others are skipped, as llama.cpp's decision server builds its label
+/// groups. Labels are tokenized as plain text, so a special-token string
+/// is never read as that special token.
+///
+/// `Debug` prints counts and lengths, never the labels.
+#[derive(Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LabelGroup {
+    /// The label; it must be one token.
+    pub label: String,
+    /// Further spellings, each kept only when it is one token.
+    pub alternatives: Vec<String>,
+}
+
+impl LabelGroup {
+    /// A group of one label.
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            alternatives: Vec::new(),
+        }
+    }
+
+    /// A label and its alternative spellings.
+    pub fn with_alternatives<I, S>(label: impl Into<String>, alternatives: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            label: label.into(),
+            alternatives: alternatives.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl std::fmt::Debug for LabelGroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LabelGroup")
+            .field("label_len", &self.label.len())
+            .field("alternatives", &self.alternatives.len())
+            .finish()
+    }
+}
+
+/// A prompt to score, and the labels whose next-token logits stand for its
+/// options. Read by [`LlmBackend::score_labels`]; nothing is generated.
+///
+/// `Debug` prints counts and the thinking flag, never the messages or the
+/// labels.
+///
+/// # Example
+///
+/// ```
+/// use xybrid_core::runtime_adapter::llm::{ChatMessage, LabelGroup, ScoringRequest};
+///
+/// let request = ScoringRequest::new(
+///     vec![ChatMessage::user("Is the sky blue?\nA. yes\nB. no\nAnswer with a letter.")],
+///     vec![LabelGroup::new("A"), LabelGroup::new("B")],
+/// );
+/// assert_eq!(request.label_groups.len(), 2);
+/// assert_eq!(request.enable_thinking, None);
+/// ```
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct ScoringRequest {
+    /// The conversation, rendered through the model's embedded chat template
+    /// with its generation prompt.
+    pub messages: Vec<ChatMessage>,
+    /// The template's `enable_thinking` flag. `None`, the default, leaves it
+    /// out of the template context.
+    pub enable_thinking: Option<bool>,
+    /// One group per option, in option order.
+    pub label_groups: Vec<LabelGroup>,
+}
+
+impl ScoringRequest {
+    /// A request with the thinking flag left out of the template context.
+    pub fn new(messages: Vec<ChatMessage>, label_groups: Vec<LabelGroup>) -> Self {
+        Self {
+            messages,
+            enable_thinking: None,
+            label_groups,
+        }
+    }
+
+    /// Passes `enabled` to the template as its `enable_thinking` flag.
+    #[must_use]
+    pub fn with_thinking(mut self, enabled: bool) -> Self {
+        self.enable_thinking = Some(enabled);
+        self
+    }
+}
+
+impl std::fmt::Debug for ScoringRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ScoringRequest")
+            .field("messages", &self.messages.len())
+            .field("enable_thinking", &self.enable_thinking)
+            .field("label_groups", &self.label_groups)
+            .finish()
+    }
+}
+
+/// What [`LlmBackend::score_labels`] read at the prompt's final position.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct LabelLogits {
+    /// One per label group, in request order: the largest logit among the
+    /// group's tokens. Raw, with no temperature and no normalization.
+    pub logits: Vec<f32>,
+    /// The probability the model's full next-token distribution puts on all
+    /// the groups' tokens together, at temperature 1, before the options are
+    /// normalized against each other. A diagnostic only, as
+    /// [`ChoiceScores::label_mass`](crate::ir::ChoiceScores::label_mass) is.
+    pub label_mass: f32,
+}
+
+impl LabelLogits {
+    /// One logit per label group, and the label mass.
+    pub fn new(logits: Vec<f32>, label_mass: f32) -> Self {
+        Self { logits, label_mass }
+    }
 }
 
 // =============================================================================
@@ -315,6 +457,29 @@ pub trait LlmBackend: Send + Sync {
         callback(partial).map_err(AdapterError::from_streaming_callback_error)?;
 
         Ok(output)
+    }
+
+    /// Score label tokens at the end of a prompt, without generating.
+    ///
+    /// Renders `request.messages` through the model's embedded chat
+    /// template, prefills the prompt from an empty state and reads the
+    /// next-token logits at each group's tokens (see [`LabelGroup`]). A
+    /// backend that keeps state between calls leaves none behind: the next
+    /// call, scoring or generating, runs as it would on a fresh context.
+    ///
+    /// The default refuses; backends that can read raw next-token logits
+    /// implement it.
+    ///
+    /// # Errors
+    ///
+    /// [`AdapterError::InvalidInput`] when the backend cannot score labels,
+    /// the model has no embedded chat template, there are no label groups, a
+    /// group's label is not one token, two groups share a token, or the
+    /// prompt does not fit the context window. Messages name group indexes
+    /// and counts, never the labels or the messages. A model that fails to
+    /// run returns a runtime error.
+    fn score_labels(&self, _request: &ScoringRequest) -> LlmResult<LabelLogits> {
+        Err(unsupported_label_scoring_error(self.name()))
     }
 
     /// Check whether this backend accepts multimodal text/image messages.
@@ -899,6 +1064,86 @@ mod tests {
         assert_eq!(output.generation_time_ms, 100);
         assert!((output.tokens_per_second - 30.0).abs() < f32::EPSILON);
         assert_eq!(output.finish_reason, "stop");
+    }
+
+    /// Backends that cannot read raw next-token logits refuse label scoring
+    /// unless they override it.
+    #[test]
+    fn label_scoring_is_refused_by_default() {
+        struct TextOnlyBackend;
+
+        impl LlmBackend for TextOnlyBackend {
+            fn name(&self) -> &str {
+                "text-only"
+            }
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["test"]
+            }
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
+                Ok(())
+            }
+            fn is_loaded(&self) -> bool {
+                true
+            }
+            fn unload(&mut self) -> LlmResult<()> {
+                Ok(())
+            }
+            fn generate(
+                &self,
+                _messages: &[ChatMessage],
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                unreachable!("label scoring never generates")
+            }
+            fn generate_raw(
+                &self,
+                _prompt: &str,
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                unreachable!("label scoring never generates")
+            }
+        }
+
+        let request = ScoringRequest::new(
+            vec![ChatMessage::user("canary-context")],
+            vec![LabelGroup::new("A"), LabelGroup::new("B")],
+        );
+        let refused = TextOnlyBackend
+            .score_labels(&request)
+            .expect_err("the default refuses");
+
+        match refused {
+            AdapterError::InvalidInput(message) => {
+                assert!(
+                    message.contains("does not support label scoring"),
+                    "{message}"
+                );
+                assert!(message.contains("text-only"), "{message}");
+            }
+            other => panic!("expected invalid input, got {other:?}"),
+        }
+    }
+
+    /// Debug output is safe to log: counts, lengths and the flag only.
+    #[test]
+    fn scoring_types_never_debug_print_their_text() {
+        let request = ScoringRequest::new(
+            vec![ChatMessage::user("canary-context")],
+            vec![LabelGroup::with_alternatives(
+                "canary-label",
+                ["canary-alternative"],
+            )],
+        )
+        .with_thinking(false);
+
+        let printed = format!("{request:?}");
+
+        assert!(!printed.contains("canary"), "{printed}");
+        assert!(
+            printed.contains("enable_thinking: Some(false)"),
+            "{printed}"
+        );
+        assert!(printed.contains("label_len: 12"), "{printed}");
     }
 
     /// Test that the default streaming implementation emits all text as one token

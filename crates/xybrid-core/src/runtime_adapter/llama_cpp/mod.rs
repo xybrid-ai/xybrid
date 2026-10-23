@@ -29,13 +29,14 @@
 // keep their existing identifiers.
 mod chat;
 mod jinja_template;
+mod scoring;
 pub use xybrid_llama::{
     get_verbosity as llama_log_get_verbosity, set_verbosity as llama_log_set_verbosity,
 };
 
 use crate::runtime_adapter::llm::{
-    local_execution_provider, ChatMessage, GenerationConfig, GenerationOutput, LlmBackend,
-    LlmConfig, LlmResult, PartialToken,
+    local_execution_provider, ChatMessage, GenerationConfig, GenerationOutput, LabelLogits,
+    LlmBackend, LlmConfig, LlmResult, PartialToken, ScoringRequest,
 };
 use crate::runtime_adapter::llm_telemetry::{StreamingTelemetry, StreamingTelemetryFields};
 use crate::runtime_adapter::streaming_postprocess::{
@@ -1224,6 +1225,25 @@ impl LlmBackend for LlamaCppBackend {
             AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
         })?;
         chat::format_chat_prompt(model, messages, self.reasoning_enabled(), &config.tools)
+    }
+
+    /// Scores on the shared context, serialized with generation by the
+    /// context lock. `score_final_position` clears the context's memory
+    /// before and after the read, a refused request included, so the cached
+    /// prefix generation would reuse is forgotten first.
+    fn score_labels(&self, request: &ScoringRequest) -> LlmResult<LabelLogits> {
+        self.with_model_and_context(|model, context| {
+            let tokens = scoring::scoring_tokens(model, request)?;
+            // Lock order is context, then kv_state: reset through this guard.
+            // `clear_cached_prefix_state` would take the same lock again.
+            *self
+                .kv_state
+                .lock()
+                .map_err(|_| AdapterError::RuntimeError("KV state mutex poisoned".to_string()))? =
+                KvCacheState::default();
+            let read = context.score_final_position(&tokens.prompt, &tokens.labels)?;
+            scoring::reduce(&read.label_logits, read.logsumexp, &tokens.group_sizes)
+        })
     }
 
     fn generate_streaming(

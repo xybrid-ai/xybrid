@@ -7,6 +7,8 @@
 //! (see [`ChoiceScores::best`]). A NaN or infinite logit on an offered candidate is
 //! an error, never a silently skewed distribution. A static model's padding
 //! rows must be dropped **before** calling in here: they may be NaN.
+//! [`label_mass`] is the label scorers' diagnostic: the share of the full
+//! next-token distribution that went to any label.
 //!
 //! # Example
 //!
@@ -53,6 +55,43 @@ pub fn softmax_scores(logits: &[f32], temperature: Option<f32>) -> ChoiceResult<
     let exps: Vec<f64> = scaled.iter().map(|x| (x - max).exp()).collect();
     let total: f64 = exps.iter().sum();
     Ok(exps.iter().map(|e| (e / total) as f32).collect())
+}
+
+/// The probability a next-token distribution puts on a set of label
+/// tokens: `Σ exp(logit − logsumexp)`, summed in `f64` and stored as `f32`.
+///
+/// `token_logits` holds each label token's logit once (a repeated token
+/// would count twice), at temperature 1, and `logsumexp` is the log-sum-exp
+/// of the whole row they were read from. This is the
+/// [`ChoiceScores::label_mass`] diagnostic: how much of the model's
+/// next-token probability went to any label at all, before the candidates
+/// are normalized against each other. `None` for an empty slice or any
+/// non-finite input.
+///
+/// # Example
+///
+/// ```
+/// use xybrid_core::execution::choice::math::label_mass;
+///
+/// // Two labels holding e^0 and e^1 of a row whose total is e^0 + e^1 + e^2.
+/// let lse = (1.0_f64 + 1.0_f64.exp() + 2.0_f64.exp()).ln() as f32;
+/// let mass = label_mass(&[0.0, 1.0], lse).unwrap();
+/// assert!((mass - 0.33).abs() < 0.01);
+/// assert_eq!(label_mass(&[], lse), None);
+/// ```
+pub fn label_mass(token_logits: &[f32], logsumexp: f32) -> Option<f32> {
+    if token_logits.is_empty()
+        || !logsumexp.is_finite()
+        || token_logits.iter().any(|logit| !logit.is_finite())
+    {
+        return None;
+    }
+    let logsumexp = f64::from(logsumexp);
+    let mass: f64 = token_logits
+        .iter()
+        .map(|&logit| (f64::from(logit) - logsumexp).exp())
+        .sum();
+    Some(mass as f32)
 }
 
 /// Pairs E, as `(id, fixed)` in E order, with its logits and scores.

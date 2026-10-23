@@ -6,8 +6,9 @@
 //! non-Jinja matcher rejects it. Tool-bearing prompts skip the native path
 //! entirely — `llama_chat_apply_template` takes only role/content pairs and
 //! cannot carry tool definitions — and render the embedded template directly
-//! with the definitions in the Jinja context. In every case the policy is
-//! the same: never silently substitute a different prompt family.
+//! with the definitions in the Jinja context. Label scoring renders through
+//! the embedded template only ([`render_scoring_prompt`]). In every case the
+//! policy is the same: never silently substitute a different prompt family.
 
 mod functiongemma;
 
@@ -257,6 +258,78 @@ fn render_embedded_template(
     tpl.render(messages, &options)
 }
 
+/// Render `messages` into the prompt a label scorer reads the next token
+/// after: the model's embedded chat template with its generation prompt,
+/// and nothing appended.
+///
+/// Only the embedded template is used. A scorer's labels are checked against
+/// prompts rendered from that template, so a model without one is refused
+/// rather than given a guessed prompt family, and llama.cpp's native
+/// template matcher is never tried. Special tokens come from the template
+/// alone, as with Hugging Face's `apply_chat_template`, which reference
+/// scores are made with: the template gets the model's BOS and EOS text, and
+/// the caller tokenizes the prompt without adding any. (The chat path
+/// instead renders `bos_token` empty and lets tokenization add BOS.)
+/// `enable_thinking` reaches the template as given, and `None` omits it, as
+/// `apply_chat_template` does when the caller passes no such keyword. The
+/// reasoning channel is never primed: the scorer reads the very next token,
+/// and a `<think>` opener would change which distribution that is.
+///
+/// A template that fails to render returns a fixed error: the engine's
+/// message could quote a value from the context, which holds the caller's
+/// messages.
+pub(super) fn render_scoring_prompt(
+    model: &xybrid_llama::LlamaModel,
+    messages: &[ChatMessage],
+    enable_thinking: Option<bool>,
+) -> LlmResult<String> {
+    let template = model.chat_template();
+    let special = |token| {
+        template
+            .as_ref()
+            .and_then(|_| detokenize_special(model, token))
+    };
+    render_scoring_template(
+        template.as_deref(),
+        special(model.token_bos()),
+        special(model.token_eos()),
+        messages,
+        enable_thinking,
+    )
+}
+
+/// The model-free half of [`render_scoring_prompt`], with the template and
+/// the BOS and EOS text already read off the model, so tests can pin its
+/// output and its refusals without loading a GGUF.
+fn render_scoring_template(
+    template: Option<&str>,
+    bos_token: Option<String>,
+    eos_token: Option<String>,
+    messages: &[ChatMessage],
+    enable_thinking: Option<bool>,
+) -> LlmResult<String> {
+    let Some(template) = template else {
+        return Err(AdapterError::InvalidInput(
+            "the model has no embedded chat template, so no scoring prompt can be rendered"
+                .to_string(),
+        ));
+    };
+    let options = RenderOptions {
+        add_generation_prompt: true,
+        enable_thinking,
+        tools: None,
+    };
+    JinjaChatTemplate::new(template, bos_token, eos_token)
+        .render(messages, &options)
+        .map_err(|_| {
+            AdapterError::RuntimeError(
+                "embedded chat template failed to render the scoring prompt \
+                 (template message withheld)"
+                    .to_string(),
+            )
+        })
+}
+
 /// Detokenize a single special token (the EOS token) to its text form for the
 /// Jinja context. Never panics: a negative/invalid token id or a detokenize
 /// error yields `None`, so the template sees an empty `eos_token`.
@@ -369,6 +442,114 @@ mod tests {
             .unwrap_or_else(|e| panic!("{}: {e}", case.id));
             assert_eq!(rendered, case.rendered, "{}: render changed", case.id);
         }
+    }
+
+    #[derive(Deserialize)]
+    struct LabelGoldens {
+        cases: Vec<LabelGolden>,
+    }
+
+    #[derive(Deserialize)]
+    struct LabelGolden {
+        id: String,
+        messages: Vec<ChatMessage>,
+        rendered: String,
+    }
+
+    /// The scoring render is the template's own output with its generation
+    /// prompt: each label case byte for byte as the goldens pin it, with the
+    /// thinking flag omitted as they were made and nothing primed after.
+    #[test]
+    fn scoring_template_renders_the_label_goldens() {
+        let template =
+            read_workspace_file("integration-tests/fixtures/choice/templates/qwen3.5.jinja");
+        let LabelGoldens { cases } = serde_json::from_str(&read_workspace_file(
+            "integration-tests/fixtures/choice/goldens/labels.json",
+        ))
+        .expect("parse goldens/labels.json");
+        assert!(!cases.is_empty(), "goldens/labels.json has no cases");
+
+        for case in &cases {
+            let rendered =
+                render_scoring_template(Some(&template), None, None, &case.messages, None)
+                    .unwrap_or_else(|e| panic!("{}: {e}", case.id));
+            assert_eq!(
+                rendered, case.rendered,
+                "{}: scoring render changed",
+                case.id
+            );
+        }
+    }
+
+    /// The flag reaches the template as given, `None` leaving it undefined;
+    /// the generation prompt is on and the reasoning channel never primed.
+    #[test]
+    fn scoring_template_passes_the_thinking_flag_through() {
+        let template = "{{ enable_thinking if enable_thinking is defined else 'unset' }}\
+                        {% if add_generation_prompt %}|gen{% endif %}";
+        let render = |flag| {
+            render_scoring_template(Some(template), None, None, &[ChatMessage::user("x")], flag)
+                .expect("render")
+        };
+
+        assert_eq!(render(Some(true)), "True|gen");
+        assert_eq!(render(Some(false)), "False|gen");
+        assert_eq!(render(None), "unset|gen");
+    }
+
+    /// No embedded template, no scoring prompt: a guessed prompt family
+    /// would put the labels after a prompt they were never checked against.
+    #[test]
+    fn scoring_template_refuses_a_model_without_one() {
+        let refused = render_scoring_template(None, None, None, &[ChatMessage::user("x")], None)
+            .expect_err("no template, no prompt");
+
+        assert!(
+            matches!(&refused, AdapterError::InvalidInput(message) if message.contains("no embedded chat template")),
+            "{refused:?}"
+        );
+    }
+
+    /// Special tokens come from the template: it gets the model's BOS and EOS
+    /// text, and renders them where it puts them.
+    #[test]
+    fn scoring_template_renders_the_models_special_tokens() {
+        let template = "{{ bos_token }}{{ messages[0].content }}{{ eos_token }}";
+        let render = |bos: Option<&str>, eos: Option<&str>| {
+            render_scoring_template(
+                Some(template),
+                bos.map(str::to_string),
+                eos.map(str::to_string),
+                &[ChatMessage::user("x")],
+                None,
+            )
+            .expect("render")
+        };
+
+        assert_eq!(render(Some("<s>"), Some("</s>")), "<s>x</s>");
+        assert_eq!(render(None, None), "x");
+    }
+
+    /// A failing template's engine message is withheld: it could quote a
+    /// value from the context, which holds the caller's messages.
+    #[test]
+    fn scoring_template_errors_withhold_the_engine_message() {
+        const CANARY: &str = "canary-3f9a1c";
+        let template = "{{ ['x'] | map(messages[0].content) | list }}";
+
+        let refused = render_scoring_template(
+            Some(template),
+            None,
+            None,
+            &[ChatMessage::user(CANARY)],
+            None,
+        )
+        .expect_err("the template fails");
+
+        let printed = format!("{refused} {refused:?}");
+        assert!(printed.contains("template message withheld"), "{printed}");
+        assert!(!printed.contains("unknown filter"), "{printed}");
+        assert!(!printed.contains(CANARY), "{printed}");
     }
 
     fn tool(name: &str) -> Tool {
