@@ -258,9 +258,18 @@ Models are automatically downloaded from the Xybrid registry on first use.
 | iOS | arm64 | Supported (auto-fetched) |
 | Android | arm64-v8a, armeabi-v7a, x86_64 | Supported |
 
-On Android, models are cached in `Application.persistentDataPath/xybrid/models`.
-To use another folder, call `XybridBolt.XybridBolt.InitSdkCacheDir(path)` before
+On Android, models are cached under `Application.persistentDataPath/xybrid`
+(the SDK is given its `models` subfolder and keeps runtime-ready files beside it
+in `extracted`). To use another folder, call `XybridBolt.XybridBolt.InitSdkCacheDir(path)` before
 loading or listing any model; the first folder set wins.
+
+Xybrid's Android library links the C++ runtime statically, so its Android
+natives include no `libc++_shared.so` to collide with the one Unity's
+GameActivity packages. Earlier releases installed a copy under
+`Assets/Xybrid/Plugins/Android/<abi>/`; after you update the package, it is
+removed the next time the Android natives are downloaded: before the next
+Android build, or from **Xybrid > Native Libraries > Download for Active Build
+Target** while Android is the active build target.
 
 ## Building Native Libraries
 
@@ -290,8 +299,17 @@ cargo xtask build-ffi --release --deploy-unity
 # iOS (from macOS)
 cargo xtask build-ffi --release --target aarch64-apple-ios
 
-# Android (requires NDK)
-cargo xtask build-ffi --release --target aarch64-linux-android
+# Android (Bazel, one build per ABI, staged as CI does in build-unity.yml;
+# off a Linux x86_64 host, add --config=remote to bazel build and bazel-output.sh)
+bazel build --config=android-arm64 //crates/xybrid-bolt:xybrid_bolt_cdylib
+LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib --config=android-arm64)
+python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target aarch64-linux-android
+# Likewise --config=android-armv7 with armv7-linux-androideabi,
+# and --config=android-x86_64 with x86_64-linux-android
+# Then run the check CI runs on the staged tree (no libc++_shared.so, static
+# C++ runtime, right ELF machine per ABI, 16 KB alignment). macOS has no
+# readelf: add --readelf "$(brew --prefix llvm)/bin/llvm-readelf"
+python3 tools/scripts/verify_unity_android_natives.py --require-abis
 ```
 
 ## Package Structure

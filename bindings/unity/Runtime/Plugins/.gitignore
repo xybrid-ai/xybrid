@@ -10,6 +10,9 @@
 *.dylib
 *.meta
 
-# ORT runtime libraries bundled for Android
-libc++_shared.so
+# ORT runtime library bundled for Android
 libonnxruntime.so
+
+# Never shipped: the Android library links libc++ statically. Kept ignored so
+# a copy left over from an older staging run is never committed.
+libc++_shared.so

@@ -86,8 +86,8 @@ is Flutter, Unity staging, and dev-env chores:
 
 ```bash
 cargo xtask build-flutter --platform <linux|macos|windows>  # Flutter native (deliberately cargo)
-cargo xtask build-ffi --target <triple> --release           # xybrid-bolt cdylib (Unity native)
-cargo xtask build-unity                                     # xybrid-bolt across Unity platforms
+cargo xtask build-ffi --target <triple> --release           # xybrid-bolt cdylib (Unity native; Android via Bazel)
+cargo xtask build-unity                                     # xybrid-bolt across Unity platforms (skips Android)
 cargo xtask deploy-unity-native --lib <path> --target <triple>  # stage a Bazel-built lib into Unity
 cargo xtask setup-test-env                                  # dev-env chore
 ```
@@ -97,6 +97,10 @@ through cargokit → cargo, so the contributor path must match. `build-ffi` /
 `build-unity` build `xybrid-bolt` (the pre-bolt `xybrid-ffi` C ABI is retired);
 `deploy-unity-native` exists so a Bazel-built lib can be staged into
 `bindings/unity/Runtime/Plugins/` with the right per-platform `.meta`.
+Unity Android natives are Bazel-only: `//crates/xybrid-bolt:xybrid_bolt_cdylib`
+links libc++ statically there and the Unity package ships no
+`libc++_shared.so`, while cargo-ndk links the shared runtime — so
+`build-ffi --deploy-unity` refuses Android and `build-unity` skips it.
 
 After editing `bindings/flutter/rust`, regenerate the Dart glue with
 `flutter_rust_bridge_codegen generate` (CLI version must match the pinned

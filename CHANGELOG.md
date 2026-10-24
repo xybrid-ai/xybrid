@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Unity Android builds no longer fail on a duplicate `libc++_shared.so`.**
+  When Unity's GameActivity packages its own copy, Gradle stopped at
+  `mergeDebugNativeLibs` with "2 files found with path
+  'lib/arm64-v8a/libc++_shared.so'" (seen with Unity 6000.6.4f1). The Unity
+  Android library now links libc++ statically, and the Unity Android natives
+  no longer include `libc++_shared.so`. That also removes two packaging
+  faults: the x86_64 bundle shipped an arm64 `libc++_shared.so`, and the
+  armeabi-v7a bundle shipped none although its library needs one. After an
+  update, the copy earlier releases installed under
+  `Assets/Xybrid/Plugins/Android/` is removed the next time the Android
+  natives are downloaded.
+- **The Unity README gives the real Android cache location.** Models live
+  under `Application.persistentDataPath/xybrid`: the SDK is given its `models`
+  subfolder and keeps runtime-ready files beside it in `extracted`.
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

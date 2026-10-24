@@ -212,15 +212,16 @@ kotlin/
 ├── README.md                            # This file
 ├── libs/                                # Native libraries (libxybrid_bolt.so built locally/CI, not committed)
 │   ├── armeabi-v7a/
-│   │   └── libxybrid_bolt.so
+│   │   ├── libxybrid_bolt.so
+│   │   └── libc++_shared.so             # C++ runtime (from the NDK sysroot)
 │   ├── arm64-v8a/
 │   │   ├── libxybrid_bolt.so
-│   │   ├── libonnxruntime.so            # ORT shared library (symlink → vendor/)
-│   │   └── libc++_shared.so             # C++ runtime (symlink → vendor/)
+│   │   ├── libonnxruntime.so            # ORT shared library (from vendor/)
+│   │   └── libc++_shared.so             # C++ runtime (from the NDK sysroot)
 │   └── x86_64/
 │       ├── libxybrid_bolt.so
-│       ├── libonnxruntime.so            # ORT shared library (symlink → vendor/)
-│       └── libc++_shared.so             # C++ runtime (symlink → vendor/)
+│       ├── libonnxruntime.so            # ORT shared library (from vendor/)
+│       └── libc++_shared.so             # C++ runtime (from the NDK sysroot)
 └── src/main/kotlin/ai/xybrid/
     ├── Xybrid.kt                         # Public convenience API
     └── XybridBolt.kt                     # BoltFFI-generated bindings
@@ -236,9 +237,9 @@ The SDK bundles ONNX Runtime (`libonnxruntime.so`) and the C++ shared library (`
 |---------|---------|--------|
 | `libxybrid_bolt.so` | Xybrid Rust SDK via BoltFFI | Built from `crates/xybrid-bolt/` |
 | `libonnxruntime.so` | ONNX Runtime inference engine | Vendored at `vendor/ort-android/` |
-| `libc++_shared.so` | C++ standard library runtime | Vendored at `vendor/ort-android/` |
+| `libc++_shared.so` | C++ standard library runtime | The NDK sysroot (`@androidndk`), matching the NDK that links `libxybrid_bolt.so` |
 
-The Bazel AAR bundles the ORT libraries into `jni/<abi>/` automatically, so staging its jniLibs populates everything Gradle needs.
+The Bazel AAR bundles `libonnxruntime.so` and `libc++_shared.so` into `jni/<abi>/` automatically, so staging its jniLibs populates everything Gradle needs.
 
 ## FFI Strategy
 
@@ -315,20 +316,22 @@ bindings/kotlin/libs/
 ├── arm64-v8a/
 │   ├── libxybrid_bolt.so
 │   ├── libonnxruntime.so         # Bundled from vendor/ort-android/
-│   └── libc++_shared.so          # Bundled from vendor/ort-android/
+│   └── libc++_shared.so          # Bundled from the NDK sysroot
 ├── armeabi-v7a/
-│   └── libxybrid_bolt.so
+│   ├── libxybrid_bolt.so
+│   └── libc++_shared.so          # Bundled from the NDK sysroot
 ├── x86_64/
 │   ├── libxybrid_bolt.so
 │   ├── libonnxruntime.so         # Bundled from vendor/ort-android/
-│   └── libc++_shared.so          # Bundled from vendor/ort-android/
+│   └── libc++_shared.so          # Bundled from the NDK sysroot
 └── {version}/                    # Versioned copy
     ├── arm64-v8a/
     │   ├── libxybrid_bolt.so
     │   ├── libonnxruntime.so
     │   └── libc++_shared.so
     ├── armeabi-v7a/
-    │   └── libxybrid_bolt.so
+    │   ├── libxybrid_bolt.so
+    │   └── libc++_shared.so
     └── x86_64/
         ├── libxybrid_bolt.so
         ├── libonnxruntime.so

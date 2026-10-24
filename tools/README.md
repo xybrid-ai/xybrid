@@ -78,7 +78,12 @@ cargo xtask build-ffi --target x86_64-unknown-linux-gnu --release --deploy-unity
 **Options:**
 - `--target <triple>` - Target triple
 - `--release` - Build in release mode
-- `--deploy-unity` - Copy the built library into `bindings/unity/Runtime/Plugins/<Platform>/`
+- `--deploy-unity` - Copy the built library into `bindings/unity/Runtime/Plugins/<Platform>/`.
+  Refused for Android targets: the Unity Android library links libc++
+  statically, which only the Bazel build does. Build
+  `//crates/xybrid-bolt:xybrid_bolt_cdylib` with `--config=android-arm64`,
+  `android-armv7` or `android-x86_64` (plus `--config=remote` off a Linux x86_64 host)
+  and stage it with `cargo xtask deploy-unity-native`.
 
 **Outputs:**
 - Dynamic library: `target/<target>/<profile>/libxybrid_bolt.{dylib,so,dll}`

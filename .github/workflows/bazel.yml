@@ -45,6 +45,7 @@ on:
       - "macros/**"
       - "vendor/llama-cpp"
       - "vendor/ort-macos/**"
+      - "vendor/ort-android/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "tools/unity-runtime-smoke/**"
@@ -86,7 +87,7 @@ jobs:
           FILES=$(gh api --paginate \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
             --jq '.[].filename' | grep -vE '\.mdx?$' || true)
-          if printf '%s\n' "$FILES" | grep -qE '^(MODULE\.bazel|\.bazelrc|\.bazelversion|\.bazelignore|BUILD\.bazel|.*/BUILD\.bazel|.*\.bzl|bazel/|tools/scripts/|rules_android_ndk\.patch|rules_foreign_cc\.patch|rules_rs\.patch|rules_rust\.patch|hermetic_llvm\.patch|emsdk\.patch|crates/|bindings/kotlin/|bindings/web/runtime/|macros/|vendor/llama-cpp|vendor/ort-macos/|Cargo\.toml|Cargo\.lock|tools/unity-runtime-smoke/|\.github/workflows/bazel\.yml)'; then
+          if printf '%s\n' "$FILES" | grep -qE '^(MODULE\.bazel|\.bazelrc|\.bazelversion|\.bazelignore|BUILD\.bazel|.*/BUILD\.bazel|.*\.bzl|bazel/|tools/scripts/|rules_android_ndk\.patch|rules_foreign_cc\.patch|rules_rs\.patch|rules_rust\.patch|hermetic_llvm\.patch|emsdk\.patch|crates/|bindings/kotlin/|bindings/web/runtime/|macros/|vendor/llama-cpp|vendor/ort-macos/|vendor/ort-android/|Cargo\.toml|Cargo\.lock|tools/unity-runtime-smoke/|\.github/workflows/bazel\.yml)'; then
             REL=true
           else
             REL=false
@@ -366,6 +367,27 @@ jobs:
             //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
           bazelisk build --config=remote --config=android-x86_64 \
             //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
+
+      # The Unity Android natives are otherwise built only by build-unity.yml,
+      # which runs after a release is tagged. Keep their static C++ runtime a
+      # standing gate: stage each ABI as the release does and run the verifier
+      # (no libc++_shared.so, no C++ runtime imports or exports, bionic still
+      # dynamic, 16 KB alignment). Same cache-shared Rust graph as above.
+      - name: Build + verify Unity android natives on RBE (3 ABIs)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          set -euo pipefail
+          root=$(mktemp -d)
+          for spec in \
+            "aarch64-linux-android:android-arm64" \
+            "armv7-linux-androideabi:android-armv7" \
+            "x86_64-linux-android:android-x86_64"; do
+            triple="${spec%%:*}"; cfg="${spec##*:}"
+            bazelisk build --config=remote --config="$cfg" //crates/xybrid-bolt:xybrid_bolt_cdylib
+            LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib --config=remote --config="$cfg")
+            python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target "$triple" --plugins-root "$root"
+          done
+          python3 tools/scripts/verify_unity_android_natives.py --require-abis "$root/Android"
 
       - name: Upload AAR artifact
         if: env.BUILDBUDDY_API_KEY != ''
