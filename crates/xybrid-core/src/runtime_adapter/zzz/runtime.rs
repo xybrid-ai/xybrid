@@ -158,6 +158,7 @@ impl ModelRuntime for ZzzKittenRuntime {
     /// Install the pending defaults and open the engine session for
     /// `model_path` (the bundle's primary language GGUF).
     fn load(&mut self, model_path: &Path) -> AdapterResult<()> {
+        assert_engine_abi()?;
         let Some(mut defaults) = self
             .pending
             .lock()
@@ -204,10 +205,17 @@ impl ModelRuntime for ZzzKittenRuntime {
     }
 }
 
-/// Guard against engine ABI drift: the pinned slice must still declare the
-/// same ABI version these bindings compile against.
+/// Check runtime availability before entering the pinned engine, then reject ABI drift.
 pub fn assert_engine_abi() -> Result<(), AdapterError> {
-    let linked = xybrid_zzz_sys::abi_version();
+    check_engine_abi(xybrid_zzz_sys::abi_version())
+}
+
+fn check_engine_abi(linked: u32) -> Result<(), AdapterError> {
+    if linked == 0 {
+        return Err(AdapterError::RuntimeError(
+            "zzz engine unavailable: Linux x86_64 requires an x86-64-v3 CPU and OS-enabled AVX/XMM/YMM state".into(),
+        ));
+    }
     if linked != ZZZ_EMBED_ABI_VERSION {
         return Err(AdapterError::RuntimeError(format!(
             "linked zzz engine ABI {linked} does not match the pinned ABI {ZZZ_EMBED_ABI_VERSION}"
@@ -220,6 +228,20 @@ pub fn assert_engine_abi() -> Result<(), AdapterError> {
 mod tests {
     use super::*;
     use crate::ir::Envelope;
+
+    #[test]
+    fn unavailable_cpu_is_distinct_from_artifact_abi_drift() {
+        let unavailable = check_engine_abi(0)
+            .expect_err("zero means unavailable")
+            .to_string();
+        assert!(unavailable.contains("x86-64-v3"));
+        assert!(!unavailable.contains("does not match"));
+        assert!(check_engine_abi(ZZZ_EMBED_ABI_VERSION).is_ok());
+        assert!(check_engine_abi(ZZZ_EMBED_ABI_VERSION + 1)
+            .expect_err("nonzero ABI drift must fail")
+            .to_string()
+            .contains("does not match"));
+    }
 
     fn defaults_with(primary: &str) -> ZzzDefaults {
         ZzzDefaults {

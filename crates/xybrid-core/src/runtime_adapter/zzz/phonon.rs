@@ -95,6 +95,7 @@ impl ModelRuntime for ZzzPhononRuntime {
     }
 
     fn load(&mut self, model_path: &Path) -> AdapterResult<()> {
+        super::assert_engine_abi()?;
         let state = self.state.get_mut().unwrap_or_else(|e| e.into_inner());
         let defaults = state.pending.take().ok_or_else(|| {
             AdapterError::InvalidInput("Phonon load requires resolved bundle settings".into())

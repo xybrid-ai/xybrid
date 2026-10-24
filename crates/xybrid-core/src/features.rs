@@ -1,6 +1,6 @@
 //! Runtime feature-flag introspection.
 //!
-//! Reports which Cargo features were enabled at compile time so callers
+//! Reports which compiled features are available on this host so callers
 //! (e.g. the registry telemetry header) can advertise the active backend set.
 
 use std::sync::OnceLock;
@@ -48,14 +48,28 @@ const ALL_FEATURES: &[(&str, bool)] = &[
 pub fn enabled() -> &'static [&'static str] {
     static ENABLED: OnceLock<Vec<&'static str>> = OnceLock::new();
     ENABLED
-        .get_or_init(|| filter_enabled(ALL_FEATURES))
+        .get_or_init(|| filter_enabled(ALL_FEATURES, zzz_available()))
         .as_slice()
 }
 
-fn filter_enabled(items: &[(&'static str, bool)]) -> Vec<&'static str> {
+fn zzz_available() -> bool {
+    #[cfg(feature = "tts-zzz")]
+    {
+        xybrid_zzz_sys::abi_version() == xybrid_zzz_sys::ZZZ_EMBED_ABI_VERSION
+    }
+    #[cfg(not(feature = "tts-zzz"))]
+    {
+        false
+    }
+}
+
+fn filter_enabled(items: &[(&'static str, bool)], zzz_available: bool) -> Vec<&'static str> {
     let mut names: Vec<&'static str> = items
         .iter()
-        .filter_map(|(name, on)| if *on { Some(*name) } else { None })
+        .filter_map(|(name, on)| {
+            let available = zzz_available || !matches!(*name, "tts-zzz" | "zzz-phonon-31m");
+            (*on && available).then_some(*name)
+        })
         .collect();
     names.sort();
     names
@@ -67,7 +81,7 @@ mod tests {
 
     #[test]
     fn empty_input_yields_empty_slice() {
-        let result = filter_enabled(&[]);
+        let result = filter_enabled(&[], true);
         assert!(result.is_empty());
     }
 
@@ -78,7 +92,7 @@ mod tests {
             ("ort-coreml", false),
             ("llm-llamacpp", false),
         ];
-        assert!(filter_enabled(items).is_empty());
+        assert!(filter_enabled(items, true).is_empty());
     }
 
     #[test]
@@ -89,7 +103,7 @@ mod tests {
             ("llm-llamacpp", true),
         ];
         assert_eq!(
-            filter_enabled(items),
+            filter_enabled(items, true),
             vec!["candle-metal", "llm-llamacpp", "ort-download"]
         );
     }
@@ -153,7 +167,22 @@ mod tests {
     fn zzz_phonon_31m_follows_tts_zzz() {
         assert_eq!(
             enabled().contains(&"zzz-phonon-31m"),
-            cfg!(feature = "tts-zzz")
+            cfg!(feature = "tts-zzz") && zzz_available()
         );
+    }
+
+    #[test]
+    fn unavailable_zzz_is_not_advertised_but_other_backends_are_preserved() {
+        let items = &[
+            ("tts-zzz", true),
+            ("zzz-phonon-31m", true),
+            ("vision", true),
+        ];
+        assert_eq!(filter_enabled(items, false), vec!["vision"]);
+        assert_eq!(
+            filter_enabled(items, true),
+            vec!["tts-zzz", "vision", "zzz-phonon-31m"]
+        );
+        assert!(filter_enabled(&[("tts-zzz", false), ("zzz-phonon-31m", false)], true).is_empty());
     }
 }

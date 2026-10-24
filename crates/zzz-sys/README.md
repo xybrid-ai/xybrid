@@ -10,6 +10,17 @@ and linker metadata.
 | Android ARM64 | Android API 29+ |
 | Linux x86_64 | x86-64-v3 CPU, glibc 2.28+ |
 
+On Linux x86_64, Rust checks the complete x86-64-v3 CPU feature set and
+OS-enabled AVX state before every engine FFI call, including capability
+probes and native defaults. Unsupported CPUs return ABI version `0`, report
+no supported models, and reject session work with a `LoadFailed` error naming
+the required CPU floor. ABI `0` means the runtime is unavailable; it does not
+mean the pinned artifact failed ABI verification. Native defaults return
+zeroed settings with `struct_size` set in this case; opening a session checks
+availability before validating settings. Other target slices retain their
+existing behavior. The Rust host must itself be built for its intended CPU
+baseline; this check cannot make a host binary compiled for v3 run on v2.
+
 Privately stage a pinned slice before native builds with
 `python3 tools/scripts/zzz_pull.py --target <target>` from the repository root;
 see `--help` for authentication, offline archives and staged verification.

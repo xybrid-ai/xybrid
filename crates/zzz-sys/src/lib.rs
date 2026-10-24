@@ -33,8 +33,8 @@
 //!   with GGUF-selected voices and sampling defaults
 //! - [`SynthesisOutcome`] — delivery payload with the capped/partial flags
 //!
-//! Zero `unsafe` on the public surface: every `unsafe` block sits in
-//! [`mod@session`] with a `# Safety` comment, mirroring `xybrid-llama`'s and
+//! Zero `unsafe` on the public surface: every `unsafe` block sits in the
+//! private session/CPU modules with a safety comment, mirroring `xybrid-llama`'s and
 //! `xybrid-whisper`'s discipline. Both session types are deliberately not
 //! `Sync`: the header documents one synthesis at a time per session, with no
 //! re-entrant or concurrent calls.
@@ -223,6 +223,8 @@ const _: () = {
     }
 };
 
+#[cfg(any(feature = "bindings", test))]
+mod cpu;
 #[cfg(feature = "bindings")]
 mod session;
 #[cfg(feature = "bindings")]

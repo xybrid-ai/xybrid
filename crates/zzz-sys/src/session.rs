@@ -66,13 +66,27 @@ fn message_of(error: &EmbedError, fallback: &str) -> ZzzError {
     }
 }
 
+fn require_cpu() -> Result<(), ZzzError> {
+    if !crate::cpu::available() {
+        return Err(ZzzError::LoadFailed {
+            message: "zzz engine unavailable: Linux x86_64 requires an x86-64-v3 CPU and OS-enabled AVX/XMM/YMM state".into(),
+        });
+    }
+    Ok(())
+}
+
 /// Read Phonon's defaults from the linked engine, including bundle temperature selection.
+/// Returns zeroed settings (with `struct_size` set) when the CPU is unsupported;
+/// session opening reports the CPU requirement before validating those settings.
 #[must_use]
 pub fn default_options() -> EmbedOptions {
     let mut options = EmbedOptions {
         struct_size: core::mem::size_of::<EmbedOptions>() as u32,
         ..EmbedOptions::default()
     };
+    if !crate::cpu::available() {
+        return options;
+    }
     // # Safety: writes exactly the one `EmbedOptions` allocated above.
     unsafe { zzz_embed_default_options(ptr::addr_of_mut!(options)) };
     options
@@ -110,19 +124,25 @@ extern "C" {
 
 /// Runtime ABI version of the linked engine slice.
 ///
-/// The verified slice comes from the same pinned release as these
-/// declarations, so a mismatch means duplicate-engine drift. Callers may
-/// `assert_eq!(crate::session::abi_version(), crate::ZZZ_EMBED_ABI_VERSION)`.
+/// Returns zero without entering the engine if the runtime CPU is unsupported.
+/// Zero means runtime unavailability, not a mismatch in the verified artifact.
+/// A nonzero mismatch indicates duplicate-engine drift.
 #[must_use]
 pub fn abi_version() -> u32 {
+    if !crate::cpu::available() {
+        return 0;
+    }
     // # Safety: a plain function returning an integer; no shared state.
     unsafe { zzz_embed_abi_version() }
 }
 
 /// Whether the linked slice compiled support for `model` (e.g.
-/// `"kitten-tts2"`).
+/// `"kitten-tts2"`). Returns false without entering the engine on unsupported CPUs.
 #[must_use]
 pub fn supports_model(model: &str) -> bool {
+    if !crate::cpu::available() {
+        return false;
+    }
     let name = match CString::new(model) {
         Ok(name) => name,
         // An interior NUL can never match an implementation name.
@@ -207,6 +227,7 @@ impl PhononSession {
         voice: Option<&str>,
         settings: PhononSettings,
     ) -> Result<Self, ZzzError> {
+        require_cpu()?;
         settings.validate()?;
         let path = c_string(
             model_path
@@ -331,6 +352,9 @@ unsafe impl Send for SessionHandle {}
 unsafe impl Sync for SessionHandle {}
 impl Drop for SessionHandle {
     fn drop(&mut self) {
+        if !crate::cpu::available() {
+            return;
+        }
         // # Safety: the final Arc owns close; no call can still hold this handle.
         unsafe { zzz_embed_close(self.0.as_ptr()) }
     }
@@ -349,6 +373,9 @@ impl core::fmt::Debug for KittenCancellation {
 impl KittenCancellation {
     /// Stop the running call. Idle cancellation is ignored by the engine.
     pub fn cancel(&self) {
+        if !crate::cpu::available() {
+            return;
+        }
         // # Safety: Arc anchors the session; cancel is thread-safe, including
         // from the callback. Close cannot occur while this borrow is alive.
         unsafe { zzz_embed_cancel(self.0 .0.as_ptr()) }
@@ -421,6 +448,7 @@ impl KittenSession {
         decoder_voice: &Path,
         settings: KittenSettings,
     ) -> Result<Self, ZzzError> {
+        require_cpu()?;
         let as_c_path = |path: &Path| -> Result<CString, ZzzError> {
             let string = path.to_str().ok_or_else(|| ZzzError::InvalidArgument {
                 message: "asset path is not valid UTF-8".to_string(),
@@ -513,6 +541,7 @@ impl KittenSession {
         language: Option<&str>,
         callback: &mut dyn FnMut(&[f32], ChunkInfo) -> bool,
     ) -> Result<StreamOutcome, ZzzError> {
+        require_cpu()?;
         let text = c_string(text)?;
         let language = match language {
             Some(language) => Some(c_string(language)?),
@@ -647,5 +676,80 @@ unsafe extern "C" fn sample_callback(
             state.panicked = true;
             1
         } // never unwind across C
+    }
+}
+
+#[cfg(test)]
+mod cpu_tests {
+    use super::*;
+
+    fn assert_unavailable<T: core::fmt::Debug>(result: Result<T, ZzzError>) {
+        let error = result.expect_err("unsupported CPUs cannot enter the engine");
+        assert!(matches!(error, ZzzError::LoadFailed { .. }), "{error}");
+        assert!(error.to_string().contains("x86-64-v3"), "{error}");
+    }
+
+    #[test]
+    fn denied_cpu_probes_and_defaults_do_not_enter_native_code() {
+        crate::cpu::without_v3(|| {
+            assert_eq!(abi_version(), 0);
+            assert!(!supports_model("phonon"));
+            assert!(!supports_model("kitten-tts2"));
+            let options = default_options();
+            assert_eq!(
+                options.struct_size as usize,
+                core::mem::size_of::<EmbedOptions>()
+            );
+            assert_eq!(options.max_frames_per_chunk, 0);
+            assert_eq!(options.max_chunk_tokens, 0);
+            assert_eq!(options.temperature, 0.0);
+            assert_eq!(options.seed, 0);
+        });
+    }
+
+    #[test]
+    fn denied_cpu_open_precedes_invalid_paths_settings_and_flags() {
+        crate::cpu::without_v3(|| {
+            let invalid_path = Path::new("invalid\0path");
+            assert_unavailable(PhononSession::open_phonon(
+                invalid_path,
+                Some("invalid\0voice"),
+                PhononSettings::default(),
+            ));
+            assert_unavailable(KittenSession::open_kitten(
+                invalid_path,
+                invalid_path,
+                invalid_path,
+                invalid_path,
+                KittenSettings {
+                    flags: KittenFlags {
+                        accelerate: true,
+                        sentence_chunks: false,
+                    },
+                    ..KittenSettings::default()
+                },
+            ));
+        });
+    }
+
+    #[test]
+    fn denied_cpu_synthesis_cancel_and_drop_never_dereference_native_handle() {
+        crate::cpu::without_v3(|| {
+            // Deliberately invalid native state: touching it through any FFI
+            // entry would be a contract violation. The guard must reject first.
+            let mut session = KittenSession {
+                session: Arc::new(SessionHandle(ptr::NonNull::dangling())),
+                not_sync: PhantomData,
+            };
+            let cancel = session.cancellation_handle();
+            assert_unavailable(session.synthesize_stream_outcome(
+                "invalid\0text",
+                None,
+                &mut |_, _| panic!("unexpected callback"),
+            ));
+            cancel.cancel();
+            drop(session);
+            drop(cancel);
+        });
     }
 }
