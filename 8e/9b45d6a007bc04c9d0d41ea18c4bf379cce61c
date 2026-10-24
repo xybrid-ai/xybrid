@@ -1,0 +1,29 @@
+tools/scripts/zzz_sdk_stage.py
+  s_33f5e18570f04e::t_f967a5dacc9828 1-228,230-346
+  s_33f5e18570f04e::t_d94ee012e74ec4 229
+tools/scripts/tests/test_zzz_sdk_stage.py
+  s_33f5e18570f04e::t_d3df12dbcf995f 1-20,22-95,97-118,120-139,141-174,176-203,223-236,238-356
+  s_33f5e18570f04e::t_b30c5927c4ff9d 21,96,119,140,175,204-222,237
+.github/workflows/README.md
+  s_33f5e18570f04e::t_91f7f98009d6f8 79
+.github/workflows/trusted-zzz-sdk.yml
+  s_33f5e18570f04e::t_926adfc70b4c73 1-69
+tools/scripts/zzz_sdk_stage.md
+  s_33f5e18570f04e::t_606bf6f2edaf22 1-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "8e9b45d6a007bc04c9d0d41ea18c4bf379cce61c",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
