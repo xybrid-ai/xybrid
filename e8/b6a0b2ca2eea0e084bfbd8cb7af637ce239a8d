@@ -1,0 +1,40 @@
+tools/scripts/tests/test_zzz_companion_native.py
+  s_33f5e18570f04e::t_c73ce295d9a3ae 1-206,208-225,227-231,234-237
+  s_33f5e18570f04e::t_311adeefa27150 207,226,232-233
+bazel/zzz/companion/check_exports.py
+  s_33f5e18570f04e::t_7f7ef35f395436 1-24,26-50,53-55,58-82
+  s_33f5e18570f04e::t_311adeefa27150 25,51-52,56-57
+MODULE.bazel
+  s_33f5e18570f04e::t_b5768fe2061d08 257-263
+bazel/zzz/companion/README.md
+  s_33f5e18570f04e::t_989cf0e114816e 1-44,46,48-50,55-83,86-93
+  s_33f5e18570f04e::t_311adeefa27150 45,47,51-54,84-85
+bazel/zzz/companion/BUILD.bazel
+  s_33f5e18570f04e::t_6973ced4feb4d5 1-79
+bazel/zzz/companion/clean.sh
+  s_33f5e18570f04e::t_cdcfa169f93410 1-5
+bazel/zzz/companion/exports.map
+  s_33f5e18570f04e::t_52120d71d5df9a 1-6
+bazel/zzz/companion/metadata.py
+  s_33f5e18570f04e::t_54026bbc0cb8c5 1-80
+bazel/zzz/companion/xybrid_tts_companion.c
+  s_33f5e18570f04e::t_86495d90263ae0 1-59
+bazel/zzz/companion/xybrid_tts_companion.h
+  s_33f5e18570f04e::t_42c0795b248063 1-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e8b6a0b2ca2eea0e084bfbd8cb7af637ce239a8d",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
