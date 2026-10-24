@@ -214,9 +214,9 @@ class ZzzPullTests(unittest.TestCase):
         contract = json.dumps(
             zzz.SCHEMA5_NOTICE_FILES, sort_keys=True, separators=(",", ":")
         ).encode()
-        self.assertEqual(13, len(zzz.SCHEMA5_NOTICE_FILES))
+        self.assertEqual(14, len(zzz.SCHEMA5_NOTICE_FILES))
         self.assertEqual(
-            "4a996b44b48ca66516b5067c11f14ef77f0824850626c0ef322576b6644883a3",
+            "a634e1fb5e0cdfa87efea950c72ff9bb522c6620cec16924395820e24b06c9ce",
             hashlib.sha256(contract).hexdigest(),
         )
 
@@ -277,7 +277,7 @@ class ZzzPullTests(unittest.TestCase):
                     archive, pin = self.make_archive(target=target)
                     staged = zzz.stage_archive(archive, pin, self.root / "staged")
                     self.assertEqual(staged, zzz.verify_staged(staged, pin))
-                    self.assertEqual(17, len(pin.files))
+                    self.assertEqual(18, len(pin.files))
                     self.assertEqual(
                         {"include", "lib", "share", "LICENSES"}, pin.directories
                     )

@@ -34,19 +34,20 @@ FROZEN_RELEASE_TAGS = {f"v0.1.0-rc.{number}" for number in range(1, 9)}
 # Immutable schema-5 contract. A change to any notice byte requires a new
 # receipt schema, not a receipt or manifest that blesses its own replacement.
 SCHEMA5_NOTICE_FILES = {
+    "LICENSES/Go-BSD-3-Clause.txt": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
     "LICENSES/KittenTTS-APACHE-2.0.txt": "787aa312b93eee80b636f35652469df29efdb7582239d6a9c088467555a3c7fd",
     "LICENSES/LLVM-compiler-rt.txt": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
     "LICENSES/PrismML-llama-MIT.txt": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
     "LICENSES/Zig-MIT.txt": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
     "LICENSES/compiler-rt-release_80.txt": "dd27f8c290bcdc8368549cd7cd98710a9dbdc34122f2e096a1edb97824ed4148",
     "LICENSES/musl-COPYRIGHT.txt": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
-    "LICENSES/musl-math-NOTICES.txt": "f4ecd0ce14c673931bf25e5868bc2172abab42469f91a5223f4cfcf8264ca289",
+    "LICENSES/musl-math-NOTICES.txt": "84cdee129cf7ea3d37731292a0b41bebe53d370b3206859b2748df9050fc6da5",
     "LICENSES/xn-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
     "LICENSES/xn-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
     "LICENSES/xn-ptts-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
     "LICENSES/xn-ptts-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
     "RUNTIME_TERMS.md": "6efce1cf8639bb04218b01a3fe69ae5fcc0ad31befb6fbaf271c6fe9e7d4ff93",
-    "THIRD_PARTY_NOTICES.md": "06e1fa93f6c76e0e10b1e5ffb51c90f74899796c3095517fe954b0ee6f75347d",
+    "THIRD_PARTY_NOTICES.md": "cbf1b58004ae71c11e7ddda97a116d255118641bf81ffacd25ad837a26be6bab",
 }
 ZIG_TARGETS = {
     "aarch64-apple-darwin": "aarch64-macos-none",

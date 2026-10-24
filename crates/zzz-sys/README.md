@@ -50,7 +50,7 @@ before either Cargo or Bazel links it. This SDK pins engine `v0.1.0-rc.8`
 with receipt schema 4. The full `combined` engine is not accepted.
 
 Receipt schema 4 is accepted only for that frozen `rc.8` release. For future
-schema-5 pins, verification also requires the immutable 13-file notice
+schema-5 pins, verification also requires the immutable 14-file notice
 inventory, including runtime terms and upstream license texts. Each archive's
 manifest entry must pin the exact schema-5 `notice_files` map; the receipt map
 and every notice's bytes must match it before staging. Changing notice bytes
