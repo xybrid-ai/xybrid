@@ -1,0 +1,21 @@
+tools/scripts/tests/test_zzz_source_policy.py
+  s_33f5e18570f04e::t_afdfc26b7ebdbd 174-177,209,213-216
+  s_33f5e18570f04e::t_819dfd0e772cdb 210-212,217-240
+  s_33f5e18570f04e::t_915e70bca453bf 241-242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "02add8e0d29ec796e10b986fd89b7696ca172cb6",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}

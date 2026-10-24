@@ -1,0 +1,20 @@
+tools/scripts/tests/test_llamacpp_update.py
+  s_33f5e18570f04e::t_7567d33cac419e 307-310
+  s_33f5e18570f04e::t_57f940d17cbca0 44-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "581e5ad7f9912a2c2d75be7f3f850cd9bee3d38b",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
