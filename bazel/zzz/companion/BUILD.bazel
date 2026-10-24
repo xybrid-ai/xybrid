@@ -69,8 +69,8 @@ platform_transition_filegroup(
 )
 
 # Explicit final-delivery input, not an AAR/Flutter/Unity activation. :notices
-# is the shared exact14-file repository interface; schema4/current rc8 rejects
-# its analysis. No raw engine archive/header/receipt is a public output here.
+# is the shared exact 14-file repository interface; a schema-4 (frozen rc.8)
+# pin rejects its analysis. No raw engine archive/header/receipt is a public output here.
 filegroup(
     name = "delivery_inputs",
     srcs = [":companion", "@zzz_android//:notices"],

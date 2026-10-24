@@ -103,14 +103,29 @@ class CompanionMetadataTests(unittest.TestCase):
         self.assertEqual(verifier.SCHEMA5_NOTICE_FILES, record["entry"]["notice_files"])
         self.assertEqual(record, json.loads(json.dumps(record, sort_keys=True)))
 
-    def test_real_rc8_is_rejected_without_writing_a_header(self):
+    def test_frozen_rc8_is_rejected_without_writing_a_header(self):
+        entry = dict(self.data["archives"][0], receipt_schema=4,
+                     archive="zzz-phonon-kitten-tts2-android-arm64-v0.1.0-rc.8.tar.gz")
+        del entry["notice_files"]
+        self.data = dict(self.data, release_tag="v0.1.0-rc.8", archives=[entry])
+        self.manifest.write_text(json.dumps(self.data))
         output = self.root / "companion_metadata.h"
         with contextlib.redirect_stderr(io.StringIO()) as error:
             self.assertEqual(1, metadata.main([
                 "--verifier", str(ROOT / "crates/zzz-sys/zzz_pull.py"),
-                "--manifest", str(verifier.DEFAULT_MANIFEST), "--output", str(output)]))
+                "--manifest", str(self.manifest), "--output", str(output)]))
         self.assertFalse(output.exists())
         self.assertIn("notice-bearing selected Android pin is required", error.getvalue())
+
+    def test_committed_pin_generates_metadata_but_client_stays_unconfigured(self):
+        output = self.root / "companion_metadata.h"
+        self.assertEqual(0, metadata.main([
+            "--verifier", str(ROOT / "crates/zzz-sys/zzz_pull.py"),
+            "--manifest", str(verifier.DEFAULT_MANIFEST), "--output", str(output)]))
+        identity, _ = metadata.contract(verifier, verifier.DEFAULT_MANIFEST)
+        self.assertEqual(metadata.header(identity), output.read_text(encoding="ascii"))
+        # Generating metadata activates nothing: the shipped client still
+        # expects no companion until a reviewed contract identity is adopted.
         self.assertIn("EXPECTED_CONTRACT: Option<[u8; 32]> = None", (ROOT / "crates/zzz-sys/src/companion.rs").read_text())
 
     def test_invalid_or_incompatible_pins_cannot_generate_metadata(self):

@@ -2,10 +2,10 @@
 
 This SDK-owned C adapter is an opt-in build prerequisite for
 `libxybrid_zzz_tts.so`. It exports only `xybrid_tts_get_api_v1` and links only
-the independently verified selected Phonon + Kitten archive. **Current rc.8
-pins cannot build its metadata or notice delivery inputs.** Rust's production
-`EXPECTED_CONTRACT` remains `None`; no SDK feature, default, AAR, Flutter or
-Unity package is activated here.
+the independently verified selected Phonon + Kitten archive. The committed
+rc.9 pin can generate its metadata and notice delivery inputs (frozen rc.8
+cannot), but Rust's production `EXPECTED_CONTRACT` remains `None`: no SDK
+feature, default, AAR, Flutter or Unity package is activated here.
 
 The fixed ARM64 table matches `crates/zzz-sys/src/companion.rs`: 24 header
 bytes, 32 identity bytes and eight function pointers, totaling 120 bytes. The
