@@ -165,10 +165,13 @@ mod tests {
     #[test]
     fn zzz_phonon_requires_settings_and_text_without_touching_assets() {
         let mut runtime = ZzzPhononRuntime::new();
-        assert!(matches!(
-            runtime.load(Path::new("missing.gguf")),
-            Err(AdapterError::InvalidInput(_))
-        ));
+        let error = runtime.load(Path::new("missing.gguf")).unwrap_err();
+        if xybrid_zzz_sys::availability().is_ok() {
+            assert!(matches!(error, AdapterError::InvalidInput(_)), "{error:?}");
+        } else {
+            assert!(matches!(error, AdapterError::RuntimeError(_)), "{error:?}");
+            assert!(error.to_string().contains("zzz engine unavailable"));
+        }
         assert!(matches!(
             runtime.execute(&Envelope::new(EnvelopeKind::Embedding(vec![]))),
             Err(AdapterError::InvalidInput(_))
@@ -180,6 +183,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "tts-zzz")]
     fn zzz_phonon_reuses_open_state_and_failed_override_is_transactional() {
         let Some(home) = std::env::var_os("HOME") else {
             return;

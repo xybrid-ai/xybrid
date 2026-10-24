@@ -111,7 +111,7 @@ pub mod llama_cpp;
 #[cfg(feature = "asr-whispercpp")]
 pub mod whisper_cpp;
 
-#[cfg(feature = "tts-zzz")]
+#[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
 pub mod zzz;
 
 // Re-exports from runtime backends

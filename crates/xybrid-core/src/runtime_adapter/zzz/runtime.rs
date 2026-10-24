@@ -3,9 +3,9 @@
 //!
 //! Mirrors the crate layering of the whisper.cpp and llama.cpp integrations:
 //! `xybrid-zzz-sys` owns the FFI; this module is the thin adapter glue. The
-//! engine is a prebuilt, privately staged slice — model weights and voice
-//! JSONs stay separate files, resolved relative to the model bundle root
-//! and declared in the bundle's `ZzzEmbed` template.
+//! engine is a verified static slice or an optional Android component. Model
+//! weights and voice JSONs stay separate files, resolved relative to the model
+//! bundle root and declared in the bundle's `ZzzEmbed` template.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -207,13 +207,16 @@ impl ModelRuntime for ZzzKittenRuntime {
 
 /// Check runtime availability before entering the pinned engine, then reject ABI drift.
 pub fn assert_engine_abi() -> Result<(), AdapterError> {
+    xybrid_zzz_sys::availability().map_err(|reason| {
+        AdapterError::RuntimeError(format!("zzz engine unavailable: {reason}"))
+    })?;
     check_engine_abi(xybrid_zzz_sys::abi_version())
 }
 
 fn check_engine_abi(linked: u32) -> Result<(), AdapterError> {
     if linked == 0 {
         return Err(AdapterError::RuntimeError(
-            "zzz engine unavailable: Linux x86_64 requires an x86-64-v3 CPU and OS-enabled AVX/XMM/YMM state".into(),
+            "zzz engine unavailable after runtime validation".into(),
         ));
     }
     if linked != ZZZ_EMBED_ABI_VERSION {
@@ -224,17 +227,17 @@ fn check_engine_abi(linked: u32) -> Result<(), AdapterError> {
     Ok(())
 }
 
-#[cfg(all(test, feature = "tts-zzz"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::ir::Envelope;
 
     #[test]
-    fn unavailable_cpu_is_distinct_from_artifact_abi_drift() {
+    fn unavailable_runtime_is_distinct_from_artifact_abi_drift() {
         let unavailable = check_engine_abi(0)
             .expect_err("zero means unavailable")
             .to_string();
-        assert!(unavailable.contains("x86-64-v3"));
+        assert!(unavailable.contains("unavailable"));
         assert!(!unavailable.contains("does not match"));
         assert!(check_engine_abi(ZZZ_EMBED_ABI_VERSION).is_ok());
         assert!(check_engine_abi(ZZZ_EMBED_ABI_VERSION + 1)
@@ -264,7 +267,12 @@ mod tests {
         let error = runtime
             .load(Path::new("/tmp/language.gguf"))
             .expect_err("load without applied defaults must fail");
-        assert!(matches!(error, AdapterError::InvalidInput(_)), "{error:?}");
+        if xybrid_zzz_sys::availability().is_ok() {
+            assert!(matches!(error, AdapterError::InvalidInput(_)), "{error:?}");
+        } else {
+            assert!(matches!(error, AdapterError::RuntimeError(_)), "{error:?}");
+            assert!(error.to_string().contains("zzz engine unavailable"));
+        }
     }
 
     #[test]

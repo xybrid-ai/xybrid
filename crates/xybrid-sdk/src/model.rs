@@ -4348,7 +4348,7 @@ impl XybridModel {
         abort_state
             .check_before_run()
             .map_err(|reason| SdkError::inference(format!("Execution aborted: {reason}")))?;
-        #[cfg(feature = "tts-zzz")]
+        #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
         {
             let is_zzz = matches!(
                 self.handle

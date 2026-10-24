@@ -110,7 +110,24 @@ companion contract is configured.** This feature currently advertises no models,
 returns ABI `0`, and rejects opens with `LoadFailed`; it does not enable speech in
 any shipped SDK. Defaults and the static `bindings` contract remain unchanged by this client. When both features are selected, static `bindings` take precedence.
 The Bazel-only opt-in client target is `:xybrid_zzz_companion_client`; it has no
-private archive dependency and is not forwarded into any SDK binding.
+private archive dependency and is not activated in standard SDK bindings.
+
+Core, SDK and Bolt also expose the off-by-default Cargo forwarder
+`tts-zzz-android-companion`. It enables only this client transport, using the
+same existing run/audio-streaming methods and template adapters. It does not
+enable static `tts-zzz` or `bindings`, and it currently advertises neither
+`tts-zzz` nor `zzz-phonon-31m`: the production identity remains unconfigured.
+Availability completes the lazy platform/table/identity validation before the
+core's capability list is cached. Unsupported or unavailable components reject
+execution with the loader's bounded reason while other backends remain usable.
+
+For Bazel the separate flag is `--//:tts_zzz_android_companion=true`; defaults
+and standard package targets remain unchanged. Core selects exactly one
+zzz-sys dependency: the client for companion-only mode, or the original static
+target when `--//:tts_zzz=true` is also set. SDK and Bolt mirror that selection.
+Cargo feature unification likewise retains static bindings precedence. Flutter
+forwarding, production identity/pins, package inclusion and installed-device
+qualification remain separate work.
 
 The private ABI-1 getter contract in `src/companion.rs` takes a requested ABI,
 exact output size and caller-owned C-layout table. Its fixed header contains

@@ -419,6 +419,8 @@ jobs:
 
       - name: Run Android companion client unit tests
         run: cargo test -p xybrid-zzz-sys --no-default-features --features android-companion --lib --locked
+      - name: Run companion-only routing without a native component
+        run: cargo test -p xybrid-core --no-default-features --features tts-zzz-android-companion --test zzz_companion_unavailable --locked
 
       # `sentence_ranker` unit-tests its cosine-similarity and ranking helpers.
       # Selecting the single example keeps the no-examples policy above intact:
