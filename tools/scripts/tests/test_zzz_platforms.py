@@ -79,6 +79,7 @@ class ZzzPlatformTests(unittest.TestCase):
                 ctx.symlink.assert_not_called()
                 files = {call.args[0]: call.args[1] for call in ctx.file.call_args_list}
                 self.assertIn('unavailable(name = "zzz"', files["BUILD.bazel"])
+                self.assertIn('unavailable(name = "notices"', files["BUILD.bazel"])
                 namespace = {"fail": fail, "rule": lambda **kw: kw["implementation"]}
                 exec(files["unavailable.bzl"], namespace)
                 with self.assertRaisesRegex(RuleFailure, "no pinned zzz engine slice.*schema-5 pin"):
@@ -122,10 +123,42 @@ class ZzzPlatformTests(unittest.TestCase):
             build = ctx.file.call_args.args[1]
             captured = []
             exec(build, {"load": lambda *args: None, "cc_import": lambda **kw: None,
-                         "cc_library": lambda **kw: captured.append(kw)})
+                         "cc_library": lambda **kw: captured.append(kw), "unavailable": lambda **kw: None})
             expected = ["-lc", "-lm", "-lpthread", "-ldl"] if "linux" in target else ["-lSystem"]
             self.assertEqual(expected, captured[0]["linkopts"])
             self.assertEqual(2, ctx.symlink.call_count)
+
+    def test_schema5_exports_only_verified_notice_files_with_canonical_paths(self):
+        # Execute the actual repository helper after its verifier success. The
+        # verifier's immutable-map checks have their own archive tests.
+        import ast
+        source = ast.parse((ROOT / "crates/zzz-sys/zzz_pull.py").read_text())
+        names = next(ast.literal_eval(node.value) for node in source.body
+                     if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and
+                     t.id == "SCHEMA5_NOTICE_FILES" for t in node.targets))
+        for target in (*NEW_TARGETS, "aarch64-linux-android"):
+            ctx = context(target, [{"target": target, "receipt_schema": 5, "notice_files": names}])
+            repository_source()["zzz_prebuilt_repository"](ctx)
+            captured = []
+            exec(ctx.file.call_args.args[1], {"load": lambda *args: None,
+                 "cc_import": lambda **kw: None, "cc_library": lambda **kw: None,
+                 "filegroup": lambda **kw: captured.append(kw)})
+            self.assertEqual([{"name": "notices", "srcs": ["notices/" + name for name in sorted(names)],
+                               "visibility": ["//visibility:public"]}], captured)
+            self.assertEqual({(f"/verified/{name}", "notices/" + name) for name in names},
+                             {(str(call.args[0]), call.args[1]) for call in ctx.symlink.call_args_list[2:]})
+            self.assertEqual(16, ctx.symlink.call_count)
+
+    def test_schema4_notice_export_fails_analysis_without_changing_native_inputs(self):
+        ctx = context(OLD_TARGETS[0], [{"target": OLD_TARGETS[0], "receipt_schema": 4}])
+        repository_source()["zzz_prebuilt_repository"](ctx)
+        files = {call.args[0]: call.args[1] for call in ctx.file.call_args_list}
+        self.assertIn('unavailable(name = "notices"', files["BUILD.bazel"])
+        namespace = {"fail": fail, "rule": lambda **kw: kw["implementation"]}
+        exec(files["notices_unavailable.bzl"], namespace)
+        with self.assertRaisesRegex(RuleFailure, "require a qualified schema-5 pin"):
+            namespace["unavailable"](None)
+        self.assertEqual(2, ctx.symlink.call_count)
 
     def test_target_maps_and_apple_environment_selects_agree(self):
         settings = {}

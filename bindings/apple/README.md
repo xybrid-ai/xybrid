@@ -188,6 +188,39 @@ bindings/apple/XCFrameworks/
         └── XybridFFI.framework/
 ```
 
+### Explicit zzz notice-bearing package (preparation)
+
+Future zzz-enabled Apple producers must explicitly build
+`//bindings/apple:XybridFFI_zzz` with `--config=ios --//:tts_zzz=true` and use
+`bazel-bin/bindings/apple/XybridFFI_zzz.xcframework.zip`. This wrapper consumes
+the actual `:XybridFFI` ZIP plus **both** `@zzz_ios//:notices` and
+`@zzz_ios_sim//:notices`. Each repository exports only independently verified
+schema-5 files as `notices/<canonical-relative-path>`; missing pins and frozen
+schema-4 inputs expose an analysis-failing `:notices` target. Existing native
+targets, default features, pins and standard release paths are unchanged.
+
+The final ZIP preserves every framework payload byte and includes the exact
+fourteen immutable notices under `XybridFFI.xcframework/Notices/zzz/`, including
+`LICENSES/`. Both input inventories must independently match the packaged
+verifier's fixed path/hash contract. Missing, additional, duplicated or changed
+notices fail; an already packaged notice set must be complete and identical.
+The wrapper accepts the actual two-slice arm64 iOS device/simulator layout,
+checks its plist, and rejects links, aliases, unsupported ZIP metadata and
+payloads beyond fixed byte/count bounds. It never extracts or executes ZIP
+contents and never replaces an existing output.
+
+A credential-free final-package check is available from the reviewed SDK tree:
+
+```bash
+python3 bindings/apple/pack_zzz_notices.py verify --archive path/to/XybridFFI_zzz.xcframework.zip
+```
+
+Exit zero means the expected ZIP layout, CRCs and all fourteen notice hashes
+passed. This check does not prove native symbols, runtime behavior, provenance
+or installed application notice retention. No schema-5 pins are activated by
+this preparation; a real Bazel build and final SDK qualification remain gates
+before publication. The standard release workflow still uses `:XybridFFI`.
+
 ### Environment Variables
 
 | Variable | Description | Default |

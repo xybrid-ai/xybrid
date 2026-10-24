@@ -22,6 +22,7 @@ unavailable = rule(implementation = _unavailable_impl)
 """)
     ctx.file("BUILD.bazel", """load(":unavailable.bzl", "unavailable")
 unavailable(name = "zzz", visibility = ["//visibility:public"])
+unavailable(name = "notices", visibility = ["//visibility:public"])
 """)
 
 def _zzz_prebuilt_impl(ctx):
@@ -49,11 +50,27 @@ def _zzz_prebuilt_impl(ctx):
     root = ctx.path(verified.stdout.strip())
     ctx.symlink(root.get_child("lib/libzzz_embed.a"), "libzzz_embed.a")
     ctx.symlink(root.get_child("include/zzz_embed.h"), "zzz_embed.h")
+    # The verifier independently pins the exact schema-5 inventory and checks
+    # every staged byte. Export only that verified inventory, never a glob or
+    # receipt-derived map. Frozen schema-4 native inputs remain usable as before.
+    notice_load = ""
+    if len(matches) == 1 and matches[0].get("receipt_schema") == 5:
+        notice_paths = ["notices/" + name for name in sorted(matches[0]["notice_files"])]
+        for name in sorted(matches[0]["notice_files"]):
+            ctx.symlink(root.get_child(name), "notices/" + name)
+        notices = "filegroup(name = \"notices\", srcs = %s, visibility = [\"//visibility:public\"])\n" % repr(notice_paths)
+    else:
+        ctx.file("notices_unavailable.bzl", """def _unavailable_impl(ctx):
+    fail("zzz-sys: final-package notices require a qualified schema-5 pin; frozen schema-4 inputs have no notice export")
+unavailable = rule(implementation = _unavailable_impl)
+""")
+        notice_load = "load(\":notices_unavailable.bzl\", \"unavailable\")\n"
+        notices = "unavailable(name = \"notices\", visibility = [\"//visibility:public\"])\n"
     libraries = _SYSTEM_LIBRARIES[ctx.attr.target]
     ctx.file("BUILD.bazel", """load("@rules_cc//cc:defs.bzl", "cc_import", "cc_library")
-cc_import(name = "archive", static_library = "libzzz_embed.a", hdrs = ["zzz_embed.h"])
+%scc_import(name = "archive", static_library = "libzzz_embed.a", hdrs = ["zzz_embed.h"])
 cc_library(name = "zzz", deps = [":archive"], linkopts = %s, visibility = ["//visibility:public"])
-""" % repr(libraries))
+%s""" % (notice_load, repr(libraries), notices))
 
 zzz_prebuilt_repository = repository_rule(
     implementation = _zzz_prebuilt_impl,
