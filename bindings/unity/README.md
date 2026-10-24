@@ -271,6 +271,12 @@ removed the next time the Android natives are downloaded: before the next
 Android build, or from **Xybrid > Native Libraries > Download for Active Build
 Target** while Android is the active build target.
 
+Device coverage: the Android natives have run end to end in a Unity app on an
+arm64 phone, and the release workflow loads the x86_64 library on a standard
+(4 KB-page) emulator. Loading on 16 KB-page devices and on armeabi-v7a, and
+running a Unity app on an emulator, are tracked in
+[#680](https://github.com/xybrid-ai/xybrid/issues/680).
+
 ## Building Native Libraries
 
 If you need to build the native libraries yourself:
