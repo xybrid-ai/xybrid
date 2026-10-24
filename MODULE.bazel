@@ -254,6 +254,13 @@ android_ndk.configure(
 use_repo(android_ndk, "androidndk")
 register_toolchains("@androidndk//:all")
 
+# Separate manual speech component only. The extension above supports one
+# hardcoded repository, so instantiate its same patched repository rule with
+# an explicit name/API floor. No global registration: ordinary SDK platforms
+# keep API28; the companion command selects its marked API29 toolchain.
+android_ndk_api29 = use_repo_rule("@rules_android_ndk//:rules.bzl", "android_ndk_repository")
+android_ndk_api29(name = "androidndk_zzz_api29", api_level = 29)
+
 # NOTE: bindgen runs OFFLINE (committed src/bindings.rs, Option A) — no
 # rust_bindgen toolchain, no libclang-from-source, no python. Regenerate via
 # `cargo build -p xybrid-llama-sys --features bindings` when llama.cpp bumps.

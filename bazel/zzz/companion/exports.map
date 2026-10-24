@@ -1,0 +1,6 @@
+{
+    global:
+        xybrid_tts_get_api_v1;
+    local:
+        *;
+};
