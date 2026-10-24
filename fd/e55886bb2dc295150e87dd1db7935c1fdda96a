@@ -1,0 +1,36 @@
+bindings/apple/pack_zzz_notices.py
+  s_33f5e18570f04e::t_6f03efed053698 1-272
+tools/scripts/tests/test_zzz_platforms.py
+  s_33f5e18570f04e::t_b01cc4143fe685 82,126,131-161
+  s_33f5e18570f04e::t_79e9b5b4ece708 162
+bazel/zzz/repositories.bzl
+  s_33f5e18570f04e::t_1b89e45c707c5c 71
+  s_33f5e18570f04e::t_b237cbb84eefd9 25,53-68,73
+bindings/apple/BUILD.bazel
+  s_33f5e18570f04e::t_31da8bfa4dcabf 11-12,48-63,66
+  s_33f5e18570f04e::t_3b5e822e0b5ced 64-65
+bindings/apple/README.md
+  s_33f5e18570f04e::t_e31e9976031d59 191-223
+tools/scripts/tests/test_zzz_apple_package.py
+  s_33f5e18570f04e::t_d78b80ef125f11 18,75
+  s_33f5e18570f04e::t_b01cc4143fe685 1-17,19-74,76-249,251-269
+  s_33f5e18570f04e::t_1b89e45c707c5c 250
+bindings/apple/zzz_notices.bzl
+  s_33f5e18570f04e::t_672e6f7db12198 1-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "fde55886bb2dc295150e87dd1db7935c1fdda96a",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
