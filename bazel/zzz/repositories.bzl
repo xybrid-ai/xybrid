@@ -1,7 +1,8 @@
 """Private prebuilt input, verified by the same tool used for Cargo builds."""
 
-# These future targets alone may have no pin. Existing rc.8 targets retain
-# strict verification even if their row is accidentally removed.
+# Targets added with schema 5 (pinned from rc.9). Only these may lack a row,
+# which defers a fixed missing-pin failure to analysis. The original three
+# targets retain strict verification even if their row is accidentally removed.
 _UNADOPTED_TARGETS = ["aarch64-apple-ios", "aarch64-apple-ios-sim", "aarch64-unknown-linux-gnu"]
 
 _SYSTEM_LIBRARIES = {

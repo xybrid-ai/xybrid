@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Custom `tts-zzz` builds now pin engine `v0.1.0-rc.9`. Its
+  `phonon-kitten-tts2` archives carry the engine's runtime terms and fourteen
+  third-party notices, which the verifier checks byte for byte. The pins add
+  static slices for iOS devices, the iOS arm64 simulator and Linux arm64.
+  Standard prebuilt SDK packaging is unchanged and still omits zzz.
 - **llama.cpp:** update to [v0.6.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0) (commit `d81235049384534c167caea52b85a694f6103d14`).
 
 ### Fixed

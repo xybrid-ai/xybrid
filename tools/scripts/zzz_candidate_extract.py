@@ -113,8 +113,8 @@ def regular(value, limit):
             "input must be a bounded single-link regular file")
 
 
-def read_json(path, limit):
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+def read_json(path, limit, dir_fd=None):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
     with os.fdopen(fd, "rb") as stream:
         before = os.fstat(stream.fileno())
         regular(before, limit)

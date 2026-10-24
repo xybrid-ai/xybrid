@@ -151,7 +151,9 @@ class ReconciliationTests(unittest.TestCase):
 
     def test_publication_rejects_wrong_checksum_and_any_unrelated_byte(self):
         self.publication(checksum="f" * 64)
-        self.rejected(received=True)
+        # Either checksum file may be checked first (set order); both reject.
+        self.rejected("outside (approved version/checksum values|exact trusted metadata rendering)",
+                      received=True)
         self.destination = self.root / "unrelated-publication"
         self.publication(changes={"README.md": "unapproved publication edit\n"})
         self.rejected("outside the two checksum files", received=True)
@@ -221,7 +223,7 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual("FRESH_PRODUCER_ARCHIVE_MEMBERS_AND_LOCAL_SOURCE", result["reconciliation"])
         self.destination = self.root / "second-use"
         self.archive.write_bytes(self.archive.read_bytes() + b"replacement")
-        self.rejected()
+        self.rejected("archive snapshot digest or identity changed")
 
     def test_member_mutation_at_final_boundary_fails_even_with_unchanged_report(self):
         original = REC.SOURCE.source_binding
@@ -236,7 +238,7 @@ class ReconciliationTests(unittest.TestCase):
                 package.chmod(0o400)
             return original(*args, **kwargs)
         with patch.object(REC.SOURCE, "source_binding", side_effect=mutate):
-            self.rejected(received=True)
+            self.rejected("output member metadata changed", received=True)
 
     def test_post_receive_directory_replacement_is_never_recursively_deleted(self):
         receive = REC.RECEIVER.receive

@@ -74,9 +74,10 @@ def schema5_apple_manifest(manifest):
     require(type(manifest) is dict and set(manifest) == {"schema_version", "engine", "release_tag", "archives"} and
             type(manifest.get("schema_version")) is int and manifest["schema_version"] == 1 and
             manifest.get("engine") == "zzz" and type(manifest.get("release_tag")) is str and
-            re.fullmatch(r"v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?", manifest["release_tag"]) and
-            manifest["release_tag"] not in PULL.FROZEN_RELEASE_TAGS,
+            re.fullmatch(r"v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?", manifest["release_tag"]),
             "published schema-5 Apple pins are required")
+    require(manifest["release_tag"] not in PULL.FROZEN_RELEASE_TAGS,
+            "frozen releases cannot supply schema-5 Apple pins")
     entries = manifest.get("archives")
     require(type(entries) is list and 0 < len(entries) <= 16 and all(type(entry) is dict for entry in entries),
             "published schema-5 Apple pins are required")

@@ -237,7 +237,7 @@ class ProducerGuardTests(unittest.TestCase):
             context = dict(github(), GITHUB_SHA=master, GITHUB_WORKFLOW_SHA=master)
             with patch.object(STAGE, "fetch_candidate") as fetch, \
                     patch.object(STAGE.SOURCE, "source_binding") as binding:
-                with self.assertRaisesRegex(STAGE.Error, "schema-5"):
+                with self.assertRaisesRegex(STAGE.Error, "frozen releases cannot supply schema-5"):
                     STAGE.preflight(tooling, tooling, "b" * 40, "0.14.0", "2026-10-24", context)
                 fetch.assert_not_called()
                 binding.assert_not_called()

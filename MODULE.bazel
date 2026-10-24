@@ -506,8 +506,8 @@ zzz_prebuilt_repository = use_repo_rule("//bazel/zzz:repositories.bzl", "zzz_pre
 zzz_prebuilt_repository(name = "zzz_linux", target = "x86_64-unknown-linux-gnu")
 zzz_prebuilt_repository(name = "zzz_macos", target = "aarch64-apple-darwin")
 zzz_prebuilt_repository(name = "zzz_android", target = "aarch64-linux-android")
-# Recognized future schema-5 slices, absent from the frozen rc.8 manifest.
-# Their repositories expose analysis failures until reviewed pins are adopted;
+# Slices added with schema 5 (pinned from rc.9; the frozen rc.8 manifest has
+# none). Without a pin their repositories defer a fixed failure to analysis;
 # merely resolving an unselected select arm must not stage or fetch an engine.
 zzz_prebuilt_repository(name = "zzz_ios", target = "aarch64-apple-ios")
 zzz_prebuilt_repository(name = "zzz_ios_sim", target = "aarch64-apple-ios-sim")

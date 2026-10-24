@@ -96,9 +96,12 @@ are never replaced or deleted. The receiver retains its own internal rollback
 on extraction failure. After it returns, its API does not transfer the original
 held output descriptor/identity; the orchestration therefore never recursively
 deletes output on a later reconciliation failure. This preserves unrelated
-replacement directories and leaves any received bytes quarantined, unreconciled
-and without a success report. A failed destination must not be consumed or used
-for a retry; the protected caller must choose a new private destination.
+replacement directories and leaves any received bytes in place under the
+destination name, unmarked and without a success report. They look like a
+successful output: only exit status 0 and the JSON result on stdout signal
+reconciliation, so callers must check both and never treat the directory's
+existence as success. A failed destination must not be consumed or used for a
+retry; the protected caller must choose a new private destination.
 
 The receiver's existing archive/count/depth/byte bounds and single-link regular
 file checks remain in force. The source contract is at most 32 KiB; the extracted

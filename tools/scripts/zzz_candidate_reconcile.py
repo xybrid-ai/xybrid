@@ -83,11 +83,13 @@ def publication_proof(repo, contract, checksum):
                                  contract["producer_context"], checksum=checksum)
 
 
-def source_facts(repo, contract, destination, checksum):
+def source_facts(repo, contract, output_fd, checksum):
     native = SOURCE.source_binding(repo, contract["trusted_master_commit"], contract["native_candidate_commit"],
                                    contract["release_version"], contract["release_date"],
                                    contract["producer_context"], checksum=None)
-    actual = RECEIVER.read_json(destination / "source-binding.json", RECEIVER.MAX_BINDING)
+    # Read through the held output descriptor so these are the bytes the
+    # output checks authenticate, not whatever the path names now.
+    actual = RECEIVER.read_json("source-binding.json", RECEIVER.MAX_BINDING, dir_fd=output_fd)
     require(SOURCE.canonical(actual) == SOURCE.canonical(native),
             "extracted source binding differs from independently recomputed native source")
     return native, publication_proof(repo, contract, checksum)
@@ -116,17 +118,18 @@ def reconcile(policy, extraction, source, run_id, artifact_id, archive, destinat
         # The receiver does not transfer its held output descriptor/identity.
         # Authenticate all returned bytes afresh, but never recursively delete
         # a directory first observed after that ownership handoff gap. A later
-        # failure preserves quarantined output and emits no success/authority.
+        # failure leaves the output in place, unmarked, with no success report:
+        # only exit status 0 and the stdout result signal reconciliation.
         output_fd = os.open(destination.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK,
                             dir_fd=parent_fd)
         RECEIVER.same_directory(output_fd, parent_fd, destination.name)
         checksum = extraction["members"][source["sdk_package_member"]]["sha256"]
         # Receiver checked the actual nested package bytes against this digest;
         # no checksum is accepted from the candidate's binding or saved report.
-        source_facts(repo, source, destination, checksum)
+        source_facts(repo, source, output_fd, checksum)
         RECEIVER.same_directory(output_fd, parent_fd, destination.name)
         RECEIVER.verify_output(output_fd, extraction)
-        native, publication = source_facts(repo, source, destination, checksum)
+        native, publication = source_facts(repo, source, output_fd, checksum)
         # Local Git/tree proofs can be substantial. Refresh remote attempt,
         # expiry and raw archive facts after them, immediately before the final
         # bounded member/identity pass rather than before another source read.

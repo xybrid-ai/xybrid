@@ -57,7 +57,7 @@ ZIG_TARGETS = {
     "aarch64-unknown-linux-gnu": "aarch64-linux-gnu",
     "x86_64-unknown-linux-gnu": "x86_64-linux-gnu",
 }
-# Added only for future schema-5 adoption. Frozen rc.8 has no such archives.
+# Targets added with schema 5 (pinned from rc.9). Frozen rc.8 has no such archives.
 # Mirrors the engine release slice contract; these are requirements, not pins.
 NEW_TARGET_CONTRACTS = {
     "aarch64-apple-ios": ("ios-arm64", "baseline", "16.0", ["System"]),
