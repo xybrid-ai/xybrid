@@ -91,9 +91,14 @@ extracted inventory and held file bytes again and recomputes source/D facts
 again. It then repeats the actual producer/archive verifier after the potentially
 expensive local Git reads, immediately before the final bounded output-byte and
 directory-identity pass. Newly observed reruns, expiry, changed raw
-ZIPs, changed members or changed binding/source facts fail. Reconciliation
-failure removes only its newly created private output, with identity-checked
-strict rollback. Existing destinations are never replaced or deleted.
+ZIPs, changed members or changed binding/source facts fail. Existing destinations
+are never replaced or deleted. The receiver retains its own internal rollback
+on extraction failure. After it returns, its API does not transfer the original
+held output descriptor/identity; the orchestration therefore never recursively
+deletes output on a later reconciliation failure. This preserves unrelated
+replacement directories and leaves any received bytes quarantined, unreconciled
+and without a success report. A failed destination must not be consumed or used
+for a retry; the protected caller must choose a new private destination.
 
 The receiver's existing archive/count/depth/byte bounds and single-link regular
 file checks remain in force. The source contract is at most 32 KiB; the extracted

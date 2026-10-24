@@ -5,7 +5,6 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import shutil
 import sys
 
 
@@ -111,10 +110,13 @@ def reconcile(policy, extraction, source, run_id, artifact_id, archive, destinat
                           source["release_version"], source["release_date"], source["producer_context"], checksum=None)
     destination = Path(destination)
     parent_fd = RECEIVER.parent_directory(destination)
-    output_fd, created, failure, result = None, False, None, None
+    output_fd, result = None, None
     try:
         RECEIVER.receive(policy, extraction, run_id, artifact_id, archive, destination, api=api, now=now)
-        created = True
+        # The receiver does not transfer its held output descriptor/identity.
+        # Authenticate all returned bytes afresh, but never recursively delete
+        # a directory first observed after that ownership handoff gap. A later
+        # failure preserves quarantined output and emits no success/authority.
         output_fd = os.open(destination.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK,
                             dir_fd=parent_fd)
         RECEIVER.same_directory(output_fd, parent_fd, destination.name)
@@ -142,21 +144,10 @@ def reconcile(policy, extraction, source, run_id, artifact_id, archive, destinat
                   "producer_context": source["producer_context"],
                   "release_version": source["release_version"], "release_date": source["release_date"],
                   "installed_sdk": "NOT_QUALIFIED", "activation": "NOT_AUTHORIZED"}
-    except BaseException as error:
-        failure = error
     finally:
-        if failure is not None and created:
-            try:
-                require(output_fd is not None, "reconciliation output directory identity was not captured")
-                RECEIVER.same_directory(output_fd, parent_fd, destination.name)
-                shutil.rmtree(destination.name, dir_fd=parent_fd)
-            except (OSError, Error):
-                failure = Error("reconciliation output rollback failed")
         if output_fd is not None:
             os.close(output_fd)
         os.close(parent_fd)
-    if failure is not None:
-        raise failure
     return result
 
 

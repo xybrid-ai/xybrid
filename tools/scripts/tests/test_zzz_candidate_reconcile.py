@@ -30,7 +30,7 @@ SRC = module("reconcile_source_fixtures", HERE / "test_zzz_source_policy.py")
 
 
 @unittest.skipUnless(SRC.GIT and REC.PRODUCER.posix_host() and hasattr(os, "O_DIRECTORY") and
-                     getattr(REC.shutil.rmtree, "avoids_symlink_attacks", False),
+                     getattr(REC.RECEIVER.shutil.rmtree, "avoids_symlink_attacks", False),
                      "reconciliation fixtures require controlled Git and POSIX descriptors")
 class ReconciliationTests(unittest.TestCase):
     def setUp(self):
@@ -107,10 +107,10 @@ class ReconciliationTests(unittest.TestCase):
         return REC.reconcile(self.policy, self.extraction, self.source, 300, 400, self.archive,
                              self.destination, self.repo.path, api=self.api, now=FIX.FIXTURES.NOW)
 
-    def rejected(self, message=None):
+    def rejected(self, message=None, *, received=False):
         with self.assertRaisesRegex((REC.Error, REC.SOURCE.PolicyError, OSError), message or ".*"):
             self.reconcile()
-        self.assertFalse(self.destination.exists())
+        self.assertEqual(received, self.destination.exists())
         self.assertEqual([], list(self.root.glob(".zzz-receive-*")))
 
     def publication(self, *, checksum=None, changes=None):
@@ -143,31 +143,33 @@ class ReconciliationTests(unittest.TestCase):
         for field, value in (("candidate_commit", "b" * 40), ("producer_context", dict(self.context, run_id=999)),
                              ("engine_manifest_sha256", "0" * 64)):
             with self.subTest(field=field):
+                self.destination = self.root / ("rejected-binding-" + field)
                 changed = dict(binding, **{field: value})
                 self.members["source-binding.json"] = REC.SOURCE.canonical(changed)
                 self.publish()  # Even independently authenticated wrong binding bytes must fail local source proof.
-                self.rejected("extracted source binding differs")
+                self.rejected("extracted source binding differs", received=True)
 
     def test_publication_rejects_wrong_checksum_and_any_unrelated_byte(self):
         self.publication(checksum="f" * 64)
-        self.rejected()
+        self.rejected(received=True)
+        self.destination = self.root / "unrelated-publication"
         self.publication(changes={"README.md": "unapproved publication edit\n"})
-        self.rejected("outside the two checksum files")
+        self.rejected("outside the two checksum files", received=True)
 
     def test_publication_rejects_added_path_or_mode_change(self):
         self.publication(changes={"extra.txt": "not allowed"})
-        self.rejected("source paths or modes")
+        self.rejected("source paths or modes", received=True)
 
     def test_publication_rejects_executable_checksum_file(self):
         self.publication()
         (self.repo.path / "Package.swift").chmod(0o755)
         self.source["publication_candidate_commit"] = self.repo.commit()
-        self.rejected("source paths or modes")
+        self.rejected("source paths or modes", received=True)
 
     def test_publication_must_descend_from_c_even_when_b_to_d_metadata_would_pass(self):
         self.repo.git("checkout", "--detach", self.repo.base)
         self.publication()
-        self.rejected("descend from built source")
+        self.rejected("descend from built source", received=True)
 
     def test_missing_ids_source_facts_and_policy_disagreement_fail_before_api(self):
         original = copy.deepcopy(self.source)
@@ -197,11 +199,11 @@ class ReconciliationTests(unittest.TestCase):
         self.rejected("code or other nonmetadata source changed")
         self.assertEqual([], self.api.paths)
 
-    def test_current_api_attempt_change_at_final_use_rolls_back_output(self):
+    def test_current_api_attempt_change_at_final_use_preserves_unreconciled_output(self):
         path = REC.PRODUCER.API_ROOT + "/actions/runs/300"
         valid = copy.deepcopy(self.api.responses[path])
         self.api.responses[path] = lambda count: dict(valid, run_attempt=2) if count == 6 else valid
-        self.rejected("attempt mismatch")
+        self.rejected("attempt mismatch", received=True)
 
     def test_final_producer_check_follows_last_local_source_proof(self):
         path = REC.PRODUCER.API_ROOT + "/actions/runs/300"
@@ -234,7 +236,21 @@ class ReconciliationTests(unittest.TestCase):
                 package.chmod(0o400)
             return original(*args, **kwargs)
         with patch.object(REC.SOURCE, "source_binding", side_effect=mutate):
-            self.rejected()
+            self.rejected(received=True)
+
+    def test_post_receive_directory_replacement_is_never_recursively_deleted(self):
+        receive = REC.RECEIVER.receive
+        original_output = self.root / "original-receiver-output"
+        def replace(*args, **kwargs):
+            result = receive(*args, **kwargs)
+            self.destination.rename(original_output)
+            self.destination.mkdir(mode=0o700)
+            (self.destination / "unrelated-sentinel").write_bytes(b"preserve unrelated bytes")
+            return result
+        with patch.object(REC.RECEIVER, "receive", side_effect=replace):
+            self.rejected(received=True)
+        self.assertEqual(b"preserve unrelated bytes", (self.destination / "unrelated-sentinel").read_bytes())
+        self.assertEqual(self.members["source-binding.json"], (original_output / "source-binding.json").read_bytes())
 
     def test_uncommitted_worktree_bytes_are_never_executed_or_used_as_object_proof(self):
         (self.repo.path / "src/frozen.rs").write_text("changed working tree, not candidate objects")
