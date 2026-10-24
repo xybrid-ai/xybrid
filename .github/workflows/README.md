@@ -75,6 +75,7 @@ Per-platform SDK builds, wrapper tests and example apps.
 | [`build-apple.yml`](build-apple.yml) | SDK: Apple | push to `master`, pull_request to `master`, workflow_dispatch | none | Build and verify the Apple XCFramework, then compile and unit-test the Swift wrapper on an iOS Simulator. |
 | [`build-flutter.yml`](build-flutter.yml) | SDK: Flutter | push to `master`, pull_request to `master`, workflow_dispatch | none | Analyze and test the Dart wrapper, build the native libraries, and build a consumer app against the packaged layout. |
 | [`build-react-native.yml`](build-react-native.yml) | SDK: React Native | push to `master`, pull_request to `master`, workflow_dispatch | none | Test and npm-pack the JS package; build the iOS and Android example apps. |
+| [`trusted-zzz-sdk.yml`](trusted-zzz-sdk.yml) | SDK: Trusted zzz Apple candidate (manual) | workflow_dispatch | none | Manual: Produce a source-verified, notice-bearing Apple SDK candidate from genuine schema-5 engine pins on protected master. |
 | [`unity-editor.yml`](unity-editor.yml) | SDK: Unity Editor | push to `master`, pull_request to `master`, workflow_dispatch | checks | Run a real Unity Editor: EditMode tests against a Bazel-built native, then an IL2CPP player smoke. |
 | [`web-webgpu.yml`](web-webgpu.yml) | SDK: WebGPU inference (manual) | workflow_dispatch | none | Manual: build the Web SDK and run WebGPU generation in Chromium on a self-hosted GPU runner. |
 
