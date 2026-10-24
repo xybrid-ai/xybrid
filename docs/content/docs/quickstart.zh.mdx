@@ -71,7 +71,7 @@ Xybrid.initialize()
 let model = try await Xybrid.model("kokoro-82m").load()
 
 // 运行文本转语音
-let envelope = XybridEnvelope.text(text: "Hello from Xybrid!")
+let envelope = Envelope.text("Hello from Xybrid!")
 let result = try await model.runAsync(envelope: envelope)
 
 // result.audioBytes 包含生成的语音音频
@@ -102,7 +102,7 @@ Xybrid.init(context)
 val model = Xybrid.model("kokoro-82m").load()
 
 // 运行文本转语音
-val envelope = XybridEnvelope.Text(text = "Hello from Xybrid!")
+val envelope = Envelope.text("Hello from Xybrid!")
 val result = model.runAsync(envelope)
 
 // result.audioBytes 包含生成的语音音频
@@ -177,7 +177,7 @@ Debug.Log($"延迟: {result.LatencyMs}ms");
 git clone --recurse-submodules https://github.com/xybrid-ai/xybrid
 cd xybrid/bindings/web
 pnpm install --frozen-lockfile
-pnpm build        # Bazel builds the Rust/WASM runtime
+pnpm build        # Bazel 构建 Rust/WASM 运行时
 pnpm dev:example   # 下载固定版本的示例模型并启动示例
 ```
 
@@ -257,7 +257,7 @@ curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh |
 irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 ```
 
-预编译二进制与源码构建方式参见[命令行指南](/docs/cli)。
+预编译二进制与源码构建方式参见[命令行指南](/zh/docs/cli)。
 
 **运行推理**
 

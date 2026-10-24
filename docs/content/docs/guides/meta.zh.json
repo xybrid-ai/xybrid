@@ -3,5 +3,5 @@
   "description": "端到端实现指南",
   "icon": "BookOpen",
   "root": true,
-  "pages": ["tool-calling", "vision-models"]
+  "pages": ["tool-calling", "reasoning", "vision-models", "device-logs"]
 }

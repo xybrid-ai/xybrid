@@ -176,13 +176,13 @@ string transcription = model.RunAudio(microphoneBytes, sampleRate: 16000);
 ```csharp
 using var session = model.Stream(StreamingConfigs.VoiceActivity(vadModelDir, language: "en"));
 
-// Drive the UI from the partial stream.
+// 用部分结果流驱动 UI。
 await foreach (var partial in session.Partials(cancellationToken))
 {
     label.text = partial.Text;
 }
 
-// From the Microphone clip, converted to float mono 16 kHz:
+// 来自 Microphone 音频片段，已转换为 float 单声道 16 kHz：
 session.Feed(pcm);
 
 string transcript = session.Flush();
