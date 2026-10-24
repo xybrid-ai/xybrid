@@ -41,6 +41,11 @@ class ReleaseTests(unittest.TestCase):
         self.track(None)
         self.manifest()
         self.git("init", "--quiet", "--initial-branch=master")
+        # Keep hooks and detached housekeeping out of this temporary fixture;
+        # cleanup must remain strict and cannot race background Git writers.
+        self.git("config", "core.hooksPath", os.devnull)
+        self.git("config", "gc.auto", "0")
+        self.git("config", "maintenance.auto", "false")
         self.git("config", "user.email", "test@example.invalid")
         self.git("config", "user.name", "Test")
         self.git("add", ".")
@@ -299,6 +304,10 @@ class ReleaseTests(unittest.TestCase):
                 return REAL_RUN(["git", *args], upstream, stderr=subprocess.DEVNULL)
 
             git("init", "--quiet", "--initial-branch=master")
+            # This upstream is also disposable; no hooks or background writers.
+            git("config", "core.hooksPath", os.devnull)
+            git("config", "gc.auto", "0")
+            git("config", "maintenance.auto", "false")
             git("config", "user.email", "test@example.invalid")
             git("config", "user.name", "Test")
             source = upstream / "source.cpp"
