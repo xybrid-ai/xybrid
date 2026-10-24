@@ -18,6 +18,16 @@ sys.path.insert(0, str(VERIFIER_DIR))
 
 import zzz_pull as zzz  # noqa: E402 (crate verifier directory must be added first)
 
+NEW_PLATFORMS = {
+    "aarch64-apple-ios": ("ios-arm64", "aarch64-ios-none", "16.0", ["System"]),
+    "aarch64-apple-ios-sim": (
+        "ios-arm64-simulator", "aarch64-ios-simulator", "16.0", ["System"]
+    ),
+    "aarch64-unknown-linux-gnu": (
+        "linux-arm64", "aarch64-linux-gnu", "glibc-2.28", ["c", "m", "pthread", "dl"]
+    ),
+}
+
 
 class ZzzPullTests(unittest.TestCase):
     def setUp(self):
@@ -47,7 +57,10 @@ class ZzzPullTests(unittest.TestCase):
         entry = next(e for e in self.manifest_data["archives"] if e["target"] == target)
         resolved = {
             "aarch64-apple-darwin": "aarch64-macos.13.0...15.6-none",
+            "aarch64-apple-ios": "aarch64-ios.16.0...18.6-none",
+            "aarch64-apple-ios-sim": "aarch64-ios.16.0...18.6-simulator",
             "aarch64-linux-android": "aarch64-linux.5.10...6.19-android.29",
+            "aarch64-unknown-linux-gnu": "aarch64-linux.5.10...6.19-gnu.2.28",
             "x86_64-unknown-linux-gnu": "x86_64-linux.5.10...6.19-gnu.2.28",
         }[target]
         receipt = {
@@ -163,6 +176,18 @@ class ZzzPullTests(unittest.TestCase):
             ],
         }
 
+    def add_future_target_pins(self):
+        # Synthetic test pins only: production rc.8 remains three targets.
+        template = self.manifest_data["archives"][0]
+        for target, (slice_name, _, minimum, libraries) in NEW_PLATFORMS.items():
+            entry = copy.deepcopy(template)
+            entry.update(
+                target=target, slice=slice_name, cpu="baseline",
+                deployment_minimum=minimum, system_libraries=libraries,
+                archive=f"zzz-{zzz.PROFILE}-{slice_name}-{self.manifest_data['release_tag']}.tar.gz",
+            )
+            self.manifest_data["archives"].append(entry)
+
     def fake_gh(self, release, archive):
         def run(command, **kwargs):
             if command[-1].endswith("/releases/assets/123"):
@@ -272,7 +297,7 @@ class ZzzPullTests(unittest.TestCase):
     def test_schema5_stages_all_notices_for_existing_targets_without_credentials(self):
         self.use_schema5()
         with mock.patch.dict(os.environ, {}, clear=True):
-            for target in zzz.ZIG_TARGETS:
+            for target in [entry["target"] for entry in self.manifest_data["archives"]]:
                 with self.subTest(target=target):
                     archive, pin = self.make_archive(target=target)
                     staged = zzz.stage_archive(archive, pin, self.root / "staged")
@@ -385,15 +410,102 @@ class ZzzPullTests(unittest.TestCase):
 
     def test_committed_manifest_has_exactly_three_speech_only_targets(self):
         self.assertEqual(
-            set(zzz.ZIG_TARGETS), {e["target"] for e in self.manifest_data["archives"]}
+            {"aarch64-apple-darwin", "aarch64-linux-android", "x86_64-unknown-linux-gnu"},
+            {e["target"] for e in self.manifest_data["archives"]},
         )
         self.assertEqual(3, len(self.manifest_data["archives"]))
-        for target in zzz.ZIG_TARGETS:
+        for target in [entry["target"] for entry in self.manifest_data["archives"]]:
             pin = zzz.select_pin(target)
             self.assertEqual("phonon-kitten-tts2", pin.entry["profile"])
             self.assertEqual(zzz.MODELS, pin.entry["models"])
             self.assertEqual(zzz.APIS, pin.entry["apis"])
             self.assertEqual(zzz.HEADERS, pin.entry["headers"])
+
+    def test_new_targets_fail_before_fetch_or_staging_without_production_pins(self):
+        for target in NEW_PLATFORMS:
+            with self.subTest(target=target), mock.patch.dict(os.environ, {}, clear=True):
+                with self.assertRaisesRegex(zzz.StageError, "missing or duplicate target/profile pin"):
+                    zzz.select_pin(target)
+                with mock.patch.object(zzz, "fetch_archive") as fetch, \
+                     mock.patch.object(zzz, "stage_archive") as stage, \
+                     contextlib.redirect_stderr(io.StringIO()) as error:
+                    self.assertEqual(1, zzz.main(["--target", target]))
+                self.assertIn("missing or duplicate target/profile pin", error.getvalue())
+                fetch.assert_not_called()
+                stage.assert_not_called()
+        for target in ("x86_64-apple-ios", "aarch64-apple-ios-macabi", "aarch64-unknown-linux-musl"):
+            with self.subTest(target=target), self.assertRaisesRegex(zzz.StageError, "unsupported zzz target"):
+                zzz.select_pin(target)
+
+    def test_future_schema5_targets_stage_the_exact_baseline_contract(self):
+        self.use_schema5()
+        self.add_future_target_pins()
+        for target, (slice_name, zig_target, minimum, libraries) in NEW_PLATFORMS.items():
+            with self.subTest(target=target), mock.patch.dict(os.environ, {}, clear=True):
+                archive, pin = self.make_archive(target=target)
+                self.assertEqual(zig_target, zzz.ZIG_TARGETS[target])
+                self.assertEqual(slice_name, pin.entry["slice"])
+                self.assertEqual("baseline", pin.entry["cpu"])
+                self.assertEqual(minimum, pin.entry["deployment_minimum"])
+                self.assertEqual(libraries, pin.entry["system_libraries"])
+                staged = zzz.stage_archive(archive, pin, self.root / "staged")
+                self.assertEqual(staged, zzz.verify_staged(staged, pin))
+
+    def test_new_targets_cannot_reinterpret_frozen_schema4_or_schema5_releases(self):
+        self.add_future_target_pins()
+        self.manifest.write_text(json.dumps(self.manifest_data))
+        for target in NEW_PLATFORMS:
+            with self.subTest(target=target), self.assertRaisesRegex(zzz.StageError, "schema 4 has no pin"):
+                zzz.select_pin(target, self.manifest)
+        self.use_schema5()
+        for tag in sorted(zzz.FROZEN_RELEASE_TAGS):
+            self.manifest_data["release_tag"] = tag
+            self.manifest.write_text(json.dumps(self.manifest_data))
+            for target in NEW_PLATFORMS:
+                with self.subTest(tag=tag, target=target), self.assertRaisesRegex(zzz.StageError, "frozen releases"):
+                    zzz.select_pin(target, self.manifest)
+
+    def test_future_target_pins_reject_changed_platform_contract_and_duplicates(self):
+        self.use_schema5()
+        self.add_future_target_pins()
+        for entry in self.manifest_data["archives"][3:]:
+            for field, value in (("cpu", "apple_m1"), ("deployment_minimum", "17.0"),
+                                 ("system_libraries", ["c"]), ("slice", "macos-arm64")):
+                with self.subTest(target=entry["target"], field=field):
+                    data = copy.deepcopy(self.manifest_data)
+                    candidate = next(e for e in data["archives"] if e["target"] == entry["target"])
+                    candidate[field] = value
+                    self.manifest.write_text(json.dumps(data))
+                    with self.assertRaisesRegex(zzz.StageError, "pin mismatch"):
+                        zzz.select_pin(entry["target"], self.manifest)
+            data = copy.deepcopy(self.manifest_data)
+            data["archives"].append(copy.deepcopy(entry))
+            self.manifest.write_text(json.dumps(data))
+            with self.assertRaisesRegex(zzz.StageError, "duplicate target/profile pin"):
+                zzz.select_pin(entry["target"], self.manifest)
+
+    def test_future_target_receipts_reject_cpu_minimum_libraries_and_abi_substitution(self):
+        self.use_schema5()
+        self.add_future_target_pins()
+        for target in NEW_PLATFORMS:
+            for change in (
+                {"cpu": "apple_m1"}, {"deployment_minimum": "17.0"},
+                {"dependencies": {"system_libraries": ["c"], "compiler_runtime": "bundled"}},
+                {"target": "aarch64-macos-none"},
+                {"resolved_target": "aarch64-ios.17.0-simulator"},
+                {"resolved_target": "aarch64-linux.5.10...6.19-gnu.2.29"},
+            ):
+                with self.subTest(target=target, change=change):
+                    archive, pin = self.make_archive(target=target, receipt_update=change)
+                    with self.assertRaisesRegex(zzz.StageError, "receipt"):
+                        zzz.inspect_archive(archive, pin)
+        for target, resolved in (
+            ("aarch64-apple-ios", "aarch64-ios.16.0...18.6-simulator"),
+            ("aarch64-apple-ios-sim", "aarch64-ios.16.0...18.6-none"),
+        ):
+            archive, pin = self.make_archive(target=target, receipt_update={"resolved_target": resolved})
+            with self.assertRaisesRegex(zzz.StageError, "resolved_target"):
+                zzz.inspect_archive(archive, pin)
 
     def test_other_profiles_cannot_substitute_for_the_speech_only_profile(self):
         for profile in ("combined", "phonon", "kitten-tts2"):
@@ -421,9 +533,9 @@ class ZzzPullTests(unittest.TestCase):
                 with self.assertRaisesRegex(zzz.StageError, "pin mismatch"):
                     zzz.select_pin(data["archives"][0]["target"], self.manifest)
 
-    def test_all_supported_slices_stage_and_verify_without_credentials(self):
+    def test_all_pinned_slices_stage_and_verify_without_credentials(self):
         with mock.patch.dict(os.environ, {}, clear=True):
-            for target in zzz.ZIG_TARGETS:
+            for target in [entry["target"] for entry in self.manifest_data["archives"]]:
                 with self.subTest(target=target):
                     archive, pin = self.make_archive(target=target)
                     staged = zzz.stage_archive(archive, pin, self.root / "staged")

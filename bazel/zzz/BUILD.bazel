@@ -18,8 +18,28 @@ config_setting(
     flag_values = {"//:tts_zzz": "true"},
     visibility = ["//visibility:public"],
 )
+# rules_rs 0.0.95 delegates Apple ABI constraints to its pinned rules_rust;
+# apple_support 2.2.0 distinguishes these otherwise identical ARM64 platforms.
+config_setting(
+    name = "ios_enabled",
+    constraint_values = ["@platforms//os:ios", "@platforms//cpu:aarch64", "@build_bazel_apple_support//constraints:device"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+config_setting(
+    name = "ios_sim_enabled",
+    constraint_values = ["@platforms//os:ios", "@platforms//cpu:aarch64", "@build_bazel_apple_support//constraints:simulator"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+config_setting(
+    name = "linux_arm64_enabled",
+    constraint_values = ["@platforms//os:linux", "@platforms//cpu:aarch64", "@rules_rs//rs/platforms/constraints:glibc"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
 selects.config_setting_group(
     name = "supported_enabled",
-    match_any = [":macos_enabled", ":linux_enabled", ":android_enabled"],
+    match_any = [":macos_enabled", ":linux_enabled", ":android_enabled", ":ios_enabled", ":ios_sim_enabled", ":linux_arm64_enabled"],
     visibility = ["//visibility:public"],
 )

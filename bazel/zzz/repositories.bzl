@@ -1,6 +1,38 @@
 """Private prebuilt input, verified by the same tool used for Cargo builds."""
 
+# These future targets alone may have no pin. Existing rc.8 targets retain
+# strict verification even if their row is accidentally removed.
+_UNADOPTED_TARGETS = ["aarch64-apple-ios", "aarch64-apple-ios-sim", "aarch64-unknown-linux-gnu"]
+
+_SYSTEM_LIBRARIES = {
+    "aarch64-apple-darwin": ["-lSystem"],
+    "aarch64-apple-ios": ["-lSystem"],
+    "aarch64-apple-ios-sim": ["-lSystem"],
+    "aarch64-linux-android": ["-lc", "-lm", "-ldl"],
+    "aarch64-unknown-linux-gnu": ["-lc", "-lm", "-lpthread", "-ldl"],
+    "x86_64-unknown-linux-gnu": ["-lc", "-lm", "-lpthread", "-ldl"],
+}
+
+def _missing_pin_repository(ctx):
+    # Bazel loads packages from unselected select arms. Defer this fixed failure
+    # to analysis of the selected target, without staging or private fetches.
+    ctx.file("unavailable.bzl", """def _unavailable_impl(ctx):
+    fail("zzz-sys: no pinned zzz engine slice for this target; adopt a qualified schema-5 pin before enabling bindings")
+unavailable = rule(implementation = _unavailable_impl)
+""")
+    ctx.file("BUILD.bazel", """load(":unavailable.bzl", "unavailable")
+unavailable(name = "zzz", visibility = ["//visibility:public"])
+""")
+
 def _zzz_prebuilt_impl(ctx):
+    # Reading the manifest makes pin changes invalidate repository verification.
+    manifest = json.decode(ctx.read(ctx.attr.manifest))
+    # A row for the target with a malformed/wrong profile is still an attempted
+    # pin: the verifier must reject it rather than treating it as unadopted.
+    matches = [entry for entry in manifest["archives"] if entry.get("target") == ctx.attr.target]
+    if ctx.attr.target in _UNADOPTED_TARGETS and not matches:
+        _missing_pin_repository(ctx)
+        return
     staged = ctx.os.environ.get("XYBRID_ZZZ_PREBUILT_DIR", "")
     if not staged:
         fail("Stage the pinned slice with tools/scripts/zzz_pull.py and set --repo_env=XYBRID_ZZZ_PREBUILT_DIR=<verified-slice>")
@@ -10,8 +42,6 @@ def _zzz_prebuilt_impl(ctx):
     if child.exists:
         staged = str(child)
     verifier = ctx.path(ctx.attr.verifier)
-    # Reading the manifest makes pin changes invalidate repository verification.
-    ctx.read(ctx.attr.manifest)
     python = ctx.os.environ.get("XYBRID_ZZZ_PYTHON", "python3")
     verified = ctx.execute([python, str(verifier), "--target", ctx.attr.target, "--verify-only"], environment = {"XYBRID_ZZZ_PREBUILT_DIR": staged}, quiet = True)
     if verified.return_code:
@@ -19,7 +49,7 @@ def _zzz_prebuilt_impl(ctx):
     root = ctx.path(verified.stdout.strip())
     ctx.symlink(root.get_child("lib/libzzz_embed.a"), "libzzz_embed.a")
     ctx.symlink(root.get_child("include/zzz_embed.h"), "zzz_embed.h")
-    libraries = {"aarch64-apple-darwin": ["-lSystem"], "aarch64-linux-android": ["-lc", "-lm", "-ldl"], "x86_64-unknown-linux-gnu": ["-lc", "-lm", "-lpthread", "-ldl"]}[ctx.attr.target]
+    libraries = _SYSTEM_LIBRARIES[ctx.attr.target]
     ctx.file("BUILD.bazel", """load("@rules_cc//cc:defs.bzl", "cc_import", "cc_library")
 cc_import(name = "archive", static_library = "libzzz_embed.a", hdrs = ["zzz_embed.h"])
 cc_library(name = "zzz", deps = [":archive"], linkopts = %s, visibility = ["//visibility:public"])

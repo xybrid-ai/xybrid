@@ -15,6 +15,9 @@ rust_library(
         "//bazel/zzz:linux_enabled": ["@zzz_linux//:zzz"],
         "//bazel/zzz:macos_enabled": ["@zzz_macos//:zzz"],
         "//bazel/zzz:android_enabled": ["@zzz_android//:zzz"],
+        "//bazel/zzz:ios_enabled": ["@zzz_ios//:zzz"],
+        "//bazel/zzz:ios_sim_enabled": ["@zzz_ios_sim//:zzz"],
+        "//bazel/zzz:linux_arm64_enabled": ["@zzz_linux_arm64//:zzz"],
         "//conditions:default": [],
     }),
     target_compatible_with = select({

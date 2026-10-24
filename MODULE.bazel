@@ -374,6 +374,7 @@ crate.from_cargo(
     platform_triples = [
         "wasm32-unknown-emscripten",
         "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
         # Desktop Windows cross (GNU/MinGW ABI — hermetic-llvm ships no MSVC CRT).
         "x86_64-pc-windows-gnu",
         # Desktop Windows cross (MSVC ABI — the CRT + SDK come from
@@ -505,3 +506,9 @@ zzz_prebuilt_repository = use_repo_rule("//bazel/zzz:repositories.bzl", "zzz_pre
 zzz_prebuilt_repository(name = "zzz_linux", target = "x86_64-unknown-linux-gnu")
 zzz_prebuilt_repository(name = "zzz_macos", target = "aarch64-apple-darwin")
 zzz_prebuilt_repository(name = "zzz_android", target = "aarch64-linux-android")
+# Recognized future schema-5 slices, absent from the frozen rc.8 manifest.
+# Their repositories expose analysis failures until reviewed pins are adopted;
+# merely resolving an unselected select arm must not stage or fetch an engine.
+zzz_prebuilt_repository(name = "zzz_ios", target = "aarch64-apple-ios")
+zzz_prebuilt_repository(name = "zzz_ios_sim", target = "aarch64-apple-ios-sim")
+zzz_prebuilt_repository(name = "zzz_linux_arm64", target = "aarch64-unknown-linux-gnu")

@@ -4,7 +4,7 @@
 Phonon and Kitten TTS 2, including release versions, archive checksums, ABI requirements,
 and linker metadata.
 
-| Binary target | Compiled baseline |
+| Pinned binary target | Compiled baseline |
 | --- | --- |
 | macOS ARM64 | macOS 13+ |
 | Android ARM64 | Android API 29+ |
@@ -55,7 +55,44 @@ inventory, including runtime terms and upstream license texts. Each archive's
 manifest entry must pin the exact schema-5 `notice_files` map; the receipt map
 and every notice's bytes must match it before staging. Changing notice bytes
 requires a new receipt schema. This verifier support does not change the
-current engine pins or enable additional SDK targets or build features.
+current engine pins or enable speech in additional shipped SDK targets.
+
+### Static platform preparation (no pins adopted)
+
+Cargo and Bazel also recognize the following future schema-5 targets. All use
+the baseline ARM64 CPU. **The current rc.8 manifest has no pins for them**, so
+enabling static `bindings` fails closed before staging or fetching. Schema 4
+and frozen release tags cannot supply these new slices. No x86 iOS simulator
+or Mac Catalyst support is added.
+
+| Rust target | Receipt Zig target | Slice | Minimum | System libraries |
+| --- | --- | --- | --- | --- |
+| `aarch64-apple-ios` | `aarch64-ios-none` | `ios-arm64` | iOS 16.0 | `System` |
+| `aarch64-apple-ios-sim` | `aarch64-ios-simulator` | `ios-arm64-simulator` | iOS 16.0 | `System` |
+| `aarch64-unknown-linux-gnu` | `aarch64-linux-gnu` | `linux-arm64` | glibc 2.28 | `c`, `m`, `pthread`, `dl` |
+
+These requirements follow the engine's release slice contract. Pins and
+receipts must preserve that CPU, minimum, system-library list and device or
+simulator ABI. Bazel uses the existing iOS 16 configurations and pinned Apple
+toolchains: its two ARM64 selects distinguish apple_support's
+[`device` and `simulator` constraints](https://github.com/bazelbuild/apple_support/blob/2.2.0/constraints/BUILD),
+as emitted by [rules_rs 0.0.95's pinned rules_rust mapping](https://github.com/hermeticbuild/rules_rust/blob/f19661ba71f77c993ce1eb082053692610fe4313/rust/platform/triple_mappings.bzl).
+Linux ARM64 additionally requires the GNU libc constraint.
+
+Bazel loads packages from unselected `select` arms. For only these three new
+targets, a genuinely absent target row produces an inert repository whose
+`zzz` rule fails when selected for analysis. Resolving that unused repository
+does not require a staged slice. Existing targets always retain strict
+verification, and any attempted new target row (including a malformed or
+duplicate pin) takes the verifier path. A selected target cannot silently omit
+the engine.
+
+Adoption still requires a published, qualified notice-bearing engine release,
+reviewed exact archive and notice pins, verified private staging, and native
+Cargo/Bazel link and runtime qualification. This preparation does not forward
+SDK features, change defaults, activate standard binaries, or qualify minimum
+iOS/glibc execution. Offline fixtures exercise verification and target mapping
+only; they contain synthetic archives and notices.
 
 `PhononSettings::default()` reads the linked engine's defaults. Temperature `0`
 selects the GGUF's default; a positive finite value overrides it. Seed `0` is

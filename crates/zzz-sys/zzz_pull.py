@@ -51,8 +51,22 @@ SCHEMA5_NOTICE_FILES = {
 }
 ZIG_TARGETS = {
     "aarch64-apple-darwin": "aarch64-macos-none",
+    "aarch64-apple-ios": "aarch64-ios-none",
+    "aarch64-apple-ios-sim": "aarch64-ios-simulator",
     "aarch64-linux-android": "aarch64-linux-android",
+    "aarch64-unknown-linux-gnu": "aarch64-linux-gnu",
     "x86_64-unknown-linux-gnu": "x86_64-linux-gnu",
+}
+# Added only for future schema-5 adoption. Frozen rc.8 has no such archives.
+# Mirrors the engine release slice contract; these are requirements, not pins.
+NEW_TARGET_CONTRACTS = {
+    "aarch64-apple-ios": ("ios-arm64", "baseline", "16.0", ["System"]),
+    "aarch64-apple-ios-sim": (
+        "ios-arm64-simulator", "baseline", "16.0", ["System"]
+    ),
+    "aarch64-unknown-linux-gnu": (
+        "linux-arm64", "baseline", "glibc-2.28", ["c", "m", "pthread", "dl"]
+    ),
 }
 
 
@@ -153,13 +167,17 @@ def select_pin(target: str, manifest: Path = DEFAULT_MANIFEST) -> Pin:
     require(type(schema) is int and schema in (4, 5), "pin mismatch: receipt_schema")
     if schema == 4:
         require(tag == SCHEMA4_RELEASE_TAG, "schema 4 requires the frozen rc.8 release")
+        require(target not in NEW_TARGET_CONTRACTS, "schema 4 has no pin for this target")
         require("notice_files" not in entry, "schema 4 cannot carry notice pins")
     else:
         require(tag not in FROZEN_RELEASE_TAGS, "frozen releases cannot use schema 5")
         expect(entry, "notice_files", SCHEMA5_NOTICE_FILES, "pin")
     slices = {
         "aarch64-apple-darwin": "macos-arm64",
+        "aarch64-apple-ios": "ios-arm64",
+        "aarch64-apple-ios-sim": "ios-arm64-simulator",
         "aarch64-linux-android": "android-arm64",
+        "aarch64-unknown-linux-gnu": "linux-arm64",
         "x86_64-unknown-linux-gnu": "linux-x86_64",
     }
     expect(entry, "slice", slices[target], "pin")
@@ -179,6 +197,12 @@ def select_pin(target: str, manifest: Path = DEFAULT_MANIFEST) -> Pin:
         isinstance(libs, list) and libs and all(isinstance(v, str) and v for v in libs),
         "invalid system library pins",
     )
+    if target in NEW_TARGET_CONTRACTS:
+        _, cpu, minimum, libraries = NEW_TARGET_CONTRACTS[target]
+        for field, value in {
+            "cpu": cpu, "deployment_minimum": minimum, "system_libraries": libraries
+        }.items():
+            expect(entry, field, value, "pin")
     return Pin(tag, entry)
 
 
@@ -223,7 +247,10 @@ def validate_receipt(receipt: dict, metadata: dict, pin: Pin) -> None:
     minimum = re.escape(entry["deployment_minimum"])
     target_patterns = {
         "aarch64-apple-darwin": rf"aarch64-macos\.{minimum}(?:\.\.\.[0-9.]+)?-none",
+        "aarch64-apple-ios": rf"aarch64-ios\.{minimum}(?:\.\.\.[0-9.]+)?-none",
+        "aarch64-apple-ios-sim": rf"aarch64-ios\.{minimum}(?:\.\.\.[0-9.]+)?-simulator",
         "aarch64-linux-android": rf"aarch64-linux(?:\.[0-9.]+)?-android\.{minimum}",
+        "aarch64-unknown-linux-gnu": rf"aarch64-linux(?:\.[0-9.]+)?-gnu\.{re.escape(entry['deployment_minimum'].removeprefix('glibc-'))}",
         "x86_64-unknown-linux-gnu": rf"x86_64-linux(?:\.[0-9.]+)?-gnu\.{re.escape(entry['deployment_minimum'].removeprefix('glibc-'))}",
     }
     require(

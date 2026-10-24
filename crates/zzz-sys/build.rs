@@ -41,11 +41,14 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process;
 
-/// The target/profile pair the committed manifest ships. Everything else
-/// fails the enabled build rather than silently linking nothing.
-const SUPPORTED_TARGETS: [&str; 3] = [
+/// Recognized static targets. Recognition does not supply a pin: the verifier
+/// rejects unadopted targets before staging or fetching any engine bytes.
+const SUPPORTED_TARGETS: [&str; 6] = [
     "aarch64-apple-darwin",
+    "aarch64-apple-ios",
+    "aarch64-apple-ios-sim",
     "aarch64-linux-android",
+    "aarch64-unknown-linux-gnu",
     "x86_64-unknown-linux-gnu",
 ];
 
