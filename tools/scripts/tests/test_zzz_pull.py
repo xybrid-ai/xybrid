@@ -29,12 +29,33 @@ NEW_PLATFORMS = {
 }
 
 
+def frozen_schema4_fixture():
+    # Keep historical-format coverage independent of the adopted production pins.
+    targets = (
+        ("aarch64-apple-darwin", "macos-arm64", "apple_m1", "13.0", ["System"]),
+        ("aarch64-linux-android", "android-arm64", "baseline", "29", ["c", "m", "dl"]),
+        ("x86_64-unknown-linux-gnu", "linux-x86_64", "x86_64_v3", "glibc-2.28", ["c", "m", "pthread", "dl"]),
+    )
+    return {
+        "schema_version": 1, "engine": "zzz", "release_tag": "v0.1.0-rc.8",
+        "archives": [
+            {"target": target, "slice": slice_name, "profile": "phonon-kitten-tts2",
+             "archive": f"zzz-phonon-kitten-tts2-{slice_name}-v0.1.0-rc.8.tar.gz",
+             "sha256": "0" * 64, "receipt_schema": 4, "apis": {"zzz_embed": 1},
+             "models": ["phonon", "kitten-tts2"], "library": "lib/libzzz_embed.a",
+             "headers": ["include/zzz_embed.h"], "backend": "cpu", "cpu": cpu,
+             "deployment_minimum": minimum, "system_libraries": libraries}
+            for target, slice_name, cpu, minimum, libraries in targets
+        ],
+    }
+
+
 class ZzzPullTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.manifest_data = json.loads(zzz.DEFAULT_MANIFEST.read_text())
+        self.manifest_data = frozen_schema4_fixture()
         self.manifest = self.root / "manifest.json"
         self.target = "aarch64-apple-darwin"
         self.environment = {
@@ -177,7 +198,7 @@ class ZzzPullTests(unittest.TestCase):
         }
 
     def add_future_target_pins(self):
-        # Synthetic test pins only: production rc.8 remains three targets.
+        # Synthetic test pins only; actual published archive staging is separate.
         template = self.manifest_data["archives"][0]
         for target, (slice_name, _, minimum, libraries) in NEW_PLATFORMS.items():
             entry = copy.deepcopy(template)
@@ -408,25 +429,33 @@ class ZzzPullTests(unittest.TestCase):
             with self.assertRaisesRegex(zzz.StageError, "unexpected engine manifest keys"):
                 zzz.select_pin(self.target, self.manifest)
 
-    def test_committed_manifest_has_exactly_three_speech_only_targets(self):
+    def test_committed_manifest_has_exactly_six_schema5_speech_only_targets(self):
+        manifest = json.loads(zzz.DEFAULT_MANIFEST.read_text())
         self.assertEqual(
-            {"aarch64-apple-darwin", "aarch64-linux-android", "x86_64-unknown-linux-gnu"},
-            {e["target"] for e in self.manifest_data["archives"]},
+            {"aarch64-apple-darwin", "aarch64-linux-android", "x86_64-unknown-linux-gnu", *NEW_PLATFORMS},
+            {e["target"] for e in manifest["archives"]},
         )
-        self.assertEqual(3, len(self.manifest_data["archives"]))
-        for target in [entry["target"] for entry in self.manifest_data["archives"]]:
+        self.assertEqual(6, len(manifest["archives"]))
+        for target in [entry["target"] for entry in manifest["archives"]]:
             pin = zzz.select_pin(target)
             self.assertEqual("phonon-kitten-tts2", pin.entry["profile"])
             self.assertEqual(zzz.MODELS, pin.entry["models"])
             self.assertEqual(zzz.APIS, pin.entry["apis"])
             self.assertEqual(zzz.HEADERS, pin.entry["headers"])
+            self.assertEqual(5, pin.entry["receipt_schema"])
+            self.assertEqual(zzz.SCHEMA5_NOTICE_FILES, pin.notices)
 
-    def test_new_targets_fail_before_fetch_or_staging_without_production_pins(self):
+    def test_missing_target_fixture_fails_before_fetch_or_staging(self):
+        self.manifest.write_text(json.dumps(self.manifest_data))
         for target in NEW_PLATFORMS:
             with self.subTest(target=target), mock.patch.dict(os.environ, {}, clear=True):
                 with self.assertRaisesRegex(zzz.StageError, "missing or duplicate target/profile pin"):
-                    zzz.select_pin(target)
-                with mock.patch.object(zzz, "fetch_archive") as fetch, \
+                    zzz.select_pin(target, self.manifest)
+                select_pin = zzz.select_pin
+                # The packaged CLI intentionally has no manifest override. Route
+                # only its manifest input to this missing-target fixture.
+                with mock.patch.object(zzz, "select_pin", side_effect=lambda requested: select_pin(requested, self.manifest)), \
+                     mock.patch.object(zzz, "fetch_archive") as fetch, \
                      mock.patch.object(zzz, "stage_archive") as stage, \
                      contextlib.redirect_stderr(io.StringIO()) as error:
                     self.assertEqual(1, zzz.main(["--target", target]))

@@ -451,7 +451,7 @@ def preflight(tooling, repo, candidate, version, release_date, environment, *, f
     manifest = tooling / SOURCE.MANIFEST
     require(manifest.read_bytes() == trusted.blob(entries[SOURCE.MANIFEST]),
             "trusted manifest checkout bytes changed")
-    trusted_pins(manifest)  # Current rc.8 fails before fetch, materialization or any mirror-token step.
+    trusted_pins(manifest)  # Frozen/schema-4 pins fail before fetch or any mirror-token step.
     if fetch:
         fetch_candidate(repo, candidate)
     return SOURCE.source_binding(repo, trusted_master, candidate, version, release_date, context, checksum=None)

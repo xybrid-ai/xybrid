@@ -86,11 +86,17 @@ class ProducerGuardTests(unittest.TestCase):
                 with self.assertRaises(STAGE.Error):
                     STAGE.schema5_apple_manifest(changed)
 
-    def test_actual_reviewed_manifest_fails_closed_before_fetch_build_or_secret_step(self):
+    def test_actual_reviewed_manifest_has_exact_six_schema5_pins(self):
         import json
-        manifest = json.loads((ROOT / "crates/zzz-sys/natives-manifest.json").read_bytes())
-        with self.assertRaisesRegex(STAGE.Error, "schema-5"):
-            STAGE.schema5_apple_manifest(manifest)
+        path = ROOT / "crates/zzz-sys/natives-manifest.json"
+        manifest = json.loads(path.read_bytes())
+        STAGE.schema5_apple_manifest(manifest)
+        self.assertEqual(set(STAGE.STAGING_TARGETS), {entry["target"] for entry in manifest["archives"]})
+        for target in STAGE.STAGING_TARGETS:
+            with self.subTest(target=target):
+                pin = STAGE.PULL.select_pin(target, path)
+                self.assertEqual(pin.entry["receipt_schema"], 5)
+                self.assertEqual(pin.notices, STAGE.PULL.SCHEMA5_NOTICE_FILES)
 
     @unittest.skipUnless(POSIX, "Apple command specification uses POSIX absolute paths")
     def test_isolated_build_plan_uses_actual_target_and_no_mutable_rc_or_remote_cache(self):
@@ -207,16 +213,34 @@ class ProducerGuardTests(unittest.TestCase):
                                 "0.14.0", "2026-10-24", github())
             git.assert_not_called()
 
-    @unittest.skipUnless(GIT and POSIX, "actual pin ordering check requires POSIX system Git")
-    def test_current_pins_block_real_preflight_before_candidate_fetch_or_source_check(self):
-        master = STAGE.SOURCE.Git(ROOT).read("rev-parse", "HEAD", limit=64).decode().strip()
-        context = dict(github(), GITHUB_SHA=master, GITHUB_WORKFLOW_SHA=master)
-        with patch.object(STAGE, "fetch_candidate") as fetch, \
-                patch.object(STAGE.SOURCE, "source_binding") as binding:
-            with self.assertRaisesRegex(STAGE.Error, "schema-5"):
-                STAGE.preflight(ROOT, ROOT, "b" * 40, "0.14.0", "2026-10-24", context)
-            fetch.assert_not_called()
-            binding.assert_not_called()
+    @unittest.skipUnless(GIT and POSIX, "frozen pin ordering check requires POSIX system Git")
+    def test_frozen_rc8_pins_block_real_preflight_before_fetch_or_source_check(self):
+        import json
+        with tempfile.TemporaryDirectory() as temporary:
+            tooling = Path(temporary)
+            manifest = {"schema_version": 1, "engine": "zzz", "release_tag": "v0.1.0-rc.8", "archives": []}
+            destination = tooling / STAGE.SOURCE.MANIFEST
+            destination.parent.mkdir(parents=True)
+            destination.write_text(json.dumps(manifest))
+            (tooling / "MODULE.bazel").write_bytes((ROOT / "MODULE.bazel").read_bytes())
+            environment = {"PATH": os.defpath, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+            def git(*args):
+                return subprocess.check_output([GIT, "-C", str(tooling), *args], env=environment,
+                                               stderr=subprocess.DEVNULL, timeout=20).decode().strip()
+            git("init", "-q")
+            for key, value in {"core.hooksPath": os.devnull, "gc.auto": "0", "maintenance.auto": "false",
+                               "user.name": "Frozen Pin Fixture", "user.email": "pins@example.invalid"}.items():
+                git("config", key, value)
+            git("add", ".")
+            git("commit", "-qm", "frozen rc8 fixture")
+            master = git("rev-parse", "HEAD")
+            context = dict(github(), GITHUB_SHA=master, GITHUB_WORKFLOW_SHA=master)
+            with patch.object(STAGE, "fetch_candidate") as fetch, \
+                    patch.object(STAGE.SOURCE, "source_binding") as binding:
+                with self.assertRaisesRegex(STAGE.Error, "schema-5"):
+                    STAGE.preflight(tooling, tooling, "b" * 40, "0.14.0", "2026-10-24", context)
+                fetch.assert_not_called()
+                binding.assert_not_called()
 
     def test_workflow_has_one_success_upload_immediately_after_guard_and_one_token_scope(self):
         text = (ROOT / ".github/workflows/trusted-zzz-sdk.yml").read_text()

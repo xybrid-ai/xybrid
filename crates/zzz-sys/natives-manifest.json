@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "engine": "zzz",
-  "release_tag": "v0.1.0-rc.8",
+  "release_tag": "v0.1.0-rc.9",
   "archives": [
     {
       "target": "aarch64-apple-darwin",
       "slice": "macos-arm64",
       "profile": "phonon-kitten-tts2",
-      "archive": "zzz-phonon-kitten-tts2-macos-arm64-v0.1.0-rc.8.tar.gz",
-      "sha256": "316970c2580d0a1b0c3522b5dc7b0c2a8051af0dfdd0f73ad96e2d8db4de423e",
-      "receipt_schema": 4,
+      "archive": "zzz-phonon-kitten-tts2-macos-arm64-v0.1.0-rc.9.tar.gz",
+      "sha256": "7302aeeb5b43bcaa536a2f30f116bc6e7225c5f307dcdb08e8b433301a1901d3",
+      "receipt_schema": 5,
       "apis": {
         "zzz_embed": 1
       },
@@ -26,15 +26,31 @@
       "deployment_minimum": "13.0",
       "system_libraries": [
         "System"
-      ]
+      ],
+      "notice_files": {
+        "LICENSES/Go-BSD-3-Clause.txt": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+        "LICENSES/KittenTTS-APACHE-2.0.txt": "787aa312b93eee80b636f35652469df29efdb7582239d6a9c088467555a3c7fd",
+        "LICENSES/LLVM-compiler-rt.txt": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+        "LICENSES/PrismML-llama-MIT.txt": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+        "LICENSES/Zig-MIT.txt": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
+        "LICENSES/compiler-rt-release_80.txt": "dd27f8c290bcdc8368549cd7cd98710a9dbdc34122f2e096a1edb97824ed4148",
+        "LICENSES/musl-COPYRIGHT.txt": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+        "LICENSES/musl-math-NOTICES.txt": "84cdee129cf7ea3d37731292a0b41bebe53d370b3206859b2748df9050fc6da5",
+        "LICENSES/xn-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSES/xn-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "LICENSES/xn-ptts-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSES/xn-ptts-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "RUNTIME_TERMS.md": "6efce1cf8639bb04218b01a3fe69ae5fcc0ad31befb6fbaf271c6fe9e7d4ff93",
+        "THIRD_PARTY_NOTICES.md": "cbf1b58004ae71c11e7ddda97a116d255118641bf81ffacd25ad837a26be6bab"
+      }
     },
     {
       "target": "aarch64-linux-android",
       "slice": "android-arm64",
       "profile": "phonon-kitten-tts2",
-      "archive": "zzz-phonon-kitten-tts2-android-arm64-v0.1.0-rc.8.tar.gz",
-      "sha256": "5b9c36f5bea5cfd93b5b49eedbe2c8eeafeea8b52c04cda84927d3f79648cfe4",
-      "receipt_schema": 4,
+      "archive": "zzz-phonon-kitten-tts2-android-arm64-v0.1.0-rc.9.tar.gz",
+      "sha256": "d0a1d03b1f61910819f339c1c7399e7794023d44f763cdcbb7bbe7c5a3409e1e",
+      "receipt_schema": 5,
       "apis": {
         "zzz_embed": 1
       },
@@ -53,15 +69,31 @@
         "c",
         "m",
         "dl"
-      ]
+      ],
+      "notice_files": {
+        "LICENSES/Go-BSD-3-Clause.txt": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+        "LICENSES/KittenTTS-APACHE-2.0.txt": "787aa312b93eee80b636f35652469df29efdb7582239d6a9c088467555a3c7fd",
+        "LICENSES/LLVM-compiler-rt.txt": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+        "LICENSES/PrismML-llama-MIT.txt": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+        "LICENSES/Zig-MIT.txt": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
+        "LICENSES/compiler-rt-release_80.txt": "dd27f8c290bcdc8368549cd7cd98710a9dbdc34122f2e096a1edb97824ed4148",
+        "LICENSES/musl-COPYRIGHT.txt": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+        "LICENSES/musl-math-NOTICES.txt": "84cdee129cf7ea3d37731292a0b41bebe53d370b3206859b2748df9050fc6da5",
+        "LICENSES/xn-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSES/xn-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "LICENSES/xn-ptts-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSES/xn-ptts-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "RUNTIME_TERMS.md": "6efce1cf8639bb04218b01a3fe69ae5fcc0ad31befb6fbaf271c6fe9e7d4ff93",
+        "THIRD_PARTY_NOTICES.md": "cbf1b58004ae71c11e7ddda97a116d255118641bf81ffacd25ad837a26be6bab"
+      }
     },
     {
       "target": "x86_64-unknown-linux-gnu",
       "slice": "linux-x86_64",
       "profile": "phonon-kitten-tts2",
-      "archive": "zzz-phonon-kitten-tts2-linux-x86_64-v0.1.0-rc.8.tar.gz",
-      "sha256": "6bb0582c481adc4dd689e4fe1a05873b2beddfc874b00662395c600398826d2f",
-      "receipt_schema": 4,
+      "archive": "zzz-phonon-kitten-tts2-linux-x86_64-v0.1.0-rc.9.tar.gz",
+      "sha256": "978d5ad7f18421da8368682c064d6da605c0e3bef0aa7b174983ba73a8b4506f",
+      "receipt_schema": 5,
       "apis": {
         "zzz_embed": 1
       },
@@ -81,7 +113,149 @@
         "m",
         "pthread",
         "dl"
-      ]
+      ],
+      "notice_files": {
+        "LICENSES/Go-BSD-3-Clause.txt": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+        "LICENSES/KittenTTS-APACHE-2.0.txt": "787aa312b93eee80b636f35652469df29efdb7582239d6a9c088467555a3c7fd",
+        "LICENSES/LLVM-compiler-rt.txt": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+        "LICENSES/PrismML-llama-MIT.txt": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+        "LICENSES/Zig-MIT.txt": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
+        "LICENSES/compiler-rt-release_80.txt": "dd27f8c290bcdc8368549cd7cd98710a9dbdc34122f2e096a1edb97824ed4148",
+        "LICENSES/musl-COPYRIGHT.txt": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+        "LICENSES/musl-math-NOTICES.txt": "84cdee129cf7ea3d37731292a0b41bebe53d370b3206859b2748df9050fc6da5",
+        "LICENSES/xn-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSES/xn-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "LICENSES/xn-ptts-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSES/xn-ptts-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "RUNTIME_TERMS.md": "6efce1cf8639bb04218b01a3fe69ae5fcc0ad31befb6fbaf271c6fe9e7d4ff93",
+        "THIRD_PARTY_NOTICES.md": "cbf1b58004ae71c11e7ddda97a116d255118641bf81ffacd25ad837a26be6bab"
+      }
+    },
+    {
+      "target": "aarch64-apple-ios",
+      "slice": "ios-arm64",
+      "profile": "phonon-kitten-tts2",
+      "archive": "zzz-phonon-kitten-tts2-ios-arm64-v0.1.0-rc.9.tar.gz",
+      "sha256": "114d77c7fd8e8eb41057f57307cf09b4745fd9173b886a97125534f27bf28294",
+      "receipt_schema": 5,
+      "apis": {
+        "zzz_embed": 1
+      },
+      "models": [
+        "phonon",
+        "kitten-tts2"
+      ],
+      "library": "lib/libzzz_embed.a",
+      "headers": [
+        "include/zzz_embed.h"
+      ],
+      "backend": "cpu",
+      "cpu": "baseline",
+      "deployment_minimum": "16.0",
+      "system_libraries": [
+        "System"
+      ],
+      "notice_files": {
+        "LICENSES/Go-BSD-3-Clause.txt": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+        "LICENSES/KittenTTS-APACHE-2.0.txt": "787aa312b93eee80b636f35652469df29efdb7582239d6a9c088467555a3c7fd",
+        "LICENSES/LLVM-compiler-rt.txt": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+        "LICENSES/PrismML-llama-MIT.txt": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+        "LICENSES/Zig-MIT.txt": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
+        "LICENSES/compiler-rt-release_80.txt": "dd27f8c290bcdc8368549cd7cd98710a9dbdc34122f2e096a1edb97824ed4148",
+        "LICENSES/musl-COPYRIGHT.txt": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+        "LICENSES/musl-math-NOTICES.txt": "84cdee129cf7ea3d37731292a0b41bebe53d370b3206859b2748df9050fc6da5",
+        "LICENSES/xn-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSES/xn-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "LICENSES/xn-ptts-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSES/xn-ptts-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "RUNTIME_TERMS.md": "6efce1cf8639bb04218b01a3fe69ae5fcc0ad31befb6fbaf271c6fe9e7d4ff93",
+        "THIRD_PARTY_NOTICES.md": "cbf1b58004ae71c11e7ddda97a116d255118641bf81ffacd25ad837a26be6bab"
+      }
+    },
+    {
+      "target": "aarch64-apple-ios-sim",
+      "slice": "ios-arm64-simulator",
+      "profile": "phonon-kitten-tts2",
+      "archive": "zzz-phonon-kitten-tts2-ios-arm64-simulator-v0.1.0-rc.9.tar.gz",
+      "sha256": "7ba7820c7eb29087edd96ba90e45587b74c09bfa4749ed03663ea379b94ea9af",
+      "receipt_schema": 5,
+      "apis": {
+        "zzz_embed": 1
+      },
+      "models": [
+        "phonon",
+        "kitten-tts2"
+      ],
+      "library": "lib/libzzz_embed.a",
+      "headers": [
+        "include/zzz_embed.h"
+      ],
+      "backend": "cpu",
+      "cpu": "baseline",
+      "deployment_minimum": "16.0",
+      "system_libraries": [
+        "System"
+      ],
+      "notice_files": {
+        "LICENSES/Go-BSD-3-Clause.txt": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+        "LICENSES/KittenTTS-APACHE-2.0.txt": "787aa312b93eee80b636f35652469df29efdb7582239d6a9c088467555a3c7fd",
+        "LICENSES/LLVM-compiler-rt.txt": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+        "LICENSES/PrismML-llama-MIT.txt": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+        "LICENSES/Zig-MIT.txt": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
+        "LICENSES/compiler-rt-release_80.txt": "dd27f8c290bcdc8368549cd7cd98710a9dbdc34122f2e096a1edb97824ed4148",
+        "LICENSES/musl-COPYRIGHT.txt": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+        "LICENSES/musl-math-NOTICES.txt": "84cdee129cf7ea3d37731292a0b41bebe53d370b3206859b2748df9050fc6da5",
+        "LICENSES/xn-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSES/xn-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "LICENSES/xn-ptts-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSES/xn-ptts-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "RUNTIME_TERMS.md": "6efce1cf8639bb04218b01a3fe69ae5fcc0ad31befb6fbaf271c6fe9e7d4ff93",
+        "THIRD_PARTY_NOTICES.md": "cbf1b58004ae71c11e7ddda97a116d255118641bf81ffacd25ad837a26be6bab"
+      }
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "slice": "linux-arm64",
+      "profile": "phonon-kitten-tts2",
+      "archive": "zzz-phonon-kitten-tts2-linux-arm64-v0.1.0-rc.9.tar.gz",
+      "sha256": "0efe3bda11654cc68adcd04c453297e3555047c53123dcfd92a062c854faaf2a",
+      "receipt_schema": 5,
+      "apis": {
+        "zzz_embed": 1
+      },
+      "models": [
+        "phonon",
+        "kitten-tts2"
+      ],
+      "library": "lib/libzzz_embed.a",
+      "headers": [
+        "include/zzz_embed.h"
+      ],
+      "backend": "cpu",
+      "cpu": "baseline",
+      "deployment_minimum": "glibc-2.28",
+      "system_libraries": [
+        "c",
+        "m",
+        "pthread",
+        "dl"
+      ],
+      "notice_files": {
+        "LICENSES/Go-BSD-3-Clause.txt": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+        "LICENSES/KittenTTS-APACHE-2.0.txt": "787aa312b93eee80b636f35652469df29efdb7582239d6a9c088467555a3c7fd",
+        "LICENSES/LLVM-compiler-rt.txt": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+        "LICENSES/PrismML-llama-MIT.txt": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+        "LICENSES/Zig-MIT.txt": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
+        "LICENSES/compiler-rt-release_80.txt": "dd27f8c290bcdc8368549cd7cd98710a9dbdc34122f2e096a1edb97824ed4148",
+        "LICENSES/musl-COPYRIGHT.txt": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+        "LICENSES/musl-math-NOTICES.txt": "84cdee129cf7ea3d37731292a0b41bebe53d370b3206859b2748df9050fc6da5",
+        "LICENSES/xn-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSES/xn-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "LICENSES/xn-ptts-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSES/xn-ptts-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "RUNTIME_TERMS.md": "6efce1cf8639bb04218b01a3fe69ae5fcc0ad31befb6fbaf271c6fe9e7d4ff93",
+        "THIRD_PARTY_NOTICES.md": "cbf1b58004ae71c11e7ddda97a116d255118641bf81ffacd25ad837a26be6bab"
+      }
     }
   ]
 }

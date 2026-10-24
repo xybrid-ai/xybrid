@@ -2,14 +2,14 @@
 
 `.github/workflows/trusted-zzz-sdk.yml` is a manual, protected-master producer
 for the existing Apple device/ARM-simulator SDK, using the actual opt-in
-notice-bearing Bazel target. It changes no production engine pins, default
-features, public release workflow or publication path. **Current frozen rc.8
-pins fail before candidate fetching, materialization or mirror-token use.**
-Genuine published schema-5 pins must first land in reviewed master.
+notice-bearing Bazel target. The current six engine pins use published `v0.1.0-rc.9` schema-5 archives.
+All six passed actual inspection, private staging and staged-byte verification.
+This enables producer preflight to accept their notice contract; default
+features, the public release workflow and publication path remain unchanged.
 
 This implementation has offline fixture/static evidence. No hosted dispatch,
-private download, native build or installed SDK qualification was performed for
-this change. A produced artifact remains a candidate until independently
+private producer download, native SDK build or installed SDK qualification was
+performed for this change. A produced artifact remains a candidate until independently
 approved API/archive/member/source reconciliation and installed-package tests.
 
 ## Runtime identity and immutable tooling

@@ -9,6 +9,8 @@ and linker metadata.
 | macOS ARM64 | macOS 13+ |
 | Android ARM64 | Android API 29+ |
 | Linux x86_64 | x86-64-v3 CPU, glibc 2.28+ |
+| iOS ARM64 device / simulator | iOS 16+ |
+| Linux ARM64 | baseline ARM64 CPU, glibc 2.28+ |
 
 On Linux x86_64, Rust checks the complete x86-64-v3 CPU feature set and
 OS-enabled AVX state before every engine FFI call, including capability
@@ -44,25 +46,26 @@ verification.
 
 The `phonon-kitten-tts2` profile supplies exactly those two models in one
 archive and exposes only the `zzz_embed` API. Single-model archives export
-overlapping symbols and cannot be linked together. Staging verifies all four
+overlapping symbols and cannot be linked together. Staging verifies all 18
 payload files, the exact model/API declarations and the archive's SHA-256
-before either Cargo or Bazel links it. This SDK pins engine `v0.1.0-rc.8`
-with receipt schema 4. The full `combined` engine is not accepted.
+before either Cargo or Bazel links it. This SDK pins engine `v0.1.0-rc.9`
+with receipt schema 5. The full `combined` engine is not accepted.
 
-Receipt schema 4 is accepted only for that frozen `rc.8` release. For future
-schema-5 pins, verification also requires the immutable 14-file notice
+Receipt schema 4 remains accepted only for the frozen `rc.8` release. The
+current schema-5 pins require the immutable 14-file notice
 inventory, including runtime terms and upstream license texts. Each archive's
 manifest entry must pin the exact schema-5 `notice_files` map; the receipt map
 and every notice's bytes must match it before staging. Changing notice bytes
-requires a new receipt schema. This verifier support does not change the
-current engine pins or enable speech in additional shipped SDK targets.
+requires a new receipt schema. All six current archives were independently
+compared with their published counterparts and inspected, staged and reverified
+through the packaged helper. Pin adoption does not enable speech in standard
+SDK binaries or qualify installed SDK applications.
 
-### Static platform preparation (no pins adopted)
+### Additional static platforms
 
-Cargo and Bazel also recognize the following future schema-5 targets. All use
-the baseline ARM64 CPU. **The current rc.8 manifest has no pins for them**, so
-enabling static `bindings` fails closed before staging or fetching. Schema 4
-and frozen release tags cannot supply these new slices. No x86 iOS simulator
+Cargo and Bazel recognize the following pinned schema-5 targets. All use
+the baseline ARM64 CPU. Enabling static `bindings` requires the exact verified
+staged slice. Schema 4 and frozen release tags cannot supply these new slices. No x86 iOS simulator
 or Mac Catalyst support is added.
 
 | Rust target | Receipt Zig target | Slice | Minimum | System libraries |
@@ -87,12 +90,10 @@ verification, and any attempted new target row (including a malformed or
 duplicate pin) takes the verifier path. A selected target cannot silently omit
 the engine.
 
-Adoption still requires a published, qualified notice-bearing engine release,
-reviewed exact archive and notice pins, verified private staging, and native
-Cargo/Bazel link and runtime qualification. This preparation does not forward
-SDK features, change defaults, activate standard binaries, or qualify minimum
-iOS/glibc execution. Offline fixtures exercise verification and target mapping
-only; they contain synthetic archives and notices.
+Native SDK Cargo/Bazel linking and installed SDK runtime qualification remain
+required. Pin adoption does not change defaults, activate standard binaries,
+or qualify minimum iOS/glibc execution. Offline tests use synthetic archives
+and notices; actual published archive staging was verified separately.
 
 `PhononSettings::default()` reads the linked engine's defaults. Temperature `0`
 selects the GGUF's default; a positive finite value overrides it. Seed `0` is
@@ -107,8 +108,7 @@ The additive `android-companion` feature exposes the same safe sessions through
 an SDK-owned table instead of requiring a static engine archive. **No production
 companion contract is configured.** This feature currently advertises no models,
 returns ABI `0`, and rejects opens with `LoadFailed`; it does not enable speech in
-any shipped SDK. Defaults, current rc.8 pins and the static `bindings` contract
-are unchanged. When both features are selected, static `bindings` take precedence.
+any shipped SDK. Defaults and the static `bindings` contract remain unchanged by this client. When both features are selected, static `bindings` take precedence.
 The Bazel-only opt-in client target is `:xybrid_zzz_companion_client`; it has no
 private archive dependency and is not forwarded into any SDK binding.
 
