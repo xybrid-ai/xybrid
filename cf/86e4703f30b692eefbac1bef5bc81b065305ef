@@ -1,0 +1,31 @@
+crates/zzz-sys/README.md
+  s_33f5e18570f04e::t_77e79b32108dcd 52-59
+crates/zzz-sys/zzz_pull.py
+  s_8e393701d0e47f::t_747daa00e2a897 32-50,91-94,102,107,151-158,186-189,308-316
+tools/scripts/tests/test_zzz_pull.py
+  s_8e393701d0e47f::t_2d1dd7f46473f9 40,42,69,83-84,88-89,100,102,109,131-151,210-378
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "cf86e4703f30b692eefbac1bef5bc81b065305ef",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_8e393701d0e47f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12845-1c1c-7f80-97e1-d2496b906141",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
