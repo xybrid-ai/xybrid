@@ -1,0 +1,21 @@
+tools/scripts/tests/test_zzz_apple_package.py
+  s_33f5e18570f04e::t_d82fbf83a2dfb7 11,13-14,237-268
+bindings/apple/pack_zzz_notices.py
+  s_33f5e18570f04e::t_d82fbf83a2dfb7 19-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "95053143d53321f7c35900e93a5bea49961b0bb2",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}

@@ -1,0 +1,106 @@
+crates/zzz-sys/README.md
+  s_33f5e18570f04e::t_77e79b32108dcd 52,54-57,96
+  s_33f5e18570f04e::t_e1cda92361748f 53
+  s_ae223208da9d23::t_567886008cb722 102-143
+  s_33f5e18570f04e::t_fef916dc5882b5 7,58-95
+crates/zzz-sys/zzz_pull.py
+  s_8e393701d0e47f::t_747daa00e2a897 32-36,38-43,45-49,51,106-109,117,122,166-169,171-174,211-214,336-344
+  s_33f5e18570f04e::t_e1cda92361748f 37,44,50
+  s_33f5e18570f04e::t_e4f6917a517190 54-55,57,60-70,170,177-178,180,200-205,250-251,253
+tools/scripts/tests/test_zzz_pull.py
+  s_8e393701d0e47f::t_2d1dd7f46473f9 50,52,82,96-97,101-102,113,115,122,144-164,235-241,243,245-299,301-304,306-403
+  s_33f5e18570f04e::t_e1cda92361748f 242,305
+  s_33f5e18570f04e::t_fad1764ca112a0 244
+  s_33f5e18570f04e::t_3516afbc78b6b9 21-30,60-61,63,179-190,300,413-414,417,536,538
+  s_33f5e18570f04e::t_49e9ecdeca17ba 424-509
+tools/scripts/tests/test_zzz_source_policy.py
+  s_33f5e18570f04e::t_afdfc26b7ebdbd 174-177,209,213-216
+  s_33f5e18570f04e::t_819dfd0e772cdb 210-212,217-240
+  s_33f5e18570f04e::t_915e70bca453bf 241-242
+tools/scripts/tests/test_llamacpp_update.py
+  s_33f5e18570f04e::t_7567d33cac419e 321-324
+  s_33f5e18570f04e::t_57f940d17cbca0 58-62
+  s_33f5e18570f04e::t_41dddc7c110439 33-38
+  s_33f5e18570f04e::t_5f28977373d9eb 30-32,39-44
+.github/workflows/ci.yml
+  s_ae223208da9d23::t_1a34f6caea9d4f 251-252,449-451
+crates/zzz-sys/BUILD.bazel
+  s_ae223208da9d23::t_f00696ce3e3991 31-43
+  s_33f5e18570f04e::t_e4f6917a517190 18-20
+crates/zzz-sys/Cargo.toml
+  s_33f5e18570f04e::t_06283a58ef307d 33-36
+crates/zzz-sys/build.rs
+  s_ae223208da9d23::t_3d837b3857691d 36-38
+  s_33f5e18570f04e::t_e4f6917a517190 44-46,48-49,51
+crates/zzz-sys/src/api.rs
+  s_33f5e18570f04e::t_b1de9a299274f1 1-217
+crates/zzz-sys/src/api/tests.rs
+  s_33f5e18570f04e::t_a0582149f54d9a 1-285
+crates/zzz-sys/src/companion.rs
+  s_33f5e18570f04e::t_616fc61f2afb6e 1-283
+crates/zzz-sys/src/companion/tests.rs
+  s_33f5e18570f04e::t_53a014cd2d2a11 1-324
+crates/zzz-sys/src/cpu.rs
+  s_33f5e18570f04e::t_7d04af0b61a342 116,118,125,130-159
+crates/zzz-sys/src/lib.rs
+  s_33f5e18570f04e::t_052c5f163d1788 19-21,23-26,230-234,236,238-240
+crates/zzz-sys/src/session.rs
+  s_33f5e18570f04e::t_f289828607f353 17,69-71,73-76,80-81,88,90,92,98,100-101,104,106,108,112,115,117,124,202,226,243-246,322-325,333,337-338,355,360,389,430,465-467,475-478,527,560-561,669-674,683,701,726,730-733
+tools/scripts/tests/test_zzz_candidate_extract.py
+  s_33f5e18570f04e::t_90408ca34ef40a 1-10,13-15,17-41,45-64,76-77,81,85-98,106-114,558-561
+  s_33f5e18570f04e::t_349aa60b2a414e 42-44,227-249,357,413-422,424-437,472,494-557
+  s_33f5e18570f04e::t_fdc0aebd10ac8d 358-385,388-405,408-412,438-471
+  s_33f5e18570f04e::t_1556b8cb7e74a7 386-387,406-407
+  s_33f5e18570f04e::t_54ff795ad5d687 11-12,16,65-75,78-80,82-84,99-105,115-226,250-356,423,473-493
+tools/scripts/zzz_candidate_extract.py
+  s_33f5e18570f04e::t_7a403e7ba8feec 1-46,49-52,54-198,206-310,371-381,384-385,387-397,400-402,406-416,424-425,428,430,435-465
+  s_33f5e18570f04e::t_ea7a44d379b28e 328-334,336-348,350-353,356-357,359,362-363,366-370,404-405,419-420,422,426-427,433-434
+  s_33f5e18570f04e::t_57b0579f3ac9d7 311-327,335,349,354-355,358,360-361,364-365
+  s_33f5e18570f04e::t_7a15045d730676 48,53,199-205,382-383,386,398-399,403,417-418,421,423,429,431-432
+  s_33f5e18570f04e::t_c4e57f523dd3fa 47
+tools/scripts/zzz_candidate_extract.md
+  s_33f5e18570f04e::t_782541c0b82110 1-123,143-183,187-188
+  s_33f5e18570f04e::t_c5e6fdee89e2ba 124-142,184-186
+bazel/zzz/BUILD.bazel
+  s_33f5e18570f04e::t_4140807488e9ba 21-40
+  s_33f5e18570f04e::t_e4f6917a517190 43
+bazel/zzz/repositories.bzl
+  s_33f5e18570f04e::t_4140807488e9ba 3-26,28-29,33-35,52
+  s_33f5e18570f04e::t_04c45957a0db53 30-32
+MODULE.bazel
+  s_33f5e18570f04e::t_e4f6917a517190 377,509-514
+tools/scripts/tests/test_zzz_platforms.py
+  s_33f5e18570f04e::t_97f6f3473562d6 1-164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "73361ff2e79548e0c8f5ed3d3f31070a338ee0b2",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_8e393701d0e47f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12845-1c1c-7f80-97e1-d2496b906141",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_ae223208da9d23": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}

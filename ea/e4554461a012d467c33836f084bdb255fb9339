@@ -1,0 +1,23 @@
+tools/scripts/zzz_candidate_reconcile.py
+  s_33f5e18570f04e::t_9ef3d78187693f 113,116-119
+tools/scripts/tests/test_zzz_candidate_reconcile.py
+  s_33f5e18570f04e::t_9ef3d78187693f 33,110,113,146,150,154-155,157,161,167,172,202,206,239-253
+tools/scripts/zzz_candidate_reconcile.md
+  s_33f5e18570f04e::t_9ef3d78187693f 94-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "eae4554461a012d467c33836f084bdb255fb9339",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
