@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **llama.cpp:** update to [v0.6.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0) (commit `d81235049384534c167caea52b85a694f6103d14`).
+
 ### Fixed
 
 - **Unity Android builds no longer fail on a duplicate `libc++_shared.so`.**

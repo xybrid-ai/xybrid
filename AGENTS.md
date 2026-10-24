@@ -517,7 +517,7 @@ is generated from the workflow files, and these rules keep it true:
   to the path, and `release-publish.yml` and the docs call
   `gh workflow run <file>`. Change `name:` instead.
 - **Job names are matched as checks; never rename them.** `CI Success`
-  (`ci.yml` and `ci-docs.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
+  (`ci.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
   gate `master` through branch protection. `tools/scripts/llamacpp_update.py`
   also waits on job names (`REQUIRED_CHECKS`, `AUTOMATION_CHECKS`) before it
   cuts a llama.cpp release. Edit a workflow's `name:` freely.

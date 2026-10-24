@@ -1,6 +1,6 @@
-# convert environment: convert_gguf.sh. The pinned llama.cpp commit's own
-# requirements-convert_hf_to_gguf.txt at exact versions, plus what its bundled
-# gguf-py needs (imported from the submodule, not PyPI). lock.sh locks it.
+# convert environment: convert_gguf.sh. Compatible pins for the Qwen fixture's
+# converter and tokenizer. Its bundled gguf-py is imported from the submodule,
+# not PyPI. lock.sh locks this environment.
 numpy==1.26.4
 protobuf==4.25.8
 pyyaml==6.0.3

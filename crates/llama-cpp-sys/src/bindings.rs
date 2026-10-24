@@ -6,9 +6,10 @@ pub const LLAMA_FILE_MAGIC_GGLA: u32 = 1734831201;
 pub const LLAMA_FILE_MAGIC_GGSN: u32 = 1734833006;
 pub const LLAMA_FILE_MAGIC_GGSQ: u32 = 1734833009;
 pub const LLAMA_SESSION_MAGIC: u32 = 1734833006;
-pub const LLAMA_SESSION_VERSION: u32 = 9;
+pub const LLAMA_SESSION_VERSION: u32 = 11;
 pub const LLAMA_STATE_SEQ_MAGIC: u32 = 1734833009;
-pub const LLAMA_STATE_SEQ_VERSION: u32 = 2;
+pub const LLAMA_STATE_SEQ_VERSION: u32 = 4;
+pub const LLAMA_STATE_SEQ_FLAGS_NONE: u32 = 0;
 pub const LLAMA_STATE_SEQ_FLAGS_SWA_ONLY: u32 = 1;
 pub const LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY: u32 = 1;
 pub const LLAMA_STATE_SEQ_FLAGS_ON_DEVICE: u32 = 2;
@@ -56,7 +57,8 @@ pub const ggml_type_GGML_TYPE_TQ2_0: ggml_type = 35;
 pub const ggml_type_GGML_TYPE_MXFP4: ggml_type = 39;
 pub const ggml_type_GGML_TYPE_NVFP4: ggml_type = 40;
 pub const ggml_type_GGML_TYPE_Q1_0: ggml_type = 41;
-pub const ggml_type_GGML_TYPE_COUNT: ggml_type = 42;
+pub const ggml_type_GGML_TYPE_Q2_0: ggml_type = 42;
+pub const ggml_type_GGML_TYPE_COUNT: ggml_type = 43;
 pub type ggml_type = ::std::os::raw::c_uint;
 pub const ggml_op_GGML_OP_NONE: ggml_op = 0;
 pub const ggml_op_GGML_OP_DUP: ggml_op = 1;
@@ -113,48 +115,53 @@ pub const ggml_op_GGML_OP_CONV_TRANSPOSE_1D: ggml_op = 51;
 pub const ggml_op_GGML_OP_IM2COL: ggml_op = 52;
 pub const ggml_op_GGML_OP_IM2COL_BACK: ggml_op = 53;
 pub const ggml_op_GGML_OP_IM2COL_3D: ggml_op = 54;
-pub const ggml_op_GGML_OP_CONV_2D: ggml_op = 55;
-pub const ggml_op_GGML_OP_CONV_3D: ggml_op = 56;
-pub const ggml_op_GGML_OP_CONV_2D_DW: ggml_op = 57;
-pub const ggml_op_GGML_OP_CONV_TRANSPOSE_2D: ggml_op = 58;
-pub const ggml_op_GGML_OP_POOL_1D: ggml_op = 59;
-pub const ggml_op_GGML_OP_POOL_2D: ggml_op = 60;
-pub const ggml_op_GGML_OP_POOL_2D_BACK: ggml_op = 61;
-pub const ggml_op_GGML_OP_UPSCALE: ggml_op = 62;
-pub const ggml_op_GGML_OP_PAD: ggml_op = 63;
-pub const ggml_op_GGML_OP_PAD_REFLECT_1D: ggml_op = 64;
-pub const ggml_op_GGML_OP_ROLL: ggml_op = 65;
-pub const ggml_op_GGML_OP_ARANGE: ggml_op = 66;
-pub const ggml_op_GGML_OP_TIMESTEP_EMBEDDING: ggml_op = 67;
-pub const ggml_op_GGML_OP_ARGSORT: ggml_op = 68;
-pub const ggml_op_GGML_OP_TOP_K: ggml_op = 69;
-pub const ggml_op_GGML_OP_LEAKY_RELU: ggml_op = 70;
-pub const ggml_op_GGML_OP_TRI: ggml_op = 71;
-pub const ggml_op_GGML_OP_FILL: ggml_op = 72;
-pub const ggml_op_GGML_OP_FLASH_ATTN_EXT: ggml_op = 73;
-pub const ggml_op_GGML_OP_FLASH_ATTN_BACK: ggml_op = 74;
-pub const ggml_op_GGML_OP_SSM_CONV: ggml_op = 75;
-pub const ggml_op_GGML_OP_SSM_SCAN: ggml_op = 76;
-pub const ggml_op_GGML_OP_WIN_PART: ggml_op = 77;
-pub const ggml_op_GGML_OP_WIN_UNPART: ggml_op = 78;
-pub const ggml_op_GGML_OP_GET_REL_POS: ggml_op = 79;
-pub const ggml_op_GGML_OP_ADD_REL_POS: ggml_op = 80;
-pub const ggml_op_GGML_OP_RWKV_WKV6: ggml_op = 81;
-pub const ggml_op_GGML_OP_GATED_LINEAR_ATTN: ggml_op = 82;
-pub const ggml_op_GGML_OP_RWKV_WKV7: ggml_op = 83;
-pub const ggml_op_GGML_OP_SOLVE_TRI: ggml_op = 84;
-pub const ggml_op_GGML_OP_GATED_DELTA_NET: ggml_op = 85;
-pub const ggml_op_GGML_OP_UNARY: ggml_op = 86;
-pub const ggml_op_GGML_OP_MAP_CUSTOM1: ggml_op = 87;
-pub const ggml_op_GGML_OP_MAP_CUSTOM2: ggml_op = 88;
-pub const ggml_op_GGML_OP_MAP_CUSTOM3: ggml_op = 89;
-pub const ggml_op_GGML_OP_CUSTOM: ggml_op = 90;
-pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS: ggml_op = 91;
-pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS_BACK: ggml_op = 92;
-pub const ggml_op_GGML_OP_OPT_STEP_ADAMW: ggml_op = 93;
-pub const ggml_op_GGML_OP_OPT_STEP_SGD: ggml_op = 94;
-pub const ggml_op_GGML_OP_GLU: ggml_op = 95;
-pub const ggml_op_GGML_OP_COUNT: ggml_op = 96;
+pub const ggml_op_GGML_OP_COL2IM_1D: ggml_op = 55;
+pub const ggml_op_GGML_OP_CONV_2D: ggml_op = 56;
+pub const ggml_op_GGML_OP_CONV_3D: ggml_op = 57;
+pub const ggml_op_GGML_OP_CONV_2D_DW: ggml_op = 58;
+pub const ggml_op_GGML_OP_CONV_TRANSPOSE_2D: ggml_op = 59;
+pub const ggml_op_GGML_OP_POOL_1D: ggml_op = 60;
+pub const ggml_op_GGML_OP_POOL_2D: ggml_op = 61;
+pub const ggml_op_GGML_OP_POOL_2D_BACK: ggml_op = 62;
+pub const ggml_op_GGML_OP_UPSCALE: ggml_op = 63;
+pub const ggml_op_GGML_OP_PAD: ggml_op = 64;
+pub const ggml_op_GGML_OP_PAD_REFLECT_1D: ggml_op = 65;
+pub const ggml_op_GGML_OP_ROLL: ggml_op = 66;
+pub const ggml_op_GGML_OP_ARANGE: ggml_op = 67;
+pub const ggml_op_GGML_OP_TIMESTEP_EMBEDDING: ggml_op = 68;
+pub const ggml_op_GGML_OP_ARGSORT: ggml_op = 69;
+pub const ggml_op_GGML_OP_TOP_K: ggml_op = 70;
+pub const ggml_op_GGML_OP_LEAKY_RELU: ggml_op = 71;
+pub const ggml_op_GGML_OP_TRI: ggml_op = 72;
+pub const ggml_op_GGML_OP_FILL: ggml_op = 73;
+pub const ggml_op_GGML_OP_FLASH_ATTN_EXT: ggml_op = 74;
+pub const ggml_op_GGML_OP_FLASH_ATTN_BACK: ggml_op = 75;
+pub const ggml_op_GGML_OP_SSM_CONV: ggml_op = 76;
+pub const ggml_op_GGML_OP_SSM_SCAN: ggml_op = 77;
+pub const ggml_op_GGML_OP_WIN_PART: ggml_op = 78;
+pub const ggml_op_GGML_OP_WIN_UNPART: ggml_op = 79;
+pub const ggml_op_GGML_OP_GET_REL_POS: ggml_op = 80;
+pub const ggml_op_GGML_OP_ADD_REL_POS: ggml_op = 81;
+pub const ggml_op_GGML_OP_RWKV_WKV6: ggml_op = 82;
+pub const ggml_op_GGML_OP_GATED_LINEAR_ATTN: ggml_op = 83;
+pub const ggml_op_GGML_OP_RWKV_WKV7: ggml_op = 84;
+pub const ggml_op_GGML_OP_SOLVE_TRI: ggml_op = 85;
+pub const ggml_op_GGML_OP_GATED_DELTA_NET: ggml_op = 86;
+pub const ggml_op_GGML_OP_LIGHTNING_INDEXER: ggml_op = 87;
+pub const ggml_op_GGML_OP_DSV4_HC_COMB: ggml_op = 88;
+pub const ggml_op_GGML_OP_DSV4_HC_PRE: ggml_op = 89;
+pub const ggml_op_GGML_OP_DSV4_HC_POST: ggml_op = 90;
+pub const ggml_op_GGML_OP_UNARY: ggml_op = 91;
+pub const ggml_op_GGML_OP_MAP_CUSTOM1: ggml_op = 92;
+pub const ggml_op_GGML_OP_MAP_CUSTOM2: ggml_op = 93;
+pub const ggml_op_GGML_OP_MAP_CUSTOM3: ggml_op = 94;
+pub const ggml_op_GGML_OP_CUSTOM: ggml_op = 95;
+pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS: ggml_op = 96;
+pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS_BACK: ggml_op = 97;
+pub const ggml_op_GGML_OP_OPT_STEP_ADAMW: ggml_op = 98;
+pub const ggml_op_GGML_OP_OPT_STEP_SGD: ggml_op = 99;
+pub const ggml_op_GGML_OP_GLU: ggml_op = 100;
+pub const ggml_op_GGML_OP_COUNT: ggml_op = 101;
 pub type ggml_op = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -254,6 +261,7 @@ pub const llama_vocab_type_LLAMA_VOCAB_TYPE_WPM: llama_vocab_type = 3;
 pub const llama_vocab_type_LLAMA_VOCAB_TYPE_UGM: llama_vocab_type = 4;
 pub const llama_vocab_type_LLAMA_VOCAB_TYPE_RWKV: llama_vocab_type = 5;
 pub const llama_vocab_type_LLAMA_VOCAB_TYPE_PLAMO2: llama_vocab_type = 6;
+pub const llama_vocab_type_LLAMA_VOCAB_TYPE_TEST: llama_vocab_type = 7;
 pub type llama_vocab_type = ::std::os::raw::c_uint;
 pub const llama_rope_type_LLAMA_ROPE_TYPE_NONE: llama_rope_type = -1;
 pub const llama_rope_type_LLAMA_ROPE_TYPE_NORM: llama_rope_type = 0;
@@ -317,6 +325,7 @@ pub const llama_ftype_LLAMA_FTYPE_MOSTLY_TQ2_0: llama_ftype = 37;
 pub const llama_ftype_LLAMA_FTYPE_MOSTLY_MXFP4_MOE: llama_ftype = 38;
 pub const llama_ftype_LLAMA_FTYPE_MOSTLY_NVFP4: llama_ftype = 39;
 pub const llama_ftype_LLAMA_FTYPE_MOSTLY_Q1_0: llama_ftype = 40;
+pub const llama_ftype_LLAMA_FTYPE_MOSTLY_Q2_0: llama_ftype = 41;
 pub const llama_ftype_LLAMA_FTYPE_GUESSED: llama_ftype = 1024;
 pub type llama_ftype = ::std::os::raw::c_uint;
 pub const llama_rope_scaling_type_LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED: llama_rope_scaling_type = -1;
@@ -346,6 +355,20 @@ pub const llama_split_mode_LLAMA_SPLIT_MODE_LAYER: llama_split_mode = 1;
 pub const llama_split_mode_LLAMA_SPLIT_MODE_ROW: llama_split_mode = 2;
 pub const llama_split_mode_LLAMA_SPLIT_MODE_TENSOR: llama_split_mode = 3;
 pub type llama_split_mode = ::std::os::raw::c_uint;
+pub const llama_load_mode_LLAMA_LOAD_MODE_AUTO: llama_load_mode = -1;
+pub const llama_load_mode_LLAMA_LOAD_MODE_NONE: llama_load_mode = 0;
+pub const llama_load_mode_LLAMA_LOAD_MODE_MMAP: llama_load_mode = 1;
+pub const llama_load_mode_LLAMA_LOAD_MODE_MLOCK: llama_load_mode = 2;
+pub const llama_load_mode_LLAMA_LOAD_MODE_MMAP_MLOCK: llama_load_mode = 3;
+pub const llama_load_mode_LLAMA_LOAD_MODE_DIRECT_IO: llama_load_mode = 4;
+pub type llama_load_mode = ::std::os::raw::c_int;
+pub const llama_lazy_mode_LLAMA_LAZY_MODE_OFF: llama_lazy_mode = 0;
+pub const llama_lazy_mode_LLAMA_LAZY_MODE_AUTO: llama_lazy_mode = 1;
+pub const llama_lazy_mode_LLAMA_LAZY_MODE_ON: llama_lazy_mode = 2;
+pub type llama_lazy_mode = ::std::os::raw::c_uint;
+pub const llama_context_type_LLAMA_CONTEXT_TYPE_DEFAULT: llama_context_type = 0;
+pub const llama_context_type_LLAMA_CONTEXT_TYPE_MTP: llama_context_type = 1;
+pub type llama_context_type = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct llama_token_data {
@@ -401,6 +424,9 @@ pub const llama_model_meta_key_LLAMA_MODEL_META_KEY_SAMPLING_MIROSTAT_TAU: llama
 pub const llama_model_meta_key_LLAMA_MODEL_META_KEY_SAMPLING_MIROSTAT_ETA: llama_model_meta_key =
     11;
 pub type llama_model_meta_key = ::std::os::raw::c_uint;
+pub const llama_process_type_LLAMA_PROCESS_TYPE_ENCODE: llama_process_type = 0;
+pub const llama_process_type_LLAMA_PROCESS_TYPE_DECODE: llama_process_type = 1;
+pub type llama_process_type = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct llama_model_kv_override {
@@ -429,19 +455,19 @@ pub struct llama_model_params {
     pub tensor_buft_overrides: *const llama_model_tensor_buft_override,
     pub n_gpu_layers: i32,
     pub split_mode: llama_split_mode,
+    pub load_mode: llama_load_mode,
+    pub lazy_mode: llama_lazy_mode,
     pub main_gpu: i32,
     pub tensor_split: *const f32,
     pub progress_callback: llama_progress_callback,
     pub progress_callback_user_data: *mut ::std::os::raw::c_void,
     pub kv_overrides: *const llama_model_kv_override,
     pub vocab_only: bool,
-    pub use_mmap: bool,
-    pub use_direct_io: bool,
-    pub use_mlock: bool,
     pub check_tensors: bool,
     pub use_extra_bufts: bool,
     pub no_host: bool,
     pub no_alloc: bool,
+    pub load_mtp: bool,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -456,8 +482,12 @@ pub struct llama_context_params {
     pub n_batch: u32,
     pub n_ubatch: u32,
     pub n_seq_max: u32,
+    pub n_rs_seq: u32,
+    pub n_outputs_max: u32,
+    pub n_outputs_max_per_seq: u32,
     pub n_threads: i32,
     pub n_threads_batch: i32,
+    pub ctx_type: llama_context_type,
     pub rope_scaling_type: llama_rope_scaling_type,
     pub pooling_type: llama_pooling_type,
     pub attention_type: llama_attention_type,
@@ -484,6 +514,7 @@ pub struct llama_context_params {
     pub kv_unified: bool,
     pub samplers: *mut llama_sampler_seq_config,
     pub n_samplers: usize,
+    pub ctx_other: *mut llama_context,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -515,6 +546,7 @@ pub struct llama_model_quantize_params {
     pub kv_overrides: *const llama_model_kv_override,
     pub tt_overrides: *const llama_model_tensor_override,
     pub prune_layers: *const i32,
+    pub max_buf_size: usize,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -542,6 +574,18 @@ pub type llama_model_set_tensor_data_t = ::std::option::Option<
     unsafe extern "C" fn(tensor: *mut ggml_tensor, userdata: *mut ::std::os::raw::c_void),
 >;
 pub type llama_state_seq_flags = u32;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct llama_batch_ext {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct llama_embd {
+    pub data: *const f32,
+    pub n_rows: usize,
+    pub n_embd: usize,
+}
 pub type llama_sampler_context_t = *mut ::std::os::raw::c_void;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -568,7 +612,11 @@ pub struct llama_sampler_i {
     >,
     pub free: ::std::option::Option<unsafe extern "C" fn(smpl: *mut llama_sampler)>,
     pub backend_init: ::std::option::Option<
-        unsafe extern "C" fn(smpl: *mut llama_sampler, buft: ggml_backend_buffer_type_t) -> bool,
+        unsafe extern "C" fn(
+            smpl: *mut llama_sampler,
+            buft: ggml_backend_buffer_type_t,
+            n_outputs_max_per_seq: u32,
+        ) -> bool,
     >,
     pub backend_accept: ::std::option::Option<
         unsafe extern "C" fn(
@@ -587,6 +635,10 @@ pub struct llama_sampler_i {
         ),
     >,
     pub backend_set_input: ::std::option::Option<unsafe extern "C" fn(smpl: *mut llama_sampler)>,
+    pub backend_reset: ::std::option::Option<unsafe extern "C" fn(smpl: *mut llama_sampler)>,
+    pub copy_state: ::std::option::Option<
+        unsafe extern "C" fn(src: *const llama_sampler, dst: *mut llama_sampler),
+    >,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -627,6 +679,7 @@ pub struct llama_opt_params {
 pub const mtmd_input_chunk_type_MTMD_INPUT_CHUNK_TYPE_TEXT: mtmd_input_chunk_type = 0;
 pub const mtmd_input_chunk_type_MTMD_INPUT_CHUNK_TYPE_IMAGE: mtmd_input_chunk_type = 1;
 pub const mtmd_input_chunk_type_MTMD_INPUT_CHUNK_TYPE_AUDIO: mtmd_input_chunk_type = 2;
+pub const mtmd_input_chunk_type_MTMD_INPUT_CHUNK_TYPE_COUNT: mtmd_input_chunk_type = 3;
 pub type mtmd_input_chunk_type = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -655,15 +708,31 @@ pub struct mtmd_input_chunks {
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct mtmd_batch {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct mtmd_input_text {
     pub text: *const ::std::os::raw::c_char,
+    pub text_len: usize,
     pub add_special: bool,
     pub parse_special: bool,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct mtmd_input_part {
+    pub text: *const mtmd_input_text,
+    pub bitmap: *const mtmd_bitmap,
+}
+pub type mtmd_progress_callback = ::std::option::Option<
+    unsafe extern "C" fn(progress: f32, user_data: *mut ::std::os::raw::c_void) -> bool,
+>;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct mtmd_context_params {
     pub use_gpu: bool,
+    pub device: ggml_backend_dev_t,
     pub print_timings: bool,
     pub n_threads: ::std::os::raw::c_int,
     pub image_marker: *const ::std::os::raw::c_char,
@@ -674,7 +743,18 @@ pub struct mtmd_context_params {
     pub image_max_tokens: ::std::os::raw::c_int,
     pub cb_eval: ggml_backend_sched_eval_callback,
     pub cb_eval_user_data: *mut ::std::os::raw::c_void,
+    pub batch_max_tokens: i32,
+    pub progress_callback: mtmd_progress_callback,
+    pub progress_callback_user_data: *mut ::std::os::raw::c_void,
 }
+pub type mtmd_bitmap_lazy_callback = ::std::option::Option<
+    unsafe extern "C" fn(
+        chunk_idx: usize,
+        user_data: *mut ::std::os::raw::c_void,
+        out_bitmap: *mut *mut mtmd_bitmap,
+        out_text: *mut *mut ::std::os::raw::c_char,
+    ) -> ::std::os::raw::c_int,
+>;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mtmd_decoder_pos {
@@ -682,6 +762,127 @@ pub struct mtmd_decoder_pos {
     pub x: u32,
     pub y: u32,
     pub z: u32,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_caps {
+    pub inp_vision: bool,
+    pub inp_audio: bool,
+}
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_NONE: mtmd_gen_audio_type = 0;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_QWEN3TTS: mtmd_gen_audio_type = 1;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_POCKETTTS: mtmd_gen_audio_type = 2;
+pub type mtmd_gen_audio_type = ::std::os::raw::c_uint;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_gen_audio_info {
+    pub type_: mtmd_gen_audio_type,
+    pub sample_rate: i32,
+    pub model_variant: *const ::std::os::raw::c_char,
+}
+pub const mtmd_gen_process_type_MTMD_GEN_PROCESS_TYPE_GEN_CODE: mtmd_gen_process_type = 0;
+pub const mtmd_gen_process_type_MTMD_GEN_PROCESS_TYPE_GEN_WAV: mtmd_gen_process_type = 1;
+pub type mtmd_gen_process_type = ::std::os::raw::c_uint;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_gen_inp {
+    pub type_: mtmd_gen_process_type,
+    pub code0: i32,
+    pub embd: *mut f32,
+    pub top_k: i32,
+    pub top_p: f32,
+    pub seed: u32,
+    pub temp: f32,
+    pub codes: *mut i32,
+    pub n_codes: usize,
+    pub feats: *const f32,
+    pub n_feats: usize,
+    pub state_data: *const ::std::os::raw::c_char,
+    pub state_size: usize,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_gen_out {
+    pub codes: *const i32,
+    pub n_codes: usize,
+    pub feats: *const f32,
+    pub n_feats: usize,
+    pub embd: *const f32,
+    pub is_eos: bool,
+    pub audio: *const f32,
+    pub n_samples: usize,
+    pub state_data: *const ::std::os::raw::c_char,
+    pub state_size: usize,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_video {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_video_init_params {
+    pub fps_target: f32,
+    pub ffmpeg_bin_dir: *const ::std::os::raw::c_char,
+    pub timestamp_interval_ms: i64,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_init_opt {
+    pub video_params: mtmd_helper_video_init_params,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_bitmap_wrapper {
+    pub bitmap: *mut mtmd_bitmap,
+    pub video_ctx: *mut mtmd_helper_video,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_embd_batch {
+    pub n_tokens: i32,
+    pub embd: *const f32,
+    pub n_embd: i32,
+    pub pos: *const llama_pos,
+    pub n_pos: i32,
+    pub seq_id: llama_seq_id,
+}
+pub type mtmd_helper_post_decode_callback = ::std::option::Option<
+    unsafe extern "C" fn(
+        batch: *const mtmd_helper_embd_batch,
+        user_data: *mut ::std::os::raw::c_void,
+    ) -> i32,
+>;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_video_info {
+    pub width: u32,
+    pub height: u32,
+    pub fps: f32,
+    pub n_frames: i32,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_gen_audio {
+    _unused: [u8; 0],
+}
+pub const mtmd_helper_gen_audio_outtype_MTMD_HELPER_GEN_AUDIO_OUTTYPE_PCM:
+    mtmd_helper_gen_audio_outtype = 0;
+pub const mtmd_helper_gen_audio_outtype_MTMD_HELPER_GEN_AUDIO_OUTTYPE_WAV:
+    mtmd_helper_gen_audio_outtype = 1;
+pub type mtmd_helper_gen_audio_outtype = ::std::os::raw::c_uint;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_gen_audio_inp {
+    pub seq_id: llama_seq_id,
+    pub prompt: *const ::std::os::raw::c_char,
+    pub prompt_len: usize,
+    pub speaker_ref: *mut mtmd_bitmap,
+    pub lang: *const ::std::os::raw::c_char,
+    pub top_k: i32,
+    pub top_p: f32,
+    pub seed: u32,
+    pub out_type: mtmd_helper_gen_audio_outtype,
 }
 extern "C" {
     pub fn llama_backend_init_c();
