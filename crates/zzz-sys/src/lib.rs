@@ -16,10 +16,14 @@
 //!
 //! # Activation
 //!
-//! The FFI entry points and the safe session surface live behind the
-//! `bindings` cargo feature. A default build compiles public types only, so
+//! Static FFI entry points live behind the `bindings` cargo feature. The safe
+//! session surface is also available to the inert `android-companion` client.
+//! A default build compiles public types only, so
 //! `cargo check --workspace` never needs a staged slice. An enabled build
-//! links the pinned slice for the target or fails (see `build.rs`).
+//! links the pinned slice for the target or fails (see `build.rs`). The additive
+//! `android-companion` client exposes the same safe sessions without static engine
+//! linkage. Its production identity is unconfigured, so it currently fails closed.
+//! When both features are enabled, static `bindings` retain precedence.
 //!
 //! # Public surface
 //!
@@ -223,11 +227,17 @@ const _: () = {
     }
 };
 
-#[cfg(any(feature = "bindings", test))]
+#[cfg(any(feature = "bindings", feature = "android-companion"))]
+mod api;
+#[cfg(all(feature = "android-companion", any(not(feature = "bindings"), test)))]
+mod companion;
+#[cfg(any(feature = "bindings", feature = "android-companion", test))]
 mod cpu;
-#[cfg(feature = "bindings")]
+#[cfg(any(feature = "bindings", feature = "android-companion"))]
 mod session;
-#[cfg(feature = "bindings")]
+#[cfg(any(feature = "bindings", feature = "android-companion"))]
+pub use api::{availability, UnavailableReason};
+#[cfg(any(feature = "bindings", feature = "android-companion"))]
 pub use session::{
     abi_version, default_options, supports_model, ChunkInfo, KittenCancellation, KittenFlags,
     KittenSession, KittenSettings, PhononCancellation, PhononSession, PhononSettings,

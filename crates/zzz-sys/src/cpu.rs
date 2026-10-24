@@ -113,24 +113,48 @@ thread_local! {
     static OVERRIDE: std::cell::Cell<Option<CpuFacts>> = const { std::cell::Cell::new(None) };
 }
 
-/// A scoped per-thread override also exercises the real FFI entry guards on
-/// non-x86 development hosts, without changing production detection.
+/// Test-only facts stay scoped to the calling thread and restore on unwind.
 #[cfg(test)]
-pub(crate) fn without_v3<T>(run: impl FnOnce() -> T) -> T {
+fn with_facts<T>(facts: CpuFacts, run: impl FnOnce() -> T) -> T {
     struct Restore(Option<CpuFacts>);
     impl Drop for Restore {
         fn drop(&mut self) {
             OVERRIDE.with(|value| value.set(self.0));
         }
     }
-    let previous = OVERRIDE.with(|value| {
-        value.replace(Some(CpuFacts {
-            requires_v3: true,
-            x86: X86Capabilities::default(),
-        }))
-    });
+    let previous = OVERRIDE.with(|value| value.replace(Some(facts)));
     let _restore = Restore(previous);
     run()
+}
+
+/// Exercise real entry guards on any host without changing detection.
+#[cfg(test)]
+pub(crate) fn without_v3<T>(run: impl FnOnce() -> T) -> T {
+    with_facts(
+        CpuFacts {
+            requires_v3: true,
+            x86: X86Capabilities::default(),
+        },
+        run,
+    )
+}
+
+/// Controlled mock tables/errors never enter engine code. Real guard tests keep
+/// their explicit denied facts; production and native integration are untouched.
+#[cfg(all(test, any(feature = "bindings", feature = "android-companion")))]
+pub(crate) fn with_supported_cpu<T>(run: impl FnOnce() -> T) -> T {
+    with_facts(
+        CpuFacts {
+            requires_v3: true,
+            x86: X86Capabilities {
+                leaf1_ecx: LEAF1_REQUIRED,
+                leaf7_ebx: LEAF7_REQUIRED,
+                extended1_ecx: EXTENDED1_REQUIRED,
+                xcr0: AVX_STATE,
+            },
+        },
+        run,
+    )
 }
 
 #[cfg(test)]

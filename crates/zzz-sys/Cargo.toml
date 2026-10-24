@@ -30,6 +30,10 @@ default = []
 # or the staged slice is missing or fails verification — never silently
 # building without the engine.
 bindings = []
+# Optional SDK-owned Android loader, with no static engine linkage or private
+# staging. No production companion identity is configured yet: fail closed.
+# Static bindings retain precedence if both additive features are enabled.
+android-companion = []
 
 [build-dependencies]
 # Manifest + staged receipt parsing. Both are already resolved in the

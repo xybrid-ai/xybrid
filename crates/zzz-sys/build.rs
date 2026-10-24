@@ -33,6 +33,9 @@
 //!
 //! If the `bindings` cargo feature is off, the script is a no-op: default
 //! workspace builds (and CI lanes without staging) compile an empty crate.
+//! `android-companion` alone also skips all staging/static linkage; its native
+//! loader declares only baseline libdl imports on Android ARM64. Enabling both
+//! features retains the existing strict static `bindings` contract.
 
 use std::env;
 use std::path::{Path, PathBuf};

@@ -25,3 +25,16 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 alias(name = "zzz-sys", actual = ":xybrid_zzz_sys", visibility = ["//visibility:public"])
+
+# Inert opt-in client only: no private archive dependency, platform constraint,
+# feature forwarding, or distribution activation. Static target above is intact.
+rust_library(
+    name = "xybrid_zzz_companion_client",
+    version = XYBRID_VERSION,
+    srcs = glob(["src/**/*.rs"]),
+    crate_name = "xybrid_zzz_sys",
+    crate_features = ["android-companion"],
+    edition = "2021",
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)

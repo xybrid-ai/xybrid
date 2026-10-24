@@ -62,3 +62,45 @@ selects the GGUF's default; a positive finite value overrides it. Seed `0` is
 valid. Omitting the voice lets the engine select a bundled voice; this surface
 does not load external voice files or clone voices. Keep mapped model files
 unchanged until all session/cancellation handles are gone.
+
+
+## Optional Android companion client (inert preparation)
+
+The additive `android-companion` feature exposes the same safe sessions through
+an SDK-owned table instead of requiring a static engine archive. **No production
+companion contract is configured.** This feature currently advertises no models,
+returns ABI `0`, and rejects opens with `LoadFailed`; it does not enable speech in
+any shipped SDK. Defaults, current rc.8 pins and the static `bindings` contract
+are unchanged. When both features are selected, static `bindings` take precedence.
+The Bazel-only opt-in client target is `:xybrid_zzz_companion_client`; it has no
+private archive dependency and is not forwarded into any SDK binding.
+
+The private ABI-1 getter contract in `src/companion.rs` takes a requested ABI,
+exact output size and caller-owned C-layout table. Its fixed header contains
+size, companion ABI, engine ABI, Android API minimum, selected-model bits,
+reserved zero and a 32-byte independently expected contract identity. Eight
+nullable C function slots cover ABI/model/default probes, the two opens,
+synthesis, cancellation and close. All metadata and slots must match before
+native probes; ABI 1 and generic Phonon support alone cannot establish the public
+Phonon-31m contract. A future reviewed adoption must supply the actual qualified,
+notice-bearing engine identity; this preparation fabricates none.
+
+Only Android ARM64 has a native loader. Other OS/ABI combinations return explicit
+unavailable reasons. Before opening the fixed `libxybrid_zzz_tts.so` SONAME with
+local visibility, the loader dynamically resolves bionic's actual-device API
+query and requires API 29+. The API-29 query is not a strong linker import;
+unknown/older OS versions cannot attempt the companion load. Getter lookup uses
+that owned library handle. No caller path, authentication, model directory,
+network fetch or environment activation is accepted. The unconfigured identity
+fails before any OS query or library operation.
+
+`availability()` returns a bounded typed `UnavailableReason`; probes/defaults
+and opens share the same lazy initialization. Success and failure are permanent
+for the process, so an optional library installed later requires app restart.
+The process cache retains a successful library reference. Every opened session
+and cancellation owner also retains its exact table/library, and final close
+runs before that ownership is released. Existing Linux v3 checks still precede
+all eight native operations, including cancel/close. Companion loading, symbol
+imports, package minima and actual Android execution remain unqualified until
+future platform/package work and installed-app tests; mock tests prove dispatch,
+validation, ordering and lifetime only.

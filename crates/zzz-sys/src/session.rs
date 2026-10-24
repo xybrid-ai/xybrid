@@ -14,7 +14,7 @@ use std::ptr;
 use std::sync::Arc;
 
 use crate::{
-    AudioCallback, EmbedError, EmbedOptions, EmbedResult, KittenOptions, ZZZ_EMBED_CANCELLED,
+    EmbedError, EmbedOptions, EmbedResult, KittenOptions, ZZZ_EMBED_CANCELLED,
     ZZZ_EMBED_INVALID_ARGUMENT, ZZZ_EMBED_LIMIT_REACHED, ZZZ_EMBED_LOAD_FAILED,
     ZZZ_EMBED_MODEL_NOT_COMPILED, ZZZ_EMBED_OK, ZZZ_EMBED_OUT_OF_MEMORY,
     ZZZ_EMBED_SYNTHESIS_FAILED,
@@ -66,90 +66,62 @@ fn message_of(error: &EmbedError, fallback: &str) -> ZzzError {
     }
 }
 
-fn require_cpu() -> Result<(), ZzzError> {
-    if !crate::cpu::available() {
-        return Err(ZzzError::LoadFailed {
-            message: "zzz engine unavailable: Linux x86_64 requires an x86-64-v3 CPU and OS-enabled AVX/XMM/YMM state".into(),
-        });
+fn unavailable(reason: crate::UnavailableReason) -> ZzzError {
+    ZzzError::LoadFailed {
+        message: format!("zzz engine unavailable: {reason}"),
     }
-    Ok(())
+}
+
+fn require_engine() -> Result<Arc<crate::api::EngineApi>, ZzzError> {
+    crate::api::load().map_err(unavailable)
 }
 
 /// Read Phonon's defaults from the linked engine, including bundle temperature selection.
-/// Returns zeroed settings (with `struct_size` set) when the CPU is unsupported;
-/// session opening reports the CPU requirement before validating those settings.
+/// Returns zeroed settings (with `struct_size` set) when the runtime is unavailable;
+/// session opening reports unavailability before validating those settings.
 #[must_use]
 pub fn default_options() -> EmbedOptions {
     let mut options = EmbedOptions {
         struct_size: core::mem::size_of::<EmbedOptions>() as u32,
         ..EmbedOptions::default()
     };
-    if !crate::cpu::available() {
+    let Ok(api) = crate::api::load() else {
         return options;
-    }
+    };
     // # Safety: writes exactly the one `EmbedOptions` allocated above.
-    unsafe { zzz_embed_default_options(ptr::addr_of_mut!(options)) };
+    unsafe { (api.functions.default_options)(ptr::addr_of_mut!(options)) };
     options
-}
-
-extern "C" {
-    fn zzz_embed_abi_version() -> u32;
-    fn zzz_embed_supports_model(model: *const std::os::raw::c_char) -> i32;
-    fn zzz_embed_default_options(options: *mut crate::EmbedOptions);
-    fn zzz_embed_open(
-        model: *const std::os::raw::c_char,
-        model_path: *const std::os::raw::c_char,
-        voice: *const std::os::raw::c_char,
-        options: *const EmbedOptions,
-        out_session: *mut *mut core::ffi::c_void,
-        error: *mut EmbedError,
-    ) -> i32;
-    fn zzz_embed_open_kitten(
-        options: *const KittenOptions,
-        out_session: *mut *mut core::ffi::c_void,
-        error: *mut EmbedError,
-    ) -> i32;
-    fn zzz_embed_synthesize(
-        session: *mut core::ffi::c_void,
-        text: *const std::os::raw::c_char,
-        language: *const std::os::raw::c_char,
-        callback: Option<AudioCallback>,
-        user_data: *mut core::ffi::c_void,
-        result: *mut EmbedResult,
-        error: *mut EmbedError,
-    ) -> i32;
-    fn zzz_embed_cancel(session: *mut core::ffi::c_void);
-    fn zzz_embed_close(session: *mut core::ffi::c_void);
 }
 
 /// Runtime ABI version of the linked engine slice.
 ///
-/// Returns zero without entering the engine if the runtime CPU is unsupported.
+/// Returns zero without entering the engine if the runtime is unavailable.
 /// Zero means runtime unavailability, not a mismatch in the verified artifact.
-/// A nonzero mismatch indicates duplicate-engine drift.
+/// A nonzero static mismatch indicates duplicate-engine drift. Companion ABI
+/// mismatches are rejected during initialization and return zero here.
 #[must_use]
 pub fn abi_version() -> u32 {
-    if !crate::cpu::available() {
+    let Ok(api) = crate::api::load() else {
         return 0;
-    }
+    };
     // # Safety: a plain function returning an integer; no shared state.
-    unsafe { zzz_embed_abi_version() }
+    unsafe { (api.functions.abi_version)() }
 }
 
 /// Whether the linked slice compiled support for `model` (e.g.
-/// `"kitten-tts2"`). Returns false without entering the engine on unsupported CPUs.
+/// `"kitten-tts2"`). Returns false without entering the engine when the runtime is unavailable.
 #[must_use]
 pub fn supports_model(model: &str) -> bool {
-    if !crate::cpu::available() {
+    let Ok(api) = crate::api::load() else {
         return false;
-    }
+    };
     let name = match CString::new(model) {
         Ok(name) => name,
         // An interior NUL can never match an implementation name.
         Err(_) => return false,
     };
     // # Safety: the C side only spans the input string and returns an int.
-    unsafe { zzz_embed_supports_model(name.as_ptr()) != 0 }
+    unsafe { (api.functions.supports_model)(name.as_ptr()) != 0 }
 }
 
 /// Safe settings for the pinned Kitten engine.
@@ -227,7 +199,7 @@ impl PhononSession {
         voice: Option<&str>,
         settings: PhononSettings,
     ) -> Result<Self, ZzzError> {
-        require_cpu()?;
+        let api = require_engine()?;
         settings.validate()?;
         let path = c_string(
             model_path
@@ -251,7 +223,7 @@ impl PhononSession {
         // open. The engine owns the resulting generic session; the shared handle
         // closes it exactly once after synthesis and every cancellation owner end.
         let code = unsafe {
-            zzz_embed_open(
+            (api.functions.open)(
                 model.as_ptr(),
                 path.as_ptr(),
                 voice.as_ref().map_or(ptr::null(), |value| value.as_ptr()),
@@ -268,7 +240,10 @@ impl PhononSession {
         })?;
         // Both model families use the same opaque C session and synthesis ABI.
         Ok(Self(KittenSession {
-            session: Arc::new(SessionHandle(session)),
+            session: Arc::new(SessionHandle {
+                native: session,
+                api,
+            }),
             not_sync: PhantomData,
         }))
     }
@@ -344,7 +319,10 @@ impl KittenFlags {
 }
 
 /// Shared lifetime anchor. Only cancel may use the pointer concurrently.
-struct SessionHandle(ptr::NonNull<core::ffi::c_void>);
+struct SessionHandle {
+    native: ptr::NonNull<core::ffi::c_void>,
+    api: Arc<crate::api::EngineApi>,
+}
 // # Safety: synthesis is exclusive through &mut KittenSession. The only
 // shared operation is the header's thread-safe cancel; Arc prevents close
 // until every synthesis/cancellation owner has returned or been dropped.
@@ -352,11 +330,12 @@ unsafe impl Send for SessionHandle {}
 unsafe impl Sync for SessionHandle {}
 impl Drop for SessionHandle {
     fn drop(&mut self) {
-        if !crate::cpu::available() {
+        if self.api.require_cpu().is_err() {
             return;
         }
         // # Safety: the final Arc owns close; no call can still hold this handle.
-        unsafe { zzz_embed_close(self.0.as_ptr()) }
+        // The stored API owns the library until after this call returns.
+        unsafe { (self.api.functions.close)(self.native.as_ptr()) }
     }
 }
 
@@ -373,12 +352,12 @@ impl core::fmt::Debug for KittenCancellation {
 impl KittenCancellation {
     /// Stop the running call. Idle cancellation is ignored by the engine.
     pub fn cancel(&self) {
-        if !crate::cpu::available() {
+        if self.0.api.require_cpu().is_err() {
             return;
         }
         // # Safety: Arc anchors the session; cancel is thread-safe, including
         // from the callback. Close cannot occur while this borrow is alive.
-        unsafe { zzz_embed_cancel(self.0 .0.as_ptr()) }
+        unsafe { (self.0.api.functions.cancel)(self.0.native.as_ptr()) }
     }
 }
 
@@ -407,7 +386,7 @@ impl core::fmt::Debug for KittenSession {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // Printed address only; engine-owned state stays private.
         f.debug_struct("KittenSession")
-            .field("session", &(self.session.0.as_ptr() as usize))
+            .field("session", &(self.session.native.as_ptr() as usize))
             .finish()
     }
 }
@@ -448,7 +427,7 @@ impl KittenSession {
         decoder_voice: &Path,
         settings: KittenSettings,
     ) -> Result<Self, ZzzError> {
-        require_cpu()?;
+        let api = require_engine()?;
         let as_c_path = |path: &Path| -> Result<CString, ZzzError> {
             let string = path.to_str().ok_or_else(|| ZzzError::InvalidArgument {
                 message: "asset path is not valid UTF-8".to_string(),
@@ -483,8 +462,9 @@ impl KittenSession {
         // caller-owned handle, null on failure per the header; on success
         // the handle is wrapped in `Self`, whose `Drop` owns the single
         // close call.
-        let code =
-            unsafe { zzz_embed_open_kitten(ptr::addr_of!(options), &mut session, &mut error) };
+        let code = unsafe {
+            (api.functions.open_kitten)(ptr::addr_of!(options), &mut session, &mut error)
+        };
         if code != ZZZ_EMBED_OK {
             return Err(message_of(&error, "opening the Kitten TTS 2 engine failed"));
         }
@@ -492,7 +472,10 @@ impl KittenSession {
             message: "engine reported success without a session".to_string(),
         })?;
         Ok(Self {
-            session: Arc::new(SessionHandle(session)),
+            session: Arc::new(SessionHandle {
+                native: session,
+                api,
+            }),
             not_sync: PhantomData,
         })
     }
@@ -541,7 +524,7 @@ impl KittenSession {
         language: Option<&str>,
         callback: &mut dyn FnMut(&[f32], ChunkInfo) -> bool,
     ) -> Result<StreamOutcome, ZzzError> {
-        require_cpu()?;
+        self.session.api.require_cpu().map_err(unavailable)?;
         let text = c_string(text)?;
         let language = match language {
             Some(language) => Some(c_string(language)?),
@@ -574,8 +557,8 @@ impl KittenSession {
             .as_ref()
             .map_or(ptr::null(), |lang| lang.as_ptr().cast());
         let code = unsafe {
-            zzz_embed_synthesize(
-                self.session.0.as_ptr(),
+            (self.session.api.functions.synthesize)(
+                self.session.native.as_ptr(),
                 text.as_ptr().cast(),
                 language_ptr,
                 Some(sample_callback),
@@ -683,6 +666,12 @@ unsafe extern "C" fn sample_callback(
 mod cpu_tests {
     use super::*;
 
+    fn without_v3(run: impl FnOnce()) {
+        crate::api::with_test_api(Ok(crate::api::tests::mock_api()), || {
+            crate::cpu::without_v3(run);
+        });
+    }
+
     fn assert_unavailable<T: core::fmt::Debug>(result: Result<T, ZzzError>) {
         let error = result.expect_err("unsupported CPUs cannot enter the engine");
         assert!(matches!(error, ZzzError::LoadFailed { .. }), "{error}");
@@ -691,7 +680,7 @@ mod cpu_tests {
 
     #[test]
     fn denied_cpu_probes_and_defaults_do_not_enter_native_code() {
-        crate::cpu::without_v3(|| {
+        without_v3(|| {
             assert_eq!(abi_version(), 0);
             assert!(!supports_model("phonon"));
             assert!(!supports_model("kitten-tts2"));
@@ -709,7 +698,7 @@ mod cpu_tests {
 
     #[test]
     fn denied_cpu_open_precedes_invalid_paths_settings_and_flags() {
-        crate::cpu::without_v3(|| {
+        without_v3(|| {
             let invalid_path = Path::new("invalid\0path");
             assert_unavailable(PhononSession::open_phonon(
                 invalid_path,
@@ -734,11 +723,14 @@ mod cpu_tests {
 
     #[test]
     fn denied_cpu_synthesis_cancel_and_drop_never_dereference_native_handle() {
-        crate::cpu::without_v3(|| {
+        without_v3(|| {
             // Deliberately invalid native state: touching it through any FFI
             // entry would be a contract violation. The guard must reject first.
             let mut session = KittenSession {
-                session: Arc::new(SessionHandle(ptr::NonNull::dangling())),
+                session: Arc::new(SessionHandle {
+                    native: ptr::NonNull::dangling(),
+                    api: crate::api::tests::mock_api(),
+                }),
                 not_sync: PhantomData,
             };
             let cancel = session.cancellation_handle();
