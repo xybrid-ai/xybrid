@@ -16,9 +16,11 @@ import tempfile
 import zipfile
 
 
-# The tool and contract are declared Bazel inputs from this reviewed checkout.
-# Never import a candidate module through cwd or sys.path.
-ROOT = Path(__file__).resolve().parents[2]
+# The tool and contract are declared Bazel runfiles. Preserve the launcher's
+# runfiles path: resolving its symlink may reach a detached physical source
+# file whose siblings are not declared runtime inputs. Direct source invocations
+# have the same relative layout. Never import through cwd or sys.path.
+ROOT = Path(os.path.abspath(__file__)).parents[2]
 SPEC = importlib.util.spec_from_file_location(
     "xybrid_apple_notice_contract", ROOT / "crates/zzz-sys/zzz_pull.py")
 PULL = importlib.util.module_from_spec(SPEC)

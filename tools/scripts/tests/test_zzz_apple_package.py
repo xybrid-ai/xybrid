@@ -8,7 +8,10 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import stat
+import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -231,6 +234,38 @@ class ApplePackageTests(unittest.TestCase):
 
 
 class AppleRuleTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "posix", "packager requires POSIX runfiles symlinks")
+    def test_detached_symlinked_tool_loads_only_declared_runfiles_helper(self):
+        # A real isolated Python process loads the symlinked source without a
+        # checkout beside its physical file. Both declared runfiles are symlinks
+        # to separate stores, as they may be in a Bazel action runtime tree.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tool = root / "tool-store/pack_zzz_notices.py"
+            helper = root / "helper-store/zzz_pull.py"
+            launcher = root / "runfiles/_main/bindings/apple/pack_zzz_notices.py"
+            declared_helper = root / "runfiles/_main/crates/zzz-sys/zzz_pull.py"
+            for path in (tool, helper, launcher, declared_helper):
+                path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / "bindings/apple/pack_zzz_notices.py", tool)
+            shutil.copyfile(ROOT / "crates/zzz-sys/zzz_pull.py", helper)
+            launcher.symlink_to(tool)
+            declared_helper.symlink_to(helper)
+            code = """import hashlib, json, pathlib, runpy, sys
+value = runpy.run_path(sys.argv[1])
+assert value['SPEC'].origin == sys.argv[2]
+contract = value['PULL'].SCHEMA5_NOTICE_FILES
+assert hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest() == sys.argv[3]
+"""
+            result = subprocess.run([sys.executable, "-I", "-c", code, str(launcher), str(declared_helper),
+                                     "a634e1fb5e0cdfa87efea950c72ff9bb522c6620cec16924395820e24b06c9ce"],
+                                    cwd=root, capture_output=True, text=True, timeout=10)
+            self.assertEqual(0, result.returncode, result.stderr)
+            # Also exercise the real CLI bootstrap in that same detached layout.
+            result = subprocess.run([sys.executable, "-I", str(launcher), "--help"], cwd=root,
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(0, result.returncode, result.stderr)
+
     def rule_source(self):
         namespace = {"rule": lambda **kw: kw["implementation"],
                      "attr": types.SimpleNamespace(label=lambda **kw: None, bool=lambda **kw: None),
