@@ -29,6 +29,25 @@ MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_PAYLOAD_BYTES = 256 * 1024 * 1024
 MAX_JSON_BYTES = 1024 * 1024
 CHUNK_BYTES = 1024 * 1024
+SCHEMA4_RELEASE_TAG = "v0.1.0-rc.8"
+FROZEN_RELEASE_TAGS = {f"v0.1.0-rc.{number}" for number in range(1, 9)}
+# Immutable schema-5 contract. A change to any notice byte requires a new
+# receipt schema, not a receipt or manifest that blesses its own replacement.
+SCHEMA5_NOTICE_FILES = {
+    "LICENSES/KittenTTS-APACHE-2.0.txt": "787aa312b93eee80b636f35652469df29efdb7582239d6a9c088467555a3c7fd",
+    "LICENSES/LLVM-compiler-rt.txt": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+    "LICENSES/PrismML-llama-MIT.txt": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+    "LICENSES/Zig-MIT.txt": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
+    "LICENSES/compiler-rt-release_80.txt": "dd27f8c290bcdc8368549cd7cd98710a9dbdc34122f2e096a1edb97824ed4148",
+    "LICENSES/musl-COPYRIGHT.txt": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+    "LICENSES/musl-math-NOTICES.txt": "f4ecd0ce14c673931bf25e5868bc2172abab42469f91a5223f4cfcf8264ca289",
+    "LICENSES/xn-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "LICENSES/xn-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "LICENSES/xn-ptts-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "LICENSES/xn-ptts-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "RUNTIME_TERMS.md": "6efce1cf8639bb04218b01a3fe69ae5fcc0ad31befb6fbaf271c6fe9e7d4ff93",
+    "THIRD_PARTY_NOTICES.md": "06e1fa93f6c76e0e10b1e5ffb51c90f74899796c3095517fe954b0ee6f75347d",
+}
 ZIG_TARGETS = {
     "aarch64-apple-darwin": "aarch64-macos-none",
     "aarch64-linux-android": "aarch64-linux-android",
@@ -70,17 +89,22 @@ class Pin:
     entry: dict
 
     @property
+    def notices(self) -> dict[str, str]:
+        return self.entry.get("notice_files", {})
+
+    @property
     def files(self) -> set[str]:
         return {
             self.entry["library"],
             *self.entry["headers"],
             "RECEIPT.json",
             "share/zzz_embed.json",
+            *self.notices,
         }
 
     @property
     def directories(self) -> set[str]:
-        return {"lib", "include", "share"}
+        return {"lib", "include", "share"} | ({"LICENSES"} if self.notices else set())
 
     @property
     def key(self) -> tuple[str, ...]:
@@ -119,12 +143,19 @@ def select_pin(target: str, manifest: Path = DEFAULT_MANIFEST) -> Pin:
         "profile": PROFILE,
         "models": MODELS,
         "backend": "cpu",
-        "receipt_schema": 4,
         "apis": APIS,
         "library": "lib/libzzz_embed.a",
         "headers": HEADERS,
     }.items():
         expect(entry, field, value, "pin")
+    schema = entry.get("receipt_schema")
+    require(type(schema) is int and schema in (4, 5), "pin mismatch: receipt_schema")
+    if schema == 4:
+        require(tag == SCHEMA4_RELEASE_TAG, "schema 4 requires the frozen rc.8 release")
+        require("notice_files" not in entry, "schema 4 cannot carry notice pins")
+    else:
+        require(tag not in FROZEN_RELEASE_TAGS, "frozen releases cannot use schema 5")
+        expect(entry, "notice_files", SCHEMA5_NOTICE_FILES, "pin")
     slices = {
         "aarch64-apple-darwin": "macos-arm64",
         "aarch64-linux-android": "android-arm64",
@@ -152,6 +183,10 @@ def select_pin(target: str, manifest: Path = DEFAULT_MANIFEST) -> Pin:
 
 def validate_receipt(receipt: dict, metadata: dict, pin: Pin) -> None:
     entry = pin.entry
+    if entry["receipt_schema"] == 5:
+        expect(receipt, "notice_files", pin.notices, "receipt")
+    else:
+        require("notice_files" not in receipt, "schema 4 cannot carry notice files")
     for field, value in {
         "schema_version": entry["receipt_schema"],
         "release_tag": pin.release_tag,
@@ -270,6 +305,15 @@ def inspect_archive(
                 with archive.extractfile(files[name]) as source:
                     documents.append(json_object(source.read(), name))
             validate_receipt(*documents, pin)
+            # Notice bytes are checked against independently pinned schema
+            # semantics before any destination files are written.
+            for name, expected_hash in pin.notices.items():
+                with archive.extractfile(files[name]) as source:
+                    require(
+                        hashlib.file_digest(source, "sha256").hexdigest()
+                        == expected_hash,
+                        "notice payload checksum mismatch",
+                    )
             hashes = {}
             for name, member in files.items():
                 digest = hashlib.sha256()

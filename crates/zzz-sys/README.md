@@ -49,6 +49,14 @@ payload files, the exact model/API declarations and the archive's SHA-256
 before either Cargo or Bazel links it. This SDK pins engine `v0.1.0-rc.8`
 with receipt schema 4. The full `combined` engine is not accepted.
 
+Receipt schema 4 is accepted only for that frozen `rc.8` release. For future
+schema-5 pins, verification also requires the immutable 13-file notice
+inventory, including runtime terms and upstream license texts. Each archive's
+manifest entry must pin the exact schema-5 `notice_files` map; the receipt map
+and every notice's bytes must match it before staging. Changing notice bytes
+requires a new receipt schema. This verifier support does not change the
+current engine pins or enable additional SDK targets or build features.
+
 `PhononSettings::default()` reads the linked engine's defaults. Temperature `0`
 selects the GGUF's default; a positive finite value overrides it. Seed `0` is
 valid. Omitting the voice lets the engine select a bundled voice; this surface

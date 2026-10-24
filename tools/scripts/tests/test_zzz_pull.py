@@ -37,7 +37,9 @@ class ZzzPullTests(unittest.TestCase):
         *,
         target=None,
         receipt_update=None,
+        receipt_omit=None,
         metadata_update=None,
+        payload_update=None,
         extra=None,
         omit=None,
     ):
@@ -64,7 +66,7 @@ class ZzzPullTests(unittest.TestCase):
         }
         receipt.update(
             {
-                "schema_version": 4,
+                "schema_version": entry["receipt_schema"],
                 "release_tag": self.manifest_data["release_tag"],
                 "engine_version": self.manifest_data["release_tag"][1:],
                 "abi_version": 1,
@@ -78,9 +80,13 @@ class ZzzPullTests(unittest.TestCase):
                 },
             }
         )
+        if "notice_files" in entry:
+            receipt["notice_files"] = copy.deepcopy(entry["notice_files"])
         if target == "aarch64-linux-android":
             receipt.update(android_api=29, elf_max_page_size=16384)
         receipt.update(receipt_update or {})
+        if receipt_omit is not None:
+            receipt.pop(receipt_omit)
         metadata = {
             k: copy.deepcopy(entry[k]) for k in ("apis", "models", "headers", "backend")
         }
@@ -91,13 +97,16 @@ class ZzzPullTests(unittest.TestCase):
             "share/zzz_embed.json": json.dumps(metadata).encode(),
             "lib/libzzz_embed.a": b"!<arch>\nsynthetic-library",
             **{header: b"/* synthetic engine header */\n" for header in entry["headers"]},
+            **getattr(self, "notice_payload", {}),
         }
+        payload.update(payload_update or {})
         archive_root = entry["archive"].removesuffix(".tar.gz")
         archive = self.root / entry["archive"]
         with tarfile.open(archive, "w:gz") as output:
             for directory in (
                 archive_root,
                 *(f"{archive_root}/{d}" for d in ("include", "lib", "share")),
+                *([f"{archive_root}/LICENSES"] if "notice_files" in entry else []),
             ):
                 member = tarfile.TarInfo(directory)
                 member.type = tarfile.DIRTYPE
@@ -118,6 +127,27 @@ class ZzzPullTests(unittest.TestCase):
         entry["sha256"] = hashlib.sha256(archive.read_bytes()).hexdigest()
         self.manifest.write_text(json.dumps(self.manifest_data))
         return archive, zzz.select_pin(target, self.manifest)
+
+    def use_schema5(self):
+        # Small synthetic contents exercise the real immutable-map validation
+        # without copying upstream license texts into the SDK's test source.
+        self.notice_payload = {
+            name: f"synthetic notice: {name}\n".encode()
+            for name in zzz.SCHEMA5_NOTICE_FILES
+        }
+        notices = {
+            name: hashlib.sha256(contents).hexdigest()
+            for name, contents in self.notice_payload.items()
+        }
+        patch = mock.patch.object(zzz, "SCHEMA5_NOTICE_FILES", notices)
+        patch.start()
+        self.addCleanup(patch.stop)
+        old_tag = self.manifest_data["release_tag"]
+        self.manifest_data["release_tag"] = "v0.1.0-rc.9"
+        for entry in self.manifest_data["archives"]:
+            entry["archive"] = entry["archive"].replace(old_tag, "v0.1.0-rc.9")
+            entry["receipt_schema"] = 5
+            entry["notice_files"] = copy.deepcopy(notices)
 
     def release_response(self, pin, archive):
         return {
@@ -176,6 +206,175 @@ class ZzzPullTests(unittest.TestCase):
             {"schema_version", "engine", "release_tag", "archives"},
             set(self.manifest_data),
         )
+
+    def test_schema5_contract_matches_the_reviewed_immutable_notice_inventory(self):
+        # SHA256 of the reviewed schema-5 contract's .files object, encoded as
+        # UTF-8 JSON with sorted keys and compact separators. Changes require a
+        # new schema, even when a new archive and its receipt agree with them.
+        contract = json.dumps(
+            zzz.SCHEMA5_NOTICE_FILES, sort_keys=True, separators=(",", ":")
+        ).encode()
+        self.assertEqual(13, len(zzz.SCHEMA5_NOTICE_FILES))
+        self.assertEqual(
+            "4a996b44b48ca66516b5067c11f14ef77f0824850626c0ef322576b6644883a3",
+            hashlib.sha256(contract).hexdigest(),
+        )
+
+    def test_schema4_is_accepted_only_for_frozen_rc8_without_notices(self):
+        for tag in ("v0.1.0-rc.1", "v0.1.0-rc.7", "v0.1.0-rc.9", "v0.2.0"):
+            with self.subTest(tag=tag):
+                self.manifest_data["release_tag"] = tag
+                self.manifest.write_text(json.dumps(self.manifest_data))
+                with self.assertRaisesRegex(zzz.StageError, "schema 4 requires"):
+                    zzz.select_pin(self.target, self.manifest)
+        self.manifest_data["release_tag"] = "v0.1.0-rc.8"
+        self.manifest_data["archives"][0]["notice_files"] = {}
+        self.manifest.write_text(json.dumps(self.manifest_data))
+        with self.assertRaisesRegex(zzz.StageError, "schema 4 cannot carry"):
+            zzz.select_pin(self.target, self.manifest)
+
+    def test_schema5_cannot_reinterpret_any_frozen_release(self):
+        self.use_schema5()
+        for tag in sorted(zzz.FROZEN_RELEASE_TAGS):
+            with self.subTest(tag=tag):
+                self.manifest_data["release_tag"] = tag
+                self.manifest.write_text(json.dumps(self.manifest_data))
+                with self.assertRaisesRegex(zzz.StageError, "frozen releases"):
+                    zzz.select_pin(self.target, self.manifest)
+
+    def test_schema5_rejects_missing_extra_or_changed_notice_pins(self):
+        self.use_schema5()
+        name = "RUNTIME_TERMS.md"
+        exact = copy.deepcopy(zzz.SCHEMA5_NOTICE_FILES)
+        missing = copy.deepcopy(exact)
+        missing.pop(name)
+        for value in (
+            None,
+            [],
+            missing,
+            dict(exact, **{"LICENSES/extra.txt": "0" * 64}),
+            dict(exact, **{name: "0" * 64}),
+            dict(exact, **{name: exact[name].upper()}),
+            dict(exact, **{name: True}),
+        ):
+            with self.subTest(value=value):
+                self.manifest_data["archives"][0]["notice_files"] = value
+                self.manifest.write_text(json.dumps(self.manifest_data))
+                with self.assertRaisesRegex(
+                    zzz.StageError, "pin mismatch: notice_files"
+                ):
+                    zzz.select_pin(self.target, self.manifest)
+        self.manifest_data["archives"][0].pop("notice_files")
+        self.manifest.write_text(json.dumps(self.manifest_data))
+        with self.assertRaisesRegex(zzz.StageError, "pin mismatch: notice_files"):
+            zzz.select_pin(self.target, self.manifest)
+
+    def test_schema5_stages_all_notices_for_existing_targets_without_credentials(self):
+        self.use_schema5()
+        with mock.patch.dict(os.environ, {}, clear=True):
+            for target in zzz.ZIG_TARGETS:
+                with self.subTest(target=target):
+                    archive, pin = self.make_archive(target=target)
+                    staged = zzz.stage_archive(archive, pin, self.root / "staged")
+                    self.assertEqual(staged, zzz.verify_staged(staged, pin))
+                    self.assertEqual(17, len(pin.files))
+                    self.assertEqual(
+                        {"include", "lib", "share", "LICENSES"}, pin.directories
+                    )
+                    for name, expected in self.notice_payload.items():
+                        self.assertEqual(expected, (staged / name).read_bytes())
+                    for item in (staged, *staged.rglob("*")):
+                        self.assertEqual(0, item.stat().st_mode & 0o077)
+
+    def test_schema5_receipt_cannot_replace_its_independent_notice_pins(self):
+        self.use_schema5()
+        exact = copy.deepcopy(zzz.SCHEMA5_NOTICE_FILES)
+        missing = copy.deepcopy(exact)
+        missing.pop("RUNTIME_TERMS.md")
+        for value in (
+            None,
+            [],
+            missing,
+            dict(exact, **{"LICENSES/extra.txt": "0" * 64}),
+            dict(exact, **{"RUNTIME_TERMS.md": "0" * 64}),
+        ):
+            with self.subTest(value=value):
+                archive, pin = self.make_archive(receipt_update={"notice_files": value})
+                with self.assertRaisesRegex(
+                    zzz.StageError, "receipt mismatch: notice_files"
+                ):
+                    zzz.inspect_archive(archive, pin)
+        archive, pin = self.make_archive(receipt_omit="notice_files")
+        with self.assertRaisesRegex(zzz.StageError, "receipt mismatch: notice_files"):
+            zzz.inspect_archive(archive, pin)
+
+    def test_schema5_rejects_each_mutated_notice_before_staging(self):
+        self.use_schema5()
+        for name in self.notice_payload:
+            with self.subTest(name=name):
+                archive, pin = self.make_archive(
+                    payload_update={name: b"altered notice"}
+                )
+                destination = self.root / "staged"
+                with self.assertRaisesRegex(zzz.StageError, "notice payload checksum"):
+                    zzz.stage_archive(archive, pin, destination)
+                self.assertFalse(destination.exists())
+
+    def test_schema5_manifest_and_receipt_cannot_self_bless_changed_notice_bytes(self):
+        self.use_schema5()
+        changed = b"self-blessed replacement terms"
+        self.manifest_data["archives"][0]["notice_files"]["RUNTIME_TERMS.md"] = (
+            hashlib.sha256(changed).hexdigest()
+        )
+        # The helper copies that same map to the receipt and pins the changed
+        # compressed archive. Immutable schema semantics still reject it.
+        with self.assertRaisesRegex(zzz.StageError, "pin mismatch: notice_files"):
+            self.make_archive(payload_update={"RUNTIME_TERMS.md": changed})
+
+    def test_schema5_requires_every_notice_and_rejects_extra_entries_and_links(self):
+        self.use_schema5()
+        for name in self.notice_payload:
+            with self.subTest(missing=name):
+                archive, pin = self.make_archive(omit=name)
+                with self.assertRaisesRegex(zzz.StageError, "missing archive payload"):
+                    zzz.inspect_archive(archive, pin)
+        for name, kind in (
+            ("LICENSES/extra.txt", tarfile.REGTYPE),
+            ("LICENSES/empty", tarfile.DIRTYPE),
+            ("RUNTIME_TERMS.md", tarfile.SYMTYPE),
+            ("LICENSES/Zig-MIT.txt", tarfile.LNKTYPE),
+        ):
+            with self.subTest(extra=name, kind=kind):
+                archive, pin = self.make_archive(
+                    omit=name if name in self.notice_payload else None,
+                    extra=("{root}/" + name, kind),
+                )
+                with self.assertRaises(zzz.StageError):
+                    zzz.inspect_archive(archive, pin)
+
+    def test_schema5_rechecks_staged_notice_contents_and_links(self):
+        self.use_schema5()
+        for name in self.notice_payload:
+            with self.subTest(name=name):
+                archive, pin = self.make_archive()
+                staged = zzz.stage_archive(
+                    archive, pin, self.root / name.replace("/", "-")
+                )
+                (staged / name).write_bytes(b"tampered")
+                with self.assertRaisesRegex(zzz.StageError, "differs"):
+                    zzz.verify_staged(staged, pin)
+        archive, pin = self.make_archive()
+        staged = zzz.stage_archive(archive, pin, self.root / "linked-notice")
+        notice = staged / "RUNTIME_TERMS.md"
+        notice.unlink()
+        notice.symlink_to(archive)
+        with self.assertRaisesRegex(zzz.StageError, "links"):
+            zzz.verify_staged(staged, pin)
+
+    def test_schema4_receipts_cannot_claim_notice_files(self):
+        archive, pin = self.make_archive(receipt_update={"notice_files": {}})
+        with self.assertRaisesRegex(zzz.StageError, "schema 4 cannot carry"):
+            zzz.inspect_archive(archive, pin)
 
     def test_manifest_keys_beyond_the_public_four_are_rejected(self):
         for key in ("source_repository", "source_commit", "notes"):
