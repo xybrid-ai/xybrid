@@ -69,8 +69,9 @@ def main(argv=None) -> int:
         verifier = load_verifier(args.verifier)
         identity, _ = contract(verifier, args.manifest)
         args.output.write_text(header(identity), encoding="ascii")
-    except (OSError, ValueError, ImportError):
-        # Do not disclose private manifest/receipt values or filesystem paths.
+    except Exception:
+        # Do not disclose private manifest/receipt values or filesystem paths,
+        # including through a verifier traceback.
         print("companion metadata: a valid notice-bearing selected Android pin is required", file=sys.stderr)
         return 1
     return 0

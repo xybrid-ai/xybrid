@@ -80,9 +80,13 @@ python3 bazel/zzz/companion/check_exports.py --readelf <pinned-ndk-llvm-readelf>
   <exact-final-libxybrid_zzz_tts.so>
 ```
 
-The audit rejects any `zzz_*` dynamic import/export, any extra export, wrong
-endianness/machine/SONAME, unexpected DT_NEEDED, load alignment below 16 KiB,
-or non-congruent LOAD offsets/addresses for the declared alignment. It must run
+The audit rejects any `zzz_*` dynamic import/export, any extra export (any
+non-local binding, including `WEAK` and `UNIQUE`), wrong endianness/machine/
+SONAME, unexpected DT_NEEDED, text relocations, RPATH/RUNPATH, a missing or
+executable `GNU_STACK`, load alignment below 16 KiB, or non-congruent LOAD
+offsets/addresses for the declared alignment. Constructors (`DT_INIT`,
+`DT_INIT_ARRAY`) are not rejected, because the linked compiler runtime may
+legitimately register one; inspect them by hand. It must run
 again after final packaging/strip. It does not establish actual API 29 import
 availability, old-OS base loading, selected model correctness, absence of private
 strings/debug information, Android linker namespaces, APK alignment or installed

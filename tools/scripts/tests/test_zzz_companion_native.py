@@ -210,6 +210,10 @@ class CompanionAdapterTests(unittest.TestCase):
         self.assertEqual([":companion", "@zzz_android//:notices"], targets["delivery_inputs"][1]["srcs"])
         self.assertIn("-Wl,--exclude-libs,ALL", targets["libxybrid_zzz_tts.so"][1]["linkopts"])
         self.assertIn("-Wl,-soname,libxybrid_zzz_tts.so", targets["libxybrid_zzz_tts.so"][1]["linkopts"])
+        # The generated metadata header lives under bazel-out; the quoted
+        # include needs the package include path to find it.
+        self.assertIn(".", targets["libxybrid_zzz_tts.so"][1]["includes"])
+        self.assertIn(":companion_metadata", targets["libxybrid_zzz_tts.so"][1]["srcs"])
         module = (ROOT / "MODULE.bazel").read_text()
         self.assertIn('android_ndk_api29(name = "androidndk_zzz_api29", api_level = 29)', module)
         self.assertNotRegex(module, r'register_toolchains\([^)]*(?:api29|companion)')
@@ -222,7 +226,8 @@ class CompanionExportTests(unittest.TestCase):
     HEADER = "Class: ELF64\nData: 2's complement, little endian\nType: DYN (Shared object file)\nMachine: AArch64\n"
     SYMBOLS = "Symbol table '.dynsym' contains 2 entries:\n 1: 00000100 32 FUNC GLOBAL DEFAULT 10 xybrid_tts_get_api_v1\n"
     DYNAMIC = "0x1 (NEEDED) Shared library: [libc.so]\n0xe (SONAME) Library soname: [libxybrid_zzz_tts.so]\n"
-    PROGRAMS = "  LOAD 0x0 0x0 0x0 0x100 0x100 R E 0x4000\n"
+    PROGRAMS = ("  LOAD 0x0 0x0 0x0 0x100 0x100 R E 0x4000\n"
+                "  GNU_STACK 0x0 0x0 0x0 0x0 0x0 RW 0x0\n")
 
     def test_exact_getter_only_report_is_accepted(self):
         checker.audit(self.HEADER, self.SYMBOLS, self.DYNAMIC, self.PROGRAMS)
@@ -231,7 +236,8 @@ class CompanionExportTests(unittest.TestCase):
         for symbol in (" 2: 00000200 16 FUNC GLOBAL DEFAULT 10 zzz_embed_abi_version\n",
                        " 2: 00000000 0 FUNC GLOBAL DEFAULT UND zzz_embed_synthesize\n",
                        " 2: 00000200 16 FUNC GLOBAL DEFAULT 10 zzz_engine_open\n",
-                       " 2: 00000200 16 FUNC GLOBAL DEFAULT 10 incidental_runtime_export\n"):
+                       " 2: 00000200 16 FUNC GLOBAL DEFAULT 10 incidental_runtime_export\n",
+                       " 2: 00000200 16 OBJECT UNIQUE DEFAULT 10 incidental_unique_export\n"):
             with self.subTest(symbol=symbol), self.assertRaises(ValueError):
                 checker.audit(self.HEADER, self.SYMBOLS + symbol, self.DYNAMIC, self.PROGRAMS)
 
@@ -247,6 +253,12 @@ class CompanionExportTests(unittest.TestCase):
             (self.HEADER, self.SYMBOLS, self.DYNAMIC, self.PROGRAMS.replace("LOAD 0x0 0x0", "LOAD 0x1000 0x0")),
             (self.HEADER, self.SYMBOLS, self.DYNAMIC, self.PROGRAMS.replace("LOAD 0x0 0x0", "LOAD 0x0 0x1000")),
             (self.HEADER, self.SYMBOLS, self.DYNAMIC, ""),
+            (self.HEADER, self.SYMBOLS, self.DYNAMIC + "0x16 (TEXTREL) 0x0\n", self.PROGRAMS),
+            (self.HEADER, self.SYMBOLS, self.DYNAMIC + "0x1e (FLAGS) TEXTREL\n", self.PROGRAMS),
+            (self.HEADER, self.SYMBOLS, self.DYNAMIC + "0x1d (RUNPATH) Library runpath: [$ORIGIN]\n", self.PROGRAMS),
+            (self.HEADER, self.SYMBOLS, self.DYNAMIC + "0xf (RPATH) Library rpath: [/tmp]\n", self.PROGRAMS),
+            (self.HEADER, self.SYMBOLS, self.DYNAMIC, self.PROGRAMS.replace(" RW 0x0", " RWE 0x0")),
+            (self.HEADER, self.SYMBOLS, self.DYNAMIC, self.PROGRAMS.split("  GNU_STACK")[0]),
         ):
             with self.subTest(reports=reports), self.assertRaises(ValueError):
                 checker.audit(*reports)

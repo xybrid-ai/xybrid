@@ -36,7 +36,8 @@ def audit(header: str, symbols: str, dynamic: str, programs: str) -> None:
         # Engine APIs must be statically resolved and hidden, never imported
         # or exported by this SDK-owned component. No public engine ABI leaks.
         require(not name.startswith("zzz_"), "engine ABI symbol leakage")
-        if binding in ("GLOBAL", "WEAK") and index != "UND":
+        # Any non-local defined symbol (GLOBAL, WEAK, UNIQUE, ...) is an export.
+        if binding != "LOCAL" and index != "UND":
             require(binding == "GLOBAL" and kind == "FUNC" and visibility == "DEFAULT", "unexpected public symbol type")
             exports.append(name)
     require(exports == [GETTER], "exactly the SDK getter must be exported")
@@ -45,6 +46,12 @@ def audit(header: str, symbols: str, dynamic: str, programs: str) -> None:
     needed = re.findall(r"\(NEEDED\).*?\[([^\]]+)\]", dynamic)
     require(len(needed) == len(set(needed)) and set(needed) <= ALLOWED_NEEDED,
             "unexpected runtime dependency")
+    require(re.search(r"\bTEXTREL\b", dynamic) is None, "text relocations are not allowed")
+    require(re.search(r"\((?:RPATH|RUNPATH)\)", dynamic) is None, "RPATH/RUNPATH is not allowed")
+    stacks = [line.split() for line in programs.splitlines() if line.strip().startswith("GNU_STACK ")]
+    require(len(stacks) == 1, "exactly one GNU_STACK header required")
+    stack_flags = "".join(value for value in stacks[0][1:] if not value.startswith("0x"))
+    require("E" not in stack_flags, "executable stack is not allowed")
     loads = [line.split() for line in programs.splitlines() if line.strip().startswith("LOAD ")]
     require(bool(loads), "ELF load segments required")
     for fields in loads:

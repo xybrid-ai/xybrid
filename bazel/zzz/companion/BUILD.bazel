@@ -45,6 +45,9 @@ cc_binary(
     additional_linker_inputs = ["exports.map"],
     copts = ["-std=c11", "-fvisibility=hidden", "-ffunction-sections", "-fdata-sections", "-Wall", "-Wextra", "-Werror"],
     deps = ["@zzz_android//:zzz"],
+    # companion_metadata.h is generated into bazel-out/<cfg>/bin/<package>;
+    # a quoted include only finds it through this package include path.
+    includes = ["."],
     linkopts = [
         "-Wl,--version-script,$(location exports.map)",
         "-Wl,--exclude-libs,ALL",
