@@ -1,0 +1,34 @@
+bindings/kotlin/README.md
+  s_7bd5c1853155d2::t_9bd7e59b92f10b 296-310
+bindings/kotlin/BUILD.bazel
+  s_7bd5c1853155d2::t_755de91f477d42 26,213-246,248
+  s_7bd5c1853155d2::t_4c0ff93624197b 24
+  s_7bd5c1853155d2::t_e7d0c4f15a4dde 247
+bindings/kotlin/pack_zzz_aar.py
+  s_7bd5c1853155d2::t_1b6cd4a7efef39 1-317
+bindings/kotlin/zzz_aar.bzl
+  s_7bd5c1853155d2::t_45b9982feb5a35 1-48
+tools/scripts/tests/test_zzz_android_package.py
+  s_7bd5c1853155d2::t_87894ed217548a 195
+  s_7bd5c1853155d2::t_1ff2f83d294a96 190-194
+  s_7bd5c1853155d2::t_4dd9936048e695 1-26,39-50,52-148,150-189,196-340
+  s_7bd5c1853155d2::t_677af8741f5c85 27-38,51,149
+bazel/zzz/companion/README.md
+  s_7bd5c1853155d2::t_9bd7e59b92f10b 60-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f392305b2517f5ad5034c501406488879945fe57",
+  "prompts": {},
+  "sessions": {
+    "s_7bd5c1853155d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8bc1fccc-7292-479b-86d7-7b291f88fe3c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
