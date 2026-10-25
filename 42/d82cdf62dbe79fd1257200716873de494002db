@@ -1,0 +1,30 @@
+tools/scripts/tests/test_zzz_companion_native.py
+  s_7bd5c1853155d2::t_02996680083bfb 213-216,229-230,239-240,256-261
+.github/workflows/ci.yml
+  s_7bd5c1853155d2::t_02996680083bfb 423-425
+bazel/zzz/companion/check_exports.py
+  s_7bd5c1853155d2::t_02996680083bfb 39-40,49-54
+bazel/zzz/companion/README.md
+  s_7bd5c1853155d2::t_02996680083bfb 83-89
+bazel/zzz/companion/metadata.py
+  s_7bd5c1853155d2::t_02996680083bfb 73-74
+  s_7bd5c1853155d2::t_505b217ddaa0c5 72
+bazel/zzz/companion/BUILD.bazel
+  s_7bd5c1853155d2::t_02996680083bfb 48-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "42d82cdf62dbe79fd1257200716873de494002db",
+  "prompts": {},
+  "sessions": {
+    "s_7bd5c1853155d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8bc1fccc-7292-479b-86d7-7b291f88fe3c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
