@@ -57,6 +57,8 @@ input under `notices/<canonical-relative-path>`. It is an input set for a final
 SDK package, not a standalone engine distribution or a complete public bundle.
 It contains no raw archive, engine header or receipt. The notice export is a
 separate coordinated prerequisite; missing/schema 4 notice targets fail analysis.
+`//bindings/kotlin:xybrid_kotlin_zzz_aar` consumes these same two inputs to
+build the final candidate AAR.
 
 The separate named NDK repository uses real `api_level=29`, as supported by the
 [inspected repository rule](https://github.com/bazelbuild/rules_android_ndk/blob/v0.1.5/rules.bzl).

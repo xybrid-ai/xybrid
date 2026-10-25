@@ -21,7 +21,9 @@ load("@rules_kotlin//kotlin:core.bzl", "define_kt_toolchain")
 load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
 load("@rules_pkg//pkg:zip.bzl", "pkg_zip")
+load("@rules_python//python:py_binary.bzl", "py_binary")
 load("//bazel/ggml:android.bzl", "ANDROID_ARM64_CPU_VARIANTS", "ANDROID_ARM64_GGML_LIBS")
+load(":zzz_aar.bzl", "zzz_aar")
 
 # Consumer-compatibility toolchain (registered in MODULE.bazel): rules_kotlin
 # 2.4's bundled kotlinc emits Kotlin 2.1 METADATA by default, which the shipped
@@ -206,5 +208,41 @@ pkg_zip(
         [":jni_ort_" + abi for abi, _, _, ort_target in ANDROID_ABIS if ort_target] +
         [":jni_ggml_arm64-v8a"],
     out = "xybrid-kotlin.aar",
+    visibility = ["//visibility:public"],
+)
+
+# The regular files :xybrid_kotlin_aar packages, derived from the same lists
+# that build it (root files, then per-ABI jni payloads). The zzz wrapper below
+# accepts exactly this base and adds only its companion and notices.
+XYBRID_KOTLIN_AAR_FILES = ["AndroidManifest.xml", "R.txt", "classes.jar"] + [
+    "jni/%s/%s" % (abi, lib)
+    for abi, _, _, _ in ANDROID_ABIS
+    for lib in ["libxybrid_bolt.so", "libc++_shared.so"]
+] + [
+    "jni/%s/libonnxruntime.so" % abi
+    for abi, _, _, ort_target in ANDROID_ABIS
+    if ort_target
+] + ["jni/arm64-v8a/" + lib for lib in _ARM64_GGML_FILES]
+
+py_binary(
+    name = "pack_zzz_aar",
+    srcs = ["pack_zzz_aar.py", "//crates/zzz-sys:zzz_pull.py"],
+    main = "pack_zzz_aar.py",
+    python_version = "PY3",
+)
+
+# Opt-in final SDK candidate for a future reviewed zzz producer: the standard
+# AAR built in companion mode, plus the ARM64/API-29 speech companion and the
+# fourteen engine notices. Defaults, the standard target and release workflows
+# are unchanged. Inert until the client's companion contract is configured.
+zzz_aar(
+    name = "xybrid_kotlin_zzz_aar",
+    base = ":xybrid_kotlin_aar",
+    base_files = XYBRID_KOTLIN_AAR_FILES,
+    companion = "//bazel/zzz/companion:companion",
+    notices = "@zzz_android//:notices",
+    enabled = select({"//:tts_zzz_android_companion_enabled": True, "//conditions:default": False}),
+    out = "xybrid-kotlin-zzz.aar",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )
