@@ -25,6 +25,7 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync"] }
 # transient glitch cannot kill the session; without a log line those failures
 # would be completely invisible.
 log = "0.4"
+url = "2.5"
 
 [dev-dependencies]
 tempfile = "3.10"
