@@ -179,10 +179,14 @@ jobs:
           file "$PLUGINS/xybrid_bolt.dll" | grep -q 'PE32+.*x86-64' || { echo "bolt is not a PE32+ x86-64 DLL"; exit 1; }
           # Unity reaches the native purely through P/Invoke, so the export
           # table IS the contract — assert every EntryPoint the C# declares.
+          # vcruntime140_1.dll (the x64 C++ exception handler, pulled in since
+          # llama.cpp v0.6.0) ships in the same VC++ redistributable as the two
+          # required DLLs. Allowed, not required.
           python3 -m pip install --quiet --user pefile
           python3 tools/scripts/audit_windows_dll.py --dll "$PLUGINS/xybrid_bolt.dll" \
             --require-import vcruntime140.dll \
             --require-import msvcp140.dll \
+            --allow-import vcruntime140_1.dll \
             --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs
           echo "Windows Unity native: OK"
 

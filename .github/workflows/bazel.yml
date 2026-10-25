@@ -719,9 +719,15 @@ jobs:
           file "$DLL"
           file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
           python3 -m pip install --quiet --user pefile
+          # vcruntime140_1.dll (the x64 C++ exception handler, pulled in since
+          # llama.cpp v0.6.0) ships in the same VC++ redistributable as the two
+          # required DLLs, and Flutter's Windows deployment docs already have
+          # apps bundle it. Allowed, not required. Keep in sync with
+          # release-prep.yml's precompile-flutter-windows, which ships this DLL.
           python3 tools/scripts/audit_windows_dll.py --dll "$DLL" \
             --require-import vcruntime140.dll \
-            --require-import msvcp140.dll
+            --require-import msvcp140.dll \
+            --allow-import vcruntime140_1.dll
           python3 - "$DLL" "$IMPLIB" <<'PYEOF'
           import sys
 

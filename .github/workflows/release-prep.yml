@@ -876,10 +876,14 @@ jobs:
           file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
           python3 -m pip install --quiet --user pefile
           # MSVC ABI: a MinGW DLL imports neither of these, and Flutter could
-          # not link against it.
+          # not link against it. vcruntime140_1.dll (the x64 C++ exception
+          # handler, pulled in since llama.cpp v0.6.0) ships in the same VC++
+          # redistributable, and Flutter's Windows deployment docs already have
+          # apps bundle it. Allowed, not required.
           python3 tools/scripts/audit_windows_dll.py --dll "$DLL" \
             --require-import vcruntime140.dll \
-            --require-import msvcp140.dll
+            --require-import msvcp140.dll \
+            --allow-import vcruntime140_1.dll
           python3 - "$DLL" "$IMPLIB" <<'PYEOF'
           import sys
 
