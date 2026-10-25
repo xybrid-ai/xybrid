@@ -3,19 +3,41 @@ title: Unity
 description: On-device ML inference SDK for Unity applications
 ---
 
-The Unity SDK (`ai.xybrid.sdk`) provides C# bindings to the Xybrid runtime via C FFI, enabling on-device ML inference in Unity games and applications.
+The Unity SDK (`ai.xybrid.sdk`) provides C# bindings to the Xybrid runtime via BoltFFI, enabling on-device ML inference in Unity games and applications.
 
 ## Installation
 
-Install via Unity Package Manager using the git URL:
-
-```
-https://github.com/xybrid-ai/xybrid.git?path=bindings/unity
-```
-
-In Unity: **Window > Package Manager > + > Add package from git URL**
+The package contains only the C# API. It downloads the native libraries for its version from the matching [GitHub Release](https://github.com/xybrid-ai/xybrid/releases), verifies their SHA-256, and installs them into `Assets/Xybrid/Plugins/`: the editor's own platform on first import, and the build target's before a player build if they aren't installed yet. The first import needs network access. To download them again, use **Xybrid > Native Libraries > Download for Current Editor** or **Download for Active Build Target**.
 
 Minimum Unity version: **2021.3 LTS**
+
+### OpenUPM (recommended)
+
+Xybrid is published on [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/). With the [OpenUPM CLI](https://openupm.com/docs/getting-started-cli.html):
+
+```bash
+openupm add ai.xybrid.sdk
+```
+
+Without the CLI, open **Edit > Project Settings > Package Manager** and add a scoped registry:
+
+| Field | Value |
+|-------|-------|
+| Name | `OpenUPM` |
+| URL | `https://package.openupm.com` |
+| Scope(s) | `ai.xybrid` |
+
+Then install **Xybrid SDK** from **Window > Package Manager > My Registries**. To declare the registry in `Packages/manifest.json` instead, or to install from a local clone, see the [package README](https://github.com/xybrid-ai/xybrid/tree/master/bindings/unity#installation).
+
+### Git URL
+
+In Unity, open **Window > Package Manager > + > Add package from git URL** (**Install package from git URL** in Unity 6) and enter:
+
+```
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
+```
+
+Without a tag, Unity installs the newest commit on `master`, but the native libraries come from the release named by that commit's `package.json` version, normally the latest release. To pin a release, append its tag after the path, as in `?path=/bindings/unity#v<version>`. Tags are listed on [GitHub Releases](https://github.com/xybrid-ai/xybrid/releases).
 
 ## Initialization
 
@@ -394,9 +416,18 @@ catch (XybridException e)
 
 ## Platform Support
 
-| Platform | Status |
-|----------|--------|
-| macOS (Apple Silicon) | Supported |
-| macOS (Intel) | Supported |
-| Windows | Planned |
-| Linux | Planned |
+| Platform | Architecture | Status |
+|----------|--------------|--------|
+| macOS | Apple Silicon (arm64) | Supported |
+| macOS | Intel (x86_64) | Not supported |
+| Windows | x64 | Supported |
+| Linux | x64 | Supported |
+| iOS | arm64 (devices, iOS 16+) | Supported |
+| Android | arm64-v8a, armeabi-v7a | Supported |
+| Android | x86_64 | Supported up to Unity 6.4 |
+
+**macOS:** the native library is Apple Silicon (arm64) only. Use the Apple silicon Unity Editor: the Intel editor can't load the library, on an Intel Mac or under Rosetta 2, which runs x86_64 code on Apple Silicon and not the reverse. Build macOS players for **Apple Silicon**. An **Intel 64-bit + Apple Silicon** player can load Xybrid only when it runs natively on an Apple Silicon Mac, not on an Intel Mac or when opened using Rosetta.
+
+**iOS:** the library is built for devices running iOS 16 or later, with no Simulator build. Set **Target minimum iOS Version** to 16.0 or later.
+
+**Android:** Unity 6.5 removed the x86_64 architecture ([announcement](https://discussions.unity.com/t/planned-breaking-changes-in-unity-6-5-updated-2026-03-27/1694205)), and Unity 6.3 and 6.4 offer it only in projects that already target it ([Android Player settings](https://docs.unity3d.com/6000.4/Documentation/Manual/class-PlayerSettingsAndroid.html)). armeabi-v7a ships without ONNX Runtime, so ONNX models such as `kokoro-82m` don't run on it, and its library hasn't been loaded on a device yet ([#680](https://github.com/xybrid-ai/xybrid/issues/680)).

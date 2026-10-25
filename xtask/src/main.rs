@@ -593,8 +593,9 @@ fn build_ffi(
 
 /// All Unity target platforms with their Rust target triples.
 const UNITY_TARGETS: &[(&str, &str)] = &[
-    // Note: x86_64-apple-darwin omitted — ORT has no prebuilt binaries for Intel Mac.
-    // Intel Macs can run arm64 binaries via Rosetta 2.
+    // Note: x86_64-apple-darwin omitted — ORT has no prebuilt binaries for Intel Mac,
+    // so Intel Macs are not supported: Rosetta 2 runs x86_64 code on Apple Silicon,
+    // not arm64 code on Intel.
     ("macOS arm64", "aarch64-apple-darwin"),
     ("Windows x86_64", "x86_64-pc-windows-msvc"),
     ("Linux x86_64", "x86_64-unknown-linux-gnu"),
