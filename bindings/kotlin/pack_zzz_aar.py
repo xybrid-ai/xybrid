@@ -205,15 +205,28 @@ def copy_member(archive, info, target=None):
 def validate_manifest(archive, files):
     info = files["AndroidManifest.xml"]
     require(info.file_size <= MAX_MANIFEST, "AAR manifest exceeds its byte bound")
-    text = archive.read(info).decode("utf-8")
+    text = re.sub(r"<!--.*?-->", "", archive.read(info).decode("utf-8"), flags=re.DOTALL)
     # The wrapper adds an ARM64/API-29 component loaded only at runtime; the
     # package floor must stay the base SDK's, never raised to hide a failure.
-    require(re.findall(r'android:minSdkVersion="(\d+)"', text) == [MIN_SDK] and
-            'package="ai.xybrid"' in text,
+    require(re.findall(r"android:minSdkVersion\s*=\s*[\"']([^\"']*)[\"']", text) == [MIN_SDK] and
+            re.findall(r"\bpackage\s*=\s*[\"']([^\"']*)[\"']", text) == ["ai.xybrid"],
             "AAR manifest must keep the ai.xybrid package and minSdk 24")
 
 
-def validate_additions(archive, files):
+def audit_companion(data, readelf):
+    """Run the companion's export/SONAME/dependency/alignment audit on packaged bytes."""
+    spec = importlib.util.spec_from_file_location(
+        "xybrid_android_companion_audit", ROOT / "bazel/zzz/companion/check_exports.py")
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    with tempfile.TemporaryDirectory(prefix=".zzz-android-audit-") as directory:
+        path = Path(directory) / "libxybrid_zzz_tts.so"
+        path.write_bytes(data)
+        require(checker.main(["--readelf", str(readelf), str(path)]) == 0,
+                "packaged companion failed its ELF audit")
+
+
+def validate_additions(archive, files, readelf=None):
     for name, expected in PULL.SCHEMA5_NOTICE_FILES.items():
         member = files[NOTICE_ROOT + name]
         require(member.file_size <= MAX_NOTICE and copy_member(archive, member) == expected,
@@ -221,8 +234,11 @@ def validate_additions(archive, files):
     member = files[COMPANION]
     require(0 < member.file_size <= MAX_COMPANION, "packaged companion exceeds its byte bound")
     with archive.open(member) as stream:
-        check_companion_header(stream.read(ELF_HEADER.size))
-    copy_member(archive, member)
+        data = stream.read(MAX_COMPANION + 1)
+    require(len(data) == member.file_size, "ZIP payload size differs")
+    check_companion_header(data)
+    if readelf is not None:
+        audit_companion(data, readelf)
 
 
 def output_info(name, original=None):
@@ -253,7 +269,7 @@ def package_archive(archive_path, companion_path, base_files, notice_values, out
                 validate_manifest(archive, files)
                 descriptor, temporary = tempfile.mkstemp(prefix=".zzz-android-", suffix=".aar", dir=output.parent)
                 with os.fdopen(descriptor, "w+b") as stream:
-                    with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as result:
+                    with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as result:
                         # Preserve the base order and every payload byte;
                         # only the companion and notices are added.
                         for info in archive.infolist():
@@ -274,7 +290,7 @@ def package_archive(archive_path, companion_path, base_files, notice_values, out
             os.unlink(temporary)
 
 
-def verify_archive(path, base_files):
+def verify_archive(path, base_files, readelf=None):
     require_host()
     base = base_inventory(base_files)
     with regular_input(path, MAX_ZIP) as source:
@@ -282,7 +298,7 @@ def verify_archive(path, base_files):
         with zipfile.ZipFile(source) as archive:
             files = member_index(archive, count, base, final=True)
             validate_manifest(archive, files)
-            validate_additions(archive, files)
+            validate_additions(archive, files, readelf)
             for name in base:
                 copy_member(archive, files[name])
 
@@ -299,13 +315,15 @@ def main(argv=None):
     verify = commands.add_parser("verify")
     verify.add_argument("--archive", required=True, type=Path)
     verify.add_argument("--base-file", action="append", default=[])
+    # The pinned NDK llvm-readelf; adds the companion's full ELF audit.
+    verify.add_argument("--readelf", type=Path)
     try:
         arguments = parser.parse_args(argv)
         if arguments.command == "pack":
             package_archive(arguments.archive, arguments.companion, arguments.base_file,
                             arguments.notice, arguments.output)
         else:
-            verify_archive(arguments.archive, arguments.base_file)
+            verify_archive(arguments.archive, arguments.base_file, arguments.readelf)
         return 0
     except Exception as error:
         message = str(error) if isinstance(error, PackageError) else "invalid or unavailable package input"

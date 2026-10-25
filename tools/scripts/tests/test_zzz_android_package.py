@@ -1,6 +1,6 @@
 """Offline Android final-package tests; no native build, downloads or qualification."""
 
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 import hashlib
 import importlib.util
 import io
@@ -8,10 +8,12 @@ import os
 from pathlib import Path
 import stat
 import struct
+import sys
 import tempfile
 import types
 import unittest
 from unittest import mock
+import warnings
 import zipfile
 import zlib
 
@@ -119,6 +121,21 @@ class AndroidPackageTests(unittest.TestCase):
                 archive.writestr(info, data)
             archive.comment = comment
 
+    def set_flag(self, name, bit):
+        data = bytearray(self.archive.read_bytes())
+        with zipfile.ZipFile(self.archive) as archive:
+            local = archive.getinfo(name).header_offset
+        data[local + 6] |= bit
+        central = data.find(b"PK\x01\x02")
+        while central != -1:
+            length = struct.unpack_from("<H", data, central + 28)[0]
+            if data[central + 46:central + 46 + length] == name.encode():
+                data[central + 8] |= bit
+                break
+            central = data.find(b"PK\x01\x02", central + 4)
+        self.assertNotEqual(-1, central)
+        self.archive.write_bytes(bytes(data))
+
     def package(self):
         PACK.package_archive(self.archive, self.companion, self.base_files, self.notices, self.output)
 
@@ -195,12 +212,16 @@ class AndroidPackageTests(unittest.TestCase):
                 self.rejected("unexpected(?: AAR ZIP directory|, linked or beyond-bound AAR ZIP payload)")
 
     def test_declared_inventory_must_keep_the_three_abi_layout(self):
+        # Each archive matches its declared list, so only the layout check can reject it.
         for files in (BASE_FILES[1:], BASE_FILES + [PACK.COMPANION], BASE_FILES + ["jni/riscv64/libx.so"],
                       [name for name in BASE_FILES if name != "jni/x86_64/libc++_shared.so"],
-                      BASE_FILES + BASE_FILES[:1]):
+                      BASE_FILES + ["assets/extra.txt"]):
             with self.subTest(files=files):
                 self.base_files = files
-                self.rejected()
+                self.write_base({name: self.base.get(name, b"x") for name in files})
+                self.rejected("reviewed three-ABI layout")
+        self.base_files = BASE_FILES + BASE_FILES[:1]
+        self.rejected("duplicate base AAR inventory entry")
 
     def test_every_changed_missing_or_duplicate_notice_fails(self):
         notices = list(self.notices)
@@ -220,8 +241,13 @@ class AndroidPackageTests(unittest.TestCase):
                 self.rejected("ARM64 ELF shared object|not an ELF")
 
     def test_manifest_must_keep_package_and_min_sdk(self):
+        commented = MANIFEST.replace(b'<uses-sdk android:minSdkVersion="24" />',
+                                     b"<!-- <uses-sdk android:minSdkVersion=\"24\" /> -->"
+                                     b"<uses-sdk android:minSdkVersion='29' />")
         for manifest in (MANIFEST.replace(b'"24"', b'"29"'), MANIFEST.replace(b"ai.xybrid", b"ai.other"),
-                         MANIFEST.replace(b'<uses-sdk android:minSdkVersion="24" />', b"")):
+                         MANIFEST.replace(b'<uses-sdk android:minSdkVersion="24" />', b""), commented,
+                         MANIFEST.replace(b'<uses-sdk android:minSdkVersion="24" />',
+                                          b'<!-- <uses-sdk android:minSdkVersion="24" /> -->')):
             with self.subTest(manifest=manifest[-80:]):
                 self.write_base(dict(self.base, **{"AndroidManifest.xml": manifest}))
                 self.rejected("minSdk 24")
@@ -243,6 +269,12 @@ class AndroidPackageTests(unittest.TestCase):
             with self.subTest(mutate=mutate.__name__):
                 self.write_base(self.base, mutate=mutate)
                 self.rejected()
+        # zipfile resets flag bits on write, so set them in the written headers.
+        for bit in (0x8, 0x1):
+            with self.subTest(flag=bit):
+                self.write_base(self.base)
+                self.set_flag("R.txt", bit)
+                self.rejected("unsupported AAR ZIP member metadata")
         self.write_base(self.base, comment=b"comment")
         self.rejected("envelope")
         self.write_base(self.base)
@@ -253,6 +285,22 @@ class AndroidPackageTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.write_base(dict(self.base, **{name: b"x"}))
                 self.rejected()
+
+    def test_compression_ratio_directories_and_duplicates_are_bounded(self):
+        self.write_base(dict(self.base, **{"classes.jar": b"\0" * (1024 * 1024)}))
+        self.rejected("unexpected, linked or beyond-bound AAR ZIP payload")
+        self.write_base(self.base)
+        with zipfile.ZipFile(self.archive, "a") as archive:
+            archive.writestr(zip_info("jni/riscv64/", directory=True), b"")
+        self.rejected("unexpected AAR ZIP directory")
+        self.write_base(self.base)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with zipfile.ZipFile(self.archive, "a") as archive:
+                archive.writestr(zip_info("R.txt"), b"second")
+        self.rejected("unsafe, aliased or duplicate AAR ZIP member")
+        self.write_base(dict(self.base, **{"r.TXT": b"alias"}))
+        self.rejected()
 
     def test_existing_output_is_never_overwritten(self):
         self.output.write_bytes(b"existing")
@@ -279,6 +327,39 @@ class AndroidPackageTests(unittest.TestCase):
                         archive.writestr(zip_info(name), data)
                 with self.assertRaises(PACK.PackageError):
                     PACK.verify_archive(candidate, self.base_files)
+
+    def test_verify_detects_corrupted_base_payload(self):
+        self.package()
+        data = bytearray(self.output.read_bytes())
+        with zipfile.ZipFile(self.output) as archive:
+            info = archive.getinfo("jni/x86_64/libxybrid_bolt.so")
+        start = info.header_offset + 30 + len(info.filename)
+        data[start] ^= 0xFF
+        self.output.write_bytes(bytes(data))
+        with self.assertRaises((PACK.PackageError, zipfile.BadZipFile, zlib.error)):
+            PACK.verify_archive(self.output, self.base_files)
+
+    def readelf(self, symbols):
+        reports = {"--file-header": "Class: ELF64\nData: 2's complement, little endian\n"
+                                    "Type: DYN (Shared object file)\nMachine: AArch64\n",
+                   "--dyn-syms": "Symbol table '.dynsym' contains 2 entries:\n" + symbols,
+                   "--dynamic": "0x1 (NEEDED) Shared library: [libc.so]\n"
+                                "0xe (SONAME) Library soname: [libxybrid_zzz_tts.so]\n",
+                   "--program-headers": "  LOAD 0x0 0x0 0x0 0x100 0x100 R E 0x4000\n"
+                                        "  GNU_STACK 0x0 0x0 0x0 0x0 0x0 RW 0x0\n"}
+        tool = self.root / "fake-readelf"
+        tool.write_text("#!" + sys.executable + "\nimport sys\nprint(" + repr(reports) + "[sys.argv[1]])\n")
+        tool.chmod(0o755)
+        return tool
+
+    def test_verify_runs_the_companion_elf_audit_when_given_readelf(self):
+        self.package()
+        getter = " 1: 00000100 32 FUNC GLOBAL DEFAULT 10 xybrid_tts_get_api_v1\n"
+        with redirect_stdout(io.StringIO()):
+            PACK.verify_archive(self.output, self.base_files, self.readelf(getter))
+        leaked = getter + " 2: 00000200 16 FUNC GLOBAL DEFAULT 10 zzz_embed_open\n"
+        with redirect_stderr(io.StringIO()), self.assertRaisesRegex(PACK.PackageError, "ELF audit"):
+            PACK.verify_archive(self.output, self.base_files, self.readelf(leaked))
 
     def test_errors_never_disclose_private_paths(self):
         stderr = io.StringIO()
