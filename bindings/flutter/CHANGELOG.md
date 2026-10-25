@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.14.0
+
 ## 0.13.1
 
 * Changed: custom `tts-zzz` builds now pin the Phonon + Kitten TTS 2-only
