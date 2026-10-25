@@ -441,8 +441,9 @@ patch, draft GitHub Release, the release PR, the tag, and the crates.io / pub.de
 
 ```bash
 git switch -c release/v<version> origin/master
-just bump-version <version>     # syncs every manifest: Cargo, pubspec, Unity,
-                                # Kotlin, Package.swift sdkVersion, Python pyproject
+just bump-version <version>     # syncs every manifest: Cargo, pubspec, Unity
+                                # (+ its README install pins), Kotlin,
+                                # Package.swift sdkVersion, Python pyproject
 ./bindings/apple/scripts/set-natives-mode.sh --set-remote   # useLocalNatives=false
 # fill the CHANGELOG entry for <version> (and bindings/flutter/CHANGELOG.md)
 git commit -am "bump: <version>" && git push -u origin release/v<version>
