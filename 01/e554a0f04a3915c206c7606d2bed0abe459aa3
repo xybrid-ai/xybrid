@@ -1,0 +1,59 @@
+.github/workflows/ci.yml
+  s_33f5e18570f04e::t_05a4b6eb2df687 422-423
+crates/xybrid-core/src/runtime_adapter/zzz/phonon.rs
+  s_33f5e18570f04e::t_6321f903b7c0e9 168-174,186
+BUILD.bazel
+  s_33f5e18570f04e::t_6d39549e64aa3d 20-28
+crates/xybrid-core/src/runtime_adapter/zzz/runtime.rs
+  s_33f5e18570f04e::t_b4f9d74599f4f0 6
+  s_33f5e18570f04e::t_c3ed24d0e9854c 7-8
+  s_33f5e18570f04e::t_6321f903b7c0e9 210-212,219,230,236,240,270-275
+crates/xybrid-core/tests/zzz_companion_unavailable.rs
+  s_33f5e18570f04e::t_c3ed24d0e9854c 1-60
+crates/xybrid-core/BUILD.bazel
+  s_33f5e18570f04e::t_41fdc74c487daf 94,111,133-137,188
+crates/zzz-sys/README.md
+  s_33f5e18570f04e::t_b7c2dfc2d324f7 115-130
+  s_33f5e18570f04e::t_05a4b6eb2df687 113
+  s_33f5e18570f04e::t_f0aae8250dd114 114
+tools/scripts/tests/test_zzz_feature_wiring.py
+  s_33f5e18570f04e::t_b7f24d17eb53cb 1-89
+crates/xybrid-core/src/features.rs
+  s_33f5e18570f04e::t_6321f903b7c0e9 34-40,45-53,68,70-76,78,188-191,198
+  s_33f5e18570f04e::t_efb474ec04787f 195-197,199-205
+crates/xybrid-core/Cargo.toml
+  s_33f5e18570f04e::t_6d39549e64aa3d 214-220
+crates/xybrid-core/src/execution/template/metadata.rs
+  s_33f5e18570f04e::t_41fdc74c487daf 168-169,174
+crates/xybrid-sdk/Cargo.toml
+  s_33f5e18570f04e::t_b4f9d74599f4f0 135
+  s_33f5e18570f04e::t_6d39549e64aa3d 138
+crates/xybrid-bolt/Cargo.toml
+  s_33f5e18570f04e::t_6d39549e64aa3d 66
+crates/xybrid-bolt/BUILD.bazel
+  s_33f5e18570f04e::t_ab187838c80e39 72,141
+crates/xybrid-core/src/execution/executor.rs
+  s_33f5e18570f04e::t_eaf9c56a52b30c 351,356,528,530,892,900,903,906,3176,3270,3314-3315,3341,3497,3503,3506,3521
+crates/xybrid-core/src/runtime_adapter/mod.rs
+  s_33f5e18570f04e::t_c266c0501262c0 114
+crates/xybrid-sdk/BUILD.bazel
+  s_33f5e18570f04e::t_2a260cebbc3bb1 73
+crates/xybrid-sdk/src/model.rs
+  s_33f5e18570f04e::t_07f4bfdfe63cd9 4351
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "01e554a0f04a3915c206c7606d2bed0abe459aa3",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
