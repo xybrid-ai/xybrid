@@ -1,0 +1,26 @@
+bindings/kotlin/pack_zzz_aar.py
+  s_7bd5c1853155d2::t_ce531c2f8d069c 208,211-212,216-229,237-241,272,293,301,318-319,326
+tools/scripts/tests/test_zzz_android_package.py
+  s_7bd5c1853155d2::t_68c856d2641e04 3,11,16,215,218,221-224,244-246,289-304,331-362
+  s_7bd5c1853155d2::t_b9378f435a6cab 124-138,272-277
+  s_7bd5c1853155d2::t_7c4baf289bab31 248-250
+  s_7bd5c1853155d2::t_85165bbaa9d2fe 363
+bindings/kotlin/README.md
+  s_7bd5c1853155d2::t_5ae66407c50294 304-308
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "8ff116fb075711e59bc2d000b0167c9948118c67",
+  "prompts": {},
+  "sessions": {
+    "s_7bd5c1853155d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8bc1fccc-7292-479b-86d7-7b291f88fe3c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
