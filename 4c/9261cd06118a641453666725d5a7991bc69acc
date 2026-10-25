@@ -1,0 +1,29 @@
+tools/scripts/zzz_candidate_reconcile.md
+  s_33f5e18570f04e::t_b2c20da27edaa6 1-88,94-127
+  s_33f5e18570f04e::t_1380a67af60357 89-93
+tools/scripts/zzz_candidate_reconcile.py
+  s_33f5e18570f04e::t_8613a3abaa23d7 1-69,71-127,132-191
+  s_33f5e18570f04e::t_1380a67af60357 128-131
+  s_33f5e18570f04e::t_8c6f0706f1688f 70
+tools/scripts/tests/test_zzz_candidate_reconcile.py
+  s_33f5e18570f04e::t_8c6f0706f1688f 161-166,190-197,245,257
+  s_33f5e18570f04e::t_e5e94e4cde0387 43-49
+  s_33f5e18570f04e::t_1380a67af60357 206-216
+  s_33f5e18570f04e::t_b266a65dcf9cd9 1-42,50-160,167-189,198-205,217-244,246-256,258-279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4c9261cd06118a641453666725d5a7991bc69acc",
+  "prompts": {},
+  "sessions": {
+    "s_33f5e18570f04e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16476-c2df-7ed3-b530-aab1621950e7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
