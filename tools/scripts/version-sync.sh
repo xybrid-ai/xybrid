@@ -360,11 +360,14 @@ case "${1:-}" in
         echo ""
         echo "Rust crates inherit via version.workspace = true."
 
-        # Regenerate Cargo.lock so it reflects the new workspace version.
+        # Update Cargo.lock so it reflects the new workspace version.
         # Without this, the lockfile stays stale and the next cargo command
-        # produces an uncommitted diff.
-        echo "Regenerating Cargo.lock..."
-        (cd "$REPO_ROOT" && cargo generate-lockfile --quiet)
+        # produces an uncommitted diff. `--workspace` touches only the
+        # workspace's own entries: `cargo generate-lockfile` re-resolves every
+        # dependency, so a release would ship crate versions master's CI never
+        # built (v0.14.0's first cut picked up a libc that broke iOS).
+        echo "Updating Cargo.lock..."
+        (cd "$REPO_ROOT" && cargo update --workspace --quiet)
         echo "Cargo.lock updated."
         # Record which upstream runtime the release branch actually includes.
         # A version bump elsewhere cannot prove that a pending update shipped.
