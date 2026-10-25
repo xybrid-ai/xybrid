@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **llama.cpp:** update to [v0.7.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.7.0) (commit `620d2225cc436ab0b001e3200e590e3b286ef9ab`).
+
 - Custom `tts-zzz` builds now pin engine `v0.1.0-rc.9`. Its
   `phonon-kitten-tts2` archives carry the engine's runtime terms and fourteen
   third-party notices, which the verifier checks byte for byte. The pins add

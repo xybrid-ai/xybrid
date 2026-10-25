@@ -6,7 +6,7 @@
 //!
 //! # Vendor location (epic open decision §1, resolved)
 //!
-//! Pinned upstream commit `d81235049384534c167caea52b85a694f6103d14`.
+//! Pinned upstream commit `620d2225cc436ab0b001e3200e590e3b286ef9ab`.
 //! Source lives at workspace `vendor/llama-cpp/`, alongside
 //! `vendor/mlx-apple/` and `vendor/ort-{ios,android}/`. `.gitmodules`
 //! is updated to match.
@@ -42,7 +42,7 @@ const LLAMA_CPP_REPO: &str = "https://github.com/ggml-org/llama.cpp";
 // exact commit so consumers without submodule support (e.g. Flutter pub
 // cache git deps, crates.io tarballs) get a reproducible build instead of
 // upstream HEAD.
-const LLAMA_CPP_COMMIT: &str = "d81235049384534c167caea52b85a694f6103d14";
+const LLAMA_CPP_COMMIT: &str = "620d2225cc436ab0b001e3200e590e3b286ef9ab";
 
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.cpp");
