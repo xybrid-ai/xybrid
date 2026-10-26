@@ -1152,6 +1152,10 @@ jobs:
       contents: write   # commits the pinned SPM checksum and pushes the branch
     needs: [check-release-branch, build-xcframework]
     runs-on: ubuntu-latest
+    # open-release-pr reads this: a commit pushed with GITHUB_TOKEN starts no
+    # pull_request workflows, so an already-open release PR needs reopening.
+    outputs:
+      pushed: ${{ steps.patch.outputs.pushed }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -1164,6 +1168,7 @@ jobs:
           path: dist
 
       - name: Patch and push the XybridFFI checksums
+        id: patch
         shell: bash
         env:
           TAG: ${{ needs.check-release-branch.outputs.tag }}
@@ -1178,6 +1183,7 @@ jobs:
           PINNED=(Package.swift bindings/react-native/package.json)
           if git diff --quiet -- "${PINNED[@]}"; then
             echo "::notice::Checksums already match the built zip — nothing to commit."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -1186,6 +1192,7 @@ jobs:
           git add -- "${PINNED[@]}"
           git commit -m "chore(release): pin XybridFFI checksum for ${TAG}"
           git push origin "HEAD:${BRANCH}"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
 
   # =========================================================================
   # Create the DRAFT release with every artifact attached.
@@ -1370,7 +1377,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write   # gh pr create for the release PR
-    needs: [check-release-branch, create-draft-release]
+    needs: [check-release-branch, patch-spm-checksum, create-draft-release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -1387,6 +1394,8 @@ jobs:
           # GITHUB_TOKEN when RELEASE_PAT is unset (PR opens, but `CI Success`
           # stays pending — merge then needs a manual CI run or admin bypass).
           GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          HAS_PAT: ${{ secrets.RELEASE_PAT != '' }}
+          CHECKSUM_PUSHED: ${{ needs.patch-spm-checksum.outputs.pushed }}
           TAG: ${{ needs.check-release-branch.outputs.tag }}
           BRANCH: ${{ needs.check-release-branch.outputs.branch }}
         run: |
@@ -1394,6 +1403,29 @@ jobs:
           EXISTING=$(gh pr list --head "$BRANCH" --base master --state open --json number -q '.[0].number' 2>/dev/null || echo "")
           if [ -n "$EXISTING" ]; then
             echo "::notice::PR #${EXISTING} already open for ${BRANCH}."
+            # A rerun (any later push to the release branch) leaves the PR head
+            # on this run's checksum commit, pushed with GITHUB_TOKEN, so no
+            # pull_request workflow runs there and the required checks never
+            # report. Reopening the PR with the PAT starts them. Closing is
+            # safe: every release-publish job needs a merged release PR.
+            if [ "$CHECKSUM_PUSHED" = "true" ]; then
+              if [ "$HAS_PAT" != "true" ]; then
+                echo "::warning::PR #${EXISTING} has no CI on its new checksum commit. Close and reopen it by hand: a reopen with GITHUB_TOKEN starts no workflows either."
+                exit 0
+              fi
+              gh pr close "$EXISTING"
+              # A PR left closed reads as an aborted release, so never exit
+              # without reopening it or failing loudly.
+              for attempt in 1 2 3; do
+                gh pr reopen "$EXISTING" && break
+                if [ "$attempt" = 3 ]; then
+                  echo "::error::PR #${EXISTING} was closed to restart CI but did not reopen. Reopen it by hand."
+                  exit 1
+                fi
+                sleep 10
+              done
+              gh pr comment "$EXISTING" --body "Reopened to run CI on the checksum commit this release-prep run pushed with GITHUB_TOKEN, which starts no pull_request workflows."
+            fi
             exit 0
           fi
 
