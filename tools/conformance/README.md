@@ -82,6 +82,12 @@ otherwise exports. The F16 digest changes with new
 and the Q4_K_M fixture is regenerated from that F16. Reference goldens,
 templates and scoring tolerances are preserved.
 
+The v0.7.0 migration adds `tokenizer.ggml.normalizer.nfc = true`, matching the
+pinned tokenizer's NFC normalizer. Rebuilt on macOS arm64 with AppleClang 15.0,
+both GGUFs gain 32 bytes of metadata while all 320 tensors remain byte-identical
+to v0.6.0. Their artifact digests and the Q4_K_M fixture's F16 input digest are
+updated together; templates, reference goldens and scoring bounds are preserved.
+
 ## Environments
 
 Each environment is Python 3.12 plus a full lock. `requirements-<env>.in` holds

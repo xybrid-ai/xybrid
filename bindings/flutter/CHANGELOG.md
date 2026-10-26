@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.15.0
+
+* Changed: precompiled native libraries now use llama.cpp v0.7.0.
+
 ## 0.14.0
 
 ## 0.13.1
