@@ -100,7 +100,7 @@
     "llama.cpp": {
       "kind": "git",
       "repository": "https://github.com/ggml-org/llama.cpp",
-      "revision": "d81235049384534c167caea52b85a694f6103d14",
+      "revision": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
       "license": "MIT",
       "license_evidence": "LICENSE",
       "submodule": "vendor/llama-cpp",
@@ -278,7 +278,7 @@
       "environment": "convert",
       "settings": {
         "command": "vendor/llama-cpp/convert_hf_to_gguf.py Qwen3.5-0.8B --no-mtp --outtype f16 --model-name Qwen3.5-0.8B",
-        "llama.cpp": "d81235049384534c167caea52b85a694f6103d14",
+        "llama.cpp": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
         "embedded_chat_template": "templates/qwen3.5.jinja"
       }
     },
@@ -300,7 +300,7 @@
       "settings": {
         "command": "llama-quantize Qwen3.5-0.8B-F16.gguf Qwen3.5-0.8B-Q4_K_M.gguf Q4_K_M",
         "build": "cmake Release, static, GGML_NATIVE=OFF, -ffp-contract=off, CPU only (no Metal, BLAS or OpenMP)",
-        "llama.cpp": "d81235049384534c167caea52b85a694f6103d14",
+        "llama.cpp": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
         "embedded_chat_template": "templates/qwen3.5.jinja",
         "reproduced_on": [
           "macOS arm64 (AppleClang 15.0)"
