@@ -1136,7 +1136,11 @@ namespace XybridBolt
 
     internal static class NativeMethods
     {
+#if UNITY_IOS && !UNITY_EDITOR
+        internal const string LibName = "__Internal";
+#else
         internal const string LibName = "xybrid_bolt";
+#endif
 
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_bundle_open")]
         internal static extern FfiBuf NativeXybridBundleOpen([In] byte[] pathBytes, nuint pathLength, out ulong boltffiHandle);

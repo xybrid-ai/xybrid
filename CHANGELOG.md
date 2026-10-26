@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Unity iOS players import native symbols from the statically linked application
+  (`__Internal`). The generated bindings previously tried to load `xybrid_bolt`
+  as a dynamic library. The Unity Editor continues using its host's dynamic library,
+  including when iOS is the selected build target.
+
 ## [0.14.0] - 2026-10-25
 
 ### Changed

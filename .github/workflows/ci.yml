@@ -123,12 +123,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Compile against Unity's C# 9 / netstandard2.1 profile
-        # ubuntu-latest ships the .NET SDK preinstalled; netstandard2.1 builds
-        # with any 6+ SDK. The csproj pins LangVersion 9 to match Unity.
+      - name: Compile bindings and check desktop native imports
+        # ubuntu-latest ships SDK 8+ for the reflection check. Every build also
+        # compiles netstandard2.1 with C# 9 to match Unity's scripting profile.
         run: |
           dotnet --version
           dotnet build tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c Release
+          dotnet run --project tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c Release -f net8.0 --no-build -- xybrid_bolt
+      - name: Check iOS player native imports
+        run: |
+          dotnet build tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c IOSPlayer -p:DefineConstants=UNITY_IOS
+          dotnet run --project tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c IOSPlayer -f net8.0 --no-build -- __Internal
+      - name: Check Unity Editor native imports with iOS selected
+        run: |
+          dotnet build tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c IOSEditor -p:DefineConstants=UNITY_IOS%3BUNITY_EDITOR
+          dotnet run --project tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c IOSEditor -f net8.0 --no-build -- xybrid_bolt
 
   # The Python SDK is the one binding CI cannot test from the committed tree
   # alone: boltffi's Python target compiles a CPython bridge per interpreter,
