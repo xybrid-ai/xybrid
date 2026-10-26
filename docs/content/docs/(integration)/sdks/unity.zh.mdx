@@ -87,7 +87,7 @@ using (var result = model.Run(envelope))
 ### 从注册表
 
 ```csharp
-using (var loader = ModelLoader.FromRegistry("whisper-tiny"))
+using (var loader = ModelLoader.FromRegistry("whisper-tiny-en-ggml"))
 {
     var model = loader.Load();
     // 使用模型执行推理...
@@ -166,15 +166,26 @@ using (var envelope = Envelope.Text("You are a blacksmith in a medieval village.
 ### 音频
 
 ```csharp
-byte[] audioBytes = File.ReadAllBytes("audio.wav");
-using (var envelope = Envelope.Audio(audioBytes, sampleRate: 16000, channels: 1))
+using System.IO;
+using UnityEngine;
+using Xybrid;
+
+// 英语语音识别；多语言识别请使用 "whisper-tiny-ggml"。
+using var model = XybridClient.LoadModel("whisper-tiny-en-ggml");
+
+// 完整 WAV 文件：16 位 PCM、单声道、16 kHz。
+byte[] wavBytes = File.ReadAllBytes("voice-command.wav");
+using (var envelope = Envelope.Audio(wavBytes, sampleRate: 16000, channels: 1))
 {
     using (var result = model.Run(envelope))
     {
+        result.ThrowIfFailed();
         Debug.Log($"Transcription: {result.Text}");
     }
 }
 ```
+
+这些 GGML 模型使用预编译原生库内置的语音识别运行时。通过 `Envelope.Audio` 或 `Model.RunAudio` 调用这些模型时，需要传入包含文件头的完整 WAV 音频。使用 Unity `Microphone` 录音时，请先将录制的采样编码为 WAV。
 
 ### 便捷方法
 
@@ -183,7 +194,8 @@ using (var envelope = Envelope.Audio(audioBytes, sampleRate: 16000, channels: 1)
 string output = model.RunText("Tell me about the ancient ruins.");
 
 // 音频输入，文本输出简写（玩家语音指令）
-string transcription = model.RunAudio(microphoneBytes, sampleRate: 16000);
+// wavBytes 包含完整 WAV 文件，与上面的音频示例相同。
+string transcription = model.RunAudio(wavBytes, sampleRate: 16000);
 ```
 
 ---
@@ -410,7 +422,7 @@ catch (XybridException e)
 
 | 平台 | 架构 | 状态 |
 |------|------|------|
-| macOS | Apple Silicon（arm64） | 支持 |
+| macOS 14+ | Apple Silicon（arm64） | 支持 |
 | macOS | Intel（x86_64） | 不支持 |
 | Windows | x64 | 支持 |
 | Linux | x64 | 支持 |
@@ -418,7 +430,7 @@ catch (XybridException e)
 | Android | arm64-v8a、armeabi-v7a | 支持 |
 | Android | x86_64 | 支持至 Unity 6.4 |
 
-**macOS：** 原生库仅支持 Apple Silicon（arm64）。请使用 Apple silicon 版 Unity 编辑器：Intel 版编辑器无法加载该库，无论是在 Intel Mac 上还是通过 Rosetta 2 运行（Rosetta 2 让 x86_64 代码在 Apple Silicon 上运行，反之则不行）。构建 macOS Player 时请选择 **Apple Silicon**。**Intel 64-bit + Apple Silicon** Player 只有在 Apple Silicon Mac 上原生运行时才能加载 Xybrid，在 Intel Mac 上或通过 Rosetta 打开时都不行。
+**macOS：** 编辑器和 Player 均需要 **macOS 14 或更高版本**以及 **Apple Silicon（arm64）**。请将 Player 的最低 macOS 版本设为 **14.0** 或更高版本，并使用 Apple silicon 版 Unity 编辑器：Intel 版编辑器无法加载该库，无论是在 Intel Mac 上还是通过 Rosetta 2 运行（Rosetta 2 让 x86_64 代码在 Apple Silicon 上运行，反之则不行）。构建 macOS Player 时请选择 **Apple Silicon**。**Intel 64-bit + Apple Silicon** Player 只有在 Apple Silicon Mac 上原生运行时才能加载 Xybrid，在 Intel Mac 上或通过 Rosetta 打开时都不行。
 
 **iOS：** 原生库面向 iOS 16 及以上的实体设备构建，不提供模拟器版本。请将 **Target minimum iOS Version** 设为 16.0 或更高。
 

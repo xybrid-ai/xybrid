@@ -87,7 +87,7 @@ using (var result = model.Run(envelope))
 ### From Registry
 
 ```csharp
-using (var loader = ModelLoader.FromRegistry("whisper-tiny"))
+using (var loader = ModelLoader.FromRegistry("whisper-tiny-en-ggml"))
 {
     var model = loader.Load();
     // Use model for inference...
@@ -169,15 +169,26 @@ using (var envelope = Envelope.Text("You are a blacksmith in a medieval village.
 ### Audio
 
 ```csharp
-byte[] audioBytes = File.ReadAllBytes("audio.wav");
-using (var envelope = Envelope.Audio(audioBytes, sampleRate: 16000, channels: 1))
+using System.IO;
+using UnityEngine;
+using Xybrid;
+
+// English ASR; use "whisper-tiny-ggml" for multilingual recognition.
+using var model = XybridClient.LoadModel("whisper-tiny-en-ggml");
+
+// A complete WAV file: 16-bit PCM, mono, 16 kHz.
+byte[] wavBytes = File.ReadAllBytes("voice-command.wav");
+using (var envelope = Envelope.Audio(wavBytes, sampleRate: 16000, channels: 1))
 {
     using (var result = model.Run(envelope))
     {
+        result.ThrowIfFailed();
         Debug.Log($"Transcription: {result.Text}");
     }
 }
 ```
+
+These GGML models use the speech-recognition runtime included in the prebuilt native libraries. For these models, `Envelope.Audio` and `Model.RunAudio` require a complete WAV file, including its header. For Unity `Microphone` input, encode the recorded samples as WAV first.
 
 ### Convenience Methods
 
@@ -186,7 +197,8 @@ using (var envelope = Envelope.Audio(audioBytes, sampleRate: 16000, channels: 1)
 string output = model.RunText("Tell me about the ancient ruins.");
 
 // Audio-in, text-out shorthand (player voice command)
-string transcription = model.RunAudio(microphoneBytes, sampleRate: 16000);
+// wavBytes contains a complete WAV file, as in the audio example above.
+string transcription = model.RunAudio(wavBytes, sampleRate: 16000);
 ```
 
 ---
@@ -418,7 +430,7 @@ catch (XybridException e)
 
 | Platform | Architecture | Status |
 |----------|--------------|--------|
-| macOS | Apple Silicon (arm64) | Supported |
+| macOS 14+ | Apple Silicon (arm64) | Supported |
 | macOS | Intel (x86_64) | Not supported |
 | Windows | x64 | Supported |
 | Linux | x64 | Supported |
@@ -426,7 +438,7 @@ catch (XybridException e)
 | Android | arm64-v8a, armeabi-v7a | Supported |
 | Android | x86_64 | Supported up to Unity 6.4 |
 
-**macOS:** the native library is Apple Silicon (arm64) only. Use the Apple silicon Unity Editor: the Intel editor can't load the library, on an Intel Mac or under Rosetta 2, which runs x86_64 code on Apple Silicon and not the reverse. Build macOS players for **Apple Silicon**. An **Intel 64-bit + Apple Silicon** player can load Xybrid only when it runs natively on an Apple Silicon Mac, not on an Intel Mac or when opened using Rosetta.
+**macOS:** the native library requires **macOS 14 or later** and **Apple Silicon (arm64)** for both the editor and players. Set the player's minimum macOS version to **14.0** or later. Use the Apple silicon Unity Editor: the Intel editor can't load the library, on an Intel Mac or under Rosetta 2, which runs x86_64 code on Apple Silicon and not the reverse. Build macOS players for **Apple Silicon**. An **Intel 64-bit + Apple Silicon** player can load Xybrid only when it runs natively on an Apple Silicon Mac, not on an Intel Mac or when opened using Rosetta.
 
 **iOS:** the library is built for devices running iOS 16 or later, with no Simulator build. Set **Target minimum iOS Version** to 16.0 or later.
 
