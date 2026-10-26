@@ -156,17 +156,26 @@ Debug.Log($"Inference completed in {result.LatencyMs}ms");
 ### Speech Recognition
 
 ```csharp
+using System.IO;
+using UnityEngine;
 using Xybrid;
 
-// Load an ASR model
-using var model = XybridClient.LoadModel("whisper-tiny");
+// English ASR; use "whisper-tiny-ggml" for multilingual recognition.
+using var model = XybridClient.LoadModel("whisper-tiny-en-ggml");
 
-// Transcribe player voice command
-using var result = model.Run(Envelope.Audio(microphoneBytes, sampleRate: 16000, channels: 1));
+// A complete WAV file: 16-bit PCM, mono, 16 kHz.
+byte[] wavBytes = File.ReadAllBytes("voice-command.wav");
+using var envelope = Envelope.Audio(wavBytes, sampleRate: 16000, channels: 1);
+using var result = model.Run(envelope);
 result.ThrowIfFailed();
 
 Debug.Log($"Player said: {result.Text}");
 ```
+
+These GGML models use the speech-recognition runtime included in the prebuilt
+native libraries. For these models, `Envelope.Audio` and `Model.RunAudio` require
+a complete WAV file, including its header. For Unity `Microphone` input, encode
+the recorded samples as WAV first.
 
 ### Vision-Language Input
 
@@ -245,7 +254,7 @@ Debug.Log(result2.Text);
 |----------|------|------|-------------|
 | `gemma-3-4b-it-qat-q4_0` | LLM | ~2.5GB | Conversational AI |
 | `kokoro-82m` | TTS | ~330MB | Text-to-speech |
-| `whisper-tiny` | ASR | ~75MB | Speech recognition |
+| `whisper-tiny-en-ggml` | ASR | ~32MB (~44MB on iOS) | English speech recognition (WAV input) |
 
 Models are automatically downloaded from the Xybrid registry on first use.
 
@@ -253,7 +262,7 @@ Models are automatically downloaded from the Xybrid registry on first use.
 
 | Platform | Architecture | Status |
 |----------|--------------|--------|
-| macOS | Apple Silicon (arm64) | Supported |
+| macOS 14+ | Apple Silicon (arm64) | Supported |
 | macOS | Intel (x86_64) | Not supported |
 | Windows | x64 | Supported |
 | Linux | x64 | Supported |
@@ -261,12 +270,13 @@ Models are automatically downloaded from the Xybrid registry on first use.
 | Android | arm64-v8a, armeabi-v7a | Supported |
 | Android | x86_64 | Supported up to Unity 6.4 |
 
-**macOS:** the native library is Apple Silicon (arm64) only. Use the Apple
-silicon Unity Editor: the Intel editor can't load the library, on an Intel Mac
-or under Rosetta 2, which runs x86_64 code on Apple Silicon and not the
-reverse. Build macOS players for **Apple Silicon**. An **Intel 64-bit + Apple
-Silicon** player can load Xybrid only when it runs natively on an Apple Silicon
-Mac, not on an Intel Mac or when opened using Rosetta.
+**macOS:** the native library requires **macOS 14 or later** and **Apple Silicon
+(arm64)** for both the editor and players. Set the player's minimum macOS version
+to **14.0** or later. Use the Apple silicon Unity Editor: the Intel editor can't
+load the library, on an Intel Mac or under Rosetta 2, which runs x86_64 code on
+Apple Silicon and not the reverse. Build macOS players for **Apple Silicon**. An
+**Intel 64-bit + Apple Silicon** player can load Xybrid only when it runs natively
+on an Apple Silicon Mac, not on an Intel Mac or when opened using Rosetta.
 
 **iOS:** the library is built for devices running iOS 16 or later, with no
 Simulator build. Set **Target minimum iOS Version** to 16.0 or later.
@@ -376,8 +386,8 @@ bindings/unity/
 1. Fetch the native library: **Xybrid → Native Libraries → Download for Current
    Editor** (the auto-download on import needs network access and the matching
    GitHub Release). Confirm it landed under `Assets/Xybrid/Plugins/`.
-2. On macOS, use the Apple silicon Unity Editor. The library is arm64 only, so
-   the Intel editor can't load it, including under Rosetta 2.
+2. On macOS 14 or later, use the Apple silicon Unity Editor. The library is
+   arm64 only, so the Intel editor can't load it, including under Rosetta 2.
 3. On macOS, you may need to remove quarantine: `xattr -d com.apple.quarantine libxybrid_bolt.dylib`
 4. Check the plugin import settings in Unity (select the .dylib and verify platform settings)
 
