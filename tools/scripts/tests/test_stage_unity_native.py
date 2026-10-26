@@ -57,6 +57,62 @@ class StageUnityNativeTests(unittest.TestCase):
             self.assertIn("Exclude OSXUniversal: 0", metadata)
             self.assertTrue((root / "Plugins" / "macOS.meta").is_file())
 
+    def test_ios_archive_is_staged_with_accelerate_dependency(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            native = root / "bazel-bin" / "libxybrid_bolt.a"
+            native.parent.mkdir()
+            native.write_bytes(b"ios-native")
+
+            destination = stage_native(
+                native,
+                "aarch64-apple-ios",
+                plugins_root=root / "Plugins",
+            )
+
+            self.assertEqual(root / "Plugins" / "iOS" / native.name, destination)
+            self.assertEqual(b"ios-native", destination.read_bytes())
+            metadata = destination.with_name(f"{native.name}.meta").read_text()
+            self.assertIn("Editor:\n      enabled: 0", metadata)
+            self.assertIn(
+                "iOS:\n      enabled: 1\n      settings:\n"
+                "        AddToEmbeddedBinaries: false\n"
+                "        CPU: ARM64\n"
+                "        CompileFlags:\n"
+                "        FrameworkDependencies: Accelerate\n",
+                metadata,
+            )
+            self.assertTrue((root / "Plugins" / "iOS.meta").is_file())
+
+    def test_existing_ios_metadata_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            native = root / "libxybrid_bolt.a"
+            native.write_bytes(b"new-ios-native")
+            output = root / "Plugins" / "iOS"
+            output.mkdir(parents=True)
+            metadata = output / f"{native.name}.meta"
+            existing = (
+                b"fileFormatVersion: 2\n"
+                b"guid: 0123456789abcdef0123456789abcdef\n"
+                b"PluginImporter:\n"
+                b"  platformData:\n"
+                b"    iOS:\n"
+                b"      enabled: 1\n"
+                b"      settings:\n"
+                b"        FrameworkDependencies: Metal;CustomFramework\n"
+            )
+            metadata.write_bytes(existing)
+
+            stage_native(
+                native,
+                "aarch64-apple-ios",
+                plugins_root=root / "Plugins",
+            )
+
+            self.assertEqual(existing, metadata.read_bytes())
+            self.assertEqual(b"new-ios-native", (output / native.name).read_bytes())
+
     def test_android_native_and_dependencies_use_the_target_abi(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

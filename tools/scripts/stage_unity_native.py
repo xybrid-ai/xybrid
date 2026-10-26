@@ -103,7 +103,7 @@ def plugin_meta(guid: str, spec: TargetSpec) -> str:
         AddToEmbeddedBinaries: false
         CPU: ARM64
         CompileFlags:
-        FrameworkDependencies:"""
+        FrameworkDependencies: Accelerate"""
     elif spec.platform == "Android":
         target_data = f"""\
         Exclude Editor: 1
