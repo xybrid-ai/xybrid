@@ -42,7 +42,7 @@ Or edit `Packages/manifest.json` directly:
     }
   ],
   "dependencies": {
-    "ai.xybrid.sdk": "0.6.0"
+    "ai.xybrid.sdk": "0.14.0"
   }
 }
 ```
@@ -59,7 +59,7 @@ https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 Pin a version by appending a tag:
 
 ```
-https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity#v0.6.0
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity#v0.14.0
 ```
 
 (**Window → Package Manager → + → Add package from git URL**, or add it under
@@ -79,10 +79,12 @@ If you've cloned the xybrid repository:
 
 ### Native libraries (fetched automatically)
 
-The package ships **no native binaries**. On first import — and before each
-player build — the SDK downloads the platform libraries for the installed
-version from the [GitHub Release](https://github.com/xybrid-ai/xybrid/releases),
-verifies their SHA-256, and installs them into `Assets/Xybrid/Plugins/`. This
+The package ships **no native binaries**. The SDK downloads the platform
+libraries for the installed version from the
+[GitHub Release](https://github.com/xybrid-ai/xybrid/releases), verifies their
+SHA-256, and installs them into `Assets/Xybrid/Plugins/`: the editor's own
+platform on first import, and the build target's before a player build if they
+aren't installed yet. This
 keeps the package small and sidesteps Git/registry size limits — **including the
 ~326 MB iOS static library, which now installs automatically** (no manual step).
 The Windows and Linux bundles include the matching ONNX Runtime shared library,
@@ -252,11 +254,29 @@ Models are automatically downloaded from the Xybrid registry on first use.
 | Platform | Architecture | Status |
 |----------|--------------|--------|
 | macOS | Apple Silicon (arm64) | Supported |
-| macOS | Intel (x86_64) | Via Rosetta 2 |
+| macOS | Intel (x86_64) | Not supported |
 | Windows | x64 | Supported |
 | Linux | x64 | Supported |
-| iOS | arm64 | Supported (auto-fetched) |
-| Android | arm64-v8a, armeabi-v7a, x86_64 | Supported |
+| iOS | arm64 (devices, iOS 16+) | Supported |
+| Android | arm64-v8a, armeabi-v7a | Supported |
+| Android | x86_64 | Supported up to Unity 6.4 |
+
+**macOS:** the native library is Apple Silicon (arm64) only. Use the Apple
+silicon Unity Editor: the Intel editor can't load the library, on an Intel Mac
+or under Rosetta 2, which runs x86_64 code on Apple Silicon and not the
+reverse. Build macOS players for **Apple Silicon**. An **Intel 64-bit + Apple
+Silicon** player can load Xybrid only when it runs natively on an Apple Silicon
+Mac, not on an Intel Mac or when opened using Rosetta.
+
+**iOS:** the library is built for devices running iOS 16 or later, with no
+Simulator build. Set **Target minimum iOS Version** to 16.0 or later.
+
+**Android:** Unity 6.5 removed the x86_64 architecture
+([announcement](https://discussions.unity.com/t/planned-breaking-changes-in-unity-6-5-updated-2026-03-27/1694205)),
+and Unity 6.3 and 6.4 offer it only in projects that already target it
+([Android Player settings](https://docs.unity3d.com/6000.4/Documentation/Manual/class-PlayerSettingsAndroid.html)).
+armeabi-v7a ships without ONNX Runtime, so ONNX models such as `kokoro-82m`
+don't run on it.
 
 On Android, models are cached under `Application.persistentDataPath/xybrid`
 (the SDK is given its `models` subfolder and keeps runtime-ready files beside it
@@ -356,8 +376,10 @@ bindings/unity/
 1. Fetch the native library: **Xybrid → Native Libraries → Download for Current
    Editor** (the auto-download on import needs network access and the matching
    GitHub Release). Confirm it landed under `Assets/Xybrid/Plugins/`.
-2. On macOS, you may need to remove quarantine: `xattr -d com.apple.quarantine libxybrid_bolt.dylib`
-3. Check the plugin import settings in Unity (select the .dylib and verify platform settings)
+2. On macOS, use the Apple silicon Unity Editor. The library is arm64 only, so
+   the Intel editor can't load it, including under Rosetta 2.
+3. On macOS, you may need to remove quarantine: `xattr -d com.apple.quarantine libxybrid_bolt.dylib`
+4. Check the plugin import settings in Unity (select the .dylib and verify platform settings)
 
 ### "Model download failed"
 
@@ -367,7 +389,7 @@ bindings/unity/
 
 ## API Reference
 
-See the [full API documentation](https://docs.xybrid.ai/unity) for detailed reference.
+See the [full API documentation](https://docs.xybrid.dev/en/docs/sdks/unity) for detailed reference.
 
 ## Telemetry
 

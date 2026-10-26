@@ -3,5 +3,8 @@
   "commit": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
   "sdk_base_version": "0.13.1",
   "update_kind": "minor",
-  "sdk_release": null
+  "sdk_release": {
+    "version": "0.14.0",
+    "commit": "d81235049384534c167caea52b85a694f6103d14"
+  }
 }

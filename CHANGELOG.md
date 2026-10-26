@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-25
+
 ### Changed
 
 - **llama.cpp:** update to [v0.7.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.7.0) (commit `620d2225cc436ab0b001e3200e590e3b286ef9ab`).
@@ -34,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The Unity README gives the real Android cache location.** Models live
   under `Application.persistentDataPath/xybrid`: the SDK is given its `models`
   subfolder and keeps runtime-ready files beside it in `extracted`.
+- **The Unity docs no longer claim Intel Mac support.** The macOS native
+  library is Apple Silicon (arm64) only; the README said Intel Macs ran it
+  through Rosetta 2, which runs x86_64 code on Apple Silicon and not the
+  reverse. The docs site's Unity page also listed Windows and Linux as planned
+  and left out iOS and Android. Both now carry the same platform table, with
+  the iOS 16 minimum and Unity's removal of Android x86_64 in Unity 6.5.
 
 ### Planned
 

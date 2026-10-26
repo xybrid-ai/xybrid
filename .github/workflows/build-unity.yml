@@ -40,7 +40,7 @@ jobs:
           echo "Unity version matches v$TAG_VERSION"
 
   #
-  # macOS native library builds (arm64 + x86_64)
+  # macOS native library builds (arm64 only)
   #
   build-unity-macos:
     name: Build macOS Libraries
@@ -71,8 +71,9 @@ jobs:
         with:
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
-      # Note: arm64 only. ORT has no x86_64-apple-darwin prebuilt; Intel Macs run
-      # arm64 via Rosetta 2.
+      # Note: arm64 only. ORT has no x86_64-apple-darwin prebuilt, so Intel
+      # (x86_64) editors and players are not supported: Rosetta 2 runs x86_64
+      # code on Apple Silicon, not arm64 code on Intel.
       # `-c opt` is required: --config=macos-metal sets the platform + Metal but
       # NOT compilation_mode (unlike the android configs), so without it Bazel
       # defaults to fastbuild — a non-optimized native. Matches the release
@@ -179,10 +180,14 @@ jobs:
           file "$PLUGINS/xybrid_bolt.dll" | grep -q 'PE32+.*x86-64' || { echo "bolt is not a PE32+ x86-64 DLL"; exit 1; }
           # Unity reaches the native purely through P/Invoke, so the export
           # table IS the contract — assert every EntryPoint the C# declares.
+          # vcruntime140_1.dll (the x64 C++ exception handler, pulled in since
+          # llama.cpp v0.6.0) ships in the same VC++ redistributable as the two
+          # required DLLs. Allowed, not required.
           python3 -m pip install --quiet --user pefile
           python3 tools/scripts/audit_windows_dll.py --dll "$PLUGINS/xybrid_bolt.dll" \
             --require-import vcruntime140.dll \
             --require-import msvcp140.dll \
+            --allow-import vcruntime140_1.dll \
             --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs
           echo "Windows Unity native: OK"
 
