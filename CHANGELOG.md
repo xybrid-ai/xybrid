@@ -9,11 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.15.0] - 2026-10-26
 
-## [0.14.0] - 2026-10-25
-
 ### Changed
 
 - **llama.cpp:** update to [v0.7.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.7.0) (commit `620d2225cc436ab0b001e3200e590e3b286ef9ab`).
+
+### Fixed
+
+- Windows Cargo builds from a Git checkout now use the prebuilt llama.cpp
+  archives. The hashed source files retain LF line endings, so their hashes
+  match the generated native manifest.
+
+## [0.14.0] - 2026-10-25
+
+### Changed
 
 - Custom `tts-zzz` builds now pin engine `v0.1.0-rc.9`. Its
   `phonon-kitten-tts2` archives carry the engine's runtime terms and fourteen
