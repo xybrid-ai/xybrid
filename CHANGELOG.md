@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but its continuations are rejected: xybrid implements LFM3's tool-result
   framing, not Qwen 3.5's. Rust callers can type the arguments with
   `tool_call::parse_tool_calls_with_tools`.
+- **Vision (llama.cpp):** `vision_encoder.max_image_tokens` in
+  `model_metadata.json` caps how many tokens one image becomes; the vision
+  encoder scales larger images down to fit. Native-resolution encoders need it:
+  LFM3-VL 2B turns a 12-megapixel photo into about 4,000 tokens, which alone
+  fills a 4,096-token context and takes minutes to encode on a CPU. Without the
+  field each encoder keeps its own limit, so existing bundles are unchanged.
+  Loading `LiquidAI/LFM3-VL-2B-GGUF` from Hugging Face now loads its vision
+  projector too (it ran text-only), with a 1,024-token image cap and LiquidAI's
+  recommended sampling.
 - **Android, React Native:** on-device speech with Phonon and Kitten TTS 2 in
   `ai.xybrid:xybrid-kotlin` and `@xybrid/react-native` on Android. The AAR's
   arm64-v8a library now links the zzz speech engine statically, so on Android

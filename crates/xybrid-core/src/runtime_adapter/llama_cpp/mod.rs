@@ -486,12 +486,19 @@ impl LlamaCppBackend {
         let warmup = false;
         let n_threads = config.n_threads;
         let flash_attn = config.flash_attn;
+        let max_image_tokens = config.max_image_tokens;
 
         self.with_mtmd_context_loaded_with(
             mmproj_path,
             |path| {
                 xybrid_llama::MtmdContext::from_file(
-                    path, model, use_gpu, warmup, n_threads, flash_attn,
+                    path,
+                    model,
+                    use_gpu,
+                    warmup,
+                    n_threads,
+                    flash_attn,
+                    max_image_tokens,
                 )
                 .map_err(AdapterError::from)
             },

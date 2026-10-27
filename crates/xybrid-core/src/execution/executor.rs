@@ -2170,6 +2170,9 @@ impl TemplateExecutor {
             let vision_encoder_path = Path::new(&self.base_path).join(&vision_encoder.file);
             llm_config =
                 llm_config.with_vision_encoder(vision_encoder_path.to_string_lossy().to_string());
+            if let Some(tokens) = vision_encoder.max_image_tokens {
+                llm_config = llm_config.with_max_image_tokens(tokens);
+            }
         }
         llm_config
     }
@@ -4770,6 +4773,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::Gemma3Vision,
                 image_size: 896,
                 patch_size: Some(14),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4890,6 +4894,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4969,6 +4974,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5043,6 +5049,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5103,6 +5110,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5186,6 +5194,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5278,6 +5287,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: bundle_metadata,
@@ -5393,6 +5403,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::Gemma3Vision,
                 image_size: 896,
                 patch_size: Some(14),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5559,6 +5570,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 2,
                 patch_size: Some(1),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5773,6 +5785,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::Gemma3Vision,
                 image_size: 896,
                 patch_size: Some(14),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5799,6 +5812,21 @@ mod tests {
             config.vision_encoder_path.as_deref(),
             Some("/models/mmproj.gguf")
         );
+        assert_eq!(config.max_image_tokens, None);
+
+        let mut capped = metadata;
+        capped
+            .vision_encoder
+            .as_mut()
+            .expect("fixture declares a vision encoder")
+            .max_image_tokens = Some(1024);
+        let config = executor.vision_language_llm_config(
+            &capped,
+            "/models/model.gguf".to_string(),
+            Some("chat_template.json"),
+            8192,
+        );
+        assert_eq!(config.max_image_tokens, Some(1024));
     }
 
     #[test]
