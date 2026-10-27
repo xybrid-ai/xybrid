@@ -636,6 +636,7 @@ pub(crate) unsafe fn mtmd_init_from_file(
     warmup: bool,
     n_threads: usize,
     flash_attn: bool,
+    max_image_tokens: Option<usize>,
 ) -> *mut MtmdContextRaw {
     sys::mtmd_init_from_file_c(
         path.as_ptr(),
@@ -644,6 +645,8 @@ pub(crate) unsafe fn mtmd_init_from_file(
         warmup,
         n_threads.min(c_int::MAX as usize) as c_int,
         flash_attn,
+        // 0 keeps the projector's own limit.
+        max_image_tokens.map_or(0, |tokens| tokens.min(c_int::MAX as usize) as c_int),
     )
 }
 

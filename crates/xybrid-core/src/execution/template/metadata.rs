@@ -442,6 +442,12 @@ pub struct VisionEncoderConfig {
     /// Optional patch size for patch-count/capability planning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch_size: Option<usize>,
+    /// Optional cap on how many tokens one image may become. The encoder
+    /// scales larger images down to fit; without a cap its own limit
+    /// applies, and native-resolution encoders (LFM3-VL) turn one photo into
+    /// thousands of tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_image_tokens: Option<usize>,
 }
 
 impl VisionEncoderConfig {
@@ -677,6 +683,10 @@ impl ModelMetadata {
 
             if vision_encoder.image_size == 0 {
                 return Err("vision_encoder image_size must be greater than 0".to_string());
+            }
+
+            if vision_encoder.max_image_tokens == Some(0) {
+                return Err("vision_encoder max_image_tokens must be greater than 0".to_string());
             }
         }
 

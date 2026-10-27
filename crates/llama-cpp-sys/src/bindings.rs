@@ -1207,6 +1207,7 @@ unsafe extern "C" {
         warmup: bool,
         n_threads: ::std::os::raw::c_int,
         flash_attn: bool,
+        image_max_tokens: ::std::os::raw::c_int,
     ) -> *mut mtmd_context;
 }
 unsafe extern "C" {

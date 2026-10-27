@@ -231,7 +231,8 @@ mtmd_context* mtmd_init_from_file_c(
     bool use_gpu,
     bool warmup,
     int n_threads,
-    bool flash_attn);
+    bool flash_attn,
+    int image_max_tokens);
 void mtmd_free_c(mtmd_context* ctx);
 
 /* mtmd bitmap helpers */
