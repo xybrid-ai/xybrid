@@ -10,13 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Android, React Native:** on-device speech with Phonon and Kitten TTS 2 in
-  `ai.xybrid:xybrid-kotlin` and `@xybrid/react-native`. The AAR's arm64-v8a
-  library now links the zzz speech engine statically, so on arm64 devices
-  `phonon-31m-en` loads from the xybrid registry and a Kitten TTS 2 bundle
-  loads from a local directory, through the existing model and run APIs (see
-  [Phonon speech](docs/sdk/PHONON.md)). The armeabi-v7a and x86_64 libraries
-  are built without the engine: there the registry does not serve
-  `phonon-31m-en` and a Kitten bundle fails to run. The AAR also carries the
+  `ai.xybrid:xybrid-kotlin` and `@xybrid/react-native` on Android. The AAR's
+  arm64-v8a library now links the zzz speech engine statically, so on Android
+  arm64-v8a devices `phonon-31m-en` loads from the xybrid registry and a
+  Kitten TTS 2 bundle loads from a local directory, through the existing model
+  and run APIs (see [Phonon speech](docs/sdk/PHONON.md)). The armeabi-v7a and
+  x86_64 libraries are built without the engine: there the registry does not
+  serve `phonon-31m-en` and a Kitten bundle fails to run. React Native on iOS
+  is unchanged and has no speech engine. The AAR also carries the
   engine's fourteen notice files (its runtime terms and the upstream licenses)
   under `assets/xybrid/zzz/`. Android merges library assets into the APK, so
   every app that ships the SDK carries them.

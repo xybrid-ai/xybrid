@@ -15,6 +15,7 @@ every other match). That catches what nothing else does before a release:
 """
 
 import ast
+import re
 import subprocess
 import tomllib
 import types
@@ -36,6 +37,26 @@ FORWARDING_FILES = (
     "crates/xybrid-sdk/BUILD.bazel",
     "crates/xybrid-bolt/BUILD.bazel",
     "integration-tests/BUILD.bazel",
+)
+# Any label of the zzz-sys crate: the rule, its `zzz-sys` alias or the package
+# default (`//crates/zzz-sys`, which names the alias), with or without a
+# repository prefix. The package's exported files (zzz_pull.py,
+# natives-manifest.json) are data, not the crate.
+ZZZ_SYS_LABEL = re.compile(r'//crates/zzz-sys(?::(?:xybrid_zzz_sys|zzz-sys))?"')
+# The speech flag and its setting, as string labels (comments that only
+# mention --//:tts_zzz=true do not count).
+FLAG_LABEL = re.compile(r'//:tts_zzz(?:_enabled)?"')
+# Files that define the flag, its settings and the engine, or consume the flag
+# without forwarding tts-zzz (the AAR's notices, the Apple zzz XCFramework).
+SPEECH_INFRA = (
+    "BUILD.bazel",
+    "bazel/zzz/BUILD.bazel",
+    "bazel/zzz/notices.bzl",
+    "bazel/zzz/repositories.bzl",
+    "crates/zzz-sys/BUILD.bazel",
+    "bindings/kotlin/BUILD.bazel",
+    "bindings/apple/BUILD.bazel",
+    "bindings/apple/zzz_notices.bzl",
 )
 # (file, target, attribute, value of the //:tts_zzz_enabled arm)
 SITES = [
@@ -337,13 +358,31 @@ class SpeechFeatureWiringTests(unittest.TestCase):
     def test_no_other_build_file_forwards_the_speech_feature(self):
         # A new forwarder must join FORWARDING_FILES/SITES (and the canonical
         # select); otherwise it would escape the per-platform checks below.
-        tracked = subprocess.run(["git", "ls-files", "-z", "--", "*BUILD.bazel", "*.bzl"], cwd=ROOT,
+        # The engine is reached through the feature, any label of the crate
+        # (the alias included), or a select on the flag itself.
+        tracked = subprocess.run(["git", "ls-files", "-z", "--", "*BUILD.bazel", "*BUILD", "*.bzl"], cwd=ROOT,
                                  capture_output=True, check=True).stdout.decode().split("\0")
         self.assertIn("crates/xybrid-core/BUILD.bazel", tracked)
         for relative in filter(None, tracked):
             text = (ROOT / relative).read_text(errors="replace")
-            if f'"{STATIC}"' in text or ZZZ_SYS in text:
-                self.assertIn(relative, FORWARDING_FILES)
+            with self.subTest(file=relative):
+                if f'"{STATIC}"' in text or ZZZ_SYS_LABEL.search(text):
+                    self.assertIn(relative, FORWARDING_FILES)
+                if FLAG_LABEL.search(text):
+                    self.assertIn(relative, FORWARDING_FILES + SPEECH_INFRA)
+
+    def test_forwarder_patterns_catch_every_spelling(self):
+        for label in ("//crates/zzz-sys", "//crates/zzz-sys:zzz-sys", "//crates/zzz-sys:xybrid_zzz_sys",
+                      "@//crates/zzz-sys", "@@//crates/zzz-sys:zzz-sys", ZZZ_SYS):
+            self.assertTrue(ZZZ_SYS_LABEL.search(f'deps = ["{label}"]'), label)
+        for label in ("//crates/zzz-sys:zzz_pull.py", "//crates/zzz-sys:natives-manifest.json"):
+            self.assertFalse(ZZZ_SYS_LABEL.search(f'srcs = ["{label}"]'), label)
+        for label in ("//:tts_zzz_enabled", "//:tts_zzz", "@//:tts_zzz_enabled"):
+            self.assertTrue(FLAG_LABEL.search(f'select({{"{label}": []}})'), label)
+        self.assertFalse(FLAG_LABEL.search("# build with --//:tts_zzz=true"))
+        self.assertTrue(set(SPEECH_INFRA) <= set(subprocess.run(
+            ["git", "ls-files", "-z", "--", *SPEECH_INFRA], cwd=ROOT, capture_output=True,
+            check=True).stdout.decode().split("\0")), "SPEECH_INFRA names a file git does not track")
 
     def test_resolution_per_platform(self):
         model, _, _ = speech_settings()

@@ -242,10 +242,11 @@ try {
 ## Speech (Phonon / Kitten TTS 2)
 
 The arm64-v8a library links the zzz speech engine, so arm64 devices run Phonon
-and Kitten TTS 2 on-device. The armeabi-v7a and x86_64 libraries (including the
-emulator's) are built without it: there the registry does not serve
-`phonon-31m-en` and a Kitten bundle fails to run. Keep the arm64-v8a ABI in
-any `abiFilters` or App Bundle split.
+and Kitten TTS 2 on-device, as do arm64-v8a emulator images (on Apple Silicon
+Macs, for example). The armeabi-v7a and x86_64 libraries (including the one
+x86_64 emulator images load) are built without it: there the registry does
+not serve `phonon-31m-en` and a Kitten bundle fails to run. Keep the arm64-v8a
+ABI in any `abiFilters` or App Bundle split.
 
 ```kotlin
 // Phonon from the registry: 24 kHz mono PCM16 little-endian audio.
@@ -271,6 +272,6 @@ for the Kitten bundle and streaming playback.
 
 | Architecture | Status |
 |-------------|--------|
-| arm64-v8a | Supported, with Phonon / Kitten TTS 2 speech |
+| arm64-v8a | Supported, with Phonon / Kitten TTS 2 speech (devices and arm64 emulator images) |
 | armeabi-v7a | Supported, without speech |
-| x86_64 | Supported (emulator), without speech |
+| x86_64 | Supported (x86_64 emulator images), without speech |

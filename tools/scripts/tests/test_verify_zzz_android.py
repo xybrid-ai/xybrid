@@ -17,6 +17,7 @@ import re
 import shutil
 import stat
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -71,7 +72,8 @@ def symbol(name, ndx="14", kind="FUNC", bind="GLOBAL", vis="DEFAULT"):
 def lib_spec(abi, name, speech=False):
     spec = {"machine": MACHINES[abi], "aligns": [0x4000, 0x4000], "tls": False,
             "marker": False, "needed": ["libc.so", "libm.so", "libdl.so"],
-            "api": GATE.API_LEVELS[abi], "dynsyms": []}
+            "api": GATE.API_LEVELS[abi], "dynsyms": [], "flags": ["BIND_NOW"],
+            "relocs": ["R_AARCH64_RELATIVE" if abi == "arm64-v8a" else "R_X86_64_RELATIVE"]}
     if name in GATE.BUNDLED:
         # Vendor levels and 4 KB alignment: not checked for bundled libraries.
         spec.update(api=21 if name == GATE.CXX else 24, aligns=[0x1000])
@@ -85,6 +87,8 @@ def lib_spec(abi, name, speech=False):
         if abi == GATE.SPEECH_ABI:
             spec["dynsyms"] += [symbol("llama_backend_init", "UND"), symbol("ggml_init", "UND")]
         spec["tls"] = spec["marker"] = speech and abi == GATE.SPEECH_ABI
+        if spec["tls"]:
+            spec["relocs"].append("R_AARCH64_TLSDESC")  # dynamic TLS, which bionic dlopen supports
         return spec
     spec["needed"] += [GATE.CXX] + ([] if name == "libggml-base.so" else ["libggml-base.so"])
     return spec
@@ -121,14 +125,28 @@ def render_headers(spec, flavor):
     lines += ["", " Section to Segment mapping:", "  Segment Sections...", "   00     .text",
               "   01     .tdata .tbss", "",
               f"Dynamic section at offset 0xf744d8 contains {len(spec['needed'])} entries:"]
+    flags = " ".join(spec.get("flags", []))
     if flavor == "gnu":
         lines.append("  Tag        Type                         Name/Value")
         lines += [f" 0x0000000000000001 (NEEDED)             Shared library: [{n}]"
                   for n in spec["needed"]]
+        lines += [f" 0x000000000000001e (FLAGS)              {flags}",
+                  " 0x000000006ffffffb (FLAGS_1)            Flags: NOW"]
     else:
         lines.append("  Tag                Type           Name/Value")
         lines += [f"  0x0000000000000001 (NEEDED)       Shared library: [{n}]"
                   for n in spec["needed"]]
+        lines += [f"  0x000000000000001e (FLAGS)    {flags} ", "  0x000000006ffffffb (FLAGS_1)  NOW "]
+    return "\n".join(lines) + "\n"
+
+
+def render_relocations(types, flavor):
+    # GNU says "1 entry", LLVM "1 entries".
+    noun = "entry" if flavor == "gnu" and len(types) == 1 else "entries"
+    lines = ["", f"Relocation section '.rela.dyn' at offset 0x2d0 contains {len(types)} {noun}:",
+             "    Offset             Info             Type               Symbol's Value  Symbol's Name + Addend"]
+    for number, kind in enumerate(types):
+        lines.append(f"{0x20400 + 8 * number:016x}  0000000200000406 {kind:<22} 0000000000000000 t + 0")
     return "\n".join(lines) + "\n"
 
 
@@ -159,10 +177,35 @@ def render_symbols(symbols, flavor, table=".dynsym"):
     return "\n".join(lines) + "\n"
 
 
-def render_archive(members, flavor):
+def ar_bytes(members, index=True):
+    """A GNU `ar` archive; `index` adds the "/" symbol table member, as ar s does."""
+    data = b"!<arch>\n"
+    for name, body in ([("/", b"\0\0\0\0")] if index else []) + list(members):
+        field = name if name in ("/", "//") else name + "/"
+        data += f"{field:<16}{0:<12}{0:<6}{0:<6}{644:<8}{len(body):<10}`\n".encode() + body
+        data += b"\n" if len(body) % 2 else b""
+    return data
+
+
+def ar_members(data):
+    members, offset = [], 8
+    while offset + 60 <= len(data):
+        name = data[offset:offset + 16].rstrip(b" ").decode()
+        length = int(data[offset + 48:offset + 58])
+        members.append((name.rstrip("/") or name, data[offset + 60:offset + 60 + length]))
+        offset += 60 + length + (length & 1)
+    return [(name, body) for name, body in members if name not in ("/", "//")]
+
+
+def render_archive(path, data, flavor):
+    """GNU readelf lists every member and fails on a non-ELF one; LLVM skips it silently."""
     text = ""
-    for member, symbols in members:
-        text += f"\nFile: libzzz_embed.a({member})\n" + render_symbols(symbols, flavor, ".symtab")
+    for member, body in ar_members(data):
+        if not body.startswith(FAKE):
+            if flavor == "gnu":
+                raise GATE.GateError("readelf failed")
+            continue
+        text += f"\nFile: {path.name}({member})\n" + render_symbols(spec_of(body)["symbols"], flavor, ".symtab")
     return text
 
 
@@ -177,11 +220,15 @@ class FakeReadelf:
         self.calls.append(list(argv))
         path, flags, flavor = Path(argv[-1]), argv[1:-1], gnu_or_llvm(argv[0])
         data = path.read_bytes()
-        if path.name in self.fail or not data.startswith(FAKE):
+        if path.name in self.fail:
+            raise GATE.GateError("readelf failed")
+        if data.startswith(b"!<arch>\n") and "-s" in flags:
+            return render_archive(path, data, flavor)
+        if not data.startswith(FAKE):
             raise GATE.GateError("readelf failed")
         spec = spec_of(data)
-        if "-s" in flags:
-            return render_archive(spec["archive"], flavor)
+        if "-r" in flags:
+            return render_relocations(spec.get("relocs", []), flavor)
         if "--dyn-syms" in flags:
             return render_symbols(spec["dynsyms"], flavor)
         if "-n" in flags:
@@ -323,6 +370,32 @@ class AarTests(GateCase):
                 entries = aar_entries()
                 mutate(entries, bolt, **changes)
                 self.assertFails(self.aar(entries), messages[case])
+
+    def test_static_tls_is_refused_in_every_library_we_build(self):
+        for key, changes, message in (
+            ("jni/arm64-v8a/libxybrid_bolt.so", dict(flags=["BIND_NOW", "STATIC_TLS"]),
+             "arm64-v8a/libxybrid_bolt.so: DT_FLAGS has STATIC_TLS"),
+            ("jni/arm64-v8a/libggml-base.so", dict(flags=["STATIC_TLS"]),
+             "arm64-v8a/libggml-base.so: DT_FLAGS has STATIC_TLS"),
+            ("jni/arm64-v8a/libxybrid_bolt.so",
+             dict(relocs=["R_AARCH64_RELATIVE", "R_AARCH64_TLSDESC", "R_AARCH64_TLS_TPREL64"]),
+             "arm64-v8a/libxybrid_bolt.so: 1 initial-exec TLS relocation(s)"),
+            ("jni/arm64-v8a/libxybrid_bolt.so", dict(relocs=["R_AARCH64_TLS_TPREL"]),
+             "1 initial-exec TLS relocation(s)"),
+            ("jni/x86_64/libxybrid_bolt.so", dict(relocs=["R_X86_64_TPOFF64", "R_X86_64_TPOFF32"]),
+             "x86_64/libxybrid_bolt.so: 2 initial-exec TLS relocation(s)"),
+            ("jni/armeabi-v7a/libxybrid_bolt.so", dict(relocs=["R_ARM_TLS_TPOFF32"]),
+             "armeabi-v7a/libxybrid_bolt.so: 1 initial-exec TLS relocation(s)"),
+        ):
+            for readelf in ("readelf", "llvm-readelf"):
+                with self.subTest(message=message, readelf=readelf):
+                    entries = aar_entries()
+                    mutate(entries, key, **changes)
+                    self.assertFails(self.aar(entries, True, "--readelf", readelf), message)
+        # Vendor-built bundled libraries keep their own TLS model.
+        entries = aar_entries()
+        mutate(entries, "jni/arm64-v8a/libonnxruntime.so", flags=["STATIC_TLS"])
+        self.assertPasses(self.aar(entries))
 
     def test_speech_free_abis_stay_speech_free(self):
         for abi in ("armeabi-v7a", "x86_64"):
@@ -497,6 +570,14 @@ class ZipSafetyTests(GateCase):
         not_zip = self.tmp / "broken.aar"
         not_zip.write_bytes(b"not a zip")
         self.assertFails(self.run_gate("aar", not_zip, "--speech"), "broken.aar: not a readable zip")
+        # zipfile raises NotImplementedError for a "version needed" above 6.3.
+        future = self.package(aar_entries(), "future.aar")
+        data = bytearray(future.read_bytes())
+        data[data.find(b"PK\x01\x02") + 6] = 105
+        future.write_bytes(bytes(data))
+        for command in (("aar", future, "--speech"), ("dist", future), ("pack-dist", future, self.tmp / "o.zip")):
+            with self.subTest(command=command[0]):
+                self.assertFails(self.run_gate(*command), "future.aar: not a readable zip")
         self.assertFails(self.run_gate("aar", self.tmp / "missing.aar", "--speech"), "missing.aar: cannot open")
         target = self.package(aar_entries())
         link = self.tmp / "link.aar"
@@ -638,9 +719,9 @@ class StageGradleTests(GateCase):
 
 
 class SymbolTests(GateCase):
-    def archive(self, symbols):
+    def archive(self, symbols, *extra):
         path = self.tmp / "libzzz_embed.a"
-        path.write_bytes(elf_bytes({"archive": [["engine.o", symbols]]}))
+        path.write_bytes(ar_bytes([("engine.o", elf_bytes({"symbols": symbols}))] + list(extra)))
         return path
 
     def library(self, name, exports):
@@ -679,6 +760,38 @@ class SymbolTests(GateCase):
         self.readelf.fail.clear()
         self.assertFails(self.run_gate("symbol-overlap", "--archive", empty, *libs), "wrong file?")
 
+    def test_every_archive_member_must_be_read(self):
+        libs = [self.library("libggml.so", ["ggml_init"])]
+        # A second ELF member whose odd length needs ar's padding byte.
+        archive = self.archive([symbol(PRIVATE_SYMBOL)], ("other.o", elf_bytes({"symbols": []}) + b"x"))
+        self.assertPasses(self.run_gate("symbol-overlap", "--readelf", "llvm-readelf", "--archive", archive, *libs))
+        # LLVM bitcode (or any non-ELF member): GNU readelf fails, llvm-readelf
+        # skips it without an error, and the member count catches that.
+        bitcode = ("lto.o", b"BC\xc0\xde" + b"\0" * 16)
+        archive = self.archive([symbol(PRIVATE_SYMBOL)], bitcode)
+        err = self.assertFails(self.run_gate("symbol-overlap", "--readelf", "llvm-readelf", "--archive", archive, *libs),
+                               "readelf listed 1 of the engine archive's 2 member(s)")
+        self.assertNotIn("lto.o", err)
+        self.assertFails(self.run_gate("symbol-overlap", "--readelf", "readelf", "--archive", archive, *libs),
+                         "readelf could not read the engine archive")
+        for name, data in (("thin.a", b"!<thin>\n"), ("short.a", b"!<arch>\n" + b"x" * 30),
+                           ("truncated.a", ar_bytes([("a.o", FAKE)])[:-4])):
+            with self.subTest(name=name):
+                path = self.tmp / name
+                path.write_bytes(data)
+                self.assertFails(self.run_gate("symbol-overlap", "--archive", path, *libs),
+                                 "readelf could not read the engine archive")
+
+    def test_archive_member_count_skips_bookkeeping(self):
+        bsd_index = b"#1/20".ljust(16) + b"0".ljust(12) + b"0".ljust(6) + b"0".ljust(6) + b"644".ljust(8)
+        bsd_index += b"24".ljust(10) + b"`\n" + b"__.SYMDEF SORTED\0\0\0\0" + b"\0" * 4
+        data = ar_bytes([("//", b"long_member_name.o/\n"), ("a.o", FAKE), ("b.o", FAKE + b"!")])
+        path = self.tmp / "count.a"
+        path.write_bytes(data)
+        self.assertEqual(GATE.archive_members(path), 2)
+        path.write_bytes(b"!<arch>\n" + bsd_index + data[8:])
+        self.assertEqual(GATE.archive_members(path), 2)
+
     def test_compare_imports(self):
         default = self.tmp / "default.so"
         default.write_bytes(elf_bytes({"dynsyms": [symbol("llama_backend_init", "UND"),
@@ -695,6 +808,23 @@ class SymbolTests(GateCase):
         bare = self.tmp / "bare.so"
         bare.write_bytes(elf_bytes({"dynsyms": [symbol("malloc@LIBC", "UND")]}))
         self.assertFails(self.run_gate("compare-imports", bare, same), "imports no ggml_/gguf_/llama_/mtmd_ symbols")
+
+    def test_compare_imports_reports_other_lost_imports_as_advisory(self):
+        default = self.tmp / "default.so"
+        default.write_bytes(elf_bytes({"dynsyms": [symbol("ggml_init", "UND"), symbol("expf@LIBC", "UND"),
+                                                   symbol("memcpy@LIBC", "UND")]}))
+        speech = self.tmp / "speech.so"
+        speech.write_bytes(elf_bytes({"dynsyms": [symbol("ggml_init", "UND"), symbol("memcpy@LIBC", "UND"),
+                                                  symbol("expf", kind="FUNC", vis="HIDDEN")]}))
+        for actions, annotated in (("", False), ("true", True)):
+            with self.subTest(github_actions=actions), mock.patch.dict(os.environ, {"GITHUB_ACTIONS": actions}):
+                out = self.assertPasses(self.run_gate("compare-imports", default, speech))
+                self.assertIn("advisory: 1 other import(s) of default.so are not imported", out)
+                self.assertIn("\n  expf\n", out)
+                self.assertNotIn("memcpy", out)
+                self.assertEqual("::warning title=compare-imports::" in out, annotated)
+        out = self.assertPasses(self.run_gate("compare-imports", default, default))
+        self.assertNotIn("advisory", out)
 
 
 class CliTests(GateCase):
@@ -713,6 +843,44 @@ class CliTests(GateCase):
         self.assertEqual(GATE.expected_natives(bzl)["arm64-v8a"],
                          {GATE.BOLT, GATE.CXX, GATE.ORT, "liba.so", "libb.so"})
         self.assertEqual(GATE.expected_natives(bzl)["armeabi-v7a"], {GATE.BOLT, GATE.CXX})
+
+
+class MarkerSourceTests(unittest.TestCase):
+    """The marker the gate requires must survive in an optimised Android build.
+
+    On aarch64 zzz-sys's CPU check is constant, so the CPU-unavailable
+    messages are dead code there. The copy that survives is check_engine_abi's
+    ABI-zero message, behind an opaque call into the engine: rewording it
+    would pass every Rust test and fail every release gate.
+    """
+
+    RUNTIME = ROOT / "crates/xybrid-core/src/runtime_adapter/zzz/runtime.rs"
+
+    def test_abi_zero_message_carries_the_marker(self):
+        text = self.RUNTIME.read_text()
+        start = text.index("fn check_engine_abi(linked: u32)")
+        body = text[start:text.index("\n}\n", start)]
+        zero = body[body.index("if linked == 0"):body.index("if linked != ")]
+        literals = re.findall(r'"((?:[^"\\]|\\.)*)"', zero)
+        self.assertTrue(any(GATE.MARKER.decode() in literal for literal in literals), zero)
+        # The Rust test of that branch pins the same text.
+        test = text[text.index("fn unavailable_runtime_is_distinct_from_artifact_abi_drift"):]
+        test = test[:test.index("\n    }\n")]
+        self.assertIn(f'unavailable.contains("{GATE.MARKER.decode()}")', test)
+
+    def test_marker_only_in_speech_only_code(self):
+        # A default build must not carry it, or `aar --no-speech` fails.
+        self.assertIn('#[cfg(feature = "tts-zzz")]\npub mod zzz;',
+                      (ROOT / "crates/xybrid-core/src/runtime_adapter/mod.rs").read_text())
+        allowed = ("crates/zzz-sys/", "crates/xybrid-core/src/runtime_adapter/zzz/")
+        tracked = subprocess.run(["git", "ls-files", "-z", "--", "*.rs"], cwd=ROOT,
+                                 capture_output=True, check=True).stdout.decode().split("\0")
+        self.assertIn("crates/xybrid-core/src/runtime_adapter/zzz/runtime.rs", tracked)
+        carriers = [relative for relative in filter(None, tracked)
+                    if (ROOT / relative).is_file() and GATE.MARKER in (ROOT / relative).read_bytes()]
+        self.assertIn("crates/xybrid-core/src/runtime_adapter/zzz/runtime.rs", carriers)
+        for relative in carriers:
+            self.assertTrue(relative.startswith(allowed), relative)
 
 
 # --- workflow hygiene (string level; no YAML parser needed) -----------------
@@ -789,6 +957,12 @@ class WorkflowHygieneTests(unittest.TestCase):
         delete = first(blocks, 'rm -rf "$RUNNER_TEMP"/zzz-*')
         self.assertIn("if: always()", blocks[delete])
         self.assertGreater(delete, last_private_use)
+        # While the inputs exist, only checkout and the repository's own cache
+        # action run; third-party setup actions come after the deletion.
+        for block in blocks[1:delete]:
+            for used in re.findall(r"uses: (\S+)", block):
+                self.assertEqual("./.github/actions/bazel-repo-cache", used, block)
+            self.assertNotIn("sdkmanager", block)
         later = blocks[delete + 1:]
         self.assertFalse(any("zzz-inputs" in block for block in later))
         for name in ("upload-artifact", "attest-build-provenance", "gradlew", "stage-gradle", "pack-dist"):
@@ -820,8 +994,16 @@ class WorkflowHygieneTests(unittest.TestCase):
                      '"--repo_env=XYBRID_ZZZ_PYTHON=$(command -v python3)"',
                      "//bindings/kotlin:xybrid_kotlin_aar", "tools/scripts/bazel-output.sh", "cp -L"):
             self.assertIn(flag, blocks[build])
-        delete = self.assert_inputs_deleted_before_packaging(blocks, build)
-        self.assertEqual(delete, build + 1)
+        # The engine archive against the public libraries, on the release's own
+        # bytes, before the inputs go.
+        overlap = first(blocks, "verify_zzz_android.py symbol-overlap")
+        self.assertEqual(overlap, build + 1)
+        for needle in ("--readelf readelf", "zzz-inputs/aarch64-linux-android/lib/libzzz_embed.a",
+                       "'jni/arm64-v8a/*'", '"$lib"/libggml*.so', '"$lib"/libllama.so', '"$lib"/libmtmd.so',
+                       '"$lib"/libc++_shared.so', '"$lib"/libonnxruntime.so'):
+            self.assertIn(needle, blocks[overlap])
+        delete = self.assert_inputs_deleted_before_packaging(blocks, overlap)
+        self.assertEqual(delete, overlap + 1)
         gate = first(blocks, "verify_zzz_android.py aar")
         self.assertIn("--readelf readelf --speech --min-sdk 29", blocks[gate])
         pack = first(blocks, "verify_zzz_android.py pack-dist")
@@ -835,6 +1017,42 @@ class WorkflowHygieneTests(unittest.TestCase):
         self.assertIn("path: dist/xybrid-android-*.zip", blocks[upload])
         # precompile-flutter-linux still waits for build-android (warm RBE cache).
         self.assertIn("needs: [check-release-branch, build-android]", job(text, "precompile-flutter-linux"))
+
+    def test_release_prep_replays_the_gradle_publish_before_the_draft(self):
+        text = workflow("release-prep.yml")
+        replay = job(text, "verify-android-gradle")
+        head = header(replay)
+        self.assertIn("    name: Verify Android Gradle packaging\n", head)
+        self.assertIn("    needs: [check-release-branch, build-android]\n", head)
+        self.assertIn("needs.check-release-branch.outputs.dry_run != 'true'", head)
+        self.assertIn("    permissions:\n      contents: read", head)
+        for absent in ("environment:", "id-token", "attestations", "secrets.", "ZZZ_"):
+            self.assertNotIn(absent, replay)
+        blocks = steps(replay)
+        self.assertIn("persist-credentials: false", blocks[0])
+        download = blocks[first(blocks, "actions/download-artifact@")]
+        self.assertIn("name: android-libs", download)
+        order = [first(blocks, needle) for needle in (
+            "actions/download-artifact@", "verify_zzz_android.py dist", "verify_zzz_android.py stage-gradle",
+            "./gradlew bundleReleaseAar", "verify_zzz_android.py aar")]
+        self.assertEqual(order, sorted(order))
+        gate = blocks[order[-1]]
+        self.assertIn("bindings/kotlin/build/outputs/aar/xybrid-kotlin-release.aar", gate)
+        self.assertIn("--readelf readelf --speech --min-sdk 29", gate)
+        # The same commands as release-publish.yml's publish-kotlin.
+        publish = steps(job(workflow("release-publish.yml"), "publish-kotlin"))
+        for needle in ('verify_zzz_android.py dist "$zip" --readelf readelf',
+                       'verify_zzz_android.py stage-gradle "$zip" --kotlin-dir bindings/kotlin',
+                       "./gradlew bundleReleaseAar --console=plain"):
+            self.assertIn(needle, blocks[first(blocks, needle)])
+            self.assertIn(needle, publish[first(publish, needle)])
+        # The draft waits for it, and refuses to exist without the zip.
+        draft = job(text, "create-draft-release")
+        self.assertIn("      - verify-android-gradle\n", header(draft))
+        create = steps(draft)[first(steps(draft), "gh release create")]
+        check = create.index('if [ ! -f "artifacts/xybrid-android-${TAG}.zip" ]; then')
+        self.assertLess(check, create.index("gh release delete"))
+        self.assertLess(check, create.index("gh release create"))
 
     def test_release_publish_gates_before_maven(self):
         text = workflow("release-publish.yml")
@@ -863,8 +1081,15 @@ class WorkflowHygieneTests(unittest.TestCase):
         self.assertNotIn("pull_request", on)
         self.assertIn("    branches: [master]", on)
         self.assertIn("'!**.md'", on)
+        for path in ("'vendor/llama-cpp'", "'crates/llama-cpp-sys/**'", "'.github/llamacpp-version.json'",
+                     "'.bazelrc'", "'Cargo.lock'", "'bindings/kotlin/settings.gradle.kts'",
+                     "'bindings/kotlin/gradle/**'", "'crates/xybrid-core/src/runtime_adapter/zzz/**'",
+                     "'tools/scripts/verify_android_jni.py'", "'tools/scripts/verify_unity_android_natives.py'"):
+            self.assertIn(f"      - {path}\n", on)
+        self.assertGreater(on.index("'!**.md'"), on.index("'tools/scripts/verify_zzz_android.py'"))
         speech = job(text, "speech-aar")
-        self.assertIn("    if: github.ref == 'refs/heads/master'\n", header(speech))
+        self.assertIn("    if: github.ref == 'refs/heads/master' && github.repository == 'xybrid-ai/xybrid'\n",
+                      header(speech))
         self.assertIn("    environment: zzz-engine\n", header(speech))
         self.assertEqual(text.count("environment:"), 1)
         blocks, stage = self.assert_single_token_step(text, speech, "ZZZ_CI_ENABLED")
@@ -888,6 +1113,14 @@ class WorkflowHygieneTests(unittest.TestCase):
         self.assertIn("grep -c", dlopen)
         aar_upload = blocks[first(blocks, "name: xybrid-kotlin-zzz-aar")]
         self.assertIn("retention-days: 1", aar_upload)
+        self.assertIn("github.event_name == 'workflow_dispatch'", aar_upload)
+        # The NDK cache path cannot come from the runner's ANDROID_HOME, which
+        # the `env` context does not hold.
+        self.assertNotIn("${{ env.ANDROID_HOME }}", text)
+        cache = blocks[first(blocks, "actions/cache@")]
+        self.assertIn("path: ${{ env.ANDROID_NDK_HOME }}", cache)
+        self.assertLess(first(blocks, 'ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"'),
+                        first(blocks, "actions/cache@"))
         self.assertIn("path: bindings/kotlin/build/outputs/aar/xybrid-kotlin-release.aar", aar_upload)
         gate = job(text, "dlopen-gate")
         self.assertNotIn("environment:", header(gate))
@@ -899,11 +1132,13 @@ class WorkflowHygieneTests(unittest.TestCase):
         self.assertIn("api-level: 35", gate)
 
     def test_ci_environments_stay_master_only(self):
+        # Comments may name zzz-release; no YAML line outside them may.
         for name in ("test-zzz-engine.yml", "trusted-zzz-sdk.yml"):
             with self.subTest(name=name):
-                text = workflow(name)
-                self.assertIn("environment: zzz-engine", text)
-                self.assertNotIn("zzz-release", text)
+                code = "\n".join(line for line in workflow(name).splitlines()
+                                 if not line.lstrip().startswith("#"))
+                self.assertIn("environment: zzz-engine", code)
+                self.assertNotIn("zzz-release", code)
 
 
 if __name__ == "__main__":

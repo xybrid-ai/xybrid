@@ -159,12 +159,18 @@ that group, or every flag-on AAR build fails as incompatible. The flag is
 build host's slice; keep it. The engine's fourteen notices ride in the AAR at
 `assets/xybrid/zzz/<path>` (`//bazel/zzz:notices.bzl`) and are never committed.
 release-prep's Build Android job takes the engine secrets from the
-`zzz-release` environment (release/v* only) and fails without them;
-`zzz-engine` stays master-only for test-zzz-engine.yml, trusted-zzz-sdk.yml and
-the test-zzz-android.yml proof lane. `tools/scripts/verify_zzz_android.py`
-gates the AAR, the `xybrid-android-<tag>.zip` and the Gradle-built AAR (speech
-in arm64-v8a only, the fourteen notices byte-exact, minSdk 29) in release-prep
-and again in release-publish before Maven Central.
+`zzz-release` environment and fails without them; `zzz-engine` stays
+master-only for test-zzz-engine.yml, trusted-zzz-sdk.yml and the
+test-zzz-android.yml proof lane. `zzz-release`'s branch rule admits `release/v*`
+refs and GitHub checks only the run's ref, so any workflow on a `release/v*`
+branch can bind it: never bind it outside Build Android, and treat push access
+to `release/v*` as what guards the credentials (a repository ruleset should
+limit it to maintainers and the release automation). `tools/scripts/verify_zzz_android.py` gates the
+AAR, the `xybrid-android-<tag>.zip` and the Gradle-built AAR (speech in
+arm64-v8a only, the fourteen notices byte-exact, minSdk 29, no static TLS) in
+release-prep, whose Verify Android Gradle packaging job replays the Gradle
+publish before the draft exists, and again in release-publish before Maven
+Central.
 
 
 ### Prebuilt llama.cpp natives (the cargo fast path)

@@ -42,6 +42,8 @@ dependencies {
 ```kotlin
 import ai.xybrid.Envelope
 import ai.xybrid.Xybrid
+import ai.xybrid.audioBytes
+import ai.xybrid.runAsync
 
 // Once, in Application.onCreate(): sets the model cache folder, which
 // Android needs before any load.
@@ -76,10 +78,12 @@ val model = Xybrid.model(ModelSource.bundle("/path/to/model/bundle")).load()
 
 The arm64-v8a library links the zzz speech engine statically, so arm64
 devices run Phonon and Kitten TTS 2 on-device (Android 10 or later, the SDK's
-floor). The armeabi-v7a and x86_64 libraries, including the emulator's, are
-built without it: there the registry does not serve `phonon-31m-en` and a
-Kitten bundle fails to run. Speech therefore needs the app to load the
-arm64-v8a library, so keep that ABI in any `abiFilters` or App Bundle split.
+floor). The library is chosen by ABI, so arm64-v8a emulator images, such as
+those on Apple Silicon Macs, include speech too. The armeabi-v7a and x86_64
+libraries, including the one x86_64 emulator images load, are built without
+it: there the registry does not serve `phonon-31m-en` and a Kitten bundle
+fails to run. Speech therefore needs the app to load the arm64-v8a library, so
+keep that ABI in any `abiFilters` or App Bundle split.
 
 Both models return raw PCM16 little-endian audio, 24 kHz mono:
 
@@ -87,6 +91,8 @@ Both models return raw PCM16 little-endian audio, 24 kHz mono:
 import ai.xybrid.Envelope
 import ai.xybrid.ModelSource
 import ai.xybrid.Xybrid
+import ai.xybrid.audioBytes
+import ai.xybrid.runAsync
 import java.io.File
 
 // Phonon: phonon-31m-en from the registry; voiceId picks one of its voices.
@@ -114,7 +120,10 @@ AAR under `assets/xybrid/zzz/`, for example
 `assets/xybrid/zzz/LICENSES/Zig-MIT.txt`. Android merges them into your APK,
 so every app that ships the SDK carries them; do not exclude them from
 packaging. Read them with `context.assets.open("xybrid/zzz/RUNTIME_TERMS.md")`,
-for example to show them beside your other open-source notices.
+for example to show them beside your other open-source notices. The
+Apache-2.0 license in the published POM covers xybrid's own sources; the
+engine linked into arm64-v8a comes under those runtime terms and licenses
+instead.
 
 ### Speech Recognition (ASR)
 

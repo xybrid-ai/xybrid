@@ -117,7 +117,7 @@ Manual utilities, run on demand.
 
 | File | Name | Triggers | Writes | Purpose |
 | --- | --- | --- | --- | --- |
-| [`test-ci.yml`](test-ci.yml) | Maintenance: Packaging tools (manual) | workflow_dispatch | contents | Manual: precompile and upload Flutter binaries per platform, and dry-run the Kotlin publish. |
+| [`test-ci.yml`](test-ci.yml) | Maintenance: Packaging tools (manual) | workflow_dispatch | contents | Manual: precompile and upload Flutter binaries per platform, and dry-run the speech-free Kotlin packaging. |
 | [`unity-activation.yml`](unity-activation.yml) | Maintenance: Unity activation (manual) | workflow_dispatch | none | Manual: emit the Unity license activation request (.alf); re-run when Editor activation starts failing. |
 
 ### Community
@@ -178,16 +178,23 @@ Releases.
 
 **Android speech.** The Kotlin AAR links the private Phonon/Kitten TTS 2 engine
 into its arm64-v8a slice. `release-prep.yml`'s Build Android job binds the
-`zzz-release` environment (release/v* branches only) to stage the engine, and
-fails without it; `tools/scripts/verify_zzz_android.py` gates the AAR and the
-`xybrid-android-<tag>.zip` there and again in `release-publish.yml` before
-Maven Central. `test-zzz-android.yml` proves the same build, gates and Gradle
-packaging on `master` with the master-only `zzz-engine` environment, which
-`test-zzz-engine.yml` and `trusted-zzz-sdk.yml` also use.
+`zzz-release` environment to stage the engine, and fails without it;
+`tools/scripts/verify_zzz_android.py` gates the AAR and the
+`xybrid-android-<tag>.zip` there, its Verify Android Gradle packaging job
+replays the Gradle publish on that zip before the draft exists, and
+`release-publish.yml` gates both again before Maven Central. The environment's
+branch rule admits `release/v*` refs, and GitHub checks only the run's ref: any
+workflow on a `release/v*` branch can bind it. Who may push `release/v*` is
+therefore what guards the engine credentials; a repository ruleset should
+limit it to maintainers and the release automation. `test-zzz-android.yml` proves the same
+build, gates and Gradle packaging on `master` with the master-only
+`zzz-engine` environment, which `test-zzz-engine.yml` and `trusted-zzz-sdk.yml`
+also use.
 
 **Manual only.** `test-ci.yml` precompiles the Flutter binaries per platform and
-uploads them to GitHub Releases (`contents: write`), and dry-runs the Kotlin
-publish. `unity-activation.yml` emits the Unity license activation request; it is
+uploads them to GitHub Releases (`contents: write`), and dry-runs the
+speech-free Kotlin packaging; the speech publish path is rehearsed by
+dispatching `test-zzz-android.yml` on `master`. `unity-activation.yml` emits the Unity license activation request; it is
 kept for when the license expires or the GameCI image changes.
 `web-webgpu.yml` runs WebGPU generation on a self-hosted runner labelled
 `webgpu`, because hosted runners have no GPU adapter with `shader-f16`.

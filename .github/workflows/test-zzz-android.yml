@@ -28,16 +28,22 @@ name: "CI: zzz Android AAR"
 #
 # This lane takes both engine secrets from the `zzz-engine` environment, which
 # admits refs/heads/master and nothing else (see test-zzz-engine.yml), and the
-# job also checks the ref; release-prep.yml's copies live in the separate,
-# release/v*-only `zzz-release` environment. Only the staging step receives
-# them. The staged inputs are deleted before packaging and never uploaded;
-# without the secrets (forks, unset) the lane prints a notice and skips. The
-# Gradle-built speech AAR is uploaded with retention-days: 1 for on-device
-# (arm64) testing, as trusted-zzz-sdk.yml uploads its engine-linked candidate.
+# job also checks the ref and the repository; release-prep.yml's copies live in
+# the separate `zzz-release` environment, bound to release/v* refs. Only the
+# staging step receives them, and only Bazel and the gate run while the staged
+# inputs exist: the NDK and SDK setup actions come after their deletion. The
+# inputs are never uploaded; without the secrets (forks, unset) the lane prints
+# a notice and skips. Only a manual run uploads the Gradle-built speech AAR
+# (retention-days: 1) for on-device arm64 testing, as trusted-zzz-sdk.yml
+# uploads its engine-linked candidate only when dispatched.
 #
-# Narrow triggers on purpose: tools/scripts/llamacpp_update.py waits on every
-# check of the master commit before it cuts a release, and this lane takes a
-# full AAR build twice.
+# The triggers cover what can break the speech AAR or its gates: the engine
+# pin and the speech selects, the Android toolchains and NDK pin, llama.cpp
+# updates (the engine carries its own llama.cpp-derived code, and only this
+# lane runs compare-imports), the marker's source, the Gradle/AGP packaging and
+# the gate's helpers. tools/scripts/llamacpp_update.py waits on every check of
+# the master commit before it cuts a release, so a llama.cpp update that breaks
+# the speech build stops there.
 
 on:
   push:
@@ -50,16 +56,39 @@ on:
       - 'bazel/zzz/**'
       - 'bazel/toolchains/android/**'
       - 'bazel/ggml/**'
-      - 'bindings/kotlin/BUILD.bazel'
-      - 'bindings/kotlin/bazel/**'
-      # The Gradle repackaging this lane replays (jniLibs + src/main/assets).
-      - 'bindings/kotlin/build.gradle.kts'
-      - 'crates/xybrid-bolt/BUILD.bazel'
-      - 'crates/xybrid-core/BUILD.bazel'
-      - 'crates/xybrid-sdk/BUILD.bazel'
       - 'MODULE.bazel'
       - 'rules_android_ndk.patch'
+      # XYBRID_NDK_URL/SHA256: the NDK both Android toolchains use.
+      - '.bazelrc'
+      - 'Cargo.lock'
+      # llama.cpp updates and the other C/C++ linked beside the engine.
+      - 'vendor/llama-cpp'
+      - 'vendor/whisper-cpp'
+      - 'vendor/ort-android/**'
+      - 'crates/llama-cpp-sys/**'
+      - '.github/llamacpp-version.json'
+      # The speech selects, the marker's source and the library carrying it.
+      - 'crates/xybrid-bolt/BUILD.bazel'
+      - 'crates/xybrid-bolt/src/**'
+      - 'crates/xybrid-core/BUILD.bazel'
+      - 'crates/xybrid-core/src/runtime_adapter/zzz/**'
+      - 'crates/xybrid-sdk/BUILD.bazel'
+      - 'bindings/kotlin/BUILD.bazel'
+      - 'bindings/kotlin/bazel/**'
+      # The Gradle repackaging this lane replays (jniLibs + src/main/assets),
+      # the AGP, plugin and wrapper pins, and the consumer smoke.
+      - 'bindings/kotlin/build.gradle.kts'
+      - 'bindings/kotlin/settings.gradle.kts'
+      - 'bindings/kotlin/gradle.properties'
+      - 'bindings/kotlin/gradle/**'
+      - 'bindings/kotlin/consumer-smoke/**'
+      # The gate, the helpers it loads, and the dlopen gate.
       - 'tools/scripts/verify_zzz_android.py'
+      - 'tools/scripts/verify_android_jni.py'
+      - 'tools/scripts/verify_android_api_level.py'
+      - 'tools/scripts/verify_unity_android_natives.py'
+      - 'tools/scripts/android-dlopen-gate.sh'
+      - 'tools/scripts/android-dlopen-probe.c'
       - '.github/workflows/test-zzz-android.yml'
       # Markdown cannot affect this build.
       - '!**.md'
@@ -73,13 +102,14 @@ permissions: read-all
 
 env:
   # NDK r27, as build-android.yml: only for the dlopen probe, llvm-strip and
-  # llvm-readelf. Bazel downloads its own pinned NDK for the libraries.
+  # llvm-readelf, after the Bazel build. Bazel downloads its own pinned NDK for
+  # the libraries (.bazelrc XYBRID_NDK_URL), so nothing before it needs this.
   NDK_VERSION: "27.0.12077973"
 
 jobs:
   speech-aar:
     name: Speech AAR (build, gate, Gradle packaging)
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/master' && github.repository == 'xybrid-ai/xybrid'
     environment: zzz-engine
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -143,28 +173,6 @@ jobs:
             /opt/hostedtoolcache/CodeQL
           sudo docker image prune --all --force || true
           df -h /
-
-      - name: Cache Android NDK
-        if: steps.stage.outputs.staged == 'true'
-        id: cache-ndk
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
-          key: android-ndk-${{ env.NDK_VERSION }}
-
-      - name: Setup Android SDK
-        if: steps.stage.outputs.staged == 'true'
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-        with:
-          packages: platform-tools
-
-      - name: Install NDK
-        if: steps.stage.outputs.staged == 'true' && steps.cache-ndk.outputs.cache-hit != 'true'
-        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
-
-      - name: Set NDK environment
-        if: steps.stage.outputs.staged == 'true'
-        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> "$GITHUB_ENV"
 
       - name: Configure BuildBuddy remote config
         if: steps.stage.outputs.staged == 'true'
@@ -244,12 +252,36 @@ jobs:
             fi
           done
 
-      # Nothing below needs the private inputs, and Gradle and the upload
-      # actions run third-party code. always(): a failed step must not leave
-      # them either.
+      # Nothing below needs the private inputs, and the SDK/NDK setup, Gradle
+      # and the upload actions run third-party code. always(): a failed step
+      # must not leave them either.
       - name: Delete the staged engine inputs
         if: always()
         run: rm -rf "$RUNNER_TEMP"/zzz-*
+
+      # The runner's ANDROID_HOME is not in the `env` context, so the cache
+      # path goes through GITHUB_ENV first.
+      - name: Locate the Android NDK
+        if: steps.stage.outputs.staged == 'true'
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Cache Android NDK
+        if: steps.stage.outputs.staged == 'true'
+        id: cache-ndk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.ANDROID_NDK_HOME }}
+          key: android-ndk-${{ env.NDK_VERSION }}
+
+      - name: Setup Android SDK
+        if: steps.stage.outputs.staged == 'true'
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+
+      - name: Install NDK
+        if: steps.stage.outputs.staged == 'true' && steps.cache-ndk.outputs.cache-hit != 'true'
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
       # release-prep.yml's zip, then release-publish.yml's publish-kotlin
       # staging, Gradle build and gate, on the same bytes.
@@ -284,7 +316,7 @@ jobs:
       # The emulator job gets no environment and no engine: the Maven
       # consumer's x86_64 slice (as Gradle packaged it), a stripped copy, its
       # siblings, the probe, and the Gradle AAR with only x86_64 natives for
-      # the consumer smoke. The emulator cannot run arm64 anyway.
+      # the consumer smoke. This x86_64 emulator cannot run arm64 anyway.
       - name: Stage dlopen-gate inputs (x86_64, engine-free)
         if: steps.stage.outputs.staged == 'true'
         run: |
@@ -322,8 +354,10 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      # Manual runs only: every master push would otherwise publish an
+      # engine-linked build of an unreleased pin as a downloadable artifact.
       - name: Upload the Gradle-built speech AAR (on-device testing)
-        if: steps.stage.outputs.staged == 'true'
+        if: steps.stage.outputs.staged == 'true' && github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: xybrid-kotlin-zzz-aar

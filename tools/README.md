@@ -108,8 +108,8 @@ The C header and Swift wrapper are committed (`bindings/apple/include/`,
 
 `build-android` was removed: it was a thin proxy over Bazel. Build the
 feature-complete 3-ABI AAR (text + candle voice + mtmd vision) directly and,
-if you need loose `.so` files for Gradle, stage its jniLibs the way CI does
-(`release-prep.yml`, `test-ci.yml`, `build-react-native.yml`):
+if you need loose `.so` files for Gradle, stage its jniLibs the way the
+speech-free CI lanes do (`test-ci.yml`, `build-react-native.yml`):
 
 ```bash
 bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
@@ -117,6 +117,16 @@ rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
 unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
 cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 ```
+
+That AAR has no speech. Releases build it with `--//:tts_zzz=true`, which
+links the private Phonon/Kitten TTS 2 engine into arm64-v8a and adds the
+engine's notices under `assets/xybrid/zzz/`, and stage it with
+`tools/scripts/verify_zzz_android.py`: `pack-dist` writes the release zip
+(`release-prep.yml`), `stage-gradle` puts its natives into
+`bindings/kotlin/libs/` and the notices into `src/main/assets/xybrid/zzz/`
+(`release-publish.yml`), and `aar --speech` gates the result. That path needs
+the staged engine (see `crates/zzz-sys/README.md`); `test-zzz-android.yml`
+rehearses it on `master`.
 
 The NDK is a pinned Bazel download — no machine setup. Each
 `libxybrid_bolt.so` is a clean one-link output (16 KB-aligned,

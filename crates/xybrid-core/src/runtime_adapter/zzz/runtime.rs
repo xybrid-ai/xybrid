@@ -237,7 +237,10 @@ mod tests {
         let unavailable = check_engine_abi(0)
             .expect_err("zero means unavailable")
             .to_string();
-        assert!(unavailable.contains("unavailable"));
+        // The Android release gate (tools/scripts/verify_zzz_android.py)
+        // finds this exact text in the arm64 library: on aarch64 the CPU
+        // check is constant, so this is the copy an optimised build keeps.
+        assert!(unavailable.contains("zzz engine unavailable"));
         assert!(!unavailable.contains("does not match"));
         assert!(check_engine_abi(ZZZ_EMBED_ABI_VERSION).is_ok());
         assert!(check_engine_abi(ZZZ_EMBED_ABI_VERSION + 1)

@@ -42,11 +42,10 @@ tokenizer and voices.
 
 ### Getting phonon-31m-en
 
-- **From the xybrid registry**, once it is registered there, as model id
-  `phonon-31m-en`. The registry serves it on the three platforms above, and
-  only to builds that advertise `zzz-phonon-31m`; any other build gets a
-  not-found error. The Android SDK advertises it from its arm64-v8a library
-  only.
+- **From the xybrid registry**, as model id `phonon-31m-en`. The registry
+  serves it on the three platforms above, and only to builds that advertise
+  `zzz-phonon-31m`; any other build gets a not-found error. The Android SDK
+  advertises it from its arm64-v8a library only.
 
   ```rust,ignore
   let model = ModelLoader::from_registry("phonon-31m-en").load()?;

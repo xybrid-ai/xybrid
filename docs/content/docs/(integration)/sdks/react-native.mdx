@@ -9,7 +9,7 @@ The React Native package (`@xybrid/react-native`) wraps the same Rust core as th
 
 - React Native 0.76+ with the New Architecture (Expo SDK 52+ with a development build — not Expo Go)
 - iOS 16.0+ (simulator builds need an Apple Silicon Mac)
-- Android 10 / API 29+ for releases after 0.15.0; API 24+ for 0.15.0 and earlier (`arm64-v8a`, `armeabi-v7a`, `x86_64`)
+- Android 10 / API 29+ for releases after 0.15.0; API 24+ for 0.15.0 and earlier (`arm64-v8a`, `armeabi-v7a`, `x86_64`). Phonon / Kitten TTS 2 speech runs on Android `arm64-v8a` only, not on iOS or the other ABIs
 
 ## Installation
 
@@ -99,6 +99,7 @@ The package covers the full SDK surface — see the [package README](https://git
 - tool calling (`generationConfig.tools`, `result.toolCalls`, `Envelope.toolResults`)
 - vision (`Envelope.image`, `Envelope.userMessage`)
 - text-to-speech voices and speech recognition, batch and live (`model.stream()`)
+- Phonon (`phonon-31m-en`) and Kitten TTS 2 speech on Android `arm64-v8a` devices only; the engine's notices ship in the AAR under `assets/xybrid/zzz/` and Android merges them into your APK
 - multi-stage pipelines (`Pipeline.fromYaml` / `fromFile`)
 - background downloads with progress, speculative cloud serving, model cache management and memory release
 

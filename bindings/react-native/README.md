@@ -23,7 +23,7 @@ await model.release();
 |---|---|
 | React Native | 0.76 or newer, **New Architecture** (the default since 0.76; the only option since 0.82) |
 | iOS | 16.0+. Simulator builds need an Apple Silicon Mac (there is no x86_64 simulator slice) |
-| Android | API 29+ (Android 10; 0.15.0 and earlier: API 24+), `arm64-v8a`, `armeabi-v7a`, `x86_64` |
+| Android | API 29+ (Android 10; 0.15.0 and earlier: API 24+), `arm64-v8a`, `armeabi-v7a`, `x86_64`. Phonon / Kitten TTS 2 speech on `arm64-v8a` only ([below](#phonon-and-kitten-tts-2-android-arm64-v8a)) |
 | Expo | SDK 52+ with a [development build](https://docs.expo.dev/develop/development-builds/introduction/) — not Expo Go |
 
 ## Install
@@ -178,6 +178,28 @@ const voices = await tts.voices();
 const speech = await tts.run(Envelope.text('Hello!', { voiceId: voices[0].id, speed: 1.1 }));
 speech.audioBytesBase64; // WAV/PCM, base64
 ```
+
+#### Phonon and Kitten TTS 2 (Android arm64-v8a)
+
+On Android, the Kotlin SDK's arm64-v8a library links the zzz speech engine,
+so arm64-v8a devices also run Phonon (`phonon-31m-en` from the registry) and
+Kitten TTS 2 (a local bundle through `ModelLoader.fromDirectory`). iOS and the
+armeabi-v7a and x86_64 libraries do not include the engine: there the registry
+does not serve `phonon-31m-en` and a Kitten bundle fails to run.
+
+```ts
+const phonon = await ModelLoader.fromRegistry('phonon-31m-en').load();
+const hello = await phonon.run(Envelope.text('Hello from Phonon.', { voiceId: 'easton' }));
+hello.audioBytesBase64; // raw PCM16 little-endian, 24 kHz mono, base64
+
+const kitten = await ModelLoader.fromDirectory(kittenBundleDir).load();
+```
+
+The engine's runtime terms and upstream licenses ship in the AAR under
+`assets/xybrid/zzz/`, and Android merges them into every APK that includes the
+package; do not exclude them. Voices and options are in
+[Phonon speech](../../docs/sdk/PHONON.md); the Kitten bundle layout is in the
+[Kotlin README](../kotlin/README.md#speech-phonon--kitten-tts-2).
 
 ### Speech recognition
 

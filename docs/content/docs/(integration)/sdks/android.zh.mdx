@@ -223,7 +223,8 @@ try {
 ## 语音合成（Phonon / Kitten TTS 2）
 
 arm64-v8a 库静态链接了 zzz 语音引擎，因此 arm64 设备可以在本地运行 Phonon 和
-Kitten TTS 2。armeabi-v7a 和 x86_64 库（包括模拟器使用的库）不包含该引擎：在这些
+Kitten TTS 2，arm64-v8a 模拟器镜像（例如 Apple Silicon Mac 上的模拟器）同样可以。
+armeabi-v7a 和 x86_64 库（包括 x86_64 模拟器镜像加载的库）不包含该引擎：在这些
 ABI 上，注册表不会提供 `phonon-31m-en`，Kitten 模型包也无法运行。请在 `abiFilters`
 或 App Bundle 拆分中保留 arm64-v8a。
 
@@ -250,6 +251,6 @@ Kitten 模型包和流式播放见
 
 | 架构 | 状态 |
 |-------------|--------|
-| arm64-v8a | 支持，含 Phonon / Kitten TTS 2 语音合成 |
+| arm64-v8a | 支持，含 Phonon / Kitten TTS 2 语音合成（设备和 arm64 模拟器镜像） |
 | armeabi-v7a | 支持，不含语音合成 |
-| x86_64 | 支持（模拟器），不含语音合成 |
+| x86_64 | 支持（x86_64 模拟器镜像），不含语音合成 |
