@@ -23,7 +23,7 @@ await model.release();
 |---|---|
 | React Native | 0.76 or newer, **New Architecture** (the default since 0.76; the only option since 0.82) |
 | iOS | 16.0+. Simulator builds need an Apple Silicon Mac (there is no x86_64 simulator slice) |
-| Android | API 29+ (Android 10), `arm64-v8a`, `armeabi-v7a`, `x86_64` |
+| Android | API 29+ (Android 10; 0.15.0 and earlier: API 24+), `arm64-v8a`, `armeabi-v7a`, `x86_64` |
 | Expo | SDK 52+ with a [development build](https://docs.expo.dev/develop/development-builds/introduction/) — not Expo Go |
 
 ## Install

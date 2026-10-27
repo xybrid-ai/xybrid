@@ -39,8 +39,8 @@ constraint_value(
 # silently resolve the API-28 toolchain instead. (ggml_cpu_backend.cpp also
 # refuses to compile below API 29, as a guard against exactly that.)
 #
-# The path is stable: .bazelrc pins XYBRID_NDK_HOST_TAG=linux-x86_64, which
-# rules_android_ndk.patch uses as the clang directory on every host.
+# The cc_toolchain is named through the repository-root alias that
+# rules_android_ndk.patch adds, so the label holds no NDK host directory.
 toolchain(
     name = "aarch64_android29",
     target_compatible_with = [
@@ -48,6 +48,6 @@ toolchain(
         "@platforms//cpu:aarch64",
         ":api29",
     ],
-    toolchain = "@androidndk_api29//toolchains/llvm/prebuilt/linux-x86_64:cc_toolchain_aarch64-linux-android",
+    toolchain = "@androidndk_api29//:cc_toolchain_aarch64-linux-android",
     toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
 )

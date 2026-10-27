@@ -263,6 +263,13 @@ use_repo(android_ndk, "androidndk")
 # //bazel/toolchains/android:api29, and only that toolchain accepts it. The
 # extension above supports one hardcoded repository, so instantiate its
 # (patched) repository rule directly with an explicit name and API level.
+#
+# Cost: this extracts the NDK a second time, about 2 GB more disk wherever the
+# AAR is analyzed (bazel.yml, including its analysis-only step; build-android,
+# build-react-native, test-ci, release-prep). The repository cache saves only
+# the download, and the rule is `local = True`, so both NDK repositories are
+# extracted again on every Bazel server start. Patching rules_android_ndk to add
+# an API-29 aarch64 toolchain inside @androidndk would avoid the second copy.
 android_ndk_api29 = use_repo_rule("@rules_android_ndk//:rules.bzl", "android_ndk_repository")
 
 android_ndk_api29(

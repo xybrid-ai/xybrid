@@ -136,7 +136,12 @@ libraries, the Unity plugin via `--config=android-*`) stays on `@androidndk` at
 API 28 and must not require Android 10. The API-29 toolchain wins only because
 MODULE.bazel registers it before `@androidndk//:all`, whose toolchains match any
 Android platform of their CPU; keep that order. `ggml_cpu_backend.cpp` refuses
-to compile below API 29, so a fallback to API 28 fails the build.
+to compile below API 29, so a fallback to API 28 fails the build. CI also reads
+the API level each library was linked for from its `.note.android.ident`
+(`tools/scripts/verify_android_api_level.py`): build-android.yml requires 29 for
+the AAR's arm64 libraries and 28 for its other slices, and
+`verify_unity_android_natives.py` and release-prep's Flutter payload check
+require 28.
 
 
 ### Prebuilt llama.cpp natives (the cargo fast path)

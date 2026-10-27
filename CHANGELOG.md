@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The AAR's arm64-v8a natives are now built against API 29. An app with a lower
   `minSdk` fails the manifest merge at build time. Raise it to 29: `minSdk = 29`
   in the app's Gradle `defaultConfig`; with Expo, `android.minSdkVersion: 29`
-  through `expo-build-properties` (or the `android.minSdkVersion=29` gradle
-  property); in bare React Native, `minSdkVersion = 29` in the root
+  through `expo-build-properties` (or set the `android.minSdkVersion=29` gradle
+  property from your own config plugin, since `expo prebuild` regenerates
+  `android/`); in bare React Native, `minSdkVersion = 29` in the root
   `android/build.gradle` `ext` block. Flutter and Unity Android requirements are
   unchanged.
 

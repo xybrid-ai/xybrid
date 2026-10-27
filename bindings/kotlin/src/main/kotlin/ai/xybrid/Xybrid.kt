@@ -16,7 +16,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
-import android.os.Build
 import android.os.PowerManager
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -81,10 +80,9 @@ object Xybrid {
      * application context so they survive Activity rotation. Battery
      * monitoring uses the sticky `ACTION_BATTERY_CHANGED` broadcast,
      * which delivers the current value immediately on registration —
-     * no separate seed call is needed. Thermal monitoring requires
-     * API 29+ ([`PowerManager.OnThermalStatusChangedListener`]); on
-     * older devices the routing engine sees `thermal_state = None`
-     * (treated as "no signal" rather than an optimistic default).
+     * no separate seed call is needed. Thermal monitoring seeds the
+     * current status, then follows
+     * [`PowerManager.OnThermalStatusChangedListener`].
      *
      * @param context Android context (application or activity).
      * @param apiKey Xybrid API key. When set, starts the telemetry exporter.
@@ -303,12 +301,11 @@ object Xybrid {
         }
         appContext.registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
-            setThermalState(thermalStatusToXybrid(pm.currentThermalStatus))
-            pm.addThermalStatusListener { status ->
-                setThermalState(thermalStatusToXybrid(status))
-            }
+        // The thermal APIs are API 29, the SDK's minSdk, so no version check.
+        val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+        setThermalState(thermalStatusToXybrid(pm.currentThermalStatus))
+        pm.addThermalStatusListener { status ->
+            setThermalState(thermalStatusToXybrid(status))
         }
     }
 

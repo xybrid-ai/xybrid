@@ -98,8 +98,22 @@ def sym(name, ndx="UND", bind="GLOBAL", vis="DEFAULT", kind="FUNC", style="gnu")
     return f"    7: 0000000000000000     0 {kind:7} {bind:6} {vis:8} {ndx:>4} {name}\n"
 
 
-def elf(machine, needed=(), aligns=(0x4000,), symbols=(), style="gnu"):
-    """Combined `readelf -W -h -d -l --dyn-syms` text in GNU or LLVM layout."""
+def notes(api, style="gnu"):
+    """`readelf -W -n` for an NDK r27 link at `api`: GNU puts the data on the owner row."""
+    data = " ".join(f"{b:02x}" for b in api.to_bytes(4, "little") + b"r27".ljust(128, b"\0"))
+    owner = "  Android              0x00000084\t"
+    if style == "gnu":
+        row = f"{owner}NT_VERSION (version)\t   description data: {data} \n"
+    else:
+        row = f"{owner}NT_ANDROID_TYPE_IDENT\n   description data: {data}\n"
+    return (
+        "\nDisplaying notes found in: .note.android.ident\n"
+        "  Owner                Data size \tDescription\n" + row
+    )
+
+
+def elf(machine, needed=(), aligns=(0x4000,), symbols=(), style="gnu", api=None):
+    """Combined `readelf -W -h -d -l [-n --dyn-syms]` text in GNU or LLVM layout."""
     pad = 13 if style == "gnu" else 7
     text = f"ELF Header:\n  Class:                             ELF64\n  Machine:                           {machine}\n\n"
     text += "Dynamic section at offset 0x1000 contains 9 entries:\n"
@@ -110,11 +124,13 @@ def elf(machine, needed=(), aligns=(0x4000,), symbols=(), style="gnu"):
         text += f"  LOAD 0x000000 0x0000000000000000 0x0000000000000000 0x1000 0x1000 R E {align:#x}\n"
     text += "\nSymbol table '.dynsym' contains 9 entries:\n"
     text += "".join(sym(*row, style=style) if isinstance(row, tuple) else row for row in symbols)
+    if api is not None:
+        text += notes(api, style)
     return text
 
 
 def clean_bolt(abi="arm64-v8a", style="gnu", **overrides):
-    fields = dict(needed=SYSTEM_NEEDED, symbols=CLEAN_SYMBOLS, style=style)
+    fields = dict(needed=SYSTEM_NEEDED, symbols=CLEAN_SYMBOLS, style=style, api=verifier.ANDROID_API)
     fields.update(overrides)
     return elf(MACHINES[abi], **fields)
 
@@ -228,6 +244,7 @@ class CheckAbiTests(unittest.TestCase):
                 self.assertEqual(failures, [])
                 self.assertTrue(summary.startswith("arm64-v8a: OK"), summary)
                 self.assertIn("LOAD align 0x4000", summary)
+                self.assertIn("Android API 28", summary)
 
     def test_v0_13_layout_reports_every_failure(self):
         bolt = clean_bolt("x86_64", needed=SYSTEM_NEEDED + (CXX_SHARED,),
@@ -307,6 +324,22 @@ class CheckAbiTests(unittest.TestCase):
     def test_missing_load_headers_fail_closed(self):
         failures, _ = verifier.check_abi("arm64-v8a", {BOLT: clean_bolt(aligns=())})
         self.assertEqual(failures, [f"arm64-v8a/{BOLT}: no LOAD program headers in readelf output"])
+
+    def test_android_10_link_is_rejected(self):
+        # What a fallback to the Kotlin AAR's arm64 toolchain would produce.
+        for style in ("gnu", "llvm"):
+            with self.subTest(style=style):
+                failures, summary = verifier.check_abi("arm64-v8a", {BOLT: clean_bolt(style=style, api=29)})
+                self.assertEqual(summary, "")
+                self.assertEqual(failures, [
+                    f"arm64-v8a/{BOLT}: linked for Android API 29, expected 28; "
+                    "the Unity plugin must keep loading on Android 9",
+                ])
+
+    def test_missing_api_note_fails_closed(self):
+        failures, _ = verifier.check_abi("x86_64", {BOLT: clean_bolt("x86_64", api=None)})
+        self.assertEqual(len(failures), 1)
+        self.assertIn(f"x86_64/{BOLT}: no .note.android.ident note", failures[0])
 
     def test_missing_bolt_is_rejected(self):
         failures, _ = verifier.check_abi("x86_64", {"libonnxruntime.so": sibling("x86_64")})
@@ -415,14 +448,15 @@ class MainTests(unittest.TestCase):
             return verifier.main(argv)
 
     @unittest.skipIf(os.name == "nt", "the stub readelf is a POSIX shell script")
-    def test_passes_wide_flags_and_reads_symbols_only_for_bolt(self):
+    def test_passes_wide_flags_and_reads_notes_and_symbols_only_for_bolt(self):
         self.add(f"x86_64/{BOLT}", clean_bolt("x86_64"))
         self.add("x86_64/libonnxruntime.so", sibling("x86_64"))
         self.assertEqual(self.run_main(), 0)
         calls = sorted(self.log.read_text().splitlines())
         self.assertEqual(len(calls), 2)
-        self.assertTrue(calls[0].startswith("-W -h -d -l --dyn-syms ") and calls[0].endswith(BOLT), calls)
-        self.assertTrue(calls[1].startswith("-W -h -d -l ") and "--dyn-syms" not in calls[1], calls)
+        self.assertTrue(calls[0].startswith("-W -h -d -l -n --dyn-syms ") and calls[0].endswith(BOLT), calls)
+        self.assertTrue(calls[1].startswith("-W -h -d -l ") and "--dyn-syms" not in calls[1]
+                        and " -n " not in calls[1], calls)
 
     @unittest.skipIf(os.name == "nt", "the stub readelf is a POSIX shell script")
     def test_fails_on_problems_and_missing_abis(self):

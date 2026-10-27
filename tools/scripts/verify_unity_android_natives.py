@@ -4,21 +4,32 @@
 Unity's GameActivity packages its own libc++_shared.so for libgame.so, built
 by whatever NDK the editor uses, and Gradle rejects a second copy at the same
 APK path. So libxybrid_bolt.so must link libc++ statically, keep that runtime
-private, and the package must ship no libc++_shared.so. Each ABI directory
-(arm64-v8a, armeabi-v7a, x86_64) is checked from `readelf -W` text; GNU
-readelf and llvm-readelf both read every ELF architecture and both formats
-parse here. Every failure is reported, not just the first.
+private, and the package must ship no libc++_shared.so. It must also be linked
+for Android 9 (API 28): only the Kotlin AAR's arm64 slice requires Android 10.
+Each ABI directory (arm64-v8a, armeabi-v7a, x86_64) is checked from
+`readelf -W` text; GNU readelf and llvm-readelf both read every ELF
+architecture and both formats parse here. Every failure is reported, not just
+the first.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+
+# The `.note.android.ident` parser the AAR and Flutter payload checks use too.
+# Loaded from beside this file, so it works however this script is started.
+_SPEC = importlib.util.spec_from_file_location(
+    "verify_android_api_level", Path(__file__).with_name("verify_android_api_level.py"))
+_API_LEVEL = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_API_LEVEL)
+parse_api_levels = _API_LEVEL.parse_api_levels
 
 DEFAULT_ROOT = Path("bindings/unity/Runtime/Plugins/Android")
 BOLT = "libxybrid_bolt.so"
@@ -38,6 +49,11 @@ ABI_MACHINES: dict[str, tuple[str, ...]] = {
 SYSTEM_LIBS = frozenset(
     {"libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so", "libz.so"}
 )
+
+# The API level libxybrid_bolt.so must be linked for: @androidndk's (MODULE.bazel),
+# which --config=android-* builds use. Unity's Android floor stays Android 9;
+# a library linked for Android 10 can fail to load below it (native ELF TLS).
+ANDROID_API = 28
 
 # Android 15+ 16 KB-page devices refuse to map a LOAD segment aligned below
 # this; the cdylib links with -z max-page-size=16384 on every Android ABI.
@@ -167,7 +183,7 @@ def check_abi(abi: str, elves: Mapping[str, str | None]) -> tuple[list[str], str
     """Check one ABI directory.
 
     `elves` maps each .so file name in the directory to its readelf text
-    (`-W -h -d -l`, plus `--dyn-syms` for libxybrid_bolt.so), or None when
+    (`-W -h -d -l`, plus `-n --dyn-syms` for libxybrid_bolt.so), or None when
     readelf could not read it (already reported by the caller). Returns the
     failures and, when there are none, a one-line summary.
     """
@@ -186,6 +202,7 @@ def check_abi(abi: str, elves: Mapping[str, str | None]) -> tuple[list[str], str
     allowed_needed = (SYSTEM_LIBS | shipped) - {CXX_SHARED}
     bolt_needed: list[str] = []
     min_align = None
+    bolt_api = None
     for name in sorted(shipped):
         text = elves[name]
         if text is None:
@@ -233,6 +250,21 @@ def check_abi(abi: str, elves: Mapping[str, str | None]) -> tuple[list[str], str
                 "statically; link only libc++ statically"
             )
 
+        levels = parse_api_levels(text)
+        if not levels:
+            failures.append(
+                f"{where}: no .note.android.ident note in readelf output; cannot "
+                "tell which Android API level it was linked for"
+            )
+        elif set(levels) != {ANDROID_API}:
+            found = ", ".join(str(level) for level in sorted(set(levels)))
+            failures.append(
+                f"{where}: linked for Android API {found}, expected {ANDROID_API}; "
+                "the Unity plugin must keep loading on Android 9"
+            )
+        else:
+            bolt_api = ANDROID_API
+
         symbols = parse_symbols(text)
         if not symbols:
             failures.append(f"{where}: no dynamic symbols in readelf output")
@@ -256,7 +288,7 @@ def check_abi(abi: str, elves: Mapping[str, str | None]) -> tuple[list[str], str
     summary = (
         f"{abi}: OK - ships {', '.join(sorted(shipped))}; {BOLT} NEEDs "
         f"{', '.join(bolt_needed) or 'nothing'}, no C++ runtime imports or "
-        f"exports, LOAD align {min_align:#x}"
+        f"exports, LOAD align {min_align:#x}, Android API {bolt_api}"
     )
     return failures, summary
 
@@ -264,7 +296,7 @@ def check_abi(abi: str, elves: Mapping[str, str | None]) -> tuple[list[str], str
 def readelf_text(readelf: str, path: Path) -> str:
     flags = ["-W", "-h", "-d", "-l"]
     if path.name == BOLT:
-        flags += ["--dyn-syms"]
+        flags += ["-n", "--dyn-syms"]
     return subprocess.run(
         [readelf, *flags, str(path)], capture_output=True, text=True, check=True
     ).stdout

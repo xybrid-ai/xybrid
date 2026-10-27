@@ -16,8 +16,9 @@ dependencies {
 }
 ```
 
-The SDK requires Android 10 (API 29): set `minSdk = 29` or higher in your
-app's `defaultConfig`, or the build fails at the manifest merge.
+Releases after 0.15.0 require Android 10 (API 29): set `minSdk = 29` or higher
+in your app's `defaultConfig`, or the build fails at the manifest merge.
+0.15.0 and earlier require API 24.
 
 ### Local Development
 
@@ -299,10 +300,11 @@ cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 **Manual Build (without cargo-ndk)**
 
 ```bash
-# Set up linker for each target (API 21+)
-export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android21-clang"
-export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi21-clang"
-export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android21-clang"
+# Set up a linker for each target, at the AAR's API levels: arm64-v8a is
+# built for Android 10 (API 29), the other ABIs for API 28
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android29-clang"
+export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi28-clang"
+export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android28-clang"
 
 # Build each target
 cargo build -p xybrid-bolt --lib --release --target aarch64-linux-android
@@ -343,7 +345,7 @@ bindings/kotlin/libs/
 
 ### Troubleshooting
 
-#### "error: linker 'aarch64-linux-android21-clang' not found"
+#### "error: linker 'aarch64-linux-android29-clang' not found"
 
 **Cause**: NDK not found or `ANDROID_NDK_HOME` not set.
 
@@ -372,7 +374,8 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
 
 **Cause**: Wrong NDK version or missing system libraries.
 
-**Fix**: Use NDK r26+ and ensure API level 21+ is targeted.
+**Fix**: Use NDK r26+ and the linkers above: API 29 for arm64-v8a, API 28
+for armeabi-v7a and x86_64.
 
 #### ".so file not loading in Android app"
 
@@ -402,9 +405,10 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
 
 ## Supported Android Versions
 
-| Android API | Version Name |
-|-------------|--------------|
-| API 29+ | Android 10 |
+| Android API | Version Name | SDK releases |
+|-------------|--------------|--------------|
+| API 29+ | Android 10 | after 0.15.0 |
+| API 24+ | Android 7.0 (Nougat) | 0.15.0 and earlier |
 
 ## NDK ABIs
 

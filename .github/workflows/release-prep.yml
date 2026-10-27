@@ -742,7 +742,9 @@ jobs:
 
       # The payload gate (the cutover ritual): right ELF machine per ABI,
       # vision aboard, android .so carry the c++_shared DT_NEEDED + 16KB
-      # page alignment, linux keeps the hermetic glibc floor.
+      # page alignment and stay linked for Android 9 (API 28; only the Kotlin
+      # AAR's arm64 slice requires Android 10), linux keeps the hermetic glibc
+      # floor.
       - name: Verify Flutter payloads
         run: |
           set -euo pipefail
@@ -762,6 +764,8 @@ jobs:
             readelf -d "$so" | grep -q 'NEEDED.*libc++_shared' || { echo "$triple: MISSING libc++_shared DT_NEEDED"; exit 1; }
             readelf -lW "$so" | grep -Eq 'LOAD.*0x4000$' || { echo "$triple: MISSING 16KB page alignment"; exit 1; }
           done
+          python3 tools/scripts/verify_android_api_level.py --api 28 \
+            prebuilt/{aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android}/libxybrid_flutter_ffi.so
           MAX_GLIBC=$(strings prebuilt/x86_64-unknown-linux-gnu/libxybrid_flutter_ffi.so | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -1)
           echo "linux glibc floor: $MAX_GLIBC"
           [ "$(printf '%s\n' "$MAX_GLIBC" GLIBC_2.31 | sort -V | tail -1)" = "GLIBC_2.31" ] || { echo "glibc floor regressed above 2.31: $MAX_GLIBC"; exit 1; }
