@@ -143,6 +143,29 @@ the AAR's arm64 libraries and 28 for its other slices, and
 `verify_unity_android_natives.py` and release-prep's Flutter payload check
 require 28.
 
+**Speech ships only in the AAR's arm64 slice.** The Kotlin AAR (so Kotlin and
+React Native) is the only standard binary built with `--//:tts_zzz=true`: its
+arm64-v8a `libxybrid_bolt.so` links the private zzz engine (Phonon, Kitten TTS
+2) statically, and armeabi-v7a / x86_64 build without it through
+`//bazel/zzz:android_without_slice`. Every crate that forwards `tts-zzz`
+(xybrid-core's features and zzz-sys dep, xybrid-sdk, both xybrid-bolt
+libraries, integration-tests' `tts_abort`) uses the identical select
+`{"//bazel/zzz:android_without_slice": [], "//:tts_zzz_enabled": [...],
+"//conditions:default": []}`. A mismatch still compiles and misroutes speech at
+runtime; `tools/scripts/tests/test_zzz_feature_wiring.py` and bazel.yml's
+speech guard catch it. A new Android ABI either gets a pinned slice or joins
+that group, or every flag-on AAR build fails as incompatible. The flag is
+`scope = "target"` so build tools in the exec configuration never resolve the
+build host's slice; keep it. The engine's fourteen notices ride in the AAR at
+`assets/xybrid/zzz/<path>` (`//bazel/zzz:notices.bzl`) and are never committed.
+release-prep's Build Android job takes the engine secrets from the
+`zzz-release` environment (release/v* only) and fails without them;
+`zzz-engine` stays master-only for test-zzz-engine.yml, trusted-zzz-sdk.yml and
+the test-zzz-android.yml proof lane. `tools/scripts/verify_zzz_android.py`
+gates the AAR, the `xybrid-android-<tag>.zip` and the Gradle-built AAR (speech
+in arm64-v8a only, the fourteen notices byte-exact, minSdk 29) in release-prep
+and again in release-publish before Maven Central.
+
 
 ### Prebuilt llama.cpp natives (the cargo fast path)
 

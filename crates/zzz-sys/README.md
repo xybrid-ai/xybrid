@@ -60,8 +60,9 @@ manifest entry must pin the exact schema-5 `notice_files` map; the receipt map
 and every notice's bytes must match it before staging. Changing notice bytes
 requires a new receipt schema. All six current archives were independently
 compared with their published counterparts and inspected, staged and reverified
-through the packaged helper. Pin adoption does not enable speech in standard
-SDK binaries or qualify installed SDK applications.
+through the packaged helper. Pin adoption alone does not enable speech in
+standard SDK binaries or qualify installed SDK applications. Only the Android
+SDK's arm64-v8a library opts in; see [Android SDK](#android-sdk).
 
 ### Additional static platforms
 
@@ -92,13 +93,42 @@ verification, and any attempted new target row (including a malformed or
 duplicate pin) takes the verifier path. A selected target cannot silently omit
 the engine.
 
-Native SDK Cargo/Bazel linking and installed SDK runtime qualification remain
-required. Pin adoption does not change defaults, activate standard binaries,
-or qualify minimum iOS/glibc execution. Offline tests use synthetic archives
-and notices; actual published archive staging was verified separately.
+Outside the Android SDK's arm64-v8a library, native SDK Cargo/Bazel linking
+and installed SDK runtime qualification remain required. Pin adoption does not
+change defaults, activate standard binaries, or qualify minimum iOS/glibc
+execution. Offline tests use synthetic archives and notices; actual published
+archive staging was verified separately.
 
 `PhononSettings::default()` reads the linked engine's defaults. Temperature `0`
 selects the GGUF's default; a positive finite value overrides it. Seed `0` is
 valid. Omitting the voice lets the engine select a bundled voice; this surface
 does not load external voice files or clone voices. Keep mapped model files
 unchanged until all session/cancellation handles are gone.
+
+## Android SDK
+
+The Android SDK (the `ai.xybrid:xybrid-kotlin` AAR, which React Native also
+uses) is the only standard SDK binary that links the engine. Its release build
+passes `--//:tts_zzz=true` and stages only the pinned `aarch64-linux-android`
+slice, which is linked statically into the AAR's arm64-v8a
+`libxybrid_bolt.so` (Android 10, API 29, the AAR's floor). Swift, Flutter,
+Unity, Python and the CLI still ship without it.
+
+- armeabi-v7a and x86_64 have no pinned slice. Under the flag they build
+  without speech through `//bazel/zzz:android_without_slice`, so one flag-on
+  AAR build covers every ABI. Every crate that forwards `tts-zzz` uses the same
+  select with that group first; `tools/scripts/tests/test_zzz_feature_wiring.py`
+  checks this per platform. Any other target without a slice (Windows, macOS
+  x86_64, Linux musl, x86 Android) still fails as incompatible when the flag is
+  set.
+- The flag is target-scoped (`scope = "target"`), so build tools in the exec
+  configuration never select the engine. A Bazel build therefore resolves only
+  its target platform's slice, not the build host's.
+- A custom flag-on `--config=android-arm64` build (the Flutter library or the
+  Unity plugin) links the same slice, but with the API-28 toolchain those
+  libraries use. The engine still needs Android 10, so such a build must not
+  claim a lower floor.
+- The fourteen notices travel in the AAR at `assets/xybrid/zzz/<path>`
+  (`//bazel/zzz:notices.bzl`). Analysis fails unless the verified slice
+  exports exactly those files. Android merges library assets into the APK, so
+  every app that ships the SDK carries them.

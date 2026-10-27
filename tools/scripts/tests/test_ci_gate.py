@@ -40,6 +40,22 @@ class ChangeSelectionTests(unittest.TestCase):
         self.assertEqual(classify("push", {"files": pr_files("README.md")[0]})["full_ci"], "false")
         self.assertEqual(classify("push", {"files": pr_files("Cargo.lock")[0]})["full_ci"], "true")
 
+    def test_zzz_contract_and_gated_workflows_run_tooling_tests(self):
+        for path in (
+            "crates/zzz-sys/zzz_pull.py", "crates/zzz-sys/natives-manifest.json",
+            ".github/workflows/release-prep.yml", ".github/workflows/release-publish.yml",
+            ".github/workflows/test-zzz-android.yml", ".github/workflows/test-zzz-engine.yml",
+            ".github/workflows/trusted-zzz-sdk.yml",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "true")
+        for path in (
+            "crates/zzz-sys/src/lib.rs", "crates/zzz-sys/zzz_pull.py.orig",
+            ".github/workflows/build-android.yml", ".github/workflows/release-prep.yml.bak",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
+
     def test_workflow_changes_run_every_optional_gate(self):
         outputs = classify("pull_request", pr_files(".github/workflows/ci.yml"))
         self.assertTrue(all(value == "true" for value in outputs.values()))

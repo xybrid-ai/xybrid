@@ -69,7 +69,12 @@ rust_shared_library(
         "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": "static",
         "//conditions:default": "dynamic",
     }),
-    crate_features = ["default"] + select({"//:tts_zzz_enabled": ["tts-zzz"], "//conditions:default": []}),
+    crate_features = ["default"] + select({
+        # Speech: identical at every tts-zzz forwarder (bazel/zzz/BUILD.bazel).
+        "//bazel/zzz:android_without_slice": [],
+        "//:tts_zzz_enabled": ["tts-zzz"],
+        "//conditions:default": [],
+    }),
     rustc_env = _BOLTFFI_EXPANSION_ENV,
     rustc_flags = _BOLTFFI_EXPANSION_FLAGS + select({
         "@platforms//os:android": [
@@ -138,7 +143,12 @@ rust_static_library(
     srcs = glob(["src/**/*.rs"]),
     crate_name = "xybrid_bolt",
     edition = "2021",
-    crate_features = ["default"] + select({"//:tts_zzz_enabled": ["tts-zzz"], "//conditions:default": []}),
+    crate_features = ["default"] + select({
+        # Speech: identical at every tts-zzz forwarder (bazel/zzz/BUILD.bazel).
+        "//bazel/zzz:android_without_slice": [],
+        "//:tts_zzz_enabled": ["tts-zzz"],
+        "//conditions:default": [],
+    }),
     rustc_env = _BOLTFFI_EXPANSION_ENV,
     rustc_flags = _BOLTFFI_EXPANSION_FLAGS,
     deps = all_crate_deps(normal = True),

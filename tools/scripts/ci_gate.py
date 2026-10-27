@@ -9,7 +9,9 @@ from pathlib import Path
 
 
 PATH_FILTERS = {
-    "relevant": r"^(tools/scripts/|\.github/workflows/ci\.yml$)",
+    # tools/scripts/tests also covers the zzz delivery contract and the
+    # workflows its hygiene tests read.
+    "relevant": r"^(tools/scripts/|crates/zzz-sys/(zzz_pull\.py|natives-manifest\.json)$|\.github/workflows/(ci|release-prep|release-publish|test-zzz-android|test-zzz-engine|trusted-zzz-sdk)\.yml$)",
     "unity_bolt": r"^(bindings/unity/Runtime/(Bolt/|BoltSupplement/|Api/)|tools/unity-bolt-compile-check/|tools/scripts/gen_unity_bolt_csharp\.py$|crates/xybrid-bolt/boltffi\.toml$|\.github/workflows/ci\.yml$)",
     "python_sdk": r"^(bindings/python/|tools/scripts/(gen_python_bolt\.py|build-python-bolt\.sh)$|crates/xybrid-bolt/|\.github/workflows/ci\.yml$)",
     "kotlin_jni": r"^(bindings/kotlin/|tools/scripts/gen_kotlin_bolt\.py$|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)",

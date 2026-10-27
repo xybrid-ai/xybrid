@@ -239,10 +239,38 @@ try {
 
 ---
 
+## Speech (Phonon / Kitten TTS 2)
+
+The arm64-v8a library links the zzz speech engine, so arm64 devices run Phonon
+and Kitten TTS 2 on-device. The armeabi-v7a and x86_64 libraries (including the
+emulator's) are built without it: there the registry does not serve
+`phonon-31m-en` and a Kitten bundle fails to run. Keep the arm64-v8a ABI in
+any `abiFilters` or App Bundle split.
+
+```kotlin
+// Phonon from the registry: 24 kHz mono PCM16 little-endian audio.
+val phonon = Xybrid.model("phonon-31m-en").load()
+val pcm = phonon.runAsync(Envelope.text("Hello from Phonon.", voiceId = "easton")).audioBytes
+
+// Kitten TTS 2 from a local directory with a ZzzEmbed model_metadata.json.
+val kitten = Xybrid.model(ModelSource.directory(kittenDir.path)).load()
+val speech = kitten.runAsync(Envelope.text("Hello from Kitten."))
+```
+
+The engine's runtime terms and upstream licenses ship in the AAR under
+`assets/xybrid/zzz/`. Android merges them into your APK, so every app that
+ships the SDK carries them; do not exclude them from packaging. See
+[Phonon speech](https://github.com/xybrid-ai/xybrid/blob/master/docs/sdk/PHONON.md)
+for voices and options, and the
+[Kotlin README](https://github.com/xybrid-ai/xybrid/blob/master/bindings/kotlin/README.md#speech-phonon--kitten-tts-2)
+for the Kitten bundle and streaming playback.
+
+---
+
 ## Platform Support
 
 | Architecture | Status |
 |-------------|--------|
-| arm64-v8a | Supported |
-| armeabi-v7a | Supported |
-| x86_64 | Supported (emulator) |
+| arm64-v8a | Supported, with Phonon / Kitten TTS 2 speech |
+| armeabi-v7a | Supported, without speech |
+| x86_64 | Supported (emulator), without speech |

@@ -43,3 +43,41 @@ selects.config_setting_group(
     match_any = [":macos_enabled", ":linux_enabled", ":android_enabled", ":ios_enabled", ":ios_sim_enabled", ":linux_arm64_enabled"],
     visibility = ["//visibility:public"],
 )
+
+# Android ABIs the Kotlin AAR ships without an engine slice. Under
+# --//:tts_zzz=true they build WITHOUT speech instead of failing, so one
+# flag-on AAR build links the engine into arm64-v8a (:android_enabled) only.
+# Every select that forwards tts-zzz (xybrid-core features and zzz-sys dep,
+# xybrid-sdk, both xybrid-bolt libraries, integration-tests' tts_abort) uses
+# the identical form, with this group ahead of //:tts_zzz_enabled:
+#
+#   {"//bazel/zzz:android_without_slice": [],
+#    "//:tts_zzz_enabled": [...],
+#    "//conditions:default": []}
+#
+# tools/scripts/tests/test_zzz_feature_wiring.py enforces that per platform. A
+# new Android ABI either gets a pinned slice or joins this group; any other
+# platform without a slice keeps failing as incompatible (crates/zzz-sys).
+#
+# Each member is a plain config_setting carrying BOTH the platform constraints
+# and the flag, so it refines //:tts_zzz_enabled and wins that select without
+# ambiguity. Do not express a member as a match_all group: skylib resolves an
+# AND group to its last member, which would not refine the flag-only setting.
+# Declared after :supported_enabled, which test_zzz_platforms.py reads first.
+config_setting(
+    name = "android_armv7_without_slice",
+    constraint_values = ["@platforms//os:android", "@platforms//cpu:armv7"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+config_setting(
+    name = "android_x86_64_without_slice",
+    constraint_values = ["@platforms//os:android", "@platforms//cpu:x86_64"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+selects.config_setting_group(
+    name = "android_without_slice",
+    match_any = [":android_armv7_without_slice", ":android_x86_64_without_slice"],
+    visibility = ["//visibility:public"],
+)

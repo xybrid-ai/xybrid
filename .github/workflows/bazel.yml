@@ -152,6 +152,75 @@ jobs:
           bazelisk build --nobuild \
             //crates/... //bindings/... //macros/... //xtask/... //integration-tests/... //:llama
 
+      # Speech (--//:tts_zzz=true) ships in the Kotlin AAR's arm64-v8a slice
+      # only; see AGENTS.md. Analysis only, with no secrets and no staged engine
+      # slice, so fork PRs run it too. The offline wiring tests come first:
+      # ci.yml runs them only when tools/scripts/ changes, and a BUILD-only
+      # edit that desynchronises the per-crate selects compiles fine.
+      #  (a) armeabi-v7a and x86_64 have no path to zzz-sys under the flag. The
+      #      same query on the windows cdylib must find one, so (a) cannot pass
+      #      vacuously.
+      #  (b) the arm64 slice selects the engine: without a staged slice its
+      #      analysis must fail with repositories.bzl's staging message, never
+      #      drop speech silently. The whole AAR fails the same way.
+      #  (c) an explicitly requested unsupported desktop target still fails as
+      #      incompatible, through zzz-sys.
+      # cquery, not query (see the ggml step below), and somepath to the exact
+      # zzz-sys label: filter("zzz", ...) would also match the //:tts_zzz flag
+      # and the //bazel/zzz settings.
+      - name: Speech reaches only the AAR's arm64 slice (analysis only)
+        run: |
+          set -euo pipefail
+          python3 -m unittest tools/scripts/tests/test_zzz_feature_wiring.py \
+            tools/scripts/tests/test_zzz_aar_notices.py
+          zzz_sys_path() { # <top-level target> [bazel flags...]
+            local target=$1; shift
+            bazelisk cquery --//:tts_zzz=true "$@" --output=label \
+              "somepath($target, filter('^//crates/zzz-sys:xybrid_zzz_sys\$', deps($target)))"
+          }
+          expect_failure() { # <message> <expected text>... -- <bazel build args>
+            local message=$1; shift
+            local patterns=()
+            while [ "$1" != "--" ]; do patterns+=("$1"); shift; done
+            shift
+            local out
+            if out=$(bazelisk build --nobuild --//:tts_zzz=true "$@" 2>&1); then
+              echo "::error::$message: analysis succeeded"
+              exit 1
+            fi
+            for pattern in "${patterns[@]}"; do
+              grep -qF -- "$pattern" <<<"$out" || {
+                echo "$out" | tail -n 30
+                echo "::error::$message: expected '$pattern'"
+                exit 1
+              }
+            done
+          }
+          # (a)
+          for abi in armeabi-v7a x86_64; do
+            path=$(zzz_sys_path "//bindings/kotlin:bolt_so_$abi")
+            if [ -n "$path" ]; then
+              echo "::error::The $abi slice reaches zzz-sys under --//:tts_zzz=true:"
+              echo "$path"
+              exit 1
+            fi
+          done
+          # (b)
+          expect_failure "The arm64 slice must select the engine" \
+            "Stage the pinned slice" "zzz_android//:zzz" -- //bindings/kotlin:bolt_so_arm64-v8a
+          expect_failure "The AAR must require the staged slice" \
+            "Stage the pinned slice" -- //bindings/kotlin:xybrid_kotlin_aar
+          # (a)'s positive control, then (c)
+          path=$(zzz_sys_path //crates/xybrid-bolt:xybrid_bolt_cdylib --config=windows)
+          grep -q '^//crates/zzz-sys:xybrid_zzz_sys ' <<<"$path" || {
+            echo "::error::Positive control: the windows cdylib should reach zzz-sys under the flag"
+            exit 1
+          }
+          expect_failure "An unsupported desktop target must be incompatible" \
+            "is incompatible and cannot be built" "//crates/zzz-sys:xybrid_zzz_sys" -- \
+            --config=windows //crates/xybrid-bolt:xybrid_bolt_cdylib
+          echo "Speech graph: arm64-v8a only, loud elsewhere ✅"
+
       # Every first-party Rust target must stamp the workspace version: without
       # `version = XYBRID_VERSION`, rules_rust sets CARGO_PKG_VERSION to its
       # "0.0.0" default and that artifact reports it (//bazel:cargo_version.bzl).

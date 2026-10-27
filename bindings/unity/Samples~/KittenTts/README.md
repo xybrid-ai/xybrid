@@ -58,12 +58,14 @@ python3 tools/scripts/stage_unity_native.py \
 For Linux use target `x86_64-unknown-linux-gnu`, its corresponding archive,
 remove `--config=macos`, and stage `libxybrid_bolt.so`. If Python 3.11 is not the
 host `python3`, pass `--repo_env=XYBRID_ZZZ_PYTHON=/usr/bin/python3.11`.
-When cross-building from Linux, Bazel can resolve both host and target slices.
-Point the repo environment variable at a private directory containing verified
-slice directories named `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin` (and
-`aarch64-linux-android` if resolved). Copy verified directories with private
-permissions; symlinks inside staged slices are rejected. This is a grouping
-root for Bazel; Cargo still takes one exact verified slice.
+A Bazel build resolves only its target platform's slice, also when
+cross-building from Linux: build tools never link the engine. To build several
+targets with one setting, point the repo environment variable at a private
+directory containing verified slice directories named by target, such as
+`x86_64-unknown-linux-gnu` and `aarch64-apple-darwin`. Copy verified
+directories with private permissions; symlinks inside staged slices are
+rejected. This is a grouping root for Bazel; Cargo still takes one exact
+verified slice.
 
 Linux also needs the pinned ORT library for the existing Kokoro route:
 

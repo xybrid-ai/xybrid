@@ -421,7 +421,12 @@ jobs:
   # The .so files come from the just-published GitHub Release asset (the
   # current release.yml grabs them via actions/download-artifact within a
   # single workflow run; in the new flow they live as release assets, so
-  # we download them with gh).
+  # we download them with gh). That zip carries Phonon/Kitten TTS 2 speech in
+  # arm64-v8a and the engine's notices under assets/xybrid/zzz/; release-prep
+  # gated it. This job gates it again, stages the ABI .so files into libs/
+  # and the notices into src/main/assets/xybrid/zzz/ (never committed), and
+  # gates the Gradle-built AAR before anything reaches Maven Central. It needs
+  # no engine credentials: everything it handles is already a release asset.
   # =========================================================================
   publish-kotlin:
     name: Publish Kotlin SDK
@@ -457,12 +462,42 @@ jobs:
           gh release download "$TAG" \
             --pattern "xybrid-android-*.zip" \
             --dir artifacts
+          shopt -s nullglob
+          zips=(artifacts/xybrid-android-*.zip)
+          if [ "${#zips[@]}" != 1 ] || [ "${zips[0]}" != "artifacts/xybrid-android-${TAG}.zip" ]; then
+            echo "::error::Expected exactly one release asset, xybrid-android-${TAG}.zip; found ${#zips[@]}."
+            exit 1
+          fi
 
-      - name: Extract .so files into Kotlin libs/
+      # verify_zzz_android.py ships with the tag: a recovery dispatch for a
+      # tag cut before the speech gate has none, and that tag's zip has no
+      # speech payload to stage, so it stops here rather than publish blind.
+      # GNU readelf is preinstalled on ubuntu-latest.
+      - name: Gate the release zip and stage it for Gradle
+        env:
+          TAG: ${{ needs.publish-release.outputs.tag }}
         run: |
-          mkdir -p bindings/kotlin/libs
-          cd bindings/kotlin/libs
-          unzip -o ${{ github.workspace }}/artifacts/xybrid-android-*.zip
+          set -euo pipefail
+          if [ ! -f tools/scripts/verify_zzz_android.py ]; then
+            echo "::error::${TAG} predates the Android speech gate (tools/scripts/verify_zzz_android.py); publish it from the workflow revision that cut it."
+            exit 1
+          fi
+          command -v readelf >/dev/null
+          zip="artifacts/xybrid-android-${TAG}.zip"
+          python3 tools/scripts/verify_zzz_android.py dist "$zip" --readelf readelf
+          python3 tools/scripts/verify_zzz_android.py stage-gradle "$zip" --kotlin-dir bindings/kotlin
+
+      - name: Build the release AAR
+        working-directory: bindings/kotlin
+        run: ./gradlew bundleReleaseAar --console=plain
+
+      # The exact AAR the publish task below uploads (bundleReleaseAar is then
+      # up to date): speech in arm64-v8a only, notices, minSdk 29.
+      - name: Gate the Gradle-built AAR
+        run: |
+          python3 tools/scripts/verify_zzz_android.py aar \
+            bindings/kotlin/build/outputs/aar/xybrid-kotlin-release.aar \
+            --readelf readelf --speech --min-sdk 29
 
       - name: Publish to Maven Central
         working-directory: bindings/kotlin

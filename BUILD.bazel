@@ -11,7 +11,14 @@ load("@rules_python//python:py_binary.bzl", "py_binary")
 load("//bazel/ggml:android.bzl", "ANDROID_ARM64_CPU_VARIANTS", "ANDROID_ARM64_GGML_LIBS")
 
 # Kitten is opt-in and consumes a privately staged, verified static archive.
-bool_flag(name = "tts_zzz", build_setting_default = False, visibility = ["//visibility:public"])
+#
+# scope = "target": the exec configuration resets the flag. rules_rust's
+# wrappers configure every Rust dep a second time in exec (proc_macro_deps),
+# so with the default "universal" scope a flag-on Android AAR build also
+# resolved xybrid-core's engine dep for the Linux build host and required the
+# host's private slice (@zzz_linux) besides @zzz_android. No build tool links
+# the engine, so exec builds never need it.
+bool_flag(name = "tts_zzz", build_setting_default = False, scope = "target", visibility = ["//visibility:public"])
 config_setting(
     name = "tts_zzz_enabled", flag_values = {":tts_zzz": "true"},
     visibility = ["//visibility:public"],

@@ -63,6 +63,7 @@ Workspace validation, pull-request gates and backend test suites.
 | [`test-policy-routing.yml`](test-policy-routing.yml) | CI: Policy routing | push to `master`, pull_request to `master`, workflow_dispatch | none | Drive the xybrid binary through a policy-routed hybrid stage: local GGUF leg, fake DeepSeek cloud leg. |
 | [`test-whispercpp.yml`](test-whispercpp.yml) | CI: whisper.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Exercise whisper.cpp with real multilingual weights: translation, per-request language, long windows, non-speech suppression. |
 | [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master` | none | Rust format, lint, tests and feature matrix, plus binding drift, API contract, Python and Web SDK checks. Gates merges. |
+| [`test-zzz-android.yml`](test-zzz-android.yml) | CI: zzz Android AAR | push to `master`, workflow_dispatch | none | Build the arm64-v8a speech AAR on master with the pinned engine, gate it and its Gradle repackaging, then dlopen its x86_64 slice on an emulator. |
 | [`test-zzz-engine.yml`](test-zzz-engine.yml) | CI: zzz engine | push to `master`, workflow_dispatch | none | Fetch and verify the pinned Phonon/Kitten-only engine slices and link them into Rust tests on each pinned target. |
 
 ### SDK
@@ -174,6 +175,15 @@ Both need `RELEASE_PAT`; without it the job summary prints the
 `gh workflow run` command. `release-notify.yml` announces on the
 `release: published` event. The full flow is in [AGENTS.md](../../AGENTS.md),
 Releases.
+
+**Android speech.** The Kotlin AAR links the private Phonon/Kitten TTS 2 engine
+into its arm64-v8a slice. `release-prep.yml`'s Build Android job binds the
+`zzz-release` environment (release/v* branches only) to stage the engine, and
+fails without it; `tools/scripts/verify_zzz_android.py` gates the AAR and the
+`xybrid-android-<tag>.zip` there and again in `release-publish.yml` before
+Maven Central. `test-zzz-android.yml` proves the same build, gates and Gradle
+packaging on `master` with the master-only `zzz-engine` environment, which
+`test-zzz-engine.yml` and `trusted-zzz-sdk.yml` also use.
 
 **Manual only.** `test-ci.yml` precompiles the Flutter binaries per platform and
 uploads them to GitHub Releases (`contents: write`), and dry-runs the Kotlin

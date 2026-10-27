@@ -1,9 +1,13 @@
 # Phonon speech
 
 Phonon runs locally through the optional `tts-zzz` backend on macOS ARM64,
-Linux x86-64-v3 and Android ARM64. Standard prebuilt SDK artifacts do not
-enable this feature; build a custom native SDK with the verified combined
-engine archive described in [zzz-sys](../../crates/zzz-sys/README.md).
+Linux x86-64-v3 and Android ARM64. Of the standard prebuilt SDK artifacts,
+only the Android SDK enables it: the arm64-v8a library of
+`ai.xybrid:xybrid-kotlin` (which React Native also uses) links the engine,
+and its armeabi-v7a and x86_64 libraries do not (see the
+[Kotlin README](../../bindings/kotlin/README.md#speech-phonon--kitten-tts-2)).
+Elsewhere, build a custom native SDK with the verified engine archive
+described in [zzz-sys](../../crates/zzz-sys/README.md).
 The engine has platform minimums of macOS 13, glibc 2.28 and Android API 29;
 the final linked SDK can require a newer OS. Linux consumers need an
 x86-64-v3 CPU. This backend does not support Windows, iOS or Metal.
@@ -41,7 +45,8 @@ tokenizer and voices.
 - **From the xybrid registry**, once it is registered there, as model id
   `phonon-31m-en`. The registry serves it on the three platforms above, and
   only to builds that advertise `zzz-phonon-31m`; any other build gets a
-  not-found error.
+  not-found error. The Android SDK advertises it from its arm64-v8a library
+  only.
 
   ```rust,ignore
   let model = ModelLoader::from_registry("phonon-31m-en").load()?;

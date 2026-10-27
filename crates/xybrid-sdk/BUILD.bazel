@@ -70,7 +70,12 @@ rust_library(
     version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
-    crate_features = select({"//:tts_zzz_enabled": ["tts-zzz"], "//conditions:default": []}) + [
+    crate_features = select({
+        # Speech: identical at every tts-zzz forwarder (bazel/zzz/BUILD.bazel).
+        "//bazel/zzz:android_without_slice": [],
+        "//:tts_zzz_enabled": ["tts-zzz"],
+        "//conditions:default": [],
+    }) + [
         "default",
         "llm-llamacpp",
     ] + select({

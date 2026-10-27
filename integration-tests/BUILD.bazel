@@ -191,7 +191,12 @@ rust_test(
     name = "tts_abort",
     version = XYBRID_VERSION,
     srcs = ["tests/tts_abort.rs"],
-    crate_features = select({"//:tts_zzz_enabled": ["tts-zzz"], "//conditions:default": []}),
+    crate_features = select({
+        # Speech: identical at every tts-zzz forwarder (bazel/zzz/BUILD.bazel).
+        "//bazel/zzz:android_without_slice": [],
+        "//:tts_zzz_enabled": ["tts-zzz"],
+        "//conditions:default": [],
+    }),
     data = [":model_metadata_fixtures"],
     edition = "2021",
     deps = [

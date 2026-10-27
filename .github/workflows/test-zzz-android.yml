@@ -1,0 +1,413 @@
+# Purpose: Build the arm64-v8a speech AAR on master with the pinned engine, gate it and its Gradle repackaging, then dlopen its x86_64 slice on an emulator.
+name: "CI: zzz Android AAR"
+
+# The release ships Phonon/Kitten TTS 2 speech in the Kotlin AAR's arm64-v8a
+# slice: release-prep.yml (build-android) builds the AAR with
+# --//:tts_zzz=true and gates it, and release-publish.yml (publish-kotlin)
+# repackages it through Gradle for Maven Central. This lane runs both paths
+# on master, before a release depends on them:
+#
+#   1. Bazel builds the default AAR and the speech AAR (RBE), and
+#      tools/scripts/verify_zzz_android.py gates both: no speech anywhere in
+#      the default one; speech linked into arm64-v8a only, the 14 notices and
+#      the per-ABI API levels in the speech one.
+#   2. The engine against the public libraries linked beside it: no symbol
+#      both defined in the engine archive and exported by libggml*/libllama/
+#      libmtmd/libc++_shared/libonnxruntime (symbol-overlap), and every
+#      shared llama.cpp import of the default arm64 libxybrid_bolt.so still
+#      imported by the speech build (compare-imports).
+#   3. armeabi-v7a and x86_64 libxybrid_bolt.so compared between the two
+#      AARs. Advisory (a warning): the selects promise identical slices, but
+#      byte identity across two Bazel configurations is not yet calibrated.
+#   4. Release packaging replayed: pack-dist -> dist -> stage-gradle ->
+#      ./gradlew bundleReleaseAar -> aar --speech on the Gradle-built AAR.
+#   5. A second job with no environment and only engine-free inputs dlopens
+#      the speech build's x86_64 slice on an API-35 emulator and runs the
+#      consumer smoke against the Gradle AAR minus its arm64-v8a and
+#      armeabi-v7a natives (build-android.yml's dlopen gate).
+#
+# This lane takes both engine secrets from the `zzz-engine` environment, which
+# admits refs/heads/master and nothing else (see test-zzz-engine.yml), and the
+# job also checks the ref; release-prep.yml's copies live in the separate,
+# release/v*-only `zzz-release` environment. Only the staging step receives
+# them. The staged inputs are deleted before packaging and never uploaded;
+# without the secrets (forks, unset) the lane prints a notice and skips. The
+# Gradle-built speech AAR is uploaded with retention-days: 1 for on-device
+# (arm64) testing, as trusted-zzz-sdk.yml uploads its engine-linked candidate.
+#
+# Narrow triggers on purpose: tools/scripts/llamacpp_update.py waits on every
+# check of the master commit before it cuts a release, and this lane takes a
+# full AAR build twice.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      # Root BUILD.bazel defines //:tts_zzz (target-scoped, so only the arm64
+      # slice is staged) and //:tts_zzz_enabled, which selects the notices.
+      - 'BUILD.bazel'
+      - 'crates/zzz-sys/**'
+      - 'bazel/zzz/**'
+      - 'bazel/toolchains/android/**'
+      - 'bazel/ggml/**'
+      - 'bindings/kotlin/BUILD.bazel'
+      - 'bindings/kotlin/bazel/**'
+      # The Gradle repackaging this lane replays (jniLibs + src/main/assets).
+      - 'bindings/kotlin/build.gradle.kts'
+      - 'crates/xybrid-bolt/BUILD.bazel'
+      - 'crates/xybrid-core/BUILD.bazel'
+      - 'crates/xybrid-sdk/BUILD.bazel'
+      - 'MODULE.bazel'
+      - 'rules_android_ndk.patch'
+      - 'tools/scripts/verify_zzz_android.py'
+      - '.github/workflows/test-zzz-android.yml'
+      # Markdown cannot affect this build.
+      - '!**.md'
+  workflow_dispatch:
+
+concurrency:
+  group: test-zzz-android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  # NDK r27, as build-android.yml: only for the dlopen probe, llvm-strip and
+  # llvm-readelf. Bazel downloads its own pinned NDK for the libraries.
+  NDK_VERSION: "27.0.12077973"
+
+jobs:
+  speech-aar:
+    name: Speech AAR (build, gate, Gradle packaging)
+    if: github.ref == 'refs/heads/master'
+    environment: zzz-engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # secrets cannot appear in `if:` expressions, so a presence flag rides
+    # the job env. The flag is a boolean, never the token: job env reaches
+    # every step, including Bazel and Gradle.
+    env:
+      ZZZ_CI_ENABLED: ${{ secrets.ZZZ_GITHUB_TOKEN != '' }}
+    outputs:
+      staged: ${{ steps.stage.outputs.staged }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true  # //:llama_src = vendor/llama-cpp
+          persist-credentials: false
+
+      # The only step that sees the engine credentials. It runs straight after
+      # checkout, before any toolchain, cache restore or Bazel step, with the
+      # runner image's gh and python3; -I keeps tools/scripts/ off sys.path.
+      # The slice moves into a private 0700 root as <root>/<target>, the layout
+      # release-prep.yml stages and bazel/zzz/repositories.bzl resolves.
+      - name: Stage the pinned speech engine (arm64-v8a)
+        if: env.ZZZ_CI_ENABLED == 'true'
+        id: stage
+        env:
+          ZZZ_GITHUB_TOKEN: ${{ secrets.ZZZ_GITHUB_TOKEN }}
+          ZZZ_RELEASE_REPOSITORY: ${{ secrets.ZZZ_RELEASE_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          inputs="$RUNNER_TEMP/zzz-inputs"
+          mkdir -m 0700 "$inputs"
+          for target in aarch64-linux-android; do
+            slice=$(python3 -I tools/scripts/zzz_pull.py --target "$target" \
+              --cache-dir "$RUNNER_TEMP/zzz-cache" --dest "$RUNNER_TEMP/zzz-staging")
+            mv -T -- "$slice" "$inputs/$target"
+          done
+          rm -rf "$RUNNER_TEMP/zzz-cache" "$RUNNER_TEMP/zzz-staging"
+          echo "staged=true" >> "$GITHUB_OUTPUT"
+
+      - name: Notice — secrets absent, lane skipped
+        if: env.ZZZ_CI_ENABLED != 'true'
+        run: |
+          echo "::notice title=zzz Android lane skipped::ZZZ_GITHUB_TOKEN/ZZZ_RELEASE_REPOSITORY not available on this run (secrets unset); the speech AAR was not built or gated."
+
+      - name: Verify the staged engine inputs
+        if: steps.stage.outputs.staged == 'true'
+        env:
+          XYBRID_ZZZ_PREBUILT_DIR: ${{ runner.temp }}/zzz-inputs/aarch64-linux-android
+        run: |
+          set -euo pipefail
+          test "$(stat -c %a "$RUNNER_TEMP/zzz-inputs")" = 700
+          python3 -I tools/scripts/zzz_pull.py --target aarch64-linux-android --verify-only > /dev/null
+
+      # Two AAR builds, Gradle and the NDK share the runner: reclaim what this
+      # job never touches (keeping /usr/local/lib/android, which it uses).
+      - name: Free disk space
+        if: steps.stage.outputs.staged == 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Cache Android NDK
+        if: steps.stage.outputs.staged == 'true'
+        id: cache-ndk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          key: android-ndk-${{ env.NDK_VERSION }}
+
+      - name: Setup Android SDK
+        if: steps.stage.outputs.staged == 'true'
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+
+      - name: Install NDK
+        if: steps.stage.outputs.staged == 'true' && steps.cache-ndk.outputs.cache-hit != 'true'
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Set NDK environment
+        if: steps.stage.outputs.staged == 'true'
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> "$GITHUB_ENV"
+
+      - name: Configure BuildBuddy remote config
+        if: steps.stage.outputs.staged == 'true'
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
+
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        if: steps.stage.outputs.staged == 'true'
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
+      # The same invocation as release-prep.yml's build-android, and the
+      # default one build-android.yml ships on every PR. bazel-bin follows the
+      # last build, so each AAR is resolved and copied right after its own.
+      - name: Build the default and the speech AAR (Bazel on RBE)
+        if: steps.stage.outputs.staged == 'true'
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/aars"
+          mkdir -p "$out"
+          bazelisk build --config=remote -c opt //bindings/kotlin:xybrid_kotlin_aar
+          cp -L "$(tools/scripts/bazel-output.sh //bindings/kotlin:xybrid_kotlin_aar --config=remote -c opt)" \
+            "$out/default.aar"
+          zzz=(--//:tts_zzz=true
+            "--repo_env=XYBRID_ZZZ_PREBUILT_DIR=$RUNNER_TEMP/zzz-inputs"
+            "--repo_env=XYBRID_ZZZ_PYTHON=$(command -v python3)")
+          bazelisk build --config=remote -c opt "${zzz[@]}" //bindings/kotlin:xybrid_kotlin_aar
+          cp -L "$(tools/scripts/bazel-output.sh //bindings/kotlin:xybrid_kotlin_aar --config=remote -c opt "${zzz[@]}")" \
+            "$out/speech.aar"
+          unzip -q "$out/default.aar" 'jni/*' -d "$out/default"
+          unzip -q "$out/speech.aar" 'jni/*' -d "$out/speech"
+          df -h /
+
+      # GNU readelf, as release-prep.yml and release-publish.yml gate with.
+      - name: Gate both AARs
+        if: steps.stage.outputs.staged == 'true'
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/verify_zzz_android.py aar "$RUNNER_TEMP/aars/default.aar" \
+            --readelf readelf --no-speech --min-sdk 29
+          python3 tools/scripts/verify_zzz_android.py aar "$RUNNER_TEMP/aars/speech.aar" \
+            --readelf readelf --speech --min-sdk 29
+
+      # Prints only the count and names the public libraries export.
+      - name: Engine symbols vs the public libraries beside it
+        if: steps.stage.outputs.staged == 'true'
+        run: |
+          set -euo pipefail
+          lib="$RUNNER_TEMP/aars/speech/jni/arm64-v8a"
+          python3 tools/scripts/verify_zzz_android.py symbol-overlap --readelf readelf \
+            --archive "$RUNNER_TEMP/zzz-inputs/aarch64-linux-android/lib/libzzz_embed.a" \
+            "$lib"/libggml*.so "$lib"/libllama.so "$lib"/libmtmd.so \
+            "$lib"/libc++_shared.so "$lib"/libonnxruntime.so
+
+      - name: Shared llama.cpp imports survive the engine link
+        if: steps.stage.outputs.staged == 'true'
+        run: |
+          python3 tools/scripts/verify_zzz_android.py compare-imports --readelf readelf \
+            "$RUNNER_TEMP/aars/default/jni/arm64-v8a/libxybrid_bolt.so" \
+            "$RUNNER_TEMP/aars/speech/jni/arm64-v8a/libxybrid_bolt.so"
+
+      - name: Speech-free slices match the default build (advisory)
+        if: steps.stage.outputs.staged == 'true'
+        run: |
+          set -euo pipefail
+          for abi in armeabi-v7a x86_64; do
+            if cmp -s "$RUNNER_TEMP/aars/default/jni/$abi/libxybrid_bolt.so" \
+                "$RUNNER_TEMP/aars/speech/jni/$abi/libxybrid_bolt.so"; then
+              echo "$abi/libxybrid_bolt.so: identical in both AARs"
+            else
+              echo "::warning title=$abi slice differs::$abi/libxybrid_bolt.so differs between the default and the speech AAR. The gate above already proved it speech-free; check whether only build metadata differs."
+            fi
+          done
+
+      # Nothing below needs the private inputs, and Gradle and the upload
+      # actions run third-party code. always(): a failed step must not leave
+      # them either.
+      - name: Delete the staged engine inputs
+        if: always()
+        run: rm -rf "$RUNNER_TEMP"/zzz-*
+
+      # release-prep.yml's zip, then release-publish.yml's publish-kotlin
+      # staging, Gradle build and gate, on the same bytes.
+      - name: Replay the release zip and stage it for Gradle
+        if: steps.stage.outputs.staged == 'true'
+        run: |
+          set -euo pipefail
+          zip="$RUNNER_TEMP/aars/xybrid-android-proof.zip"
+          python3 tools/scripts/verify_zzz_android.py pack-dist "$RUNNER_TEMP/aars/speech.aar" "$zip"
+          python3 tools/scripts/verify_zzz_android.py dist "$zip" --readelf readelf
+          python3 tools/scripts/verify_zzz_android.py stage-gradle "$zip" --kotlin-dir bindings/kotlin
+
+      - name: Set up JDK 17
+        if: steps.stage.outputs.staged == 'true'
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Build the release AAR with Gradle
+        if: steps.stage.outputs.staged == 'true'
+        working-directory: bindings/kotlin
+        run: ./gradlew bundleReleaseAar --console=plain
+
+      - name: Gate the Gradle-built AAR
+        if: steps.stage.outputs.staged == 'true'
+        run: |
+          python3 tools/scripts/verify_zzz_android.py aar \
+            bindings/kotlin/build/outputs/aar/xybrid-kotlin-release.aar \
+            --readelf readelf --speech --min-sdk 29
+
+      # The emulator job gets no environment and no engine: the Maven
+      # consumer's x86_64 slice (as Gradle packaged it), a stripped copy, its
+      # siblings, the probe, and the Gradle AAR with only x86_64 natives for
+      # the consumer smoke. The emulator cannot run arm64 anyway.
+      - name: Stage dlopen-gate inputs (x86_64, engine-free)
+        if: steps.stage.outputs.staged == 'true'
+        run: |
+          set -euo pipefail
+          NDKBIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          aar=bindings/kotlin/build/outputs/aar/xybrid-kotlin-release.aar
+          src="$RUNNER_TEMP/aars/gradle"
+          unzip -q "$aar" 'jni/x86_64/*' -d "$src"
+          mkdir -p dlopen-gate
+          cp "$src/jni/x86_64/libxybrid_bolt.so" "$src/jni/x86_64/libc++_shared.so" \
+            "$src/jni/x86_64/libonnxruntime.so" dlopen-gate/
+          # AGP-style strip; the clean .so must still dlopen after it.
+          cp "$src/jni/x86_64/libxybrid_bolt.so" dlopen-gate/libxybrid_bolt.stripped.so
+          "$NDKBIN/llvm-strip" --strip-all dlopen-gate/libxybrid_bolt.stripped.so
+          python3 tools/scripts/verify_android_jni.py --readelf "$NDKBIN/llvm-readelf" \
+            --glue bindings/kotlin/bazel/jni/jni_glue.c dlopen-gate/libxybrid_bolt.stripped.so
+          "$NDKBIN/x86_64-linux-android24-clang" \
+            tools/scripts/android-dlopen-probe.c -o dlopen-gate/android-dlopen-probe
+          cp "$aar" dlopen-gate/xybrid-kotlin.aar
+          zip -q -d dlopen-gate/xybrid-kotlin.aar 'jni/arm64-v8a/*' 'jni/armeabi-v7a/*'
+          # grep -c reads all input (grep -q + pipefail can mask a match).
+          left=$(unzip -Z1 dlopen-gate/xybrid-kotlin.aar | grep -c -e '^jni/arm64-v8a/' -e '^jni/armeabi-v7a/' || true)
+          if [ "$left" != 0 ]; then
+            echo "::error::the consumer-smoke AAR still carries arm64-v8a or armeabi-v7a natives"
+            exit 1
+          fi
+          ls -la dlopen-gate
+
+      - name: Upload dlopen-gate inputs (x86_64, engine-free)
+        if: steps.stage.outputs.staged == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zzz-android-dlopen-gate
+          path: dlopen-gate/
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload the Gradle-built speech AAR (on-device testing)
+        if: steps.stage.outputs.staged == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: xybrid-kotlin-zzz-aar
+          path: bindings/kotlin/build/outputs/aar/xybrid-kotlin-release.aar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  # build-android.yml's dlopen gate on the speech build's x86_64 slice, with
+  # no environment and only the engine-free inputs above.
+  dlopen-gate:
+    name: dlopen gate (speech build, x86_64 emulator)
+    needs: speech-aar
+    if: needs.speech-aar.outputs.staged == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      # KVM is required for a usable (hardware-accelerated) x86_64 emulator on
+      # the Linux runner; without it boot times out.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Download dlopen-gate inputs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: zzz-android-dlopen-gate
+          path: dlopen-gate
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Stage the AAR for the instrumented consumer
+        run: |
+          mkdir -p bindings/kotlin/consumer-smoke/app/libs
+          cp dlopen-gate/xybrid-kotlin.aar bindings/kotlin/consumer-smoke/app/libs/
+
+      # Same retrying pre-install as build-android.yml: the emulator-runner
+      # action's single `sdkmanager --install emulator` intermittently lands a
+      # corrupt download.
+      - name: Pre-install Android Emulator (retry corrupt downloads)
+        run: |
+          set -u
+          sdk="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          sdkmanager="$(command -v sdkmanager || true)"
+          if [ -z "$sdkmanager" ]; then
+            sdkmanager="$(ls "$sdk"/cmdline-tools/latest/bin/sdkmanager \
+              "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
+          fi
+          if [ -z "$sdkmanager" ]; then
+            echo "::error::sdkmanager not found under $sdk"; exit 1
+          fi
+          echo "using sdkmanager: $sdkmanager"
+          for i in $(seq 1 3); do
+            if yes | "$sdkmanager" --install emulator --channel=0; then
+              echo "emulator installed (attempt $i)"
+              exit 0
+            fi
+            echo "::warning::emulator install attempt $i failed; clearing partial download and retrying"
+            rm -rf "$sdk/emulator" "$sdk/.temp" "$sdk/.downloadIntermediates" || true
+            sleep 10
+          done
+          echo "::error::emulator install failed after 3 attempts"
+          exit 1
+
+      # api-level 35 = Android 15 bionic, strict about the DT_GNU_HASH and
+      # 16 KB alignment problems build-android.yml's gate guards against.
+      - name: Load native libraries and invoke JNI from the consumer APK
+        uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            bash tools/scripts/android-dlopen-gate.sh dlopen-gate
+            bindings/kotlin/gradlew -p bindings/kotlin/consumer-smoke :app:connectedDebugAndroidTest --no-daemon --console=plain
