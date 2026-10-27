@@ -293,25 +293,6 @@ unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
 cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 ```
 
-**Opt-in zzz speech candidate (not shipped)**
-
-`//bindings/kotlin:xybrid_kotlin_zzz_aar` (`xybrid-kotlin-zzz.aar`) is the
-standard AAR built in companion mode plus two additions:
-`jni/arm64-v8a/libxybrid_zzz_tts.so`, the separate ARM64 / API 29 speech
-companion, and the fourteen engine notices under `assets/xybrid/zzz/`. Every
-base member keeps its bytes and the package keeps `minSdk 24`; the companion
-is loaded only at runtime. `pack_zzz_aar.py` builds it from the exact 18-file
-base the graph declares (`XYBRID_KOTLIN_AAR_FILES` in `BUILD.bazel`).
-`pack_zzz_aar.py verify --archive <aar> --base-file <name>...` (one flag per
-base file) rechecks a final AAR's inventory, bytes, manifest and notices, but
-only the companion's ELF header. Add `--readelf <pinned NDK llvm-readelf>` to
-also run the companion's export, SONAME, dependency and alignment audit.
-It needs `--//:tts_zzz_android_companion=true --//:tts_zzz=false`, the manual
-API-29 toolchain on a Linux x86-64 host and a staged private engine slice (see
-[`bazel/zzz/companion/README.md`](../../bazel/zzz/companion/README.md)). It is
-inert until the client's companion contract is configured, and no release
-workflow builds it.
-
 **Manual Build (without cargo-ndk)**
 
 ```bash

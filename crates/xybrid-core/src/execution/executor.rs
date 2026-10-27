@@ -348,12 +348,12 @@ impl TemplateExecutor {
             "whispercpp".to_string(),
             Box::new(crate::runtime_adapter::WhisperCppRuntime::new()),
         );
-        #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
+        #[cfg(feature = "tts-zzz")]
         runtimes.insert(
             "zzz".to_string(),
             Box::new(crate::runtime_adapter::zzz::ZzzKittenRuntime::new()),
         );
-        #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
+        #[cfg(feature = "tts-zzz")]
         runtimes.insert(
             "zzz-phonon".to_string(),
             Box::new(crate::runtime_adapter::zzz::ZzzPhononRuntime::new()),
@@ -525,9 +525,9 @@ impl TemplateExecutor {
             ExecutionTemplate::TfLite { model_file } => ("tflite", model_file),
             #[cfg(feature = "asr-whispercpp")]
             ExecutionTemplate::GgmlWhisper { model_file, .. } => ("whispercpp", model_file),
-            #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
+            #[cfg(feature = "tts-zzz")]
             ExecutionTemplate::ZzzEmbed { model_file, .. } => ("zzz", model_file),
-            #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
+            #[cfg(feature = "tts-zzz")]
             ExecutionTemplate::ZzzPhonon { model_file, .. } => ("zzz-phonon", model_file),
             // A scorer's session lives in the executor's own cache.
             ExecutionTemplate::ChoiceScorer {
@@ -889,7 +889,7 @@ impl TemplateExecutor {
                     "GGML Whisper execution requires the 'asr-whispercpp' feature".to_string(),
                 ));
             }
-            #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
+            #[cfg(feature = "tts-zzz")]
             ExecutionTemplate::ZzzEmbed { .. } => {
                 // The four asset paths are bundle-declared and resolved
                 // inside execute_zzz (which has base_path and the whole
@@ -897,13 +897,15 @@ impl TemplateExecutor {
                 // single-model flow below.
                 return self.execute_zzz(metadata, input);
             }
-            #[cfg(not(any(feature = "tts-zzz", feature = "tts-zzz-android-companion")))]
+            #[cfg(not(feature = "tts-zzz"))]
             ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. } => {
                 return Err(AdapterError::RuntimeError(
-                    "zzz execution requires 'tts-zzz' or 'tts-zzz-android-companion'".to_string(),
+                    "zzz execution requires the 'tts-zzz' feature and its \
+                     privately staged pinned engine slice"
+                        .to_string(),
                 ));
             }
-            #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
+            #[cfg(feature = "tts-zzz")]
             ExecutionTemplate::ZzzPhonon { .. } => {
                 self.prepare_phonon(metadata, input, config)?;
                 return self
@@ -3173,7 +3175,7 @@ impl TemplateExecutor {
     }
 
     /// Resolve Phonon template defaults and request overrides before opening or reusing a session.
-    #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
+    #[cfg(feature = "tts-zzz")]
     fn prepare_phonon(
         &mut self,
         metadata: &ModelMetadata,
@@ -3267,7 +3269,7 @@ impl TemplateExecutor {
     ///
     /// The session lives on the `zzz` runtime registered in
     /// [`Self::default_runtimes`]; paths resolve against `base_path` here.
-    #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
+    #[cfg(feature = "tts-zzz")]
     fn prepare_zzz(&mut self, metadata: &ModelMetadata) -> ExecutorResult<()> {
         let ExecutionTemplate::ZzzEmbed {
             model_file,
@@ -3311,8 +3313,7 @@ impl TemplateExecutor {
         {
             let runtime = self.runtimes.get_mut("zzz").ok_or_else(|| {
                 AdapterError::RuntimeError(
-                    "zzz runtime not configured; enable 'tts-zzz' or 'tts-zzz-android-companion'"
-                        .to_string(),
+                    "zzz runtime not configured; enable the 'tts-zzz' feature".to_string(),
                 )
             })?;
             let Some(engine) = runtime
@@ -3338,7 +3339,7 @@ impl TemplateExecutor {
         }
     }
 
-    #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
+    #[cfg(feature = "tts-zzz")]
     fn execute_zzz(
         &mut self,
         metadata: &ModelMetadata,
@@ -3494,16 +3495,16 @@ impl TemplateExecutor {
         // Other runtimes currently resolve their own generation configuration.
         let _ = config;
         use super::{TtsAudioChunk, TtsStatus, TtsStreamResult};
-        #[cfg(not(any(feature = "tts-zzz", feature = "tts-zzz-android-companion")))]
+        #[cfg(not(feature = "tts-zzz"))]
         if matches!(
             metadata.execution_template,
             ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. }
         ) {
             return Err(AdapterError::RuntimeError(
-                "zzz execution requires 'tts-zzz' or 'tts-zzz-android-companion'".into(),
+                "zzz execution requires the 'tts-zzz' feature and its privately staged pinned engine slice".into(),
             ));
         }
-        #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
+        #[cfg(feature = "tts-zzz")]
         if matches!(
             metadata.execution_template,
             ExecutionTemplate::ZzzPhonon { .. }
@@ -3518,7 +3519,7 @@ impl TemplateExecutor {
                 .expect("prepare_phonon checked runtime type")
                 .execute_stream(input, cancelled, on_chunk);
         }
-        #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
+        #[cfg(feature = "tts-zzz")]
         if matches!(
             metadata.execution_template,
             ExecutionTemplate::ZzzEmbed { .. }

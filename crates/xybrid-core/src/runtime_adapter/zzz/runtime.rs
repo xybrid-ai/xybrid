@@ -3,9 +3,9 @@
 //!
 //! Mirrors the crate layering of the whisper.cpp and llama.cpp integrations:
 //! `xybrid-zzz-sys` owns the FFI; this module is the thin adapter glue. The
-//! engine is a verified static slice or an optional Android component. Model
-//! weights and voice JSONs stay separate files, resolved relative to the model
-//! bundle root and declared in the bundle's `ZzzEmbed` template.
+//! engine is a prebuilt, privately staged slice — model weights and voice
+//! JSONs stay separate files, resolved relative to the model bundle root
+//! and declared in the bundle's `ZzzEmbed` template.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

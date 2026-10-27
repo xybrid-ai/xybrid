@@ -183,7 +183,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "tts-zzz")]
     fn zzz_phonon_reuses_open_state_and_failed_override_is_transactional() {
         let Some(home) = std::env::var_os("HOME") else {
             return;

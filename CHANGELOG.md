@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- The inert Android speech companion: the `android-companion` Cargo feature on
+  `xybrid-zzz-sys`, the `tts-zzz-android-companion` features on `xybrid-core`,
+  `xybrid-sdk` and `xybrid-bolt`, the Bazel flag `--//:tts_zzz_android_companion`
+  and the `//bindings/kotlin:xybrid_kotlin_zzz_aar` target.
+  `xybrid_zzz_sys::UnavailableReason` drops its companion-only variants and keeps
+  `UnsupportedCpu`. Custom static `tts-zzz` builds are unchanged.
+
 ### Fixed
 
 - Unity iOS players import native symbols from the statically linked application

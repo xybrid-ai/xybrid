@@ -1,7 +1,7 @@
-//! One owned dispatch table for static or optional Android speech sessions.
+//! One owned dispatch table for the statically linked engine; tests substitute a mock table.
 
 use std::ffi::{c_char, c_void};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use crate::{AudioCallback, EmbedError, EmbedOptions, EmbedResult, KittenOptions};
 
@@ -29,46 +29,13 @@ pub(crate) type Synthesize = unsafe extern "C" fn(
 ) -> i32;
 pub(crate) type SessionCall = unsafe extern "C" fn(*mut c_void);
 
-/// Fixed diagnostics contain no loader paths or unscreened system errors.
+/// Why the linked engine cannot run in this process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum UnavailableReason {
     /// The static Linux archive needs a v3 CPU and OS-enabled AVX state.
     #[error("Linux x86_64 requires an x86-64-v3 CPU and OS-enabled AVX/XMM/YMM state")]
     UnsupportedCpu,
-    /// Companion loading is Android-only.
-    #[error("the optional speech companion is supported only on Android")]
-    UnsupportedPlatform,
-    /// Only the ARM64 application ABI may load the companion.
-    #[error("the optional speech companion requires an Android ARM64 process")]
-    UnsupportedAbi,
-    /// No reviewed notice-bearing companion contract has been adopted.
-    #[error("the Android speech companion contract is not configured")]
-    Unconfigured,
-    /// The actual device API could not be established without newer imports.
-    #[error("the Android device API level is unavailable")]
-    UnknownAndroidApi,
-    /// The actual device OS predates the engine's minimum.
-    #[error("the Android speech companion requires device API 29 or newer")]
-    UnsupportedAndroidApi,
-    /// The fixed SDK companion could not be opened.
-    #[error("the optional Android speech companion could not be loaded")]
-    LibraryNotFound,
-    /// The SDK-owned getter was absent from that library handle.
-    #[error("the Android speech companion getter is missing")]
-    GetterNotFound,
-    /// The getter rejected the exact requested table contract.
-    #[error("the Android speech companion rejected its table contract")]
-    GetterRejected,
-    /// Metadata or a required function slot differs from the SDK contract.
-    #[error("the Android speech companion table does not match the SDK contract")]
-    InvalidTable,
-    /// An accepted table must still report the pinned engine ABI.
-    #[error("the Android speech companion engine ABI does not match")]
-    EngineAbiMismatch,
-    /// Both selected model implementations must be present.
-    #[error("the Android speech companion lacks a selected model implementation")]
-    MissingModels,
 }
 
 #[derive(Clone, Copy)]
@@ -85,10 +52,6 @@ pub(crate) struct Functions {
 
 pub(crate) struct EngineApi {
     pub(crate) functions: Functions,
-    // A successful companion is also held by the process-lifetime OnceLock.
-    // Sessions/cancellation owners independently anchor its code and table.
-    #[cfg(all(feature = "android-companion", any(not(feature = "bindings"), test)))]
-    pub(crate) _library: Option<crate::companion::Library>,
 }
 
 impl EngineApi {
@@ -113,31 +76,27 @@ pub(crate) fn load() -> Result<Arc<EngineApi>, UnavailableReason> {
     }
     #[cfg(feature = "bindings")]
     {
-        // Static bindings retain precedence when Cargo unifies both features.
+        use std::sync::OnceLock;
         static API: OnceLock<Arc<EngineApi>> = OnceLock::new();
         Ok(Arc::clone(API.get_or_init(|| {
             Arc::new(EngineApi {
                 functions: static_functions(),
-                #[cfg(all(feature = "android-companion", any(not(feature = "bindings"), test)))]
-                _library: None,
             })
         })))
     }
+    // Only unit tests compile this module without `bindings`. Nothing is linked
+    // then, so reaching here is a test bug: it must install a mock table.
     #[cfg(not(feature = "bindings"))]
     {
-        static API: OnceLock<Result<Arc<EngineApi>, UnavailableReason>> = OnceLock::new();
-        cached_load(&API, crate::companion::load)
+        panic!("no zzz engine is linked without `bindings`; wrap the test in `with_test_api`")
     }
 }
 
 /// Return runtime availability without opening model files.
 ///
-/// Companion-only builds currently return an unavailable reason: no production
-/// companion identity is configured. In companion mode both success and failure
-/// are cached for the process; installing/replacing it requires app restart.
-///
 /// # Errors
-/// Returns a bounded platform, CPU, loading or contract diagnostic.
+/// Returns [`UnavailableReason::UnsupportedCpu`] when this host cannot run the
+/// linked archive.
 pub fn availability() -> Result<(), UnavailableReason> {
     load().map(|_| ())
 }
@@ -203,14 +162,6 @@ pub(crate) fn with_test_api<T>(
     }
     let _restore = Restore(TEST_API.with(|slot| slot.replace(Some(value))));
     run()
-}
-
-#[cfg(not(feature = "bindings"))]
-pub(crate) fn cached_load(
-    cache: &OnceLock<Result<Arc<EngineApi>, UnavailableReason>>,
-    initialize: impl FnOnce() -> Result<Arc<EngineApi>, UnavailableReason>,
-) -> Result<Arc<EngineApi>, UnavailableReason> {
-    cache.get_or_init(initialize).clone()
 }
 
 #[cfg(test)]

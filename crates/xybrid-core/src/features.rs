@@ -31,26 +31,14 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     ("ort-cuda", cfg!(feature = "ort-cuda")),
     ("ort-download", cfg!(feature = "ort-download")),
     ("ort-dynamic", cfg!(feature = "ort-dynamic")),
-    (
-        "tts-zzz",
-        cfg!(any(
-            feature = "tts-zzz",
-            feature = "tts-zzz-android-companion"
-        )),
-    ),
+    ("tts-zzz", cfg!(feature = "tts-zzz")),
     // Vision (image envelopes + preprocessing pipeline) is always compiled in;
     // the heavy native VLM backend is reported via `llm-llamacpp-vision`.
     ("vision", true),
     // The registry serves `phonon-31m-en` only to clients that list this
-    // backend. Static pins or the independently expected companion identity
-    // establish the implementation contract; runtime validation gates both.
-    (
-        "zzz-phonon-31m",
-        cfg!(any(
-            feature = "tts-zzz",
-            feature = "tts-zzz-android-companion"
-        )),
-    ),
+    // backend. Every `tts-zzz` build pins a zzz engine that loads it; the
+    // rc.6 engine pinned by 0.12.0 rejects it, so `tts-zzz` alone cannot gate it.
+    ("zzz-phonon-31m", cfg!(feature = "tts-zzz")),
 ];
 
 /// Return the sorted list of enabled runtime feature names.
@@ -65,17 +53,14 @@ pub fn enabled() -> &'static [&'static str] {
 }
 
 fn zzz_available() -> bool {
-    #[cfg(any(feature = "tts-zzz", feature = "tts-zzz-android-companion"))]
+    #[cfg(feature = "tts-zzz")]
     {
-        // This completes the lazy table/identity/platform validation before
-        // enabled() publishes its permanent cached capability list. Probes use
-        // the same owned transport as execution; no wrapper initialization race.
         xybrid_zzz_sys::availability().is_ok()
             && xybrid_zzz_sys::abi_version() == xybrid_zzz_sys::ZZZ_EMBED_ABI_VERSION
             && xybrid_zzz_sys::supports_model("phonon")
             && xybrid_zzz_sys::supports_model("kitten-tts2")
     }
-    #[cfg(not(any(feature = "tts-zzz", feature = "tts-zzz-android-companion")))]
+    #[cfg(not(feature = "tts-zzz"))]
     {
         false
     }
@@ -185,22 +170,8 @@ mod tests {
     fn zzz_phonon_31m_follows_tts_zzz() {
         assert_eq!(
             enabled().contains(&"zzz-phonon-31m"),
-            cfg!(any(
-                feature = "tts-zzz",
-                feature = "tts-zzz-android-companion"
-            )) && zzz_available()
+            cfg!(feature = "tts-zzz") && zzz_available()
         );
-    }
-
-    #[cfg(all(feature = "tts-zzz-android-companion", not(feature = "tts-zzz")))]
-    #[test]
-    fn unconfigured_companion_is_never_cached_as_a_backend() {
-        assert!(xybrid_zzz_sys::availability().is_err());
-        let first = enabled();
-        assert!(!first.contains(&"tts-zzz"));
-        assert!(!first.contains(&"zzz-phonon-31m"));
-        assert!(first.contains(&"vision"));
-        assert_eq!(first.as_ptr(), enabled().as_ptr());
     }
 
     #[test]

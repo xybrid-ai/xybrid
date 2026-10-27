@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-COMPANION = "tts-zzz-android-companion"
 STATIC = "tts-zzz"
 
 
@@ -13,10 +12,10 @@ def cargo_features(crate):
     return tomllib.loads((ROOT / f"crates/{crate}/Cargo.toml").read_text())["features"]
 
 
-def configured_targets(static, companion):
+def configured_targets(static):
     settings = {}
     flags = {}
-    values = {":tts_zzz": str(static).lower(), ":tts_zzz_android_companion": str(companion).lower()}
+    values = {":tts_zzz": str(static).lower()}
     root = (ROOT / "BUILD.bazel").read_text().split("# The macOS GPU lane toggle", 1)[0]
     exec(root, {"load": lambda *a, **kw: None, "exports_files": lambda *a: None,
                 "bool_flag": lambda **kw: flags.update({kw["name"]: kw}),
@@ -49,41 +48,24 @@ def configured_targets(static, companion):
 
 
 class SpeechFeatureWiringTests(unittest.TestCase):
-    def test_companion_forwarders_do_not_enable_the_static_feature(self):
-        core = cargo_features("xybrid-core")
-        self.assertEqual(["dep:xybrid-zzz-sys", "xybrid-zzz-sys/android-companion"], core[COMPANION])
-        self.assertEqual(["dep:xybrid-zzz-sys", "xybrid-zzz-sys/bindings"], core[STATIC])
-        self.assertEqual(["xybrid-core/" + COMPANION], cargo_features("xybrid-sdk")[COMPANION])
-        self.assertEqual(["xybrid-sdk/" + COMPANION], cargo_features("xybrid-bolt")[COMPANION])
+    def test_static_forwarders_stay_opt_in(self):
+        self.assertEqual(["dep:xybrid-zzz-sys", "xybrid-zzz-sys/bindings"], cargo_features("xybrid-core")[STATIC])
+        self.assertEqual(["xybrid-core/" + STATIC], cargo_features("xybrid-sdk")[STATIC])
+        self.assertEqual(["xybrid-sdk/" + STATIC], cargo_features("xybrid-bolt")[STATIC])
         for crate in ("xybrid-core", "xybrid-sdk", "xybrid-bolt"):
             for name, expansion in cargo_features(crate).items():
                 if name == "default" or name.startswith("platform-"):
-                    self.assertFalse(any(COMPANION in value or value.endswith("/tts-zzz") for value in expansion))
+                    self.assertFalse(any(value.endswith("/" + STATIC) for value in expansion), (crate, name))
 
-    def test_all_bazel_flag_combinations_select_one_transport_with_static_precedence(self):
-        for static, companion in ((False, False), (False, True), (True, False), (True, True)):
-            with self.subTest(static=static, companion=companion):
-                flags, targets = configured_targets(static, companion)
-                self.assertFalse(flags["tts_zzz_android_companion"]["build_setting_default"])
-                expected = [STATIC] if static else [COMPANION] if companion else []
+    def test_bazel_flag_selects_the_static_feature_only_when_set(self):
+        for static in (False, True):
+            with self.subTest(static=static):
+                flags, targets = configured_targets(static)
+                self.assertFalse(flags["tts_zzz"]["build_setting_default"])
+                expected = [STATIC] if static else []
                 for target in ("xybrid-core", "xybrid-sdk", "xybrid_bolt_cdylib", "xybrid_bolt_staticlib"):
-                    selected = [f for f in targets[target]["crate_features"] if f in (STATIC, COMPANION)]
+                    selected = [f for f in targets[target]["crate_features"] if f == STATIC]
                     self.assertEqual(expected, selected, target)
-                expected_dep = ["//crates/zzz-sys:xybrid_zzz_sys"] if static else ["//crates/zzz-sys:xybrid_zzz_companion_client"] if companion else []
+                expected_dep = ["//crates/zzz-sys:xybrid_zzz_sys"] if static else []
                 self.assertEqual(expected_dep, [d for d in targets["xybrid-core"]["deps"] if "/zzz-sys:" in d])
-                self.assertEqual(["android-companion"], targets["xybrid_zzz_companion_client"]["crate_features"])
-                self.assertEqual([], targets["xybrid_zzz_companion_client"]["deps"])
-
-    def test_production_run_stream_and_runtime_gates_accept_either_transport(self):
-        for name in (
-            "crates/xybrid-core/src/runtime_adapter/mod.rs",
-            "crates/xybrid-core/src/execution/executor.rs",
-            "crates/xybrid-core/src/features.rs",
-            "crates/xybrid-sdk/src/model.rs",
-        ):
-            source = (ROOT / name).read_text().split("#[cfg(test)]", 1)[0]
-            self.assertNotRegex(source, r'cfg!?\((?:not\()?feature = "tts-zzz"\)')
-            self.assertIn('feature = "tts-zzz-android-companion"', source)
-        client = (ROOT / "crates/zzz-sys/src/companion.rs").read_text()
-        self.assertIn("EXPECTED_CONTRACT: Option<[u8; 32]> = None", client)
-        self.assertNotIn(COMPANION, (ROOT / "bindings/flutter/rust/Cargo.toml").read_text())
+                self.assertEqual({"xybrid_zzz_sys"}, {name for name in targets if "zzz" in name})

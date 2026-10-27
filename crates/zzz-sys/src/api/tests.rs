@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 #[derive(Default)]
-pub(crate) struct MockState {
+struct MockState {
     calls: Mutex<Vec<&'static str>>,
     closed: AtomicUsize,
     cancelled: AtomicBool,
@@ -22,18 +22,11 @@ thread_local! {
     static STATE: RefCell<Arc<MockState>> = RefCell::new(Arc::default());
 }
 
-#[cfg(feature = "android-companion")]
-pub(crate) fn recorded_call_count() -> usize {
-    let state = state();
-    let count = state.calls.lock().unwrap().len();
-    count
-}
-
 fn state() -> Arc<MockState> {
     STATE.with(|s| Arc::clone(&s.borrow()))
 }
 
-pub(crate) fn with_state<T>(run: impl FnOnce(Arc<MockState>) -> T) -> T {
+fn with_state<T>(run: impl FnOnce(Arc<MockState>) -> T) -> T {
     struct Restore(Arc<MockState>);
     impl Drop for Restore {
         fn drop(&mut self) {
@@ -139,7 +132,7 @@ unsafe extern "C" fn close(session: *mut c_void) {
     state.closed.fetch_add(1, Ordering::SeqCst);
 }
 
-pub(crate) fn mock_functions() -> Functions {
+fn mock_functions() -> Functions {
     Functions {
         abi_version: abi,
         supports_model: supports,
@@ -155,15 +148,13 @@ pub(crate) fn mock_functions() -> Functions {
 pub(crate) fn mock_api() -> Arc<EngineApi> {
     Arc::new(EngineApi {
         functions: mock_functions(),
-        #[cfg(all(feature = "android-companion", any(not(feature = "bindings"), test)))]
-        _library: None,
     })
 }
 
 // Every controlled mock path, including a new cancellation thread, establishes
 // its own fake supported facts inside an explicit denied scope. This proves
 // that the tests do not depend on host v3 support and that denial is restored.
-pub(crate) fn with_supported_mock_cpu<T>(run: impl FnOnce() -> T) -> T {
+fn with_supported_mock_cpu<T>(run: impl FnOnce() -> T) -> T {
     crate::cpu::without_v3(|| {
         let result = crate::cpu::with_supported_cpu(run);
         assert!(!crate::cpu::available());
@@ -192,7 +183,7 @@ fn all_eight_calls_use_the_owned_table_and_cancel_keeps_session_alive() {
             });
             let cancel = phonon.cancellation_handle();
             // A changed global availability result must never replace a session's table.
-            with_test_api(Err(UnavailableReason::Unconfigured), || {
+            with_test_api(Err(UnavailableReason::UnsupportedCpu), || {
                 let cancelled = phonon
                     .synthesize_stream_outcome("hello", None, &mut |samples, _| {
                         assert_eq!(samples.len(), 4);
@@ -238,48 +229,37 @@ fn all_eight_calls_use_the_owned_table_and_cancel_keeps_session_alive() {
 }
 
 #[test]
-fn every_unavailable_state_rejects_before_paths_defaults_or_native_calls() {
+fn unavailable_engine_rejects_before_paths_defaults_or_native_calls() {
     use crate::{KittenSession, KittenSettings, PhononSession, PhononSettings};
     use std::path::Path;
     with_supported_mock_cpu(|| {
         with_state(|state| {
-            for reason in [
-                UnavailableReason::UnsupportedPlatform,
-                UnavailableReason::UnsupportedAbi,
-                UnavailableReason::Unconfigured,
-                UnavailableReason::UnknownAndroidApi,
-                UnavailableReason::UnsupportedAndroidApi,
-                UnavailableReason::LibraryNotFound,
-                UnavailableReason::GetterNotFound,
-                UnavailableReason::GetterRejected,
-                UnavailableReason::InvalidTable,
-                UnavailableReason::EngineAbiMismatch,
-                UnavailableReason::MissingModels,
-            ] {
-                with_test_api(Err(reason), || {
-                    assert_eq!(availability(), Err(reason));
-                    assert_eq!(crate::abi_version(), 0);
-                    assert!(!crate::supports_model("phonon"));
-                    assert_eq!(crate::default_options().max_chunk_tokens, 0);
-                    let path = Path::new("invalid\0path");
-                    let phonon = PhononSession::open_phonon(
-                        path,
-                        Some("invalid\0voice"),
-                        PhononSettings::default(),
-                    );
-                    let kitten = KittenSession::open_kitten(
-                        path,
-                        path,
-                        path,
-                        path,
-                        KittenSettings::default(),
-                    );
-                    for result in [phonon.map(|_| ()), kitten.map(|_| ())] {
-                        assert!(matches!(result, Err(crate::ZzzError::LoadFailed { .. })));
-                    }
-                });
-            }
+            let reason = UnavailableReason::UnsupportedCpu;
+            with_test_api(Err(reason), || {
+                assert_eq!(availability(), Err(reason));
+                assert_eq!(crate::abi_version(), 0);
+                assert!(!crate::supports_model("phonon"));
+                assert_eq!(crate::default_options().max_chunk_tokens, 0);
+                let path = Path::new("invalid\0path");
+                let phonon = PhononSession::open_phonon(
+                    path,
+                    Some("invalid\0voice"),
+                    PhononSettings::default(),
+                );
+                let kitten =
+                    KittenSession::open_kitten(path, path, path, path, KittenSettings::default());
+                for result in [phonon.map(|_| ()), kitten.map(|_| ())] {
+                    assert!(matches!(result, Err(crate::ZzzError::LoadFailed { .. })));
+                }
+            });
             assert!(state.calls.lock().unwrap().is_empty());
         })
     });
+}
+
+#[cfg(not(feature = "bindings"))]
+#[test]
+#[should_panic(expected = "wrap the test in `with_test_api`")]
+fn unlinked_test_build_never_pretends_an_engine_exists() {
+    with_supported_mock_cpu(|| drop(load()));
 }

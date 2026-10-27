@@ -211,13 +211,6 @@ tts-zzz = [
     "xybrid-zzz-sys/bindings",
 ]
 
-# Opt-in SDK-owned lazy Android transport. It never enables static bindings;
-# the production companion identity is still unconfigured and fails closed.
-tts-zzz-android-companion = [
-    "dep:xybrid-zzz-sys",
-    "xybrid-zzz-sys/android-companion",
-]
-
 # The Rust vision pipeline (envelopes, preprocessing, strategy dispatch) is
 # always compiled in. This feature gates only the *native* llama multimodal
 # backend (mtmd bindings) on top of `llm-llamacpp`.

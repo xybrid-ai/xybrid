@@ -17,15 +17,6 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
-# Additive client only. Static selection wins when both flags are set, so no
-# target can depend on two variants of the same zzz-sys crate simultaneously.
-bool_flag(name = "tts_zzz_android_companion", build_setting_default = False, visibility = ["//visibility:public"])
-config_setting(
-    name = "tts_zzz_android_companion_enabled",
-    flag_values = {":tts_zzz": "false", ":tts_zzz_android_companion": "true"},
-    visibility = ["//visibility:public"],
-)
-
 # The macOS GPU lane toggle (Flip 2). Both darwin lanes share the SAME Rust
 # feature set (candle-metal/CoreML/vision are bindings — pure Rust, cross-
 # compilable, so keeping features identical maximizes rlib cache overlap

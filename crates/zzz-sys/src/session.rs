@@ -97,8 +97,7 @@ pub fn default_options() -> EmbedOptions {
 ///
 /// Returns zero without entering the engine if the runtime is unavailable.
 /// Zero means runtime unavailability, not a mismatch in the verified artifact.
-/// A nonzero static mismatch indicates duplicate-engine drift. Companion ABI
-/// mismatches are rejected during initialization and return zero here.
+/// A nonzero mismatch indicates duplicate-engine drift.
 #[must_use]
 pub fn abi_version() -> u32 {
     let Ok(api) = crate::api::load() else {
@@ -334,7 +333,6 @@ impl Drop for SessionHandle {
             return;
         }
         // # Safety: the final Arc owns close; no call can still hold this handle.
-        // The stored API owns the library until after this call returns.
         unsafe { (self.api.functions.close)(self.native.as_ptr()) }
     }
 }

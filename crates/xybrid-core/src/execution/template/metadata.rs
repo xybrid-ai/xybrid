@@ -165,13 +165,13 @@ pub enum ExecutionTemplate {
         generation_params: Option<GenerationParams>,
     },
 
-    /// Kitten TTS 2 execution through the selected zzz CPU engine using
-    /// static bindings or the optional Android companion (see `crates/zzz-sys`). Model
+    /// Kitten TTS 2 execution through the pinned combined zzz CPU engine and
+    /// quietly staged `libzzz_embed.a` (see `crates/zzz-sys`). Model
     /// weights and both voice JSONs are bundle files resolved like other
     /// template paths.
     ///
     /// Distinct from the ONNX `KittenTTS-Nano` path: the zzz engine links
-    /// static `tts-zzz` or lazy `tts-zzz-android-companion` transport and takes the four
+    /// the pinned engine binary (feature `tts-zzz`) and takes the four
     /// assets directly, without phonemize preprocessing steps.
     ZzzEmbed {
         /// Language (speech-token) GGUF, relative to bundle root.

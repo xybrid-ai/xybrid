@@ -141,7 +141,7 @@ pub(crate) fn without_v3<T>(run: impl FnOnce() -> T) -> T {
 
 /// Controlled mock tables/errors never enter engine code. Real guard tests keep
 /// their explicit denied facts; production and native integration are untouched.
-#[cfg(all(test, any(feature = "bindings", feature = "android-companion")))]
+#[cfg(test)]
 pub(crate) fn with_supported_cpu<T>(run: impl FnOnce() -> T) -> T {
     with_facts(
         CpuFacts {
