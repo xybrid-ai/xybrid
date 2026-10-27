@@ -1163,7 +1163,7 @@ impl LlmBackend for LlamaCppBackend {
             let text = clean.trim().to_string();
 
             let parsed_tool_calls = if suppress_tools {
-                crate::runtime_adapter::tool_call::parse_tool_calls(&text)
+                crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(&text, &config.tools)
             } else {
                 Vec::new()
             };
@@ -1344,7 +1344,7 @@ impl LlmBackend for LlamaCppBackend {
             // fine but is not a tool call.
             let saw_tool_call_block = filter.saw_tool_call_block();
             let parsed_tool_calls = if suppress_tools {
-                crate::runtime_adapter::tool_call::parse_tool_calls(&text)
+                crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(&text, &config.tools)
             } else {
                 Vec::new()
             };
@@ -1790,7 +1790,7 @@ impl LlmBackend for LlamaCppBackend {
             // will report, and a complete-but-unparseable block is not a
             // tool call.
             let parsed_tool_calls = if suppress_tools {
-                crate::runtime_adapter::tool_call::parse_tool_calls(&text)
+                crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(&text, &config.tools)
             } else {
                 Vec::new()
             };
