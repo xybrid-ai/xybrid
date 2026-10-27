@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **LFM3 tool calling (llama.cpp backend):** tool-bearing requests to LFM3
+  models parse their `<tool_call><function=…><parameter=…>` calls into
+  `tool_calls`. LFM3 writes every argument as text, and each one is typed
+  against the tool's JSON Schema the way llama.cpp types it: a `string`
+  parameter keeps `75001` as text, an `integer` one gets `75001`.
+  `Envelope::tool_results` continuations replay the call and each result as
+  LFM3's own `tool` turn, and streaming suppresses LFM3 call blocks like the
+  other families'. Qwen 3.5 writes the same notation, so its calls parse too,
+  but its continuations are rejected: xybrid implements LFM3's tool-result
+  framing, not Qwen 3.5's. Rust callers can type the arguments with
+  `tool_call::parse_tool_calls_with_tools`.
 - **Android, React Native:** on-device speech with Phonon and Kitten TTS 2 in
   `ai.xybrid:xybrid-kotlin` and `@xybrid/react-native` on Android. The AAR's
   arm64-v8a library now links the zzz speech engine statically, so on Android

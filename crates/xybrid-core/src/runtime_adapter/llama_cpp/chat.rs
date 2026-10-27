@@ -178,13 +178,15 @@ fn render_with_tools(
     //   each entry verbatim into their system-prompt tool list, and the
     //   wrapper shape is not what those models were trained on (verified
     //   against the LFM2.5-230M/350M GGUF templates).
+    // - LFM3's template unwraps `tool.function` when present and lists the
+    //   function object either way, so it takes the bare shape too.
     let protocol = ToolCallProtocol::detect_from_template(&template);
     let entries = match protocol {
         ToolCallProtocol::Gemma | ToolCallProtocol::FunctionGemma => tools
             .iter()
             .map(serde_json::to_value)
             .collect::<Result<Vec<_>, _>>(),
-        ToolCallProtocol::Lfm2 => tools
+        ToolCallProtocol::Lfm2 | ToolCallProtocol::Lfm3 => tools
             .iter()
             .map(|tool| serde_json::to_value(&tool.function))
             .collect::<Result<Vec<_>, _>>(),

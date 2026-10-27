@@ -824,6 +824,55 @@ mod tests {
         assert!(f.saw_tool_call_block());
     }
 
+    /// LFM3's call block, streamed in the token pieces the model produces:
+    /// nothing of it reaches the callback, prose on either side does.
+    #[test]
+    fn streaming_filter_suppresses_lfm3_tool_block_split_across_tokens() {
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("Checking."), Some("Checking.".to_string()));
+        for piece in [
+            "<tool_call>",
+            "\n",
+            "<function=",
+            "get",
+            "_weather",
+            ">\n",
+            "<parameter=",
+            "city",
+            ">\nParis\n",
+            "</parameter>",
+            "\n",
+            "</function>",
+            "\n",
+            "</tool_call>",
+        ] {
+            assert_eq!(f.push(piece), None, "{piece:?} must not reach the callback");
+        }
+        assert_eq!(f.push(" Done."), Some(" Done.".to_string()));
+
+        assert_eq!(f.cumulative_emitted(), "Checking. Done.");
+        assert!(f.saw_tool_call_block());
+    }
+
+    /// A reasoning-primed LFM3 stream closes its thinking before the call:
+    /// neither the reasoning nor the call block is emitted.
+    #[test]
+    fn streaming_filter_hides_lfm3_reasoning_and_tool_block() {
+        let mut f = StreamingTextFilter::new_reasoning_primed(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("The user wants the weather."), None);
+        assert_eq!(f.push("</think>"), None);
+        assert_eq!(
+            f.push("<tool_call>\n<function=get_weather>\n<parameter=city>\nParis\n</parameter>\n</function>\n</tool_call>"),
+            None
+        );
+
+        assert_eq!(f.cumulative_emitted(), "");
+        assert_eq!(f.reasoning(), Some("The user wants the weather."));
+        assert!(f.saw_tool_call_block());
+    }
+
     #[test]
     fn streaming_filter_holds_back_split_tool_start_marker() {
         let (start, end, _) = TOOL_BLOCK_MARKERS[0];
