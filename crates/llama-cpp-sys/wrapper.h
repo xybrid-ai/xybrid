@@ -106,6 +106,7 @@ int32_t llama_token_bos_c(const XYBRID_LLAMA_MODEL* model);
 int32_t llama_token_eos_c(const XYBRID_LLAMA_MODEL* model);
 int32_t llama_token_nl_c(const XYBRID_LLAMA_MODEL* model);
 bool llama_vocab_is_eog_c(const XYBRID_LLAMA_MODEL* model, int32_t token);
+bool llama_vocab_get_add_bos_c(const XYBRID_LLAMA_MODEL* model);
 
 /* Model metadata */
 const char* llama_model_chat_template_c(const XYBRID_LLAMA_MODEL* model);

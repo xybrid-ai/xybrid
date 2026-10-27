@@ -184,6 +184,26 @@ impl ToolCallProtocol {
     }
 }
 
+/// Whether `template` is LiquidAI's LFM3 chat template.
+///
+/// LFM3 writes calls in the `<tool_call>` / `<function=…>` / `<parameter=…>`
+/// notation it shares with Qwen3-Coder and Qwen3.5, and it alone in that
+/// family pre-fills a literal `<think></think>` when thinking is off (Qwen3.5
+/// writes the empty block with newlines inside). The chat formatter keys on
+/// this to render LFM3 prompts through the template, because the generation
+/// prompt carries that thinking state and llama.cpp's native matcher, which
+/// reads LFM3's template as plain ChatML, drops it.
+pub(crate) fn is_lfm3_template(template: &str) -> bool {
+    [
+        "<tool_call>",
+        "<function=",
+        "<parameter=",
+        "<think></think>",
+    ]
+    .iter()
+    .all(|marker| template.contains(marker))
+}
+
 /// Parses supported tool-call blocks from model output.
 ///
 /// Complete marker blocks are scanned in left-to-right order across both
