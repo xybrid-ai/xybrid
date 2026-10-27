@@ -119,7 +119,7 @@ Each badge links to its platform setup. See the full
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.13.1
+  xybrid_flutter: ^0.16.0
 ```
 
 **Run a model:**
@@ -136,9 +136,11 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.13.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.16.0")
 }
 ```
+
+Releases 0.16.0 and later require Android 10 (API 29): set `minSdk = 29` or higher in your app's `defaultConfig`, or the build fails at the manifest merge.
 
 **Run a model:**
 
@@ -154,7 +156,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.13.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.16.0")
 ]
 ```
 
@@ -171,10 +173,12 @@ let result = try await model.runAsync(envelope: Envelope.text("Hello world"))
 **Install** in a React Native 0.76+ app with the New Architecture (or an Expo SDK 52+ development build):
 
 ```sh
-npm install @xybrid/react-native@0.13.1
+npm install @xybrid/react-native@0.16.0
 ```
 
 For bare React Native, run `cd ios && pod install`. For Expo, run `npx expo prebuild`; Expo Go cannot load the native module.
+
+On Android, releases 0.16.0 and later require `minSdkVersion` 29 (Android 10). The React Native and Expo templates default to 24; the [React Native guide](https://docs.xybrid.dev/en/docs/sdks/react-native#installation) shows how to raise it.
 
 **Run a model:**
 
@@ -228,7 +232,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.13.1"
+xybrid = "0.16.0"
 ```
 
 **Run a model:**

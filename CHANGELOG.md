@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-30
+
 ### Added
 
 - **Android, React Native:** on-device speech with Phonon and Kitten TTS 2 in
@@ -17,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and run APIs (see [Phonon speech](docs/sdk/PHONON.md)). The armeabi-v7a and
   x86_64 libraries are built without the engine: there the registry does not
   serve `phonon-31m-en` and a Kitten bundle fails to load. React Native on iOS
-  is unchanged and has no speech engine. The AAR also carries the
+  is unchanged and has no speech engine. Native Swift/Flutter iOS speech
+  linkage remains unqualified, even though the registry can resolve the
+  existing Phonon GGUF for `ios-arm64`. The AAR also carries the
   engine's fourteen notice files (its runtime terms and the upstream licenses)
   under `assets/xybrid/zzz/`. Android merges library assets into the APK, so
   every app that ships the SDK carries them.
@@ -44,7 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `//bindings/kotlin:xybrid_kotlin_zzz_aar` target. Crates that enable either
   feature must drop it. `xybrid_zzz_sys::UnavailableReason` drops its
   companion-only variants and keeps `UnsupportedCpu`, so code naming a removed
-  variant must be updated. Custom static `tts-zzz` builds are unchanged.
+  variant must be updated. The removal does not affect custom static `tts-zzz`
+  builds.
 
 ### Fixed
 
