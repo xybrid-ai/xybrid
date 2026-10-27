@@ -25,6 +25,27 @@ description: 使用文本加图像输入运行本地视觉语言模型
 如果缺少配套构件，模型加载会在生成之前失败，并抛出指明所引用路径的
 `MissingArtifact` 错误。
 
+### 图像 token 预算
+
+有些投影器按原始分辨率读取图像。LFM3-VL 2B 将每个 32×32 像素块转换为一个语言
+token，因此一张 1200 万像素的照片约为 4,000 个 token，即 llama.cpp 对该投影器的
+上限。仅这一张图像就会占满 4,096 token 的上下文，并且在 CPU 上需要数分钟来编码。
+请在 bundle 的 `vision_encoder` 中设置上限；更大的图像会被缩小以适应该上限：
+
+```json
+{
+  "vision_encoder": {
+    "file": "mmproj-LFM3-VL-2B-Q8_0.gguf",
+    "preprocessing_preset": "siglip",
+    "image_size": 512,
+    "patch_size": 16,
+    "max_image_tokens": 1024
+  }
+}
+```
+
+未设置 `max_image_tokens` 时，使用投影器自身的上限。
+
 ## 启用视觉功能的构建
 
 默认的平台预设仍为纯文本。请为将要运行 VLM 的构建添加 `llm-llamacpp-vision`：
