@@ -55,7 +55,7 @@ class SpeechFeatureWiringTests(unittest.TestCase):
         for crate in ("xybrid-core", "xybrid-sdk", "xybrid-bolt"):
             for name, expansion in cargo_features(crate).items():
                 if name == "default" or name.startswith("platform-"):
-                    self.assertFalse(any(value.endswith("/" + STATIC) for value in expansion), (crate, name))
+                    self.assertFalse(any(value == STATIC or value.endswith("/" + STATIC) for value in expansion), (crate, name))
 
     def test_bazel_flag_selects_the_static_feature_only_when_set(self):
         for static in (False, True):
@@ -66,6 +66,7 @@ class SpeechFeatureWiringTests(unittest.TestCase):
                 for target in ("xybrid-core", "xybrid-sdk", "xybrid_bolt_cdylib", "xybrid_bolt_staticlib"):
                     selected = [f for f in targets[target]["crate_features"] if f == STATIC]
                     self.assertEqual(expected, selected, target)
+                self.assertEqual(["bindings"] if static else [], targets["xybrid_zzz_sys"]["crate_features"])
                 expected_dep = ["//crates/zzz-sys:xybrid_zzz_sys"] if static else []
                 self.assertEqual(expected_dep, [d for d in targets["xybrid-core"]["deps"] if "/zzz-sys:" in d])
                 self.assertEqual({"xybrid_zzz_sys"}, {name for name in targets if "zzz" in name})

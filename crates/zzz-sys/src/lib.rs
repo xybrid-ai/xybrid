@@ -23,6 +23,8 @@
 //!
 //! # Public surface
 //!
+//! - `availability()` / `UnavailableReason` — whether this process can run
+//!   the linked engine (today only `UnsupportedCpu`, on Linux x86_64)
 //! - [`abi_version`] / [`supports_model`] — capability probes
 //! - [`EmbedOptions`] / [`KittenOptions`] / [`EmbedError`] / [`EmbedResult`]
 //!   — C-layout types with `Default`s mirroring the header's rules
