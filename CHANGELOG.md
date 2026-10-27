@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **llama.cpp:** update to master commit [`19ff817`](https://github.com/ggml-org/llama.cpp/commit/19ff817fb25e9a1b838b1d7f9f4325f7bf9779c4) (commit `19ff817fb25e9a1b838b1d7f9f4325f7bf9779c4`), ahead of the latest stable release, for the LiquidAI LFM3 architecture (`lfm3`) and vision projector (`lfm3vl`). No stable `vX.Y.Z` release includes them yet.
+
 - **Breaking (Android, React Native):** `ai.xybrid:xybrid-kotlin` and
   `@xybrid/react-native` now require Android 10 (API 29); their `minSdk` was 24.
   The AAR's arm64-v8a natives are now built against API 29. An app with a lower

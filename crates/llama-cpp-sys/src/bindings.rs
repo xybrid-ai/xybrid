@@ -13,6 +13,7 @@ pub const LLAMA_STATE_SEQ_FLAGS_NONE: u32 = 0;
 pub const LLAMA_STATE_SEQ_FLAGS_SWA_ONLY: u32 = 1;
 pub const LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY: u32 = 1;
 pub const LLAMA_STATE_SEQ_FLAGS_ON_DEVICE: u32 = 2;
+pub const LLAMA_DRY_MAX_SEQ_BREAKERS: u32 = 64;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ggml_context {
@@ -151,17 +152,18 @@ pub const ggml_op_GGML_OP_LIGHTNING_INDEXER: ggml_op = 87;
 pub const ggml_op_GGML_OP_DSV4_HC_COMB: ggml_op = 88;
 pub const ggml_op_GGML_OP_DSV4_HC_PRE: ggml_op = 89;
 pub const ggml_op_GGML_OP_DSV4_HC_POST: ggml_op = 90;
-pub const ggml_op_GGML_OP_UNARY: ggml_op = 91;
-pub const ggml_op_GGML_OP_MAP_CUSTOM1: ggml_op = 92;
-pub const ggml_op_GGML_OP_MAP_CUSTOM2: ggml_op = 93;
-pub const ggml_op_GGML_OP_MAP_CUSTOM3: ggml_op = 94;
-pub const ggml_op_GGML_OP_CUSTOM: ggml_op = 95;
-pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS: ggml_op = 96;
-pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS_BACK: ggml_op = 97;
-pub const ggml_op_GGML_OP_OPT_STEP_ADAMW: ggml_op = 98;
-pub const ggml_op_GGML_OP_OPT_STEP_SGD: ggml_op = 99;
-pub const ggml_op_GGML_OP_GLU: ggml_op = 100;
-pub const ggml_op_GGML_OP_COUNT: ggml_op = 101;
+pub const ggml_op_GGML_OP_TOP_K_MASK: ggml_op = 91;
+pub const ggml_op_GGML_OP_UNARY: ggml_op = 92;
+pub const ggml_op_GGML_OP_MAP_CUSTOM1: ggml_op = 93;
+pub const ggml_op_GGML_OP_MAP_CUSTOM2: ggml_op = 94;
+pub const ggml_op_GGML_OP_MAP_CUSTOM3: ggml_op = 95;
+pub const ggml_op_GGML_OP_CUSTOM: ggml_op = 96;
+pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS: ggml_op = 97;
+pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS_BACK: ggml_op = 98;
+pub const ggml_op_GGML_OP_OPT_STEP_ADAMW: ggml_op = 99;
+pub const ggml_op_GGML_OP_OPT_STEP_SGD: ggml_op = 100;
+pub const ggml_op_GGML_OP_GLU: ggml_op = 101;
+pub const ggml_op_GGML_OP_COUNT: ggml_op = 102;
 pub type ggml_op = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -717,6 +719,11 @@ pub struct mtmd_batch {
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct mtmd_gen_state {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct mtmd_input_text {
     pub text: *const ::std::os::raw::c_char,
     pub text_len: usize,
@@ -772,10 +779,25 @@ pub struct mtmd_decoder_pos {
 pub struct mtmd_caps {
     pub inp_vision: bool,
     pub inp_audio: bool,
+    pub gen_audio: bool,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_audio_stream {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_audio_stream_params {
+    pub step_ms: i32,
+    pub prompt: *const llama_token,
+    pub n_prompt: usize,
 }
 pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_NONE: mtmd_gen_audio_type = 0;
 pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_QWEN3TTS: mtmd_gen_audio_type = 1;
 pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_POCKETTTS: mtmd_gen_audio_type = 2;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_SOPRANO: mtmd_gen_audio_type = 3;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_LFM3A: mtmd_gen_audio_type = 4;
 pub type mtmd_gen_audio_type = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -795,14 +817,13 @@ pub struct mtmd_gen_inp {
     pub embd: *mut f32,
     pub top_k: i32,
     pub top_p: f32,
-    pub seed: u32,
     pub temp: f32,
+    pub penalty_repeat: f32,
+    pub penalty_last_n: i32,
     pub codes: *mut i32,
     pub n_codes: usize,
     pub feats: *const f32,
     pub n_feats: usize,
-    pub state_data: *const ::std::os::raw::c_char,
-    pub state_size: usize,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -815,8 +836,11 @@ pub struct mtmd_gen_out {
     pub is_eos: bool,
     pub audio: *const f32,
     pub n_samples: usize,
-    pub state_data: *const ::std::os::raw::c_char,
-    pub state_size: usize,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_gen_state_params {
+    pub seed: u32,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -867,6 +891,18 @@ pub struct mtmd_helper_video_info {
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_cap {
+    pub chat: bool,
+    pub vision: bool,
+    pub audio: bool,
+    pub video: bool,
+    pub audio_stream: bool,
+    pub text_gen: bool,
+    pub audio_gen: bool,
+    pub audio_gen_spk_ref: bool,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct mtmd_helper_gen_audio {
     _unused: [u8; 0],
 }
@@ -875,14 +911,27 @@ pub const mtmd_helper_gen_audio_outtype_MTMD_HELPER_GEN_AUDIO_OUTTYPE_PCM:
 pub const mtmd_helper_gen_audio_outtype_MTMD_HELPER_GEN_AUDIO_OUTTYPE_WAV:
     mtmd_helper_gen_audio_outtype = 1;
 pub type mtmd_helper_gen_audio_outtype = ::std::os::raw::c_uint;
+pub const mtmd_helper_gen_audio_out_mode_MTMD_HELPER_GEN_AUDIO_OUT_AUTO:
+    mtmd_helper_gen_audio_out_mode = 0;
+pub const mtmd_helper_gen_audio_out_mode_MTMD_HELPER_GEN_AUDIO_OUT_TEXT:
+    mtmd_helper_gen_audio_out_mode = 1;
+pub const mtmd_helper_gen_audio_out_mode_MTMD_HELPER_GEN_AUDIO_OUT_AUDIO:
+    mtmd_helper_gen_audio_out_mode = 2;
+pub const mtmd_helper_gen_audio_out_mode_MTMD_HELPER_GEN_AUDIO_OUT_MIXED:
+    mtmd_helper_gen_audio_out_mode = 3;
+pub type mtmd_helper_gen_audio_out_mode = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mtmd_helper_gen_audio_inp {
+    pub stream: bool,
     pub seq_id: llama_seq_id,
     pub prompt: *const ::std::os::raw::c_char,
     pub prompt_len: usize,
+    pub n_past: i32,
+    pub out_mode: mtmd_helper_gen_audio_out_mode,
     pub speaker_ref: *mut mtmd_bitmap,
     pub lang: *const ::std::os::raw::c_char,
+    pub voice: *const ::std::os::raw::c_char,
     pub top_k: i32,
     pub top_p: f32,
     pub seed: u32,
