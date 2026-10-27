@@ -37,7 +37,14 @@ Xybrid 的设计准则是**能力是数据，而非入口点**。工具端到端
 | 协议族 | 语法 | 示例模型 |
 |-----------------|--------|----------------|
 | LFM2 系列 | `<\|tool_call_start\|>[name(k=v)]<\|tool_call_end\|>`（Python 风格） | LFM2.5 230M / 350M |
+| LFM3 | `<tool_call><function=name><parameter=k>v</parameter></function></tool_call>`（XML） | LFM3 1.7B、LFM3-VL 2B |
 | gemma-4 系列 | `<\|tool_call>call:name{...}<tool_call\|>` | gemma-4 E2B |
+
+LFM3 以原始文本写出参数值。Xybrid 按照工具的 JSON Schema 为每个参数确定类型，
+规则与 llama.cpp 相同：`string` 参数保留原文，接受数字、布尔值、数组或对象的参数
+则解析为文本所表示的 JSON 值。Qwen3.5 使用相同的 XML 写法，因此其调用也能被解析；
+但针对 Qwen3.5 模板的 `tool_results` 续写会被拒绝：xybrid 实现的是 LFM3 的工具
+结果格式，而不是 Qwen3.5 的。
 
 Bundle 通过 `model_metadata.json` 中一个建议性的 `tool_calling: true` 标志来
 宣告支持（由 `ModelMetadata::supports_tool_calling()` /

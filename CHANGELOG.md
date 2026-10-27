@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Loading `LiquidAI/LFM3-VL-2B-GGUF` from Hugging Face now loads its vision
   projector too (it ran text-only), with a 1,024-token image cap and LiquidAI's
   recommended sampling.
+- **LFM3 (llama.cpp backend):** LiquidAI's LFM3 1.7B and LFM3-VL 2B GGUFs
+  load and run, with thinking switched by the metadata `reasoning` flag, tool
+  calling and image input (see the [reasoning](docs/content/docs/guides/reasoning.mdx),
+  [tool calling](docs/content/docs/guides/tool-calling.mdx) and
+  [vision](docs/content/docs/guides/vision-models.mdx) guides). The integration
+  fixtures `lfm3-1.7b` and `lfm3-vl-2b` pin LiquidAI's quantization-aware Q4_0
+  builds. LFM3-Audio 2B and LFM3-Omni 2B are not supported: they need
+  llama.cpp's audio input and speech generation, which xybrid does not wrap.
 
 ### Changed
 
