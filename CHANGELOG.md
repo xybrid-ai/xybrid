@@ -50,6 +50,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **llama.cpp backend:** LFM3 chat prompts render through the model's own chat
+  template. llama.cpp's built-in matcher reads LFM3's template as plain ChatML
+  and drops the thinking state every assistant turn opens with (`<think>` to
+  reason, `<think></think>` to answer directly), so the model reasoned without
+  an opening tag and sometimes answered a question nobody asked. The `reasoning`
+  flag in the model metadata picks the state.
+- **llama.cpp backend:** prompts rendered through a model's chat template now
+  start with BOS when its vocabulary leaves BOS to the template (LFM3's
+  GGUFs set `tokenizer.ggml.add_bos_token` to false), as llama.cpp's own chat
+  path does. Vocabularies that add BOS themselves are unchanged.
+- **llama.cpp backend:** reasoning models no longer get a doubled think block
+  in tool-bearing prompts. The template render asked for thinking off, so
+  templates such as Qwen 3.5's closed an empty think block that priming then
+  reopened (`<think>\n\n</think>\n\n<think>\n`); it now asks for thinking on
+  when the model's `reasoning` flag is set. gemma-4 still renders with
+  thinking off.
 - Unity iOS players import native symbols from the statically linked application
   (`__Internal`). The generated bindings previously tried to load `xybrid_bolt`
   as a dynamic library. The Unity Editor continues using its host's dynamic library,

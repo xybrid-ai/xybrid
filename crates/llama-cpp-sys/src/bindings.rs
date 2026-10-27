@@ -1036,6 +1036,9 @@ extern "C" {
     pub fn llama_vocab_is_eog_c(model: *const ::std::os::raw::c_void, token: i32) -> bool;
 }
 extern "C" {
+    pub fn llama_vocab_get_add_bos_c(model: *const ::std::os::raw::c_void) -> bool;
+}
+extern "C" {
     pub fn llama_model_chat_template_c(
         model: *const ::std::os::raw::c_void,
     ) -> *const ::std::os::raw::c_char;

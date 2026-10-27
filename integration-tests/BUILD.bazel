@@ -70,7 +70,8 @@ filegroup(
 
 # Byte fixtures for the llama.cpp adapter's embedded chat-template render,
 # read by xybrid-core's inline chat tests. Two of their cases render the
-# Qwen3.5 template from choice_fixtures.
+# Qwen3.5 template from choice_fixtures; the lfm3 cases render
+# fixtures/chat_render/templates/lfm3.jinja.
 filegroup(
     name = "chat_render_fixtures",
     srcs = glob(

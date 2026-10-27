@@ -271,6 +271,11 @@ pub(crate) unsafe fn vocab_is_eog(model: *const c_void, token: i32) -> bool {
     sys::llama_vocab_is_eog_c(model, token)
 }
 
+/// # Safety: `model` must be a live, non-null model pointer.
+pub(crate) unsafe fn vocab_get_add_bos(model: *const c_void) -> bool {
+    sys::llama_vocab_get_add_bos_c(model)
+}
+
 /// # Safety: `model` must be a live, non-null model pointer. The returned
 /// C string is owned by llama.cpp and remains valid for the model's
 /// lifetime; the caller must not free it.

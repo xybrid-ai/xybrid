@@ -1,6 +1,6 @@
 {
-  "description": "Byte fixtures for the llama.cpp adapter's embedded chat-template render: chat::render_embedded_template, the model-free half of render_embedded (BOS suppressed, EOS passed through, add_generation_prompt true, thinking off). Cases with tools null take the fallback path; cases with tools take the tools path, with the definitions in the shape render_with_tools passes for these templates (bare function objects). template is inline text or a file relative to the workspace root. The renders must stay byte-identical.",
-  "generator": "Captured on master 89400752 (before enable_thinking became Option<bool>) by a throwaway test that called render_embedded_template on each case's inputs and wrote the results with serde_json; the rendered fields were copied in unchanged. Regenerate only for an intended render change.",
+  "description": "Byte fixtures for the llama.cpp adapter's embedded chat-template render: chat::render_embedded_template, the model-free half of render_embedded (add_generation_prompt true). Cases with tools null take a tool-less template path (the fallback, or LFM3's template-only render); cases with tools take the tools path, with the definitions in the shape render_with_tools passes for these templates (bare function objects). bos_token is absent (suppressed) unless the case models a vocabulary that does not add BOS itself (LFM3), and enable_thinking is false unless set. template is inline text or a file relative to the workspace root. The renders must stay byte-identical.",
+  "generator": "Captured on master 89400752 (before enable_thinking became Option<bool>) by a throwaway test that called render_embedded_template on each case's inputs and wrote the results with serde_json; the rendered fields were copied in unchanged. The lfm3 cases were added with templates/lfm3.jinja, byte-identical to LiquidAI/LFM3-1.7B's chat_template.jinja (revision 40ebe0aa6662c9d40389c2f5d565b6a2c6aebacd), the template embedded in its GGUFs and llama.cpp's models/templates/LFM3.jinja (19ff817f): their tool-less renders come from Hugging Face transformers' chat-template environment (Jinja2 3.1.6) and match render_embedded_template byte for byte; the tools case is render_embedded_template's own output, because its tool JSON (sorted keys, compact nesting) differs from transformers' json.dumps. Regenerate only for an intended render change.",
   "cases": [
     {
       "id": "fallback-mistral-v0.1-multi-turn",
@@ -148,6 +148,105 @@
         }
       ],
       "rendered": "<|im_start|>system\n# Tools\n\nYou have access to the following functions:\n\n<tools>\n{\"description\":\"Get the current weather for a city\",\"name\":\"get_weather\",\"parameters\":{\"properties\":{\"city\":{\"description\":\"City name, for example Paris\",\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"}}\n{\"description\":\"Get the local time in an IANA time zone\",\"name\":\"get_time\",\"parameters\":{\"properties\":{\"timezone\":{\"type\":\"string\"}},\"required\":[\"timezone\"],\"type\":\"object\"}}\n</tools>\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>\n\nUse the tools when they help.<|im_end|>\n<|im_start|>user\nWhat is the weather in Paris right now?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    },
+    {
+      "id": "template-lfm3-system-thinking-off",
+      "template": {
+        "file": "integration-tests/fixtures/chat_render/templates/lfm3.jinja"
+      },
+      "bos_token": "<|startoftext|>",
+      "eos_token": "<|im_end|>",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a helpful assistant."
+        },
+        {
+          "role": "user",
+          "content": "What is the capital of France?"
+        }
+      ],
+      "tools": null,
+      "enable_thinking": false,
+      "rendered": "<|startoftext|><|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWhat is the capital of France?<|im_end|>\n<|im_start|>assistant\n<think></think>"
+    },
+    {
+      "id": "template-lfm3-multi-turn-thinking-on",
+      "template": {
+        "file": "integration-tests/fixtures/chat_render/templates/lfm3.jinja"
+      },
+      "bos_token": "<|startoftext|>",
+      "eos_token": "<|im_end|>",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hi"
+        },
+        {
+          "role": "assistant",
+          "content": "Hello! How can I help?"
+        },
+        {
+          "role": "user",
+          "content": "Tell me a joke."
+        }
+      ],
+      "tools": null,
+      "enable_thinking": true,
+      "rendered": "<|startoftext|><|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n<think></think>Hello! How can I help?<|im_end|>\n<|im_start|>user\nTell me a joke.<|im_end|>\n<|im_start|>assistant\n<think>"
+    },
+    {
+      "id": "tools-lfm3-system",
+      "template": {
+        "file": "integration-tests/fixtures/chat_render/templates/lfm3.jinja"
+      },
+      "bos_token": "<|startoftext|>",
+      "eos_token": "<|im_end|>",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Use the tools when they help."
+        },
+        {
+          "role": "user",
+          "content": "What is the weather in Paris right now?"
+        }
+      ],
+      "tools": [
+        {
+          "name": "get_weather",
+          "description": "Get the current weather for a city",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": "City name, for example Paris"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        },
+        {
+          "name": "get_time",
+          "description": "Get the local time in an IANA time zone",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "timezone": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "timezone"
+            ]
+          }
+        }
+      ],
+      "enable_thinking": false,
+      "rendered": "<|startoftext|><|im_start|>system\nUse the tools when they help.\n\n<tools>\n{\"description\": \"Get the current weather for a city\", \"name\": \"get_weather\", \"parameters\": {\"properties\":{\"city\":{\"description\":\"City name, for example Paris\",\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"}}\n{\"description\": \"Get the local time in an IANA time zone\", \"name\": \"get_time\", \"parameters\": {\"properties\":{\"timezone\":{\"type\":\"string\"}},\"required\":[\"timezone\"],\"type\":\"object\"}}\n</tools><|im_end|>\n<|im_start|>user\nWhat is the weather in Paris right now?<|im_end|>\n<|im_start|>assistant\n<think></think>"
     }
   ]
 }
