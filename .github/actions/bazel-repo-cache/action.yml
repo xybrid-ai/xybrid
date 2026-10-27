@@ -1,7 +1,8 @@
 name: Cache pinned Bazel downloads
 description: >
   Persist hermetic-llvm's macOS SDK and apple_support archives, with bounded
-  retries and checksum verification for cold apple_support downloads.
+  retries and checksum verification for cold apple_support downloads, and seed
+  rules_rs's pinned zlib package with a checksum-verified Launchpad fallback.
 
 # WHY THIS EXISTS. hermetic-llvm pins the macOS SDK to a swcdn.apple.com URL plus
 # one web.archive.org mirror. Apple's URL now returns 403 permanently (verified
@@ -23,6 +24,12 @@ description: >
 # GitHub returned HTTP 500 for apple_support during the web build on 2026-10-05.
 # Seed Bazel's distdir with bounded curl retries before analysis so cold caches
 # recover from transient failures without retrying compilation.
+#
+# rules_rs 0.0.95 fetches Ubuntu's zlib1g .deb for its Linux rustc (bundled
+# libLLVM needs libz.so.1) from one pinned snapshot.ubuntu.com URL. On
+# 2026-10-27 that host returned 503 and every Bazel lane failed analysis. The
+# same package (same SHA-256) is published on Launchpad, so it is seeded into a
+# distdir from the pinned URL or, failing that, from Launchpad.
 #
 # Bazel verifies the checksums from the upstream pins, so a restored (or
 # mirrored) file cannot substitute different content — a cache hit is exactly the
@@ -49,6 +56,25 @@ inputs:
       never a wrong artifact.
     required: false
     default: edc7ce9b8f09e0c7a39aaa714f941b4c2597f333ec1ffe59a14d67eb36cdb7e7
+  zlib-deb-version:
+    description: >
+      Ubuntu zlib1g package version that rules_rs's rustc repository pins (its
+      rs/private/rustc_repository.bzl). Update with both SHA-256s on a rules_rs
+      bump that moves the pin; a stale value only costs the fallback.
+    required: false
+    default: "1.3.dfsg-3.1ubuntu2.1"
+  zlib-deb-snapshot:
+    description: snapshot.ubuntu.com timestamp in rules_rs's pinned zlib URL.
+    required: false
+    default: 20260801T000000Z
+  zlib-deb-amd64-sha256:
+    description: SHA-256 of that version's amd64 .deb, as pinned by rules_rs.
+    required: false
+    default: 7074b6a2f6367a10d280c00a1cb02e74277709180bab4f2491a2f355ab2d6c20
+  zlib-deb-arm64-sha256:
+    description: SHA-256 of that version's arm64 .deb, as pinned by rules_rs.
+    required: false
+    default: cbe3d39ec32d3cc27c021ae4af11e7c67bdf9d700d573207e0941d4038056278
   macos-sdk-mirror:
     description: >
       Optional replacement download location for that package, as host+path with no
@@ -116,6 +142,50 @@ runs:
           --output "$archive"
         printf '%s  %s\n' "$APPLE_SUPPORT_SHA256" "$archive" | shasum -a 256 --check
         mv "$archive" "$entry"
+
+    # Linux rustc's zlib package, needed by every lane that resolves a Linux exec
+    # rustc (RBE included: repository fetches run on the client). amd64 always,
+    # arm64 too on ARM64 runners. Bazel matches a distdir entry by file name and
+    # still verifies the pinned SHA-256, so the mirror cannot change the bytes.
+    - name: Seed the pinned zlib package for rules_rs
+      shell: bash
+      env:
+        ZLIB_VERSION: ${{ inputs.zlib-deb-version }}
+        ZLIB_SNAPSHOT: ${{ inputs.zlib-deb-snapshot }}
+        ZLIB_AMD64_SHA256: ${{ inputs.zlib-deb-amd64-sha256 }}
+        ZLIB_ARM64_SHA256: ${{ inputs.zlib-deb-arm64-sha256 }}
+      run: |
+        dir="$HOME/.cache/xybrid-bazel-downloads/zlib1g"
+        mkdir -p "$dir"
+        echo "common --distdir=$dir" >> .context/local.bazelrc
+        seed() {
+          local sha=$2 name="zlib1g_${ZLIB_VERSION}_$1.deb"
+          local entry="$dir/$name" tmp url
+          if [ -f "$entry" ]; then
+            echo "$name already seeded."
+            return 0
+          fi
+          tmp=$(mktemp "$entry.tmp.XXXXXX")
+          for url in \
+            "https://snapshot.ubuntu.com/ubuntu/$ZLIB_SNAPSHOT/pool/main/z/zlib/$name" \
+            "https://launchpad.net/ubuntu/+archive/primary/+files/$name"; do
+            if curl --fail --location --retry 1 --retry-delay 5 --retry-max-time 30 \
+                --connect-timeout 10 --max-time 30 --silent --show-error "$url" --output "$tmp" &&
+              printf '%s  %s\n' "$sha" "$tmp" | shasum -a 256 --check --status; then
+              mv "$tmp" "$entry"
+              echo "Seeded $name from $url"
+              return 0
+            fi
+            echo "::warning::could not fetch a verified $name from $url"
+          done
+          rm -f "$tmp"
+          # Not fatal: Bazel still tries the pinned URL itself and fails clearly.
+          echo "::warning::$name not seeded; Bazel will try the pinned URL."
+        }
+        seed amd64 "$ZLIB_AMD64_SHA256"
+        if [ "$RUNNER_ARCH" = "ARM64" ]; then
+          seed arm64 "$ZLIB_ARM64_SHA256"
+        fi
 
     # The cold-cache hole, and the switch that closes it. Nothing is hardcoded to
     # a default mirror on purpose: the package is Apple's, and where it may be
