@@ -366,6 +366,34 @@ jobs:
           compression-level: 0
           retention-days: 1
 
+      # Manual runs only, like the AAR above: the consumer-smoke app and its
+      # instrumentation APK built against that AAR, for the opt-in on-device
+      # speech check (SpeechDeviceTest; run with -e xybridSpeech true on an
+      # arm64 Android 10+ device).
+      - name: Build the on-device speech test APKs
+        if: steps.stage.outputs.staged == 'true' && github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          mkdir -p bindings/kotlin/consumer-smoke/app/libs
+          cp bindings/kotlin/build/outputs/aar/xybrid-kotlin-release.aar \
+            bindings/kotlin/consumer-smoke/app/libs/xybrid-kotlin.aar
+          bindings/kotlin/gradlew -p bindings/kotlin/consumer-smoke \
+            :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --console=plain
+          mkdir -p speech-apks
+          cp bindings/kotlin/consumer-smoke/app/build/outputs/apk/debug/app-debug.apk \
+            bindings/kotlin/consumer-smoke/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            speech-apks/
+
+      - name: Upload the on-device speech test APKs
+        if: steps.stage.outputs.staged == 'true' && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: xybrid-speech-device-apks
+          path: speech-apks/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   # build-android.yml's dlopen gate on the speech build's x86_64 slice, with
   # no environment and only the engine-free inputs above.
   dlopen-gate:
