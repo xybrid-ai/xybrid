@@ -48,15 +48,19 @@ Subcommands:
       libs/<abi>/ directories, notice directories holding anything but the
       exact notices, and any other file under src/main/assets/.
 
-  symbol-overlap --archive <libzzz_embed.a> [--readelf R] <shared libs...>
+  symbol-overlap --archive <libzzz_embed.a> --private-in <libxybrid_bolt.so>
+                 [--readelf R] <shared libs...>
       Count the archive's GLOBAL/WEAK defined symbols that the given public
       shared libraries (libggml*.so, libllama.so, libmtmd.so,
       libc++_shared.so, libonnxruntime.so) also export. Prints only the count
-      and the overlapping names, which are public by construction; fails if
-      any overlap, since a static engine copy would interpose on them. Every
-      archive member must be an ELF object that readelf lists: llvm-readelf
-      skips other members (LLVM bitcode, say) without an error, so a member
-      count from the archive's own headers must match its `File:` blocks.
+      and the overlapping names, which are public by construction. Fails on
+      any overlap, since a static engine copy would interpose on it, except
+      the reviewed compiler-runtime helpers in RUNTIME_HELPERS: those must
+      stay private to the speech libxybrid_bolt.so (--private-in), i.e. not
+      exported by it. Every archive member must be an ELF object that readelf
+      lists: llvm-readelf skips other members (LLVM bitcode, say) without an
+      error, so a member count from the archive's own headers must match its
+      `File:` blocks.
 
   compare-imports <tts-off.so> <tts-on.so> [--readelf R]
       Fail if an undefined ggml_/gguf_/llama_/mtmd_ import of the default
@@ -163,6 +167,19 @@ PRIVATE_NAMES = frozenset({
     "zzz_embed.json", "libxybrid_zzz_tts.so",
 })
 SHARED_PREFIXES = ("ggml_", "gguf_", "llama_", "mtmd_")
+# Compiler-runtime helpers that the engine's bundled compiler runtime defines
+# and that libc++_shared.so also exports (an NDK packaging artifact). Every
+# NDK-linked library carries its own hidden copy of such helpers: the default
+# arm64 libxybrid_bolt.so imports neither (it links private copies), so with
+# the engine linked its private copies come from the engine instead, and the
+# version script keeps them hidden while other libraries still resolve the
+# names in libc++_shared.so. Their behaviour is fixed by the ABI. Reviewed by
+# name, from the first proof-lane run against the real archive: any other
+# overlap still fails.
+RUNTIME_HELPERS = frozenset({
+    "__emutls_get_address",  # emulated-TLS accessor
+    "__muloti4",  # 128-bit multiply with overflow
+})
 # Initial-exec TLS in a dlopen'ed library: lld's DT_FLAGS marker and the
 # dynamic relocations bionic then refuses (GNU readelf 2.41 and llvm-readelf
 # print R_AARCH64_TLS_TPREL64; older binutils R_AARCH64_TLS_TPREL).
@@ -882,7 +899,8 @@ def stage_gradle(release_zip: Path, kotlin_dir: Path) -> int:
 # --- symbol comparisons ----------------------------------------------------
 
 
-def symbol_overlap(archive: Path, libraries: Sequence[Path], readelf: Readelf) -> int:
+def symbol_overlap(archive: Path, libraries: Sequence[Path], private_in: Path,
+                   readelf: Readelf) -> int:
     try:
         members = archive_members(archive)
         text = readelf(archive, "-s")
@@ -911,10 +929,29 @@ def symbol_overlap(archive: Path, libraries: Sequence[Path], readelf: Readelf) -
             overlap.setdefault(name, []).append(library.name)
     print(f"symbol-overlap: {len(overlap)} engine symbol(s) also exported by "
           f"{len(libraries)} public librar{'y' if len(libraries) == 1 else 'ies'}")
-    for name in sorted(overlap):
+    helpers = sorted(name for name in overlap if name in RUNTIME_HELPERS)
+    unexpected = sorted(name for name in overlap if name not in RUNTIME_HELPERS)
+    leaked: Set[str] = set()
+    if helpers:
+        try:
+            leaked = set(helpers) & dynamic_exports(readelf(private_in, "--dyn-syms"))
+        except GateError:
+            print(f"symbol-overlap: readelf could not read {private_in.name}", file=sys.stderr)
+            return 1
+    for name in helpers:
         # Public by construction: these libraries export the name.
-        print(f"  {name} (exported by {', '.join(sorted(overlap[name]))})")
-    return 1 if overlap else 0
+        state = (f"EXPORTED by {private_in.name}" if name in leaked
+                 else f"reviewed compiler-runtime helper, private to {private_in.name}")
+        print(f"  {name} (exported by {', '.join(sorted(overlap[name]))}): {state}")
+    for name in unexpected:
+        print(f"  {name} (exported by {', '.join(sorted(overlap[name]))}): unexpected")
+    if leaked:
+        print(f"symbol-overlap: {private_in.name} exports {len(leaked)} engine runtime helper(s); "
+              "the version script must keep them hidden", file=sys.stderr)
+    if unexpected:
+        print(f"symbol-overlap: {len(unexpected)} unexpected overlap(s); a static engine copy "
+              "would interpose on them", file=sys.stderr)
+    return 1 if leaked or unexpected else 0
 
 
 def compare_imports(default: Path, speech: Path, readelf: Readelf) -> int:
@@ -992,6 +1029,8 @@ def main(argv: Optional[Sequence[str]] = None, runner: Optional[Runner] = None,
 
     overlap = with_readelf(commands.add_parser("symbol-overlap", help="engine vs public exports"))
     overlap.add_argument("--archive", type=Path, required=True)
+    overlap.add_argument("--private-in", type=Path, required=True,
+                         help="the speech arm64-v8a libxybrid_bolt.so")
     overlap.add_argument("libraries", type=Path, nargs="+")
 
     compare = with_readelf(commands.add_parser("compare-imports", help="tts-off vs tts-on imports"))
@@ -1012,7 +1051,7 @@ def main(argv: Optional[Sequence[str]] = None, runner: Optional[Runner] = None,
         if args.command == "stage-gradle":
             return stage_gradle(args.zip, args.kotlin_dir)
         if args.command == "symbol-overlap":
-            return symbol_overlap(args.archive, args.libraries, readelf)
+            return symbol_overlap(args.archive, args.libraries, args.private_in, readelf)
         return compare_imports(args.default, args.speech, readelf)
     except GateError as error:
         print(f"verify_zzz_android: {error}", file=sys.stderr)

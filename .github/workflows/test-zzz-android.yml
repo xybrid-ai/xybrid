@@ -13,7 +13,9 @@ name: "CI: zzz Android AAR"
 #      the per-ABI API levels in the speech one.
 #   2. The engine against the public libraries linked beside it: no symbol
 #      both defined in the engine archive and exported by libggml*/libllama/
-#      libmtmd/libc++_shared/libonnxruntime (symbol-overlap), and every
+#      libmtmd/libc++_shared/libonnxruntime (symbol-overlap; the reviewed
+#      compiler-runtime helpers it allows must stay hidden in the speech
+#      libxybrid_bolt.so), and every
 #      shared llama.cpp import of the default arm64 libxybrid_bolt.so still
 #      imported by the speech build (compare-imports).
 #   3. armeabi-v7a and x86_64 libxybrid_bolt.so compared between the two
@@ -229,6 +231,7 @@ jobs:
           lib="$RUNNER_TEMP/aars/speech/jni/arm64-v8a"
           python3 tools/scripts/verify_zzz_android.py symbol-overlap --readelf readelf \
             --archive "$RUNNER_TEMP/zzz-inputs/aarch64-linux-android/lib/libzzz_embed.a" \
+            --private-in "$lib/libxybrid_bolt.so" \
             "$lib"/libggml*.so "$lib"/libllama.so "$lib"/libmtmd.so \
             "$lib"/libc++_shared.so "$lib"/libonnxruntime.so
 

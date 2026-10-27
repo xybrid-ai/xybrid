@@ -729,6 +729,10 @@ class SymbolTests(GateCase):
         path.write_bytes(elf_bytes({"dynsyms": [symbol(n) for n in exports] + [symbol("memcpy@LIBC", "UND")]}))
         return path
 
+    def overlap(self, archive, libs, *extra, bolt_exports=("Java_ai_xybrid_Native_init",)):
+        bolt = self.library("libxybrid_bolt.so", list(bolt_exports))
+        return self.run_gate("symbol-overlap", *extra, "--archive", archive, "--private-in", bolt, *libs)
+
     def test_overlap_prints_only_publicly_exported_names(self):
         archive = self.archive([symbol("ggml_init"), symbol("llama_backend_init", vis="HIDDEN"),
                                 symbol("gguf_init_empty", bind="WEAK"), symbol(PRIVATE_SYMBOL),
@@ -739,7 +743,7 @@ class SymbolTests(GateCase):
                 self.library("libc++_shared.so", ["memcpy_like"])]
         for readelf in ("readelf", "llvm-readelf"):
             with self.subTest(readelf=readelf):
-                code, out, err = self.run_gate("symbol-overlap", "--readelf", readelf, "--archive", archive, *libs)
+                code, out, err = self.overlap(archive, libs, "--readelf", readelf)
                 self.assertEqual(code, 1, out + err)
                 self.assertIn("3 engine symbol(s) also exported by 3 public libraries", out)
                 for name in ("ggml_init", "gguf_init_empty", "llama_backend_init"):
@@ -750,36 +754,74 @@ class SymbolTests(GateCase):
     def test_no_overlap_passes_and_failures_hide_the_archive_path(self):
         archive = self.archive([symbol(PRIVATE_SYMBOL)])
         libs = [self.library("libggml.so", ["ggml_init"])]
-        code, out, err = self.run_gate("symbol-overlap", "--archive", archive, *libs)
+        code, out, err = self.overlap(archive, libs)
         self.assertEqual((code, out.strip()), (0, "symbol-overlap: 0 engine symbol(s) also exported by 1 public library"))
         self.readelf.fail.add("libzzz_embed.a")
-        code, out, err = self.run_gate("symbol-overlap", "--archive", archive, *libs)
+        code, out, err = self.overlap(archive, libs)
         self.assertEqual(code, 1)
         self.assertEqual(err.strip(), "symbol-overlap: readelf could not read the engine archive")
         empty = self.archive([symbol("memcpy", "UND")])
         self.readelf.fail.clear()
-        self.assertFails(self.run_gate("symbol-overlap", "--archive", empty, *libs), "wrong file?")
+        self.assertFails(self.overlap(empty, libs), "wrong file?")
+
+    def test_reviewed_runtime_helpers_pass_only_while_private(self):
+        self.assertEqual(GATE.RUNTIME_HELPERS, {"__emutls_get_address", "__muloti4"})
+        archive = self.archive([symbol("__emutls_get_address", bind="WEAK"), symbol("__muloti4"),
+                                symbol(PRIVATE_SYMBOL)])
+        libs = [self.library("libggml.so", ["ggml_init"]),
+                self.library("libc++_shared.so", ["__emutls_get_address", "__muloti4", "_ZNSt3__14cout"])]
+        out = self.assertPasses(self.overlap(archive, libs))
+        self.assertIn("2 engine symbol(s) also exported by 2 public libraries", out)
+        for name in ("__emutls_get_address", "__muloti4"):
+            self.assertIn(f"  {name} (exported by libc++_shared.so): reviewed compiler-runtime helper, "
+                          "private to libxybrid_bolt.so", out)
+        self.assertNotIn(PRIVATE_SYMBOL, out)
+        # The speech library exporting one would interpose it on every library.
+        err = self.assertFails(self.overlap(archive, libs, bolt_exports=("Java_x", "__muloti4")),
+                               "libxybrid_bolt.so exports 1 engine runtime helper(s)")
+        self.assertNotIn("unexpected", err)
+        self.readelf.fail.add("libxybrid_bolt.so")
+        self.assertFails(self.overlap(archive, libs), "readelf could not read libxybrid_bolt.so")
+
+    def test_any_other_overlap_still_fails_beside_the_helpers(self):
+        archive = self.archive([symbol("__muloti4"), symbol("ggml_init"), symbol("__udivti3")])
+        libs = [self.library("libggml.so", ["ggml_init"]),
+                self.library("libc++_shared.so", ["__muloti4", "__udivti3"])]
+        code, out, err = self.overlap(archive, libs)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("__muloti4 (exported by libc++_shared.so): reviewed compiler-runtime helper", out)
+        self.assertIn("ggml_init (exported by libggml.so): unexpected", out)
+        self.assertIn("__udivti3 (exported by libc++_shared.so): unexpected", out)
+        self.assertIn("2 unexpected overlap(s)", err)
+
+    def test_private_in_is_required(self):
+        archive = self.archive([symbol(PRIVATE_SYMBOL)])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            GATE.main(["symbol-overlap", "--archive", str(archive), str(self.library("libggml.so", []))])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertNotIn(str(self.tmp), err.getvalue())
 
     def test_every_archive_member_must_be_read(self):
         libs = [self.library("libggml.so", ["ggml_init"])]
         # A second ELF member whose odd length needs ar's padding byte.
         archive = self.archive([symbol(PRIVATE_SYMBOL)], ("other.o", elf_bytes({"symbols": []}) + b"x"))
-        self.assertPasses(self.run_gate("symbol-overlap", "--readelf", "llvm-readelf", "--archive", archive, *libs))
+        self.assertPasses(self.overlap(archive, libs, "--readelf", "llvm-readelf"))
         # LLVM bitcode (or any non-ELF member): GNU readelf fails, llvm-readelf
         # skips it without an error, and the member count catches that.
         bitcode = ("lto.o", b"BC\xc0\xde" + b"\0" * 16)
         archive = self.archive([symbol(PRIVATE_SYMBOL)], bitcode)
-        err = self.assertFails(self.run_gate("symbol-overlap", "--readelf", "llvm-readelf", "--archive", archive, *libs),
+        err = self.assertFails(self.overlap(archive, libs, "--readelf", "llvm-readelf"),
                                "readelf listed 1 of the engine archive's 2 member(s)")
         self.assertNotIn("lto.o", err)
-        self.assertFails(self.run_gate("symbol-overlap", "--readelf", "readelf", "--archive", archive, *libs),
+        self.assertFails(self.overlap(archive, libs, "--readelf", "readelf"),
                          "readelf could not read the engine archive")
         for name, data in (("thin.a", b"!<thin>\n"), ("short.a", b"!<arch>\n" + b"x" * 30),
                            ("truncated.a", ar_bytes([("a.o", FAKE)])[:-4])):
             with self.subTest(name=name):
                 path = self.tmp / name
                 path.write_bytes(data)
-                self.assertFails(self.run_gate("symbol-overlap", "--archive", path, *libs),
+                self.assertFails(self.overlap(path, libs),
                                  "readelf could not read the engine archive")
 
     def test_archive_member_count_skips_bookkeeping(self):
@@ -999,6 +1041,7 @@ class WorkflowHygieneTests(unittest.TestCase):
         overlap = first(blocks, "verify_zzz_android.py symbol-overlap")
         self.assertEqual(overlap, build + 1)
         for needle in ("--readelf readelf", "zzz-inputs/aarch64-linux-android/lib/libzzz_embed.a",
+                       '--private-in "$lib/libxybrid_bolt.so"',
                        "'jni/arm64-v8a/*'", '"$lib"/libggml*.so', '"$lib"/libllama.so', '"$lib"/libmtmd.so',
                        '"$lib"/libc++_shared.so', '"$lib"/libonnxruntime.so'):
             self.assertIn(needle, blocks[overlap])
@@ -1097,6 +1140,8 @@ class WorkflowHygieneTests(unittest.TestCase):
         self.assertTrue(any("::notice" in block and "ZZZ_CI_ENABLED != 'true'" in block for block in blocks))
         overlap = first(blocks, "verify_zzz_android.py symbol-overlap")
         self.assertIn("zzz-inputs/aarch64-linux-android/lib/libzzz_embed.a", blocks[overlap])
+        self.assertIn('--private-in "$lib/libxybrid_bolt.so"', blocks[overlap])
+        self.assertIn('lib="$RUNNER_TEMP/aars/speech/jni/arm64-v8a"', blocks[overlap])
         build = first(blocks, "bazelisk build")
         self.assertIn("--//:tts_zzz=true", blocks[build])
         delete = self.assert_inputs_deleted_before_packaging(blocks, overlap)
