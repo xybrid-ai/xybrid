@@ -3,18 +3,21 @@
 //! Tool-less prompts prefer llama.cpp's native `llama_chat_apply_template`,
 //! falling back to built-in ChatML when the model has no template, or to a
 //! minijinja render of the model's own embedded template when llama.cpp's
-//! non-Jinja matcher rejects it. Tool-bearing prompts skip the native path
-//! entirely — `llama_chat_apply_template` takes only role/content pairs and
-//! cannot carry tool definitions — and render the embedded template directly
-//! with the definitions in the Jinja context. In every case the policy is
-//! the same: never silently substitute a different prompt family.
+//! non-Jinja matcher rejects it. LFM3's template skips the native path: the
+//! matcher reads it as plain ChatML and drops the thinking state the model
+//! needs at the start of its turn, so it always renders through minijinja.
+//! Tool-bearing prompts skip the native path entirely —
+//! `llama_chat_apply_template` takes only role/content pairs and cannot carry
+//! tool definitions — and render the embedded template directly with the
+//! definitions in the Jinja context. In every case the policy is the same:
+//! never silently substitute a different prompt family.
 
 mod functiongemma;
 
 use super::jinja_template::{JinjaChatTemplate, JinjaTemplateError, RenderOptions};
 use crate::gateway::Tool;
 use crate::runtime_adapter::llm::LlmResult;
-use crate::runtime_adapter::tool_call::ToolCallProtocol;
+use crate::runtime_adapter::tool_call::{is_lfm3_template, ToolCallProtocol};
 use crate::runtime_adapter::{AdapterError, ChatMessage};
 use xybrid_llama::LlamaError;
 
@@ -31,17 +34,21 @@ pub(super) const THINK_PRIME: &str = "<think>\n";
 /// this model expects.
 ///
 /// Tool-less requests take the native-template → ChatML → minijinja-fallback
-/// chain, unchanged. Tool-bearing requests render through
-/// [`render_with_tools`] instead, because the native path physically cannot
-/// carry tool definitions. Both branches share the `<think>` priming
-/// post-processing for reasoning models.
+/// chain, except LFM3, which renders through [`render_template_only`].
+/// Tool-bearing requests render through [`render_with_tools`] instead,
+/// because the native path physically cannot carry tool definitions. Every
+/// branch shares the `<think>` priming post-processing for reasoning models.
 pub(super) fn format_chat_prompt(
     model: &xybrid_llama::LlamaModel,
     messages: &[ChatMessage],
     reasoning: bool,
     tools: &[Tool],
 ) -> LlmResult<String> {
-    let mut prompt = if tools.is_empty() {
+    let mut prompt = if !tools.is_empty() {
+        render_with_tools(model, messages, tools, reasoning)?
+    } else if let Some(template) = model.chat_template().filter(|t| is_lfm3_template(t)) {
+        render_template_only(model, &template, messages, reasoning)?
+    } else {
         let roles: Vec<&str> = messages.iter().map(|m| m.role.as_str()).collect();
         let contents: Vec<&str> = messages.iter().map(|m| m.content.as_str()).collect();
 
@@ -53,12 +60,10 @@ pub(super) fn format_chat_prompt(
             Ok(Some(prompt)) => prompt,
             Ok(None) => format_chat_chatml(messages),
             Err(err @ LlamaError::ChatTemplateFailed { .. }) => {
-                render_embedded_fallback(model, messages, err)?
+                render_embedded_fallback(model, messages, err, reasoning)?
             }
             Err(err) => return Err(err.into()),
         }
-    } else {
-        render_with_tools(model, messages, tools)?
     };
 
     // Thinking models (metadata `reasoning: true`) gate their `<think>` block
@@ -67,9 +72,9 @@ pub(super) fn format_chat_prompt(
     // the model emits its chain-of-thought; the backend reconstructs the opening
     // tag for capture. See `.context/reasoning-content-surfacing.md`.
     //
-    // Guard against a doubled tag: if the template (or a future llama.cpp / the
-    // minijinja fallback with thinking enabled) already rendered an opening
-    // `<think>`, don't prime a second one.
+    // Guard against a doubled tag: a minijinja render with thinking on already
+    // ends in an opening `<think>` for templates that open the channel
+    // themselves (LFM3, Qwen3.5), so don't prime a second one.
     if reasoning && !prompt.trim_end().ends_with("<think>") {
         prompt.push_str(THINK_PRIME);
     }
@@ -95,12 +100,13 @@ fn render_embedded_fallback(
     model: &xybrid_llama::LlamaModel,
     messages: &[ChatMessage],
     err: LlamaError,
+    reasoning: bool,
 ) -> LlmResult<String> {
     let Some(template) = model.chat_template() else {
         return Err(err.into());
     };
 
-    match render_embedded(model, &template, messages, None) {
+    match render_embedded(model, &template, messages, None, reasoning) {
         Ok(prompt) => Ok(prompt),
         Err(render_err) => {
             tracing::warn!(
@@ -112,6 +118,29 @@ fn render_embedded_fallback(
             )))
         }
     }
+}
+
+/// Render a tool-less prompt through the model's own embedded chat template,
+/// for templates the native path would mangle (see [`is_lfm3_template`]).
+///
+/// llama.cpp's non-Jinja matcher accepts LFM3's template as plain ChatML, so
+/// the native path "succeeds" but drops the thinking state the template puts
+/// after `<|im_start|>assistant\n` (`<think>` to reason, `<think></think>` to
+/// answer directly). Without one the model writes reasoning with no opener
+/// and can answer a question nobody asked. Same no-substitution policy as
+/// [`render_embedded_fallback`]: a render failure surfaces as an error rather
+/// than a native ChatML prompt.
+fn render_template_only(
+    model: &xybrid_llama::LlamaModel,
+    template: &str,
+    messages: &[ChatMessage],
+    reasoning: bool,
+) -> LlmResult<String> {
+    render_embedded(model, template, messages, None, reasoning).map_err(|render_err| {
+        AdapterError::RuntimeError(format!(
+            "embedded chat template failed to render ({render_err})"
+        ))
+    })
 }
 
 /// Render a tool-bearing prompt through the model's own embedded chat
@@ -127,6 +156,7 @@ fn render_with_tools(
     model: &xybrid_llama::LlamaModel,
     messages: &[ChatMessage],
     tools: &[Tool],
+    reasoning: bool,
 ) -> LlmResult<String> {
     let Some(template) = model.chat_template() else {
         return Err(AdapterError::InvalidInput(
@@ -169,6 +199,7 @@ fn render_with_tools(
         &template,
         messages.as_ref(),
         Some(serde_json::Value::Array(entries)),
+        reasoning,
     )
     .map_err(|render_err| {
         AdapterError::RuntimeError(format!(
@@ -200,18 +231,20 @@ fn ensure_tool_names_rendered(prompt: &str, tools: &[Tool]) -> LlmResult<()> {
     }
 }
 
-/// Shared minijinja plumbing for both embedded-template entry points
-/// ([`render_embedded_fallback`] and [`render_with_tools`]), so their
-/// BOS/EOS handling and thinking policy cannot drift.
+/// Shared minijinja plumbing for every embedded-template entry point
+/// ([`render_embedded_fallback`], [`render_template_only`] and
+/// [`render_with_tools`]), so their BOS/EOS handling and thinking policy
+/// cannot drift.
 ///
-/// BOS is deliberately suppressed (passed as `None`): `tokenize_chat_prompt`
-/// tokenizes this prompt with `add_special = true`, so llama.cpp prepends the
-/// BOS token itself. HF Jinja templates (gemma-4's included) emit a literal
-/// `{{ bos_token }}` which `parse_special` would turn into a *second* BOS —
-/// and gemma degrades badly on a doubled BOS. llama.cpp's own native gemma
-/// template likewise emits no leading BOS and relies on `add_special`; we
-/// match that contract. This assumes the model adds BOS at tokenization,
-/// which holds for every template that reaches this chat path.
+/// BOS follows llama.cpp's own chat-template rule: the template renders the
+/// BOS text only when tokenization will not add it. `tokenize_chat_prompt`
+/// tokenizes with `add_special = true`, so for a vocabulary that adds BOS
+/// (most of them) a template's literal `{{ bos_token }}` would become a
+/// *second* BOS once `parse_special` maps it — and gemma degrades badly on a
+/// doubled BOS. There `bos_token` is passed empty, matching llama.cpp's own
+/// native gemma template. LFM3's vocabulary does not add BOS and its template
+/// renders `{{ bos_token }}` first, so there the token text is passed
+/// through; leaving it out would start every LFM3 prompt without BOS.
 ///
 /// EOS is passed through for templates that interpolate `{{ eos_token }}` to
 /// terminate prior assistant turns; where it appears it is mid-prompt, so
@@ -219,39 +252,71 @@ fn ensure_tool_names_rendered(prompt: &str, tools: &[Tool]) -> LlmResult<()> {
 /// `<turn|>` marker and never references `eos_token`, so this is a no-op for
 /// the motivating model but keeps other templates correct.)
 ///
-/// `enable_thinking: Some(false)`: xybrid's llama.cpp backend is a raw
+/// `enable_thinking` comes from [`template_thinking`] and is always passed
+/// explicitly, never omitted (`None`): templates such as Qwen3's close the
+/// think block only for an explicit `false`, and treat a missing flag as
+/// thinking on.
+fn render_embedded(
+    model: &xybrid_llama::LlamaModel,
+    template: &str,
+    messages: &[ChatMessage],
+    tools: Option<serde_json::Value>,
+    reasoning: bool,
+) -> Result<String, JinjaTemplateError> {
+    let bos_token = if model.adds_bos() {
+        None
+    } else {
+        detokenize_special(model, model.token_bos())
+    };
+    let eos_token = detokenize_special(model, model.token_eos());
+    render_embedded_template(
+        template,
+        bos_token,
+        eos_token,
+        messages,
+        tools,
+        template_thinking(template, reasoning),
+    )
+}
+
+/// The thinking flag a template render requests for a model whose metadata
+/// `reasoning` flag is `reasoning`.
+///
+/// Templates whose reasoning channel is the `<think>` block that
+/// `streaming_postprocess` captures follow the flag: a reasoning model's
+/// template opens the channel itself, and a non-reasoning one pre-fills it
+/// closed (LFM3 needs one or the other at the start of every turn). Gemma
+/// templates always get `false`: xybrid's llama.cpp backend is a raw
 /// tokenize → generate → detokenize loop with no parser for gemma-4's
 /// `<|channel>thought … <channel|>` reasoning blocks (unlike llama.cpp's own
 /// chat server). Requesting a reasoning channel would leak its markers and
 /// reasoning text into the user-facing output, which the post-processing
 /// stop/strip patterns don't yet understand. Asking for a direct answer makes
 /// gemma-4's template pre-fill an empty thought and emit the response
-/// straight away. The flag is passed explicitly, never omitted (`None`):
-/// templates such as Qwen3's close the think block only for an explicit
-/// `false`, and treat a missing flag as thinking on.
-fn render_embedded(
-    model: &xybrid_llama::LlamaModel,
-    template: &str,
-    messages: &[ChatMessage],
-    tools: Option<serde_json::Value>,
-) -> Result<String, JinjaTemplateError> {
-    let eos_token = detokenize_special(model, model.token_eos());
-    render_embedded_template(template, eos_token, messages, tools)
+/// straight away.
+fn template_thinking(template: &str, reasoning: bool) -> bool {
+    reasoning
+        && !matches!(
+            ToolCallProtocol::detect_from_template(template),
+            ToolCallProtocol::Gemma | ToolCallProtocol::FunctionGemma
+        )
 }
 
-/// The model-free half of [`render_embedded`]: applies its BOS, EOS and
-/// thinking policy, with the EOS text already read off the model. Kept
-/// separate so tests can pin the exact output without loading a GGUF.
+/// The model-free half of [`render_embedded`]: renders with its BOS, EOS and
+/// thinking choices already made. Kept separate so tests can pin the exact
+/// output without loading a GGUF.
 fn render_embedded_template(
     template: &str,
+    bos_token: Option<String>,
     eos_token: Option<String>,
     messages: &[ChatMessage],
     tools: Option<serde_json::Value>,
+    enable_thinking: bool,
 ) -> Result<String, JinjaTemplateError> {
-    let tpl = JinjaChatTemplate::new(template, None, eos_token);
+    let tpl = JinjaChatTemplate::new(template, bos_token, eos_token);
     let options = RenderOptions {
         add_generation_prompt: true,
-        enable_thinking: Some(false),
+        enable_thinking: Some(enable_thinking),
         tools,
     };
     tpl.render(messages, &options)
@@ -317,9 +382,16 @@ mod tests {
     struct RenderFixture {
         id: String,
         template: FixtureTemplate,
+        /// BOS text passed to the template; absent (suppressed) unless the
+        /// case models a vocabulary that does not add BOS itself.
+        #[serde(default)]
+        bos_token: Option<String>,
         eos_token: Option<String>,
         messages: Vec<ChatMessage>,
         tools: Option<serde_json::Value>,
+        /// The thinking flag the render requests; off unless set.
+        #[serde(default)]
+        enable_thinking: bool,
         rendered: String,
     }
 
@@ -362,13 +434,69 @@ mod tests {
         for case in &cases {
             let rendered = render_embedded_template(
                 &case.template.text(),
+                case.bos_token.clone(),
                 case.eos_token.clone(),
                 &case.messages,
                 case.tools.clone(),
+                case.enable_thinking,
             )
             .unwrap_or_else(|e| panic!("{}: {e}", case.id));
             assert_eq!(rendered, case.rendered, "{}: render changed", case.id);
         }
+    }
+
+    const LFM3_TEMPLATE: &str = "integration-tests/fixtures/chat_render/templates/lfm3.jinja";
+    const QWEN3_5_TEMPLATE: &str = "integration-tests/fixtures/choice/templates/qwen3.5.jinja";
+
+    /// LFM3 renders through its template because the native matcher would
+    /// drop its thinking state. Qwen3.5 shares LFM3's call notation but keeps
+    /// the native path, so the fingerprint must tell the two apart.
+    #[test]
+    fn lfm3_fingerprint_matches_lfm3_and_not_qwen3_5() {
+        assert!(is_lfm3_template(&read_workspace_file(LFM3_TEMPLATE)));
+        assert!(!is_lfm3_template(&read_workspace_file(QWEN3_5_TEMPLATE)));
+    }
+
+    /// LFM3 needs a thinking state on every turn: `<think>` primed when the
+    /// model reasons, an empty block pre-filled when it doesn't.
+    #[test]
+    fn lfm3_generation_prompt_carries_the_thinking_state() {
+        let template = read_workspace_file(LFM3_TEMPLATE);
+        let messages = [ChatMessage::user("Hi")];
+        let render = |reasoning| {
+            render_embedded_template(
+                &template,
+                Some("<|startoftext|>".to_string()),
+                Some("<|im_end|>".to_string()),
+                &messages,
+                None,
+                template_thinking(&template, reasoning),
+            )
+            .expect("LFM3 template renders")
+        };
+
+        assert_eq!(
+            render(false),
+            "<|startoftext|><|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n<think></think>"
+        );
+        assert_eq!(
+            render(true),
+            "<|startoftext|><|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n<think>"
+        );
+    }
+
+    /// A reasoning model's `<think>` template gets thinking on, so it opens
+    /// the channel itself instead of pre-filling it closed (which priming
+    /// would then reopen). Gemma's channel stays off: nothing parses it.
+    #[test]
+    fn template_thinking_follows_reasoning_except_for_gemma_channels() {
+        let qwen3_5 = read_workspace_file(QWEN3_5_TEMPLATE);
+        let gemma4 = "{%- for tool in tools -%}<|tool>{{ tool['function']['name'] }}{%- endfor -%}";
+
+        assert!(template_thinking(&qwen3_5, true));
+        assert!(!template_thinking(&qwen3_5, false));
+        assert!(!template_thinking(gemma4, true));
+        assert!(!template_thinking(gemma4, false));
     }
 
     fn tool(name: &str) -> Tool {

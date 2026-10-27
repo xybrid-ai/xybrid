@@ -541,6 +541,18 @@ bool llama_vocab_is_eog_c(const llama_model* model, int32_t token) {
     return llama_vocab_is_eog(vocab, token);
 }
 
+/**
+ * Whether tokenizing with add_special prepends the BOS token.
+ *
+ * Reads the GGUF `tokenizer.ggml.add_bos_token` flag. Most vocabularies set
+ * it, but some (LFM3) leave BOS to the chat template's `bos_token`; a prompt
+ * rendered without it then starts without BOS.
+ */
+bool llama_vocab_get_add_bos_c(const llama_model* model) {
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+    return llama_vocab_get_add_bos(vocab);
+}
+
 int llama_n_vocab_c(const llama_model* model) {
     const llama_vocab* vocab = llama_model_get_vocab(model);
     return llama_vocab_n_tokens(vocab);
