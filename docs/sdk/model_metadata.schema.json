@@ -1921,6 +1921,15 @@
           "format": "uint",
           "minimum": 0
         },
+        "max_image_tokens": {
+          "description": "Optional cap on how many tokens one image may become. The encoder\nscales larger images down to fit; without a cap its own limit\napplies, and native-resolution encoders (LFM3-VL) turn one photo into\nthousands of tokens.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
         "patch_size": {
           "description": "Optional patch size for patch-count/capability planning.",
           "type": [

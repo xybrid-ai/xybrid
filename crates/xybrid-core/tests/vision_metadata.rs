@@ -108,6 +108,36 @@ fn vision_language_template_requires_encoder_block() {
 }
 
 #[test]
+fn vision_encoder_max_image_tokens_is_optional_and_positive() {
+    let encoder = |max_image_tokens: &str| {
+        metadata_json(
+            &format!(
+                r#"{{
+                    "file": "mmproj.gguf",
+                    "preprocessing_preset": "siglip",
+                    "image_size": 512,
+                    "patch_size": 16{max_image_tokens}
+                }}"#
+            ),
+            r#"["model.gguf", "mmproj.gguf"]"#,
+        )
+    };
+
+    let uncapped: ModelMetadata = serde_json::from_str(&encoder("")).unwrap();
+    uncapped.validate().unwrap();
+    assert_eq!(uncapped.vision_encoder.unwrap().max_image_tokens, None);
+
+    let capped: ModelMetadata =
+        serde_json::from_str(&encoder(r#", "max_image_tokens": 1024"#)).unwrap();
+    capped.validate().unwrap();
+    assert_eq!(capped.vision_encoder.unwrap().max_image_tokens, Some(1024));
+
+    let zero: ModelMetadata = serde_json::from_str(&encoder(r#", "max_image_tokens": 0"#)).unwrap();
+    let err = zero.validate().unwrap_err();
+    assert!(err.contains("max_image_tokens"), "{err}");
+}
+
+#[test]
 fn vision_encoder_validation_requires_sibling_file_in_files_array() {
     let json = metadata_json(
         r#"{

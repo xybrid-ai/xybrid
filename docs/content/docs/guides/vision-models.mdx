@@ -28,6 +28,28 @@ or equivalent vision encoder. If the sibling artifact is missing, model load
 fails before generation with a `MissingArtifact` error naming the referenced
 path.
 
+### Image token budget
+
+Some projectors read images at native resolution. LFM3-VL 2B turns every
+32×32 pixel block into one language token, so a 12-megapixel photo becomes
+about 4,000 tokens: llama.cpp's cap for that projector. That one image fills
+a 4,096-token context and takes minutes to encode on a CPU. Cap it in the
+bundle's `vision_encoder`; larger images are scaled down to fit:
+
+```json
+{
+  "vision_encoder": {
+    "file": "mmproj-LFM3-VL-2B-Q8_0.gguf",
+    "preprocessing_preset": "siglip",
+    "image_size": 512,
+    "patch_size": 16,
+    "max_image_tokens": 1024
+  }
+}
+```
+
+Without `max_image_tokens`, the projector's own limit applies.
+
 ## Build With Vision Enabled
 
 The default platform presets remain text-only. Add `llm-llamacpp-vision` to the

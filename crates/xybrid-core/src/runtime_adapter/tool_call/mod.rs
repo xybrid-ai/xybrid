@@ -1,30 +1,35 @@
-//! LFM2-family, gemma-4-family, and FunctionGemma tool-call protocols.
+//! LFM2-family, LFM3, gemma-4-family, and FunctionGemma tool-call protocols.
 //!
 //! LFM2-family GGUF models emit pythonic function-call text between special
-//! markers. Gemma-4-family GGUF models emit `call:name{args}` blocks inside
-//! their model turn. FunctionGemma uses the same structured call grammar with
-//! different markers and a different string delimiter. This module is always
-//! compiled because every protocol is plain text: parsing and continuation
-//! composition do not depend on a specific runtime, feature flag, or I/O surface.
+//! markers. LFM3 emits one `<tool_call>` block per call, holding a
+//! `<function=name>` whose `<parameter=key>` children carry raw-text values
+//! (the notation Qwen3-Coder and Qwen3.5 use too). Gemma-4-family GGUF models
+//! emit `call:name{args}` blocks inside their model turn. FunctionGemma uses
+//! the same structured call grammar with different markers and a different
+//! string delimiter. This module is always compiled because every protocol is
+//! plain text: parsing and continuation composition do not depend on a
+//! specific runtime, feature flag, or I/O surface.
 //!
 //! Model output is untrusted. Malformed candidates are skipped instead of
 //! surfaced as fatal errors so callers can still use surrounding prose or
 //! sibling tool calls. LFM2 nested dictionaries, nested calls, and nested lists
 //! are deliberately unsupported in v1 to keep the accepted grammar predictable;
 //! both structured Gemma dialects support nested maps and lists with an
-//! explicit depth cap.
+//! explicit depth cap. LFM3 values are typed against the request's tool
+//! schemas when [`parse_tool_calls_with_tools`] has them.
 //!
 //! The cross-protocol scanner and continuation dispatcher live here.
-//! Grammar-specific parsing and response formatting live in `lfm2` and
-//! `gemma`, with shared cursor primitives isolated in `cursor`.
+//! Grammar-specific parsing and response formatting live in `lfm2`, `lfm3`
+//! and `gemma`, with shared cursor primitives isolated in `cursor`.
 
 mod cursor;
 #[cfg(test)]
 mod functiongemma_tests;
 mod gemma;
 mod lfm2;
+mod lfm3;
 
-use crate::gateway::{FunctionCall, ToolCall};
+use crate::gateway::{FunctionCall, Tool, ToolCall};
 use crate::runtime_adapter::AdapterError;
 use serde_json::Value;
 
@@ -43,6 +48,10 @@ const FUNCTION_GEMMA_TOOL_CALL_END: &str = "<end_function_call>";
 const FUNCTION_GEMMA_TOOL_RESPONSE_START: &str = "<start_function_response>";
 const FUNCTION_GEMMA_TOOL_RESPONSE_END: &str = "<end_function_response>";
 const FUNCTION_GEMMA_STRING_DELIMITER: &str = "<escape>";
+const LFM3_TOOL_CALL_START: &str = "<tool_call>";
+const LFM3_TOOL_CALL_END: &str = "</tool_call>";
+const LFM3_TOOL_RESPONSE_START: &str = "<tool_response>";
+const LFM3_TOOL_RESPONSE_END: &str = "</tool_response>";
 const FAMILY_MARKERS: &[&str] = &[
     TOOL_CALL_START,
     TOOL_CALL_END,
@@ -58,6 +67,10 @@ const FAMILY_MARKERS: &[&str] = &[
     FUNCTION_GEMMA_TOOL_CALL_END,
     FUNCTION_GEMMA_TOOL_RESPONSE_START,
     FUNCTION_GEMMA_TOOL_RESPONSE_END,
+    LFM3_TOOL_CALL_START,
+    LFM3_TOOL_CALL_END,
+    LFM3_TOOL_RESPONSE_START,
+    LFM3_TOOL_RESPONSE_END,
 ];
 const RESERVED_PROTOCOL_MARKERS: &[&str] = &[
     TOOL_CALL_START,
@@ -75,6 +88,18 @@ const RESERVED_PROTOCOL_MARKERS: &[&str] = &[
     FUNCTION_GEMMA_TOOL_RESPONSE_START,
     FUNCTION_GEMMA_TOOL_RESPONSE_END,
     FUNCTION_GEMMA_STRING_DELIMITER,
+    LFM3_TOOL_CALL_START,
+    LFM3_TOOL_CALL_END,
+    LFM3_TOOL_RESPONSE_START,
+    LFM3_TOOL_RESPONSE_END,
+    "<function=",
+    "</function>",
+    "<parameter=",
+    "</parameter>",
+    "<tools>",
+    "</tools>",
+    "<think>",
+    "</think>",
     "<|\"|>",
     "<|im_end|>",
     "<|im_start|>",
@@ -98,9 +123,9 @@ pub(crate) const TURN_MARKERS: &[&str] = &[
 
 /// Complete tool-protocol block delimiters as `(start, end, is_call_block)`,
 /// for streaming suppression and any consumer that must recognize whole
-/// blocks. Includes each family's calls plus structured Gemma declaration and
-/// response blocks. Declarations and responses are suppressible protocol
-/// traffic but not tool calls, hence the flag.
+/// blocks. Includes each family's calls plus structured Gemma and LFM3
+/// response blocks and Gemma declarations. Declarations and responses are
+/// suppressible protocol traffic but not tool calls, hence the flag.
 pub(crate) const TOOL_BLOCK_MARKERS: &[(&str, &str, bool)] = &[
     (TOOL_CALL_START, TOOL_CALL_END, true),
     (GEMMA_TOOL_CALL_START, GEMMA_TOOL_CALL_END, true),
@@ -120,6 +145,8 @@ pub(crate) const TOOL_BLOCK_MARKERS: &[(&str, &str, bool)] = &[
         FUNCTION_GEMMA_DECLARATION_END,
         false,
     ),
+    (LFM3_TOOL_CALL_START, LFM3_TOOL_CALL_END, true),
+    (LFM3_TOOL_RESPONSE_START, LFM3_TOOL_RESPONSE_END, false),
 ];
 
 /// Which tool-call text protocol a model speaks. Owned here so every
@@ -131,6 +158,12 @@ pub(crate) enum ToolCallProtocol {
     /// Also the default for unrecognized templates (HF-generic `tojson`
     /// tool lists take the same bare-function shape).
     Lfm2,
+    /// LFM3: ChatML turns opening with a thinking state, `<tool_call>` blocks
+    /// in XML notation, JSON-line tool lists, results in `tool` turns.
+    /// Qwen3-Coder and Qwen3.5 write the same call notation, so their calls
+    /// parse through this variant's scanner, but their templates are not
+    /// detected as LFM3: they frame tool results differently.
+    Lfm3,
     /// Gemma-4-family: `<|turn>` framing, `call:name{...}` notation,
     /// wrapper-shaped tool declarations.
     Gemma,
@@ -142,12 +175,15 @@ pub(crate) enum ToolCallProtocol {
 impl ToolCallProtocol {
     /// Detect from an embedded chat template's source text.
     /// Structured Gemma templates carry distinct declaration markers; the
-    /// LFM2/ChatML marker family contains neither marker.
+    /// LFM2/ChatML marker family contains neither marker, and LFM3 is told
+    /// apart by [`is_lfm3_template`].
     pub(crate) fn detect_from_template(template: &str) -> Self {
         if template.contains(FUNCTION_GEMMA_DECLARATION_START) {
             Self::FunctionGemma
         } else if template.contains("<|tool>") {
             Self::Gemma
+        } else if is_lfm3_template(template) {
+            Self::Lfm3
         } else {
             Self::Lfm2
         }
@@ -160,6 +196,8 @@ impl ToolCallProtocol {
             Some(Self::FunctionGemma)
         } else if prompt.contains("<|turn>") {
             Some(Self::Gemma)
+        } else if lfm3::is_lfm3_prompt(prompt) {
+            Some(Self::Lfm3)
         } else if prompt.contains("<|im_start|>") {
             Some(Self::Lfm2)
         } else {
@@ -170,6 +208,7 @@ impl ToolCallProtocol {
     fn call_start(self) -> &'static str {
         match self {
             Self::Lfm2 => TOOL_CALL_START,
+            Self::Lfm3 => LFM3_TOOL_CALL_START,
             Self::Gemma => GEMMA_TOOL_CALL_START,
             Self::FunctionGemma => FUNCTION_GEMMA_TOOL_CALL_START,
         }
@@ -178,18 +217,41 @@ impl ToolCallProtocol {
     fn call_end(self) -> &'static str {
         match self {
             Self::Lfm2 => TOOL_CALL_END,
+            Self::Lfm3 => LFM3_TOOL_CALL_END,
             Self::Gemma => GEMMA_TOOL_CALL_END,
             Self::FunctionGemma => FUNCTION_GEMMA_TOOL_CALL_END,
         }
     }
 }
 
+/// Whether `template` is LiquidAI's LFM3 chat template.
+///
+/// LFM3 writes calls in the `<tool_call>` / `<function=…>` / `<parameter=…>`
+/// notation it shares with Qwen3-Coder and Qwen3.5, and it alone in that
+/// family pre-fills a literal `<think></think>` when thinking is off (Qwen3.5
+/// writes the empty block with newlines inside). The chat formatter keys on
+/// this to render LFM3 prompts through the template, because the generation
+/// prompt carries that thinking state and llama.cpp's native matcher, which
+/// reads LFM3's template as plain ChatML, drops it.
+pub(crate) fn is_lfm3_template(template: &str) -> bool {
+    [
+        LFM3_TOOL_CALL_START,
+        "<function=",
+        "<parameter=",
+        "<think></think>",
+    ]
+    .iter()
+    .all(|marker| template.contains(marker))
+}
+
 /// Parses supported tool-call blocks from model output.
 ///
-/// Complete marker blocks are scanned in left-to-right order across both
+/// Complete marker blocks are scanned in left-to-right order across all
 /// protocols. Malformed call candidates are skipped silently; successfully
 /// parsed calls are numbered across the full response as `call_0`, `call_1`,
-/// and so on.
+/// and so on. LFM3 argument values are typed without schemas here: text
+/// that spells a non-string JSON value is decoded. Use
+/// [`parse_tool_calls_with_tools`] when the request's tools are at hand.
 ///
 /// # Examples
 ///
@@ -212,6 +274,49 @@ impl ToolCallProtocol {
 /// assert_eq!(gemma[0].function.arguments, r#"{"room":"bedroom"}"#);
 /// ```
 pub fn parse_tool_calls(text: &str) -> Vec<ToolCall> {
+    parse_tool_calls_with_tools(text, &[])
+}
+
+/// Parses supported tool-call blocks from model output, typing LFM3
+/// argument values against `tools`, the tools the request offered.
+///
+/// LFM3 writes every value as raw text. A parameter whose schema admits only
+/// strings keeps the text; any other parameter takes the JSON value the text
+/// spells when its schema admits that type, the rule llama.cpp's parser for
+/// this notation follows. A value that fits none of its parameter's types
+/// keeps the text. A parameter without a schema (its tool is not in `tools`,
+/// or the schema names no type) gets [`parse_tool_calls`]'s schema-free
+/// decoding. Other protocols spell their own types and parse exactly as with
+/// [`parse_tool_calls`].
+///
+/// # Examples
+///
+/// ```
+/// use xybrid_core::gateway::Tool;
+/// use xybrid_core::runtime_adapter::tool_call::parse_tool_calls_with_tools;
+///
+/// let tools = [Tool::function(
+///     "set_postcode",
+///     "Store a postcode",
+///     serde_json::json!({
+///         "type": "object",
+///         "properties": {
+///             "postcode": { "type": "string" },
+///             "verified": { "type": "boolean" }
+///         }
+///     }),
+/// )];
+/// let output = "<tool_call>\n<function=set_postcode>\n\
+///               <parameter=postcode>\n75001\n</parameter>\n\
+///               <parameter=verified>\ntrue\n</parameter>\n\
+///               </function>\n</tool_call>";
+///
+/// let calls = parse_tool_calls_with_tools(output, &tools);
+///
+/// assert_eq!(calls[0].function.name, "set_postcode");
+/// assert_eq!(calls[0].function.arguments, r#"{"postcode":"75001","verified":true}"#);
+/// ```
+pub fn parse_tool_calls_with_tools(text: &str, tools: &[Tool]) -> Vec<ToolCall> {
     let mut parsed = Vec::new();
     let mut rest = text;
 
@@ -223,6 +328,9 @@ pub fn parse_tool_calls(text: &str) -> Vec<ToolCall> {
 
         let calls = match protocol {
             ToolCallProtocol::Lfm2 => lfm2::parse_lfm2_block(after_start[..end].trim()),
+            ToolCallProtocol::Lfm3 => lfm3::parse_lfm3_block(after_start[..end].trim(), tools)
+                .into_iter()
+                .collect(),
             ToolCallProtocol::Gemma => gemma::parse_gemma_block(after_start[..end].trim())
                 .into_iter()
                 .collect(),
@@ -291,6 +399,8 @@ pub fn strip_tool_calls(text: &str) -> String {
             FUNCTION_GEMMA_TOOL_RESPONSE_START,
             FUNCTION_GEMMA_TOOL_RESPONSE_END,
         ),
+        (LFM3_TOOL_CALL_START, LFM3_TOOL_CALL_END),
+        (LFM3_TOOL_RESPONSE_START, LFM3_TOOL_RESPONSE_END),
     ];
 
     let mut output = String::new();
@@ -338,10 +448,12 @@ pub fn has_tool_markers(text: &str) -> bool {
 
 /// Composes a raw tool-call continuation prompt with tool responses.
 ///
-/// ChatML/LFM2 prompts keep the legacy scaffold. Structured Gemma prompts are
-/// detected from their declaration or turn markers; their tool responses are
-/// appended directly after `prior_assistant_text` because their templates emit
-/// no new model-turn header after a tool response.
+/// ChatML/LFM2 prompts keep the legacy scaffold. LFM3 prompts, detected from
+/// their tool list and thinking state, get one `tool` turn per response and
+/// a fresh assistant turn in the base's thinking state. Structured Gemma
+/// prompts are detected from their declaration or turn markers; their tool
+/// responses are appended directly after `prior_assistant_text` because
+/// their templates emit no new model-turn header after a tool response.
 ///
 /// Crate-internal on purpose: callers drive continuations through
 /// [`Envelope::tool_results`](crate::ir::Envelope::tool_results), not by
@@ -350,7 +462,9 @@ pub fn has_tool_markers(text: &str) -> bool {
 /// # Errors
 ///
 /// Returns [`AdapterError::InvalidInput`] when responses do not exactly answer
-/// the prior calls or `base_prompt` has no supported protocol markers.
+/// the prior calls, `base_prompt` has no supported protocol markers, or the
+/// prior calls use LFM3's notation on a prompt that is not LFM3's (Qwen3.5
+/// writes the same notation but frames tool results differently).
 pub(crate) fn compose_tool_continuation(
     base_prompt: &str,
     prior_assistant_text: &str,
@@ -369,10 +483,21 @@ pub(crate) fn compose_tool_continuation(
                 .to_string(),
         )
     })?;
+    if protocol != ToolCallProtocol::Lfm3 && prior_assistant_text.contains(LFM3_TOOL_CALL_START) {
+        return Err(AdapterError::InvalidInput(
+            "the prior turn's <tool_call> calls come from a template whose tool-result framing \
+             xybrid does not implement (only LFM3's); refusing to substitute another family's \
+             continuation"
+                .to_string(),
+        ));
+    }
 
     match protocol {
         ToolCallProtocol::Lfm2 => {
             lfm2::compose_chatml_continuation(base_prompt, prior_assistant_text, &responses)
+        }
+        ToolCallProtocol::Lfm3 => {
+            lfm3::compose_lfm3_continuation(base_prompt, prior_assistant_text, &responses)
         }
         ToolCallProtocol::Gemma => {
             gemma::compose_gemma_continuation(base_prompt, prior_assistant_text, &responses)
@@ -547,6 +672,22 @@ fn neutralized_marker(marker: &str) -> &'static str {
         "function_response"
     } else if marker == FUNCTION_GEMMA_STRING_DELIMITER || marker == "<|\"|>" {
         "string_delimiter"
+    } else if marker == LFM3_TOOL_CALL_START || marker == LFM3_TOOL_CALL_END {
+        "tool_call"
+    } else if marker == LFM3_TOOL_RESPONSE_START || marker == LFM3_TOOL_RESPONSE_END {
+        "tool_response"
+    } else if marker == "<function=" {
+        "function="
+    } else if marker == "</function>" {
+        "function"
+    } else if marker == "<parameter=" {
+        "parameter="
+    } else if marker == "</parameter>" {
+        "parameter"
+    } else if marker == "<tools>" || marker == "</tools>" {
+        "tools"
+    } else if marker == "<think>" || marker == "</think>" {
+        "think"
     } else if marker == "<|im_end|>" {
         "im_end"
     } else if marker == "<|im_start|>" {
@@ -584,6 +725,7 @@ pub(crate) fn truncate_at_turn_marker(text: &mut String) {
 fn find_next_call_marker(text: &str) -> Option<(ToolCallProtocol, usize)> {
     [
         (ToolCallProtocol::Lfm2, TOOL_CALL_START),
+        (ToolCallProtocol::Lfm3, LFM3_TOOL_CALL_START),
         (ToolCallProtocol::Gemma, GEMMA_TOOL_CALL_START),
         (
             ToolCallProtocol::FunctionGemma,

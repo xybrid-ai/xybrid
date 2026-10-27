@@ -11,6 +11,8 @@
 !/mnist/model_metadata.json
 model_metadata.json
 !/lfm2-vl-450m/model_metadata.json
+!/lfm3-1.7b/model_metadata.json
+!/lfm3-vl-2b/model_metadata.json
 !/gemma-4-e2b/model_metadata.json
 !/functiongemma-270m-it/model_metadata.json
 !/whisper-ggml-tiny-en/model_metadata.json
