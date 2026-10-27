@@ -94,12 +94,15 @@ RULES_RS_PLATFORMS = {
 # @platforms aliases that config_settings may name.
 ALIASES = {_OS + "macos": _OS + "osx"}
 NO_SPEECH = "no speech"
+# The Android slice reaches zzz-sys only through its isolation, which wraps
+# @zzz_android//:zzz (bazel/zzz/isolate.bzl; test_zzz_isolation.py).
+ANDROID_ENGINE = "//bazel/zzz:android_engine"
 # Expected flag-on outcome per platform: the engine slice that zzz-sys links,
 # NO_SPEECH (built without tts-zzz), or INCOMPATIBLE (tts-zzz plus a zzz-sys
 # that cannot build, so an explicit request fails loudly).
 EXPECTED = {
-    "aarch64-linux-android": "@zzz_android//:zzz",
-    "//bazel/ggml:android_arm64_cpu_variants": "@zzz_android//:zzz",
+    "aarch64-linux-android": ANDROID_ENGINE,
+    "//bazel/ggml:android_arm64_cpu_variants": ANDROID_ENGINE,
     "armv7-linux-androideabi": NO_SPEECH,
     "x86_64-linux-android": NO_SPEECH,
     "i686-linux-android": INCOMPATIBLE,
@@ -195,6 +198,7 @@ def speech_settings():
         "load": lambda *a, **kw: None,
         "config_setting": lambda **kw: settings.update({kw["name"]: kw}),
         "selects": types.SimpleNamespace(config_setting_group=lambda **kw: groups.append(kw)),
+        "zzz_isolated_engine": lambda **kw: None, "ZZZ_EMBED_API": [],
     }
     path = ROOT / "bazel/zzz/BUILD.bazel"
     exec(compile(path.read_text(), str(path), "exec"), namespace)
@@ -405,7 +409,7 @@ class SpeechFeatureWiringTests(unittest.TestCase):
                     self.assertEqual(["bindings"], resolve(model, engine["crate_features"], constraints, flags))
                     compatible = resolve(model, engine["target_compatible_with"], constraints, flags)
                     slices = [dep for dep in resolve(model, engine["deps"], constraints, flags)
-                              if dep.startswith("@zzz_")]
+                              if dep.startswith("@zzz_") or dep == ANDROID_ENGINE]
                     if expected == INCOMPATIBLE:
                         self.assertEqual(([INCOMPATIBLE], []), (compatible, slices))
                     else:
@@ -434,7 +438,7 @@ class SpeechFeatureWiringTests(unittest.TestCase):
                 self.assertIn(platform, platforms, "add the new ABI's platform constraints to this test")
                 features = resolve(model, found[SITES[0][:3]], platforms[platform], flags)
                 self.assertEqual([STATIC] if abi == "arm64-v8a" else [], features)
-                self.assertEqual("@zzz_android//:zzz" if abi == "arm64-v8a" else NO_SPEECH, EXPECTED[platform])
+                self.assertEqual(ANDROID_ENGINE if abi == "arm64-v8a" else NO_SPEECH, EXPECTED[platform])
 
     def test_resolver_rejects_a_member_that_does_not_refine_the_flag(self):
         # Guards the model itself: a constraint-only member (or a match_all

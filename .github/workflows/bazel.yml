@@ -153,28 +153,35 @@ jobs:
             //crates/... //bindings/... //macros/... //xtask/... //integration-tests/... //:llama
 
       # Speech (--//:tts_zzz=true) ships in the Kotlin AAR's arm64-v8a slice
-      # only; see AGENTS.md. Analysis only, with no secrets and no staged engine
-      # slice, so fork PRs run it too. The offline tests come first: ci.yml
-      # runs them only when tools/scripts/ changes, and a BUILD-only edit that
-      # desynchronises the per-crate selects compiles fine. The release gate's
-      # tests also read bazel/ggml/android.bzl (the arm64 inventory) and the
-      # speech marker's Rust source, which a release depends on.
+      # only; see AGENTS.md. No secrets and no staged engine slice, so fork PRs
+      # run it too. The offline tests come first: ci.yml runs them only when
+      # tools/scripts/ changes, and a BUILD-only edit that desynchronises the
+      # per-crate selects compiles fine. The release gate's tests also read
+      # bazel/ggml/android.bzl (the arm64 inventory) and the speech marker's
+      # Rust source, which a release depends on.
       #  (a) armeabi-v7a and x86_64 have no path to zzz-sys under the flag. The
       #      same query on the windows cdylib must find one, so (a) cannot pass
       #      vacuously.
-      #  (b) the arm64 slice selects the engine: without a staged slice its
-      #      analysis must fail with repositories.bzl's staging message, never
-      #      drop speech silently. The whole AAR fails the same way.
+      #  (b) the arm64 slice selects the engine, through the isolation of
+      #      //bazel/zzz:android_engine: without a staged slice its analysis
+      #      must fail with repositories.bzl's staging message, never drop
+      #      speech silently. The whole AAR fails the same way.
       #  (c) an explicitly requested unsupported desktop target still fails as
       #      incompatible, through zzz-sys.
+      #  (d) the engine isolation itself (bazel/zzz/isolate.bzl), on a fake
+      #      engine: the only thing this step builds, in seconds, with the NDK
+      #      the analysis above already fetched. It fails unless only the
+      #      zzz_embed_* API stays global and a library linked from it imports
+      #      memcpy, strlen and expf from bionic (bazel/zzz/selftest).
       # cquery, not query (see the ggml step below), and somepath to the exact
       # zzz-sys label: filter("zzz", ...) would also match the //:tts_zzz flag
       # and the //bazel/zzz settings.
-      - name: Speech reaches only the AAR's arm64 slice (analysis only)
+      - name: Speech reaches only the AAR's arm64 slice (analysis, isolation self-test)
         run: |
           set -euo pipefail
           python3 -m unittest tools/scripts/tests/test_zzz_feature_wiring.py \
             tools/scripts/tests/test_zzz_aar_notices.py \
+            tools/scripts/tests/test_zzz_isolation.py \
             tools/scripts/tests/test_verify_zzz_android.py
           zzz_sys_path() { # <top-level target> [bazel flags...]
             local target=$1; shift
@@ -209,8 +216,9 @@ jobs:
             fi
           done
           # (b)
-          expect_failure "The arm64 slice must select the engine" \
-            "Stage the pinned slice" "zzz_android//:zzz" -- //bindings/kotlin:bolt_so_arm64-v8a
+          expect_failure "The arm64 slice must select the isolated engine" \
+            "Stage the pinned slice" "zzz_android//:zzz" "//bazel/zzz:android_engine" -- \
+            //bindings/kotlin:bolt_so_arm64-v8a
           expect_failure "The AAR must require the staged slice" \
             "Stage the pinned slice" -- //bindings/kotlin:xybrid_kotlin_aar
           # (a)'s positive control, then (c)
@@ -223,6 +231,9 @@ jobs:
             "is incompatible and cannot be built" "//crates/zzz-sys:xybrid_zzz_sys" -- \
             --config=windows //crates/xybrid-bolt:xybrid_bolt_cdylib
           echo "Speech graph: arm64-v8a only, loud elsewhere ✅"
+          # (d)
+          bazelisk build --platforms=//bazel/ggml:android_arm64_cpu_variants //bazel/zzz/selftest
+          echo "Engine isolation self-test: only the zzz_embed_* API stays global ✅"
 
       # Every first-party Rust target must stamp the workspace version: without
       # `version = XYBRID_VERSION`, rules_rust sets CARGO_PKG_VERSION to its

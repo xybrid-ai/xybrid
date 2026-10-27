@@ -167,10 +167,27 @@ branch can bind it: never bind it outside Build Android, and treat push access
 to `release/v*` as what guards the credentials (a repository ruleset should
 limit it to maintainers and the release automation). `tools/scripts/verify_zzz_android.py` gates the
 AAR, the `xybrid-android-<tag>.zip` and the Gradle-built AAR (speech in
-arm64-v8a only, the fourteen notices byte-exact, minSdk 29, no static TLS) in
+arm64-v8a only, the fourteen notices byte-exact, minSdk 29, no static TLS,
+libc/libm imported from bionic) in
 release-prep, whose Verify Android Gradle packaging job replays the Gradle
 publish before the draft exists, and again in release-publish before Maven
 Central.
+
+**The engine is isolated at build time: only `zzz_embed_*` stays global.** Its
+archive bundles its own runtime and defines memcpy, strlen, expf,
+`__stack_chk_fail` and other libc, libm and compiler-rt names globally, and the
+AAR takes the whole archive into `libxybrid_bolt.so`, where those copies used
+to satisfy xybrid's own references instead of bionic's. zzz-sys therefore links
+`//bazel/zzz:android_engine` (`bazel/zzz/isolate.bzl`), never
+`@zzz_android//:zzz`: the target toolchain's `ld -r` prelinks the archive into
+one object, `llvm-objcopy` makes every definition but the C API local, and the
+action fails unless exactly that API (`ZZZ_EMBED_API`, kept equal to
+`crates/zzz-sys/src/api.rs` by `test_zzz_isolation.py`) is left global. A new
+engine function goes into both lists. The AAR gate's libc/libm canary and the
+proof lane's compare-imports check the shipped library, and
+`bazel/zzz/selftest` proves the mechanism on a fake engine in bazel.yml. The
+other static slices and Cargo builds still link the archive as is (a follow-up;
+see `crates/zzz-sys/README.md`).
 
 
 ### Prebuilt llama.cpp natives (the cargo fast path)

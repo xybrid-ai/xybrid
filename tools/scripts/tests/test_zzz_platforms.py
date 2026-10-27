@@ -167,6 +167,8 @@ class ZzzPlatformTests(unittest.TestCase):
             "load": lambda *args: None,
             "config_setting": lambda **kw: settings.update({kw["name"]: kw}),
             "selects": types.SimpleNamespace(config_setting_group=lambda **kw: groups.append(kw)),
+            # The Android engine's isolation (test_zzz_isolation.py covers it).
+            "zzz_isolated_engine": lambda **kw: None, "ZZZ_EMBED_API": [],
         }
         path = ROOT / "bazel/zzz/BUILD.bazel"
         exec(compile(path.read_text(), str(path), "exec"), namespace)

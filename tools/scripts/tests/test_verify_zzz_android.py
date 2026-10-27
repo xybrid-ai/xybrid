@@ -84,6 +84,7 @@ def lib_spec(abi, name, speech=False):
         spec["needed"] = [GATE.CXX] + (LLAMA if abi == GATE.SPEECH_ABI else []) + SYSTEM
         spec["dynsyms"] = [symbol(n) for n in JNI_EXPORTS + [GATE.JNI.BOLT_SYMBOL]]
         spec["dynsyms"].append(symbol("malloc@LIBC", "UND"))
+        spec["dynsyms"] += [symbol(n + "@LIBC", "UND") for n in GATE.LIBC_CANARY]
         if abi == GATE.SPEECH_ABI:
             spec["dynsyms"] += [symbol("llama_backend_init", "UND"), symbol("ggml_init", "UND")]
         spec["tls"] = spec["marker"] = speech and abi == GATE.SPEECH_ABI
@@ -177,38 +178,6 @@ def render_symbols(symbols, flavor, table=".dynsym"):
     return "\n".join(lines) + "\n"
 
 
-def ar_bytes(members, index=True):
-    """A GNU `ar` archive; `index` adds the "/" symbol table member, as ar s does."""
-    data = b"!<arch>\n"
-    for name, body in ([("/", b"\0\0\0\0")] if index else []) + list(members):
-        field = name if name in ("/", "//") else name + "/"
-        data += f"{field:<16}{0:<12}{0:<6}{0:<6}{644:<8}{len(body):<10}`\n".encode() + body
-        data += b"\n" if len(body) % 2 else b""
-    return data
-
-
-def ar_members(data):
-    members, offset = [], 8
-    while offset + 60 <= len(data):
-        name = data[offset:offset + 16].rstrip(b" ").decode()
-        length = int(data[offset + 48:offset + 58])
-        members.append((name.rstrip("/") or name, data[offset + 60:offset + 60 + length]))
-        offset += 60 + length + (length & 1)
-    return [(name, body) for name, body in members if name not in ("/", "//")]
-
-
-def render_archive(path, data, flavor):
-    """GNU readelf lists every member and fails on a non-ELF one; LLVM skips it silently."""
-    text = ""
-    for member, body in ar_members(data):
-        if not body.startswith(FAKE):
-            if flavor == "gnu":
-                raise GATE.GateError("readelf failed")
-            continue
-        text += f"\nFile: {path.name}({member})\n" + render_symbols(spec_of(body)["symbols"], flavor, ".symtab")
-    return text
-
-
 class FakeReadelf:
     """An injectable runner: renders readelf text from the file's JSON spec."""
 
@@ -222,8 +191,6 @@ class FakeReadelf:
         data = path.read_bytes()
         if path.name in self.fail:
             raise GATE.GateError("readelf failed")
-        if data.startswith(b"!<arch>\n") and "-s" in flags:
-            return render_archive(path, data, flavor)
         if not data.startswith(FAKE):
             raise GATE.GateError("readelf failed")
         spec = spec_of(data)
@@ -395,6 +362,44 @@ class AarTests(GateCase):
         # Vendor-built bundled libraries keep their own TLS model.
         entries = aar_entries()
         mutate(entries, "jni/arm64-v8a/libonnxruntime.so", flags=["STATIC_TLS"])
+        self.assertPasses(self.aar(entries))
+
+    def test_libc_canary_is_imported_by_every_bolt_library(self):
+        self.assertEqual(("memcpy", "memset", "memcmp", "strlen", "__stack_chk_fail", "expf", "logf"),
+                         GATE.LIBC_CANARY)
+        self.assertNotIn("memmove", GATE.LIBC_CANARY)  # armeabi-v7a does not import it
+        for speech in (True, False):
+            for index, abi in enumerate(GATE.ABIS):
+                key = f"jni/{abi}/libxybrid_bolt.so"
+                base = lib_spec(abi, GATE.BOLT, speech)["dynsyms"]
+                # One canary name per case, rotating so every name is covered.
+                for name in GATE.LIBC_CANARY[index::len(GATE.ABIS)]:
+                    with self.subTest(speech=speech, abi=abi, name=name):
+                        entries = aar_entries(speech)
+                        mutate(entries, key, dynsyms=[s for s in base if s[0] != name + "@LIBC"])
+                        err = self.assertFails(self.aar(entries, speech),
+                                               f"{abi}/libxybrid_bolt.so: does not import {name} from libc/libm")
+                        self.assertEqual(1, err.count("does not import"))
+                # A defined, exported copy is no import either.
+                with self.subTest(speech=speech, abi=abi, name="defined memcpy"):
+                    entries = aar_entries(speech)
+                    mutate(entries, key, dynsyms=[s for s in base if s[0] != "memcpy@LIBC"] + [symbol("memcpy")])
+                    self.assertFails(self.aar(entries, speech), f"{abi}/libxybrid_bolt.so: does not import memcpy ")
+
+    def test_libc_canary_lists_every_missing_name_with_both_readelf_flavours(self):
+        bolt = "jni/arm64-v8a/libxybrid_bolt.so"
+        kept = [s for s in lib_spec("arm64-v8a", GATE.BOLT, True)["dynsyms"]
+                if s[0].split("@")[0] not in GATE.LIBC_CANARY]
+        for readelf in ("readelf", "llvm-readelf"):
+            with self.subTest(readelf=readelf):
+                entries = aar_entries()
+                mutate(entries, bolt, dynsyms=kept)
+                self.assertFails(self.aar(entries, True, "--readelf", readelf),
+                                 "arm64-v8a/libxybrid_bolt.so: does not import memcpy, memset, memcmp, "
+                                 "strlen, __stack_chk_fail, expf, logf from libc/libm")
+        # Other libraries are not held to it: libllama.so imports what it uses.
+        entries = aar_entries()
+        mutate(entries, "jni/arm64-v8a/libllama.so", dynsyms=[])
         self.assertPasses(self.aar(entries))
 
     def test_speech_free_abis_stay_speech_free(self):
@@ -718,162 +723,65 @@ class StageGradleTests(GateCase):
             GATE._create(self.tmp / "escape.so", self.kotlin / "libs")
 
 
-class SymbolTests(GateCase):
-    def archive(self, symbols, *extra):
-        path = self.tmp / "libzzz_embed.a"
-        path.write_bytes(ar_bytes([("engine.o", elf_bytes({"symbols": symbols}))] + list(extra)))
-        return path
-
-    def library(self, name, exports):
+class CompareImportsTests(GateCase):
+    def library(self, name, *symbols):
         path = self.tmp / name
-        path.write_bytes(elf_bytes({"dynsyms": [symbol(n) for n in exports] + [symbol("memcpy@LIBC", "UND")]}))
+        path.write_bytes(elf_bytes({"dynsyms": list(symbols)}))
         return path
 
-    def overlap(self, archive, libs, *extra, bolt_exports=("Java_ai_xybrid_Native_init",)):
-        bolt = self.library("libxybrid_bolt.so", list(bolt_exports))
-        return self.run_gate("symbol-overlap", *extra, "--archive", archive, "--private-in", bolt, *libs)
+    def default(self):
+        return self.library("default.so", symbol("llama_backend_init", "UND"), symbol("ggml_init", "UND"),
+                            symbol("memcpy@LIBC", "UND"), symbol("expf@LIBC", "UND"),
+                            symbol("Java_ai_xybrid_Native_run"))
 
-    def test_overlap_prints_only_publicly_exported_names(self):
-        archive = self.archive([symbol("ggml_init"), symbol("llama_backend_init", vis="HIDDEN"),
-                                symbol("gguf_init_empty", bind="WEAK"), symbol(PRIVATE_SYMBOL),
-                                symbol("memcpy", "UND"), symbol("local_helper", bind="LOCAL"),
-                                symbol("engine.zig", "ABS", kind="FILE", bind="LOCAL")])
-        libs = [self.library("libggml-base.so", ["ggml_init", "gguf_init_empty", "local_helper"]),
-                self.library("libllama.so", ["llama_backend_init"]),
-                self.library("libc++_shared.so", ["memcpy_like"])]
+    def test_every_import_kept_passes(self):
+        speech = self.library("speech.so", symbol("llama_backend_init", "UND"), symbol("ggml_init", "UND"),
+                              symbol("memcpy@LIBC", "UND"), symbol("expf@LIBC", "UND"),
+                              symbol("pthread_create@LIBC", "UND"), symbol("Java_ai_xybrid_Native_run"))
         for readelf in ("readelf", "llvm-readelf"):
             with self.subTest(readelf=readelf):
-                code, out, err = self.overlap(archive, libs, "--readelf", readelf)
-                self.assertEqual(code, 1, out + err)
-                self.assertIn("3 engine symbol(s) also exported by 3 public libraries", out)
-                for name in ("ggml_init", "gguf_init_empty", "llama_backend_init"):
-                    self.assertIn(name, out)
-                self.assertNotIn(PRIVATE_SYMBOL, out + err)
-                self.assertNotIn("local_helper", out)
+                out = self.assertPasses(self.run_gate("compare-imports", "--readelf", readelf,
+                                                      self.default(), speech))
+                self.assertEqual("compare-imports: all 4 imports of default.so are still imported by the "
+                                 "speech build (1 new)", out.strip())
 
-    def test_no_overlap_passes_and_failures_hide_the_archive_path(self):
-        archive = self.archive([symbol(PRIVATE_SYMBOL)])
-        libs = [self.library("libggml.so", ["ggml_init"])]
-        code, out, err = self.overlap(archive, libs)
-        self.assertEqual((code, out.strip()), (0, "symbol-overlap: 0 engine symbol(s) also exported by 1 public library"))
-        self.readelf.fail.add("libzzz_embed.a")
-        code, out, err = self.overlap(archive, libs)
-        self.assertEqual(code, 1)
-        self.assertEqual(err.strip(), "symbol-overlap: readelf could not read the engine archive")
-        empty = self.archive([symbol("memcpy", "UND")])
-        self.readelf.fail.clear()
-        self.assertFails(self.overlap(empty, libs), "wrong file?")
+    def test_any_lost_import_fails_and_is_named(self):
+        cases = {
+            # A libc/libm import the engine's bundled runtime now satisfies.
+            "libc": ([symbol("llama_backend_init", "UND"), symbol("ggml_init", "UND"),
+                      symbol("memcpy", vis="HIDDEN"), symbol("pthread_create@LIBC", "UND")], ["expf", "memcpy"]),
+            # A shared llama.cpp import a static copy now satisfies.
+            "llama.cpp": ([symbol("llama_backend_init", "UND"), symbol("ggml_init"),
+                           symbol("memcpy@LIBC", "UND"), symbol("expf@LIBC", "UND")], ["ggml_init"]),
+        }
+        for case, (symbols, lost) in cases.items():
+            with self.subTest(case=case):
+                speech = self.library("speech.so", *symbols)
+                err = self.assertFails(self.run_gate("compare-imports", self.default(), speech),
+                                       f"compare-imports: {len(lost)} of 4 import(s) of default.so are not "
+                                       "imported by the speech build")
+                listed = [line.strip() for line in err.splitlines() if line.startswith("  ")]
+                self.assertEqual(lost, listed)
+                self.assertNotIn("llama_backend_init", err)  # still imported: not listed
 
-    def test_reviewed_runtime_helpers_pass_only_while_private(self):
-        self.assertEqual(GATE.RUNTIME_HELPERS, {"__emutls_get_address", "__muloti4"})
-        archive = self.archive([symbol("__emutls_get_address", bind="WEAK"), symbol("__muloti4"),
-                                symbol(PRIVATE_SYMBOL)])
-        libs = [self.library("libggml.so", ["ggml_init"]),
-                self.library("libc++_shared.so", ["__emutls_get_address", "__muloti4", "_ZNSt3__14cout"])]
-        out = self.assertPasses(self.overlap(archive, libs))
-        self.assertIn("2 engine symbol(s) also exported by 2 public libraries", out)
-        for name in ("__emutls_get_address", "__muloti4"):
-            self.assertIn(f"  {name} (exported by libc++_shared.so): reviewed compiler-runtime helper, "
-                          "private to libxybrid_bolt.so", out)
-        self.assertNotIn(PRIVATE_SYMBOL, out)
-        # The speech library exporting one would interpose it on every library.
-        err = self.assertFails(self.overlap(archive, libs, bolt_exports=("Java_x", "__muloti4")),
-                               "libxybrid_bolt.so exports 1 engine runtime helper(s)")
-        self.assertNotIn("unexpected", err)
-        self.readelf.fail.add("libxybrid_bolt.so")
-        self.assertFails(self.overlap(archive, libs), "readelf could not read libxybrid_bolt.so")
+    def test_the_default_library_must_import_llama_cpp(self):
+        bare = self.library("bare.so", symbol("malloc@LIBC", "UND"))
+        speech = self.library("speech.so", symbol("ggml_init", "UND"))
+        self.assertFails(self.run_gate("compare-imports", bare, speech),
+                         "bare.so imports no ggml_/gguf_/llama_/mtmd_ symbols")
 
-    def test_any_other_overlap_still_fails_beside_the_helpers(self):
-        archive = self.archive([symbol("__muloti4"), symbol("ggml_init"), symbol("__udivti3")])
-        libs = [self.library("libggml.so", ["ggml_init"]),
-                self.library("libc++_shared.so", ["__muloti4", "__udivti3"])]
-        code, out, err = self.overlap(archive, libs)
-        self.assertEqual(code, 1, out + err)
-        self.assertIn("__muloti4 (exported by libc++_shared.so): reviewed compiler-runtime helper", out)
-        self.assertIn("ggml_init (exported by libggml.so): unexpected", out)
-        self.assertIn("__udivti3 (exported by libc++_shared.so): unexpected", out)
-        self.assertIn("2 unexpected overlap(s)", err)
-
-    def test_private_in_is_required(self):
-        archive = self.archive([symbol(PRIVATE_SYMBOL)])
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
-            GATE.main(["symbol-overlap", "--archive", str(archive), str(self.library("libggml.so", []))])
-        self.assertEqual(raised.exception.code, 2)
-        self.assertNotIn(str(self.tmp), err.getvalue())
-
-    def test_every_archive_member_must_be_read(self):
-        libs = [self.library("libggml.so", ["ggml_init"])]
-        # A second ELF member whose odd length needs ar's padding byte.
-        archive = self.archive([symbol(PRIVATE_SYMBOL)], ("other.o", elf_bytes({"symbols": []}) + b"x"))
-        self.assertPasses(self.overlap(archive, libs, "--readelf", "llvm-readelf"))
-        # LLVM bitcode (or any non-ELF member): GNU readelf fails, llvm-readelf
-        # skips it without an error, and the member count catches that.
-        bitcode = ("lto.o", b"BC\xc0\xde" + b"\0" * 16)
-        archive = self.archive([symbol(PRIVATE_SYMBOL)], bitcode)
-        err = self.assertFails(self.overlap(archive, libs, "--readelf", "llvm-readelf"),
-                               "readelf listed 1 of the engine archive's 2 member(s)")
-        self.assertNotIn("lto.o", err)
-        self.assertFails(self.overlap(archive, libs, "--readelf", "readelf"),
-                         "readelf could not read the engine archive")
-        for name, data in (("thin.a", b"!<thin>\n"), ("short.a", b"!<arch>\n" + b"x" * 30),
-                           ("truncated.a", ar_bytes([("a.o", FAKE)])[:-4])):
-            with self.subTest(name=name):
-                path = self.tmp / name
-                path.write_bytes(data)
-                self.assertFails(self.overlap(path, libs),
-                                 "readelf could not read the engine archive")
-
-    def test_archive_member_count_skips_bookkeeping(self):
-        bsd_index = b"#1/20".ljust(16) + b"0".ljust(12) + b"0".ljust(6) + b"0".ljust(6) + b"644".ljust(8)
-        bsd_index += b"24".ljust(10) + b"`\n" + b"__.SYMDEF SORTED\0\0\0\0" + b"\0" * 4
-        data = ar_bytes([("//", b"long_member_name.o/\n"), ("a.o", FAKE), ("b.o", FAKE + b"!")])
-        path = self.tmp / "count.a"
-        path.write_bytes(data)
-        self.assertEqual(GATE.archive_members(path), 2)
-        path.write_bytes(b"!<arch>\n" + bsd_index + data[8:])
-        self.assertEqual(GATE.archive_members(path), 2)
-
-    def test_compare_imports(self):
-        default = self.tmp / "default.so"
-        default.write_bytes(elf_bytes({"dynsyms": [symbol("llama_backend_init", "UND"),
-                                                   symbol("ggml_init", "UND"), symbol("malloc@LIBC", "UND")]}))
-        same = self.tmp / "speech.so"
-        same.write_bytes(elf_bytes({"dynsyms": [symbol("llama_backend_init", "UND"), symbol("ggml_init", "UND"),
-                                                symbol("mtmd_init", "UND")]}))
-        out = self.assertPasses(self.run_gate("compare-imports", default, same))
-        self.assertIn("all 2 shared llama.cpp imports are still imported (1 new)", out)
-        interposed = self.tmp / "interposed.so"
-        interposed.write_bytes(elf_bytes({"dynsyms": [symbol("llama_backend_init", "UND"), symbol("ggml_init")]}))
-        err = self.assertFails(self.run_gate("compare-imports", default, interposed), "1 of 2", "ggml_init")
-        self.assertNotIn("llama_backend_init", err)
-        bare = self.tmp / "bare.so"
-        bare.write_bytes(elf_bytes({"dynsyms": [symbol("malloc@LIBC", "UND")]}))
-        self.assertFails(self.run_gate("compare-imports", bare, same), "imports no ggml_/gguf_/llama_/mtmd_ symbols")
-
-    def test_compare_imports_reports_other_lost_imports_as_advisory(self):
-        default = self.tmp / "default.so"
-        default.write_bytes(elf_bytes({"dynsyms": [symbol("ggml_init", "UND"), symbol("expf@LIBC", "UND"),
-                                                   symbol("memcpy@LIBC", "UND")]}))
-        speech = self.tmp / "speech.so"
-        speech.write_bytes(elf_bytes({"dynsyms": [symbol("ggml_init", "UND"), symbol("memcpy@LIBC", "UND"),
-                                                  symbol("expf", kind="FUNC", vis="HIDDEN")]}))
-        for actions, annotated in (("", False), ("true", True)):
-            with self.subTest(github_actions=actions), mock.patch.dict(os.environ, {"GITHUB_ACTIONS": actions}):
-                out = self.assertPasses(self.run_gate("compare-imports", default, speech))
-                self.assertIn("advisory: 1 other import(s) of default.so are not imported", out)
-                self.assertIn("\n  expf\n", out)
-                self.assertNotIn("memcpy", out)
-                self.assertEqual("::warning title=compare-imports::" in out, annotated)
-        out = self.assertPasses(self.run_gate("compare-imports", default, default))
-        self.assertNotIn("advisory", out)
+    def test_readelf_failure_is_reported_without_its_output(self):
+        speech = self.library("speech.so", symbol("ggml_init", "UND"))
+        self.readelf.fail.add("speech.so")
+        err = self.assertFails(self.run_gate("compare-imports", self.default(), speech), "readelf failed")
+        self.assertEqual("compare-imports: readelf failed", err.strip())
 
 
 class CliTests(GateCase):
     def test_usage_errors_do_not_echo_arguments(self):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
-            GATE.main(["symbol-overlap", "--archive", "/private/zzz-inputs/libzzz_embed.a", "--bogus"])
+            GATE.main(["compare-imports", "/private/zzz-inputs/libxybrid_bolt.so", "--bogus"])
         self.assertEqual(raised.exception.code, 2)
         self.assertNotIn("/private", err.getvalue())
         self.assertIn("invalid arguments", err.getvalue())
@@ -1036,17 +944,13 @@ class WorkflowHygieneTests(unittest.TestCase):
                      '"--repo_env=XYBRID_ZZZ_PYTHON=$(command -v python3)"',
                      "//bindings/kotlin:xybrid_kotlin_aar", "tools/scripts/bazel-output.sh", "cp -L"):
             self.assertIn(flag, blocks[build])
-        # The engine archive against the public libraries, on the release's own
-        # bytes, before the inputs go.
-        overlap = first(blocks, "verify_zzz_android.py symbol-overlap")
-        self.assertEqual(overlap, build + 1)
-        for needle in ("--readelf readelf", "zzz-inputs/aarch64-linux-android/lib/libzzz_embed.a",
-                       '--private-in "$lib/libxybrid_bolt.so"',
-                       "'jni/arm64-v8a/*'", '"$lib"/libggml*.so', '"$lib"/libllama.so', '"$lib"/libmtmd.so',
-                       '"$lib"/libc++_shared.so', '"$lib"/libonnxruntime.so'):
-            self.assertIn(needle, blocks[overlap])
-        delete = self.assert_inputs_deleted_before_packaging(blocks, overlap)
-        self.assertEqual(delete, overlap + 1)
+        # The build is the last use of the inputs: the engine is isolated as it
+        # is linked (//bazel/zzz:isolate.bzl), and the aar gate's libc/libm
+        # canary checks the result, so no step reads the private archive.
+        delete = self.assert_inputs_deleted_before_packaging(blocks, build)
+        self.assertEqual(delete, build + 1)
+        for retired in ("symbol-overlap", "--private-in", "lib/libzzz_embed.a"):
+            self.assertNotIn(retired, text)
         gate = first(blocks, "verify_zzz_android.py aar")
         self.assertIn("--readelf readelf --speech --min-sdk 29", blocks[gate])
         pack = first(blocks, "verify_zzz_android.py pack-dist")
@@ -1138,16 +1042,18 @@ class WorkflowHygieneTests(unittest.TestCase):
         blocks, stage = self.assert_single_token_step(text, speech, "ZZZ_CI_ENABLED")
         self.assertIn("if: env.ZZZ_CI_ENABLED == 'true'", blocks[stage])
         self.assertTrue(any("::notice" in block and "ZZZ_CI_ENABLED != 'true'" in block for block in blocks))
-        overlap = first(blocks, "verify_zzz_android.py symbol-overlap")
-        self.assertIn("zzz-inputs/aarch64-linux-android/lib/libzzz_embed.a", blocks[overlap])
-        self.assertIn('--private-in "$lib/libxybrid_bolt.so"', blocks[overlap])
-        self.assertIn('lib="$RUNNER_TEMP/aars/speech/jni/arm64-v8a"', blocks[overlap])
         build = first(blocks, "bazelisk build")
         self.assertIn("--//:tts_zzz=true", blocks[build])
-        delete = self.assert_inputs_deleted_before_packaging(blocks, overlap)
+        delete = self.assert_inputs_deleted_before_packaging(blocks, build)
         for needle in ("aar \"$RUNNER_TEMP/aars/default.aar\"", "--no-speech", "compare-imports",
                        "cmp -s", "::warning"):
+            self.assertLess(build, first(blocks, needle))
             self.assertLess(first(blocks, needle), delete)
+        compare = blocks[first(blocks, "verify_zzz_android.py compare-imports")]
+        self.assertIn('"$RUNNER_TEMP/aars/default/jni/arm64-v8a/libxybrid_bolt.so"', compare)
+        self.assertIn('"$RUNNER_TEMP/aars/speech/jni/arm64-v8a/libxybrid_bolt.so"', compare)
+        for retired in ("symbol-overlap", "--private-in", "lib/libzzz_embed.a"):
+            self.assertNotIn(retired, text)
         order = [first(blocks, needle) for needle in (
             "verify_zzz_android.py pack-dist", "./gradlew bundleReleaseAar",
             "build/outputs/aar/xybrid-kotlin-release.aar \\", "zip -q -d", "name: zzz-android-dlopen-gate",

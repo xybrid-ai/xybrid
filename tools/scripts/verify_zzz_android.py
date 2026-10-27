@@ -21,8 +21,9 @@ Subcommands:
       exports (verify_android_jni.py) and the `.note.android.ident` API level
       (verify_android_api_level.py: 29 for every arm64-v8a library we build,
       28 for armeabi-v7a and x86_64; the bundled libc++_shared.so and
-      libonnxruntime.so keep their vendor's level) and no static
-      (initial-exec) TLS in any library we build (see below). --speech:
+      libonnxruntime.so keep their vendor's level), no static
+      (initial-exec) TLS in any library we build and the libc/libm canary in
+      every libxybrid_bolt.so (both below). --speech:
       arm64-v8a carries the engine-linked signal below, the other ABIs are
       speech-free, and assets/xybrid/zzz/ holds exactly the 14 notices with
       their pinned SHA-256 and nothing else. --no-speech: no engine anywhere
@@ -48,27 +49,29 @@ Subcommands:
       libs/<abi>/ directories, notice directories holding anything but the
       exact notices, and any other file under src/main/assets/.
 
-  symbol-overlap --archive <libzzz_embed.a> --private-in <libxybrid_bolt.so>
-                 [--readelf R] <shared libs...>
-      Count the archive's GLOBAL/WEAK defined symbols that the given public
-      shared libraries (libggml*.so, libllama.so, libmtmd.so,
-      libc++_shared.so, libonnxruntime.so) also export. Prints only the count
-      and the overlapping names, which are public by construction. Fails on
-      any overlap, since a static engine copy would interpose on it, except
-      the reviewed compiler-runtime helpers in RUNTIME_HELPERS: those must
-      stay private to the speech libxybrid_bolt.so (--private-in), i.e. not
-      exported by it. Every archive member must be an ELF object that readelf
-      lists: llvm-readelf skips other members (LLVM bitcode, say) without an
-      error, so a member count from the archive's own headers must match its
-      `File:` blocks.
-
   compare-imports <tts-off.so> <tts-on.so> [--readelf R]
-      Fail if an undefined ggml_/gguf_/llama_/mtmd_ import of the default
-      arm64-v8a libxybrid_bolt.so is missing from the speech build: the
-      engine would then be satisfying it with its own copy. Any other import
-      the speech build lost (a libc or libm one that the engine's bundled musl
-      math or compiler-rt could now satisfy) is reported as advisory only,
-      until the proof lane has calibrated it.
+      Fail if ANY undefined import of the default arm64-v8a libxybrid_bolt.so
+      is missing from the speech build, printing the names (public: the
+      default build imports them). Something linked into the speech build,
+      the engine's bundled runtime say, would then be satisfying it with its
+      own copy. The default build must import ggml_/gguf_/llama_/mtmd_
+      symbols, so the wrong file fails too.
+
+The engine cannot interpose by construction: //bazel/zzz:isolate.bzl prelinks
+its archive into one object and makes every symbol but its zzz_embed_* C API
+local, and that build action fails unless only the API stays global. The
+proof lane's first run against the real archive had found its bundled runtime
+(memcpy, strlen, expf, __stack_chk_fail, __emutls_get_address, ...) bound to
+xybrid's own code, which then imported none of them. Two gates watch the
+result: compare-imports in the proof lane (test-zzz-android.yml), and the
+libc/libm canary below, which `aar` and `dist` apply everywhere.
+
+libc/libm canary: every libxybrid_bolt.so we ship, on every ABI and with or
+without speech, must list memcpy, memset, memcmp, strlen, __stack_chk_fail,
+expf and logf (LIBC_CANARY) as undefined dynamic symbols, i.e. import them
+from bionic, as master's libraries on all three ABIs do (memmove is left out:
+armeabi-v7a does not import it). The engine's bundled runtime defines every
+one of them, so a missing import means a static copy serves xybrid's code.
 
 Engine-linked signal for arm64-v8a/libxybrid_bolt.so, which the CI proof lane
 (test-zzz-android.yml) recalibrates on every relevant change:
@@ -96,7 +99,9 @@ relocations in libxybrid_bolt.so: the engine's TLS must use a dynamic model
 (TLSDESC on arm64).
 
 Messages are fixed text: no readelf stderr, receipt or private path is
-printed, and symbol names only where public libraries export or import them.
+printed, and symbol names only where public libraries export or import them
+(the generated JNI entry points, the canary's list, compare-imports' lost
+imports).
 Exit status: 0 passed, 1 failed, 2 usage. Standard library only, Python 3.9+.
 GNU readelf and llvm-readelf output both parse.
 """
@@ -167,30 +172,18 @@ PRIVATE_NAMES = frozenset({
     "zzz_embed.json", "libxybrid_zzz_tts.so",
 })
 SHARED_PREFIXES = ("ggml_", "gguf_", "llama_", "mtmd_")
-# Compiler-runtime helpers that the engine's bundled compiler runtime defines
-# and that libc++_shared.so also exports (an NDK packaging artifact). Every
-# NDK-linked library carries its own hidden copy of such helpers: the default
-# arm64 libxybrid_bolt.so imports neither (it links private copies), so with
-# the engine linked its private copies come from the engine instead, and the
-# version script keeps them hidden while other libraries still resolve the
-# names in libc++_shared.so. Their behaviour is fixed by the ABI. Reviewed by
-# name, from the first proof-lane run against the real archive: any other
-# overlap still fails.
-RUNTIME_HELPERS = frozenset({
-    "__emutls_get_address",  # emulated-TLS accessor
-    "__muloti4",  # 128-bit multiply with overflow
-})
+# libc and libm functions every libxybrid_bolt.so imports from bionic, on all
+# three ABIs, with or without speech (calibrated on master's libraries; not
+# memmove, which armeabi-v7a does not import). The engine's bundled runtime
+# defines each of them, so one going missing means a static copy now serves
+# xybrid's own code: the engine isolation (//bazel/zzz:isolate.bzl) failed.
+LIBC_CANARY = ("memcpy", "memset", "memcmp", "strlen", "__stack_chk_fail", "expf", "logf")
 # Initial-exec TLS in a dlopen'ed library: lld's DT_FLAGS marker and the
 # dynamic relocations bionic then refuses (GNU readelf 2.41 and llvm-readelf
 # print R_AARCH64_TLS_TPREL64; older binutils R_AARCH64_TLS_TPREL).
 STATIC_TLS_FLAG = "STATIC_TLS"
 STATIC_TLS_RELOCATIONS = re.compile(
     r"\bR_(?:AARCH64_TLS_TPREL(?:64)?|X86_64_TPOFF(?:64|32)|ARM_TLS_TPOFF32|386_TLS_TPOFF(?:32)?)\b")
-# `ar` members that are archive bookkeeping, not objects: the SysV/GNU symbol
-# and long-name tables and the BSD symbol tables.
-AR_INDEX_NAMES = frozenset({b"/", b"//", b"/SYM64/"})
-AR_BSD_INDEX = b"__.SYMDEF"
-EXPORT_BINDS = frozenset({"GLOBAL", "WEAK", "UNIQUE", "GNU_UNIQUE"})
 
 # The documented AAR anatomy (developer.android.com, "Anatomy of an AAR
 # file") plus what AGP adds (META-INF/, annotations.zip, baseline-prof.txt).
@@ -293,62 +286,18 @@ def static_tls_relocations(relocations: str) -> int:
     return sum(1 for line in relocations.splitlines() if STATIC_TLS_RELOCATIONS.search(line))
 
 
-def archive_members(path: Path) -> int:
-    """Count the object members of a GNU/SysV or BSD `ar` archive, bookkeeping excluded.
-
-    Thin archives (members stored outside the file) and malformed headers fail.
-    """
-    with open(path, "rb") as stream:
-        size = os.fstat(stream.fileno()).st_size
-        require(stream.read(8) == b"!<arch>\n", "not a regular ar archive")
-        offset, count = 8, 0
-        while offset < size:
-            stream.seek(offset)
-            header = stream.read(60)
-            if offset + 1 == size and header == b"\n":
-                break  # some writers pad the last member's data to an even length here
-            require(len(header) == 60 and header[58:60] == b"`\n", "corrupt ar member header")
-            field = header[48:58].strip()
-            require(field.isdigit(), "corrupt ar member size")
-            length = int(field)
-            require(length <= size - offset - 60, "ar member runs past the end of the archive")
-            name = header[:16].rstrip(b" ")
-            if name.startswith(b"#1/"):  # BSD: the name leads the member data
-                require(name[3:].isdigit() and int(name[3:]) <= length, "corrupt ar member name")
-                name = stream.read(int(name[3:])).rstrip(b"\0")
-            if name not in AR_INDEX_NAMES and not name.startswith(AR_BSD_INDEX):
-                count += 1
-            offset += 60 + length + (length & 1)
-    return count
-
-
-def listed_members(symbol_text: str) -> int:
-    """`File: <archive>(<member>)` blocks in `readelf -s` text, one per member read."""
-    return sum(1 for line in symbol_text.splitlines() if line.startswith("File: "))
-
-
-def defined_globals(symbol_text: str) -> Set[str]:
-    return {
-        symbol.name for symbol in ELF.parse_symbols(symbol_text)
-        if symbol.defined and symbol.bind in EXPORT_BINDS
-        and symbol.kind not in ("SECTION", "FILE")
-    }
-
-
-def dynamic_exports(symbol_text: str) -> Set[str]:
-    return {
-        symbol.name for symbol in ELF.parse_symbols(symbol_text)
-        if symbol.defined and symbol.bind in EXPORT_BINDS
-        and symbol.visibility in ("DEFAULT", "PROTECTED")
-    }
-
-
 def undefined_imports(symbol_text: str) -> Set[str]:
     return {symbol.name for symbol in ELF.parse_symbols(symbol_text) if not symbol.defined}
 
 
 def shared_imports(symbol_text: str) -> Set[str]:
     return {name for name in undefined_imports(symbol_text) if name.startswith(SHARED_PREFIXES)}
+
+
+def missing_canary(symbol_text: str) -> List[str]:
+    """LIBC_CANARY names that `--dyn-syms` text does not list as undefined imports."""
+    imported = undefined_imports(symbol_text)
+    return [name for name in LIBC_CANARY if name not in imported]
 
 
 def contains(path: Path, needle: bytes) -> bool:
@@ -683,6 +632,10 @@ def check_library(abi: str, name: str, path: Path, shipped: FrozenSet[str], spee
     except ValueError as error:
         # The names are the generated, public Java_* entry points.
         report.fail(f"{where}: " + str(error).replace("\n", "; "))
+    missing = missing_canary(dynsyms)
+    if missing:
+        report.fail(f"{where}: does not import {', '.join(missing)} from libc/libm; a static copy "
+                    "linked into it (the speech engine's bundled runtime?) serves xybrid's own code")
     engine = [s for s in ELF.parse_symbols(dynsyms) if s.name.startswith(ENGINE_PREFIX)]
     undefined = sum(1 for symbol in engine if not symbol.defined)
     defined = len(engine) - undefined
@@ -713,7 +666,7 @@ def check_library(abi: str, name: str, path: Path, shipped: FrozenSet[str], spee
         state = ("speech engine linked statically (marker, PT_TLS, no engine symbols in .dynsym)"
                  if speech else "speech-free")
         report.ok(f"{where}: {state}; JNI exports, NEEDED, Android API {API_LEVELS[abi]}, "
-                  "no static TLS OK")
+                  "no static TLS, libc/libm imports OK")
 
 
 def check_natives(package: Package, natives: Dict[str, Dict[str, zipfile.ZipInfo]], speech: bool,
@@ -899,61 +852,6 @@ def stage_gradle(release_zip: Path, kotlin_dir: Path) -> int:
 # --- symbol comparisons ----------------------------------------------------
 
 
-def symbol_overlap(archive: Path, libraries: Sequence[Path], private_in: Path,
-                   readelf: Readelf) -> int:
-    try:
-        members = archive_members(archive)
-        text = readelf(archive, "-s")
-    except (GateError, OSError):
-        # Never echo the archive's path or readelf's stderr.
-        print("symbol-overlap: readelf could not read the engine archive", file=sys.stderr)
-        return 1
-    listed = listed_members(text)
-    if listed != members:
-        print(f"symbol-overlap: readelf listed {listed} of the engine archive's {members} "
-              "member(s); every member must be an ELF object", file=sys.stderr)
-        return 1
-    engine = defined_globals(text)
-    if not engine:
-        print("symbol-overlap: no defined global symbols in the engine archive; wrong file?",
-              file=sys.stderr)
-        return 1
-    overlap: Dict[str, List[str]] = {}
-    for library in libraries:
-        try:
-            exports = dynamic_exports(readelf(library, "--dyn-syms"))
-        except GateError:
-            print(f"symbol-overlap: readelf could not read {library.name}", file=sys.stderr)
-            return 1
-        for name in engine & exports:
-            overlap.setdefault(name, []).append(library.name)
-    print(f"symbol-overlap: {len(overlap)} engine symbol(s) also exported by "
-          f"{len(libraries)} public librar{'y' if len(libraries) == 1 else 'ies'}")
-    helpers = sorted(name for name in overlap if name in RUNTIME_HELPERS)
-    unexpected = sorted(name for name in overlap if name not in RUNTIME_HELPERS)
-    leaked: Set[str] = set()
-    if helpers:
-        try:
-            leaked = set(helpers) & dynamic_exports(readelf(private_in, "--dyn-syms"))
-        except GateError:
-            print(f"symbol-overlap: readelf could not read {private_in.name}", file=sys.stderr)
-            return 1
-    for name in helpers:
-        # Public by construction: these libraries export the name.
-        state = (f"EXPORTED by {private_in.name}" if name in leaked
-                 else f"reviewed compiler-runtime helper, private to {private_in.name}")
-        print(f"  {name} (exported by {', '.join(sorted(overlap[name]))}): {state}")
-    for name in unexpected:
-        print(f"  {name} (exported by {', '.join(sorted(overlap[name]))}): unexpected")
-    if leaked:
-        print(f"symbol-overlap: {private_in.name} exports {len(leaked)} engine runtime helper(s); "
-              "the version script must keep them hidden", file=sys.stderr)
-    if unexpected:
-        print(f"symbol-overlap: {len(unexpected)} unexpected overlap(s); a static engine copy "
-              "would interpose on them", file=sys.stderr)
-    return 1 if leaked or unexpected else 0
-
-
 def compare_imports(default: Path, speech: Path, readelf: Readelf) -> int:
     try:
         default_symbols = readelf(default, "--dyn-syms")
@@ -961,32 +859,22 @@ def compare_imports(default: Path, speech: Path, readelf: Readelf) -> int:
     except GateError as error:
         print(f"compare-imports: {error}", file=sys.stderr)
         return 1
-    before, after = shared_imports(default_symbols), shared_imports(speech_symbols)
-    if not before:
+    if not shared_imports(default_symbols):
         print(f"compare-imports: {default.name} imports no {'/'.join(SHARED_PREFIXES)} symbols; "
               "expected the default arm64-v8a libxybrid_bolt.so", file=sys.stderr)
         return 1
-    missing = sorted(before - after)
-    if missing:
-        print(f"compare-imports: {len(missing)} of {len(before)} shared llama.cpp import(s) of "
-              f"{default.name} are no longer imported by the speech build, so a static copy "
-              "now satisfies them:", file=sys.stderr)
-        for name in missing:
+    before, after = undefined_imports(default_symbols), undefined_imports(speech_symbols)
+    lost = sorted(before - after)
+    if lost:
+        # Public by construction: the default build imports every one of them.
+        print(f"compare-imports: {len(lost)} of {len(before)} import(s) of {default.name} are not "
+              "imported by the speech build, so a static copy linked into it (the engine's "
+              "bundled runtime?) now satisfies them:", file=sys.stderr)
+        for name in lost:
             print(f"  {name}", file=sys.stderr)
         return 1
-    print(f"compare-imports: all {len(before)} shared llama.cpp imports are still imported "
-          f"({len(after - before)} new)")
-    # Advisory: names the public default build imports, so public by construction.
-    lost = sorted(undefined_imports(default_symbols) - undefined_imports(speech_symbols))
-    if lost:
-        print(f"compare-imports: advisory: {len(lost)} other import(s) of {default.name} are not "
-              "imported by the speech build; check that no engine copy (musl math, compiler-rt) "
-              "replaced them:")
-        for name in lost:
-            print(f"  {name}")
-        if os.environ.get("GITHUB_ACTIONS") == "true":
-            print(f"::warning title=compare-imports::{len(lost)} import(s) of the default "
-                  "libxybrid_bolt.so are not imported by the speech build (advisory; see the log)")
+    print(f"compare-imports: all {len(before)} imports of {default.name} are still imported by "
+          f"the speech build ({len(after - before)} new)")
     return 0
 
 
@@ -1027,12 +915,6 @@ def main(argv: Optional[Sequence[str]] = None, runner: Optional[Runner] = None,
     stage.add_argument("zip", type=Path)
     stage.add_argument("--kotlin-dir", type=Path, required=True)
 
-    overlap = with_readelf(commands.add_parser("symbol-overlap", help="engine vs public exports"))
-    overlap.add_argument("--archive", type=Path, required=True)
-    overlap.add_argument("--private-in", type=Path, required=True,
-                         help="the speech arm64-v8a libxybrid_bolt.so")
-    overlap.add_argument("libraries", type=Path, nargs="+")
-
     compare = with_readelf(commands.add_parser("compare-imports", help="tts-off vs tts-on imports"))
     compare.add_argument("default", type=Path)
     compare.add_argument("speech", type=Path)
@@ -1050,8 +932,6 @@ def main(argv: Optional[Sequence[str]] = None, runner: Optional[Runner] = None,
             return pack_dist(args.aar, args.output)
         if args.command == "stage-gradle":
             return stage_gradle(args.zip, args.kotlin_dir)
-        if args.command == "symbol-overlap":
-            return symbol_overlap(args.archive, args.libraries, args.private_in, readelf)
         return compare_imports(args.default, args.speech, readelf)
     except GateError as error:
         print(f"verify_zzz_android: {error}", file=sys.stderr)

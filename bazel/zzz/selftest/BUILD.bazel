@@ -1,0 +1,65 @@
+# Self-test of //bazel/zzz:isolate.bzl that needs no private input: a fake
+# engine (fake_engine.c) goes through the same zzz_isolated_engine rule as the
+# real one, is linked with SDK-side code (host.c) into a shared library by the
+# API-29 NDK toolchain, and :selftest fails the build unless
+#   - the raw fake engine defines memcpy, strlen, expf and its variables
+#     globally (so the test is not vacuous), the isolated one defines only the
+#     zzz_embed_* API globally and the rest locally, and still imports write;
+#   - the isolated object keeps its .tbss, .init_array and .eh_frame;
+#   - the library imports memcpy, strlen, expf and write from bionic, exports
+#     none of the fake runtime, and reaches the thread-local through TLSDESC
+#     (PT_TLS, no TPREL relocation, no STATIC_TLS).
+#
+#   bazel build --platforms=//bazel/ggml:android_arm64_cpu_variants //bazel/zzz/selftest
+#
+# bazel.yml runs exactly that. Every target here is for that platform only
+# (Android 10's native ELF TLS; API-28 builds would use emulated TLS), so a
+# host wildcard build or analysis skips them as incompatible.
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("//bazel/zzz:isolate.bzl", "ZZZ_EMBED_API", "zzz_isolated_engine")
+load(":check.bzl", "isolation_selftest")
+
+_AAR_ARM64 = [
+    "@platforms//os:android",
+    "@platforms//cpu:aarch64",
+    "//bazel/toolchains/android:api29",
+]
+
+cc_library(
+    name = "fake_engine",
+    srcs = ["fake_engine.c"],
+    copts = ["-fno-builtin"],
+    # The real engine's link flags (bazel/zzz/repositories.bzl), which the
+    # isolated engine must carry over.
+    linkopts = ["-lc", "-lm", "-ldl"],
+    linkstatic = True,
+    target_compatible_with = _AAR_ARM64,
+)
+
+zzz_isolated_engine(
+    name = "fake_engine_isolated",
+    api = ZZZ_EMBED_API,
+    engine = ":fake_engine",
+    target_compatible_with = _AAR_ARM64,
+)
+
+cc_binary(
+    name = "libselftest.so",
+    srcs = ["host.c"],
+    copts = ["-fno-builtin"],
+    linkshared = True,
+    target_compatible_with = _AAR_ARM64,
+    deps = [":fake_engine_isolated"],
+)
+
+isolation_selftest(
+    name = "selftest",
+    api = ZZZ_EMBED_API,
+    engine = ":fake_engine_isolated",
+    imports = ["expf", "memcpy", "strlen", "write"],
+    library = ":libselftest.so",
+    local = ["expf", "fake_engine_counter", "fake_engine_tls", "memcpy", "strlen"],
+    raw = ":fake_engine",
+    target_compatible_with = _AAR_ARM64,
+    undefined = ["write"],
+)
