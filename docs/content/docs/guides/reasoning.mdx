@@ -38,6 +38,7 @@ emits a chain-of-thought before every answer.
 |-------|-----------------|-------|
 | `lfm2.5-1.2b-thinking` | yes | hybrid conv+attention reasoning model, ~697 MB |
 | `qwen3.5-0.8b` / `qwen3.5-2b` | sometimes | Qwen 3.5 thinking mode |
+| LFM3 1.7B / LFM3-VL 2B bundles | yes, when flagged | its chat template switches thinking on or off |
 
 ## Reading Reasoning
 
@@ -138,12 +139,20 @@ Without the flag, xybrid treats the model as a normal LLM: any `<think>` blocks
 it emits on its own are still stripped from `text` and captured, but xybrid
 won't prime the channel, so a model that only thinks *when asked to* stays quiet.
 
+Some chat templates switch thinking themselves. LFM3's opens the channel by
+default, so xybrid renders LFM3 prompts through the template with the flag:
+thinking on with `reasoning: true`, and the channel pre-filled closed without
+it. With thinking off, LFM3 occasionally writes a draft answer, a stray
+`</think>` and then its answer again. The final result keeps the answer after
+the tag in `text` and the draft in `reasoningContent`, but a streaming
+callback has already received the draft and the tag by then.
+
 ## Recognized formats
 
 Reasoning is captured from these delimiters (in the answer text and, during
 streaming, suppressed from the live callback):
 
-- `<think>…</think>` — Qwen 3 / DeepSeek-R1 / LFM2.5-thinking (the form xybrid primes).
+- `<think>…</think>` — Qwen 3 / DeepSeek-R1 / LFM2.5-thinking / LFM3 (the form xybrid primes).
 - `<thinking>…</thinking>` — Anthropic-style.
 - `<|channel>thought … <channel|>` — gemma-4's thought channel. Recognized, but
   xybrid runs gemma-4 with thinking disabled today, so this path isn't yet
