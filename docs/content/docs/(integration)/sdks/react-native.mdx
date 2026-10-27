@@ -9,7 +9,7 @@ The React Native package (`@xybrid/react-native`) wraps the same Rust core as th
 
 - React Native 0.76+ with the New Architecture (Expo SDK 52+ with a development build — not Expo Go)
 - iOS 16.0+ (simulator builds need an Apple Silicon Mac)
-- Android API 24+ (`arm64-v8a`, `armeabi-v7a`, `x86_64`)
+- Android 10 / API 29+ (`arm64-v8a`, `armeabi-v7a`, `x86_64`)
 
 ## Installation
 
@@ -17,7 +17,23 @@ The React Native package (`@xybrid/react-native`) wraps the same Rust core as th
 npm install @xybrid/react-native@0.13.1
 ```
 
-For bare React Native, run `cd ios && pod install`. With Expo, run `npx expo prebuild` and use a development build; Expo Go cannot load the native module. No config plugin is needed.
+For bare React Native, run `cd ios && pod install`. With Expo, run `npx expo prebuild` and use a development build; Expo Go cannot load the native module. The package itself needs no config plugin.
+
+On Android, your app's `minSdkVersion` must be 29 or higher; with a lower value the Gradle build fails at the manifest merge. The React Native and Expo templates currently default to 24, so raise it:
+
+- **Expo**: install `expo-build-properties` (`npx expo install expo-build-properties`), set `android.minSdkVersion` to 29, then run `npx expo prebuild` again. The plugin writes `android.minSdkVersion=29` to `android/gradle.properties`; your own config plugin can set that property instead.
+
+  ```json title="app.json"
+  {
+    "expo": {
+      "plugins": [
+        ["expo-build-properties", { "android": { "minSdkVersion": 29 } }]
+      ]
+    }
+  }
+  ```
+
+- **Bare React Native**: set `minSdkVersion = 29` in the `ext` block of `android/build.gradle`.
 
 On iOS, `pod install` downloads the Rust core from the matching GitHub Release and verifies its SHA-256. Offline or behind a proxy, set `XYBRID_NATIVES_BASE_URL` (a mirror) or `XYBRID_XCFRAMEWORK_PATH` (a local copy). On Android, Gradle resolves the Kotlin SDK from Maven Central.
 

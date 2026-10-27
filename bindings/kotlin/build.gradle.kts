@@ -12,7 +12,9 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        minSdk = 24
+        // Android 10: the arm64 natives are built for API 29
+        // (//bazel/toolchains/android). Keep bazel/AndroidManifest.xml in sync.
+        minSdk = 29
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")

@@ -245,13 +245,37 @@ python.toolchain(
 
 android_ndk = use_extension("@rules_android_ndk//:extension.bzl", "android_ndk_repository_extension")
 android_ndk.configure(
-    # android-28 matches today's cmake ANDROID_PLATFORM (build.rs / boltffi path).
+    # Android 9 (API 28) is the floor for every Bazel Android native EXCEPT the
+    # Kotlin AAR's arm64 slice (below): the Flutter precompiled libraries, the
+    # Unity plugin (--config=android-*) and the AAR's armeabi-v7a / x86_64
+    # slices all build here. It matches the cargo path's cmake ANDROID_PLATFORM
+    # (crates/llama-cpp-sys/build.rs). Raising it would move all of them to
+    # Android 10.
     api_level = 28,
     # The NDK itself is DOWNLOADED as a pinned repo input (rules_android_ndk.patch:
     # XYBRID_NDK_URL/SHA256 in .bazelrc) — no local install. A local NDK via
     # ANDROID_NDK_HOME / path applies only when XYBRID_NDK_URL is unset.
 )
 use_repo(android_ndk, "androidndk")
+
+# The same pinned NDK at API 29 (Android 10), for the Kotlin AAR's arm64 slice
+# only: //bazel/ggml:android_arm64_cpu_variants carries
+# //bazel/toolchains/android:api29, and only that toolchain accepts it. The
+# extension above supports one hardcoded repository, so instantiate its
+# (patched) repository rule directly with an explicit name and API level.
+android_ndk_api29 = use_repo_rule("@rules_android_ndk//:rules.bzl", "android_ndk_repository")
+
+android_ndk_api29(
+    name = "androidndk_api29",
+    api_level = 29,
+)
+
+# ORDER MATTERS. @androidndk's toolchains constrain only os + cpu, so they also
+# match a platform carrying :api29. Root-module registration order is priority:
+# the API-29 toolchain must come first to win on the AAR's arm64 platform. On
+# every other Android platform (default :api28) it does not match at all.
+register_toolchains("//bazel/toolchains/android:all")
+
 register_toolchains("@androidndk//:all")
 
 # NOTE: bindgen runs OFFLINE (committed src/bindings.rs, Option A) — no

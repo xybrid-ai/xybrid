@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "ai.xybrid.smoke"
-        minSdk = 24
+        minSdk = 29
         targetSdk = 34
         versionCode = 1
         versionName = "0.0.0"

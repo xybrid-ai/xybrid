@@ -1,0 +1,53 @@
+"""The Android API-level floor as a platform constraint, and the API-29 NDK toolchain.
+
+Every Bazel Android native builds with `@androidndk` at API 28 (Android 9),
+except the Kotlin AAR's arm64 slice: its platform,
+`//bazel/ggml:android_arm64_cpu_variants`, carries `:api29`, and the toolchain
+below compiles and links it with `@androidndk_api29`, the same pinned NDK at
+API 29 (Android 10). The AAR's armeabi-v7a / x86_64 slices, the Flutter
+precompiled libraries and the Unity plugin keep the default `:api28`.
+
+Registered in MODULE.bazel BEFORE `@androidndk//:all`. Those toolchains
+constrain only os + cpu, so they also match an `:api29` platform; registration
+order is what makes this one win there.
+"""
+
+package(default_visibility = ["//visibility:private"])
+
+# Every platform that does not name a value gets :api28, so the API-29 toolchain
+# cannot match an existing Android platform by accident.
+constraint_setting(
+    name = "android_api",
+    default_constraint_value = ":api28",
+    visibility = ["//visibility:public"],
+)
+
+constraint_value(
+    name = "api28",
+    constraint_setting = ":android_api",
+    visibility = ["//visibility:public"],
+)
+
+constraint_value(
+    name = "api29",
+    constraint_setting = ":android_api",
+    visibility = ["//visibility:public"],
+)
+
+# No exec_compatible_with, like the @androidndk toolchains: an exec constraint
+# this toolchain alone carried would let a non-matching exec platform skip it and
+# silently resolve the API-28 toolchain instead. (ggml_cpu_backend.cpp also
+# refuses to compile below API 29, as a guard against exactly that.)
+#
+# The path is stable: .bazelrc pins XYBRID_NDK_HOST_TAG=linux-x86_64, which
+# rules_android_ndk.patch uses as the clang directory on every host.
+toolchain(
+    name = "aarch64_android29",
+    target_compatible_with = [
+        "@platforms//os:android",
+        "@platforms//cpu:aarch64",
+        ":api29",
+    ],
+    toolchain = "@androidndk_api29//toolchains/llvm/prebuilt/linux-x86_64:cc_toolchain_aarch64-linux-android",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+)

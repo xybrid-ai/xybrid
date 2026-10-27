@@ -30,7 +30,7 @@ android {
 
     defaultConfig {
         applicationId = "ai.xybrid.example"
-        minSdk = 28
+        minSdk = 29
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"

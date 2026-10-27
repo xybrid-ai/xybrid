@@ -44,7 +44,10 @@ npx expo run:android
 ```
 
 The config plugin in `plugins/withXybridDevAndroid.js` puts `mavenLocal()`
-first, so the app links the Kotlin SDK you just published.
+first, so the app links the Kotlin SDK you just published. It also sets
+`android.minSdkVersion=29` in `gradle.properties`, because the Kotlin SDK
+requires Android 10 (API 29); run the example on an Android 10+ device or
+emulator.
 
 ## Choosing models
 

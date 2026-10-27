@@ -16,6 +16,9 @@ dependencies {
 }
 ```
 
+The SDK requires Android 10 (API 29): set `minSdk = 29` or higher in your
+app's `defaultConfig`, or the build fails at the manifest merge.
+
 ### Local Development
 
 Add this module as a project dependency:
@@ -401,7 +404,7 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
 
 | Android API | Version Name |
 |-------------|--------------|
-| API 24+ | Android 7.0 (Nougat) |
+| API 29+ | Android 10 |
 
 ## NDK ABIs
 

@@ -23,7 +23,7 @@ await model.release();
 |---|---|
 | React Native | 0.76 or newer, **New Architecture** (the default since 0.76; the only option since 0.82) |
 | iOS | 16.0+. Simulator builds need an Apple Silicon Mac (there is no x86_64 simulator slice) |
-| Android | API 24+, `arm64-v8a`, `armeabi-v7a`, `x86_64` |
+| Android | API 29+ (Android 10), `arm64-v8a`, `armeabi-v7a`, `x86_64` |
 | Expo | SDK 52+ with a [development build](https://docs.expo.dev/develop/development-builds/introduction/) — not Expo Go |
 
 ## Install
@@ -39,10 +39,15 @@ cd ios && pod install
   offline, point `XYBRID_NATIVES_BASE_URL` at a mirror, or
   `XYBRID_XCFRAMEWORK_PATH` at a local copy (directory or `.zip`). If your app
   targets iOS below 16.0, raise it in the Podfile (`platform :ios, '16.0'`).
-- **Android** — nothing to do: Gradle pulls `ai.xybrid:xybrid-kotlin` (the
-  Kotlin SDK with the native libraries) from Maven Central.
+- **Android** — Gradle pulls `ai.xybrid:xybrid-kotlin` (the Kotlin SDK with
+  the native libraries) from Maven Central. It requires Android 10: set
+  `minSdkVersion = 29` (or higher) in the `ext` block of `android/build.gradle`.
+  Below that, the build fails at the manifest merge.
 - **Expo** — `npx expo install @xybrid/react-native`, then
-  `npx expo prebuild` / `npx expo run:ios|android`. No config plugin needed.
+  `npx expo prebuild` / `npx expo run:ios|android`. The package needs no config
+  plugin, but the app's Android `minSdkVersion` must be 29 or higher: add
+  `expo-build-properties` with `android.minSdkVersion: 29` (or set the
+  `android.minSdkVersion=29` gradle property from your own config plugin).
 
 ## Quick tour
 

@@ -121,7 +121,7 @@ Native Android example using Jetpack Compose and the Xybrid Kotlin SDK.
 |------|------------------|--------------|
 | Android Studio | Hedgehog (2023.1.1)+ | [developer.android.com/studio](https://developer.android.com/studio) |
 | JDK | 11+ | Included with Android Studio |
-| Android SDK | API 28+ | Via SDK Manager |
+| Android SDK | API 29+ (Android 10) | Via SDK Manager |
 | Rust | 1.70+ | [rustup.rs](https://rustup.rs) (for native lib build) |
 
 ### Getting Started
@@ -237,7 +237,7 @@ Native libraries need to be built from Rust before the SDK works:
 |-------|----------|
 | "SDK location not found" (Android) | Set `ANDROID_HOME` environment variable |
 | "Target 'aarch64-apple-ios' not installed" | Run `rustup target add aarch64-apple-ios` |
-| "minSdk is too high" (Android) | Use Android 9.0+ device/emulator (API 28) |
+| "minSdk is too high" (Android) | Use a device/emulator at or above the example's minimum: Android 10 (API 29) for Android (Kotlin), Android 9 (API 28) for Flutter and Unity |
 | Xcode signing errors | Configure development team in Xcode |
 
 ### Microphone permission denied

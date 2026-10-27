@@ -15,7 +15,7 @@ dependencies {
 }
 ```
 
-Minimum SDK: **24** (Android 7.0)
+Minimum SDK: **29** (Android 10). Set `minSdk = 29` or higher in your app's `defaultConfig`; with a lower value the build fails at the manifest merge.
 
 ## Quick Start
 
@@ -41,7 +41,7 @@ if (result.success) {
 }
 ```
 
-`Xybrid.init(context)` also registers `BatteryManager` and (on API 29+) `PowerManager.OnThermalStatusChangedListener` observers, forwarding readings to the routing engine.
+`Xybrid.init(context)` also registers `BatteryManager` and `PowerManager.OnThermalStatusChangedListener` observers, forwarding readings to the routing engine.
 
 ## Initialization
 

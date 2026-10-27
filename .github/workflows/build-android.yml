@@ -17,6 +17,10 @@ on:
       # llama.cpp's Android build config and sources (see //:llama_android_dl).
       - 'BUILD.bazel'
       - 'bazel/ggml/**'
+      # The Android NDK toolchains: @androidndk (API 28) and the AAR arm64
+      # slice's @androidndk_api29 (see //bazel/toolchains/android).
+      - 'MODULE.bazel'
+      - 'bazel/toolchains/android/**'
       - 'crates/llama-cpp-sys/**'
       - 'vendor/llama-cpp'
       - 'vendor/ort-android/**'
@@ -48,6 +52,8 @@ on:
       # llama.cpp's Android build config and sources (see //:llama_android_dl).
       - 'BUILD.bazel'
       - 'bazel/ggml/**'
+      - 'MODULE.bazel'
+      - 'bazel/toolchains/android/**'
       - 'crates/llama-cpp-sys/**'
       - 'vendor/llama-cpp'
       - 'vendor/ort-android/**'

@@ -15,7 +15,7 @@ dependencies {
 }
 ```
 
-最低 SDK 版本：**24**（Android 7.0）
+最低 SDK 版本：**29**（Android 10）。请在应用的 `defaultConfig` 中将 `minSdk` 设为 29 或更高；低于该值时，构建会在清单合并阶段失败。
 
 ## 快速开始
 
@@ -34,7 +34,7 @@ if (result.success) {
 }
 ```
 
-`Xybrid.init(context)` 还会注册 `BatteryManager` 以及（在 API 29+ 上）`PowerManager.OnThermalStatusChangedListener` 观察者，将读数转发给路由引擎。
+`Xybrid.init(context)` 还会注册 `BatteryManager` 以及 `PowerManager.OnThermalStatusChangedListener` 观察者，将读数转发给路由引擎。
 
 ## 初始化
 

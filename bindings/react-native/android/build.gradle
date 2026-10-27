@@ -31,7 +31,9 @@ android {
   compileSdkVersion xybridExt("compileSdkVersion", 35)
 
   defaultConfig {
-    minSdkVersion xybridExt("minSdkVersion", 24)
+    // ai.xybrid:xybrid-kotlin requires Android 10 (API 29). Never declare less,
+    // so an app below it fails the manifest merge naming this library.
+    minSdkVersion Math.max(29, xybridExt("minSdkVersion", 29).toString().toInteger())
     targetSdkVersion xybridExt("targetSdkVersion", 35)
   }
 
