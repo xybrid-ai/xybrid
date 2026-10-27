@@ -430,8 +430,9 @@ pub struct GenerationConfig {
     ///
     /// When non-empty, the local llama.cpp backend renders the definitions
     /// into the model's embedded chat template and the executor parses any
-    /// emitted tool-call blocks (LFM2-family pythonic and gemma-4-family
-    /// `call:` notation) into the response envelope's `tool_calls` metadata.
+    /// emitted tool-call blocks (LFM2-family pythonic, LFM3 `<tool_call>`
+    /// XML, typed against these schemas, and gemma-4-family `call:`
+    /// notation) into the response envelope's `tool_calls` metadata.
     /// Tool calling is llama.cpp-only today and unsupported paths fail
     /// closed: a model without an embedded chat template, the mistralrs
     /// backend, and the SDK's cloud-fallback leg all reject tool-bearing
