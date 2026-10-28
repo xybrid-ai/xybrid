@@ -22,7 +22,7 @@ Subcommands:
       (verify_android_api_level.py: 29 for every arm64-v8a library we build,
       28 for armeabi-v7a and x86_64; the bundled libc++_shared.so and
       libonnxruntime.so keep their vendor's level), no static
-      (initial-exec) TLS in any library we build and the libc/libm canary in
+      (initial-exec) TLS in any library we build and the libc canary in
       every libxybrid_bolt.so (both below). --speech:
       arm64-v8a carries the engine-linked signal below, the other ABIs are
       speech-free, and assets/xybrid/zzz/ holds exactly the 14 notices with
@@ -65,15 +65,15 @@ proof lane's first run against the real archive had found its bundled runtime
 (memcpy, strlen, expf, __stack_chk_fail, __emutls_get_address, ...) bound to
 xybrid's own code, which then imported none of them. Two gates watch the
 result: compare-imports in the proof lane (test-zzz-android.yml), and the
-libc/libm canary below, which `aar` and `dist` apply everywhere.
+libc canary below, which `aar` and `dist` apply everywhere.
 
-libc/libm canary: every libxybrid_bolt.so we ship, on every ABI and with or
-without speech, must list memcpy, memset, memcmp, strlen, __stack_chk_fail,
-expf and logf (LIBC_CANARY) as undefined dynamic symbols, i.e. import them
-from bionic, as master's libraries on all three ABIs do (memmove is left out:
-armeabi-v7a does not import it). The engine's bundled runtime defines every
-one of them, so a missing import means a static copy serves xybrid's code,
-or that xybrid stopped calling the function (see LIBC_CANARY).
+libc canary: every libxybrid_bolt.so we ship, on every ABI and with or
+without speech, must list memcpy, memset, memcmp, strlen and __stack_chk_fail
+(LIBC_CANARY) as undefined dynamic symbols, i.e. import them from bionic, as
+master's libraries on all three ABIs do (memmove is left out: armeabi-v7a does
+not import it). The engine's bundled runtime defines every one of them, so a
+missing import means a static copy serves xybrid's code, or that xybrid
+stopped calling the function (see LIBC_CANARY).
 
 Engine-linked signal for arm64-v8a/libxybrid_bolt.so, which the CI proof lane
 (test-zzz-android.yml) recalibrates on every relevant change:
@@ -177,20 +177,20 @@ PRIVATE_NAMES = frozenset({
     "libxybrid_zzz_tts.so",
 })
 SHARED_PREFIXES = ("ggml_", "gguf_", "llama_", "mtmd_")
-# libc and libm functions every libxybrid_bolt.so imports from bionic, on all
-# three ABIs, with or without speech (calibrated on master's libraries; not
-# memmove, which armeabi-v7a does not import). The engine's bundled runtime
-# defines each of them, so one going missing means a static copy now serves
-# xybrid's own code: the engine isolation (//bazel/zzz:isolate.bzl) failed.
-# In master's arm64-v8a library (-c opt) the string functions and
-# __stack_chk_fail are called from 50 to 5000 sites each, but expf from four
-# and logf from one: ggml and llama.cpp are shared libraries there (the x86_64
-# library, which links them statically, calls expf 239 and logf 74 times). A
-# change that drops those few calls fails this canary on a sound library; then
-# swap in another name the engine's runtime defines that all three ABIs still
-# import (exp and log10 have more arm64 call sites), rather than drop the libm
-# check.
-LIBC_CANARY = ("memcpy", "memset", "memcmp", "strlen", "__stack_chk_fail", "expf", "logf")
+# libc functions every libxybrid_bolt.so imports from bionic, on all three
+# ABIs, with or without speech (calibrated on master's libraries; not memmove,
+# which armeabi-v7a does not import). The engine's bundled runtime defines each
+# of them, so one going missing means a static copy now serves xybrid's own
+# code: the engine isolation (//bazel/zzz:isolate.bzl) failed. Only names with
+# many call sites: in master's arm64-v8a library (-c opt) memcpy is called from
+# 5029 sites, memcmp 986, memset 444, strlen 84 and __stack_chk_fail 53, so no
+# ordinary refactor drops one. libm names are left out on purpose: expf and
+# logf have only four and one arm64 call sites (ggml and llama.cpp are shared
+# libraries there), so they would fail a sound release on a refactor. A failed
+# isolation interposes the bundled string routines together with its libm,
+# the isolation action itself refuses any global besides the C API, and the
+# proof lane's compare-imports still watches every libm import.
+LIBC_CANARY = ("memcpy", "memset", "memcmp", "strlen", "__stack_chk_fail")
 # Initial-exec TLS in a dlopen'ed library: lld's DT_FLAGS marker and the
 # dynamic relocations bionic then refuses (GNU readelf 2.41 and llvm-readelf
 # print R_AARCH64_TLS_TPREL64; older binutils R_AARCH64_TLS_TPREL).
@@ -648,7 +648,7 @@ def check_library(abi: str, name: str, path: Path, shipped: FrozenSet[str], spee
     missing = missing_canary(dynsyms)
     if missing:
         pronoun = "it" if len(missing) == 1 else "them"
-        report.fail(f"{where}: does not import {', '.join(missing)} from libc/libm. Either a static "
+        report.fail(f"{where}: does not import {', '.join(missing)} from libc. Either a static "
                     "copy linked into the library serves xybrid's own code (the speech engine's "
                     f"bundled runtime, if its isolation failed), or xybrid no longer calls {pronoun} "
                     "(then recalibrate LIBC_CANARY)")
@@ -682,7 +682,7 @@ def check_library(abi: str, name: str, path: Path, shipped: FrozenSet[str], spee
         state = ("speech engine linked statically (marker, PT_TLS, no engine symbols in .dynsym)"
                  if speech else "speech-free")
         report.ok(f"{where}: {state}; JNI exports, NEEDED, Android API {API_LEVELS[abi]}, "
-                  "no static TLS, libc/libm imports OK")
+                  "no static TLS, libc imports OK")
 
 
 def check_natives(package: Package, natives: Dict[str, Dict[str, zipfile.ZipInfo]], speech: bool,

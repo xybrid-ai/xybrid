@@ -365,8 +365,7 @@ class AarTests(GateCase):
         self.assertPasses(self.aar(entries))
 
     def test_libc_canary_is_imported_by_every_bolt_library(self):
-        self.assertEqual(("memcpy", "memset", "memcmp", "strlen", "__stack_chk_fail", "expf", "logf"),
-                         GATE.LIBC_CANARY)
+        self.assertEqual(("memcpy", "memset", "memcmp", "strlen", "__stack_chk_fail"), GATE.LIBC_CANARY)
         self.assertNotIn("memmove", GATE.LIBC_CANARY)  # armeabi-v7a does not import it
         for speech in (True, False):
             for index, abi in enumerate(GATE.ABIS):
@@ -378,7 +377,7 @@ class AarTests(GateCase):
                         entries = aar_entries(speech)
                         mutate(entries, key, dynsyms=[s for s in base if s[0] != name + "@LIBC"])
                         err = self.assertFails(self.aar(entries, speech),
-                                               f"{abi}/libxybrid_bolt.so: does not import {name} from libc/libm",
+                                               f"{abi}/libxybrid_bolt.so: does not import {name} from libc",
                                                "or xybrid no longer calls it (then recalibrate LIBC_CANARY)")
                         self.assertEqual(1, err.count("does not import"))
                 # A defined, exported copy is no import either.
@@ -397,7 +396,7 @@ class AarTests(GateCase):
                 mutate(entries, bolt, dynsyms=kept)
                 self.assertFails(self.aar(entries, True, "--readelf", readelf),
                                  "arm64-v8a/libxybrid_bolt.so: does not import memcpy, memset, memcmp, "
-                                 "strlen, __stack_chk_fail, expf, logf from libc/libm",
+                                 "strlen, __stack_chk_fail from libc",
                                  "or xybrid no longer calls them (then recalibrate LIBC_CANARY)")
         # Other libraries are not held to it: libllama.so imports what it uses.
         entries = aar_entries()
@@ -960,7 +959,7 @@ class WorkflowHygieneTests(unittest.TestCase):
                      "//bindings/kotlin:xybrid_kotlin_aar", "tools/scripts/bazel-output.sh", "cp -L"):
             self.assertIn(flag, blocks[build])
         # The build is the last use of the inputs: the engine is isolated as it
-        # is linked (//bazel/zzz:isolate.bzl), and the aar gate's libc/libm
+        # is linked (//bazel/zzz:isolate.bzl), and the aar gate's libc
         # canary checks the result, so no step reads the private archive.
         delete = self.assert_inputs_deleted_before_packaging(blocks, build)
         self.assertEqual(delete, build + 1)

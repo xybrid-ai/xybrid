@@ -13,7 +13,7 @@ name: "CI: zzz Android AAR"
 #      the per-ABI API levels in the speech one.
 #   2. The engine isolated from the code linked beside it. The Bazel build
 #      itself fails unless the engine object keeps only its zzz_embed_* API
-#      global (//bazel/zzz:isolate.bzl); the gate's libc/libm canary holds
+#      global (//bazel/zzz:isolate.bzl); the gate's libc canary holds
 #      for every libxybrid_bolt.so; and every import of the default arm64
 #      libxybrid_bolt.so is still imported by the speech build
 #      (compare-imports, which names any import a static copy took over).

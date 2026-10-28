@@ -168,7 +168,7 @@ to `release/v*` as what guards the credentials (a repository ruleset should
 limit it to maintainers and the release automation). `tools/scripts/verify_zzz_android.py` gates the
 AAR, the `xybrid-android-<tag>.zip` and the Gradle-built AAR (speech in
 arm64-v8a only, the fourteen notices byte-exact, minSdk 29, no static TLS,
-libc/libm imported from bionic) in
+libc imported from bionic) in
 release-prep, whose Verify Android Gradle packaging job replays the Gradle
 publish before the draft exists, and again in release-publish before Maven
 Central.
@@ -185,7 +185,7 @@ still drops dead engine code; any `ld -r` warning fails), `llvm-objcopy` makes
 every definition but the C API local, and the action fails unless exactly that
 API (`ZZZ_EMBED_API`, kept equal to `crates/zzz-sys/src/api.rs` by
 `test_zzz_isolation.py`) is left global. A new engine function goes into both
-lists. The AAR gate's libc/libm canary and the proof lane's compare-imports
+lists. The AAR gate's libc canary and the proof lane's compare-imports
 check the shipped library, and `bazel/zzz/selftest` proves the mechanism on a
 fake engine in bazel.yml. The other static slices and Cargo builds still link
 the archive as is (a follow-up; see `crates/zzz-sys/README.md`).

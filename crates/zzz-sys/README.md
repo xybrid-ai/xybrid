@@ -150,7 +150,7 @@ Unity, Python and the CLI still ship without it.
   relocatable link cannot allocate one, so the engine must be built with
   `-fno-common`. The AAR gate (`tools/scripts/verify_zzz_android.py`) then
   requires every `libxybrid_bolt.so` to import memcpy, memset, memcmp,
-  strlen, `__stack_chk_fail`, expf and logf from bionic, and
+  strlen and `__stack_chk_fail` from bionic, and
   `bazel/zzz/selftest` proves the mechanism on a fake engine.
 - The other slices still link their archive as is: the Bazel macOS, Linux,
   iOS and Linux ARM64 arms of `BUILD.bazel`, and every Cargo build

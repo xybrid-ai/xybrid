@@ -358,7 +358,7 @@ jobs:
 
       # The release gate in its speech-free mode (GNU readelf): no engine and
       # no notices anywhere, minSdk 29, the per-ABI API levels, JNI exports,
-      # libc/libm imported from bionic (the canary).
+      # libc imported from bionic (the canary).
       - name: Gate the Gradle-built AAR (speech-free)
         run: |
           python3 tools/scripts/verify_zzz_android.py aar \

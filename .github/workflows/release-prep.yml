@@ -702,7 +702,7 @@ jobs:
       # The release gate (GNU readelf, preinstalled on ubuntu-latest): speech
       # linked into arm64-v8a only, the 14 notices byte-exact, minSdk 29, API
       # notes 29 (arm64-v8a) / 28 (armeabi-v7a, x86_64), the JNI exports, the
-      # libc/libm canary (every libxybrid_bolt.so still imports memcpy, expf,
+      # libc canary (every libxybrid_bolt.so still imports memcpy, strlen,
       # ... from bionic, so no engine copy serves them) and no staged engine
       # file anywhere. See tools/scripts/verify_zzz_android.py.
       - name: Gate the AAR (arm64-v8a speech, notices, API levels)
