@@ -10,15 +10,23 @@ resolved those names to the engine's copies instead of bionic's.
 `zzz_isolated_engine` takes the engine's one static archive from a CcInfo dep
 and, with the target C++ toolchain's own tools, runs isolate_engine.sh:
 
-  1. `ld -r --whole-archive`: prelink every member into one relocatable
-     object. The engine's references to its own runtime resolve inside it;
-     its TLS, .init_array and .eh_frame sections pass through unchanged.
+  1. `ld -r --unique --whole-archive`: prelink every member into one
+     relocatable object. The engine's references to its own runtime resolve
+     inside it. --unique keeps every input section a section of its own (TLS,
+     .init_array and .eh_frame keep their types), so the final link's
+     --gc-sections still drops every engine section it dropped from the raw
+     archive; merged by name, a dead member's code would stay, and its
+     references would have to resolve. --fatal-warnings: -r only warns about
+     a relocation into a discarded COMDAT section, which a final link
+     refuses, and writes R_*_NONE in its place.
   2. `objcopy --keep-global-symbols`: keep only the C API global (the
      functions crates/zzz-sys/src/api.rs declares, ZZZ_EMBED_API) and make
      every other definition local. Undefined symbols (the engine's libc, libm
      and libdl imports) stay undefined and global. A COMDAT group whose
      signature becomes local stops being a COMDAT group, so the final link
-     cannot fold it into a same-named one outside the engine either.
+     cannot fold it into a same-named one outside the engine either. The
+     .llvm_addrsig tables go: -r leaves their symbol indices stale, and the
+     NDK's opt links (--icf=safe) would ignore them with a warning anyway.
   3. Fail the action unless the object defines exactly the API as its
      global/weak symbols, defines every name it did before, and still imports
      (undefined and global) exactly what it did before; and unless step 1

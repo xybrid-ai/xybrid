@@ -17,6 +17,7 @@ def _isolation_selftest_impl(ctx):
         _names(ctx, "api", ctx.attr.api),
         _names(ctx, "local", ctx.attr.local),
         _names(ctx, "undefined", ctx.attr.undefined),
+        _names(ctx, "collected", ctx.attr.collected),
         _names(ctx, "imports", ctx.attr.imports),
     ]
     report = ctx.actions.declare_file(ctx.label.name + ".txt")
@@ -40,6 +41,10 @@ isolation_selftest = rule(
     doc = "Fails the build unless `engine` isolates `raw` and `library` links it without interposition.",
     attrs = {
         "api": attr.string_list(mandatory = True, doc = "The only symbols `engine` may define globally."),
+        "collected": attr.string_list(
+            mandatory = True,
+            doc = "Imports of an unreferenced `raw` member only: `library` must not reference them.",
+        ),
         "engine": attr.label(mandatory = True, providers = [CcInfo], doc = "The isolated fake engine."),
         "imports": attr.string_list(mandatory = True, doc = "Undefined dynamic symbols `library` must have."),
         "library": attr.label(mandatory = True, allow_single_file = [".so"], doc = "Linked from the host and `engine`."),

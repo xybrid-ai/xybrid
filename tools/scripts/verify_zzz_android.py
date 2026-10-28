@@ -29,7 +29,8 @@ Subcommands:
       their pinned SHA-256 and nothing else. --no-speech: no engine anywhere
       and no assets/xybrid/zzz/. Either way no private staging file
       (libzzz_embed.a, zzz_embed.h, RECEIPT.json, .pinned-archive.tar.gz,
-      share/zzz_embed.json) may appear anywhere.
+      share/zzz_embed.json) or isolated engine (libzzz_embed_isolated.a,
+      zzz_embed_isolated.o) may appear anywhere.
 
   pack-dist <file.aar> <out.zip>
       Repackage an AAR as the release zip (xybrid-android-<tag>.zip): its
@@ -71,7 +72,8 @@ without speech, must list memcpy, memset, memcmp, strlen, __stack_chk_fail,
 expf and logf (LIBC_CANARY) as undefined dynamic symbols, i.e. import them
 from bionic, as master's libraries on all three ABIs do (memmove is left out:
 armeabi-v7a does not import it). The engine's bundled runtime defines every
-one of them, so a missing import means a static copy serves xybrid's code.
+one of them, so a missing import means a static copy serves xybrid's code,
+or that xybrid stopped calling the function (see LIBC_CANARY).
 
 Engine-linked signal for arm64-v8a/libxybrid_bolt.so, which the CI proof lane
 (test-zzz-android.yml) recalibrates on every relevant change:
@@ -165,11 +167,14 @@ GLUE = ROOT / "bindings/kotlin/bazel/jni/jni_glue.c"
 NOTICE_ROOT = "assets/xybrid/zzz/"
 MARKER = b"zzz engine unavailable"
 ENGINE_PREFIX = "zzz_embed_"
-# Staged engine inputs (zzz_pull.py's slice layout) and the retired Android
-# companion library: none may reach a shipped package.
+# Staged engine inputs (zzz_pull.py's slice layout), the isolated engine
+# (//bazel/zzz:isolate.bzl's archive and its one member: the whole engine with
+# its symbols made local) and the retired Android companion library: none may
+# reach a shipped package.
 PRIVATE_NAMES = frozenset({
     "libzzz_embed.a", "zzz_embed.h", "RECEIPT.json", PULL.STAGED_ARCHIVE,
-    "zzz_embed.json", "libxybrid_zzz_tts.so",
+    "zzz_embed.json", "libzzz_embed_isolated.a", "zzz_embed_isolated.o",
+    "libxybrid_zzz_tts.so",
 })
 SHARED_PREFIXES = ("ggml_", "gguf_", "llama_", "mtmd_")
 # libc and libm functions every libxybrid_bolt.so imports from bionic, on all
@@ -177,6 +182,14 @@ SHARED_PREFIXES = ("ggml_", "gguf_", "llama_", "mtmd_")
 # memmove, which armeabi-v7a does not import). The engine's bundled runtime
 # defines each of them, so one going missing means a static copy now serves
 # xybrid's own code: the engine isolation (//bazel/zzz:isolate.bzl) failed.
+# In master's arm64-v8a library (-c opt) the string functions and
+# __stack_chk_fail are called from 50 to 5000 sites each, but expf from four
+# and logf from one: ggml and llama.cpp are shared libraries there (the x86_64
+# library, which links them statically, calls expf 239 and logf 74 times). A
+# change that drops those few calls fails this canary on a sound library; then
+# swap in another name the engine's runtime defines that all three ABIs still
+# import (exp and log10 have more arm64 call sites), rather than drop the libm
+# check.
 LIBC_CANARY = ("memcpy", "memset", "memcmp", "strlen", "__stack_chk_fail", "expf", "logf")
 # Initial-exec TLS in a dlopen'ed library: lld's DT_FLAGS marker and the
 # dynamic relocations bionic then refuses (GNU readelf 2.41 and llvm-readelf
@@ -634,8 +647,11 @@ def check_library(abi: str, name: str, path: Path, shipped: FrozenSet[str], spee
         report.fail(f"{where}: " + str(error).replace("\n", "; "))
     missing = missing_canary(dynsyms)
     if missing:
-        report.fail(f"{where}: does not import {', '.join(missing)} from libc/libm; a static copy "
-                    "linked into it (the speech engine's bundled runtime?) serves xybrid's own code")
+        pronoun = "it" if len(missing) == 1 else "them"
+        report.fail(f"{where}: does not import {', '.join(missing)} from libc/libm. Either a static "
+                    "copy linked into the library serves xybrid's own code (the speech engine's "
+                    f"bundled runtime, if its isolation failed), or xybrid no longer calls {pronoun} "
+                    "(then recalibrate LIBC_CANARY)")
     engine = [s for s in ELF.parse_symbols(dynsyms) if s.name.startswith(ENGINE_PREFIX)]
     undefined = sum(1 for symbol in engine if not symbol.defined)
     defined = len(engine) - undefined

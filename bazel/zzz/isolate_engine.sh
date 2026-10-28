@@ -69,8 +69,15 @@ LC_ALL=C comm -23 "$work/archive.undefined" "$work/archive.globals" > "$work/arc
 # 1. Every member, prelinked. -r leaves relocations against global symbols in
 #    place, so the engine's references to its own runtime still point at its
 #    own definitions once those turn local below.
+#    --unique keeps every input section a section of its own, as it was in the
+#    archive. Merged by name, a dead member's .text would ride along with a
+#    live one's: the final link's --gc-sections could no longer drop it, and
+#    under --no-undefined its references would have to resolve.
+#    --fatal-warnings: a relocation into a discarded COMDAT section, which a
+#    final link refuses, is only a warning for -r, which writes R_*_NONE (a
+#    null pointer) in its place.
 prelinked="$work/prelinked.o"
-run "$work/ld.out" "$ld" -r --whole-archive "$archive" --no-whole-archive -o "$prelinked"
+run "$work/ld.out" "$ld" -r --unique --fatal-warnings --whole-archive "$archive" --no-whole-archive -o "$prelinked"
 
 # A common (tentative) symbol stays common through -r (ld.lld cannot allocate
 # one there), and llvm-objcopy cannot make one local. llvm-nm -P prints its
@@ -93,9 +100,13 @@ LC_ALL=C comm -23 "$work/undefined.before" "$work/archive.imports" > "$work/unex
   || fail "$(count "$work/unexpected") symbol(s) left undefined by ld -r that the archive does not import"
 
 # 2. Only the API stays global; every other definition turns local.
-#    llvm-objcopy leaves undefined symbols global.
+#    llvm-objcopy leaves undefined symbols global. -r leaves .llvm_addrsig
+#    with sh_link 0 and stale symbol indices, which the NDK's opt links
+#    (--icf=safe) ignore with a warning; without the table lld treats every
+#    engine symbol as address-significant, as it does now, minus the warning.
 isolated="$work/zzz_embed_isolated.o"
-run "$work/objcopy.out" "$objcopy" --keep-global-symbols="$work/api" "$prelinked" "$isolated"
+run "$work/objcopy.out" "$objcopy" --keep-global-symbols="$work/api" --remove-section=.llvm_addrsig \
+  "$prelinked" "$isolated"
 
 # 3. The checks the link relies on. -g -u lists only global undefined symbols,
 #    so an import made local (which no linker could resolve) counts as gone.

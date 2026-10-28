@@ -3,7 +3,8 @@
  * (BUILD.bazel here). Like the real one it defines the zzz_embed_* C API, its
  * own copies of libc and libm routines (memcpy weak, as a bundled runtime
  * often has it), a thread-local and a global variable and a constructor, and
- * imports one libc function (write). None of it is ever run.
+ * imports one libc function (write). fake_engine_unused.c is its dead
+ * second member. None of it is ever run.
  *
  * No libc header on purpose: bionic's fortified <string.h> defines memcpy
  * inline, which would clash with the definition below.

@@ -143,12 +143,15 @@ Unity, Python and the CLI still ship without it.
   whose only global definitions are the eight `zzz_embed_*` functions of
   `src/api.rs`. Every other definition is local, the undefined imports stay
   as they were, and the build action fails unless exactly that API is left
-  global. A common symbol fails the action too: a relocatable link cannot
-  allocate one, so the engine must be built with `-fno-common`. The AAR gate
-  (`tools/scripts/verify_zzz_android.py`) then requires every
-  `libxybrid_bolt.so` to import memcpy, memset, memcmp, strlen,
-  `__stack_chk_fail`, expf and logf from bionic, and `bazel/zzz/selftest`
-  proves the mechanism on a fake engine.
+  global. `--unique` keeps every input section apart, so the final link's
+  `--gc-sections` still drops dead engine code, and any `ld -r` warning fails
+  the action (a relocation into a discarded COMDAT section, which a final link
+  refuses, is only a warning there). A common symbol fails the action too: a
+  relocatable link cannot allocate one, so the engine must be built with
+  `-fno-common`. The AAR gate (`tools/scripts/verify_zzz_android.py`) then
+  requires every `libxybrid_bolt.so` to import memcpy, memset, memcmp,
+  strlen, `__stack_chk_fail`, expf and logf from bionic, and
+  `bazel/zzz/selftest` proves the mechanism on a fake engine.
 - The other slices still link their archive as is: the Bazel macOS, Linux,
   iOS and Linux ARM64 arms of `BUILD.bazel`, and every Cargo build
   (`build.rs` links `static=zzz_embed`). Their bundled runtime can interpose

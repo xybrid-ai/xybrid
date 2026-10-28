@@ -378,7 +378,8 @@ class AarTests(GateCase):
                         entries = aar_entries(speech)
                         mutate(entries, key, dynsyms=[s for s in base if s[0] != name + "@LIBC"])
                         err = self.assertFails(self.aar(entries, speech),
-                                               f"{abi}/libxybrid_bolt.so: does not import {name} from libc/libm")
+                                               f"{abi}/libxybrid_bolt.so: does not import {name} from libc/libm",
+                                               "or xybrid no longer calls it (then recalibrate LIBC_CANARY)")
                         self.assertEqual(1, err.count("does not import"))
                 # A defined, exported copy is no import either.
                 with self.subTest(speech=speech, abi=abi, name="defined memcpy"):
@@ -396,7 +397,8 @@ class AarTests(GateCase):
                 mutate(entries, bolt, dynsyms=kept)
                 self.assertFails(self.aar(entries, True, "--readelf", readelf),
                                  "arm64-v8a/libxybrid_bolt.so: does not import memcpy, memset, memcmp, "
-                                 "strlen, __stack_chk_fail, expf, logf from libc/libm")
+                                 "strlen, __stack_chk_fail, expf, logf from libc/libm",
+                                 "or xybrid no longer calls them (then recalibrate LIBC_CANARY)")
         # Other libraries are not held to it: libllama.so imports what it uses.
         entries = aar_entries()
         mutate(entries, "jni/arm64-v8a/libllama.so", dynsyms=[])
@@ -517,10 +519,23 @@ class AarTests(GateCase):
     def test_private_staging_files_are_rejected_anywhere(self):
         for name in ("jni/arm64-v8a/libzzz_embed.a", "META-INF/RECEIPT.json", "res/raw/zzz_embed.h",
                      GATE.NOTICE_ROOT + ".pinned-archive.tar.gz", "META-INF/share/zzz_embed.json",
-                     "jni/arm64-v8a/libxybrid_zzz_tts.so"):
+                     "jni/arm64-v8a/libxybrid_zzz_tts.so",
+                     # The isolated engine, where only the name check guards.
+                     "libs/libzzz_embed_isolated.a", "META-INF/zzz_embed_isolated.o",
+                     "prefab/modules/xybrid/libs/android.arm64-v8a/libzzz_embed_isolated.a"):
             with self.subTest(name=name):
                 self.assertFails(self.aar(dict(aar_entries(), **{name: b"private"})),
                                  f"{name!r}: private engine staging file")
+
+    def test_private_names_cover_what_the_isolation_writes(self):
+        # bazel/zzz/isolate.bzl names the archive, isolate_engine.sh its member.
+        rule = (ROOT / "bazel/zzz/isolate.bzl").read_text()
+        script = (ROOT / "bazel/zzz/isolate_engine.sh").read_text()
+        archive = re.findall(r'declare_file\(ctx\.label\.name \+ "/([^"/]+\.a)"\)', rule)
+        member = re.findall(r'^isolated="\$work/([^"/]+\.o)"$', script, re.MULTILINE)
+        self.assertEqual(["libzzz_embed_isolated.a"], archive)
+        self.assertEqual(["zzz_embed_isolated.o"], member)
+        self.assertLessEqual(set(archive + member), GATE.PRIVATE_NAMES)
 
     def test_unexpected_top_level_entries(self):
         for name, message in (("notes.txt", "unexpected top-level AAR entry"),
@@ -1050,8 +1065,19 @@ class WorkflowHygieneTests(unittest.TestCase):
             self.assertLess(build, first(blocks, needle))
             self.assertLess(first(blocks, needle), delete)
         compare = blocks[first(blocks, "verify_zzz_android.py compare-imports")]
-        self.assertIn('"$RUNNER_TEMP/aars/default/jni/arm64-v8a/libxybrid_bolt.so"', compare)
-        self.assertIn('"$RUNNER_TEMP/aars/speech/jni/arm64-v8a/libxybrid_bolt.so"', compare)
+        default_lib = '"$RUNNER_TEMP/aars/default/jni/arm64-v8a/libxybrid_bolt.so"'
+        speech_lib = '"$RUNNER_TEMP/aars/speech/jni/arm64-v8a/libxybrid_bolt.so"'
+        # The direction is the check: the default library first, then the speech one.
+        self.assertEqual((1, 1), (compare.count(default_lib), compare.count(speech_lib)))
+        self.assertLess(compare.index("compare-imports"), compare.index(default_lib))
+        self.assertLess(compare.index(default_lib), compare.index(speech_lib))
+        # Without the secrets everything after the notice skips, but the deletion.
+        notice = first(blocks, "::notice")
+        for index in range(notice + 1, len(blocks)):
+            if index != delete:
+                self.assertIn("if: steps.stage.outputs.staged == 'true'", blocks[index])
+        replay = blocks[first(blocks, "verify_zzz_android.py pack-dist")]
+        self.assertIn('verify_zzz_android.py dist "$zip" --readelf readelf', replay)
         for retired in ("symbol-overlap", "--private-in", "lib/libzzz_embed.a"):
             self.assertNotIn(retired, text)
         order = [first(blocks, needle) for needle in (

@@ -129,6 +129,22 @@ class WiringTests(unittest.TestCase):
         source = (ROOT / "bazel/zzz/selftest/fake_engine.c").read_text()
         for name in API + ["memcpy", "strlen", "expf"]:
             self.assertRegex(source, rf"\b{name}\([^;]*\)\s*\{{", name)
+        # The dead member: its plain .text would merge with fake_engine.c's
+        # live one without ld -r --unique, and its unresolved call would then
+        # fail the --gc-sections/--no-undefined link of the library.
+        engine = calls["fake_engine"]
+        self.assertEqual(["fake_engine.c", "fake_engine_unused.c"], engine["srcs"])
+        for flag in ("-fno-function-sections", "-fno-data-sections", "-faddrsig"):
+            self.assertIn(flag, engine["copts"])
+        for flag in ("-Wl,--gc-sections", "-Wl,--no-undefined"):
+            self.assertIn(flag, calls["libselftest.so"]["linkopts"])
+        self.assertEqual(["fake_engine_unresolved"], selftest["collected"])
+        self.assertIn("fake_engine_unused", selftest["local"])
+        unused = (ROOT / "bazel/zzz/selftest/fake_engine_unused.c").read_text()
+        self.assertIn("extern void fake_engine_unresolved(void);", unused)
+        self.assertIn("void fake_engine_unused(void) { fake_engine_unresolved(); }", unused)
+        for other in ("fake_engine.c", "host.c"):
+            self.assertNotIn("fake_engine_unresolved", (ROOT / "bazel/zzz/selftest" / other).read_text())
         # Android 10's native TLS only: never in a host or API-28 build.
         for name in ("fake_engine", "fake_engine_isolated", "libselftest.so", "selftest"):
             self.assertIn("//bazel/toolchains/android:api29", calls[name]["target_compatible_with"])
@@ -217,11 +233,18 @@ def is_global(symbol):
 
 tool, args = sys.argv[1], sys.argv[2:]
 if tool == "ld":
-    assert args[:2] == ["-r", "--whole-archive"] and args[3:5] == ["--no-whole-archive", "-o"], args
-    archive = load(args[2])
+    assert args[:4] == ["-r", "--unique", "--fatal-warnings", "--whole-archive"], args
+    assert args[5:7] == ["--no-whole-archive", "-o"] and len(args) == 8, args
+    archive = load(args[4])
     if "ld_error" in archive:
         sys.stderr.write(archive["ld_error"] + "\n")
         sys.exit(1)
+    if "ld_warning" in archive:
+        # What -r prints where a final link fails (lld: "relocation refers to
+        # a discarded section"); --fatal-warnings makes it an error.
+        sys.stderr.write(archive["ld_warning"] + "\n")
+        if "--fatal-warnings" in args:
+            sys.exit(1)
     # -r resolves one member's reference to another member's global definition.
     defined = {s["name"] for s in archive["symbols"] if s["type"] not in UNDEFINED and is_global(s)}
     symbols = []
@@ -234,11 +257,15 @@ if tool == "ld":
             symbol = {"name": symbol["name"], "type": "U"}
         symbols.append(symbol)
     symbols += [{"name": name, "type": "U"} for name in archive.get("ld_adds", [])]
-    save(args[5], dict(archive, symbols=symbols))
+    save(args[7], dict(archive, symbols=symbols))
 elif tool == "objcopy":
-    keep_file = args[0].split("=", 1)[1]
+    options = [arg for arg in args if arg.startswith("--")]
+    source, target = [arg for arg in args if not arg.startswith("--")]
+    keep_file = next(arg for arg in options if arg.startswith("--keep-global-symbols=")).split("=", 1)[1]
     keep = set(open(keep_file).read().split())
-    obj = load(args[1])
+    obj = load(source)
+    removed = {arg.split("=", 1)[1] for arg in options if arg.startswith("--remove-section=")}
+    obj["sections"] = [name for name in obj.get("sections", []) if name not in removed]
     for symbol in obj["symbols"]:
         stays = symbol["name"] in keep or symbol["name"] in obj.get("objcopy_misses", [])
         if symbol["type"] in LOCAL and not stays:
@@ -246,7 +273,7 @@ elif tool == "objcopy":
         if symbol["name"] in obj.get("objcopy_localizes", []):
             symbol["type"] = "u!"
     obj["symbols"] = [s for s in obj["symbols"] if s["name"] not in obj.get("objcopy_drops", [])]
-    save(args[2], obj)
+    save(target, obj)
 elif tool == "nm":
     path, flags = args[-1], args[:-1]
     # -A: "file: name", or "archive:member: name" (the fake archive is one member).
@@ -298,6 +325,7 @@ class IsolateScriptTests(unittest.TestCase):
 
     def isolate(self, symbols, tools=None, **extra):
         archive = self.tmp / "libzzz_embed.a"
+        extra.setdefault("sections", [".text", ".tbss", ".init_array", ".eh_frame", ".llvm_addrsig"])
         archive.write_text(json.dumps(dict(symbols=symbols, **extra)))
         result = subprocess.run(["bash", str(SCRIPT), *(tools or self.tools), str(archive), str(self.api),
                                  str(self.output)], capture_output=True, text=True,
@@ -321,9 +349,19 @@ class IsolateScriptTests(unittest.TestCase):
         self.assertEqual({name: "T" for name in API}, {n: t for n, t in types_by_name.items() if t in "TWDB"})
         self.assertEqual(("t", "t", "b", "t", "U", "w"), tuple(types_by_name[name] for name in (
             "memcpy", "expf", SECRET, SECRET_HELPER, "write", "pthread_create")))
+        # ld -r leaves the address-significance table stale: it goes, the rest stays.
+        self.assertEqual([".text", ".tbss", ".init_array", ".eh_frame"],
+                         json.loads(self.output.read_text())["sections"])
 
     def test_a_tool_failure_withholds_its_diagnostics(self):
         result = self.isolate(engine_symbols(), ld_error=f"ld.lld: error: duplicate symbol: {SECRET}")
+        self.assertIsolationFails(result, "ld failed; 1 line(s) of its diagnostics withheld")
+
+    def test_a_prelink_warning_fails_too(self):
+        # -r writes R_*_NONE where a final link refuses a relocation into a
+        # discarded section, and only warns: the warning must fail the action.
+        result = self.isolate(engine_symbols(), ld_warning=(
+            f"ld.lld: warning: relocation refers to a discarded section: .text.{SECRET}"))
         self.assertIsolationFails(result, "ld failed; 1 line(s) of its diagnostics withheld")
 
     def test_common_symbols_are_refused(self):
