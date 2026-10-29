@@ -6,9 +6,11 @@
 # linked runtime (`bindings`) stays a cargo-only concern on Apple Silicon
 # macOS (CI job: check (llm-mlx-runtime, macos-14)).
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 rust_library(
     name = "mlx_c_sys",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
     visibility = ["//visibility:public"],
