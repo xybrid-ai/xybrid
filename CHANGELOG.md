@@ -48,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Flutter Android builds support Gradle 9 / AGP 9 and copy `libc++_shared.so`
+  from the host app's selected NDK. Apple build logs no longer dump the environment.
+- Custom speech builds accept a configurable Python 3.11+ interpreter through
+  `XYBRID_ZZZ_PYTHON` and a per-target root in `XYBRID_ZZZ_PREBUILT_DIR`.
 - Unity iOS players import native symbols from the statically linked application
   (`__Internal`). The generated bindings previously tried to load `xybrid_bolt`
   as a dynamic library. The Unity Editor continues using its host's dynamic library,

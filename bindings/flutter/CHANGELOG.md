@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Fixed: Android builds support Gradle 9 / AGP 9 and copy `libc++_shared.so`
+  from the host app's selected NDK. Apple build logs no longer dump the environment.
+
 ## 0.15.0
 
 * Changed: precompiled native libraries now use llama.cpp v0.7.0.

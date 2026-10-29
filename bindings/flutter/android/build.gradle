@@ -47,11 +47,7 @@ android {
 
     // SDK versions - API 21 minimum for 64-bit requirement (arm64-v8a, x86_64)
     // and modern NDK toolchain compatibility
-    compileSdkVersion 34
-
-    // Use the NDK version from the host Flutter project
-    // NDK 25+ recommended for full ONNX Runtime compatibility
-    ndkVersion android.ndkVersion
+    compileSdk = 34
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
@@ -78,7 +74,7 @@ android {
     // Ensure native libraries are properly packaged
     packagingOptions {
         // Prevent duplicate .so files from dependencies (ORT AAR + NDK copy)
-        pickFirst '**/libc++_shared.so'
+        jniLibs.pickFirsts.add('**/libc++_shared.so')
     }
 
     // Bundle libc++_shared.so from the NDK.
@@ -87,7 +83,7 @@ android {
     // See: https://github.com/xybrid-ai/xybrid/issues/14
     sourceSets {
         main {
-            jniLibs.srcDirs += ["${buildDir}/ndk-libs"]
+            jniLibs.srcDir(layout.buildDirectory.dir('ndk-libs').get().asFile)
         }
     }
 }
@@ -112,20 +108,23 @@ dependencies {
 // Required because the precompiled Rust FFI binary dynamically links libc++
 // (via llama.cpp), but when cargokit downloads precompiled binaries instead
 // of building from source, the ORT Maven AAR alone doesn't always provide it.
-task copyNdkLibs {
-    def ndkCopyDir = file("${buildDir}/ndk-libs")
+def copyNdkLibs = tasks.register('copyNdkLibs', Copy) {
+    def ndkCopyDir = layout.buildDirectory.dir('ndk-libs')
+    // CargoKit resolves this provider from the Flutter host, honoring both
+    // ndkVersion and ndkPath instead of this library's AGP default NDK.
+    def ndkDirectory = providers.provider { cargokit.ndkDirectory.get().asFile }
+    into ndkCopyDir
     outputs.dir ndkCopyDir
 
-    doLast {
-        abiToTriple.each { abi, triple ->
-            def src = file("${android.ndkDirectory}/toolchains/llvm/prebuilt/${hostTag}/sysroot/usr/lib/${triple}/libc++_shared.so")
-            def dst = file("${ndkCopyDir}/${abi}/libc++_shared.so")
-            if (src.exists()) {
-                dst.parentFile.mkdirs()
-                ant.copy(file: src, tofile: dst)
-            } else {
-                logger.warn("Xybrid: libc++_shared.so not found at ${src} — Android build may fail at runtime")
+    abiToTriple.each { abi, triple ->
+        from(ndkDirectory.map { ndk ->
+            def src = new File(ndk, "toolchains/llvm/prebuilt/${hostTag}/sysroot/usr/lib/${triple}/libc++_shared.so")
+            if (!src.isFile()) {
+                throw new GradleException("Xybrid: libc++_shared.so for ${abi} is missing from the host NDK at ${src}")
             }
+            src
+        }) {
+            into abi
         }
     }
 }
