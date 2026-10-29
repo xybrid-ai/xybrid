@@ -678,7 +678,10 @@ jobs:
       # slice; armeabi-v7a and x86_64 build exactly as without it. The AAR
       # also carries the engine's notices at assets/xybrid/zzz/. The repository
       # rule verifies the staged slice again (zzz_pull.py --verify-only) with
-      # the runner's python3, which it needs at 3.11+.
+      # the runner's python3, which it needs at 3.11+. The engine is isolated
+      # as it is linked (//bazel/zzz:android_engine): only its zzz_embed_* API
+      # stays global, or that build action fails, so its bundled libc/libm
+      # cannot serve xybrid's own code. The gate below checks the result.
       - name: Build the Android AAR with arm64-v8a speech (Bazel on RBE)
         run: |
           set -euo pipefail
@@ -690,26 +693,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/android"
           cp -L "$aar" "$RUNNER_TEMP/android/xybrid-kotlin.aar"
 
-      # The engine archive against the public libraries linked beside it: no
-      # symbol both defined in the archive (hidden or not) and exported by
-      # libggml*/libllama/libmtmd/libc++_shared/libonnxruntime, so the static
-      # engine cannot interpose on them. A llama.cpp update can reach a
-      # release without the proof lane (test-zzz-android.yml) in between, so
-      # the release checks it on its own bytes. GNU readelf; prints only the
-      # count and names the public libraries export.
-      - name: Engine symbols vs the public libraries beside it
-        run: |
-          set -euo pipefail
-          lib="$RUNNER_TEMP/android/arm64-v8a"
-          mkdir -p "$lib"
-          unzip -q -j "$RUNNER_TEMP/android/xybrid-kotlin.aar" 'jni/arm64-v8a/*' -d "$lib"
-          python3 tools/scripts/verify_zzz_android.py symbol-overlap --readelf readelf \
-            --archive "$RUNNER_TEMP/zzz-inputs/aarch64-linux-android/lib/libzzz_embed.a" \
-            --private-in "$lib/libxybrid_bolt.so" \
-            "$lib"/libggml*.so "$lib"/libllama.so "$lib"/libmtmd.so \
-            "$lib"/libc++_shared.so "$lib"/libonnxruntime.so
-          rm -rf "$lib"
-
       # Nothing after this needs the private inputs; later steps run
       # third-party actions. always(): a failed step must not leave them either.
       - name: Delete the staged engine inputs
@@ -718,8 +701,10 @@ jobs:
 
       # The release gate (GNU readelf, preinstalled on ubuntu-latest): speech
       # linked into arm64-v8a only, the 14 notices byte-exact, minSdk 29, API
-      # notes 29 (arm64-v8a) / 28 (armeabi-v7a, x86_64), the JNI exports and
-      # no staged engine file anywhere. See tools/scripts/verify_zzz_android.py.
+      # notes 29 (arm64-v8a) / 28 (armeabi-v7a, x86_64), the JNI exports, the
+      # libc canary (every libxybrid_bolt.so still imports memcpy, strlen,
+      # ... from bionic, so no engine copy serves them) and no staged engine
+      # file anywhere. See tools/scripts/verify_zzz_android.py.
       - name: Gate the AAR (arm64-v8a speech, notices, API levels)
         run: |
           python3 tools/scripts/verify_zzz_android.py aar "$RUNNER_TEMP/android/xybrid-kotlin.aar" \

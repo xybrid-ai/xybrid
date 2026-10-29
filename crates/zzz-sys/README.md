@@ -132,3 +132,27 @@ Unity, Python and the CLI still ship without it.
   (`//bazel/zzz:notices.bzl`). Analysis fails unless the verified slice
   exports exactly those files. Android merges library assets into the APK, so
   every app that ships the SDK carries them.
+- The engine is isolated before it is linked. The archive carries its own
+  runtime (string and math routines, compiler-rt helpers) and defines
+  memcpy, strlen, expf, `__stack_chk_fail` and more as global or weak
+  symbols, and the AAR's alwayslink Rust staticlib pulls in the whole
+  archive. Linked as is, those copies satisfied xybrid's own references in
+  `libxybrid_bolt.so` instead of bionic's. The Android slice therefore reaches
+  this crate only as `//bazel/zzz:android_engine` (`bazel/zzz/isolate.bzl`):
+  the archive prelinked with the target toolchain's `ld -r` into one object
+  whose only global definitions are the eight `zzz_embed_*` functions of
+  `src/api.rs`. Every other definition is local, the undefined imports stay
+  as they were, and the build action fails unless exactly that API is left
+  global. `--unique` keeps every input section apart, so the final link's
+  `--gc-sections` still drops dead engine code, and any `ld -r` warning fails
+  the action (a relocation into a discarded COMDAT section, which a final link
+  refuses, is only a warning there). A common symbol fails the action too: a
+  relocatable link cannot allocate one, so the engine must be built with
+  `-fno-common`. The AAR gate (`tools/scripts/verify_zzz_android.py`) then
+  requires every `libxybrid_bolt.so` to import memcpy, memset, memcmp,
+  strlen and `__stack_chk_fail` from bionic, and
+  `bazel/zzz/selftest` proves the mechanism on a fake engine.
+- The other slices still link their archive as is: the Bazel macOS, Linux,
+  iOS and Linux ARM64 arms of `BUILD.bazel`, and every Cargo build
+  (`build.rs` links `static=zzz_embed`). Their bundled runtime can interpose
+  on the host's libc in the same way; isolating them is a follow-up.

@@ -14,7 +14,11 @@ rust_library(
     deps = all_crate_deps(normal = True) + select({
         "//bazel/zzz:linux_enabled": ["@zzz_linux//:zzz"],
         "//bazel/zzz:macos_enabled": ["@zzz_macos//:zzz"],
-        "//bazel/zzz:android_enabled": ["@zzz_android//:zzz"],
+        # The pinned slice with only its zzz_embed_* API left global: the engine's
+        # bundled libc/libm must not satisfy xybrid's own references
+        # (bazel/zzz/isolate.bzl). The other slices still link the archive as
+        # is; isolating them is a follow-up (README.md).
+        "//bazel/zzz:android_enabled": ["//bazel/zzz:android_engine"],
         "//bazel/zzz:ios_enabled": ["@zzz_ios//:zzz"],
         "//bazel/zzz:ios_sim_enabled": ["@zzz_ios_sim//:zzz"],
         "//bazel/zzz:linux_arm64_enabled": ["@zzz_linux_arm64//:zzz"],

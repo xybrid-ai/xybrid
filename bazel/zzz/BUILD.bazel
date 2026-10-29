@@ -1,4 +1,5 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load(":isolate.bzl", "ZZZ_EMBED_API", "zzz_isolated_engine")
 
 config_setting(
     name = "macos_enabled",
@@ -80,4 +81,23 @@ selects.config_setting_group(
     name = "android_without_slice",
     match_any = [":android_armv7_without_slice", ":android_x86_64_without_slice"],
     visibility = ["//visibility:public"],
+)
+
+# The Android arm64 engine as crates/zzz-sys links it: the pinned archive with
+# every symbol but the zzz_embed_* C API made local (isolate.bzl). The archive
+# defines its own libc, libm and compiler-rt routines (memcpy, strlen, expf,
+# __stack_chk_fail, ...), and the AAR's libxybrid_bolt.so takes all of it, so
+# linked as is it handed xybrid's own code those copies instead of bionic's.
+# Analysis needs the staged slice, so wildcards skip this (manual); only
+# zzz-sys's android_enabled arm names it. No target_compatible_with: rules_rust
+# also configures zzz-sys's deps in the exec configuration (proc_macro_deps,
+# never built from there), and an incompatible dep would make every flag-on
+# AAR build incompatible. The other slices still link their archive as is
+# (see crates/zzz-sys/README.md).
+zzz_isolated_engine(
+    name = "android_engine",
+    api = ZZZ_EMBED_API,
+    engine = "@zzz_android//:zzz",
+    tags = ["manual"],
+    visibility = ["//crates/zzz-sys:__pkg__"],
 )
