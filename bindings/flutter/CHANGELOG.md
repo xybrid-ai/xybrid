@@ -4,6 +4,9 @@
 
 * Fixed: Android builds support Gradle 9 / AGP 9 and copy `libc++_shared.so`
   from the host app's selected NDK. Apple build logs no longer dump the environment.
+* Fixed: `load()` throws `XybridException` with the native diagnostic, and run
+  failures retain their causes without duplicated inference prefixes. Cached
+  speech models fail during load when the build lacks a usable zzz backend.
 
 ## 0.15.0
 

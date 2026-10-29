@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Kitten TTS 2 bundle loads from a local directory, through the existing model
   and run APIs (see [Phonon speech](docs/sdk/PHONON.md)). The armeabi-v7a and
   x86_64 libraries are built without the engine: there the registry does not
-  serve `phonon-31m-en` and a Kitten bundle fails to run. React Native on iOS
+  serve `phonon-31m-en` and a Kitten bundle fails to load. React Native on iOS
   is unchanged and has no speech engine. The AAR also carries the
   engine's fourteen notice files (its runtime terms and the upstream licenses)
   under `assets/xybrid/zzz/`. Android merges library assets into the APK, so
@@ -52,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the host app's selected NDK. Apple build logs no longer dump the environment.
 - Custom speech builds accept a configurable Python 3.11+ interpreter through
   `XYBRID_ZZZ_PYTHON` and a per-target root in `XYBRID_ZZZ_PREBUILT_DIR`.
+- Speech models fail during load when the runtime lacks a usable zzz backend,
+  including when the model is cached. Flutter load failures throw
+  `XybridException`, and native diagnostics retain their causes without an extra
+  inference prefix.
 - Unity iOS players import native symbols from the statically linked application
   (`__Internal`). The generated bindings previously tried to load `xybrid_bolt`
   as a dynamic library. The Unity Editor continues using its host's dynamic library,
