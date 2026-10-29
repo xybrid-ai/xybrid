@@ -18,6 +18,12 @@ use super::device;
 use super::result::FfiResult;
 use super::spawn_reporting_panics;
 
+// Use the canonical SDK-to-FFI conversion to retain the source chain when
+// crossing Flutter's string-only error boundary.
+fn sdk_error_message(error: xybrid_sdk::SdkError) -> String {
+    facade::Error::from(error).to_string()
+}
+
 /// Generation parameters for LLM inference.
 ///
 /// All fields are optional. When `None`, the model's default value is used.
@@ -777,7 +783,7 @@ fn cloud_fallback_abort_event(reason: xybrid_core::abort::AbortReason) -> FfiStr
 fn stream_error_event(error: SdkError) -> FfiStreamEvent {
     match error {
         SdkError::AbortedForCloudFallback { reason } => cloud_fallback_abort_event(reason),
-        other => FfiStreamEvent::Error(other.to_string()),
+        other => FfiStreamEvent::Error(sdk_error_message(other)),
     }
 }
 
@@ -815,14 +821,14 @@ impl FfiModelLoader {
     pub fn from_bundle(path: String) -> Result<FfiModelLoader, String> {
         ModelLoader::from_bundle(&path)
             .map(FfiModelLoader)
-            .map_err(|e| e.to_string())
+            .map_err(sdk_error_message)
     }
 
     #[frb(sync)]
     pub fn from_directory(path: String) -> Result<FfiModelLoader, String> {
         ModelLoader::from_directory(&path)
             .map(FfiModelLoader)
-            .map_err(|e| e.to_string())
+            .map_err(sdk_error_message)
     }
 
     /// Create a loader for a model from a HuggingFace Hub repository.
@@ -839,7 +845,7 @@ impl FfiModelLoader {
         let model = apply_backend_to_loader(self.0.clone(), backend)
             .load_async()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(sdk_error_message)?;
         // Flutter loads through the SDK, not the facade's loader, so it
         // applies the facade's FFI refusal itself.
         facade::ensure_ffi_supported(&model).map_err(|e| e.to_string())?;
@@ -866,7 +872,7 @@ impl FfiModelLoader {
             });
 
             match result
-                .map_err(|e| e.to_string())
+                .map_err(sdk_error_message)
                 .and_then(|model| facade::ensure_ffi_supported(&model).map_err(|e| e.to_string()))
             {
                 Ok(()) => {
@@ -989,7 +995,7 @@ impl FfiModel {
         let result = self
             .0
             .run(&envelope.into_envelope(), sdk_config.as_ref())
-            .map_err(|e| e.to_string())?;
+            .map_err(sdk_error_message)?;
         FfiResult::try_from_inference_result(&result)
     }
 
@@ -1102,7 +1108,7 @@ impl FfiModel {
                     let _ = sink.add(FfiStreamEvent::completion(&inference_result));
                 }
                 Err(e) => {
-                    let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
+                    let _ = sink.add(FfiStreamEvent::Error(sdk_error_message(e)));
                 }
             }
         };
@@ -1200,7 +1206,7 @@ impl FfiModel {
                     }
                 }
                 Err(e) => {
-                    let _ = sink.add(FfiTtsStreamEvent::Error(e.to_string()));
+                    let _ = sink.add(FfiTtsStreamEvent::Error(sdk_error_message(e)));
                 }
             }
         };
@@ -1247,7 +1253,7 @@ impl FfiModel {
         let result = self
             .0
             .run_with_context(&envelope.into_envelope(), &ctx_guard, sdk_config.as_ref())
-            .map_err(|e| e.to_string())?;
+            .map_err(sdk_error_message)?;
 
         FfiResult::try_from_inference_result(&result)
     }
@@ -1498,7 +1504,7 @@ impl FfiModel {
         config: super::streaming::FfiStreamingConfig,
     ) -> Result<super::streaming::FfiStreamSession, String> {
         let sdk_config = config.to_sdk()?;
-        let stream = self.0.stream(sdk_config).map_err(|e| e.to_string())?;
+        let stream = self.0.stream(sdk_config).map_err(sdk_error_message)?;
         Ok(super::streaming::FfiStreamSession::spawn(stream))
     }
 
@@ -1508,7 +1514,7 @@ impl FfiModel {
     /// Runs on FRB's worker pool, so the returned `Future` does not block the
     /// Dart isolate. Returns an error string if the warmup inference fails.
     pub fn warmup(&self) -> Result<(), String> {
-        self.0.warmup().map_err(|e| e.to_string())
+        self.0.warmup().map_err(sdk_error_message)
     }
 
     /// Unload the model, dropping the executor and freeing the underlying
@@ -1520,13 +1526,35 @@ impl FfiModel {
     /// valid but unloaded; a subsequent call reloads on demand. Returns an
     /// error string if unloading fails.
     pub fn unload(&self) -> Result<(), String> {
-        self.0.unload().map_err(|e| e.to_string())
+        self.0.unload().map_err(sdk_error_message)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sdk_diagnostics_retain_load_and_inference_causes() {
+        let load = xybrid_sdk::SdkError::LoadError {
+            message: "Failed to parse metadata".into(),
+            source: Some(Box::new(std::io::Error::other("invalid model metadata"))),
+        };
+        assert_eq!(
+            sdk_error_message(load),
+            "Failed to load model: Failed to parse metadata: invalid model metadata"
+        );
+        let inference = xybrid_sdk::SdkError::InferenceError {
+            message: "Execution failed".into(),
+            source: Some(Box::new(xybrid_core::runtime_adapter::AdapterError::RuntimeError(
+                "zzz execution requires the 'tts-zzz' feature and its privately staged pinned engine slice".into(),
+            ))),
+        };
+        let message = sdk_error_message(inference);
+        assert!(message.contains("tts-zzz"));
+        assert!(message.contains("pinned engine slice"));
+        assert_eq!(message.matches("Inference failed:").count(), 1);
+    }
 
     fn sample_options() -> FfiRunOptions {
         FfiRunOptions {

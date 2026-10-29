@@ -264,11 +264,19 @@ class XybridModelLoader {
   ///
   /// Downloads the model if loading from registry and not cached.
   /// Returns a ready-to-use [XybridModel] instance.
+  ///
+  /// Throws [XybridException] if loading fails, retaining the native diagnostic.
   Future<XybridModel> load({
     XybridBackend backend = XybridBackend.auto,
   }) async {
-    final ffiModel = await _inner.load(backend: backend.toFfi());
-    return XybridModel._(ffiModel);
+    try {
+      final ffiModel = await _inner.load(backend: backend.toFfi());
+      return XybridModel._(ffiModel);
+    } on XybridException {
+      rethrow;
+    } catch (e) {
+      throw XybridException(e.toString());
+    }
   }
 
   /// Load the model with download progress updates.
@@ -302,10 +310,10 @@ class XybridModelLoader {
     return _inner.loadWithProgress(backend: backend.toFfi()).map((ffiEvent) {
       return switch (ffiEvent) {
         FfiLoadEvent_Progress(:final field0) => LoadProgress(
-          field0.progress,
-          downloadedBytes: field0.downloadedBytes.toInt(),
-          totalBytes: field0.totalBytes?.toInt(),
-        ),
+            field0.progress,
+            downloadedBytes: field0.downloadedBytes.toInt(),
+            totalBytes: field0.totalBytes?.toInt(),
+          ),
         FfiLoadEvent_Complete() => const LoadComplete(),
         FfiLoadEvent_Error(:final field0) => LoadError(field0),
       };
@@ -381,10 +389,10 @@ class XybridModel {
     return inner.downloadProgress().map((ffiEvent) {
       return switch (ffiEvent) {
         FfiLoadEvent_Progress(:final field0) => LoadProgress(
-          field0.progress,
-          downloadedBytes: field0.downloadedBytes.toInt(),
-          totalBytes: field0.totalBytes?.toInt(),
-        ),
+            field0.progress,
+            downloadedBytes: field0.downloadedBytes.toInt(),
+            totalBytes: field0.totalBytes?.toInt(),
+          ),
         FfiLoadEvent_Complete() => const LoadComplete(),
         FfiLoadEvent_Error(:final field0) => LoadError(field0),
       };
@@ -410,8 +418,10 @@ class XybridModel {
         config: config?.toFfi(),
       );
       return XybridResult.fromFfi(ffiResult);
+    } on XybridException {
+      rethrow;
     } catch (e) {
-      throw XybridException('Inference failed: $e');
+      throw XybridException(e.toString());
     }
   }
 
@@ -449,8 +459,10 @@ class XybridModel {
         config: config?.toFfi(),
       );
       return XybridResult.fromFfi(ffiResult);
+    } on XybridException {
+      rethrow;
     } catch (e) {
-      throw XybridException('Inference with context failed: $e');
+      throw XybridException(e.toString());
     }
   }
 

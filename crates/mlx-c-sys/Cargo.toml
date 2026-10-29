@@ -21,4 +21,7 @@ default = []
 bindings = []
 
 [build-dependencies]
-bindgen = "0.70"
+# Same pin as xybrid-llama-sys and xybrid-whisper-sys: 0.72.1 handles Clang
+# 22+ (0.70 emitted opaque structs), and one version keeps Cargo.lock to a
+# single bindgen.
+bindgen = "0.72.1"

@@ -60,6 +60,11 @@ tokenizer and voices.
   `52433c46975bfa13144c56204c9f4ee1c5b148aa` and `gradium/phonon-voices` at
   revision `da6c9ec0d47be8df5c87c730a3aa97187f3229c3`.
 
+Local and cached Phonon or Kitten bundles are also checked during loading.
+If the runtime lacks a usable zzz backend, `load()` returns
+`UnsupportedBackendCapability` with a hint to use a `tts-zzz` build and its
+pinned engine slice. Flutter reports the diagnostic through `XybridException`.
+
 ```json
 {
   "model_id": "phonon-31m-en",
