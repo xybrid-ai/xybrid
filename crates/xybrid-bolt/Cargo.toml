@@ -60,3 +60,6 @@ llm-llamacpp-vision = ["xybrid-sdk/llm-llamacpp-vision"]
 # against a llama-less baseline would charge whisper for ggml, which every
 # shipped artifact already contains.
 asr-whispercpp = ["xybrid-sdk/asr-whispercpp"]
+
+# Opt-in privately staged Kitten engine.
+tts-zzz = ["xybrid-sdk/tts-zzz"]

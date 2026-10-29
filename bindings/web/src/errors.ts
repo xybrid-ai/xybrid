@@ -11,8 +11,7 @@ export type XybridErrorCode =
   | "runtime_configuration"
   | "runtime_initialization"
   | "unsupported_feature"
-  | "unsupported_template"
-  | "unsupported_tensor_type";
+  | "unsupported_template";
 
 export class XybridError extends Error {
   readonly causeValue: unknown;
@@ -57,7 +56,7 @@ export class IntegrityError extends XybridError {
 }
 
 export class UnsupportedTemplateError extends XybridError {
-  constructor(template: string, supported = "TfLite") {
+  constructor(template: string, supported = "Gguf") {
     super(
       "unsupported_template",
       `Browser preview supports ${supported} metadata, received ${template}.`,
@@ -74,7 +73,7 @@ export class UnsupportedFeatureError extends XybridError {
 }
 
 export class RuntimeConfigurationError extends XybridError {
-  constructor(message = "LiteRT is already initialized with a different configuration.") {
+  constructor(message = "The runtime is already initialized with a different asset path.") {
     super("runtime_configuration", message);
     this.name = "RuntimeConfigurationError";
   }
@@ -82,7 +81,11 @@ export class RuntimeConfigurationError extends XybridError {
 
 export class RuntimeInitializationError extends XybridError {
   constructor(causeValue: unknown) {
-    super("runtime_initialization", "LiteRT initialization or compilation failed.", causeValue);
+    super(
+      "runtime_initialization",
+      `Rust/WASM runtime initialization or model loading failed${causeValue instanceof Error ? `: ${causeValue.message}` : "."}`,
+      causeValue,
+    );
     this.name = "RuntimeInitializationError";
   }
 }
@@ -94,16 +97,9 @@ export class InputValidationError extends XybridError {
   }
 }
 
-export class UnsupportedTensorTypeError extends XybridError {
-  constructor(dataType: string) {
-    super("unsupported_tensor_type", `Browser preview does not support tensor dtype ${dataType}.`);
-    this.name = "UnsupportedTensorTypeError";
-  }
-}
-
 export class InferenceError extends XybridError {
   constructor(causeValue: unknown) {
-    super("inference", "LiteRT inference failed.", causeValue);
+    super("inference", "Rust/WASM inference failed.", causeValue);
     this.name = "InferenceError";
   }
 }

@@ -6,8 +6,14 @@
 # platform, so every existing arm64 Android select still matches), and every
 # target that picks a llama build — //crates/llama-cpp-sys and //:whisper —
 # switches to //:llama_android_dl on cpu_variants_enabled. Other arm64
-# Android builds (the Flutter cdylib) never see the constraint and keep the
-# static //:llama.
+# Android builds (the Flutter cdylib, the Unity plugin) never see the
+# constraint and keep the static //:llama.
+#
+# The same platform sets the AAR arm64 slice's Android floor: it also carries
+# //bazel/toolchains/android:api29, so its whole closure (libxybrid_bolt.so,
+# the Rust staticlib, //:llama_android_dl) compiles and links with the API-29
+# NDK toolchain (@androidndk_api29, Android 10). Every other Android platform
+# keeps @androidndk at API 28.
 exports_files(
     ["android_system_name.cmake"],
     visibility = ["//visibility:public"],
@@ -23,7 +29,10 @@ constraint_value(
 
 platform(
     name = "android_arm64_cpu_variants",
-    constraint_values = [":cpu_variants"],
+    constraint_values = [
+        ":cpu_variants",
+        "//bazel/toolchains/android:api29",
+    ],
     parents = ["@rules_rs//rs/platforms:aarch64-linux-android"],
     visibility = ["//visibility:public"],
 )

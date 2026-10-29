@@ -1870,6 +1870,55 @@ data class XybridStreamToken(
 
 
 /**
+ * Owned PCM16 LE packet. Offsets count samples per channel.
+ */
+data class XybridTtsAudioChunk(
+    val pcm: ByteArray,
+    val sampleRate: UInt,
+    val channels: UInt,
+    val firstSample: ULong
+) {
+    internal fun wireSize(): Int {
+        return 4 + this.pcm.size + 4 + 4 + 8
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeBytes(this.pcm)
+        writer.writeU32(this.sampleRate)
+        writer.writeU32(this.channels)
+        writer.writeU64(this.firstSample)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridTtsAudioChunk {
+            return XybridTtsAudioChunk(
+                reader.readBytes(),
+                reader.readU32(),
+                reader.readU32(),
+                reader.readU64()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridTtsAudioChunk {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
  * One pull from a streaming inference session.
  *
  * This is a flat record instead of a data-carrying enum because the pinned
@@ -1881,15 +1930,17 @@ data class XybridStreamToken(
  */
 data class XybridStreamEvent(
     val kind: XybridStreamEventKind,
-    val token: XybridStreamToken?
+    val token: XybridStreamToken?,
+    val audio: XybridTtsAudioChunk?
 ) {
     internal fun wireSize(): Int {
-        return 4 + 1 + (this.token?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
+        return 4 + 1 + (this.token?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0) + 1 + (this.audio?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
         writer.writeI32(this.kind.value)
         writer.writeOptionalValue(this.token, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        writer.writeOptionalValue(this.audio, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -1907,7 +1958,8 @@ data class XybridStreamEvent(
         internal fun fromReader(reader: WireReader): XybridStreamEvent {
             return XybridStreamEvent(
                 XybridStreamEventKind.fromValue(reader.readI32()),
-                reader.readOptionalValue({ reader -> XybridStreamToken.fromReader(reader) })
+                reader.readOptionalValue({ reader -> XybridStreamToken.fromReader(reader) }),
+                reader.readOptionalValue({ reader -> XybridTtsAudioChunk.fromReader(reader) })
             )
         }
 
@@ -2736,7 +2788,8 @@ enum class XybridDownloadState(val value: Int) {
 
 enum class XybridStreamEventKind(val value: Int) {
     TOKEN(0),
-    COMPLETE(1);
+    COMPLETE(1),
+    AUDIO(2);
 
     companion object {
         fun fromValue(value: Int): XybridStreamEventKind =
@@ -3118,9 +3171,11 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
          * download in the background.
          *
          * Returns almost immediately instead of blocking on the download. Requires
-         * a resolvable API key and an uncached model; otherwise it behaves exactly
-         * like `from_registry`. Poll `download_status` for progress and
-         * `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+         * a resolvable API key, an uncached model, and a chat model the registry
+         * serves as a direct download (GGUF or vision-language, not a `.xyb`
+         * bundle); otherwise it behaves exactly like `from_registry`. Poll
+         * `download_status` for progress and `is_cloud_serving` to know which leg
+         * is answering.
          */
         fun fromRegistrySpeculative(id: String): XybridModel {
             val __boltffi_id_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(id))
@@ -4300,11 +4355,12 @@ fun setPlatformUrl(url: String) {
 }
 
 /**
- * Enable speculative cloud fallback globally: a registry model that isn't
- * downloaded yet is served from the gateway while the weights download.
+ * Enable speculative cloud fallback globally: a registry chat model that
+ * isn't downloaded yet is served from the gateway while the weights download.
  *
- * LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
- * also loads ASR/TTS models, which cannot be served this way.
+ * An uncached load asks the registry first, so other models (ASR, TTS,
+ * `.xyb` bundles) download and load as usual.
+ * `XybridModel.fromRegistrySpeculative` opts a single load in instead.
  */
 fun setSpeculativeCloud(enabled: Boolean) {
     Native.boltffi_function_xybrid_bolt_set_speculative_cloud(enabled)
@@ -4325,11 +4381,13 @@ fun isSpeculativeCloudEnabled(): Boolean {
 }
 
 /**
- * Whether `XybridModel::from_registry_speculative(model_id)` would actually
- * speculate: an API key resolves and the model is not already cached.
+ * Whether `XybridModel::from_registry_speculative(model_id)` may speculate:
+ * an API key resolves and the model is not already cached.
  *
- * Lets the hand-written Swift/Kotlin loader facades answer "will this
- * speculate?" before loading. Never touches the network.
+ * Lets the hand-written Swift/Kotlin loader facades answer "can this
+ * speculate?" before loading. Never touches the network, so it cannot know
+ * the model type: the load asks the registry and speculates only for a chat
+ * model.
  */
 fun willSpeculateForModel(modelId: String): Boolean {
     val __boltffi_modelId_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(modelId))

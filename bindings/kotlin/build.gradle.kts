@@ -5,14 +5,16 @@ plugins {
 }
 
 group = "ai.xybrid"
-version = "0.10.0-rc1"
+version = "0.15.0"
 
 android {
     namespace = "ai.xybrid"
     compileSdk = 34
 
     defaultConfig {
-        minSdk = 24
+        // Android 10: the arm64 natives are built for API 29
+        // (//bazel/toolchains/android). Keep bazel/AndroidManifest.xml in sync.
+        minSdk = 29
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")

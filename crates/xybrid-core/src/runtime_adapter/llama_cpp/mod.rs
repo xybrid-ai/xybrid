@@ -99,9 +99,9 @@ pub struct LlamaCppBackend {
     kv_state: Mutex<KvCacheState>,
     /// Backend-owned mtmd projector context for vision-language models.
     ///
-    /// The mtmd context references the loaded llama text model, so `Drop`,
-    /// `unload`, and model replacement always take this before dropping the
-    /// llama context/model pair.
+    /// The mtmd context references the loaded llama text model and holds
+    /// its handle. `Drop`, `unload`, and model replacement still take this
+    /// before the llama context/model pair, so it is freed first.
     #[cfg(feature = "llm-llamacpp-vision")]
     mtmd_context: Mutex<Option<MtmdContextState>>,
 }
@@ -277,9 +277,10 @@ impl LlamaCppBackend {
 
 impl Drop for LlamaCppBackend {
     fn drop(&mut self) {
-        // Drop mtmd first, then context, then model (order matters: both mtmd
-        // and llama context reference the model).
-        // LlamaContext and LlamaModel implement Drop, so take() + drop handles cleanup.
+        // Drop mtmd first, then context, then model, so each native object is
+        // freed here. The order is no longer needed for safety: mtmd and the
+        // llama context hold the model's handle, which keeps it loaded.
+        // Dropping each handle frees its native object, so take() handles cleanup.
         // get_mut() doesn't lock — safe because Drop has &mut self.
         #[cfg(feature = "llm-llamacpp-vision")]
         let _ = self.mtmd_context.get_mut().unwrap().take(); // drops MtmdContext
@@ -478,7 +479,10 @@ impl LlamaCppBackend {
         let config = self.config.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No config. Call load() first.".to_string())
         })?;
-        let use_gpu = config.gpu_layers != 0;
+        let use_gpu = effective_gpu_layers(
+            config.gpu_layers,
+            cfg!(all(target_os = "ios", target_abi = "sim")),
+        ) != 0;
         let warmup = false;
         let n_threads = config.n_threads;
         let flash_attn = config.flash_attn;
@@ -690,6 +694,17 @@ fn gpu_layers_are_a_no_op(gpu_layers: i32) -> bool {
     gpu_layers > 0 && local_execution_provider("llama-cpp") == "cpu"
 }
 
+/// The iOS Simulator's Metal path produces invalid tokens for llama.cpp.
+/// Keep the native library's Metal support for devices, but run simulator
+/// inference on the CPU, including multimodal projector work.
+fn effective_gpu_layers(requested: i32, ios_simulator: bool) -> i32 {
+    if ios_simulator {
+        0
+    } else {
+        requested
+    }
+}
+
 /// Say once, at load, that a GPU offload request will not happen.
 ///
 /// The silence is the bug this exists to fix: without it the only symptom of a
@@ -822,10 +837,14 @@ impl LlmBackend for LlamaCppBackend {
             gguf_files[0].path().to_string_lossy().to_string()
         };
 
-        warn_if_gpu_layers_are_a_no_op(config.gpu_layers);
+        let gpu_layers = effective_gpu_layers(
+            config.gpu_layers,
+            cfg!(all(target_os = "ios", target_abi = "sim")),
+        );
+        warn_if_gpu_layers_are_a_no_op(gpu_layers);
 
         // Load model
-        let model = xybrid_llama::LlamaModel::load(&gguf_path, config.gpu_layers).map_err(|e| {
+        let model = xybrid_llama::LlamaModel::load(&gguf_path, gpu_layers).map_err(|e| {
             AdapterError::RuntimeError(format!(
                 "Failed to load model from {}: {}. \
                  This may indicate an unsupported GGUF architecture — \
@@ -871,8 +890,8 @@ impl LlmBackend for LlamaCppBackend {
     }
 
     fn unload(&mut self) -> LlmResult<()> {
-        // Drop mtmd first, then context, then model (order matters).
-        // LlamaContext and LlamaModel implement Drop, so take() handles cleanup.
+        // Drop mtmd first, then context, then model, as in `Drop`. Dropping
+        // each handle frees its native object, so take() handles cleanup.
         #[cfg(feature = "llm-llamacpp-vision")]
         let _ = self.mtmd_context.get_mut().unwrap().take();
         let _ = self.context.get_mut().unwrap().take();
@@ -1484,13 +1503,7 @@ impl LlmBackend for LlamaCppBackend {
                 context.kv_cache_clear();
                 self.clear_cached_prefix_state();
                 xybrid_trace::add_metadata("tokens_in", summary.helper_total_tokens.to_string());
-                let n_batch = self.config.as_ref().map_or(512, |config| {
-                    if config.n_batch == 0 {
-                        512
-                    } else {
-                        config.n_batch
-                    }
-                });
+                let n_batch = context.n_batch();
                 let new_n_past = xybrid_llama::mtmd_helper_eval_chunks(
                     mtmd_context,
                     context,
@@ -1669,13 +1682,7 @@ impl LlmBackend for LlamaCppBackend {
                 context.kv_cache_clear();
                 self.clear_cached_prefix_state();
                 xybrid_trace::add_metadata("tokens_in", summary.helper_total_tokens.to_string());
-                let n_batch = self.config.as_ref().map_or(512, |config| {
-                    if config.n_batch == 0 {
-                        512
-                    } else {
-                        config.n_batch
-                    }
-                });
+                let n_batch = context.n_batch();
                 let new_n_past = xybrid_llama::mtmd_helper_eval_chunks(
                     mtmd_context,
                     context,
@@ -1885,6 +1892,13 @@ mod tests {
         // build the request is honored, on a CPU-only one it is not.
         let cpu_only = local_execution_provider("llama-cpp") == "cpu";
         assert_eq!(gpu_layers_are_a_no_op(99), cpu_only);
+    }
+
+    #[test]
+    fn ios_simulator_runs_llama_on_cpu_even_when_gpu_layers_are_requested() {
+        assert_eq!(effective_gpu_layers(99, true), 0);
+        assert_eq!(effective_gpu_layers(0, true), 0);
+        assert_eq!(effective_gpu_layers(99, false), 99);
     }
 
     #[test]

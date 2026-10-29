@@ -114,6 +114,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::TokenIds(_) => {
             println!("⚠️  Unexpected: Got raw token IDs output instead of text");
         }
+        EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+            println!("⚠️  Unexpected: Got choice output instead of text");
+        }
     }
 
     println!();

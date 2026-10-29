@@ -17,7 +17,7 @@ rust_binary(
     visibility = ["//visibility:public"],
 )
 
-# Inline `#[cfg(test)] mod tests` (9) in the binary crate. `crate = ` recompiles
+# Inline `#[cfg(test)] mod tests` (15) in the binary crate. `crate = ` recompiles
 # the binary above with `--test`; it inherits srcs, edition and deps. No dev-deps.
 rust_test(
     name = "xtask_test",

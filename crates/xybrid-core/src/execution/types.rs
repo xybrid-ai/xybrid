@@ -93,6 +93,9 @@ impl PreprocessedData {
             EnvelopeKind::TokenIds(_) => Err(AdapterError::InvalidInput(
                 "EnvelopeKind::TokenIds is consumed directly by MLX/LLM adapters".to_string(),
             )),
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                Err(crate::execution::choice::choice_kind_not_runtime_input())
+            }
         }
     }
 
@@ -304,6 +307,9 @@ impl RawOutputs {
             EnvelopeKind::TokenIds(_) => Err(AdapterError::InvalidInput(
                 "EnvelopeKind::TokenIds is an internal LLM stage type".to_string(),
             )),
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                Err(crate::execution::choice::choice_kind_not_runtime_input())
+            }
         }
     }
 }

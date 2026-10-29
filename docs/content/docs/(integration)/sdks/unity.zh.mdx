@@ -3,19 +3,41 @@ title: Unity
 description: 面向 Unity 应用的本地 ML 推理 SDK
 ---
 
-Unity SDK（`ai.xybrid.sdk`）通过 C FFI 提供到 Xybrid 运行时的 C# 绑定，支持在 Unity 游戏和应用中进行本地 ML 推理。
+Unity SDK（`ai.xybrid.sdk`）通过 BoltFFI 提供到 Xybrid 运行时的 C# 绑定，支持在 Unity 游戏和应用中进行本地 ML 推理。
 
 ## 安装
 
-通过 Unity Package Manager 使用 git URL 安装：
-
-```
-https://github.com/xybrid-ai/xybrid.git?path=bindings/unity
-```
-
-在 Unity 中：**Window > Package Manager > + > Add package from git URL**
+该包只包含 C# API。原生库从对应版本的 [GitHub Release](https://github.com/xybrid-ai/xybrid/releases) 下载，经 SHA-256 校验后安装到 `Assets/Xybrid/Plugins/`：首次导入时下载编辑器所在平台的原生库；构建 Player 前，如果目标平台的原生库尚未安装，也会自动下载。首次导入需要联网。如需重新下载，请使用 **Xybrid > Native Libraries > Download for Current Editor** 或 **Download for Active Build Target**。
 
 最低 Unity 版本：**2021.3 LTS**
+
+### OpenUPM（推荐）
+
+Xybrid 已发布到 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/)。使用 [OpenUPM CLI](https://openupm.com/docs/getting-started-cli.html)：
+
+```bash
+openupm add ai.xybrid.sdk
+```
+
+不使用 CLI 时，打开 **Edit > Project Settings > Package Manager**，添加一个作用域注册表（scoped registry）：
+
+| 字段 | 值 |
+|-------|-------|
+| Name | `OpenUPM` |
+| URL | `https://package.openupm.com` |
+| Scope(s) | `ai.xybrid` |
+
+然后在 **Window > Package Manager > My Registries** 中安装 **Xybrid SDK**。如需改为在 `Packages/manifest.json` 中声明注册表，或从本地克隆安装，请参阅[包 README](https://github.com/xybrid-ai/xybrid/tree/master/bindings/unity#installation)。
+
+### Git URL
+
+在 Unity 中打开 **Window > Package Manager > + > Add package from git URL**（Unity 6 中为 **Install package from git URL**），输入：
+
+```
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
+```
+
+不带标签时，Unity 安装的是 `master` 上的最新提交，但原生库来自该提交 `package.json` 中版本对应的发布（通常是最近一次发布）。如需固定版本，在路径之后追加发布标签，例如 `?path=/bindings/unity#v<version>`。可用标签见 [GitHub Releases](https://github.com/xybrid-ai/xybrid/releases)。
 
 ## 初始化
 
@@ -31,6 +53,8 @@ void Awake()
 ```
 
 `Initialize()` 是线程安全且幂等的——多次调用无副作用。
+
+在 Android 上，模型缓存在 `Application.persistentDataPath/xybrid` 下（SDK 使用其中的 `models` 子目录，并在旁边的 `extracted` 目录中存放可直接运行的文件）。如需使用其他目录，请在加载或列出任何模型之前调用 `XybridBolt.XybridBolt.InitSdkCacheDir(path)`；以最先设置的目录为准。
 
 无论是否鉴权，推理都完全在本地运行。传入 `apiKey` 即可点亮[控制台](https://dashboard.xybrid.dev)——这一次调用会启动遥测导出器，你的 `model.Run(...)` 调用便会自动上报执行轨迹：
 
@@ -63,7 +87,7 @@ using (var result = model.Run(envelope))
 ### 从注册表
 
 ```csharp
-using (var loader = ModelLoader.FromRegistry("whisper-tiny"))
+using (var loader = ModelLoader.FromRegistry("whisper-tiny-en-ggml"))
 {
     var model = loader.Load();
     // 使用模型执行推理...
@@ -142,15 +166,26 @@ using (var envelope = Envelope.Text("You are a blacksmith in a medieval village.
 ### 音频
 
 ```csharp
-byte[] audioBytes = File.ReadAllBytes("audio.wav");
-using (var envelope = Envelope.Audio(audioBytes, sampleRate: 16000, channels: 1))
+using System.IO;
+using UnityEngine;
+using Xybrid;
+
+// 英语语音识别；多语言识别请使用 "whisper-tiny-ggml"。
+using var model = XybridClient.LoadModel("whisper-tiny-en-ggml");
+
+// 完整 WAV 文件：16 位 PCM、单声道、16 kHz。
+byte[] wavBytes = File.ReadAllBytes("voice-command.wav");
+using (var envelope = Envelope.Audio(wavBytes, sampleRate: 16000, channels: 1))
 {
     using (var result = model.Run(envelope))
     {
+        result.ThrowIfFailed();
         Debug.Log($"Transcription: {result.Text}");
     }
 }
 ```
+
+这些 GGML 模型使用预编译原生库内置的语音识别运行时。通过 `Envelope.Audio` 或 `Model.RunAudio` 调用这些模型时，需要传入包含文件头的完整 WAV 音频。使用 Unity `Microphone` 录音时，请先将录制的采样编码为 WAV。
 
 ### 便捷方法
 
@@ -159,7 +194,8 @@ using (var envelope = Envelope.Audio(audioBytes, sampleRate: 16000, channels: 1)
 string output = model.RunText("Tell me about the ancient ruins.");
 
 // 音频输入，文本输出简写（玩家语音指令）
-string transcription = model.RunAudio(microphoneBytes, sampleRate: 16000);
+// wavBytes 包含完整 WAV 文件，与上面的音频示例相同。
+string transcription = model.RunAudio(wavBytes, sampleRate: 16000);
 ```
 
 ---
@@ -384,9 +420,18 @@ catch (XybridException e)
 
 ## 平台支持
 
-| 平台 | 状态 |
-|----------|--------|
-| macOS（Apple Silicon） | 支持 |
-| macOS（Intel） | 支持 |
-| Windows | 规划中 |
-| Linux | 规划中 |
+| 平台 | 架构 | 状态 |
+|------|------|------|
+| macOS 14+ | Apple Silicon（arm64） | 支持 |
+| macOS | Intel（x86_64） | 不支持 |
+| Windows | x64 | 支持 |
+| Linux | x64 | 支持 |
+| iOS | arm64（实体设备，iOS 16+） | 支持 |
+| Android | arm64-v8a、armeabi-v7a | 支持 |
+| Android | x86_64 | 支持至 Unity 6.4 |
+
+**macOS：** 编辑器和 Player 均需要 **macOS 14 或更高版本**以及 **Apple Silicon（arm64）**。请将 Player 的最低 macOS 版本设为 **14.0** 或更高版本，并使用 Apple silicon 版 Unity 编辑器：Intel 版编辑器无法加载该库，无论是在 Intel Mac 上还是通过 Rosetta 2 运行（Rosetta 2 让 x86_64 代码在 Apple Silicon 上运行，反之则不行）。构建 macOS Player 时请选择 **Apple Silicon**。**Intel 64-bit + Apple Silicon** Player 只有在 Apple Silicon Mac 上原生运行时才能加载 Xybrid，在 Intel Mac 上或通过 Rosetta 打开时都不行。
+
+**iOS：** 原生库面向 iOS 16 及以上的实体设备构建，不提供模拟器版本。请将 **Target minimum iOS Version** 设为 16.0 或更高。
+
+**Android：** Unity 6.5 已移除 x86_64 架构（[公告](https://discussions.unity.com/t/planned-breaking-changes-in-unity-6-5-updated-2026-03-27/1694205)）；在 Unity 6.3 和 6.4 中，该架构仅对已启用它的现有项目可用（[Android Player 设置](https://docs.unity3d.com/6000.4/Documentation/Manual/class-PlayerSettingsAndroid.html)）。armeabi-v7a 的原生库不含 ONNX Runtime，因此 `kokoro-82m` 等 ONNX 模型无法在该架构上运行；该架构的原生库也尚未在真机上加载验证（[#680](https://github.com/xybrid-ai/xybrid/issues/680)）。

@@ -7,8 +7,8 @@ use xybrid_core::device::{ResourceSnapshot, ResourceSnapshotProvider};
 use xybrid_core::runtime_adapter::CloudRuntimeAdapter;
 use xybrid_ffi_facade as facade;
 use xybrid_sdk::{
-    AbortPolicy, AbortSignal, BackendChoice, CancellationToken, GenerationConfig, ModelLoader,
-    RunOptions, SdkError, XybridModel,
+    AbortPolicy, AbortSignal, BackendChoice, CancellationToken, GenerationConfig, InferenceResult,
+    ModelLoader, RunOptions, SdkError, XybridModel,
 };
 
 use crate::frb_generated::StreamSink;
@@ -731,6 +731,17 @@ pub struct FfiModelLoader(ModelLoader);
 #[frb(opaque)]
 pub struct FfiModel(Arc<XybridModel>);
 
+impl FfiStreamEvent {
+    /// The event that ends a successful run: `Complete` only when the result
+    /// converts, so a stream never completes with its output dropped.
+    fn completion(result: &InferenceResult) -> Self {
+        match FfiResult::try_from_inference_result(result) {
+            Ok(result) => FfiStreamEvent::Complete(result),
+            Err(error) => FfiStreamEvent::Error(error),
+        }
+    }
+}
+
 impl From<xybrid_sdk::StreamEvent> for FfiStreamEvent {
     fn from(event: xybrid_sdk::StreamEvent) -> Self {
         match event {
@@ -751,9 +762,7 @@ impl From<xybrid_sdk::StreamEvent> for FfiStreamEvent {
                     .collect(),
                 raw_text: token.raw_text,
             }),
-            xybrid_sdk::StreamEvent::Complete(result) => {
-                FfiStreamEvent::Complete(FfiResult::from_inference_result(&result))
-            }
+            xybrid_sdk::StreamEvent::Complete(result) => FfiStreamEvent::completion(&result),
             xybrid_sdk::StreamEvent::Error(e) => FfiStreamEvent::Error(e),
         }
     }
@@ -783,16 +792,20 @@ impl FfiModelLoader {
     ///
     /// `load()` then returns almost immediately with a cloud-backed model that
     /// switches to on-device by itself once the download lands. Requires a
-    /// resolvable API key and an uncached model — otherwise this behaves
-    /// exactly like [`Self::from_registry`], which [`Self::will_speculate`]
-    /// reports. LLM/chat models only.
+    /// resolvable API key, an uncached model, and a chat model the registry
+    /// serves as a direct download (GGUF or vision-language, not a `.xyb`
+    /// bundle) — otherwise this behaves exactly like [`Self::from_registry`].
+    /// [`Self::will_speculate`] checks the first two before loading;
+    /// `FfiModel::is_cloud_serving` reports the outcome.
     #[frb(sync)]
     pub fn from_registry_speculative(model_id: String) -> FfiModelLoader {
         FfiModelLoader(ModelLoader::from_registry(&model_id).with_speculative_cloud(true))
     }
 
-    /// Whether `load()` would actually speculate: enabled, an API key
-    /// resolves, and the model is not already cached. Never hits the network.
+    /// Whether `load()` may speculate: enabled, an API key resolves, and the
+    /// model is not already cached. Never hits the network, so it cannot know
+    /// the model type: the load asks the registry and speculates only for a
+    /// chat model.
     #[frb(sync)]
     pub fn will_speculate(&self) -> bool {
         self.0.will_speculate()
@@ -823,11 +836,14 @@ impl FfiModelLoader {
 
     /// Load the model without progress updates.
     pub async fn load(&self, backend: Option<FfiBackend>) -> Result<FfiModel, String> {
-        apply_backend_to_loader(self.0.clone(), backend)
+        let model = apply_backend_to_loader(self.0.clone(), backend)
             .load_async()
             .await
-            .map(|m| FfiModel(Arc::new(m)))
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        // Flutter loads through the SDK, not the facade's loader, so it
+        // applies the facade's FFI refusal itself.
+        facade::ensure_ffi_supported(&model).map_err(|e| e.to_string())?;
+        Ok(FfiModel(Arc::new(model)))
     }
 
     /// Load the model with download progress updates.
@@ -849,13 +865,16 @@ impl FfiModelLoader {
                 let _ = sink.add(FfiLoadEvent::Progress(FfiDownloadStatus::from_sdk(status)));
             });
 
-            match result {
-                Ok(_) => {
+            match result
+                .map_err(|e| e.to_string())
+                .and_then(|model| facade::ensure_ffi_supported(&model).map_err(|e| e.to_string()))
+            {
+                Ok(()) => {
                     // Model is now cached, send complete event
                     let _ = sink.add(FfiLoadEvent::Complete);
                 }
-                Err(e) => {
-                    let _ = sink.add(FfiLoadEvent::Error(e.to_string()));
+                Err(message) => {
+                    let _ = sink.add(FfiLoadEvent::Error(message));
                 }
             }
         };
@@ -971,7 +990,7 @@ impl FfiModel {
             .0
             .run(&envelope.into_envelope(), sdk_config.as_ref())
             .map_err(|e| e.to_string())?;
-        Ok(FfiResult::from_inference_result(&result))
+        FfiResult::try_from_inference_result(&result)
     }
 
     /// Run inference with streaming output.
@@ -1080,8 +1099,7 @@ impl FfiModel {
             match result {
                 Ok(inference_result) => {
                     reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    let ffi_result = FfiResult::from_inference_result(&inference_result);
-                    let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
+                    let _ = sink.add(FfiStreamEvent::completion(&inference_result));
                 }
                 Err(e) => {
                     let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
@@ -1137,9 +1155,12 @@ impl FfiModel {
                 // Clone the sink for the per-chunk callback; the original stays
                 // for the terminal Complete/Error emit below.
                 let chunk_sink = sink.clone();
-                let on_chunk = move |pcm: Vec<u8>, sample_rate: u32| -> bool {
+                let on_chunk = move |packet: xybrid_core::execution::TtsAudioChunk| -> bool {
                     if chunk_sink
-                        .add(FfiTtsStreamEvent::AudioChunk { pcm, sample_rate })
+                        .add(FfiTtsStreamEvent::AudioChunk {
+                            pcm: packet.pcm,
+                            sample_rate: packet.sample_rate,
+                        })
                         .is_err()
                         && should_cancel_on_sink_close(
                             reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
@@ -1158,7 +1179,7 @@ impl FfiModel {
             };
 
             match result {
-                Ok(()) => {
+                Ok(summary) => {
                     reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
                     // A cancelled run (barge-in via sink-close, or the caller
                     // cancelling the token) stopped early — don't surface it as a
@@ -1168,7 +1189,13 @@ impl FfiModel {
                         .as_ref()
                         .map(|h| h.0.is_cancelled())
                         .unwrap_or(false);
-                    if !cancelled {
+                    if summary.status == xybrid_core::execution::TtsStatus::Limited {
+                        let _ = sink.add(FfiTtsStreamEvent::Error(
+                            "TTS output limited; partial audio delivered".into(),
+                        ));
+                    } else if !cancelled
+                        && summary.status != xybrid_core::execution::TtsStatus::Cancelled
+                    {
                         let _ = sink.add(FfiTtsStreamEvent::Complete);
                     }
                 }
@@ -1222,7 +1249,7 @@ impl FfiModel {
             .run_with_context(&envelope.into_envelope(), &ctx_guard, sdk_config.as_ref())
             .map_err(|e| e.to_string())?;
 
-        Ok(FfiResult::from_inference_result(&result))
+        FfiResult::try_from_inference_result(&result)
     }
 
     /// Run inference with streaming output and conversation context.
@@ -1344,8 +1371,7 @@ impl FfiModel {
             match result {
                 Ok(inference_result) => {
                     reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    let ffi_result = FfiResult::from_inference_result(&inference_result);
-                    let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
+                    let _ = sink.add(FfiStreamEvent::completion(&inference_result));
                 }
                 Err(e) => {
                     let _ = sink.add(stream_error_event(e));
@@ -1443,8 +1469,7 @@ impl FfiModel {
             match result {
                 Ok(inference_result) => {
                     reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    let ffi_result = FfiResult::from_inference_result(&inference_result);
-                    let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
+                    let _ = sink.add(FfiStreamEvent::completion(&inference_result));
                 }
                 Err(e) => {
                     let _ = sink.add(stream_error_event(e));
@@ -1743,5 +1768,30 @@ mod tests {
             }
             _ => panic!("expected Error event"),
         }
+    }
+
+    /// Every stream completion goes through `completion`, so a run whose output
+    /// `FfiResult` cannot carry ends the stream with an error, not with an
+    /// empty `Complete`.
+    #[test]
+    fn a_stream_completes_only_when_its_result_converts() {
+        use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+
+        let text = InferenceResult::new(Envelope::new(EnvelopeKind::Text("done".into())), "m", 0);
+        assert!(matches!(
+            FfiStreamEvent::completion(&text),
+            FfiStreamEvent::Complete(ref result) if result.text.as_deref() == Some("done")
+        ));
+
+        let multipart =
+            InferenceResult::new(Envelope::new(EnvelopeKind::MultiPart(vec![])), "m", 0);
+        assert!(matches!(
+            FfiStreamEvent::completion(&multipart),
+            FfiStreamEvent::Error(ref error) if error.contains("a multi-part message")
+        ));
+        assert!(matches!(
+            FfiStreamEvent::from(xybrid_sdk::StreamEvent::Complete(multipart)),
+            FfiStreamEvent::Error(_)
+        ));
     }
 }

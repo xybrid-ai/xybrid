@@ -83,6 +83,10 @@ test('every bolt record field and enum variant reaches a TS type', () => {
       for (const variant of record.members) {
         const mapped = entry.variants?.[variant];
         assert.ok(mapped, `${name}::${variant} is new in bolt; map it in parity.json. ${HOW_TO}`);
+        if (typeof mapped === 'object' && mapped !== null && 'excluded' in mapped) {
+          checkEntry(`${name}::${variant}`, mapped);
+          continue;
+        }
         assert.ok(literals.has(mapped), `${name}::${variant} maps to '${mapped}', not a member of ${entry.ts}`);
       }
     }

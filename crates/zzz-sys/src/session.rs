@@ -1,0 +1,745 @@
+//! Safe session surface over the C ABI.
+//!
+//! Every `unsafe` block in this module carries a `# Safety` comment tied to
+//! the header's ownership contract: the library owns all session memory and
+//! releases it on close; one synthesis at a time per session; borrowed audio
+//! is valid only until callback return; paths need only live through open.
+
+use std::cell::Cell;
+use std::ffi::CString;
+use std::marker::PhantomData;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::Path;
+use std::ptr;
+use std::sync::Arc;
+
+use crate::{
+    EmbedError, EmbedOptions, EmbedResult, KittenOptions, ZZZ_EMBED_CANCELLED,
+    ZZZ_EMBED_INVALID_ARGUMENT, ZZZ_EMBED_LIMIT_REACHED, ZZZ_EMBED_LOAD_FAILED,
+    ZZZ_EMBED_MODEL_NOT_COMPILED, ZZZ_EMBED_OK, ZZZ_EMBED_OUT_OF_MEMORY,
+    ZZZ_EMBED_SYNTHESIS_FAILED,
+};
+
+/// Output format of the pinned slices, per `zzz_embed.h` ("currently 24 kHz
+/// mono"). The ABI also carries both values per call; these constants exist
+/// so callers can pre-size buffers without a completed call.
+pub const SYNTHESIS_SAMPLE_RATE: u32 = 24_000;
+pub const SYNTHESIS_CHANNELS: u32 = 1;
+
+/// Typed error surface mapped from the ABI's integer codes, carrying the
+/// engine's privacy-screened message.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum ZzzError {
+    #[error("invalid argument: {message}")]
+    InvalidArgument { message: String },
+    #[error("model is not compiled into this engine slice: {message}")]
+    ModelNotCompiled { message: String },
+    #[error("engine load failed: {message}")]
+    LoadFailed { message: String },
+    #[error("engine ran out of memory: {message}")]
+    OutOfMemory { message: String },
+    #[error("synthesis was cancelled: {message}")]
+    Cancelled { message: String },
+    #[error("output limit reached, partial audio delivered: {message}")]
+    LimitReached { message: String },
+    #[error("synthesis failed: {message}")]
+    SynthesisFailed { message: String },
+    #[error("engine call failed: {message}")]
+    Failed { message: String },
+}
+
+#[must_use]
+fn message_of(error: &EmbedError, fallback: &str) -> ZzzError {
+    let spoken = error.message();
+    let message = String::from(if spoken.is_empty() { fallback } else { spoken });
+    match error.code {
+        ZZZ_EMBED_INVALID_ARGUMENT => ZzzError::InvalidArgument { message },
+        ZZZ_EMBED_MODEL_NOT_COMPILED => ZzzError::ModelNotCompiled { message },
+        ZZZ_EMBED_LOAD_FAILED => ZzzError::LoadFailed { message },
+        ZZZ_EMBED_OUT_OF_MEMORY => ZzzError::OutOfMemory { message },
+        ZZZ_EMBED_CANCELLED => ZzzError::Cancelled { message },
+        ZZZ_EMBED_LIMIT_REACHED => ZzzError::LimitReached { message },
+        ZZZ_EMBED_SYNTHESIS_FAILED => ZzzError::SynthesisFailed { message },
+        code => ZzzError::Failed {
+            message: format!("{message} (code {code})"),
+        },
+    }
+}
+
+fn unavailable(reason: crate::UnavailableReason) -> ZzzError {
+    ZzzError::LoadFailed {
+        message: format!("zzz engine unavailable: {reason}"),
+    }
+}
+
+fn require_engine() -> Result<Arc<crate::api::EngineApi>, ZzzError> {
+    crate::api::load().map_err(unavailable)
+}
+
+/// Read Phonon's defaults from the linked engine, including bundle temperature selection.
+/// Returns zeroed settings (with `struct_size` set) when the runtime is unavailable;
+/// session opening reports unavailability before validating those settings.
+#[must_use]
+pub fn default_options() -> EmbedOptions {
+    let mut options = EmbedOptions {
+        struct_size: core::mem::size_of::<EmbedOptions>() as u32,
+        ..EmbedOptions::default()
+    };
+    let Ok(api) = crate::api::load() else {
+        return options;
+    };
+    // # Safety: writes exactly the one `EmbedOptions` allocated above.
+    unsafe { (api.functions.default_options)(ptr::addr_of_mut!(options)) };
+    options
+}
+
+/// Runtime ABI version of the linked engine slice.
+///
+/// Returns zero without entering the engine if the runtime is unavailable.
+/// Zero means runtime unavailability, not a mismatch in the verified artifact.
+/// A nonzero mismatch indicates duplicate-engine drift.
+#[must_use]
+pub fn abi_version() -> u32 {
+    let Ok(api) = crate::api::load() else {
+        return 0;
+    };
+    // # Safety: a plain function returning an integer; no shared state.
+    unsafe { (api.functions.abi_version)() }
+}
+
+/// Whether the linked slice compiled support for `model` (e.g.
+/// `"kitten-tts2"`). Returns false without entering the engine when the runtime is unavailable.
+#[must_use]
+pub fn supports_model(model: &str) -> bool {
+    let Ok(api) = crate::api::load() else {
+        return false;
+    };
+    let name = match CString::new(model) {
+        Ok(name) => name,
+        // An interior NUL can never match an implementation name.
+        Err(_) => return false,
+    };
+    // # Safety: the C side only spans the input string and returns an int.
+    unsafe { (api.functions.supports_model)(name.as_ptr()) != 0 }
+}
+
+/// Safe settings for the pinned Kitten engine.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KittenSettings {
+    /// 1..=64; 0 selects the engine default of 4.
+    pub threads: u32,
+    /// 1..=1023; 0 uses available model-window room with the split-chunk guard.
+    pub max_tokens: u32,
+    /// Waveform-stage seed; 0 is a valid seed, not a sentinel.
+    pub seed: u64,
+    /// Sentence mode and macOS Accelerate; neither is enabled by default.
+    pub flags: KittenFlags,
+}
+
+/// Phonon open settings, initialized from the linked engine's defaults.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PhononSettings {
+    /// Positive per-chunk frame capacity; reaching it reports partial audio.
+    pub max_frames_per_chunk: u32,
+    /// Positive text-token capacity per chunk.
+    pub max_chunk_tokens: u32,
+    /// Zero selects the GGUF bundle default; positive finite values override it.
+    pub temperature: f32,
+    /// Reset for each utterance; zero is a valid seed.
+    pub seed: u64,
+}
+
+impl Default for PhononSettings {
+    fn default() -> Self {
+        let options = default_options();
+        Self {
+            max_frames_per_chunk: options.max_frames_per_chunk,
+            max_chunk_tokens: options.max_chunk_tokens,
+            temperature: options.temperature,
+            seed: options.seed,
+        }
+    }
+}
+
+impl PhononSettings {
+    /// Check capacities and sampling values before opening any model files.
+    pub fn validate(&self) -> Result<(), ZzzError> {
+        if self.max_frames_per_chunk == 0
+            || self.max_chunk_tokens == 0
+            || !self.temperature.is_finite()
+            || self.temperature < 0.0
+        {
+            return Err(ZzzError::InvalidArgument {
+                message: "capacities must be positive; temperature must be finite and nonnegative"
+                    .into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// A resident Phonon session with exclusive synthesis and lifetime-safe cancellation.
+///
+/// The mapped GGUF must remain unchanged until the session and its cancellation
+/// handles are dropped. Voices come from that GGUF; no external voice is opened.
+/// Like [`KittenSession`], this type is `Send` but deliberately not `Sync`.
+#[derive(Debug)]
+pub struct PhononSession(KittenSession);
+
+impl PhononSession {
+    /// Open a GGUF with a bundled voice, or let the engine select its default.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZzzError`] for invalid settings/strings, missing assets or an
+    /// unknown bundled voice. Strings need only remain alive through this call.
+    pub fn open_phonon(
+        model_path: &Path,
+        voice: Option<&str>,
+        settings: PhononSettings,
+    ) -> Result<Self, ZzzError> {
+        let api = require_engine()?;
+        settings.validate()?;
+        let path = c_string(
+            model_path
+                .to_str()
+                .ok_or_else(|| ZzzError::InvalidArgument {
+                    message: "asset path is not valid UTF-8".into(),
+                })?,
+        )?;
+        let voice = voice.map(c_string).transpose()?;
+        let model = c_string("phonon")?;
+        let options = EmbedOptions {
+            struct_size: core::mem::size_of::<EmbedOptions>() as u32,
+            max_frames_per_chunk: settings.max_frames_per_chunk,
+            max_chunk_tokens: settings.max_chunk_tokens,
+            temperature: settings.temperature,
+            seed: settings.seed,
+        };
+        let mut error = EmbedError::zeroed();
+        let mut session = ptr::null_mut();
+        // # Safety: all strings and caller-owned outputs outlive this synchronous
+        // open. The engine owns the resulting generic session; the shared handle
+        // closes it exactly once after synthesis and every cancellation owner end.
+        let code = unsafe {
+            (api.functions.open)(
+                model.as_ptr(),
+                path.as_ptr(),
+                voice.as_ref().map_or(ptr::null(), |value| value.as_ptr()),
+                &options,
+                &mut session,
+                &mut error,
+            )
+        };
+        if code != ZZZ_EMBED_OK {
+            return Err(message_of(&error, "opening the Phonon engine failed"));
+        }
+        let session = ptr::NonNull::new(session).ok_or_else(|| ZzzError::Failed {
+            message: "engine reported success without a session".into(),
+        })?;
+        // Both model families use the same opaque C session and synthesis ABI.
+        Ok(Self(KittenSession {
+            session: Arc::new(SessionHandle {
+                native: session,
+                api,
+            }),
+            not_sync: PhantomData,
+        }))
+    }
+
+    /// Clone a handle that can cancel concurrently without closing the session.
+    pub fn cancellation_handle(&self) -> PhononCancellation {
+        self.0.cancellation_handle()
+    }
+
+    /// Stream borrowed samples, preserving counters for cancellation and limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine's typed error or a contained callback panic. A returned
+    /// error leaves the session reusable; delivered audio cannot be retracted.
+    pub fn synthesize_stream_outcome(
+        &mut self,
+        text: &str,
+        language: Option<&str>,
+        callback: &mut dyn FnMut(&[f32], ChunkInfo) -> bool,
+    ) -> Result<StreamOutcome, ZzzError> {
+        self.0.synthesize_stream_outcome(text, language, callback)
+    }
+
+    /// Stream samples, reporting cancellation and partial limits as errors.
+    pub fn synthesize_stream(
+        &mut self,
+        text: &str,
+        language: Option<&str>,
+        callback: &mut dyn FnMut(&[f32], ChunkInfo) -> bool,
+    ) -> Result<EmbedResult, ZzzError> {
+        self.0.synthesize_stream(text, language, callback)
+    }
+
+    /// Collect a completed utterance; cancellation or limits discard partial audio.
+    pub fn synthesize(
+        &mut self,
+        text: &str,
+        language: Option<&str>,
+    ) -> Result<SynthesisOutcome, ZzzError> {
+        self.0.synthesize(text, language)
+    }
+}
+
+/// One boxed streaming callback (chunk samples + metadata -> continue?).
+/// Explicit `'a` bound: the boxed closure borrows the caller's callback
+/// only for the synchronous call.
+type StreamCallback<'a> = Box<dyn FnMut(&[f32], ChunkInfo) -> bool + 'a>;
+struct CallbackState<'a> {
+    callback: StreamCallback<'a>,
+    panicked: bool,
+}
+
+/// Validated Kitten flags. Accelerate is rejected on non-macOS targets.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KittenFlags {
+    pub sentence_chunks: bool,
+    pub accelerate: bool,
+}
+
+impl KittenFlags {
+    fn bits(self) -> Result<u32, ZzzError> {
+        if self.accelerate && !cfg!(target_os = "macos") {
+            return Err(ZzzError::InvalidArgument {
+                message: "Kitten Accelerate requires macOS".into(),
+            });
+        }
+        Ok(
+            (u32::from(self.accelerate) * crate::ZZZ_EMBED_KITTEN_ACCELERATE)
+                | (u32::from(self.sentence_chunks) * crate::ZZZ_EMBED_KITTEN_SENTENCE_CHUNKS),
+        )
+    }
+}
+
+/// Shared lifetime anchor. Only cancel may use the pointer concurrently.
+struct SessionHandle {
+    native: ptr::NonNull<core::ffi::c_void>,
+    api: Arc<crate::api::EngineApi>,
+}
+// # Safety: synthesis is exclusive through &mut KittenSession. The only
+// shared operation is the header's thread-safe cancel; Arc prevents close
+// until every synthesis/cancellation owner has returned or been dropped.
+unsafe impl Send for SessionHandle {}
+unsafe impl Sync for SessionHandle {}
+impl Drop for SessionHandle {
+    fn drop(&mut self) {
+        if self.api.require_cpu().is_err() {
+            return;
+        }
+        // # Safety: the final Arc owns close; no call can still hold this handle.
+        unsafe { (self.api.functions.close)(self.native.as_ptr()) }
+    }
+}
+
+/// A cancellation-only handle that keeps the native session alive.
+#[derive(Clone)]
+pub struct KittenCancellation(Arc<SessionHandle>);
+/// Cancellation for Phonon uses the same lifetime-safe generic C session handle.
+pub type PhononCancellation = KittenCancellation;
+impl core::fmt::Debug for KittenCancellation {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("KittenCancellation")
+    }
+}
+impl KittenCancellation {
+    /// Stop the running call. Idle cancellation is ignored by the engine.
+    pub fn cancel(&self) {
+        if self.0.api.require_cpu().is_err() {
+            return;
+        }
+        // # Safety: Arc anchors the session; cancel is thread-safe, including
+        // from the callback. Close cannot occur while this borrow is alive.
+        unsafe { (self.0.api.functions.cancel)(self.0.native.as_ptr()) }
+    }
+}
+
+/// One resident session. Mutable synthesis serializes calls; shared handles only cancel.
+pub struct KittenSession {
+    session: Arc<SessionHandle>,
+    not_sync: PhantomData<Cell<()>>,
+}
+
+/// Terminal state; limited audio is explicitly partial.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SynthesisStatus {
+    Completed,
+    Cancelled,
+    Limited,
+}
+
+/// Native counters remain available for cancellation and limits as well as success.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StreamOutcome {
+    pub status: SynthesisStatus,
+    pub result: EmbedResult,
+}
+
+impl core::fmt::Debug for KittenSession {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // Printed address only; engine-owned state stays private.
+        f.debug_struct("KittenSession")
+            .field("session", &(self.session.native.as_ptr() as usize))
+            .finish()
+    }
+}
+
+/// Owned C strings backing one `open` call: per the header, paths need only
+/// live through open, so they are dropped when the call returns.
+struct AssetPaths {
+    language_model: CString,
+    decoder_model: CString,
+    language_voice: CString,
+    decoder_voice: CString,
+}
+
+/// NUL-terminated UTF-8 C string for the engine; an interior NUL byte would
+/// truncate the path in C, so it is rejected here.
+fn c_string(argument: &str) -> Result<CString, ZzzError> {
+    CString::new(argument.as_bytes()).map_err(|_| ZzzError::InvalidArgument {
+        message: "string contains an interior NUL byte".to_string(),
+    })
+}
+
+impl KittenSession {
+    /// Open a Kitten TTS 2 session from its four asset paths.
+    ///
+    /// The language-model voice JSON (`reference_text`, `reference_tokens`,
+    /// `speaker`) and the S3 decoder voice JSON must describe the same
+    /// speaker. Independent sessions can run concurrently.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the engine's typed errors ([`ZzzError::LoadFailed`],
+    /// [`ZzzError::InvalidArgument`], ...) with the engine's own message
+    /// when it has one.
+    pub fn open_kitten(
+        language_model: &Path,
+        decoder_model: &Path,
+        language_voice: &Path,
+        decoder_voice: &Path,
+        settings: KittenSettings,
+    ) -> Result<Self, ZzzError> {
+        let api = require_engine()?;
+        let as_c_path = |path: &Path| -> Result<CString, ZzzError> {
+            let string = path.to_str().ok_or_else(|| ZzzError::InvalidArgument {
+                message: "asset path is not valid UTF-8".to_string(),
+            })?;
+            c_string(string)
+        };
+        let paths = AssetPaths {
+            language_model: as_c_path(language_model)?,
+            decoder_model: as_c_path(decoder_model)?,
+            language_voice: as_c_path(language_voice)?,
+            decoder_voice: as_c_path(decoder_voice)?,
+        };
+        let options = KittenOptions {
+            struct_size: core::mem::size_of::<KittenOptions>() as u32,
+            threads: settings.threads,
+            max_tokens: settings.max_tokens,
+            flags: settings.flags.bits()?,
+            seed: settings.seed,
+            // Byte pointers into the CStrings above; each stays valid
+            // through the call that consumes them, per the header's note
+            // that paths need only live through open.
+            language_model_path: paths.language_model.as_ptr().cast(),
+            decoder_model_path: paths.decoder_model.as_ptr().cast(),
+            language_voice_path: paths.language_voice.as_ptr().cast(),
+            decoder_voice_path: paths.decoder_voice.as_ptr().cast(),
+        };
+
+        let mut error = EmbedError::zeroed();
+        let mut session: *mut core::ffi::c_void = ptr::null_mut();
+        // # Safety: every argument stays valid for the duration of the call
+        // (the CStrings above outlive it). `out_session` receives a
+        // caller-owned handle, null on failure per the header; on success
+        // the handle is wrapped in `Self`, whose `Drop` owns the single
+        // close call.
+        let code = unsafe {
+            (api.functions.open_kitten)(ptr::addr_of!(options), &mut session, &mut error)
+        };
+        if code != ZZZ_EMBED_OK {
+            return Err(message_of(&error, "opening the Kitten TTS 2 engine failed"));
+        }
+        let session = ptr::NonNull::new(session).ok_or_else(|| ZzzError::Failed {
+            message: "engine reported success without a session".to_string(),
+        })?;
+        Ok(Self {
+            session: Arc::new(SessionHandle {
+                native: session,
+                api,
+            }),
+            not_sync: PhantomData,
+        })
+    }
+
+    /// Clone a lifetime-safe handle for concurrent native cancellation.
+    pub fn cancellation_handle(&self) -> KittenCancellation {
+        KittenCancellation(self.session.clone())
+    }
+
+    /// Synthesize `text`, delivering audio through a streaming callback.
+    ///
+    /// The callback receives borrowed sample chunks plus per-chunk delivery
+    /// metadata — copy or encode them to retain. Returning `false` from the
+    /// callback cancels the remaining delivery; audio delivered before the
+    /// cancellation is final (the header cannot retract it) and the call
+    /// reports [`ZzzError::Cancelled`]. One call at a time per session;
+    /// never call session methods from inside the callback.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the engine's typed errors. [`ZzzError::LimitReached`]
+    /// carries partial audio already delivered; the session remains usable
+    /// after cancellation or any other error.
+    pub fn synthesize_stream(
+        &mut self,
+        text: &str,
+        language: Option<&str>,
+        callback: &mut dyn FnMut(&[f32], ChunkInfo) -> bool,
+    ) -> Result<EmbedResult, ZzzError> {
+        let outcome = self.synthesize_stream_outcome(text, language, callback)?;
+        match outcome.status {
+            SynthesisStatus::Completed => Ok(outcome.result),
+            SynthesisStatus::Cancelled => Err(ZzzError::Cancelled {
+                message: "user cancelled".into(),
+            }),
+            SynthesisStatus::Limited => Err(ZzzError::LimitReached {
+                message: "partial audio".into(),
+            }),
+        }
+    }
+
+    /// Return counters and terminal status even for limited or cancelled delivery.
+    pub fn synthesize_stream_outcome(
+        &mut self,
+        text: &str,
+        language: Option<&str>,
+        callback: &mut dyn FnMut(&[f32], ChunkInfo) -> bool,
+    ) -> Result<StreamOutcome, ZzzError> {
+        self.session.api.require_cpu().map_err(unavailable)?;
+        let text = c_string(text)?;
+        let language = match language {
+            Some(language) => Some(c_string(language)?),
+            None => None,
+        };
+
+        // The closure is boxed; this context stays on the stack through the
+        // synchronous native call. The C side cannot retain its address.
+        let mut boxed = CallbackState {
+            callback: Box::new(move |samples, info| callback(samples, info)),
+            panicked: false,
+        };
+        let mut error = EmbedError::zeroed();
+        let mut result = EmbedResult {
+            sample_rate: SYNTHESIS_SAMPLE_RATE,
+            channels: SYNTHESIS_CHANNELS,
+            ..EmbedResult::default()
+        };
+        // # Safety: `self.session` is engine-owned and valid for the struct's
+        // lifetime; the boxed closure address is valid until the engine
+        // returns; the call is synchronous and single-threaded by the
+        // header's contract, which keeps the callback's borrowed samples
+        // slice valid until callback return; `text` and `language` are
+        // NUL-terminated strings alive for the whole call.
+        // The C pointer must live until the synchronous call ends, so it is
+        // derived from a borrow of the owning `Option<CString>` — not inside
+        // a consuming `map_or` closure, which would drop the `CString` (and
+        // dangle) before the engine ever reads it.
+        let language_ptr = language
+            .as_ref()
+            .map_or(ptr::null(), |lang| lang.as_ptr().cast());
+        let code = unsafe {
+            (self.session.api.functions.synthesize)(
+                self.session.native.as_ptr(),
+                text.as_ptr().cast(),
+                language_ptr,
+                Some(sample_callback),
+                ptr::addr_of_mut!(boxed).cast(),
+                ptr::addr_of_mut!(result),
+                ptr::addr_of_mut!(error),
+            )
+        };
+        let panicked = boxed.panicked;
+        drop(boxed);
+        if panicked {
+            return Err(ZzzError::SynthesisFailed {
+                message: "audio callback panicked".into(),
+            });
+        }
+        let status = match code {
+            ZZZ_EMBED_OK => SynthesisStatus::Completed,
+            ZZZ_EMBED_CANCELLED => SynthesisStatus::Cancelled,
+            ZZZ_EMBED_LIMIT_REACHED => SynthesisStatus::Limited,
+            _ => return Err(message_of(&error, "synthesis failed")),
+        };
+        Ok(StreamOutcome { status, result })
+    }
+
+    /// Synthesize, collecting every delivered sample.
+    ///
+    /// # Errors
+    ///
+    /// Cancellation in collect mode returns [`ZzzError::Cancelled`] and
+    /// discards the partial audio already delivered; use
+    /// [`KittenSession::synthesize_stream`] when partial audio on
+    /// cancellation matters (the xybrid adapter wraps the streaming form).
+    /// [`ZzzError::LimitReached`] likewise discards partial audio here.
+    pub fn synthesize(
+        &mut self,
+        text: &str,
+        language: Option<&str>,
+    ) -> Result<SynthesisOutcome, ZzzError> {
+        let mut samples = Vec::new();
+        self.synthesize_stream(text, language, &mut |chunk, _info| {
+            samples.extend_from_slice(chunk);
+            true
+        })
+        .map(|result| SynthesisOutcome { samples, result })
+    }
+}
+
+/// Per-chunk delivery metadata, mirroring the callback's C arguments.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChunkInfo {
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub first_sample: u64,
+}
+
+/// What one collected synthesis produced: the delivered samples plus the
+/// engine's result record (`sample_rate`, `channels`, chunk counts, and the
+/// `limited_chunks` census for the partial-audio case).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SynthesisOutcome {
+    pub samples: Vec<f32>,
+    pub result: EmbedResult,
+}
+
+/// # Safety (trampoline)
+///
+/// Runs on the synthesis thread, inside the engine's call. Only ever
+/// dereferences `user_data`, which points at the boxed closure owned
+/// locally by the running synthesize call, and borrows the samples slice,
+/// which the header promises is valid until callback return. Returning
+/// nonzero cancels the remaining delivery per the header.
+unsafe extern "C" fn sample_callback(
+    samples: *const f32,
+    sample_count: usize,
+    sample_rate: u32,
+    channels: u32,
+    first_sample: u64,
+    user_data: *mut core::ffi::c_void,
+) -> i32 {
+    if samples.is_null() || user_data.is_null() {
+        // A null buffer or context is an engine contract violation; cancel
+        // the delivery rather than dereference.
+        return 1;
+    }
+    // # Safety: the call owns this state until native returns; callbacks are
+    // synchronous on the synthesis thread and cannot retain the context.
+    let state = unsafe { &mut *user_data.cast::<CallbackState<'_>>() };
+    let audio = std::slice::from_raw_parts(samples, sample_count);
+    let info = ChunkInfo {
+        sample_rate,
+        channels,
+        first_sample,
+    };
+    match catch_unwind(AssertUnwindSafe(|| (state.callback)(audio, info))) {
+        Ok(true) => ZZZ_EMBED_OK,
+        Ok(false) => 1, // delivery cancelled by user request
+        Err(_) => {
+            state.panicked = true;
+            1
+        } // never unwind across C
+    }
+}
+
+#[cfg(test)]
+mod cpu_tests {
+    use super::*;
+
+    fn without_v3(run: impl FnOnce()) {
+        crate::api::with_test_api(Ok(crate::api::tests::mock_api()), || {
+            crate::cpu::without_v3(run);
+        });
+    }
+
+    fn assert_unavailable<T: core::fmt::Debug>(result: Result<T, ZzzError>) {
+        let error = result.expect_err("unsupported CPUs cannot enter the engine");
+        assert!(matches!(error, ZzzError::LoadFailed { .. }), "{error}");
+        assert!(error.to_string().contains("x86-64-v3"), "{error}");
+    }
+
+    #[test]
+    fn denied_cpu_probes_and_defaults_do_not_enter_native_code() {
+        without_v3(|| {
+            assert_eq!(abi_version(), 0);
+            assert!(!supports_model("phonon"));
+            assert!(!supports_model("kitten-tts2"));
+            let options = default_options();
+            assert_eq!(
+                options.struct_size as usize,
+                core::mem::size_of::<EmbedOptions>()
+            );
+            assert_eq!(options.max_frames_per_chunk, 0);
+            assert_eq!(options.max_chunk_tokens, 0);
+            assert_eq!(options.temperature, 0.0);
+            assert_eq!(options.seed, 0);
+        });
+    }
+
+    #[test]
+    fn denied_cpu_open_precedes_invalid_paths_settings_and_flags() {
+        without_v3(|| {
+            let invalid_path = Path::new("invalid\0path");
+            assert_unavailable(PhononSession::open_phonon(
+                invalid_path,
+                Some("invalid\0voice"),
+                PhononSettings::default(),
+            ));
+            assert_unavailable(KittenSession::open_kitten(
+                invalid_path,
+                invalid_path,
+                invalid_path,
+                invalid_path,
+                KittenSettings {
+                    flags: KittenFlags {
+                        accelerate: true,
+                        sentence_chunks: false,
+                    },
+                    ..KittenSettings::default()
+                },
+            ));
+        });
+    }
+
+    #[test]
+    fn denied_cpu_synthesis_cancel_and_drop_never_dereference_native_handle() {
+        without_v3(|| {
+            // Deliberately invalid native state: touching it through any FFI
+            // entry would be a contract violation. The guard must reject first.
+            let mut session = KittenSession {
+                session: Arc::new(SessionHandle {
+                    native: ptr::NonNull::dangling(),
+                    api: crate::api::tests::mock_api(),
+                }),
+                not_sync: PhantomData,
+            };
+            let cancel = session.cancellation_handle();
+            assert_unavailable(session.synthesize_stream_outcome(
+                "invalid\0text",
+                None,
+                &mut |_, _| panic!("unexpected callback"),
+            ));
+            cancel.cancel();
+            drop(session);
+            drop(cancel);
+        });
+    }
+}

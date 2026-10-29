@@ -1,4 +1,5 @@
-name: Test policy routing
+# Purpose: Drive the xybrid binary through a policy-routed hybrid stage: local GGUF leg, fake DeepSeek cloud leg.
+name: "CI: Policy routing"
 
 # Drives the real `xybrid` binary through a policy-routed hybrid stage: the
 # local leg is a real GGUF model (FunctionGemma 270M), the cloud leg is a
@@ -41,7 +42,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: test-policy-routing-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all

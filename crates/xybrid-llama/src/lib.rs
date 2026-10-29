@@ -16,7 +16,11 @@
 //!
 //! - [`LlamaModel`] — owning handle to a loaded GGUF model
 //! - [`LlamaContext`] — owning handle to a llama context, with KV-cache
-//!   manipulation methods
+//!   manipulation and per-sequence state snapshot methods
+//! - [`LlamaSeqSnapshot`] — a saved sequence state, restorable into the
+//!   context that saved it
+//! - [`FinalLogits`] — a prompt's final-position label logits and
+//!   log-sum-exp, from [`LlamaContext::score_final_position`]
 //! - [`StreamingCallback`] — closure type alias for streaming generation
 //! - [`generate_streaming`] / [`generate_with_stops`] — the autoregressive
 //!   loops, including the prefix-reuse `n_past_in` knob
@@ -66,11 +70,13 @@ mod generation;
 mod log_control;
 #[cfg(feature = "bindings")]
 mod model;
+#[cfg(feature = "bindings")]
+mod scoring;
 #[cfg(all(feature = "bindings", feature = "vision"))]
 mod vision;
 
 #[cfg(feature = "bindings")]
-pub use context::LlamaContext;
+pub use context::{LlamaContext, LlamaSeqSnapshot};
 #[cfg(all(feature = "bindings", feature = "vision"))]
 pub use generation::generate_from_current_logits_streaming;
 #[cfg(feature = "bindings")]
@@ -79,6 +85,8 @@ pub use generation::{format_chat, generate_streaming, generate_with_stops, Strea
 pub use log_control::{get_verbosity, set_verbosity};
 #[cfg(feature = "bindings")]
 pub use model::LlamaModel;
+#[cfg(feature = "bindings")]
+pub use scoring::FinalLogits;
 #[cfg(all(feature = "bindings", feature = "vision"))]
 pub use vision::{
     mtmd_helper_eval_chunks, MtmdBitmap, MtmdChunksSummary, MtmdContext, MtmdInputChunks,
@@ -99,6 +107,10 @@ pub struct LlamaModel;
 /// Stub returned when the `bindings` feature is disabled.
 #[cfg(not(feature = "bindings"))]
 pub struct LlamaContext;
+
+/// Stub returned when the `bindings` feature is disabled.
+#[cfg(not(feature = "bindings"))]
+pub struct LlamaSeqSnapshot;
 
 #[cfg(not(feature = "bindings"))]
 pub fn set_verbosity(_level: i32) {}

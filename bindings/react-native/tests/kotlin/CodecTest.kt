@@ -100,6 +100,13 @@ fun main() {
     XybridCodec.decodeEnvelope(js("kind" to "text", "text" to "x", "metadata" to js("n" to 1.0)))
   }
   expectInvalidArgument("not an object") { XybridCodec.decodeEnvelope("text") }
+  val tokenIds = XybridEnvelope(XybridEnvelopeKind.TokenIds(longArrayOf(1, 2)), emptyList())
+  expectInvalidArgument("internal token IDs cannot be encoded") {
+    XybridCodec.encodeEnvelope(tokenIds)
+  }
+  expectInvalidArgument("nested internal token IDs cannot be encoded") {
+    XybridCodec.encodeEnvelope(XybridEnvelope(XybridEnvelopeKind.MultiPart(listOf(tokenIds)), emptyList()))
+  }
 
   // -- Run options
   val request = XybridCodec.decodeRunRequest(

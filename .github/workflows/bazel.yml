@@ -8,7 +8,8 @@
 #
 # Fork-safe: PRs from forks have no secrets, so the RBE steps skip and only the
 # analyze phase runs (no remote, no network beyond repo fetches).
-name: Bazel
+# Purpose: Bazel graph analysis and remote-execution targets; a required check that skips when no Bazel input changed.
+name: "CI: Bazel"
 
 on:
   # No path filter here (unlike push): a required check must report on EVERY PR
@@ -37,11 +38,14 @@ on:
       - "rules_rs.patch"
       - "rules_rust.patch"
       - "hermetic_llvm.patch"
+      - "emsdk.patch"
       - "crates/**"
       - "bindings/kotlin/**"
+      - "bindings/web/runtime/**"
       - "macros/**"
       - "vendor/llama-cpp"
       - "vendor/ort-macos/**"
+      - "vendor/ort-android/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "tools/unity-runtime-smoke/**"
@@ -54,7 +58,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: bazel-${{ github.workflow }}-${{ github.ref }}
+  group: bazel-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -83,7 +87,7 @@ jobs:
           FILES=$(gh api --paginate \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
             --jq '.[].filename' | grep -vE '\.mdx?$' || true)
-          if printf '%s\n' "$FILES" | grep -qE '^(MODULE\.bazel|\.bazelrc|\.bazelversion|\.bazelignore|BUILD\.bazel|.*/BUILD\.bazel|.*\.bzl|bazel/|tools/scripts/|rules_android_ndk\.patch|rules_foreign_cc\.patch|rules_rs\.patch|rules_rust\.patch|hermetic_llvm\.patch|crates/|bindings/kotlin/|macros/|vendor/llama-cpp|vendor/ort-macos/|Cargo\.toml|Cargo\.lock|tools/unity-runtime-smoke/|\.github/workflows/bazel\.yml)'; then
+          if printf '%s\n' "$FILES" | grep -qE '^(MODULE\.bazel|\.bazelrc|\.bazelversion|\.bazelignore|BUILD\.bazel|.*/BUILD\.bazel|.*\.bzl|bazel/|tools/scripts/|rules_android_ndk\.patch|rules_foreign_cc\.patch|rules_rs\.patch|rules_rust\.patch|hermetic_llvm\.patch|emsdk\.patch|crates/|bindings/kotlin/|bindings/web/runtime/|macros/|vendor/llama-cpp|vendor/ort-macos/|vendor/ort-android/|Cargo\.toml|Cargo\.lock|tools/unity-runtime-smoke/|\.github/workflows/bazel\.yml)'; then
             REL=true
           else
             REL=false
@@ -147,6 +151,89 @@ jobs:
         run: |
           bazelisk build --nobuild \
             //crates/... //bindings/... //macros/... //xtask/... //integration-tests/... //:llama
+
+      # Speech (--//:tts_zzz=true) ships in the Kotlin AAR's arm64-v8a slice
+      # only; see AGENTS.md. No secrets and no staged engine slice, so fork PRs
+      # run it too. The offline tests come first: ci.yml runs them only when
+      # tools/scripts/ changes, and a BUILD-only edit that desynchronises the
+      # per-crate selects compiles fine. The release gate's tests also read
+      # bazel/ggml/android.bzl (the arm64 inventory) and the speech marker's
+      # Rust source, which a release depends on.
+      #  (a) armeabi-v7a and x86_64 have no path to zzz-sys under the flag. The
+      #      same query on the windows cdylib must find one, so (a) cannot pass
+      #      vacuously.
+      #  (b) the arm64 slice selects the engine, through the isolation of
+      #      //bazel/zzz:android_engine: without a staged slice its analysis
+      #      must fail with repositories.bzl's staging message, never drop
+      #      speech silently. The whole AAR fails the same way.
+      #  (c) an explicitly requested unsupported desktop target still fails as
+      #      incompatible, through zzz-sys.
+      #  (d) the engine isolation itself (bazel/zzz/isolate.bzl), on a fake
+      #      engine: the only thing this step builds, in seconds, with the NDK
+      #      the analysis above already fetched. It fails unless only the
+      #      zzz_embed_* API stays global and a library linked from it imports
+      #      memcpy, strlen and expf from bionic (bazel/zzz/selftest).
+      # cquery, not query (see the ggml step below), and somepath to the exact
+      # zzz-sys label: filter("zzz", ...) would also match the //:tts_zzz flag
+      # and the //bazel/zzz settings.
+      - name: Speech reaches only the AAR's arm64 slice (analysis, isolation self-test)
+        run: |
+          set -euo pipefail
+          python3 -m unittest tools/scripts/tests/test_zzz_feature_wiring.py \
+            tools/scripts/tests/test_zzz_aar_notices.py \
+            tools/scripts/tests/test_zzz_isolation.py \
+            tools/scripts/tests/test_verify_zzz_android.py
+          zzz_sys_path() { # <top-level target> [bazel flags...]
+            local target=$1; shift
+            bazelisk cquery --//:tts_zzz=true "$@" --output=label \
+              "somepath($target, filter('^//crates/zzz-sys:xybrid_zzz_sys\$', deps($target)))"
+          }
+          expect_failure() { # <message> <expected text>... -- <bazel build args>
+            local message=$1; shift
+            local patterns=()
+            while [ "$1" != "--" ]; do patterns+=("$1"); shift; done
+            shift
+            local out
+            if out=$(bazelisk build --nobuild --//:tts_zzz=true "$@" 2>&1); then
+              echo "::error::$message: analysis succeeded"
+              exit 1
+            fi
+            for pattern in "${patterns[@]}"; do
+              grep -qF -- "$pattern" <<<"$out" || {
+                echo "$out" | tail -n 30
+                echo "::error::$message: expected '$pattern'"
+                exit 1
+              }
+            done
+          }
+          # (a)
+          for abi in armeabi-v7a x86_64; do
+            path=$(zzz_sys_path "//bindings/kotlin:bolt_so_$abi")
+            if [ -n "$path" ]; then
+              echo "::error::The $abi slice reaches zzz-sys under --//:tts_zzz=true:"
+              echo "$path"
+              exit 1
+            fi
+          done
+          # (b)
+          expect_failure "The arm64 slice must select the isolated engine" \
+            "Stage the pinned slice" "zzz_android//:zzz" "//bazel/zzz:android_engine" -- \
+            //bindings/kotlin:bolt_so_arm64-v8a
+          expect_failure "The AAR must require the staged slice" \
+            "Stage the pinned slice" -- //bindings/kotlin:xybrid_kotlin_aar
+          # (a)'s positive control, then (c)
+          path=$(zzz_sys_path //crates/xybrid-bolt:xybrid_bolt_cdylib --config=windows)
+          grep -q '^//crates/zzz-sys:xybrid_zzz_sys ' <<<"$path" || {
+            echo "::error::Positive control: the windows cdylib should reach zzz-sys under the flag"
+            exit 1
+          }
+          expect_failure "An unsupported desktop target must be incompatible" \
+            "is incompatible and cannot be built" "//crates/zzz-sys:xybrid_zzz_sys" -- \
+            --config=windows //crates/xybrid-bolt:xybrid_bolt_cdylib
+          echo "Speech graph: arm64-v8a only, loud elsewhere ✅"
+          # (d)
+          bazelisk build --platforms=//bazel/ggml:android_arm64_cpu_variants //bazel/zzz/selftest
+          echo "Engine isolation self-test: only the zzz_embed_* API stays global ✅"
 
       # Every first-party Rust target must stamp the workspace version: without
       # `version = XYBRID_VERSION`, rules_rust sets CARGO_PKG_VERSION to its
@@ -364,6 +451,27 @@ jobs:
           bazelisk build --config=remote --config=android-x86_64 \
             //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
 
+      # The Unity Android natives are otherwise built only by build-unity.yml,
+      # which runs after a release is tagged. Keep their static C++ runtime a
+      # standing gate: stage each ABI as the release does and run the verifier
+      # (no libc++_shared.so, no C++ runtime imports or exports, bionic still
+      # dynamic, 16 KB alignment). Same cache-shared Rust graph as above.
+      - name: Build + verify Unity android natives on RBE (3 ABIs)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          set -euo pipefail
+          root=$(mktemp -d)
+          for spec in \
+            "aarch64-linux-android:android-arm64" \
+            "armv7-linux-androideabi:android-armv7" \
+            "x86_64-linux-android:android-x86_64"; do
+            triple="${spec%%:*}"; cfg="${spec##*:}"
+            bazelisk build --config=remote --config="$cfg" //crates/xybrid-bolt:xybrid_bolt_cdylib
+            LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib --config=remote --config="$cfg")
+            python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target "$triple" --plugins-root "$root"
+          done
+          python3 tools/scripts/verify_unity_android_natives.py --require-abis "$root/Android"
+
       - name: Upload AAR artifact
         if: env.BUILDBUDDY_API_KEY != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -520,6 +628,7 @@ jobs:
       # cargo Vulkan job.
       - name: Setup Vulkan SDK
         uses: ./.github/actions/setup-vulkan-sdk
+        timeout-minutes: 15
 
       # //:llama_vulkan reads the Vulkan headers from a fixed /opt path, which
       # this step points at whatever the runner actually has. Fixed, because a
@@ -605,15 +714,19 @@ jobs:
           [ "$(printf '%s\n' "$MAX_GLIBC" GLIBC_2.31 | sort -V | tail -1)" = "GLIBC_2.31" ] || { echo "glibc floor regressed above 2.31: $MAX_GLIBC"; exit 1; }
           echo "Vulkan CLI smoke: OK ✅"
 
-  # The windows-MSVC lane — NON-SHIPPING proof, like the windows-gnu bolt DLL
-  # above. Everything compiles on Linux RBE workers; the runner only fetches
-  # repositories and inspects outputs.
+  # The windows-MSVC lane. Everything compiles on Linux RBE workers; the runner
+  # only fetches repositories and inspects outputs. It began as a non-shipping
+  # proof, but release-prep's precompile-flutter-windows now ships this same
+  # DLL (same config plus Rust LTO, same import audit), and build-unity's
+  # Windows job builds the Unity DLL with this toolchain. The job name keeps
+  # "non-shipping" because job names are matched as checks.
   #
   # Master-merge / dispatch only (same shape as bazel-macos-metal), because
   # @msvc_runtime + @windows_sdk are ~1.3 GB of Microsoft payload fetched
-  # CLIENT-side, and this workflow keeps no repository cache. Putting that on
-  # every Bazel-touching PR would cost more than the lane is worth until the
-  # Flutter windows producer actually flips to it.
+  # CLIENT-side, and this workflow keeps no repository cache. A PR that changes
+  # the native build therefore gets no MSVC signal: dispatch this workflow on
+  # its branch (`gh workflow run bazel.yml --ref <branch>`) before merging.
+  # The llama.cpp v0.6.0 update (#629) broke this lane with every PR check green.
   bazel-windows-msvc:
     name: Bazel windows-MSVC lane (non-shipping)
     if: github.event_name != 'pull_request'
@@ -693,9 +806,15 @@ jobs:
           file "$DLL"
           file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
           python3 -m pip install --quiet --user pefile
+          # vcruntime140_1.dll (the x64 C++ exception handler, pulled in since
+          # llama.cpp v0.6.0) ships in the same VC++ redistributable as the two
+          # required DLLs, and Flutter's Windows deployment docs already have
+          # apps bundle it. Allowed, not required. Keep in sync with
+          # release-prep.yml's precompile-flutter-windows, which ships this DLL.
           python3 tools/scripts/audit_windows_dll.py --dll "$DLL" \
             --require-import vcruntime140.dll \
-            --require-import msvcp140.dll
+            --require-import msvcp140.dll \
+            --allow-import vcruntime140_1.dll
           python3 - "$DLL" "$IMPLIB" <<'PYEOF'
           import sys
 

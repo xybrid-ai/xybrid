@@ -238,7 +238,8 @@ class XybridModelLoader {
   // Serve from the cloud gateway while the weights download in the background
   factory XybridModelLoader.fromRegistrySpeculative(String modelId);
 
-  // Would load() actually speculate? (enabled + API key + not cached)
+  // May load() speculate? (enabled + API key + not cached; the registry
+  // then decides whether it is a chat model)
   bool get willSpeculate;
 
   // Load the model
@@ -461,8 +462,12 @@ let model = Xybrid::model("qwen3.5-0.8b")
 
 `fromRegistrySpeculative()` answers from the cloud gateway while the registry
 weights download in the background, then switches to on-device by itself. It
-needs an API key and an uncached model — otherwise it behaves exactly like
-`fromRegistry()`, which `willSpeculate` reports up front. LLM/chat models only.
+needs an API key, an uncached model, and a chat model the registry serves as a
+direct download (a GGUF or vision-language variant, not a `.xyb` bundle) —
+otherwise it behaves exactly like `fromRegistry()`. `willSpeculate` checks the
+first two before loading and never touches the network; the load asks the
+registry for the third, and `isCloudServing()` on the loaded model reports the
+outcome.
 
 It sets the per-load override itself, so it does **not** depend on
 `setSpeculativeCloud()` — that toggle is the default for loads which do not opt
@@ -717,6 +722,29 @@ class XybridModel {
     required RunOptions options,
   });
 
+  // Unity uses RunTtsStreaming(envelope, onAudio, cancellationToken) and
+  // RunTtsStreamingAsync with the same arguments. Audio is owned PCM16 LE,
+  // carrying sampleRate, channels and firstSample (per-channel offset).
+  // Both return TtsStreamResult: completed, cancelled, limited, or failed.
+  // Calls run off the main/audio thread; callbacks run on the draining worker.
+  // The existing native RunStream/StreamNext/StreamResult/StreamClose protocol
+  // delivers Audio events for TTS models and Token events for text models.
+  // Kitten cancellation reaches the active native session without the model
+  // lock; pre-cancelled/queued requests never synthesize. Cancellation discards
+  // queued audio; callers invalidate already scheduled playback themselves.
+  // Dispose only after the asynchronous run has returned.
+  // Batch Kitten output uses the existing raw PCM16 LE audio contract.
+  // Unity InferenceResult.SpeechStatus / LimitedChunks expose partial limits;
+  // Success is false for limited/cancelled batch output, with AudioBytes retained.
+  // RunTts (byte-only convenience) therefore throws on a limit.
+  // Kitten Run with a cancellation token collects the controlled stream, so
+  // live interruption also retains a cancelled batch outcome/partial PCM.
+  // ZzzEmbed metadata adds sentence_chunks=false and accelerate=false. The
+  // latter is macOS-only. max_tokens=0 uses available LM-window room, with the
+  // engine's split-chunk runaway guard; explicit caps remain explicit. Kitten
+  // owns text splitting and preserves expression markup. Limited output is
+  // partial audio, never an unqualified completed request.
+
   // Benchmarking
   Future<BenchmarkResult> benchmark({
     required Envelope envelope,
@@ -797,6 +825,61 @@ The generated Swift and C# model types expose the same generation-default call
 as `defaultGenerationConfig()` / `DefaultGenerationConfig()`. These reads use
 load-time metadata snapshots, so they do not wait behind an in-flight
 inference's model write lock.
+
+### Choice scoring (Rust)
+
+A `ChoiceScorer` model (see [`MODEL_METADATA.md`](MODEL_METADATA.md#choicescorer))
+scores a closed list of candidates against one context instead of generating
+output. Build the input with `Envelope::choice_request` and run it through
+`run`, `run_with_options` or `run_async`; the scores come back in
+`InferenceResult::choice_scores()`.
+
+```rust
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::{Choice, ModelLoader};
+
+let model = ModelLoader::from_directory("models/cua-s1-forms")?.load()?;
+model.warmup()?; // loads the scorer and checks the model against its spec
+
+let request = Envelope::choice_request(
+    Envelope::new(EnvelopeKind::Text("FORM Intake\nELEMENT Edit \"Phone\" value=\"\"".into())),
+    vec![
+        Choice::new("tel", "fill Tel: (503) 555-0142"),
+        Choice::new("name", "fill Name: Jane Doe"),
+    ],
+);
+let result = model.run(&request, None)?;
+let scores = result.choice_scores().expect("a scorer returns choice scores");
+let best = &scores.entries[scores.best().expect("at least two candidates")];
+println!("{} {:.3}", best.id, best.score);
+```
+
+- `is_choice_scorer()` tells a scorer apart, and `fixed_choices()` lists the
+  candidates it appends after the caller's; their ids are reserved.
+- `ChoiceScores.entries` holds one `ChoiceScore { id, logit, score, fixed }`
+  per candidate, the caller's choices first, then the fixed ones. `best()` is
+  the index of the highest score and `margin()` its lead over the runner-up.
+  Scores rank the offered candidates against each other; they are not
+  calibrated probabilities.
+- Every other entry point (streaming, `*_with_context`, pipelines) refuses a
+  scorer, every other model refuses a choice request, and a scorer refuses any
+  other input, all before any backend or cloud call; the `run*` methods report
+  `SdkError::UnsupportedModelCapability`. Choice requests never go to the
+  cloud.
+- An invalid request (an empty context, fewer than two or more than
+  `max_choices` candidates, or an empty, repeated or reserved id) fails with
+  `SdkError::InferenceError`. Errors name positions and counts, never ids,
+  texts or the context. When ONNX Runtime fails, its own message, which can
+  quote input bytes, is withheld, and so is the shape of a wrong-shaped output,
+  which a model can derive from the request. Scorer sessions and runs set ONNX
+  Runtime's own log level to fatal, so ONNX Runtime logs nothing below fatal
+  for them, such as that message or a warning that quotes what the request
+  produced. Its process-wide logger is not covered; by default it follows
+  `ORT_LOG`.
+- The language bindings refuse to load a choice scorer.
+- From the command line, `xybrid run --input-text <context> --choice ID=TEXT`
+  sends the same request and prints the scores; see the
+  [CLI reference](../content/docs/cli/reference/run.mdx#choice-scoring).
 
 ### Implementation Status
 
@@ -960,6 +1043,10 @@ the audio.
 Of `XybridRunOptions`, only `correlationId` applies to a pipeline run. Setting
 `generationConfig` or `abortOn` fails with `ConfigError` instead of being
 ignored; per-stage generation settings belong in the pipeline YAML.
+
+A run fails if any stage's output cannot be represented, as described under
+[Result Types](#7-result-types); Dart, which returns only the final output,
+checks that one.
 
 ### Rust
 
@@ -1293,6 +1380,12 @@ stages:
 > **Audio format**: TTS models produce raw PCM audio bytes (16-bit signed, little-endian).
 > Typical sample rate is 24kHz mono (e.g., Kokoro TTS). The audio is returned as raw bytes,
 > not base64-encoded. Convert to WAV or feed directly to platform audio APIs.
+
+A result always carries its output. If a run produces an output the binding has
+no field for, the run fails instead of returning success with empty payload
+fields: `UnsupportedModelCapability` (code 20) on Kotlin, Swift, C# and Python,
+an `Unsupported model capability:` error on Dart. Streams end with that error
+instead of a completion. No shipped model produces such an output today.
 
 ### Dart
 
@@ -1656,7 +1749,8 @@ final stream = model.runStreaming(
 Per-run controls for cooperative cancellation and resource-driven local abort.
 Rust SDK methods with options are available as model-level `run_with_options`,
 `run_with_context_options`, `run_streaming_with_options`, and
-`run_streaming_with_context_options`, plus pipeline-level `run_with_options`,
+`run_streaming_with_context_options`, `run_tts_streaming` and its async partner,
+plus pipeline-level `run_with_options`,
 `run_async_with_options`, `Xybrid::run_pipeline_with_options`, and
 `Xybrid::run_pipeline_streaming_with_options`.
 
@@ -1683,6 +1777,20 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 `fallback_to_cloud` is carried in policy and telemetry contracts so binding
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
+
+TTS checks the same resource policy before synthesis and before audio packet
+delivery. Kitten also polls it while native inference runs, independently of
+the model lock; ONNX can stop only at chunk boundaries. Resource aborts return
+`AbortedForCloudFallback` when the policy permits fallback, or an inference
+error otherwise. `max_grace_tokens` counts additional audio packets on this
+path; polling does not spend that budget. User cancellation returns a cancelled
+TTS summary immediately after the backend drains, without packet grace or cloud
+fallback. These checks preserve the fallback decision; they do not themselves
+start a cloud request.
+Completed and limited backend results remain authoritative if a resource
+signal arrives during finalization. A resource fallback requires the backend
+to confirm that local synthesis was interrupted; late signals do not restart
+speech that has already finished.
 
 **User cancellation (all bindings).** A caller
 can abort an in-flight local streaming run via a `CancellationToken` cancel
@@ -1981,50 +2089,21 @@ XybridClient.InitializeTelemetry(config);
 
 ### Rust — `SdkConfig`
 
-The Rust SDK ships a small `SdkConfig` struct consumed by `init_sdk_cache_dir`.
-It carries the `binding` identifier reported in the `X-Xybrid-Client` registry
-telemetry header. Non-Rust bindings register their identifier through the
-platform-specific entry points listed under "Setting `binding` per binding"
-below — they do not expose `SdkConfig` directly.
+The Rust SDK ships a small `SdkConfig` struct that holds the folder set by
+`init_sdk_cache_dir`. Its `binding` field, `with_binding()` and `binding()` are
+deprecated: no API reads a config's binding, so it never reaches a request.
+Register the identifier reported in the `X-Xybrid-Client` registry header
+before the first registry call instead:
 
 ```rust
-pub struct SdkConfig {
-    pub cache_dir: Option<std::path::PathBuf>,
-    /// Reported in the `X-Xybrid-Client` registry header. Defaults to
-    /// `DEFAULT_BINDING` ("rust") when unset.
-    pub binding: Option<&'static str>,
-}
-
-impl SdkConfig {
-    /// Override the binding identifier reported in the registry telemetry header.
-    pub fn with_binding(self, binding: &'static str) -> Self;
-    /// Resolve the configured binding identifier, falling back to `DEFAULT_BINDING`.
-    pub fn binding(&self) -> &'static str;
-}
-
-pub const DEFAULT_BINDING: &str = "rust";
+xybrid_sdk::init().binding("my-tool").run();
+// or
+xybrid_sdk::set_binding("my-tool");
 ```
 
-**Example — explicit Rust binding:**
-
-```rust
-use xybrid_sdk::{SdkConfig, DEFAULT_BINDING};
-
-let config = SdkConfig::default().with_binding("my-tool");
-assert_eq!(config.binding(), "my-tool");
-```
-
-**Setting `binding` per binding:**
-
-| Binding | Resolves to | Set by |
-|---------|-------------|--------|
-| Rust SDK direct | `rust` (default) | `xybrid_sdk::DEFAULT_BINDING`, override with `SdkConfig::with_binding(...)` or `xybrid_sdk::set_binding(...)` |
-| Flutter | `flutter` | Internal: `XybridSdkClient` calls `xybrid_sdk::set_binding("flutter")` from every FRB entry point |
-| Kotlin (Android) | `kotlin` | Internal: `Xybrid.init(context)` calls UniFFI `setBinding("kotlin")` |
-| Swift (iOS / macOS) | `swift` | Internal: `Xybrid.initialize()` calls UniFFI `setBinding(binding: "swift")` |
-| Unity (C#) | `unity` | Internal: `XybridClient.Initialize()` calls native `xybrid_set_binding("unity")` |
-
-The full wire format and the list of enum values for each header field is documented in [`docs/telemetry/registry.md`](../telemetry/registry.md).
+Every binding's identifier, and where each SDK registers it, is listed in
+[`docs/telemetry/registry.md`](../telemetry/registry.md) with the full wire
+format.
 
 ### Implementation Status
 
@@ -2050,8 +2129,8 @@ The full wire format and the list of enum values for each header field is docume
 
 | Method (Rust `SdkConfig`) | Rust |
 |---------------------------|------|
-| `with_binding(binding)` | ✅ |
-| `binding()` | ✅ |
+| `with_binding(binding)` | Deprecated, no effect |
+| `binding()` | Deprecated, no effect |
 
 > **Note**: On Dart, prefer passing `apiKey` (and optional `ingestUrl`) to
 > `Xybrid.init()` — that bundles telemetry startup into initialization.
@@ -2060,9 +2139,9 @@ The full wire format and the list of enum values for each header field is docume
 > both routes share the same process-wide once-guard. Flush / shutdown / batch
 > configuration are not yet exposed on Dart; events flush on the Rust exporter's
 > default 5 s interval. The C# (Unity) SDK remains the reference implementation
-> of the wider telemetry-config surface. `SdkConfig.binding` is Rust-only —
-> non-Rust bindings register their identifier through the platform-specific
-> entry points listed in [`docs/telemetry/registry.md`](../telemetry/registry.md).
+> of the wider telemetry-config surface. Every binding registers its
+> identifier at the entry points listed in
+> [`docs/telemetry/registry.md`](../telemetry/registry.md).
 
 ---
 

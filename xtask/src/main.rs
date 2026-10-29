@@ -83,7 +83,7 @@ fn resolve_ort_lib_location(target: &str) -> Option<PathBuf> {
 /// Resolves the ORT Android shared library directory.
 ///
 /// Checks for vendor/ort-android/ which should contain per-ABI subdirectories
-/// (arm64-v8a/, x86_64/) with libonnxruntime.so and libc++_shared.so.
+/// (arm64-v8a/, x86_64/) with libonnxruntime.so.
 ///
 /// Returns None if the directory doesn't exist.
 fn resolve_ort_android_libs() -> Option<PathBuf> {
@@ -238,7 +238,8 @@ enum Commands {
         #[arg(long)]
         platform_preset: Option<String>,
 
-        /// Copy built library to Unity bindings directory
+        /// Copy built library to Unity bindings directory (not Android: its
+        /// Unity native is Bazel-built, see `deploy-unity-native`)
         #[arg(long)]
         deploy_unity: bool,
     },
@@ -287,7 +288,8 @@ enum Commands {
     ///
     /// Convenience wrapper around build-ffi that orchestrates builds for all Unity-supported
     /// platforms. By default, builds for the host platform only. Use --all-platforms to build
-    /// all targets available on the current host OS.
+    /// all targets available on the current host OS. Android is skipped: its Unity native is
+    /// built by Bazel and staged with deploy-unity-native.
     BuildUnity {
         /// Build all Unity target platforms available on the current host OS
         #[arg(long)]
@@ -308,7 +310,7 @@ enum Commands {
     /// Package per-platform Unity native bundles + resolver manifest into dist/.
     ///
     /// Zips each present `bindings/unity/Runtime/Plugins/<Platform>` tree (as
-    /// deployed by `build-unity --deploy`) into
+    /// deployed by `build-unity --deploy`, or for Android by `deploy-unity-native`) into
     /// `xybrid-unity-native-<platform>-v<ver>.zip` and writes
     /// `xybrid-unity-natives-v<ver>.manifest.json` (the manifest the Unity
     /// editor `NativeLibraryResolver` downloads and verifies against).
@@ -464,6 +466,20 @@ fn build_ffi(
     let crate_name = "xybrid-bolt";
     let lib_stem = "xybrid_bolt";
 
+    // Unity's Android library must link libc++ statically (the package ships no
+    // libc++_shared.so), and cargo-ndk builds link the shared runtime
+    // (.cargo/config.toml, llama-cpp-sys). Refuse before spending a build on it.
+    if deploy_unity {
+        if let Some(t) = target.as_deref().filter(|t| t.contains("android")) {
+            anyhow::bail!(
+                "build-ffi --deploy-unity does not support Android: cargo-ndk links \
+                 libc++_shared.so, which the Unity package does not ship. Build the \
+                 Unity library with Bazel and stage it instead:\n{}",
+                unity_android_bazel_steps(t)?
+            );
+        }
+    }
+
     // Resolve the platform preset: use override if provided, otherwise auto-detect
     let preset = if let Some(ref p) = platform_preset {
         p.clone()
@@ -577,8 +593,9 @@ fn build_ffi(
 
 /// All Unity target platforms with their Rust target triples.
 const UNITY_TARGETS: &[(&str, &str)] = &[
-    // Note: x86_64-apple-darwin omitted — ORT has no prebuilt binaries for Intel Mac.
-    // Intel Macs can run arm64 binaries via Rosetta 2.
+    // Note: x86_64-apple-darwin omitted — ORT has no prebuilt binaries for Intel Mac,
+    // so Intel Macs are not supported: Rosetta 2 runs x86_64 code on Apple Silicon,
+    // not arm64 code on Intel.
     ("macOS arm64", "aarch64-apple-darwin"),
     ("Windows x86_64", "x86_64-pc-windows-msvc"),
     ("Linux x86_64", "x86_64-unknown-linux-gnu"),
@@ -588,26 +605,62 @@ const UNITY_TARGETS: &[(&str, &str)] = &[
     ("Android x86_64", "x86_64-linux-android"),
 ];
 
-/// Returns the Unity targets that can be built on the current host OS.
+/// Whether a Unity target's native is built by Bazel rather than cargo.
+///
+/// The Unity Android library links libc++ statically because the package ships
+/// no `libc++_shared.so`; cargo-ndk builds link that shared runtime instead.
+fn is_bazel_only_unity_target(triple: &str) -> bool {
+    triple.contains("android")
+}
+
+/// Bazel `--config` that builds the Unity Android library for `triple`.
+fn bazel_android_config(triple: &str) -> Option<&'static str> {
+    match triple {
+        "aarch64-linux-android" => Some("android-arm64"),
+        "armv7-linux-androideabi" => Some("android-armv7"),
+        "x86_64-linux-android" => Some("android-x86_64"),
+        _ => None,
+    }
+}
+
+/// The commands that build and stage the Unity Android library for `triple`.
+fn unity_android_bazel_steps(triple: &str) -> Result<String> {
+    let config = bazel_android_config(triple)
+        .with_context(|| format!("Unity has no Android ABI for target {triple}"))?;
+    Ok(format!(
+        "  bazel build --config={config} //crates/xybrid-bolt:xybrid_bolt_cdylib\n  \
+         cargo xtask deploy-unity-native --target {triple} --lib \
+         \"$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib --config={config})\"\n  \
+         (bash; off a Linux x86_64 host add --config=remote to bazel build and bazel-output.sh: \
+         the pinned NDK is the linux-x86_64 toolchain)"
+    ))
+}
+
+/// Returns the Unity targets cargo can build on the current host OS.
 fn unity_targets_for_host() -> Vec<&'static str> {
-    let host = std::env::consts::OS;
+    unity_targets_for_os(std::env::consts::OS)
+}
+
+/// Returns the Unity targets cargo can build on `host` (a `std::env::consts::OS` value).
+fn unity_targets_for_os(host: &str) -> Vec<&'static str> {
     UNITY_TARGETS
         .iter()
-        .filter(|(_, triple)| match host {
+        .map(|(_, triple)| *triple)
+        .filter(|triple| !is_bazel_only_unity_target(triple))
+        .filter(|triple| match host {
             "macos" => triple.contains("apple"),
-            "linux" => triple.contains("linux") || triple.contains("android"),
+            "linux" => triple.contains("linux"),
             "windows" => triple.contains("windows"),
             _ => false,
         })
-        .map(|(_, triple)| *triple)
         .collect()
 }
 
 /// Build xybrid-bolt for Unity target platforms.
 ///
 /// Orchestrates calls to `build_ffi()` for each target. By default, builds only
-/// for the host platform. With `--all-platforms`, builds all targets available
-/// on the current host OS.
+/// for the host platform. With `--all-platforms`, builds all cargo-buildable
+/// targets available on the current host OS; Android is listed as Bazel-built.
 fn build_unity(all_platforms: bool, deploy: bool) -> Result<()> {
     println!("Building xybrid-bolt for Unity...\n");
 
@@ -615,11 +668,21 @@ fn build_unity(all_platforms: bool, deploy: bool) -> Result<()> {
         let buildable = unity_targets_for_host();
         let skipped: Vec<_> = UNITY_TARGETS
             .iter()
-            .filter(|(_, triple)| !buildable.contains(triple))
+            .filter(|(_, triple)| {
+                !buildable.contains(triple) && !is_bazel_only_unity_target(triple)
+            })
+            .collect();
+        let bazel_only: Vec<_> = UNITY_TARGETS
+            .iter()
+            .filter(|(_, triple)| is_bazel_only_unity_target(triple))
             .collect();
 
         println!("All Unity targets:");
         for (name, triple) in UNITY_TARGETS {
+            if is_bazel_only_unity_target(triple) {
+                println!("  - {} ({}) — built by Bazel", name, triple);
+                continue;
+            }
             let available = buildable.contains(triple);
             println!(
                 "  {} {} ({})",
@@ -635,6 +698,18 @@ fn build_unity(all_platforms: bool, deploy: bool) -> Result<()> {
                 "Skipping {} target(s) not available on this host OS.\n",
                 skipped.len()
             );
+        }
+
+        if !bazel_only.is_empty() {
+            println!(
+                "Skipping {} Android target(s): the Unity Android library links libc++ \
+                 statically, which only the Bazel build does. Per ABI:",
+                bazel_only.len()
+            );
+            for (_, triple) in &bazel_only {
+                println!("{}", unity_android_bazel_steps(triple)?);
+            }
+            println!();
         }
 
         if buildable.is_empty() {
@@ -803,45 +878,46 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
         println!("  ✓ Created plugin .meta: {}", meta_path.display());
     }
 
-    // Bundle ORT Android .so files alongside libxybrid_bolt.so (Android only)
+    // Bundle the ORT Android .so alongside libxybrid_bolt.so (Android only)
     if let Some(abi) = android_abi {
+        remove_stale_unity_android_runtime(&unity_plugins_dir)?;
+
         if let Some(ort_android_path) = resolve_ort_android_libs() {
             let ort_abi_dir = ort_android_path.join(abi);
             if ort_abi_dir.is_dir() {
-                for lib_name in &["libonnxruntime.so", "libc++_shared.so"] {
-                    let src = ort_abi_dir.join(lib_name);
-                    if src.exists() {
-                        let dst = unity_plugins_dir.join(lib_name);
-                        std::fs::copy(&src, &dst).with_context(|| {
-                            format!("Failed to copy ORT library {} to {:?}", lib_name, dst)
-                        })?;
-                        println!("  ✓ Bundled ORT: {}", dst.display());
+                let lib_name = "libonnxruntime.so";
+                let src = ort_abi_dir.join(lib_name);
+                if src.exists() {
+                    let dst = unity_plugins_dir.join(lib_name);
+                    std::fs::copy(&src, &dst).with_context(|| {
+                        format!("Failed to copy ORT library {} to {:?}", lib_name, dst)
+                    })?;
+                    println!("  ✓ Bundled ORT: {}", dst.display());
 
-                        // Generate .meta for ORT dep if missing — Unity ignores files
-                        // in immutable packages that lack a .meta file.
-                        let ort_meta = dst.with_extension(format!(
-                            "{}.meta",
-                            dst.extension().unwrap_or_default().to_str().unwrap_or("")
-                        ));
-                        if !ort_meta.exists() {
-                            let guid = format!(
-                                "{:032x}",
-                                std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_nanos()
-                                    .wrapping_add(lib_name.len() as u128)
-                            );
-                            let cpu = match abi {
-                                "arm64-v8a" => "ARM64",
-                                "armeabi-v7a" => "ARMv7",
-                                "x86_64" => "x86_64",
-                                _ => "ARM64",
-                            };
-                            let meta_content = generate_android_plugin_meta(&guid, cpu);
-                            std::fs::write(&ort_meta, meta_content)?;
-                            println!("  ✓ Created ORT .meta: {}", ort_meta.display());
-                        }
+                    // Generate .meta for ORT dep if missing — Unity ignores files
+                    // in immutable packages that lack a .meta file.
+                    let ort_meta = dst.with_extension(format!(
+                        "{}.meta",
+                        dst.extension().unwrap_or_default().to_str().unwrap_or("")
+                    ));
+                    if !ort_meta.exists() {
+                        let guid = format!(
+                            "{:032x}",
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_nanos()
+                                .wrapping_add(lib_name.len() as u128)
+                        );
+                        let cpu = match abi {
+                            "arm64-v8a" => "ARM64",
+                            "armeabi-v7a" => "ARMv7",
+                            "x86_64" => "x86_64",
+                            _ => "ARM64",
+                        };
+                        let meta_content = generate_android_plugin_meta(&guid, cpu);
+                        std::fs::write(&ort_meta, meta_content)?;
+                        println!("  ✓ Created ORT .meta: {}", ort_meta.display());
                     }
                 }
             } else {
@@ -856,6 +932,42 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Files the Unity package must not carry in an Android ABI directory.
+///
+/// The Unity Android library links libc++ statically. A `libc++_shared.so` left
+/// in a local plugins tree (gitignored, so never cleaned) collides in Gradle
+/// with the copy Unity's GameActivity packages for `libgame.so`.
+const STALE_UNITY_ANDROID_FILES: [&str; 2] = ["libc++_shared.so", "libc++_shared.so.meta"];
+
+/// Deletes [`STALE_UNITY_ANDROID_FILES`] from a Unity Android ABI directory.
+fn remove_stale_unity_android_runtime(abi_dir: &Path) -> Result<()> {
+    for name in STALE_UNITY_ANDROID_FILES {
+        let path = abi_dir.join(name);
+        match std::fs::remove_file(&path) {
+            Ok(()) => println!("  ✓ Removed stale: {}", path.display()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).with_context(|| format!("Failed to remove stale {:?}", path))
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Lists [`STALE_UNITY_ANDROID_FILES`] present in any ABI directory under a
+/// Unity `Plugins/Android` directory.
+fn stale_unity_android_files(android_dir: &Path) -> Vec<PathBuf> {
+    ["arm64-v8a", "armeabi-v7a", "x86_64"]
+        .iter()
+        .flat_map(|abi| {
+            STALE_UNITY_ANDROID_FILES
+                .iter()
+                .map(move |name| android_dir.join(abi).join(name))
+        })
+        .filter(|path| path.exists())
+        .collect()
+}
+
 /// Generate a Unity .meta file for a native plugin with correct platform settings
 fn generate_plugin_meta(guid: &str, platform_dir: &str) -> String {
     match platform_dir {
@@ -863,7 +975,7 @@ fn generate_plugin_meta(guid: &str, platform_dir: &str) -> String {
             "fileFormatVersion: 2\nguid: {guid}\nPluginImporter:\n  externalObjects: {{}}\n  serializedVersion: 3\n  iconMap: {{}}\n  executionOrder: {{}}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 1\n  isExplicitlyReferenced: 0\n  validateReferences: 1\n  platformData:\n    Any:\n      enabled: 0\n      settings:\n        Exclude Editor: 0\n        Exclude Linux64: 1\n        Exclude OSXUniversal: 0\n        Exclude WebGL: 1\n        Exclude Win: 1\n        Exclude Win64: 1\n    Editor:\n      enabled: 1\n      settings:\n        CPU: AnyCPU\n        DefaultValueInitialized: true\n        OS: AnyOS\n    OSXUniversal:\n      enabled: 1\n      settings:\n        CPU: AnyCPU\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n"
         ),
         "iOS" => format!(
-            "fileFormatVersion: 2\nguid: {guid}\nPluginImporter:\n  externalObjects: {{}}\n  serializedVersion: 3\n  iconMap: {{}}\n  executionOrder: {{}}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 1\n  isExplicitlyReferenced: 0\n  validateReferences: 1\n  platformData:\n    Any:\n      enabled: 0\n      settings:\n        Exclude Editor: 1\n        Exclude Linux64: 1\n        Exclude OSXUniversal: 1\n        Exclude WebGL: 1\n        Exclude Win: 1\n        Exclude Win64: 1\n    Editor:\n      enabled: 0\n      settings:\n        CPU: AnyCPU\n        DefaultValueInitialized: true\n        OS: AnyOS\n    iOS:\n      enabled: 1\n      settings:\n        AddToEmbeddedBinaries: false\n        CPU: ARM64\n        CompileFlags:\n        FrameworkDependencies:\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n"
+            "fileFormatVersion: 2\nguid: {guid}\nPluginImporter:\n  externalObjects: {{}}\n  serializedVersion: 3\n  iconMap: {{}}\n  executionOrder: {{}}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 1\n  isExplicitlyReferenced: 0\n  validateReferences: 1\n  platformData:\n    Any:\n      enabled: 0\n      settings:\n        Exclude Editor: 1\n        Exclude Linux64: 1\n        Exclude OSXUniversal: 1\n        Exclude WebGL: 1\n        Exclude Win: 1\n        Exclude Win64: 1\n    Editor:\n      enabled: 0\n      settings:\n        CPU: AnyCPU\n        DefaultValueInitialized: true\n        OS: AnyOS\n    iOS:\n      enabled: 1\n      settings:\n        AddToEmbeddedBinaries: false\n        CPU: ARM64\n        CompileFlags:\n        FrameworkDependencies: Accelerate\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n"
         ),
         "Android" => format!(
             "fileFormatVersion: 2\nguid: {guid}\nPluginImporter:\n  externalObjects: {{}}\n  serializedVersion: 3\n  iconMap: {{}}\n  executionOrder: {{}}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 1\n  isExplicitlyReferenced: 0\n  validateReferences: 1\n  platformData:\n    Any:\n      enabled: 0\n      settings:\n        Exclude Editor: 1\n        Exclude Linux64: 1\n        Exclude OSXUniversal: 1\n        Exclude WebGL: 1\n        Exclude Win: 1\n        Exclude Win64: 1\n    Android:\n      enabled: 1\n      settings:\n        CPU: ARM64\n    Editor:\n      enabled: 0\n      settings:\n        CPU: AnyCPU\n        DefaultValueInitialized: true\n        OS: AnyOS\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n"
@@ -878,8 +990,8 @@ fn generate_plugin_meta(guid: &str, platform_dir: &str) -> String {
 }
 
 /// Generate a Unity .meta file for an Android plugin with the correct ABI CPU setting.
-/// Used for ORT dependency .so files (libonnxruntime.so, libc++_shared.so) which share
-/// the same platform settings as the main library but need an ABI-specific CPU value.
+/// Used for the ORT dependency (libonnxruntime.so), which shares the same platform
+/// settings as the main library but needs an ABI-specific CPU value.
 fn generate_android_plugin_meta(guid: &str, cpu: &str) -> String {
     format!(
         "fileFormatVersion: 2\nguid: {guid}\nPluginImporter:\n  externalObjects: {{}}\n  serializedVersion: 3\n  iconMap: {{}}\n  executionOrder: {{}}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 1\n  isExplicitlyReferenced: 0\n  validateReferences: 1\n  platformData:\n    Any:\n      enabled: 0\n      settings:\n        Exclude Editor: 1\n        Exclude Linux64: 1\n        Exclude OSXUniversal: 1\n        Exclude WebGL: 1\n        Exclude Win: 1\n        Exclude Win64: 1\n    Android:\n      enabled: 1\n      settings:\n        CPU: {cpu}\n    Editor:\n      enabled: 0\n      settings:\n        CPU: AnyCPU\n        DefaultValueInitialized: true\n        OS: AnyOS\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n"
@@ -1456,7 +1568,8 @@ fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
     if !plugins_dir.exists() {
         anyhow::bail!(
             "Unity plugins dir not found at {:?} — run \
-             `cargo xtask build-unity --all-platforms --deploy --bolt` first",
+             `cargo xtask build-unity --all-platforms --deploy` first (Android: \
+             build with Bazel and stage with `cargo xtask deploy-unity-native`)",
             plugins_dir
         );
     }
@@ -1492,6 +1605,18 @@ fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
         if !present {
             println!("  • skipping {key} — native not deployed at {:?}", src_dir);
             continue;
+        }
+        if key == "android" {
+            let stale = stale_unity_android_files(&src_dir);
+            if !stale.is_empty() {
+                anyhow::bail!(
+                    "Refusing to package the Android natives: {:?} must not ship (the \
+                     library links libc++ statically, and a copy collides with the one \
+                     Unity's GameActivity packages). Re-stage those ABIs with \
+                     `cargo xtask deploy-unity-native`, which removes it.",
+                    stale
+                );
+            }
         }
 
         let filename = format!("xybrid-unity-native-{key}-v{version}.zip");
@@ -1535,7 +1660,8 @@ fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
     if entries.is_empty() {
         anyhow::bail!(
             "No Unity native platforms were present to package — run \
-             `cargo xtask build-unity --all-platforms --deploy --bolt` first"
+             `cargo xtask build-unity --all-platforms --deploy` first (Android: \
+             build with Bazel and stage with `cargo xtask deploy-unity-native`)"
         );
     }
 
@@ -1698,5 +1824,99 @@ mod tests {
             assert!(result.unwrap().ends_with("ios-arm64"));
         }
         // If the file doesn't exist and no ORT_LIB_LOCATION is set, result can be None
+    }
+
+    #[test]
+    fn test_unity_targets_for_os_never_includes_android() {
+        for host in ["linux", "macos", "windows"] {
+            let targets = unity_targets_for_os(host);
+            assert!(
+                targets.iter().all(|t| !t.contains("android")),
+                "{host}: {targets:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_unity_targets_for_os_per_host() {
+        assert_eq!(
+            unity_targets_for_os("linux"),
+            vec!["x86_64-unknown-linux-gnu"]
+        );
+        assert_eq!(
+            unity_targets_for_os("macos"),
+            vec!["aarch64-apple-darwin", "aarch64-apple-ios"]
+        );
+        assert_eq!(
+            unity_targets_for_os("windows"),
+            vec!["x86_64-pc-windows-msvc"]
+        );
+        assert!(unity_targets_for_os("freebsd").is_empty());
+    }
+
+    #[test]
+    fn test_every_android_unity_target_has_a_bazel_config() {
+        for (_, triple) in UNITY_TARGETS {
+            if is_bazel_only_unity_target(triple) {
+                let steps = unity_android_bazel_steps(triple).unwrap();
+                assert!(steps.contains("--config=android-"), "{steps}");
+                assert!(steps.contains(&format!("--target {triple}")), "{steps}");
+            }
+        }
+        assert!(unity_android_bazel_steps("i686-linux-android").is_err());
+    }
+
+    #[test]
+    fn test_build_ffi_refuses_unity_deploy_for_android_before_building() {
+        let error = build_ffi(Some("aarch64-linux-android".to_string()), true, None, true)
+            .expect_err("Android --deploy-unity must be refused");
+        let message = error.to_string();
+        assert!(message.contains("does not support Android"), "{message}");
+        assert!(message.contains("--config=android-arm64"), "{message}");
+    }
+
+    #[test]
+    fn test_remove_stale_unity_android_runtime() {
+        let abi_dir =
+            std::env::temp_dir().join(format!("xtask-unity-android-stale-{}", std::process::id()));
+        std::fs::create_dir_all(&abi_dir).unwrap();
+        for name in STALE_UNITY_ANDROID_FILES {
+            std::fs::write(abi_dir.join(name), b"stale").unwrap();
+        }
+        std::fs::write(abi_dir.join("libonnxruntime.so"), b"ort").unwrap();
+
+        remove_stale_unity_android_runtime(&abi_dir).unwrap();
+        // A second pass finds nothing to remove and still succeeds.
+        remove_stale_unity_android_runtime(&abi_dir).unwrap();
+
+        for name in STALE_UNITY_ANDROID_FILES {
+            assert!(!abi_dir.join(name).exists(), "{name} survived");
+        }
+        assert!(abi_dir.join("libonnxruntime.so").exists());
+        std::fs::remove_dir_all(&abi_dir).unwrap();
+    }
+
+    #[test]
+    fn test_stale_unity_android_files() {
+        let android_dir = std::env::temp_dir().join(format!(
+            "xtask-unity-android-package-{}",
+            std::process::id()
+        ));
+        for abi in ["arm64-v8a", "x86_64"] {
+            std::fs::create_dir_all(android_dir.join(abi)).unwrap();
+            std::fs::write(android_dir.join(abi).join("libxybrid_bolt.so"), b"bolt").unwrap();
+        }
+        assert!(stale_unity_android_files(&android_dir).is_empty());
+
+        std::fs::write(
+            android_dir.join("x86_64").join("libc++_shared.so"),
+            b"stale",
+        )
+        .unwrap();
+        assert_eq!(
+            stale_unity_android_files(&android_dir),
+            vec![android_dir.join("x86_64").join("libc++_shared.so")]
+        );
+        std::fs::remove_dir_all(&android_dir).unwrap();
     }
 }

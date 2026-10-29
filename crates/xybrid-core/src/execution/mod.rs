@@ -17,6 +17,7 @@
 //! | [`preprocessing`] | Preprocessing step implementations |
 //! | [`postprocessing`] | Postprocessing step implementations |
 //! | [`modes`] | Execution mode implementations (SingleShot, Autoregressive, Whisper, TTS, BERT) |
+//! | [`choice`] | Choice-scoring primitives (candidates, byte encoding, score math, ONNX scorer) |
 //!
 //! ## Execution Flow
 //!
@@ -61,6 +62,9 @@
 // Template types (model_metadata.json schema)
 pub mod template;
 
+// Choice-scoring primitives (decision models)
+pub mod choice;
+
 // Chat template formatting for LLM prompts
 pub mod chat_template;
 pub use chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
@@ -93,6 +97,9 @@ pub(crate) mod path;
 
 // Loaded tokenizer.json cache, one per executor (internal)
 pub(crate) mod tokenizer_cache;
+
+// Last executor-built ONNX session, one per executor (internal)
+pub(crate) mod session_cache;
 
 // TTS text chunking (internal)
 pub(crate) mod text_chunking;
@@ -130,3 +137,6 @@ pub mod listener;
 pub(crate) mod strategies;
 #[allow(unused_imports)]
 pub(crate) use strategies::{ExecutionContext, ExecutionStrategy};
+
+pub mod tts_stream;
+pub use tts_stream::{TtsAudioChunk, TtsStatus, TtsStreamResult};

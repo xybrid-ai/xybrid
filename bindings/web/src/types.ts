@@ -32,34 +32,9 @@ export type GenerateOptions = {
   readonly maxOutputTokens?: number;
 };
 
-export type TensorDataType = "float32" | "int32" | "uint8";
-export type TensorValue =
-  | Float32Array<ArrayBufferLike>
-  | Int32Array<ArrayBufferLike>
-  | Uint8Array<ArrayBufferLike>;
-
-export type TensorDetail = {
-  readonly name: string;
-  readonly shape: readonly number[];
-  readonly dataType: TensorDataType;
-};
-
-export type TensorInput =
-  | TensorValue
-  | {
-      readonly data: TensorValue;
-      readonly shape: readonly number[];
-    };
-
-export type TensorInputs = readonly TensorInput[] | Readonly<Record<string, TensorInput>>;
-
-export type TensorOutput = {
-  readonly name: string;
-  readonly shape: readonly number[];
-  readonly data: TensorValue;
-};
-
-export type RunResult = {
-  readonly outputs: readonly TensorOutput[];
-  readonly byName: Readonly<Record<string, TensorOutput>>;
+/** Load a GGUF URL directly, optionally verifying its declared size and SHA-256. */
+export type GgufLoadOptions = LlmLoadOptions & {
+  readonly contextLength?: number;
+  readonly sizeBytes?: number;
+  readonly sha256?: string;
 };

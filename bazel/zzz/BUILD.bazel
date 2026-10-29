@@ -1,0 +1,103 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load(":isolate.bzl", "ZZZ_EMBED_API", "zzz_isolated_engine")
+
+config_setting(
+    name = "macos_enabled",
+    constraint_values = ["@platforms//os:macos", "@platforms//cpu:aarch64"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+config_setting(
+    name = "linux_enabled",
+    constraint_values = ["@platforms//os:linux", "@platforms//cpu:x86_64"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+config_setting(
+    name = "android_enabled",
+    constraint_values = ["@platforms//os:android", "@platforms//cpu:aarch64"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+# rules_rs 0.0.95 delegates Apple ABI constraints to its pinned rules_rust;
+# apple_support 2.2.0 distinguishes these otherwise identical ARM64 platforms.
+config_setting(
+    name = "ios_enabled",
+    constraint_values = ["@platforms//os:ios", "@platforms//cpu:aarch64", "@build_bazel_apple_support//constraints:device"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+config_setting(
+    name = "ios_sim_enabled",
+    constraint_values = ["@platforms//os:ios", "@platforms//cpu:aarch64", "@build_bazel_apple_support//constraints:simulator"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+config_setting(
+    name = "linux_arm64_enabled",
+    constraint_values = ["@platforms//os:linux", "@platforms//cpu:aarch64", "@rules_rs//rs/platforms/constraints:glibc"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+selects.config_setting_group(
+    name = "supported_enabled",
+    match_any = [":macos_enabled", ":linux_enabled", ":android_enabled", ":ios_enabled", ":ios_sim_enabled", ":linux_arm64_enabled"],
+    visibility = ["//visibility:public"],
+)
+
+# Android ABIs the Kotlin AAR ships without an engine slice. Under
+# --//:tts_zzz=true they build WITHOUT speech instead of failing, so one
+# flag-on AAR build links the engine into arm64-v8a (:android_enabled) only.
+# Every select that forwards tts-zzz (xybrid-core features and zzz-sys dep,
+# xybrid-sdk, both xybrid-bolt libraries, integration-tests' tts_abort) uses
+# the identical form, with this group ahead of //:tts_zzz_enabled:
+#
+#   {"//bazel/zzz:android_without_slice": [],
+#    "//:tts_zzz_enabled": [...],
+#    "//conditions:default": []}
+#
+# tools/scripts/tests/test_zzz_feature_wiring.py enforces that per platform. A
+# new Android ABI either gets a pinned slice or joins this group; any other
+# platform without a slice keeps failing as incompatible (crates/zzz-sys).
+#
+# Each member is a plain config_setting carrying BOTH the platform constraints
+# and the flag, so it refines //:tts_zzz_enabled and wins that select without
+# ambiguity. Do not express a member as a match_all group: skylib resolves an
+# AND group to its last member, which would not refine the flag-only setting.
+# Declared after :supported_enabled, which test_zzz_platforms.py reads first.
+config_setting(
+    name = "android_armv7_without_slice",
+    constraint_values = ["@platforms//os:android", "@platforms//cpu:armv7"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+config_setting(
+    name = "android_x86_64_without_slice",
+    constraint_values = ["@platforms//os:android", "@platforms//cpu:x86_64"],
+    flag_values = {"//:tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
+selects.config_setting_group(
+    name = "android_without_slice",
+    match_any = [":android_armv7_without_slice", ":android_x86_64_without_slice"],
+    visibility = ["//visibility:public"],
+)
+
+# The Android arm64 engine as crates/zzz-sys links it: the pinned archive with
+# every symbol but the zzz_embed_* C API made local (isolate.bzl). The archive
+# defines its own libc, libm and compiler-rt routines (memcpy, strlen, expf,
+# __stack_chk_fail, ...), and the AAR's libxybrid_bolt.so takes all of it, so
+# linked as is it handed xybrid's own code those copies instead of bionic's.
+# Analysis needs the staged slice, so wildcards skip this (manual); only
+# zzz-sys's android_enabled arm names it. No target_compatible_with: rules_rust
+# also configures zzz-sys's deps in the exec configuration (proc_macro_deps,
+# never built from there), and an incompatible dep would make every flag-on
+# AAR build incompatible. The other slices still link their archive as is
+# (see crates/zzz-sys/README.md).
+zzz_isolated_engine(
+    name = "android_engine",
+    api = ZZZ_EMBED_API,
+    engine = "@zzz_android//:zzz",
+    tags = ["manual"],
+    visibility = ["//crates/zzz-sys:__pkg__"],
+)

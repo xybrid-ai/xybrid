@@ -53,6 +53,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use xybrid_core::execution::{ExecutionTemplate, ModelMetadata};
 use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
 use xybrid_core::runtime_adapter::{
     select_with_cfg, BackendChoice, RegistryView, SelectionParams, SelectorCfg,
@@ -113,6 +114,30 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
         current_platform(),
         backends,
     ))
+}
+
+/// Backends that pick which file the registry serves (`requires_backends`).
+/// Sent as `?backends=` because telemetry opt-out drops the header; only
+/// artifact-selecting names go here, never the full feature list.
+const ARTIFACT_BACKENDS: &[&str] = &["asr-whispercpp-coreml", "zzz-phonon-31m"];
+
+/// URL for `GET /v1/models/{mask}/resolve`.
+///
+/// Takes the feature list as a parameter (the caller passes
+/// [`xybrid_core::features::enabled`]) so unit tests can cover both branches;
+/// only names in [`ARTIFACT_BACKENDS`] reach the query.
+fn resolve_url(api_url: &str, mask: &str, platform: &str, features: &[&str]) -> String {
+    let mut url = format!("{api_url}/v1/models/{mask}/resolve?platform={platform}");
+    let backends: Vec<&str> = features
+        .iter()
+        .copied()
+        .filter(|b| ARTIFACT_BACKENDS.contains(b))
+        .collect();
+    if !backends.is_empty() {
+        url.push_str("&backends=");
+        url.push_str(&backends.join(","));
+    }
+    url
 }
 
 /// Header identifying which version of a file a partial download holds, so a
@@ -843,6 +868,15 @@ impl RegistryClient {
         self.binding
     }
 
+    /// This client with its cache under `cache_dir`, so a test never reads or
+    /// writes the user's model cache.
+    #[cfg(test)]
+    pub(crate) fn with_cache_dir(mut self, cache_dir: PathBuf) -> Self {
+        self.cache =
+            CacheManager::with_dir(cache_dir).expect("a test cache directory should be creatable");
+        self
+    }
+
     /// Apply the [`CLIENT_HEADER_NAME`] header to a request when telemetry is opted in.
     ///
     /// When [`is_telemetry_opted_out`] is true, returns the request unchanged so
@@ -978,10 +1012,7 @@ impl RegistryClient {
         let platform = platform.map(String::from).unwrap_or_else(detect_platform);
 
         self.execute_with_fallback(|api_url| {
-            let mut url = format!(
-                "{}/v1/models/{}/resolve?platform={}",
-                api_url, mask, platform
-            );
+            let mut url = resolve_url(api_url, mask, &platform, xybrid_core::features::enabled());
             if let Some(format) = format {
                 url.push_str("&format=");
                 url.push_str(format);
@@ -1673,7 +1704,7 @@ impl RegistryClient {
     /// Download and extract an already-resolved variant into `cache_key`'s
     /// extraction directory (the bare mask when `None`), driving one progress
     /// bar through to the terminal `Ready` frame.
-    fn fetch_extracted_resolved(
+    pub(crate) fn fetch_extracted_resolved(
         &self,
         mask: &str,
         cache_key: Option<&str>,
@@ -2830,6 +2861,34 @@ pub struct ResolvedArtifact {
     pub sha256: String,
 }
 
+/// Whether a resolved variant is a chat model, judged before downloading it.
+///
+/// Speculation serves a model from the gateway's chat surface, so it must only
+/// reach chat models. A passthrough variant is the only kind whose
+/// `model_metadata.json` arrives inline with the resolve response; a bundle's
+/// stays inside the `.xyb` until it is downloaded. The variant qualifies when
+/// that inline metadata parses as [`ModelMetadata`] and declares a `Gguf`,
+/// `VisionLanguage`, or MLX text-generation template. Bundles and passthrough
+/// variants with missing,
+/// malformed or unknown metadata do not.
+pub(crate) fn resolved_is_chat(resolved: &ResolvedVariant) -> bool {
+    if !resolved.passthrough {
+        return false;
+    }
+    let Some(metadata) = resolved.model_metadata.as_ref() else {
+        return false;
+    };
+    // The full parse, not just the template tag: metadata that fails it would
+    // fail the local load too, so the model could never take over from the
+    // cloud.
+    ModelMetadata::deserialize(metadata).is_ok_and(|metadata| {
+        matches!(
+            metadata.execution_template,
+            ExecutionTemplate::Gguf { .. } | ExecutionTemplate::VisionLanguage { .. }
+        ) || xybrid_core::execution::template::is_mlx_llm_safetensors_metadata(&metadata)
+    })
+}
+
 /// Aggregate cache statistics across all managed model cache roots.
 #[derive(Debug, Clone)]
 pub struct CacheStats {
@@ -3442,6 +3501,194 @@ mod tests {
             "partial file survived cancellation at {}",
             partial.display()
         );
+    }
+
+    /// A passthrough GGUF variant whose model file is served at `url`.
+    fn gguf_passthrough(url: String, size_bytes: usize) -> ResolvedVariant {
+        serde_json::from_value(serde_json::json!({
+            "hf_repo": "xybrid-ai/reused",
+            "file": "model.gguf",
+            "download_url": url,
+            "format": "gguf",
+            "quantization": "q4_k_m",
+            "size_bytes": size_bytes,
+            "sha256": "",
+            "passthrough": true,
+            "model_metadata": {
+                "model_id": "reused",
+                "version": "1.0",
+                "execution_template": { "type": "Gguf", "model_file": "model.gguf" },
+                "files": ["model.gguf"],
+                "metadata": {}
+            }
+        }))
+        .unwrap()
+    }
+
+    /// A speculative load resolves once, then hands the variant to the
+    /// download, which must not resolve it again.
+    #[test]
+    fn a_resolved_variant_downloads_with_progress_and_no_second_resolve() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let resolve = server.mock(|when, then| {
+            when.method(GET).path_contains("/resolve");
+            then.status(500);
+        });
+        let body = vec![7u8; 64 * 1024];
+        server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(200).body(&body);
+        });
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let client = RegistryClient::with_url(server.base_url())
+            .unwrap()
+            .with_cache_dir(temp_dir.path().join("cache"));
+        let resolved = gguf_passthrough(server.url("/model.gguf"), body.len());
+
+        let seen = Mutex::new(Vec::new());
+        let dir = client
+            .fetch_extracted_resolved(
+                "reused",
+                None,
+                &resolved,
+                Arc::new(AtomicBool::new(false)),
+                &|status| seen.lock().unwrap().push(status),
+            )
+            .expect("a resolved variant should download");
+
+        assert_eq!(std::fs::read(dir.join("model.gguf")).unwrap(), body);
+        let seen = seen.into_inner().unwrap();
+        let last = seen.last().expect("no progress was reported");
+        assert_eq!(last.state, crate::DownloadState::Ready);
+        assert_eq!(last.downloaded_bytes, body.len() as u64);
+        assert_eq!(resolve.hits(), 0, "the variant was resolved already");
+    }
+
+    #[test]
+    fn cancelling_a_resolved_variant_download_discards_the_partial_file() {
+        use httpmock::prelude::*;
+        use std::sync::atomic::Ordering;
+
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(200).body(vec![0u8; 512 * 1024]);
+        });
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let client = RegistryClient::with_url(server.base_url())
+            .unwrap()
+            .with_cache_dir(temp_dir.path().join("cache"));
+        let resolved = gguf_passthrough(server.url("/model.gguf"), 512 * 1024);
+
+        // Cancel from the progress callback once bytes are flowing, as in
+        // `cancelling_a_fetch_stops_it_and_discards_the_partial_file`.
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&cancel);
+        let err = client
+            .fetch_extracted_resolved("reused", None, &resolved, cancel, &move |status| {
+                if status.downloaded_bytes > 0 {
+                    flag.store(true, Ordering::Relaxed);
+                }
+            })
+            .expect_err("a cancelled download must not report success");
+
+        assert!(
+            matches!(err, SdkError::Cancelled { .. }),
+            "expected Cancelled, got {err:?}"
+        );
+        let partial = client.cache.extraction_dir("reused").join("model.gguf");
+        assert!(
+            !partial.exists(),
+            "partial file survived cancellation at {}",
+            partial.display()
+        );
+    }
+
+    #[test]
+    fn only_a_passthrough_variant_with_chat_metadata_is_chat() {
+        let variant = |passthrough: bool, model_metadata: Option<serde_json::Value>| {
+            let mut variant = gguf_passthrough("http://127.0.0.1:9/model.gguf".to_string(), 1);
+            variant.passthrough = passthrough;
+            variant.model_metadata = model_metadata;
+            variant
+        };
+        let with_template = |template: serde_json::Value| {
+            Some(serde_json::json!({
+                "model_id": "m",
+                "version": "1.0",
+                "execution_template": template,
+                "files": ["model.gguf"],
+                "metadata": {}
+            }))
+        };
+        let gguf =
+            || with_template(serde_json::json!({ "type": "Gguf", "model_file": "model.gguf" }));
+
+        assert!(resolved_is_chat(&variant(true, gguf())));
+        assert!(resolved_is_chat(&variant(
+            true,
+            with_template(
+                serde_json::json!({ "type": "VisionLanguage", "model_file": "model.gguf" })
+            ),
+        )));
+        assert!(resolved_is_chat(&variant(
+            true,
+            with_template(serde_json::json!({
+                "type": "SafeTensors",
+                "model_file": "model.safetensors",
+                "architecture": "qwen3"
+            })),
+        )));
+
+        let not_chat = [
+            ("a bundle", variant(false, gguf())),
+            ("missing metadata", variant(true, None)),
+            (
+                "malformed metadata",
+                variant(true, Some(serde_json::json!({ "model_id": 7 }))),
+            ),
+            (
+                "an unknown template",
+                variant(
+                    true,
+                    with_template(serde_json::json!({ "type": "ChoiceScorer", "scorer": {} })),
+                ),
+            ),
+            (
+                "a speech model",
+                variant(
+                    true,
+                    with_template(
+                        serde_json::json!({ "type": "GgmlWhisper", "model_file": "model.gguf" }),
+                    ),
+                ),
+            ),
+            (
+                "an ONNX model",
+                variant(
+                    true,
+                    with_template(
+                        serde_json::json!({ "type": "Onnx", "model_file": "model.onnx" }),
+                    ),
+                ),
+            ),
+            (
+                "an MLX embedding model",
+                variant(
+                    true,
+                    with_template(serde_json::json!({
+                        "type": "SafeTensors",
+                        "model_file": "model.safetensors",
+                        "architecture": "nomic_bert"
+                    })),
+                ),
+            ),
+        ];
+        for (what, variant) in not_chat {
+            assert!(!resolved_is_chat(&variant), "{what} must not count as chat");
+        }
     }
 
     /// One canned reply per connection, for failures `httpmock` cannot stage:
@@ -4402,6 +4649,53 @@ mod tests {
             !header.contains("backends=,"),
             "leading comma in backends list: {}",
             header
+        );
+    }
+
+    #[test]
+    fn resolve_url_sends_only_artifact_backends() {
+        let features = [
+            "asr-whispercpp",
+            "asr-whispercpp-coreml",
+            "ort-coreml",
+            "vision",
+        ];
+        assert_eq!(
+            resolve_url("http://r", "whisper", "ios-arm64", &features),
+            "http://r/v1/models/whisper/resolve?platform=ios-arm64&backends=asr-whispercpp-coreml"
+        );
+    }
+
+    #[test]
+    fn resolve_url_omits_backends_without_an_artifact_backend() {
+        let features = ["asr-whispercpp", "ort-coreml", "vision"];
+        assert_eq!(
+            resolve_url("http://r", "whisper", "macos-arm64", &features),
+            "http://r/v1/models/whisper/resolve?platform=macos-arm64"
+        );
+    }
+
+    #[test]
+    fn resolve_url_sends_the_phonon_31m_backend_but_not_tts_zzz() {
+        let features = ["asr-whispercpp", "tts-zzz", "vision", "zzz-phonon-31m"];
+        assert_eq!(
+            resolve_url("http://r", "phonon-31m-en", "android-arm64", &features),
+            "http://r/v1/models/phonon-31m-en/resolve?platform=android-arm64&backends=zzz-phonon-31m"
+        );
+    }
+
+    #[test]
+    fn resolve_url_joins_every_artifact_backend_in_feature_order() {
+        let features = [
+            "asr-whispercpp",
+            "asr-whispercpp-coreml",
+            "tts-zzz",
+            "vision",
+            "zzz-phonon-31m",
+        ];
+        assert_eq!(
+            resolve_url("http://r", "m", "p", &features),
+            "http://r/v1/models/m/resolve?platform=p&backends=asr-whispercpp-coreml,zzz-phonon-31m"
         );
     }
 

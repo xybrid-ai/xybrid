@@ -6,6 +6,9 @@ fixtures/models/*/
 
 # Large binary files
 *.onnx
+# ...except the ~1 KB fake scorers the choice-scoring contract tests load,
+# which provenance.json pins as committed fixtures.
+!fixtures/choice/fake/*.onnx
 *.safetensors
 *.bin
 *.pt

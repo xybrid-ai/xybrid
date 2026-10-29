@@ -1,0 +1,34 @@
+# The pinned engine archive remains an opt-in private build input.
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
+
+exports_files(["natives-manifest.json", "zzz_pull.py"])
+
+rust_library(
+    name = "xybrid_zzz_sys",
+    version = XYBRID_VERSION,
+    srcs = glob(["src/**/*.rs"]),
+    crate_features = select({"//:tts_zzz_enabled": ["bindings"], "//conditions:default": []}),
+    edition = "2021",
+    deps = all_crate_deps(normal = True) + select({
+        "//bazel/zzz:linux_enabled": ["@zzz_linux//:zzz"],
+        "//bazel/zzz:macos_enabled": ["@zzz_macos//:zzz"],
+        # The pinned slice with only its zzz_embed_* API left global: the engine's
+        # bundled libc/libm must not satisfy xybrid's own references
+        # (bazel/zzz/isolate.bzl). The other slices still link the archive as
+        # is; isolating them is a follow-up (README.md).
+        "//bazel/zzz:android_enabled": ["//bazel/zzz:android_engine"],
+        "//bazel/zzz:ios_enabled": ["@zzz_ios//:zzz"],
+        "//bazel/zzz:ios_sim_enabled": ["@zzz_ios_sim//:zzz"],
+        "//bazel/zzz:linux_arm64_enabled": ["@zzz_linux_arm64//:zzz"],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = select({
+        "//bazel/zzz:supported_enabled": [],
+        "//:tts_zzz_enabled": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+)
+alias(name = "zzz-sys", actual = ":xybrid_zzz_sys", visibility = ["//visibility:public"])

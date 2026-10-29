@@ -38,7 +38,7 @@ pub mod whisper;
 pub use autoregressive::execute_autoregressive_stage;
 pub use bert::execute_bert_inference;
 pub use single_shot::execute_single_shot_stage;
-pub use tts::execute_tts_inference;
+pub use tts::{execute_tts_inference, tts_waveform_output};
 pub use whisper::execute_whisper_decoder_stage;
 
 /// Parse KV cache input name from HuggingFace format.

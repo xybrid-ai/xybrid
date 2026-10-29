@@ -119,10 +119,12 @@ namespace Xybrid
         /// <remarks>
         /// Opts this load into speculation explicitly, so it does not depend on
         /// <see cref="XybridClient.SetSpeculativeCloud"/>. It still requires a
-        /// resolvable API key and a model that is not already cached; otherwise it
-        /// behaves exactly like <see cref="FromRegistry"/>.
-        /// <see cref="WillSpeculate"/> reports which of the two you will get.
-        /// LLM/chat models only.
+        /// resolvable API key, a model that is not already cached, and a chat
+        /// model the registry serves as a direct download (GGUF or
+        /// vision-language, not a <c>.xyb</c> bundle); otherwise it behaves
+        /// exactly like <see cref="FromRegistry"/>.
+        /// <see cref="WillSpeculate"/> checks the first two before loading;
+        /// <c>IsCloudServing()</c> on the loaded model reports the outcome.
         /// </remarks>
         /// <param name="modelId">The model ID.</param>
         /// <exception cref="ArgumentNullException">Thrown if modelId is null.</exception>
@@ -136,19 +138,32 @@ namespace Xybrid
         }
 
         /// <summary>
-        /// Gets whether <see cref="Load"/> will actually speculate: speculation is
-        /// in effect for this loader, an API key resolves, and the model is not
+        /// Gets whether <see cref="Load"/> may speculate: speculation is in
+        /// effect for this loader, an API key resolves, and the model is not
         /// already cached.
         /// </summary>
         /// <remarks>
         /// Always false for every source but
         /// <see cref="FromRegistrySpeculative"/>, which turns speculation on for
         /// itself regardless of <see cref="XybridClient.SetSpeculativeCloud"/>.
-        /// Reads the local cache to answer; never hits the network.
+        /// Reads the local cache to answer; never hits the network, so it cannot
+        /// know the model type: <see cref="Load"/> asks the registry and
+        /// speculates only for a chat model.
         /// </remarks>
-        public bool WillSpeculate =>
-            _source == Source.RegistrySpeculative &&
-            XybridBolt.XybridBolt.WillSpeculateForModel(_value);
+        public bool WillSpeculate
+        {
+            get
+            {
+                if (_source != Source.RegistrySpeculative)
+                {
+                    return false;
+                }
+                // The answer depends on the cache, which Android only has once
+                // the default folder is set.
+                XybridBolt.AndroidCacheFolder.ApplyDefault();
+                return XybridBolt.XybridBolt.WillSpeculateForModel(_value);
+            }
+        }
 
         /// <summary>
         /// Starts downloading the model's weights in the background, without

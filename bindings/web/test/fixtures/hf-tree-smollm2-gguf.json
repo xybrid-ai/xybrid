@@ -1,0 +1,14 @@
+[
+  {
+    "type": "file",
+    "oid": "060b6deb28162027937f886e7cd9fd68f401ebb3",
+    "size": 91726912,
+    "lfs": {
+      "oid": "f68203bfb98b1b1e8c64fac75fab10c4e36acac081609573b4df0fcc19c90dd9",
+      "size": 91726912,
+      "pointerSize": 134
+    },
+    "xetHash": "7aaee8e8d6e62f61c79b201057f181edcc869bbbf5bd5a1aa5abc8da17558764",
+    "path": "SmolLM2-135M-Instruct.Q4_0.gguf"
+  }
+]

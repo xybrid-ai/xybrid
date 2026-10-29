@@ -121,6 +121,9 @@ pub mod mlx;
 #[cfg(feature = "asr-whispercpp")]
 pub mod whisper_cpp;
 
+#[cfg(feature = "tts-zzz")]
+pub mod zzz;
+
 // Re-exports from runtime backends
 pub use cloud::{CloudRuntimeAdapter, CloudStreaming};
 pub use metadata_driven::MetadataDrivenAdapter;

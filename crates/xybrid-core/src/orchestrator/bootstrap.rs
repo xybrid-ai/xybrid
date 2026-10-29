@@ -372,6 +372,9 @@ impl RuntimeAdapter for MockRuntimeAdapter {
                 EnvelopeKind::Text("mock-output-vision-unsupported".to_string())
             }
             EnvelopeKind::TokenIds(_) => EnvelopeKind::Text("mock-output-tokens".to_string()),
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                return Err(crate::execution::choice::choice_kind_not_runtime_input());
+            }
         };
 
         Ok(crate::ir::Envelope::new(output))

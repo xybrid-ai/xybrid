@@ -514,6 +514,8 @@ fn kind_name(kind: &EnvelopeKind) -> &'static str {
         EnvelopeKind::Image { .. } => "image",
         EnvelopeKind::MultiPart(_) => "multipart",
         EnvelopeKind::TokenIds(_) => "tokenids",
+        EnvelopeKind::ChoiceRequest(_) => "choice_request",
+        EnvelopeKind::ChoiceScores(_) => "choice_scores",
     }
 }
 

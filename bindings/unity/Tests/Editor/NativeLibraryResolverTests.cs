@@ -1,9 +1,11 @@
 // Xybrid SDK - Native Library Resolver EditMode Tests
 // Covers the host-independent logic of the editor NativeLibraryResolver:
-// build-target → platform mapping, manifest JSON parsing/lookup, and the
-// zip-slip extraction guard. Network/download and Unity-import paths are not
-// exercised here (they require a real release + player build).
+// build-target → platform mapping, manifest JSON parsing/lookup, the
+// zip-slip extraction guard, and pruning of retired Android natives.
+// Network/download and Unity-import paths are not exercised here (they require
+// a real release + player build).
 
+using System;
 using System.IO;
 using NUnit.Framework;
 using UnityEditor;
@@ -76,6 +78,66 @@ namespace Xybrid.Tests.Editor
             Assert.IsFalse(
                 NativeLibraryResolver.TryResolveSafeExtractPath(root, "macOS/../../evil.dll", out _),
                 "a nested traversal that escapes the root must be rejected");
+        }
+
+        [Test]
+        public void PruneRetiredAndroidNatives_RemovesOnlySharedCxxRuntime()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "xybrid-prune-" + Guid.NewGuid().ToString("N"));
+            string Touch(params string[] parts)
+            {
+                var path = Path.Combine(root, Path.Combine(parts));
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path, "");
+                return path;
+            }
+
+            try
+            {
+                var abis = new[] { "arm64-v8a", "armeabi-v7a", "x86_64" };
+                var retired = new[] { "libc++_shared.so", "libc++_shared.so.meta" };
+                var kept = new[]
+                {
+                    "libxybrid_bolt.so", "libxybrid_bolt.so.meta",
+                    "libonnxruntime.so", "libonnxruntime.so.meta",
+                };
+                foreach (var abi in abis)
+                {
+                    foreach (var name in retired) Touch("Android", abi, name);
+                    foreach (var name in kept) Touch("Android", abi, name);
+                }
+                var userFile = Touch("Android", "arm64-v8a", "libgame_plugin.so");
+                var iosFile = Touch("iOS", "libc++_shared.so");
+
+                Assert.AreEqual(6, NativeLibraryResolver.PruneRetiredAndroidNatives(root));
+
+                foreach (var abi in abis)
+                {
+                    foreach (var name in retired)
+                    {
+                        Assert.IsFalse(File.Exists(Path.Combine(root, "Android", abi, name)),
+                            $"Android/{abi}/{name} must be removed");
+                    }
+                    foreach (var name in kept)
+                    {
+                        Assert.IsTrue(File.Exists(Path.Combine(root, "Android", abi, name)),
+                            $"Android/{abi}/{name} must survive");
+                    }
+                }
+                Assert.IsTrue(File.Exists(userFile), "an unrelated file in an ABI folder must survive");
+                Assert.IsTrue(File.Exists(iosFile), "files outside Android/ must survive");
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            }
+        }
+
+        [Test]
+        public void PruneRetiredAndroidNatives_ReturnsZeroWithoutAndroidFolder()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "xybrid-prune-" + Guid.NewGuid().ToString("N"));
+            Assert.AreEqual(0, NativeLibraryResolver.PruneRetiredAndroidNatives(root));
         }
     }
 }

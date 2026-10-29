@@ -134,6 +134,13 @@ llama_model* llama_load_model_from_file_c(
 ) {
     llama_model_params params = llama_model_default_params();
     params.n_gpu_layers = n_gpu_layers;
+#ifdef __EMSCRIPTEN__
+    // llama.cpp trims mapped files with partial munmap calls. Emscripten's
+    // emulated mmap only supports unmapping the original complete allocation,
+    // so trimmed mappings otherwise survive model destruction. Read tensors
+    // into owned backend buffers that llama_model_free can release instead.
+    params.load_mode = LLAMA_LOAD_MODE_NONE;
+#endif
 
     return llama_model_load_from_file(path_model, params);
 }
@@ -175,7 +182,9 @@ mtmd_bitmap* mtmd_bitmap_init_from_buf_c(
     const unsigned char* buf,
     size_t len
 ) {
-    return mtmd_helper_bitmap_init_from_buf(ctx, buf, len);
+    return mtmd_helper_bitmap_init_from_buf(
+        ctx, buf, len, false, mtmd_helper_init_opt_default()
+    ).bitmap;
 }
 
 mtmd_bitmap* mtmd_bitmap_init_rgb_c(
@@ -306,8 +315,9 @@ int32_t mtmd_tokenize_c(
         return -1;
     }
 
-    mtmd_input_text input;
+    mtmd_input_text input = {};
     input.text = text;
+    input.text_len = strlen(text);
     input.add_special = add_special;
     input.parse_special = parse_special;
 
@@ -402,6 +412,60 @@ int llama_kv_cache_seq_rm_c(llama_context* ctx, int seq_id, int p_keep) {
     // everything from p_keep onward.
     llama_memory_seq_rm(mem, (llama_seq_id) seq_id, (llama_pos) p_keep, -1);
     return 0;
+}
+
+// Per-sequence state snapshots: the sequence's KV cache cells plus, on
+// recurrent / hybrid models, its recurrent state. That makes them the
+// prefix-reuse primitive for models where llama_kv_cache_seq_rm_c cannot
+// truncate (the recurrent state stays keyed to the full sequence): prefill a
+// shared prefix once, save it, then restore it before each request and
+// prefill only the new tail with n_past_in = the prefix length.
+//
+// seq_id must be one of the context's sequences, [0, n_seq_max). llama.cpp
+// reads -1 as "every sequence" (the whole cache), and restoring into an id
+// outside [-1, LLAMA_MAX_SEQ) hits a GGML_ASSERT (abort) on KV caches, so
+// both are rejected here. Failures
+// llama.cpp raises as C++ exceptions (truncated buffer, layer or type
+// mismatch, no free cells) are caught inside it and reported as 0, which
+// these return too. It does not validate the bytes themselves, though: a
+// damaged snapshot, or one from another model, can still hit an assert and
+// abort, so only pass bytes from llama_state_seq_get_data_c on the same model.
+static bool state_seq_args_ok(const llama_context* ctx, int seq_id) {
+    return ctx && seq_id >= 0 && (uint32_t) seq_id < llama_n_seq_max(ctx);
+}
+
+size_t llama_state_seq_get_size_c(llama_context* ctx, int seq_id) {
+    if (!state_seq_args_ok(ctx, seq_id)) {
+        return 0;
+    }
+    return llama_state_seq_get_size(ctx, (llama_seq_id) seq_id);
+}
+
+size_t llama_state_seq_get_data_c(llama_context* ctx, uint8_t* dst, size_t size, int seq_id) {
+    if (!state_seq_args_ok(ctx, seq_id) || !dst) {
+        return 0;
+    }
+    return llama_state_seq_get_data(ctx, dst, size, (llama_seq_id) seq_id);
+}
+
+size_t llama_state_seq_set_data_c(llama_context* ctx, const uint8_t* src, size_t size, int seq_id) {
+    if (!state_seq_args_ok(ctx, seq_id) || !src || size == 0) {
+        return 0;
+    }
+    // Clear the sequence first: llama.cpp only does so for a non-empty
+    // snapshot, so restoring an empty one would otherwise keep the old KV
+    // cells (and, on hybrid models, drop only the recurrent half).
+    llama_memory_t mem = llama_get_memory(ctx);
+    llama_memory_seq_rm(mem, (llama_seq_id) seq_id, -1, -1);
+    const size_t n_read = llama_state_seq_set_data(ctx, src, size, (llama_seq_id) seq_id);
+    if (n_read == 0) {
+        // llama.cpp only clears the sequence when a read returns false. A
+        // thrown read can leave cells half restored, and on hybrid models a
+        // rejected attention part leaves the recurrent state. Clear both
+        // again, so a failed restore always leaves the sequence empty.
+        llama_memory_seq_rm(mem, (llama_seq_id) seq_id, -1, -1);
+    }
+    return n_read;
 }
 
 // =============================================================================
@@ -674,7 +738,12 @@ llama_sampler* llama_sampler_chain_create_c(
     // Add samplers in order: penalties -> top_k -> top_p -> min_p -> temp -> dist
     // Repetition penalty must come first to modify logits before sampling
     if (repeat_penalty != 1.0f && penalty_last_n > 0) {
+        if (!model) {
+            llama_sampler_free(chain);
+            return nullptr;
+        }
         llama_sampler_chain_add(chain, llama_sampler_init_penalties(
+            llama_vocab_n_tokens(llama_model_get_vocab(model)),
             penalty_last_n,    // penalty_last_n: how many tokens to consider
             repeat_penalty,    // penalty_repeat: > 1.0 penalizes repetition
             0.0f,              // penalty_freq: frequency penalty (disabled)

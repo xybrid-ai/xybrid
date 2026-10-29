@@ -91,6 +91,11 @@ rust_library(
             "llm-llamacpp-vision",
         ],
         "//conditions:default": [],
+    }) + select({
+        # Speech: identical at every tts-zzz forwarder (bazel/zzz/BUILD.bazel).
+        "//bazel/zzz:android_without_slice": [],
+        "//:tts_zzz_enabled": ["tts-zzz"],
+        "//conditions:default": [],
     }),
     # Vulkan lane (--//:vulkan=true): `local_execution_provider` decides between
     # "vulkan" and "cpu" with `option_env!("XYBRID_LLAMA_CPP_VULKAN")`
@@ -108,7 +113,12 @@ rust_library(
     # default, so the optional `xybrid-whisper` path-dep is absent from it. The
     # feature is force-enabled above, so the dep has to be added by hand or the
     # crate fails to compile with an unresolved `xybrid_whisper` import.
-    deps = all_crate_deps(normal = True) + ["//crates/xybrid-whisper:xybrid_whisper"],
+    deps = all_crate_deps(normal = True) + ["//crates/xybrid-whisper:xybrid_whisper"] + select({
+        # Speech: identical at every tts-zzz forwarder (bazel/zzz/BUILD.bazel).
+        "//bazel/zzz:android_without_slice": [],
+        "//:tts_zzz_enabled": ["//crates/zzz-sys:xybrid_zzz_sys"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
 )
 
@@ -224,13 +234,18 @@ rust_test(
     name = "xybrid-core_test",
     version = XYBRID_VERSION,
     crate = ":xybrid-core",
-    # Fixture files three inline tests read off disk (model metadata + the web
-    # SDK's serialization fixture). Cargo reads them straight from the worktree;
-    # Bazel sandboxes the action, so they have to be declared inputs. Both are
-    # resolved relative to CARGO_MANIFEST_DIR, which rules_rust points at this
-    # crate's directory, so the workspace-relative layout still applies.
+    # Fixture files inline tests read off disk (model metadata, the web SDK's
+    # serialization fixture, the choice-scoring conformance inputs with
+    # their fake ONNX scorers, and the llama.cpp chat-render byte fixtures).
+    # Cargo reads them straight from the worktree; Bazel sandboxes the
+    # action, so they have to be declared inputs. All are resolved relative
+    # to CARGO_MANIFEST_DIR, which rules_rust points at this crate's
+    # directory, so the workspace-relative layout still applies. The
+    # regenerated CUA-S1-FORMS model is not among them: its G1 test skips here.
     data = [
         "//bindings/web:rust_metadata_fixtures",
+        "//integration-tests:chat_render_fixtures",
+        "//integration-tests:choice_fixtures",
         "//integration-tests:model_metadata_fixtures",
     ],
     deps = [

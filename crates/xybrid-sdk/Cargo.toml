@@ -14,7 +14,7 @@ name = "xybrid_sdk"
 path = "src/lib.rs"
 
 [dependencies]
-xybrid-macros = { version = "0.10.0-rc1", path = "../../macros" }
+xybrid-macros = { version = "0.15.0", path = "../../macros" }
 anyhow = "1.0"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
@@ -38,12 +38,12 @@ ort = { version = "=2.0.0-rc.11", default-features = false, features = ["ndarray
 # Platform-specific dependencies (NOT features - those are in presets)
 # Android: rustls with ring backend (aws-lc-rs uses getentropy unavailable on API 24)
 [target.'cfg(target_os = "android")'.dependencies]
-xybrid-core = { version = "0.10.0-rc1", path = "../xybrid-core", default-features = false, features = ["ort-dynamic"] }
+xybrid-core = { version = "0.15.0", path = "../xybrid-core", default-features = false, features = ["ort-dynamic"] }
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
-xybrid-core = { version = "0.10.0-rc1", path = "../xybrid-core", default-features = false, features = ["ort-download"] }
+xybrid-core = { version = "0.15.0", path = "../xybrid-core", default-features = false, features = ["ort-download"] }
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 
 [features]
@@ -100,6 +100,12 @@ platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "coreml"
 # Desktop (Linux/Windows): CPU with llama.cpp
 platform-desktop = ["xybrid-core/ort-download", "llm-llamacpp-vision", "asr-whispercpp"]
 
+# Phonon and Kitten TTS 2 via the pinned zzz engine are intentionally NOT in any
+# platform-* preset yet: the native slice is only published for
+# (macos-arm64 | android-arm64 | linux-x86_64), so enabling it in presets
+# would fail Windows/iOS SDK builds. Enable explicitly, per target, until
+# the native CI fetch step gates it.
+
 # INDIVIDUAL FEATURE FORWARDING (for custom builds)
 
 # ONNX Runtime Execution Providers
@@ -125,6 +131,10 @@ llm-llamacpp = ["xybrid-core/llm-llamacpp"]
 # In every `platform-*` preset above; kept as a standalone forwarder so
 # tools/scripts/measure-binary-size.sh can build the with/without delta.
 asr-whispercpp = ["xybrid-core/asr-whispercpp"]
+
+# Phonon and Kitten TTS 2 via the pinned zzz engine slice. Per-target: enabled builds
+# fail on targets whose slice is not pinned (Windows, iOS).
+tts-zzz = ["xybrid-core/tts-zzz"]
 llm-llamacpp-vision = ["llm-llamacpp", "xybrid-core/llm-llamacpp-vision"]
 llm-mlx = ["xybrid-core/llm-mlx"]
 llm-mlx-runtime = ["llm-mlx", "xybrid-core/llm-mlx-runtime"]

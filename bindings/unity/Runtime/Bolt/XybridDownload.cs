@@ -5,7 +5,7 @@
 
 namespace XybridBolt
 {
-    public sealed class XybridDownload : global::System.IDisposable
+    public sealed partial class XybridDownload : global::System.IDisposable
     {
         private long handle;
 

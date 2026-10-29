@@ -592,6 +592,42 @@ public struct XybridStreamToken: Hashable, Equatable, Sendable {
     }
 }
 
+/// Owned PCM16 LE packet. Offsets count samples per channel.
+public struct XybridTtsAudioChunk: Hashable, Equatable, Sendable {
+    public var pcm: Data
+    public var sampleRate: UInt32
+    public var channels: UInt32
+    public var firstSample: UInt64
+
+    public init(
+        pcm: Data,
+        sampleRate: UInt32,
+        channels: UInt32,
+        firstSample: UInt64
+    ) {
+        self.pcm = pcm
+        self.sampleRate = sampleRate
+        self.channels = channels
+        self.firstSample = firstSample
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridTtsAudioChunk {
+        XybridTtsAudioChunk(
+            pcm: reader.readBytes(),
+            sampleRate: reader.readU32(),
+            channels: reader.readU32(),
+            firstSample: reader.readU64()
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeBytes(self.pcm)
+        writer.writeU32(self.sampleRate)
+        writer.writeU32(self.channels)
+        writer.writeU64(self.firstSample)
+    }
+}
+
 /// One pull from a streaming inference session.
 ///
 /// This is a flat record instead of a data-carrying enum because the pinned
@@ -603,19 +639,22 @@ public struct XybridStreamToken: Hashable, Equatable, Sendable {
 public struct XybridStreamEvent: Hashable, Equatable, Sendable {
     public var kind: XybridStreamEventKind
     public var token: XybridStreamToken?
+    public var audio: XybridTtsAudioChunk?
 
-    public init(kind: XybridStreamEventKind, token: XybridStreamToken?) {
+    public init(kind: XybridStreamEventKind, token: XybridStreamToken?, audio: XybridTtsAudioChunk?) {
         self.kind = kind
         self.token = token
+        self.audio = audio
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridStreamEvent {
-        XybridStreamEvent(kind: XybridStreamEventKind(rawValue: reader.readI32())!, token: reader.readOptional { reader in XybridStreamToken.decode(from: &reader) })
+        XybridStreamEvent(kind: XybridStreamEventKind(rawValue: reader.readI32())!, token: reader.readOptional { reader in XybridStreamToken.decode(from: &reader) }, audio: reader.readOptional { reader in XybridTtsAudioChunk.decode(from: &reader) })
     }
 
     @inlinable func encode(to writer: inout WireWriter) {
         writer.writeI32(self.kind.rawValue)
         writer.writeOptional(self.token) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        writer.writeOptional(self.audio) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
     }
 }
 
@@ -1128,6 +1167,7 @@ public enum XybridDownloadState: Int32, Hashable, Sendable, CaseIterable {
 public enum XybridStreamEventKind: Int32, Hashable, Sendable, CaseIterable {
     case token = 0
     case complete = 1
+    case audio = 2
 
     @usableFromInline init(fromC c: Int32) {
         self = XybridStreamEventKind(rawValue: c)!
@@ -1420,9 +1460,11 @@ public final class XybridModel {
     /// download in the background.
     ///
     /// Returns almost immediately instead of blocking on the download. Requires
-    /// a resolvable API key and an uncached model; otherwise it behaves exactly
-    /// like `from_registry`. Poll `download_status` for progress and
-    /// `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+    /// a resolvable API key, an uncached model, and a chat model the registry
+    /// serves as a direct download (GGUF or vision-language, not a `.xyb`
+    /// bundle); otherwise it behaves exactly like `from_registry`. Poll
+    /// `download_status` for progress and `is_cloud_serving` to know which leg
+    /// is answering.
     public init(fromRegistrySpeculative id: String) throws {
         let boltffiIdBytes = boltffiEncode { boltffiIdWriter in boltffiIdWriter.writeString(id) }
         let boltffiHandle = try boltffiIdBytes.withUnsafeBufferPointer { boltffiIdBuffer in
@@ -2434,11 +2476,12 @@ public func setPlatformUrl(url: String) {
     }
 }
 
-/// Enable speculative cloud fallback globally: a registry model that isn't
-/// downloaded yet is served from the gateway while the weights download.
+/// Enable speculative cloud fallback globally: a registry chat model that
+/// isn't downloaded yet is served from the gateway while the weights download.
 ///
-/// LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
-/// also loads ASR/TTS models, which cannot be served this way.
+/// An uncached load asks the registry first, so other models (ASR, TTS,
+/// `.xyb` bundles) download and load as usual.
+/// `XybridModel.fromRegistrySpeculative` opts a single load in instead.
 public func setSpeculativeCloud(enabled: Bool) {
     boltffi_function_xybrid_bolt_set_speculative_cloud(enabled)
 }
@@ -2453,11 +2496,13 @@ public func isSpeculativeCloudEnabled() -> Bool {
     return boltffi_function_xybrid_bolt_is_speculative_cloud_enabled()
 }
 
-/// Whether `XybridModel::from_registry_speculative(model_id)` would actually
-/// speculate: an API key resolves and the model is not already cached.
+/// Whether `XybridModel::from_registry_speculative(model_id)` may speculate:
+/// an API key resolves and the model is not already cached.
 ///
-/// Lets the hand-written Swift/Kotlin loader facades answer "will this
-/// speculate?" before loading. Never touches the network.
+/// Lets the hand-written Swift/Kotlin loader facades answer "can this
+/// speculate?" before loading. Never touches the network, so it cannot know
+/// the model type: the load asks the registry and speculates only for a chat
+/// model.
 public func willSpeculateForModel(modelId: String) -> Bool {
     let boltffiModelIdBytes = boltffiEncode { boltffiModelIdWriter in boltffiModelIdWriter.writeString(modelId) }
     return boltffiModelIdBytes.withUnsafeBufferPointer { boltffiModelIdBuffer in

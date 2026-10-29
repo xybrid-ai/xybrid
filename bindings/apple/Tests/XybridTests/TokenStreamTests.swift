@@ -80,6 +80,30 @@ final class TokenStreamTests: XCTestCase {
         XCTAssertEqual(probe.closeCount, 1)
     }
 
+    func testAudioEventFailsAndClosesTheTokenStream() async throws {
+        let probe = StreamProbe(events: [
+            XybridStreamEvent(
+                kind: .audio, token: nil,
+                audio: XybridTtsAudioChunk(
+                    pcm: Data([1, 0]), sampleRate: 24000, channels: 1, firstSample: 0
+                )
+            ),
+            .complete,
+        ])
+        var iterator = probe.stream().makeAsyncIterator()
+        do {
+            _ = try await iterator.next()
+            XCTFail("audio must not silently exhaust a token stream")
+        } catch XybridError.inferenceError(let message) {
+            XCTAssertTrue(message.contains("audio"))
+        }
+        let afterError = try await iterator.next()
+        XCTAssertNil(afterError)
+        XCTAssertEqual(probe.pullCount, 1)
+        XCTAssertTrue(probe.waitUntilClosed(timeout: 2))
+        XCTAssertEqual(probe.closeCount, 1)
+    }
+
     func testBreakingIterationClosesTheNativeSession() async throws {
         let probe = StreamProbe(events: [
             .token("one", index: 0),
@@ -265,11 +289,12 @@ private extension XybridStreamEvent {
                 finishReason: nil,
                 toolCalls: [],
                 rawText: nil
-            )
+            ),
+            audio: nil
         )
     }
 
     static var complete: Self {
-        Self(kind: .complete, token: nil)
+        Self(kind: .complete, token: nil, audio: nil)
     }
 }

@@ -1,4 +1,5 @@
-name: Build Unity
+# Purpose: On a v* tag, build the Unity native libraries for every platform and upload the bundles to the release.
+name: "Release: Unity bundles"
 
 on:
   push:
@@ -39,7 +40,7 @@ jobs:
           echo "Unity version matches v$TAG_VERSION"
 
   #
-  # macOS native library builds (arm64 + x86_64)
+  # macOS native library builds (arm64 only)
   #
   build-unity-macos:
     name: Build macOS Libraries
@@ -70,8 +71,9 @@ jobs:
         with:
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
-      # Note: arm64 only. ORT has no x86_64-apple-darwin prebuilt; Intel Macs run
-      # arm64 via Rosetta 2.
+      # Note: arm64 only. ORT has no x86_64-apple-darwin prebuilt, so Intel
+      # (x86_64) editors and players are not supported: Rosetta 2 runs x86_64
+      # code on Apple Silicon, not arm64 code on Intel.
       # `-c opt` is required: --config=macos-metal sets the platform + Metal but
       # NOT compilation_mode (unlike the android configs), so without it Bazel
       # defaults to fastbuild — a non-optimized native. Matches the release
@@ -178,10 +180,14 @@ jobs:
           file "$PLUGINS/xybrid_bolt.dll" | grep -q 'PE32+.*x86-64' || { echo "bolt is not a PE32+ x86-64 DLL"; exit 1; }
           # Unity reaches the native purely through P/Invoke, so the export
           # table IS the contract — assert every EntryPoint the C# declares.
+          # vcruntime140_1.dll (the x64 C++ exception handler, pulled in since
+          # llama.cpp v0.6.0) ships in the same VC++ redistributable as the two
+          # required DLLs. Allowed, not required.
           python3 -m pip install --quiet --user pefile
           python3 tools/scripts/audit_windows_dll.py --dll "$PLUGINS/xybrid_bolt.dll" \
             --require-import vcruntime140.dll \
             --require-import msvcp140.dll \
+            --allow-import vcruntime140_1.dll \
             --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs
           echo "Windows Unity native: OK"
 
@@ -268,13 +274,14 @@ jobs:
         with:
           submodules: true
 
-      # Android's bolt .so is built by Bazel — the same
-      # //crates/xybrid-bolt:xybrid_bolt_cdylib target the Kotlin AAR ships (and
-      # dlopen-gates on 16 KB-page emulators), one build per ABI. The Bazel link
-      # already strips, 16 KB-aligns, and links libc++_shared (see the android
-      # rustc_flags in crates/xybrid-bolt/BUILD.bazel), so there's no NDK,
-      # cargo-ndk, or strip step here. Android builds remotely only (Linux RBE);
-      # creds come from a gitignored try-import written from the BuildBuddy secret.
+      # Android's bolt .so is built by Bazel from
+      # //crates/xybrid-bolt:xybrid_bolt_cdylib, one build per ABI. On Android
+      # that cdylib ships only here: the Kotlin AAR links the bolt staticlib into
+      # its own JNI library. The Bazel link already strips, 16 KB-aligns, and
+      # links libc++ statically (see cc_runtime_linkage and the android
+      # rustc_flags in crates/xybrid-bolt/BUILD.bazel), so there's no cargo-ndk
+      # or strip step here. Android builds remotely only (Linux RBE); creds come
+      # from a gitignored try-import written from the BuildBuddy secret.
       - name: Configure BuildBuddy remote config
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
@@ -289,8 +296,9 @@ jobs:
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       # stage_unity_native.py copies each ABI's .so into
-      # Runtime/Plugins/Android/<abi>/ and bundles the vendored ORT and
-      # libc++_shared beside it when that ABI is available.
+      # Runtime/Plugins/Android/<abi>/ and bundles the vendored ORT beside it
+      # where vendor/ort-android has that ABI. No libc++_shared.so: Unity's
+      # GameActivity packages its own, and Gradle rejects a second copy.
       - name: Build + stage Android natives (Bazel, per ABI)
         run: |
           set -euo pipefail
@@ -312,21 +320,18 @@ jobs:
               --target "$triple"
           done
 
+      # A Unity player may or may not package its own libc++_shared.so, so each
+      # ABI must stand alone: no libc++_shared.so shipped or NEEDed, no C++
+      # runtime imported or exported, the right ELF machine per ABI directory,
+      # and 16 KB LOAD alignment. The runner's GNU readelf reads every ELF
+      # architecture (see the script for the full rule set).
       - name: Verify deployed libraries
         run: |
-          echo "Android plugin directory:"
-          ABIS=("arm64-v8a" "armeabi-v7a" "x86_64")
-          for abi in "${ABIS[@]}"; do
-            ABI_DIR="bindings/unity/Runtime/Plugins/Android/$abi"
-            if [ ! -d "$ABI_DIR" ]; then
-              echo "ERROR: ABI directory not found: $ABI_DIR"
-              exit 1
-            fi
-            echo ""
-            echo "=== $abi ==="
-            ls -la "$ABI_DIR/"
-            file "$ABI_DIR/libxybrid_bolt.so"
-          done
+          set -euo pipefail
+          ls -laR bindings/unity/Runtime/Plugins/Android/
+          readelf --version | head -1
+          python3 tools/scripts/verify_unity_android_natives.py --require-abis \
+            bindings/unity/Runtime/Plugins/Android
 
       - name: Upload Android plugins
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -334,6 +339,132 @@ jobs:
           name: unity-plugins-android
           path: bindings/unity/Runtime/Plugins/Android/
           if-no-files-found: error
+
+      # Stage everything the dlopen-gate job needs (x86_64 — the ABI the CI
+      # emulator runs), so the gate job is a cheap emulator-only step with no
+      # toolchain. Only libonnxruntime.so ships beside the bolt .so, so only it
+      # is staged. The probe is a few lines of C and the strip mirrors AGP's, so
+      # the runner image's preinstalled NDK serves; the shipped .so is built by
+      # Bazel with its own pinned NDK (XYBRID_NDK_URL in .bazelrc).
+      - name: Stage dlopen-gate artifacts (x86_64)
+        run: |
+          set -euo pipefail
+          # The image's default NDK (r27, like the Bazel build and Unity 6's).
+          NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
+          [ -d "$NDK" ] || { echo "No preinstalled Android NDK on the runner"; exit 1; }
+          grep Pkg.Revision "$NDK/source.properties"
+          NDKBIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          SRC="bindings/unity/Runtime/Plugins/Android/x86_64"
+          mkdir -p dlopen-gate
+          cp "$SRC/libxybrid_bolt.so" "$SRC/libonnxruntime.so" dlopen-gate/
+          # AGP-style strip, as the Unity player's Gradle build applies to
+          # packaged native libs. The .so must still dlopen after it.
+          cp "$SRC/libxybrid_bolt.so" dlopen-gate/libxybrid_bolt.stripped.so
+          "$NDKBIN/llvm-strip" --strip-all dlopen-gate/libxybrid_bolt.stripped.so
+          # Probe executable for the emulator's x86_64 ABI.
+          "$NDKBIN/x86_64-linux-android24-clang" \
+            tools/scripts/android-dlopen-probe.c -o dlopen-gate/android-dlopen-probe
+          ls -la dlopen-gate
+
+      # Not unity-plugins-*: package-unity downloads that pattern into the SDK.
+      - name: Upload dlopen-gate artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unity-android-dlopen-gate
+          path: dlopen-gate/
+          if-no-files-found: error
+
+  #
+  # Android load test: dlopen the shipped x86_64 native on an emulator
+  #
+  # The verifier above reads the ELF; only the device loader proves the .so
+  # loads. The gate dlopens it with RTLD_NOW, as built and after an AGP-style
+  # strip, with only libonnxruntime.so beside it, so a C++ runtime import the
+  # static link left behind fails here instead of in a Unity player whose
+  # libc++_shared.so (if any) Xybrid doesn't control. x86_64 is the ABI a
+  # GitHub KVM runner can emulate; the verifier covers the other ABIs.
+  unity-android-dlopen-gate:
+    name: Android dlopen gate (x86_64 emulator)
+    needs: [build-unity-android]
+    # build-unity-android runs via always() when check-version is skipped
+    # (workflow_dispatch); without always() here that skip would carry over.
+    if: always() && needs.build-unity-android.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # KVM is required for a usable (hardware-accelerated) x86_64 emulator on
+      # the Linux runner; without it boot times out.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Download dlopen-gate artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: unity-android-dlopen-gate
+          path: dlopen-gate
+
+      # sdkmanager and the emulator tooling run on this JDK, as in the
+      # build-android.yml gate, rather than whatever the image defaults to.
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # `android-emulator-runner` installs the "latest emulator" with a single,
+      # un-retried `sdkmanager --install emulator` call. That download
+      # intermittently lands corrupt on the runner and fails the whole job with
+      # "Error on ZipFile unknown archive" — an infra hiccup, not a regression
+      # in the .so this gate checks. Pre-install it here with retries (wiping
+      # any partial download between attempts so a wedged cache can't be reused)
+      # so a bad fetch can't sink the run; the action's own install then sees
+      # the package already current and no-ops.
+      - name: Pre-install Android Emulator (retry corrupt downloads)
+        run: |
+          set -u
+          sdk="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          # `sdkmanager` isn't on PATH in a plain run step (the emulator-runner
+          # action wires it up itself), so resolve it under the SDK root.
+          sdkmanager="$(command -v sdkmanager || true)"
+          if [ -z "$sdkmanager" ]; then
+            sdkmanager="$(ls "$sdk"/cmdline-tools/latest/bin/sdkmanager \
+              "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
+          fi
+          if [ -z "$sdkmanager" ]; then
+            echo "::error::sdkmanager not found under $sdk"; exit 1
+          fi
+          echo "using sdkmanager: $sdkmanager"
+          for i in $(seq 1 3); do
+            if yes | "$sdkmanager" --install emulator --channel=0; then
+              echo "emulator installed (attempt $i)"
+              exit 0
+            fi
+            echo "::warning::emulator install attempt $i failed; clearing partial download and retrying"
+            rm -rf "$sdk/emulator" "$sdk/.temp" "$sdk/.downloadIntermediates" || true
+            sleep 10
+          done
+          echo "::error::emulator install failed after 3 attempts"
+          exit 1
+
+      # api-level 35 = Android 15 bionic, which is strict enough to reject the
+      # DT_GNU_HASH corruption the stripped variant guards against.
+      # GATE_SIBLINGS: the Unity package ships no libc++_shared.so, so none is
+      # pushed beside the .so.
+      - name: dlopen the Unity native (as built + stripped)
+        uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            GATE_SIBLINGS="libonnxruntime.so" bash tools/scripts/android-dlopen-gate.sh dlopen-gate
 
   #
   # iOS native library build (arm64 static)
@@ -412,7 +543,7 @@ jobs:
     name: Package Unity SDK
     permissions:
       contents: write   # gh release upload of the packaged SDK tarball
-    needs: [build-unity-macos, build-unity-windows, build-unity-linux, build-unity-ios, build-unity-android]
+    needs: [build-unity-macos, build-unity-windows, build-unity-linux, build-unity-ios, build-unity-android, unity-android-dlopen-gate]
     if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     steps:

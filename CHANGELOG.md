@@ -7,6 +7,436 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Android, React Native:** on-device speech with Phonon and Kitten TTS 2 in
+  `ai.xybrid:xybrid-kotlin` and `@xybrid/react-native` on Android. The AAR's
+  arm64-v8a library now links the zzz speech engine statically, so on Android
+  arm64-v8a devices `phonon-31m-en` loads from the xybrid registry and a
+  Kitten TTS 2 bundle loads from a local directory, through the existing model
+  and run APIs (see [Phonon speech](docs/sdk/PHONON.md)). The armeabi-v7a and
+  x86_64 libraries are built without the engine: there the registry does not
+  serve `phonon-31m-en` and a Kitten bundle fails to run. React Native on iOS
+  is unchanged and has no speech engine. The AAR also carries the
+  engine's fourteen notice files (its runtime terms and the upstream licenses)
+  under `assets/xybrid/zzz/`. Android merges library assets into the APK, so
+  every app that ships the SDK carries them.
+
+### Changed
+
+- **Breaking (Android, React Native):** `ai.xybrid:xybrid-kotlin` and
+  `@xybrid/react-native` now require Android 10 (API 29); their `minSdk` was 24.
+  The AAR's arm64-v8a natives are now built against API 29. An app with a lower
+  `minSdk` fails the manifest merge at build time. Raise it to 29: `minSdk = 29`
+  in the app's Gradle `defaultConfig`; with Expo, `android.minSdkVersion: 29`
+  through `expo-build-properties` (or set the `android.minSdkVersion=29` gradle
+  property from your own config plugin, since `expo prebuild` regenerates
+  `android/`); in bare React Native, `minSdkVersion = 29` in the root
+  `android/build.gradle` `ext` block. Flutter and Unity Android requirements are
+  unchanged.
+
+### Removed
+
+- **Breaking (Rust):** the inert Android speech companion is removed: the
+  `android-companion` Cargo feature on `xybrid-zzz-sys`, the
+  `tts-zzz-android-companion` features on `xybrid-core`, `xybrid-sdk` and
+  `xybrid-bolt`, the Bazel flag `--//:tts_zzz_android_companion` and the
+  `//bindings/kotlin:xybrid_kotlin_zzz_aar` target. Crates that enable either
+  feature must drop it. `xybrid_zzz_sys::UnavailableReason` drops its
+  companion-only variants and keeps `UnsupportedCpu`, so code naming a removed
+  variant must be updated. Custom static `tts-zzz` builds are unchanged.
+
+### Fixed
+
+- Unity iOS players import native symbols from the statically linked application
+  (`__Internal`). The generated bindings previously tried to load `xybrid_bolt`
+  as a dynamic library. The Unity Editor continues using its host's dynamic library,
+  including when iOS is the selected build target.
+- Unity iOS builds link Accelerate for the native archive's vDSP calls.
+  The build hook also repairs framework metadata in already downloaded native
+  bundles, preserving custom dependencies and the plugin GUID.
+
+## [0.15.0] - 2026-10-26
+
+### Changed
+
+- **llama.cpp:** update to [v0.7.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.7.0) (commit `620d2225cc436ab0b001e3200e590e3b286ef9ab`).
+
+### Fixed
+
+- Windows Cargo builds from a Git checkout now use the prebuilt llama.cpp
+  archives. The hashed source files retain LF line endings, so their hashes
+  match the generated native manifest.
+
+## [0.14.0] - 2026-10-25
+
+### Changed
+
+- Custom `tts-zzz` builds now pin engine `v0.1.0-rc.9`. Its
+  `phonon-kitten-tts2` archives carry the engine's runtime terms and fourteen
+  third-party notices, which the verifier checks byte for byte. The pins add
+  static slices for iOS devices, the iOS arm64 simulator and Linux arm64.
+  Standard prebuilt SDK packaging is unchanged and still omits zzz.
+- **llama.cpp:** update to [v0.6.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0) (commit `d81235049384534c167caea52b85a694f6103d14`).
+
+### Fixed
+
+- **Unity Android builds no longer fail on a duplicate `libc++_shared.so`.**
+  When Unity's GameActivity packages its own copy, Gradle stopped at
+  `mergeDebugNativeLibs` with "2 files found with path
+  'lib/arm64-v8a/libc++_shared.so'" (seen with Unity 6000.6.4f1). The Unity
+  Android library now links libc++ statically, and the Unity Android natives
+  no longer include `libc++_shared.so`. That also removes two packaging
+  faults: the x86_64 bundle shipped an arm64 `libc++_shared.so`, and the
+  armeabi-v7a bundle shipped none although its library needs one. After an
+  update, the copy earlier releases installed under
+  `Assets/Xybrid/Plugins/Android/` is removed the next time the Android
+  natives are downloaded.
+- **The Unity README gives the real Android cache location.** Models live
+  under `Application.persistentDataPath/xybrid`: the SDK is given its `models`
+  subfolder and keeps runtime-ready files beside it in `extracted`.
+- **The Unity docs no longer claim Intel Mac support.** The macOS native
+  library is Apple Silicon (arm64) only; the README said Intel Macs ran it
+  through Rosetta 2, which runs x86_64 code on Apple Silicon and not the
+  reverse. The docs site's Unity page also listed Windows and Linux as planned
+  and left out iOS and Android. Both now carry the same platform table, with
+  the iOS 16 minimum and Unity's removal of Android x86_64 in Unity 6.5.
+
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.13.1] - 2026-10-22
+
+Custom `tts-zzz` builds use the Phonon + Kitten TTS 2-only engine profile;
+the published Rust sys crate can verify that engine without a source checkout.
+No API changes. Standard prebuilt SDK packaging is unchanged.
+
+### Changed
+
+- Custom `tts-zzz` builds now pin engine `v0.1.0-rc.8`'s
+  `phonon-kitten-tts2` profile: only Phonon and Kitten TTS 2, with the
+  existing `zzz_embed` ABI. Other engine models and APIs are excluded.
+  Standard prebuilt SDK packaging is unchanged.
+
+### Fixed
+
+- The published `xybrid-zzz-sys` crate includes its verifier and uses its
+  packaged manifest, so an enabled build can verify a privately staged
+  engine without the xybrid source workspace.
+
+---
+
+## [0.13.0] - 2026-10-21
+
+Gradium's public Phonon checkpoint, `phonon-31m-en` (Apache-2.0), runs through
+the opt-in `tts-zzz` backend on zzz engine `v0.1.0-rc.7`. Standard prebuilt SDK
+packaging is unchanged.
+
+### Added
+
+- **Phonon `phonon-31m-en` through the opt-in `tts-zzz` backend.** Gradium's
+  public English checkpoint (Apache-2.0) loads as one converted GGUF with the
+  existing `ZzzPhonon` template and audio APIs. It carries 38 voices:
+  `default`, used when no voice is set, plus the 37 English voices of the
+  `gradium/phonon-voices` catalog. Its default temperature is 0.3 and it
+  speaks English at 24 kHz mono. The two earlier private Phonon previews
+  still load. See [Phonon speech](docs/sdk/PHONON.md).
+- **`zzz-phonon-31m` registry backend.** Every `tts-zzz` build reports it,
+  and `resolve` sends it in its `&backends=` query even when telemetry is
+  opted out, so the registry can serve `phonon-31m-en` only to builds whose
+  engine loads it. 0.12.0 builds report `tts-zzz` but cannot load that model.
+
+### Changed
+
+- **zzz engine pin bumped to `v0.1.0-rc.7`**, the first engine release that
+  loads `phonon-31m-en`; `v0.1.0-rc.6` rejects it. The engine's C ABI is
+  unchanged, so the SDK exposes no new Phonon options.
+
+---
+
+## [0.12.0] - 2026-10-20
+
+Phonon joins Kitten behind the opt-in `tts-zzz` feature for custom native
+builds. Both use the existing audio APIs; standard prebuilt SDK packaging
+is unchanged. This release also adds Rust choice scoring and EmbeddingGemma 2
+text embeddings, and keeps embedding sessions resident between calls.
+
+Rust consumers must update exhaustive matches for the new template, envelope
+and output variants, and `Tokenize` struct literals. Existing bundle metadata
+and foreign binding APIs remain compatible; choice scorers remain Rust-only.
+
+### Added
+
+- **Phonon speech through the opt-in `tts-zzz` backend.** Load a single GGUF
+  with the `ZzzPhonon` execution template, then use the existing batch and
+  audio-streaming APIs, including async calls, cancellation and resource-abort
+  controls. Voice, language, temperature and seed overrides travel through
+  existing request options. Omitted voices and temperature `0` select the
+  bundle defaults. Sessions remain resident and reusable after cancellation
+  or returned errors. The combined engine archive also preserves Kitten TTS 2;
+  standard prebuilt SDK artifacts continue to require a custom `tts-zzz` build
+  for either model.
+
+- **Choice scoring in the Rust SDK.** A `ChoiceScorer` model scores a closed
+  list of candidates against one context: build the input with
+  `Envelope::choice_request` and call `run`, `run_with_options` or
+  `run_async`. `InferenceResult::choice_scores()` returns one raw logit and
+  one softmax score per candidate, the caller's choices first, then the
+  scorer's fixed ones. The first kind of scorer is `OnnxByteOptionScorer`, an
+  ONNX model over UTF-8 byte ids; CUA-S1-FORMS matches its PyTorch reference
+  through the SDK within 2e-5 in logits. The executor checks the model against
+  its spec once and keeps that session for later runs, and `warmup()` scores a
+  synthetic request. Telemetry reports the decision task, the backend and the
+  number of candidates, never ids, texts or scores. When ONNX Runtime fails a
+  scorer run, its message is withheld from the error, and so is the shape of a
+  wrong-shaped output, which a model can derive from the request. Scorer
+  sessions and runs set ONNX Runtime's own log level to fatal, so ONNX Runtime
+  logs nothing below fatal for them, such as that message or a warning that
+  quotes what the request produced. Its process-wide logger is not covered; by
+  default it follows `ORT_LOG`. The language bindings still refuse to load a
+  scorer.
+- **`xybrid run --choice` scores candidates from the CLI.** Pass the context as
+  `--input-text` and each candidate as `--choice ID=TEXT` (repeatable) to a
+  choice scorer from `--directory`, `--model`, `--bundle` or `--huggingface`.
+  The CLI prints every candidate's score and raw logit in the order offered,
+  the scorer's fixed choices last, marks the best one and prints the margin;
+  `--output` saves the scores as JSON. A scorer given no `--choice` scores its
+  fixed choices. Requests are checked before the model runs, also by
+  `--dry-run`, and the refusals number candidates from 0 without quoting ids
+  or texts. Other models refuse `--choice`; a scorer refuses `--input-audio`,
+  `--input-image`, `--voice` and `--max-tokens`; and `xybrid repl` and
+  `--speculative-cloud` refuse a scorer.
+- **EmbeddingGemma 2 runs as a local text-embedding model.** Google's open
+  (Apache 2.0) embedding model returns 768-dimensional unit vectors for text
+  in over 100 languages and for code. Its ONNX export also declares image,
+  video and audio inputs, which the token-ID path now gives zero rows, so the
+  text model runs alone. On the q4 export the vectors match the model's own
+  `sentence_embedding` output to a cosine of at least 0.9999. The
+  `embeddinggemma-2` test fixture shows the metadata; callers prefix queries
+  with `task: search result | query: ` and documents with
+  `title: none | text: `. Image, video and audio input are not supported yet.
+- **`Tokenize` can add the tokenizer's special tokens.** With
+  `add_special_tokens: true`, the text is wrapped in the special tokens the
+  tokenizer's post-processor defines (`<bos>`/`<eos>`, `[CLS]`/`[SEP]`), and
+  truncation to `max_length` keeps the closing ones. Without them,
+  EmbeddingGemma 2's vectors dropped as low as a cosine of 0.61 against the
+  correct ones. The default stays `false`, so existing models are unchanged.
+- **An `L2Normalize` postprocessing step** scales embeddings to unit length.
+  Put it after `MeanPool` for models whose sentence-transformers pipeline
+  ends in `Normalize`.
+
+### Changed
+
+- **Rust:** `ExecutionTemplate` gains `ZzzPhonon`; exhaustive matches need
+  an additional arm. Existing Kitten bundle metadata remains compatible.
+
+- **Embedding models keep their ONNX session between calls.** The token-ID
+  (BERT-style) path built a new session on every call and dropped it: 44 of
+  about 52 ms for a MiniLM embedding on an M4 Max, against 2 ms of
+  inference. It now keeps one session per loaded model, as TTS already did,
+  and `warmup()` builds it ahead of the first real call.
+- **Breaking (Rust):** `PreprocessingStep::Tokenize` gains an
+  `add_special_tokens` field and `PostprocessingStep` gains an `L2Normalize`
+  variant, so struct literals and exhaustive matches need updating. Existing
+  `model_metadata.json` files are unaffected.
+- **Breaking (Rust):** choice requests have a typed place in the API.
+  `EnvelopeKind` gains `ChoiceRequest` (a sealed `ChoiceRequest`: one context
+  and the caller's choices) and `ChoiceScores`, `ExecutionTemplate` gains
+  `ChoiceScorer`, and the SDK's `OutputType` gains `ChoiceScores`, so
+  exhaustive matches over these enums need new arms. Existing envelopes keep
+  their binary encoding. A `ChoiceScorer` model accepts only a choice request,
+  and only through `run`, `run_with_options` or `run_async`. Every other entry
+  point and every other model refuse choice requests and choice scores,
+  including inside a multi-part message, conversation history or a pipeline,
+  before any backend or cloud call. The bindings refuse to load a choice
+  scorer, and an invalid scorer spec fails the load with `MetadataInvalid`.
+
+---
+
+## [0.11.0] - 2026-10-06
+
+The browser SDK now runs Xybrid's own Rust llama.cpp path compiled to
+WebAssembly, replacing the LiteRT preview, and ships with each GitHub Release.
+Speculative loads ask the registry before serving from the cloud, early stops
+in llama.cpp runs report as stops, and every SDK reports its own name to the
+registry and telemetry. Unity on Android can load models.
+
+This release breaks the `@xybrid/web` preview API (`XybridModel` and LiteRT
+models are gone) and renames two `xybrid-ffi-facade` conversions in Rust. The
+foreign binding APIs are unchanged.
+
+### Added
+
+- **The browser SDK runs GGUF models through Xybrid's Rust runtime.**
+  `@xybrid/web` compiles the existing `xybrid-llama` wrappers and the pinned
+  llama.cpp to WebAssembly, with a CPU/WASM SIMD build and an experimental
+  WebGPU build that needs `shader-f16`. `XybridLlm` loads a GGUF from a URL,
+  the registry or Hugging Face with integrity checks, streams tokens in a
+  worker, cancels generation, enforces the context limit and reports memory
+  and speed. The gzipped runtime is about 1.1 MiB (CPU) or 1.5 MiB (WebGPU),
+  plus the model. CI builds both runtimes and runs real GGUF generation in
+  Chromium; WebGPU generation has not been verified on GPU hardware yet.
+- **ONNX choice-scoring primitives in `xybrid-core`.** `OnnxChoiceScorer`
+  scores a closed list of candidates against one context without generating
+  text, from a `ChoiceScorerSpec`. It matches the PyTorch reference for the
+  CUA-S1-FORMS fixtures within 2e-5 in logits on macOS and Linux. No SDK entry
+  point runs a scorer yet.
+- **Per-sequence state snapshots in `xybrid-llama`.**
+  `LlamaContext::state_seq_save` and `state_seq_restore` copy a sequence's
+  KV cache and recurrent state out and back in, through three new
+  `llama_state_seq_*_c` shim functions. This makes prefix reuse possible on
+  recurrent and hybrid models such as LFM2, where `kv_cache_seq_rm` cannot
+  truncate: prefill a shared system prompt once, then restore it before each
+  request. Snapshots are opaque (`LlamaSeqSnapshot`) and only restore into
+  the context that saved them, because llama.cpp does not validate the bytes
+  and can abort on bad ones. A `seq_id` the context does not hold, or a
+  failed restore, returns an error, and a failed restore leaves the sequence
+  empty. `xybrid-core` does not use it yet.
+- **Kitten TTS 2 via the pinned zzz engine (`tts-zzz`).** `xybrid-zzz-sys`
+  carries hand-written ABI-1 FFI for the prebuilt `libzzz_embed.a` and
+  statically links the privately staged pinned slice through
+  `tools/scripts/zzz_pull.py` verification — the crate never compiles zzz;
+  an enabled build fails on unsupported targets or unverified slices. The
+  safe surface (`KittenSession`, streaming audio callback, typed errors)
+  plugs into `xybrid-core` as the `ZzzEmbed` execution template (four asset
+  paths: language and decoder GGUFs plus both voice JSONs), executed by a
+  new `zzz` runtime that synthesizes text to WAV envelopes with the
+  engine's 24 kHz mono output. Feature-gated off every platform preset
+  until native CI fetches the pinned slices. Model weights and voices stay
+  separate files. Raw archives, receipts and staging remain private.
+- **Web SDK release packaging.** Releases include `@xybrid/web` as an npm
+  archive with its ESM client, declarations, worker, CPU/WASM SIMD and
+  experimental WebGPU runtimes. Preparation checks the actual archive in an
+  isolated consumer and Chromium; npm publication stages that same artifact
+  for approval, using `next` for prereleases.
+- **Daily llama.cpp stable-release intake (POC).** Official upstream releases
+  produce reviewed dependency-update PRs, with real grammar and vision tests.
+  Once validation and the refreshed native manifest are ready, automation
+  prepares a release branch for the existing reviewed release pipeline.
+- **`XybridModel::is_speculative`** reports whether a load served the model
+  from the cloud while it downloaded. It stays `true` once the download lands;
+  `is_cloud_serving` reports whether the cloud still answers.
+
+### Changed
+
+- **Breaking (`@xybrid/web`):** the LiteRT runtime and the tensor
+  `XybridModel` API are removed. Use `XybridLlm` with GGUF models and `Gguf`
+  metadata instead of `.litertlm` / `LiteRtLm`. `wasmPath` now defaults to
+  `/xybrid/runtime`. Registry and Hugging Face loading, streaming, generation
+  options, load cancellation and typed errors keep their shape.
+- **A speculative load asks the registry before serving from the cloud.**
+  When speculation is on and the model is not cached, the load now resolves
+  the model first and serves it from the gateway only if the registry
+  describes a chat model: a GGUF or vision-language variant served as a direct
+  download. Every other model downloads and loads as if speculation were off.
+  Before, every uncached registry model was speculated, so speech and TTS
+  models had their requests sent to the gateway as chat. Models packaged as
+  `.xyb` bundles are no longer speculated either; on today's registry that is
+  `qwen3.5-0.8b` and `qwen3.5-2b`.
+
+  The check costs one registry request before the load returns; the download
+  reuses its answer. An uncached speculative load now fails when the registry
+  is unreachable, instead of returning a model whose download then fails.
+  Cached models still load offline without a registry request.
+  `will_speculate` (`willSpeculate` in the bindings) still reads only the local
+  cache, so it can return `true` for a model the load then declines to
+  speculate. The loaded model's `is_speculative` (Rust) or `isCloudServing`
+  (bindings) tells.
+- **The bindings never report success with the output missing.** A run,
+  pipeline run or stream whose output a binding has no field for now fails with
+  `UnsupportedModelCapability` (code 20) on Kotlin, Swift, C# and Python, and
+  with an `Unsupported model capability:` error on Dart. Before, Dart returned
+  `success: true` with every payload field empty, and the other bindings
+  replaced a raw pixel image with the text `[raw image]`. No shipped model
+  produces such an output, so existing results are unchanged.
+- **Breaking (Rust):** in `xybrid-ffi-facade`, `Envelope::from_sdk` and
+  `InferenceResult::from_sdk` are now `Envelope::try_from_sdk` and
+  `InferenceResult::try_from_sdk`, returning `Result`. The foreign APIs are
+  unchanged.
+
+### Fixed
+
+- **KittenTTS no longer returns its phoneme durations instead of speech.**
+  KittenTTS 0.8 models (nano, micro and mini) return per-phoneme durations
+  next to the waveform, and synthesis used whichever output came first. In
+  about four runs out of ten, "Hello world" came back as 15 samples, under a
+  millisecond of sound, and the run still succeeded. Short, long and streamed
+  text were all affected. Synthesis now uses the output named `waveform` (or
+  `audio`); a TTS model with several outputs and neither name fails with an
+  error instead of guessing. Kokoro has a single output and was not affected.
+- **Stopping a llama.cpp run on one of its first tokens no longer reports a
+  native failure.** When memory or thermal pressure, a cancel, or an
+  `on_token` error stopped generation on one of the first four tokens (five
+  for vision models), the run failed with an unrelated error such as
+  `Generation failed with error code -2 (sampler chain creation failed)`.
+  Cloud fallback therefore never reached the cloud, and a cancel did not read
+  as a cancel. Those stops now behave as they do later in the run.
+- **Dart streams no longer drop an error that follows the final token.**
+  `runStreaming` and `runStreamingWithFallback` ignored any error that arrived
+  after the final token, so a run that failed once generation stopped looked
+  like a successful stop. They now end the stream with the error token, as
+  `runStreamingWithContext` already did.
+- **`xybrid run` and `xybrid repl` with `--speculative-cloud` handle a model
+  that loads locally.** `run` saved only streamed text, so a TTS model's
+  `--output` came out empty; it now prints and saves the audio as WAV, as
+  plain `run` does. The REPL failed every turn on a model that is not a chat
+  model and now runs it like any registry model. Both show a download bar while
+  such a model downloads, and report whether the load speculated even when the
+  download finishes at once.
+- **Registry requests and telemetry name the SDK that sent them.** Several
+  paths reported the fallback `rust` instead:
+  - Python always did: the SDK rejected the name `python`. It is accepted now
+    and registered on `import xybrid`, so `xybrid.init()` stays optional.
+  - Flutter did on iOS, macOS, Linux and Windows unless an API key was set,
+    because `Xybrid.init` reached no registering call there.
+    `XybridRustLib.init()` now registers `flutter` on every platform.
+  - Swift and Unity did whenever an app skipped `Xybrid.initialize()` or
+    `XybridClient.Initialize()`, including through the generated constructors.
+    The native library now reports `swift` on Apple platforms and `kotlin` on
+    Android until an SDK registers its own name, and Unity registers from the
+    static constructors of the generated types.
+  - The `xybrid` CLI now reports `cli` instead of `rust`.
+  - The browser SDK (`@xybrid/web`) sent no header at all; it now sends
+    `binding=web` with its version.
+
+  A test now fails if a binding registers a name the SDK would reject.
+- **Unity on Android can load models.** Android has no default model cache
+  folder, and the Unity SDK never set one, so every registry and bundle load
+  failed. It now uses `Application.persistentDataPath/xybrid/models`, unless
+  the app sets its own folder first.
+- **`init_sdk_cache_dir` keeps its first folder entirely.** A later call left
+  the folder alone but still pointed `HF_HOME` and related variables at its
+  own path.
+
+### Deprecated
+
+- **`SdkConfig::with_binding()` and `SdkConfig::binding()`.** No API reads a
+  config's binding, so they never changed what requests report. Use
+  `xybrid_sdk::set_binding` or `xybrid_sdk::init().binding()`.
+
+---
+
+## [0.10.1] - 2026-09-27
+
+### Fixed
+
+- **Readable llama.cpp output on the iOS Simulator.** Simulator builds now run
+  llama.cpp inference on the CPU. This fixes the invalid special-token output
+  observed in fresh Expo and bare React Native apps with 0.10.0. Physical iOS
+  devices continue to use Metal. The fix was verified with local XCFramework
+  builds in both Expo and bare React Native apps on an iPhone 17 Pro simulator.
+
+---
+
+## [0.10.0] - 2026-09-26
+
+This is the stable release of the React Native, model-cache, pipeline, live
+speech and download-progress work in 0.10.0-rc1. See the release-candidate
+entry below for the full SDK changes.
+
 ### Fixed
 
 - **A download survives losing the network for a while.** Once bytes have
@@ -17,9 +447,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Wi-Fi for 10 seconds mid-download). A download that starts offline still
   fails fast.
 
-### Planned
+### Known issues
 
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+- In fresh Expo and bare React Native apps, the published rc1 built and loaded
+  a local model on the iOS Simulator, but inference returned invalid special
+  tokens. This was reproduced on an iPhone 17 Pro simulator running iOS 26.5;
+  inference on a physical iPhone was not tested.
 
 ---
 
@@ -1963,7 +2396,7 @@ First production release of xybrid - a hybrid cloud-edge ML inference orchestrat
 | Android arm64 | ✅ | ✅ | CPU (NNAPI planned) |
 | iOS arm64 | ✅ | Planned | CoreML ANE, Metal GPU |
 
-## [Unreleased]
+## Roadmap
 
 ### Planned
 

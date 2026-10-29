@@ -6,13 +6,16 @@
 //! - Handles execution provider selection (CPU, CoreML, etc.)
 //! - Provides a clean interface for running inference
 //!
-//! Construction goes through a single entry point — [`ONNXSession::build`] —
-//! taking the model path, the requested [`ExecutionProviderKind`], and a
-//! [`SessionOptions`] flag bag. The default options keep the session on
-//! the cheap path; opting in to `capture_resolved_ep` enables ORT
-//! profiling so the *actual* execution provider that ran each op can be
-//! harvested after the first inference (see
-//! [`ONNXSession::resolved_providers`]).
+//! Construction goes through a single public entry point —
+//! [`ONNXSession::build`] — taking the model path, the requested
+//! [`ExecutionProviderKind`], and a [`SessionOptions`] flag bag. The
+//! default options keep the session on the cheap path; opting in to
+//! `capture_resolved_ep` enables ORT profiling so the *actual* execution
+//! provider that ran each op can be harvested after the first inference
+//! (see [`ONNXSession::resolved_providers`]). Choice scorers use a
+//! crate-internal variant, `ONNXSession::build_unlogged`, which also sets
+//! the session's ONNX Runtime log level to fatal; both share one
+//! implementation.
 //!
 //! # Example
 //!
@@ -42,7 +45,8 @@ use super::execution_provider::ExecutionProviderKind;
 use super::profiling::{parse_profile_json, ResolvedExecutionProviders};
 use crate::runtime_adapter::{AdapterError, AdapterResult};
 use ndarray::{ArrayD, IxDyn};
-use ort::session::{builder::GraphOptimizationLevel, Session};
+use ort::logging::LogLevel;
+use ort::session::{builder::GraphOptimizationLevel, RunOptions, Session};
 use ort::tensor::TensorElementType;
 use ort::value::Value;
 use std::collections::HashMap;
@@ -52,6 +56,9 @@ use tempfile::TempDir;
 
 /// Metadata extracted from ONNX model inputs: (names, shapes, element types).
 type InputMetadata = (Vec<String>, Vec<Vec<i64>>, Vec<Option<TensorElementType>>);
+
+/// Metadata extracted from ONNX model outputs: (names, shapes, element types).
+type OutputMetadata = (Vec<String>, Vec<Vec<i64>>, Vec<Option<TensorElementType>>);
 
 /// Construction-time options for [`ONNXSession::build`].
 ///
@@ -128,6 +135,8 @@ pub struct ONNXSession {
     output_shapes: Vec<Vec<i64>>,
     /// Input element types (e.g., Float32, Int64) from ONNX model metadata
     input_dtypes: Vec<Option<TensorElementType>>,
+    /// Output element types from ONNX model metadata
+    output_dtypes: Vec<Option<TensorElementType>>,
     /// The execution provider used for this session
     execution_provider: ExecutionProviderKind,
     /// Resolved-EP capture state. `Disabled` for sessions built with the
@@ -141,8 +150,8 @@ pub struct ONNXSession {
 impl ONNXSession {
     /// Builds a new ONNX session.
     ///
-    /// This is the single construction entry point on `ONNXSession`. It
-    /// loads the model file, configures the requested execution
+    /// This is the single public construction entry point on `ONNXSession`.
+    /// It loads the model file, configures the requested execution
     /// provider, extracts input/output metadata, and — when
     /// `options.capture_resolved_ep` is set — turns on ORT profiling so
     /// the resolved EP can be harvested after the first inference.
@@ -193,6 +202,43 @@ impl ONNXSession {
         execution_provider: ExecutionProviderKind,
         options: SessionOptions,
     ) -> AdapterResult<Self> {
+        Self::build_with_log_level(model_path, execution_provider, options, None)
+    }
+
+    /// [`ONNXSession::build`] for a session whose inputs must not reach a log.
+    ///
+    /// ONNX Runtime logs through two loggers while it runs a model: the run's
+    /// (see [`ONNXSession::run_single_output_f32_unlogged`]) and the
+    /// session's, which carries messages such as a warning that an output's
+    /// shape differs from the model's declaration, quoting the shape the
+    /// inputs produced. This session's log level is fatal, so it logs nothing
+    /// below that. Messages ONNX Runtime sends to its process-wide logger are
+    /// not affected.
+    ///
+    /// # Errors
+    ///
+    /// As [`ONNXSession::build`], and when the log level cannot be set.
+    pub(crate) fn build_unlogged(
+        model_path: &str,
+        execution_provider: ExecutionProviderKind,
+        options: SessionOptions,
+    ) -> AdapterResult<Self> {
+        Self::build_with_log_level(
+            model_path,
+            execution_provider,
+            options,
+            Some(LogLevel::Fatal),
+        )
+    }
+
+    /// Builds the session, with `log_level` as its own log level when given
+    /// (otherwise ONNX Runtime's environment level applies).
+    fn build_with_log_level(
+        model_path: &str,
+        execution_provider: ExecutionProviderKind,
+        options: SessionOptions,
+        log_level: Option<LogLevel>,
+    ) -> AdapterResult<Self> {
         let path = Path::new(model_path);
         if !path.exists() {
             return Err(AdapterError::ModelNotFound(format!(
@@ -216,6 +262,11 @@ impl ONNXSession {
             .map_err(|e| {
                 AdapterError::RuntimeError(format!("Failed to set optimization level: {}", e))
             })?;
+        if let Some(level) = log_level {
+            builder = builder.with_log_level(level).map_err(|e| {
+                AdapterError::RuntimeError(format!("Failed to set the session log level: {e}"))
+            })?;
+        }
 
         let resolved_state = if options.capture_resolved_ep {
             let tempdir = tempfile::tempdir().map_err(|e| {
@@ -245,7 +296,7 @@ impl ONNXSession {
             .map_err(|e| AdapterError::RuntimeError(format!("Failed to load ONNX model: {}", e)))?;
 
         let (input_names, input_shapes, input_dtypes) = Self::extract_input_metadata(&session)?;
-        let (output_names, output_shapes) = Self::extract_output_metadata(&session)?;
+        let (output_names, output_shapes, output_dtypes) = Self::extract_output_metadata(&session)?;
 
         log::info!(
             "Created ONNX session with {} execution provider for model: {} (capture_resolved_ep={})",
@@ -261,6 +312,7 @@ impl ONNXSession {
             input_shapes,
             output_shapes,
             input_dtypes,
+            output_dtypes,
             execution_provider,
             resolved_state: Mutex::new(resolved_state),
         })
@@ -345,9 +397,10 @@ impl ONNXSession {
     }
 
     /// Extracts output metadata from the session.
-    fn extract_output_metadata(session: &Session) -> AdapterResult<(Vec<String>, Vec<Vec<i64>>)> {
+    fn extract_output_metadata(session: &Session) -> AdapterResult<OutputMetadata> {
         let mut output_names = Vec::new();
         let mut output_shapes = Vec::new();
+        let mut output_dtypes = Vec::new();
 
         // Access session.outputs directly - ort exposes outputs as Vec<Output>
         // Each Output has a name field
@@ -358,15 +411,17 @@ impl ONNXSession {
             // For now, use placeholder shapes
             // TODO: Extract real shapes from model metadata if available
             output_shapes.push(vec![-1]); // Placeholder: -1 indicates dynamic dimension
+            output_dtypes.push(output.dtype().tensor_type());
         }
 
         // If no outputs found, use placeholder
         if output_names.is_empty() {
             output_names.push("output".to_string());
             output_shapes.push(vec![1, 512]); // Placeholder shape
+            output_dtypes.push(None);
         }
 
-        Ok((output_names, output_shapes))
+        Ok((output_names, output_shapes, output_dtypes))
     }
 
     /// Runs inference on the session.
@@ -429,6 +484,93 @@ impl ONNXSession {
         &self,
         inputs: HashMap<String, Value>,
     ) -> AdapterResult<HashMap<String, ArrayD<f32>>> {
+        self.run_then(inputs, None, |outputs| self.collect_outputs(outputs))
+    }
+
+    /// Runs inference and returns one named float32 output.
+    ///
+    /// Unlike [`ONNXSession::run_with_values`], the output is looked up by
+    /// name rather than collected with the rest, and it is never converted:
+    /// an output of any other element type is an error. Locking and the
+    /// resolved-EP harvest are shared with `run_with_values`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` is empty (without running the model),
+    /// inference fails, the model has no output called `name`, or that output
+    /// is not a float32 tensor.
+    pub fn run_single_output_f32(
+        &self,
+        inputs: HashMap<String, Value>,
+        name: &str,
+    ) -> AdapterResult<ArrayD<f32>> {
+        self.single_output_f32(inputs, name, None)
+    }
+
+    /// [`ONNXSession::run_single_output_f32`] for inputs that must not reach a
+    /// log.
+    ///
+    /// ONNX Runtime logs a failed run's message itself, to stderr (and the
+    /// system log on Apple and Android), before returning it, and the message
+    /// can quote input values, such as a gather index read from the input.
+    /// This run sets ONNX Runtime's run log level to fatal, so the message
+    /// stays in the returned error. Messages ONNX Runtime logs through the
+    /// session follow the session's level: build the session with
+    /// [`ONNXSession::build_unlogged`] to silence them too.
+    ///
+    /// # Errors
+    ///
+    /// As [`ONNXSession::run_single_output_f32`], and when the run options
+    /// cannot be created.
+    pub(crate) fn run_single_output_f32_unlogged(
+        &self,
+        inputs: HashMap<String, Value>,
+        name: &str,
+    ) -> AdapterResult<ArrayD<f32>> {
+        let mut options = RunOptions::new().map_err(|e| {
+            AdapterError::RuntimeError(format!("Failed to create run options: {e}"))
+        })?;
+        options.set_log_level(LogLevel::Fatal).map_err(|e| {
+            AdapterError::RuntimeError(format!("Failed to set the run log level: {e}"))
+        })?;
+        self.single_output_f32(inputs, name, Some(&options))
+    }
+
+    /// Runs the model (with `options` when given) and reads the float32
+    /// output `name`.
+    fn single_output_f32(
+        &self,
+        inputs: HashMap<String, Value>,
+        name: &str,
+        options: Option<&RunOptions>,
+    ) -> AdapterResult<ArrayD<f32>> {
+        // ort asserts on an empty output name; refuse it as an error instead.
+        if name.is_empty() {
+            return Err(AdapterError::InvalidInput(
+                "Output name must not be empty".to_string(),
+            ));
+        }
+        self.run_then(inputs, options, |outputs| {
+            let value = outputs.get(name).ok_or_else(|| {
+                AdapterError::RuntimeError(format!("Model has no output named '{name}'"))
+            })?;
+            let array = value.try_extract_array::<f32>().map_err(|e| {
+                AdapterError::RuntimeError(format!("Output '{name}' is not float32: {e}"))
+            })?;
+            Ok(array.to_owned())
+        })
+    }
+
+    /// Locks the session, runs it (with `options` when given), hands the
+    /// outputs to `extract`, then finishes the resolved-EP harvest. An
+    /// `extract` error returns before the harvest, leaving capture pending for
+    /// the next inference.
+    fn run_then<T>(
+        &self,
+        inputs: HashMap<String, Value>,
+        options: Option<&RunOptions>,
+        extract: impl FnOnce(&ort::session::SessionOutputs<'_>) -> AdapterResult<T>,
+    ) -> AdapterResult<T> {
         use ort::session::SessionInputs;
 
         // Get mutable access to session (wrapped in Mutex)
@@ -448,12 +590,33 @@ impl ONNXSession {
             .collect();
 
         // Run inference with dynamic number of inputs
-        let outputs = session_guard
-            .run(SessionInputs::from(ort_inputs))
-            .map_err(|e| {
-                AdapterError::InferenceFailed(format!("ONNX Runtime inference failed: {}", e))
-            })?;
+        let inputs = SessionInputs::from(ort_inputs);
+        let outputs = match options {
+            Some(options) => session_guard.run_with_options(inputs, options),
+            None => session_guard.run(inputs),
+        }
+        .map_err(|e| {
+            AdapterError::InferenceFailed(format!("ONNX Runtime inference failed: {}", e))
+        })?;
 
+        let result = extract(&outputs)?;
+
+        // After the first inference, end profiling and parse the JSON
+        // to surface the resolved EP. `extract` returned owned data, so
+        // nothing borrows from `session_guard` once `outputs` is gone and
+        // we can take a `&mut` reborrow for `end_profiling`. Drop
+        // `outputs` explicitly to make that borrow lifetime obvious.
+        drop(outputs);
+        self.maybe_harvest_resolved_ep(&mut session_guard);
+
+        Ok(result)
+    }
+
+    /// Converts every model output to `ArrayD<f32>`, widening int64 outputs.
+    fn collect_outputs(
+        &self,
+        outputs: &ort::session::SessionOutputs<'_>,
+    ) -> AdapterResult<HashMap<String, ArrayD<f32>>> {
         // Convert outputs back to HashMap<String, ArrayD<f32>>
         let mut result = HashMap::new();
 
@@ -499,15 +662,6 @@ impl ONNXSession {
             result.insert(output_name.clone(), array_d);
         }
 
-        // After the first inference, end profiling and parse the JSON
-        // to surface the resolved EP. `outputs` has been fully converted
-        // into owned `result` entries above, so we no longer borrow
-        // from `session_guard` and can take a `&mut` reborrow for
-        // `end_profiling`. Drop `outputs` explicitly to make that
-        // borrow lifetime obvious to the reader.
-        drop(outputs);
-        self.maybe_harvest_resolved_ep(&mut session_guard);
-
         Ok(result)
     }
 
@@ -534,6 +688,11 @@ impl ONNXSession {
     /// Returns output shapes.
     pub fn output_shapes(&self) -> &[Vec<i64>] {
         &self.output_shapes
+    }
+
+    /// Returns output element types, parallel to [`ONNXSession::output_names`].
+    pub fn output_dtypes(&self) -> &[Option<TensorElementType>] {
+        &self.output_dtypes
     }
 
     /// Returns the execution provider used for this session.

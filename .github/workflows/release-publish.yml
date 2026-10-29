@@ -1,4 +1,5 @@
-name: Release Publish
+# Purpose: Release step 2: when the release PR merges, publish the release and the language packages.
+name: "Release: Publish"
 
 # Release-branch flow, step 2 of 2. Companion: release-prep.yml.
 #
@@ -24,8 +25,8 @@ name: Release Publish
 #   3. Verifies the published tag's Package.swift checksum matches the
 #      now-public xcframework zip (sanity belt).
 #   4. Publishes the language packages: crates.io and Maven Central run on
-#      either trigger, and npm (React Native) too once NPM_PUBLISH_ENABLED is
-#      set. pub.dev (publish-flutter) only runs on
+#      either trigger, and npm packages once NPM_PUBLISH_ENABLED (React Native)
+#      or NPM_WEB_PUBLISH_ENABLED (Web) is set. pub.dev (publish-flutter) only runs on
 #      workflow_dispatch-from-tag — pub.dev's OIDC binding rejects
 #      pull_request / branch-ref tokens — so on the merge path
 #      dispatch-flutter-publish re-fires this workflow against the new tag
@@ -57,6 +58,10 @@ permissions: read-all
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_BUILD_JOBS: 2
   RUST_BACKTRACE: 1
 
 jobs:
@@ -262,6 +267,7 @@ jobs:
           publish_crate xybrid-whisper
           publish_crate mlx-c-sys
           publish_crate xybrid-mlx
+          publish_crate xybrid-zzz-sys
           publish_crate xybrid-core
           publish_crate xybrid-sdk
           publish_crate xybrid
@@ -417,7 +423,15 @@ jobs:
   # The .so files come from the just-published GitHub Release asset (the
   # current release.yml grabs them via actions/download-artifact within a
   # single workflow run; in the new flow they live as release assets, so
-  # we download them with gh).
+  # we download them with gh). That zip carries Phonon/Kitten TTS 2 speech in
+  # arm64-v8a and the engine's notices under assets/xybrid/zzz/; release-prep
+  # gated it and replayed this job's packaging on it (verify-android-gradle).
+  # This job gates it again, stages the ABI .so files into libs/ and the
+  # notices into src/main/assets/xybrid/zzz/ (never committed), and gates the
+  # Gradle-built AAR before anything reaches Maven Central. It needs no engine
+  # credentials: everything it handles is already a release asset. It checks
+  # out the tag (the merge commit), so a JNI export or ggml variant change that
+  # landed on master after release-prep fails the gate here; cut a new release.
   # =========================================================================
   publish-kotlin:
     name: Publish Kotlin SDK
@@ -453,12 +467,42 @@ jobs:
           gh release download "$TAG" \
             --pattern "xybrid-android-*.zip" \
             --dir artifacts
+          shopt -s nullglob
+          zips=(artifacts/xybrid-android-*.zip)
+          if [ "${#zips[@]}" != 1 ] || [ "${zips[0]}" != "artifacts/xybrid-android-${TAG}.zip" ]; then
+            echo "::error::Expected exactly one release asset, xybrid-android-${TAG}.zip; found ${#zips[@]}."
+            exit 1
+          fi
 
-      - name: Extract .so files into Kotlin libs/
+      # verify_zzz_android.py ships with the tag: a recovery dispatch for a
+      # tag cut before the speech gate has none, and that tag's zip has no
+      # speech payload to stage, so it stops here rather than publish blind.
+      # GNU readelf is preinstalled on ubuntu-latest.
+      - name: Gate the release zip and stage it for Gradle
+        env:
+          TAG: ${{ needs.publish-release.outputs.tag }}
         run: |
-          mkdir -p bindings/kotlin/libs
-          cd bindings/kotlin/libs
-          unzip -o ${{ github.workspace }}/artifacts/xybrid-android-*.zip
+          set -euo pipefail
+          if [ ! -f tools/scripts/verify_zzz_android.py ]; then
+            echo "::error::${TAG} predates the Android speech gate (tools/scripts/verify_zzz_android.py); publish it from the workflow revision that cut it."
+            exit 1
+          fi
+          command -v readelf >/dev/null
+          zip="artifacts/xybrid-android-${TAG}.zip"
+          python3 tools/scripts/verify_zzz_android.py dist "$zip" --readelf readelf
+          python3 tools/scripts/verify_zzz_android.py stage-gradle "$zip" --kotlin-dir bindings/kotlin
+
+      - name: Build the release AAR
+        working-directory: bindings/kotlin
+        run: ./gradlew bundleReleaseAar --console=plain
+
+      # The exact AAR the publish task below uploads (bundleReleaseAar is then
+      # up to date): speech in arm64-v8a only, notices, minSdk 29.
+      - name: Gate the Gradle-built AAR
+        run: |
+          python3 tools/scripts/verify_zzz_android.py aar \
+            bindings/kotlin/build/outputs/aar/xybrid-kotlin-release.aar \
+            --readelf readelf --speech --min-sdk 29
 
       - name: Publish to Maven Central
         working-directory: bindings/kotlin
@@ -549,6 +593,80 @@ jobs:
           npm stage publish --provenance --access public --tag "$DIST_TAG"
 
   # =========================================================================
+  # Stage @xybrid/web using the exact archive built and tested by release-prep.
+  # Separate opt-in and stage-only token let its first-publish/trusted-publisher
+  # setup happen independently of React Native. See bindings/web/RELEASING.md.
+  # =========================================================================
+  publish-web-npm:
+    name: Publish Web SDK (npm)
+    if: ${{ vars.NPM_WEB_PUBLISH_ENABLED == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.flutter_only) }}
+    needs: [publish-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # npm trusted publishing + provenance
+    defaults:
+      run:
+        working-directory: bindings/web
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.publish-release.outputs.tag }}
+
+      - name: Use Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm
+        run: npm install -g npm@11
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.2.2 --activate
+
+      - name: Install package verification tools
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the tested web release package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.publish-release.outputs.tag }}
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "xybrid-web-${VERSION}.tgz*" --dir "$RUNNER_TEMP/xybrid-web-npm"
+
+      - name: Verify release archive checksum
+        working-directory: ${{ runner.temp }}/xybrid-web-npm
+        env:
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: sha256sum --check "xybrid-web-${VERSION}.tgz.sha256"
+
+      - name: Verify the release archive contents and version
+        env:
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: node scripts/check-pack.mjs "$RUNNER_TEMP/xybrid-web-npm/xybrid-web-${VERSION}.tgz"
+
+      - name: Stage Web SDK for npm approval
+        env:
+          VERSION: ${{ needs.publish-release.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_WEB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+          if npm view "@xybrid/web@${VERSION}" version >/dev/null 2>&1; then
+            echo "::notice::@xybrid/web@${VERSION} is already on npm — skipping."
+            exit 0
+          fi
+          DIST_TAG=latest
+          case "$VERSION" in *-*) DIST_TAG=next ;; esac
+          npm stage publish "$RUNNER_TEMP/xybrid-web-npm/xybrid-web-${VERSION}.tgz" \
+            --ignore-scripts --provenance --access public --tag "$DIST_TAG"
+
+  # =========================================================================
   # Update the legacy `swift` branch with the URL-based Package.swift.
   #
   # Planned for deprecation once consumers move to `from: "<version>"`
@@ -605,8 +723,8 @@ jobs:
           let package = Package(
               name: "Xybrid",
               platforms: [
-                  .iOS(.v13),
-                  .macOS(.v10_15)
+                  // Match the published iOS-only XCFramework and its deployment floor.
+                  .iOS(.v16),
               ],
               products: [
                   .library(

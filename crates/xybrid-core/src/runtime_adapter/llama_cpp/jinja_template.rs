@@ -47,8 +47,12 @@ pub(super) struct RenderOptions {
     pub add_generation_prompt: bool,
     /// Whether reasoning-model templates should enter their thinking mode.
     /// Templates that honor this switch skip reasoning-channel scaffolding
-    /// for direct user-facing answers.
-    pub enable_thinking: bool,
+    /// for direct user-facing answers. `Some(flag)` passes the flag; `None`
+    /// omits the `enable_thinking` key from the context entirely, as
+    /// HuggingFace `apply_chat_template` does when the caller passes no
+    /// such keyword. What an omitted key means is up to the template:
+    /// Qwen3.5's closes an empty think block, Qwen3's leaves thinking on.
+    pub enable_thinking: Option<bool>,
     /// Tool definitions to expose in the template context, pre-serialized as
     /// a JSON array (bare function objects for LFM2-family templates). When
     /// `None` the `tools` key is omitted from the context entirely so
@@ -59,10 +63,11 @@ pub(super) struct RenderOptions {
 }
 
 impl Default for RenderOptions {
+    /// Generation prompt on, thinking explicitly on, no tools.
     fn default() -> Self {
         Self {
             add_generation_prompt: true,
-            enable_thinking: true,
+            enable_thinking: Some(true),
             tools: None,
         }
     }
@@ -144,18 +149,21 @@ impl JinjaChatTemplate {
         let base = context! {
             messages => messages_value,
             add_generation_prompt => options.add_generation_prompt,
-            enable_thinking => options.enable_thinking,
             bos_token => self.bos_token.clone().unwrap_or_default(),
             eos_token => self.eos_token.clone().unwrap_or_default(),
         };
-        // The `tools` key is merged in only when the caller supplied
-        // definitions: HuggingFace's `apply_chat_template` omits the key
-        // entirely for tool-less calls, so `{%- if tools -%}` guards see an
-        // undefined (falsy) value and `tools is defined` checks stay
-        // accurate. Passing null or `[]` instead would flip the latter.
-        let ctx = match &options.tools {
-            Some(tools) => context! { tools => Value::from_serialize(tools), ..base },
+        // The `enable_thinking` and `tools` keys are merged in only when the
+        // caller supplied them: HuggingFace's `apply_chat_template` omits a
+        // keyword the caller did not pass, so `{%- if tools -%}` guards see
+        // an undefined (falsy) value and `is defined` checks stay accurate.
+        // Passing null, `[]` or a default flag instead would flip the latter.
+        let ctx = match options.enable_thinking {
+            Some(enable_thinking) => context! { enable_thinking => enable_thinking, ..base },
             None => base,
+        };
+        let ctx = match &options.tools {
+            Some(tools) => context! { tools => Value::from_serialize(tools), ..ctx },
+            None => ctx,
         };
 
         let tmpl = env
@@ -348,7 +356,7 @@ mod tests {
         );
         let opts = RenderOptions {
             add_generation_prompt: false,
-            enable_thinking: true,
+            enable_thinking: Some(true),
             tools: None,
         };
         let out = tmpl.render(&[ChatMessage::user("hello")], &opts).unwrap();
@@ -378,7 +386,7 @@ mod tests {
                 &[ChatMessage::user("Hello")],
                 &RenderOptions {
                     add_generation_prompt: true,
-                    enable_thinking: false,
+                    enable_thinking: Some(false),
                     tools: None,
                 },
             )
@@ -400,13 +408,41 @@ mod tests {
                 &[ChatMessage::user("Hello")],
                 &RenderOptions {
                     add_generation_prompt: true,
-                    enable_thinking: true,
+                    enable_thinking: Some(true),
                     tools: None,
                 },
             )
             .unwrap();
         assert!(on.contains("<|think|>"));
         assert!(!on.contains("<|channel>thought"));
+    }
+
+    /// `enable_thinking: None` must OMIT the context key, not pass `false`:
+    /// templates such as Qwen3's check `enable_thinking is defined and
+    /// enable_thinking is false`, so the two render differently. Same
+    /// HuggingFace omission contract as `tools`. The default stays an
+    /// explicit `true`.
+    #[test]
+    fn enable_thinking_none_leaves_key_undefined() {
+        let tmpl = JinjaChatTemplate::new(
+            "{% if enable_thinking is defined %}{{ enable_thinking }}{% else %}undefined{% endif %}",
+            None,
+            None,
+        );
+        let render = |options: &RenderOptions| {
+            tmpl.render(&[ChatMessage::user("x")], options)
+                .expect("probe template renders")
+        };
+        let with_thinking = |enable_thinking| RenderOptions {
+            enable_thinking,
+            ..RenderOptions::default()
+        };
+
+        assert_eq!(render(&with_thinking(None)), "undefined");
+        // Booleans print as Jinja2 prints them.
+        assert_eq!(render(&with_thinking(Some(false))), "False");
+        assert_eq!(render(&with_thinking(Some(true))), "True");
+        assert_eq!(render(&RenderOptions::default()), "True");
     }
 
     /// A syntactically broken template must surface as `Err`, never panic —
@@ -568,5 +604,87 @@ mod tests {
         let tmpl = JinjaChatTemplate::new("{% generation foo %}", None, None);
         let result = tmpl.render(&[ChatMessage::user("hi")], &RenderOptions::default());
         assert!(matches!(result, Err(JinjaTemplateError::Render(_))));
+    }
+
+    /// Reads a choice-scoring conformance fixture (pinned by its
+    /// `provenance.json`).
+    fn read_choice_fixture(relative: &str) -> String {
+        // The runtime CARGO_MANIFEST_DIR, not `env!`: under Bazel the test
+        // runs in a sandbox where the compile-time path points nowhere.
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let path = std::path::PathBuf::from(manifest_dir)
+            .join("../../integration-tests/fixtures/choice")
+            .join(relative);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    }
+
+    fn sha256_hex(text: &str) -> String {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(text.as_bytes()))
+    }
+
+    #[derive(serde::Deserialize)]
+    struct LabelGoldens {
+        provenance: LabelProvenance,
+        cases: Vec<LabelGolden>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct LabelProvenance {
+        template_sha256: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct LabelGolden {
+        id: String,
+        messages: Vec<ChatMessage>,
+        rendered: String,
+        rendered_sha256: String,
+    }
+
+    /// G0: with `enable_thinking` omitted, the Qwen3.5 chat template renders
+    /// every label case byte for byte as Hugging Face's `apply_chat_template`
+    /// did when the goldens were made (Jinja2 3.1.6 through transformers
+    /// 5.17.0). The goldens pin the bytes, including the template-specific
+    /// generation suffix; no suffix is hard-coded here.
+    #[test]
+    fn qwen3_5_render_with_thinking_omitted_matches_label_goldens() {
+        let template = read_choice_fixture("templates/qwen3.5.jinja");
+        let goldens: LabelGoldens =
+            serde_json::from_str(&read_choice_fixture("goldens/labels.json"))
+                .expect("goldens/labels.json parses");
+        assert_eq!(
+            sha256_hex(&template),
+            goldens.provenance.template_sha256,
+            "templates/qwen3.5.jinja is not the template the goldens were rendered from"
+        );
+        assert!(
+            !goldens.cases.is_empty(),
+            "goldens/labels.json has no cases"
+        );
+
+        let tmpl = JinjaChatTemplate::new(template, None, None);
+        let options = RenderOptions {
+            add_generation_prompt: true,
+            enable_thinking: None,
+            tools: None,
+        };
+        for case in &goldens.cases {
+            assert_eq!(
+                sha256_hex(&case.rendered),
+                case.rendered_sha256,
+                "{}: the golden's rendered text does not match its rendered_sha256",
+                case.id
+            );
+            let rendered = tmpl
+                .render(&case.messages, &options)
+                .unwrap_or_else(|e| panic!("{}: {e}", case.id));
+            assert_eq!(
+                rendered, case.rendered,
+                "{}: render differs from the golden",
+                case.id
+            );
+        }
     }
 }

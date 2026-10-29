@@ -2,6 +2,72 @@
 
 ## Unreleased
 
+## 0.15.0
+
+* Changed: precompiled native libraries now use llama.cpp v0.7.0.
+
+## 0.14.0
+
+## 0.13.1
+
+* Changed: custom `tts-zzz` builds now pin the Phonon + Kitten TTS 2-only
+  engine profile from `v0.1.0-rc.8`. Standard precompiled Flutter binaries
+  continue to omit this optional backend.
+
+## 0.13.0
+
+* Added: custom native builds with `tts-zzz` can load Gradium's public
+  `phonon-31m-en` (Apache-2.0) as a converted GGUF through `ZzzPhonon`; it
+  carries a `default` voice plus 37 English catalog voices. These builds now
+  pin zzz engine `v0.1.0-rc.7` and report the `zzz-phonon-31m` registry
+  backend. Standard precompiled Flutter binaries continue to omit this
+  optional backend.
+
+## 0.12.0
+
+* Added: custom native builds with `tts-zzz` can load converted Phonon GGUF
+  bundles through `ZzzPhonon` and receive audio through the existing run APIs.
+  Omitted voices and temperature `0` select the GGUF bundle defaults. Standard
+  precompiled Flutter binaries continue to omit this optional backend.
+* Changed: text-embedding models retain their ONNX session between calls.
+  Model metadata can enable tokenizer special tokens and `L2Normalize`,
+  including for EmbeddingGemma 2 text embeddings. The Dart API is unchanged.
+* Changed: choice-scoring models are available in Rust; language bindings
+  reject these bundles at load with an unsupported-capability error.
+
+## 0.11.0
+
+* Changed: `XybridModelLoader.fromRegistrySpeculative` asks the registry
+  before serving from the cloud, and speculates only for a chat model served
+  as a direct GGUF download. Other models, including `.xyb` bundles such as
+  `qwen3.5-0.8b`, download and load normally. An uncached speculative load now
+  fails when the registry is unreachable. `willSpeculate` still reads only the
+  local cache; `XybridModel.isCloudServing` reports the outcome.
+* Changed: a run, pipeline run or stream whose output `XybridResult` has no
+  field for fails with an `Unsupported model capability:` error, instead of
+  returning `success: true` with text, audio and embedding all empty. No
+  shipped model produces such an output, so existing results are unchanged.
+* Fixed: `runStreaming` and `runStreamingWithFallback` ignored an error that
+  arrived after the final token, so a run that failed once generation stopped
+  looked like a successful stop. They now end the stream with the error token.
+* Fixed: registry requests and telemetry say `flutter` on every platform.
+  On iOS, macOS, Linux and Windows without an API key they said `rust`.
+* Fixed: a llama.cpp run stopped on one of its first tokens, by a cancel,
+  memory or thermal pressure, or cloud fallback, no longer fails with an
+  unrelated native error. `runStreamingWithFallback` now reaches the cloud
+  when it stops that early.
+
+## 0.10.1
+
+* Fixed: llama.cpp inference on the iOS Simulator uses the CPU to avoid
+  invalid special-token output. Physical iOS devices continue to use Metal.
+
+## 0.10.0
+
+Stable release of the Dart changes in 0.10.0-rc1, including model-cache
+management and byte-level download progress. See the rc1 entry below for the
+full list.
+
 * Fixed: a download that loses the network part-way (Wi-Fi to cellular, a
   lift, a tunnel) waits up to two minutes for it to return and resumes, instead
   of failing about seven seconds into the outage.

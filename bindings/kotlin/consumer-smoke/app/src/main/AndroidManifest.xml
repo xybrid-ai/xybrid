@@ -1,2 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- SpeechDeviceTest downloads phonon-31m-en from the registry. The AAR
+         declares no permissions, and instrumentation runs in this app's
+         process, so the app under test must ask for network access. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

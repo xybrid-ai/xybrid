@@ -1,0 +1,203 @@
+{
+  "description": "Qwen3.5-0.8B label-token reference for cases/labels.json: Hugging Face apply_chat_template with no template keyword arguments, then one float32 CPU forward pass. logsumexp, scores and label_mass are computed in float64 from the float32 final-position logits.",
+  "provenance": {
+    "sources": {
+      "qwen3.5-0.8b": "2fc06364715b967f1860aea9cf38778875588b17"
+    },
+    "generator": "tools/conformance/gen_label_goldens.py",
+    "environment": "labels",
+    "requirements_sha256": "0e30abc9eb04e863a3898d125c82645478b90df603e08c0b3262233aaf32e0c4",
+    "cases_sha256": "b4e3b9e17e9f35b24391472b67cb391d9b982538d8a43270a7460f36b90092fa",
+    "template_sha256": "273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80",
+    "inputs": [
+      {
+        "source": "qwen3.5-0.8b",
+        "file": "chat_template.jinja",
+        "sha256": "273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80"
+      },
+      {
+        "source": "qwen3.5-0.8b",
+        "file": "config.json",
+        "sha256": "b90b86f35c8e6925ef74ee04d0e758f0a845c83a42089ad82bbaa948de9b4204"
+      },
+      {
+        "source": "qwen3.5-0.8b",
+        "file": "merges.txt",
+        "sha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d"
+      },
+      {
+        "source": "qwen3.5-0.8b",
+        "file": "model.safetensors-00001-of-00001.safetensors",
+        "sha256": "04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696"
+      },
+      {
+        "source": "qwen3.5-0.8b",
+        "file": "model.safetensors.index.json",
+        "sha256": "d8a08838a613b025eb7952ed9db11696213e57e76a375661ef5c12f9dd5dcf4e"
+      },
+      {
+        "source": "qwen3.5-0.8b",
+        "file": "tokenizer.json",
+        "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"
+      },
+      {
+        "source": "qwen3.5-0.8b",
+        "file": "tokenizer_config.json",
+        "sha256": "49e2b6e395f959f077f1e992b338919c0d4a9732fc6e613995e06557f843500c"
+      },
+      {
+        "source": "qwen3.5-0.8b",
+        "file": "vocab.json",
+        "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003"
+      }
+    ],
+    "loading": {
+      "model_class": "Qwen3_5ForCausalLM",
+      "missing_keys": 0,
+      "unexpected_keys": 0,
+      "mismatched_keys": 0,
+      "tied_embeddings": true,
+      "vocab_size": 248320
+    },
+    "generation_prompt": "add_generation_prompt=True, no enable_thinking",
+    "numerics": {
+      "dtype": "float32",
+      "device": "cpu",
+      "torch_threads": 1,
+      "deterministic_algorithms": true,
+      "mode": "eval, no_grad"
+    },
+    "versions": {
+      "torch": "2.14.0",
+      "transformers": "5.17.0",
+      "tokenizers": "0.23.2",
+      "jinja2": "3.1.6"
+    }
+  },
+  "cases": [
+    {
+      "id": "forms-phone",
+      "messages": [
+        {
+          "role": "user",
+          "content": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Edit \"Phone number\" value=\"\"\n\nOptions:\nA. fill Name: Jane Doe\nB. fill Tel: (503) 555-0142\nC. fill DOB: 03/14/1987\nD. fill Email: jane.doe@example.invalid\nE. check\nF. click\nG. skip\n\nAnswer with a single letter."
+        }
+      ],
+      "rendered": "<|im_start|>user\nTASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Edit \"Phone number\" value=\"\"\n\nOptions:\nA. fill Name: Jane Doe\nB. fill Tel: (503) 555-0142\nC. fill DOB: 03/14/1987\nD. fill Email: jane.doe@example.invalid\nE. check\nF. click\nG. skip\n\nAnswer with a single letter.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+      "rendered_sha256": "d4dfe1df1c7027d7233ad870ccfbfd3bf64d5bc3731da13732a090209a0b6b98",
+      "token_ids": [248045, 846, 198, 63593, 4990, 279, 1304, 494, 279, 2128, 11, 1179, 9042, 198, 10501, 4634, 18574, 37926, 471, 1478, 27982, 23741, 198, 88591, 8081, 328, 6723, 1324, 1, 869, 8147, 271, 3670, 25, 198, 32, 13, 4990, 3855, 25, 20817, 47956, 198, 33, 13, 4990, 22125, 25, 318, 20, 15, 18, 8, 220, 20, 20, 20, 12, 15, 16, 19, 17, 198, 34, 13, 4990, 9043, 33, 25, 220, 15, 18, 14, 16, 19, 14, 16, 24, 23, 22, 198, 35, 13, 4990, 8041, 25, 95201, 920, 4493, 34314, 53852, 198, 36, 13, 1716, 198, 37, 13, 4066, 198, 38, 13, 10390, 271, 15666, 440, 264, 3074, 6321, 13, 248046, 198, 248045, 74455, 198, 248068, 271, 248069, 271],
+      "labels": ["A", "B", "C", "D", "E", "F", "G"],
+      "label_ids": [32, 33, 34, 35, 36, 37, 38],
+      "label_logits": [23.67613983154297, 23.84862518310547, 22.384990692138672, 21.504261016845703, 22.656160354614258, 22.807374954223633, 22.48068618774414],
+      "logsumexp": 24.985734171645298,
+      "scores": [0.2732381769812517, 0.3246764699852199, 0.0751281046590716, 0.031139124258335486, 0.09853032620571411, 0.11461503379944513, 0.08267276411096212],
+      "label_mass": 0.9878909922000425,
+      "best": 1,
+      "margin": 0.05143829300396818
+    },
+    {
+      "id": "binary",
+      "messages": [
+        {
+          "role": "user",
+          "content": "The button below submits the form. Should the agent click it now that every required field is filled?\n\nOptions:\nA. Yes, click it\nB. No, wait\n\nAnswer with a single letter."
+        }
+      ],
+      "rendered": "<|im_start|>user\nThe button below submits the form. Should the agent click it now that every required field is filled?\n\nOptions:\nA. Yes, click it\nB. No, wait\n\nAnswer with a single letter.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+      "rendered_sha256": "0167791eca04421a0ae26d9bdbd3d4ef3734daeff0f1940be10c4d032a0d26e2",
+      "token_ids": [248045, 846, 198, 760, 3037, 3559, 90790, 279, 1304, 13, 11910, 279, 8057, 4066, 424, 1381, 421, 1396, 2483, 2002, 369, 9896, 30, 271, 3670, 25, 198, 32, 13, 7179, 11, 4066, 424, 198, 33, 13, 2233, 11, 3655, 271, 15666, 440, 264, 3074, 6321, 13, 248046, 198, 248045, 74455, 198, 248068, 271, 248069, 271],
+      "labels": ["A", "B"],
+      "label_ids": [32, 33],
+      "label_logits": [25.89680290222168, 26.38441276550293],
+      "logsumexp": 26.872655896006513,
+      "scores": [0.38045678420258255, 0.6195432157974174],
+      "label_mass": 0.990574392839517,
+      "best": 1,
+      "margin": 0.2390864315948349
+    },
+    {
+      "id": "system-prompt",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful form-filling assistant. Answer with the letter of the single best action."
+        },
+        {
+          "role": "user",
+          "content": "FORM Northwind Clinic - New Patient Registration\nELEMENT CheckBox \"I agree to the privacy policy\" unchecked\n\nOptions:\nA. check the box\nB. leave it unchecked\nC. click submit\n\nAnswer with a single letter."
+        }
+      ],
+      "rendered": "<|im_start|>system\nYou are a careful form-filling assistant. Answer with the letter of the single best action.<|im_end|>\n<|im_start|>user\nFORM Northwind Clinic - New Patient Registration\nELEMENT CheckBox \"I agree to the privacy policy\" unchecked\n\nOptions:\nA. check the box\nB. leave it unchecked\nC. click submit\n\nAnswer with a single letter.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+      "rendered_sha256": "f092261ce115504bbd47a2914db54b4ba94916efb20cbdb5d997fcf49c1d1570",
+      "token_ids": [248045, 8678, 198, 2523, 513, 264, 16097, 1304, 2149, 9121, 17313, 13, 21134, 440, 279, 6321, 314, 279, 3074, 1786, 1852, 13, 248046, 198, 248045, 846, 198, 10501, 4634, 18574, 37926, 471, 1478, 27982, 23741, 198, 88591, 43851, 328, 40, 7268, 310, 279, 11992, 4687, 1, 51404, 271, 3670, 25, 198, 32, 13, 1716, 279, 3618, 198, 33, 13, 5106, 424, 51404, 198, 34, 13, 4066, 9042, 271, 15666, 440, 264, 3074, 6321, 13, 248046, 198, 248045, 74455, 198, 248068, 271, 248069, 271],
+      "labels": ["A", "B", "C"],
+      "label_ids": [32, 33, 34],
+      "label_logits": [25.537988662719727, 25.50292205810547, 23.317949295043945],
+      "logsumexp": 26.28105940806901,
+      "scores": [0.4821261521450487, 0.4655126175097867, 0.0523612303451645],
+      "label_mass": 0.9865697291761282,
+      "best": 0,
+      "margin": 0.01661353463526205
+    },
+    {
+      "id": "multilingual",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Formulaire : « Numéro de téléphone » — 電話番号を入力してください 📞\n\nOptions:\nA. remplir Tél. : 06 12 34 56 78\nB. remplir Courriel : élodie@example.invalid\nC. ignorer ce champ ✓\n\nAnswer with a single letter."
+        }
+      ],
+      "rendered": "<|im_start|>user\nFormulaire : « Numéro de téléphone » — 電話番号を入力してください 📞\n\nOptions:\nA. remplir Tél. : 06 12 34 56 78\nB. remplir Courriel : élodie@example.invalid\nC. ignorer ce champ ✓\n\nAnswer with a single letter.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+      "rendered_sha256": "2f0f0e29635374d3cddb22df04dac225ddaf18f6404724e003a4f27b526cac9f",
+      "token_ids": [248045, 846, 198, 50903, 540, 535, 12129, 228236, 401, 95486, 7925, 1892, 220, 247887, 220531, 172808, 10838, 241, 252, 271, 3670, 25, 198, 32, 13, 216018, 194243, 13, 535, 220, 15, 21, 220, 16, 17, 220, 18, 19, 220, 20, 21, 220, 22, 23, 198, 33, 13, 216018, 6048, 21358, 535, 30865, 82399, 34314, 53852, 198, 34, 13, 5056, 14397, 3633, 33396, 50615, 271, 15666, 440, 264, 3074, 6321, 13, 248046, 198, 248045, 74455, 198, 248068, 271, 248069, 271],
+      "labels": ["A", "B", "C"],
+      "label_ids": [32, 33, 34],
+      "label_logits": [21.040203094482422, 20.477720260620117, 22.414043426513672],
+      "logsumexp": 22.758915407803016,
+      "scores": [0.18115005393481132, 0.10321796126966376, 0.7156319847955249],
+      "label_mass": 0.9897699373098582,
+      "best": 2,
+      "margin": 0.5344819308607136
+    },
+    {
+      "id": "max-26",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Which city is the capital of Australia?\n\nOptions:\nA. Sydney\nB. Melbourne\nC. Canberra\nD. Perth\nE. Adelaide\nF. Brisbane\nG. Hobart\nH. Darwin\nI. Auckland\nJ. Wellington\nK. Toronto\nL. Ottawa\nM. Vancouver\nN. Montreal\nO. Chicago\nP. Boston\nQ. Denver\nR. Seattle\nS. Lisbon\nT. Madrid\nU. Dublin\nV. Oslo\nW. Vienna\nX. Prague\nY. Warsaw\nZ. Athens\n\nAnswer with a single letter."
+        }
+      ],
+      "rendered": "<|im_start|>user\nWhich city is the capital of Australia?\n\nOptions:\nA. Sydney\nB. Melbourne\nC. Canberra\nD. Perth\nE. Adelaide\nF. Brisbane\nG. Hobart\nH. Darwin\nI. Auckland\nJ. Wellington\nK. Toronto\nL. Ottawa\nM. Vancouver\nN. Montreal\nO. Chicago\nP. Boston\nQ. Denver\nR. Seattle\nS. Lisbon\nT. Madrid\nU. Dublin\nV. Oslo\nW. Vienna\nX. Prague\nY. Warsaw\nZ. Athens\n\nAnswer with a single letter.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+      "rendered_sha256": "b13efd033a13d7c8e0fce7bbefab8ce6cda50843dd1d98b325dd685849241b19",
+      "token_ids": [248045, 846, 198, 22365, 3177, 369, 279, 6511, 314, 8071, 30, 271, 3670, 25, 198, 32, 13, 20620, 198, 33, 13, 25592, 198, 34, 13, 66463, 198, 35, 13, 47780, 198, 36, 13, 47547, 198, 37, 13, 44693, 198, 38, 13, 35558, 461, 198, 39, 13, 42905, 198, 40, 13, 51457, 198, 41, 13, 54124, 198, 42, 13, 14211, 198, 43, 13, 31106, 198, 44, 13, 21875, 198, 45, 13, 28551, 198, 46, 13, 10244, 198, 47, 13, 9893, 198, 48, 13, 21431, 198, 49, 13, 15875, 198, 50, 13, 77916, 198, 51, 13, 23327, 198, 52, 13, 31785, 198, 53, 13, 55918, 198, 54, 13, 44745, 198, 55, 13, 65019, 198, 56, 13, 69724, 198, 57, 13, 44299, 271, 15666, 440, 264, 3074, 6321, 13, 248046, 198, 248045, 74455, 198, 248068, 271, 248069, 271],
+      "labels": ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"],
+      "label_ids": [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57],
+      "label_logits": [22.956357955932617, 19.499208450317383, 26.8594970703125, 18.515621185302734, 18.708614349365234, 16.80646324157715, 17.48150634765625, 17.320371627807617, 15.761978149414062, 19.364582061767578, 17.46489715576172, 15.934414863586426, 17.052406311035156, 15.631865501403809, 17.68773078918457, 16.70488929748535, 15.123611450195312, 16.523235321044922, 15.87462043762207, 17.55656623840332, 15.114311218261719, 14.862957954406738, 18.268314361572266, 15.77744197845459, 17.0760498046875, 18.465980529785156],
+      "logsumexp": 26.885178107447476,
+      "scores": [0.01972344358832907, 0.0006216726894281085, 0.9774499343230243, 0.00023248517660014027, 0.0002819753428741552, 4.2084037949883225e-05, 8.265800128108503e-05, 7.03566220321867e-05, 1.4808234786795277e-05, 0.0005433682913120902, 8.12964570509695e-05, 1.7595094554842414e-05, 5.3818194200838725e-05, 1.300157862182659e-05, 0.00010158908216030977, 3.801932483005574e-05, 7.821033690668116e-06, 3.1703928548471116e-05, 1.6573842818379258e-05, 8.910108569547497e-05, 7.748633454727574e-06, 6.026480862843968e-06, 0.00018154792032861662, 1.503900650645509e-05, 5.510580617428112e-05, 0.00022122622288326874],
+      "label_mass": 0.9971312920122528,
+      "best": 2,
+      "margin": 0.9577264907346952
+    },
+    {
+      "id": "near-tie-season",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Which season do you prefer?\n\nOptions:\nA. autumn\nB. spring\n\nAnswer with a single letter."
+        }
+      ],
+      "rendered": "<|im_start|>user\nWhich season do you prefer?\n\nOptions:\nA. autumn\nB. spring\n\nAnswer with a single letter.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+      "rendered_sha256": "2ff0d5fd2142162bdac2ac5357d07dcc134820a524a46cff377fb11e2e45003f",
+      "token_ids": [248045, 846, 198, 22365, 3098, 635, 488, 10386, 30, 271, 3670, 25, 198, 32, 13, 40297, 198, 33, 13, 10151, 271, 15666, 440, 264, 3074, 6321, 13, 248046, 198, 248045, 74455, 198, 248068, 271, 248069, 271],
+      "labels": ["A", "B"],
+      "label_ids": [32, 33],
+      "label_logits": [24.116792678833008, 24.02759552001953],
+      "logsumexp": 24.777148938459952,
+      "scores": [0.5222845167803074, 0.4777154832196926],
+      "label_mass": 0.9892447840668932,
+      "best": 0,
+      "margin": 0.04456903356061481
+    }
+  ]
+}

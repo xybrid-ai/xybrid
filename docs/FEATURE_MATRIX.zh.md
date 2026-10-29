@@ -105,7 +105,7 @@ Candle **不在**任何预设中。在同一 Android 代理上它约占 1.3 MiB�
 | 预设 | 目标平台 | 启用的 Core 特性 | VLM 默认 | ASR 默认 | 理由 |
 |--------|-----------------|----------------------|-------------|-------------|-----------|
 | **platform-android** | Android（所有 ABI） | `ort-dynamic`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 用于 AAR 分发的动态 ORT 加载；Whisper ASR 由 whisper.cpp 承担，复用 llama.cpp 已链接的 ggml（strip 后约 0.2 MiB）；llama.cpp 具备运行时 SIMD 检测；mistral.rs 在不具备 ARMv8.2-A FP16 的设备上会导致 SIGILL |
-| **platform-ios** | iOS（arm64、模拟器） | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 静态 ORT 链接；用于 ANE 加速的 CoreML；经由 ggml 使用 Metal |
+| **platform-ios** | iOS（arm64、模拟器） | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 静态 ORT 链接；用于 ANE 加速的 CoreML；llama.cpp 在实体设备上使用 Metal，在模拟器上使用 CPU |
 | **platform-macos** | macOS（arm64、x86_64） | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 与 iOS 相同 — 统一的 Apple 平台特性 |
 | **platform-desktop** | Linux、Windows | `ort-download`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 静态 ORT 链接；LLM 推理用 llama.cpp，ASR 用 whisper.cpp（所有平台统一） |
 

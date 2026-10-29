@@ -6,11 +6,14 @@ Build automation and scripts for the xybrid project.
 
 ```
 tools/
+├── conformance/    # Choice-scoring conformance inputs: exports, goldens,
+│                   #   pinned environments (see conformance/README.md)
 ├── scripts/        # Build, release, and codegen helpers (see below)
 │   ├── natives-*.sh          # Prebuilt llama.cpp slices: fingerprint, push,
 │   │                         #   pull, manifest, anonymous-pull verification
 │   ├── gen_*_bolt*.py        # Generate the Kotlin / Python / Unity C# bolt
 │   │                         #   bindings (CI byte-compares with --check)
+│   ├── check_choice_provenance.py  # Verify the conformance fixture pins
 │   ├── version-sync.sh       # Read or set the version across every manifest
 │   ├── api-contract-check.sh # Soft-warning public SDK signature check
 │   ├── build-xcframework.sh  # Build XCFramework for Apple platforms
@@ -75,7 +78,12 @@ cargo xtask build-ffi --target x86_64-unknown-linux-gnu --release --deploy-unity
 **Options:**
 - `--target <triple>` - Target triple
 - `--release` - Build in release mode
-- `--deploy-unity` - Copy the built library into `bindings/unity/Runtime/Plugins/<Platform>/`
+- `--deploy-unity` - Copy the built library into `bindings/unity/Runtime/Plugins/<Platform>/`.
+  Refused for Android targets: the Unity Android library links libc++
+  statically, which only the Bazel build does. Build
+  `//crates/xybrid-bolt:xybrid_bolt_cdylib` with `--config=android-arm64`,
+  `android-armv7` or `android-x86_64` (plus `--config=remote` off a Linux x86_64 host)
+  and stage it with `cargo xtask deploy-unity-native`.
 
 **Outputs:**
 - Dynamic library: `target/<target>/<profile>/libxybrid_bolt.{dylib,so,dll}`
@@ -100,8 +108,8 @@ The C header and Swift wrapper are committed (`bindings/apple/include/`,
 
 `build-android` was removed: it was a thin proxy over Bazel. Build the
 feature-complete 3-ABI AAR (text + candle voice + mtmd vision) directly and,
-if you need loose `.so` files for Gradle, stage its jniLibs the way CI does
-(`release-prep.yml`, `test-ci.yml`, `build-react-native.yml`):
+if you need loose `.so` files for Gradle, stage its jniLibs the way the
+speech-free CI lanes do (`test-ci.yml`, `build-react-native.yml`):
 
 ```bash
 bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
@@ -109,6 +117,16 @@ rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
 unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
 cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 ```
+
+That AAR has no speech. Releases build it with `--//:tts_zzz=true`, which
+links the private Phonon/Kitten TTS 2 engine into arm64-v8a and adds the
+engine's notices under `assets/xybrid/zzz/`, and stage it with
+`tools/scripts/verify_zzz_android.py`: `pack-dist` writes the release zip
+(`release-prep.yml`), `stage-gradle` puts its natives into
+`bindings/kotlin/libs/` and the notices into `src/main/assets/xybrid/zzz/`
+(`release-publish.yml`), and `aar --speech` gates the result. That path needs
+the staged engine (see `crates/zzz-sys/README.md`); `test-zzz-android.yml`
+rehearses it on `master`.
 
 The NDK is a pinned Bazel download — no machine setup. Each
 `libxybrid_bolt.so` is a clean one-link output (16 KB-aligned,

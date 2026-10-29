@@ -1,0 +1,12 @@
+# Chat templates in the choice fixtures are pinned by SHA-256 and rendered
+# byte for byte in tests, so check them out exactly as committed: no CRLF
+# conversion under core.autocrlf on Windows.
+integration-tests/fixtures/choice/templates/** -text
+
+# build.rs compares the raw bytes of these three files with the hashes pinned
+# in natives-manifest.txt before it downloads a prebuilt llama.cpp slice. A
+# CRLF checkout never matches, so Windows checkouts always built llama.cpp
+# from source.
+crates/llama-cpp-sys/build.rs -text
+crates/llama-cpp-sys/wrapper.cpp -text
+crates/llama-cpp-sys/wrapper.h -text

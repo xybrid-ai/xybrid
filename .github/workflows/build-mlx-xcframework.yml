@@ -1,4 +1,5 @@
-name: Build MLX XCFramework
+# Purpose: Build the pinned MLX XCFramework for validation and publish it on mlx-v* tags.
+name: "Artifacts: MLX XCFramework"
 
 # Builds a fat mlx.xcframework from upstream ml-explore/mlx and ml-explore/mlx-c
 # sources. Three slices are produced (iphoneos-arm64, iphonesimulator-arm64,

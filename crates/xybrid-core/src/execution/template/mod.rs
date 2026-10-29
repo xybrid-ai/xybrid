@@ -5,9 +5,11 @@
 //! | Module | Contents |
 //! |--------|----------|
 //! | [`metadata`] | `ExecutionTemplate`, `ModelMetadata`, `PipelineStage`, `ExecutionMode` |
+//! | [`choice`] | `ChoiceScorerSpec` and its byte-field encoding |
 //! | [`steps`] | `PreprocessingStep`, `PostprocessingStep`, helper types |
 //! | [`voice`] | `VoiceConfig`, `VoiceFormat`, `VoiceInfo`, `VoiceLoader` |
 
+mod choice;
 mod metadata;
 mod steps;
 mod voice;
@@ -21,6 +23,9 @@ pub use metadata::{
     ExecutionTemplate, GenerationParams, ModelMetadata, PipelineStage, RefinementSchedule,
 };
 pub use metadata::{VisionEncoderConfig, VisionPreprocessingPreset};
+
+// Re-export choice-scorer spec types
+pub use choice::{ByteFieldSpec, ByteOverflow, ChoiceScorerSpec, OnnxByteOptionScorerSpec};
 
 // Re-export step types
 pub use steps::{

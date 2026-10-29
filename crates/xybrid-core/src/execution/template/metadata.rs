@@ -2,6 +2,7 @@
 //!
 //! This module contains the core types that define how models are executed.
 
+use super::choice::ChoiceScorerSpec;
 use super::steps::{ImageNormalizePreset, ImageResizeMode, ImageTensorLayout, InterpolationMethod};
 use super::steps::{PostprocessingStep, PreprocessingStep};
 use super::voice::{VoiceConfig, VoiceInfo};
@@ -19,7 +20,7 @@ use schemars::JsonSchema;
 /// Main execution template enum - defines how a model should be executed.
 ///
 /// Variants are named by **format**, not by runtime implementation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "type")]
 pub enum ExecutionTemplate {
@@ -59,7 +60,7 @@ pub enum ExecutionTemplate {
         model_file: String,
     },
 
-    /// LiteRT-LM model execution (browser SDK / @xybrid/web only)
+    /// Legacy LiteRT-LM metadata; retained for serialization compatibility.
     LiteRtLm {
         /// Path to the .litertlm model file (relative to bundle root)
         model_file: String,
@@ -107,6 +108,14 @@ pub enum ExecutionTemplate {
     /// implementation. Both transcribe; they differ in weight format (GGML
     /// quantized vs F32 safetensors) and therefore in cost, which is the whole
     /// reason this variant exists.
+    ///
+    /// A bundle may also ship whisper.cpp's Core ML encoder beside the model
+    /// file: `model_file` with its extension and any `-qX_Y` tag replaced by
+    /// `-encoder.mlmodelc` (`ggml-base.en-q5_1.bin` →
+    /// `ggml-base.en-encoder.mlmodelc`). On iOS 16 and later, in builds with
+    /// the `coreml` feature (the `platform-ios` preset), the encoder then runs
+    /// through Core ML and the decoder stays on ggml. Older iOS versions and
+    /// other platforms ignore the file and keep the ggml encoder.
     GgmlWhisper {
         /// Path to the GGML model file (relative to bundle root), e.g.
         /// `ggml-base.en-q5_1.bin`.
@@ -125,6 +134,10 @@ pub enum ExecutionTemplate {
         /// window and 2.8x faster than full context; 250 degenerates. So a
         /// model opts in here after its own quality check rather than
         /// inheriting a fast-but-fragile default.
+        ///
+        /// Leave it at `0` in a bundle that ships a Core ML encoder: that
+        /// encoder only takes the full window, so a truncated context is
+        /// rejected while it is active.
         #[serde(default)]
         audio_ctx: u32,
 
@@ -150,6 +163,103 @@ pub enum ExecutionTemplate {
         /// Per-model generation sampling parameters.
         #[serde(default)]
         generation_params: Option<GenerationParams>,
+    },
+
+    /// Kitten TTS 2 execution through the pinned combined zzz CPU engine and
+    /// quietly staged `libzzz_embed.a` (see `crates/zzz-sys`). Model
+    /// weights and both voice JSONs are bundle files resolved like other
+    /// template paths.
+    ///
+    /// Distinct from the ONNX `KittenTTS-Nano` path: the zzz engine links
+    /// the pinned engine binary (feature `tts-zzz`) and takes the four
+    /// assets directly, without phonemize preprocessing steps.
+    ZzzEmbed {
+        /// Language (speech-token) GGUF, relative to bundle root.
+        model_file: String,
+
+        /// S3 waveform-decoder GGUF, relative to bundle root.
+        #[serde(default)]
+        decoder_file: String,
+
+        /// Language-model voice JSON, relative to bundle root.
+        #[serde(default)]
+        language_voice_file: String,
+
+        /// S3 decoder voice JSON (`zzz.kitten_s3.voice.v1`), relative to
+        /// bundle root.
+        #[serde(default)]
+        decoder_voice_file: String,
+
+        /// Forced language; the engine's PoC accepts prepared English only,
+        /// so absent (its default) is also the correct value there.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
+
+        /// Threads (0 = engine default of 4; explicit range 1..=64).
+        #[serde(default)]
+        threads: u32,
+
+        /// Per-chunk speech token cap (0 = available LM-window room,
+        /// subject to the split-chunk runaway guard; explicit 1..=1023).
+        #[serde(default)]
+        max_tokens: u32,
+
+        /// Waveform-stage seed; 0 is valid.
+        #[serde(default)]
+        seed: u64,
+
+        /// Emit each sentence separately; default engine packing stays enabled otherwise.
+        #[serde(default)]
+        sentence_chunks: bool,
+
+        /// Accelerate waveform matrix products on macOS only.
+        #[serde(default)]
+        accelerate: bool,
+    },
+
+    /// Phonon speech from one GGUF using the opt-in zzz CPU engine.
+    ///
+    /// Voices are embedded in the GGUF. Omitted options use native defaults;
+    /// temperature zero selects the loaded bundle's sampling default.
+    ZzzPhonon {
+        /// GGUF path relative to the model bundle.
+        model_file: String,
+        /// Bundled voice name; absent lets the engine select its default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        voice: Option<String>,
+        /// Language code; absent selects the engine's English default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
+        /// Positive per-chunk frame capacity; absent uses the engine default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
+        max_frames_per_chunk: Option<u32>,
+        /// Positive text-token capacity; absent uses the engine default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
+        max_chunk_tokens: Option<u32>,
+        /// Nonnegative finite sampling temperature; zero selects the bundle default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(range(min = 0)))]
+        temperature: Option<f32>,
+        /// Utterance seed; zero is valid and absence uses the engine default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seed: Option<u64>,
+    },
+
+    /// A decision model: scores one context against a closed list of
+    /// candidates in a single forward pass, without generating text.
+    ///
+    /// Accepts only an
+    /// [`EnvelopeKind::ChoiceRequest`](crate::ir::EnvelopeKind::ChoiceRequest)
+    /// through a batch run and answers with
+    /// [`EnvelopeKind::ChoiceScores`](crate::ir::EnvelopeKind::ChoiceScores).
+    /// The scores are relative preferences among the offered candidates, not
+    /// calibrated probabilities of being correct.
+    ChoiceScorer {
+        /// How the scorer encodes the request and which output holds the
+        /// candidate logits.
+        scorer: ChoiceScorerSpec,
     },
 }
 
@@ -177,7 +287,7 @@ pub struct GenerationParams {
 // ============================================================================
 
 /// A single stage in a pipeline execution
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct PipelineStage {
     /// Stage name (e.g., "encoder", "decoder", "vocoder")
@@ -206,7 +316,7 @@ pub struct PipelineStage {
 // ============================================================================
 
 /// Execution mode for a pipeline stage
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "type")]
 #[derive(Default)]
@@ -247,7 +357,7 @@ pub enum ExecutionMode {
 }
 
 /// Schedule for iterative refinement (diffusion models)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "type")]
 #[derive(Default)]
@@ -627,6 +737,7 @@ pub fn stage_kind_from_task(task: &str) -> Option<&'static str> {
         "embedding" | "text-embedding" | "text_embedding" | "sentence-embedding"
         | "sentence_embedding" => Some("embed"),
         "audio-classification" | "vad" => Some("audio"),
+        "decision" => Some("decision"),
         _ => None,
     }
 }
@@ -842,6 +953,14 @@ pub fn backend_label_from_template(
         // engine to hint at — so this is reported unconditionally rather than
         // deferring to the hint like the GGUF arms above.
         ExecutionTemplate::GgmlWhisper { .. } => Some("whispercpp"),
+        // The template fixes the runtime to the pinned zzz engine slice; no
+        // hint participates.
+        ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. } => Some("zzz"),
+        // The only registered scorer kind is an ONNX byte scorer; a new kind
+        // states its own runtime here.
+        ExecutionTemplate::ChoiceScorer { scorer } => match scorer {
+            ChoiceScorerSpec::OnnxByteOptionScorer(_) => Some("ort"),
+        },
         ExecutionTemplate::CoreMl { .. }
         | ExecutionTemplate::TfLite { .. }
         | ExecutionTemplate::LiteRtLm { .. }
@@ -910,7 +1029,17 @@ pub fn quantization_label_from_metadata(metadata: &ModelMetadata) -> Option<Stri
         ExecutionTemplate::Gguf { model_file, .. } => Some(model_file),
         ExecutionTemplate::VisionLanguage { model_file, .. } => Some(model_file),
         ExecutionTemplate::LiteRtLm { model_file, .. } => Some(model_file),
-        _ => None,
+        // Only GGUF-style file names encode a quantization; a scorer declares
+        // its own in the bundle metadata.
+        ExecutionTemplate::Onnx { .. }
+        | ExecutionTemplate::SafeTensors { .. }
+        | ExecutionTemplate::CoreMl { .. }
+        | ExecutionTemplate::TfLite { .. }
+        | ExecutionTemplate::ModelGraph { .. }
+        | ExecutionTemplate::GgmlWhisper { .. }
+        | ExecutionTemplate::ZzzEmbed { .. }
+        | ExecutionTemplate::ZzzPhonon { .. }
+        | ExecutionTemplate::ChoiceScorer { .. } => None,
     };
     if let Some(model_file) = model_file {
         return infer_quantization_from_gguf_filename(model_file);
@@ -993,6 +1122,13 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
                 "cpu"
             }
         }
+        ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. } => {
+            // The pinned zzz slice is CPU-only by profile (the Metal LLM
+            // remains excluded), so the swim-lane colour is fixed.
+            "cpu"
+        }
+        // ONNX Runtime on its CPU provider, like the plain ONNX arm.
+        ExecutionTemplate::ChoiceScorer { .. } => "cpu",
         ExecutionTemplate::Onnx { .. }
         | ExecutionTemplate::TfLite { .. }
         | ExecutionTemplate::LiteRtLm { .. }
@@ -1025,6 +1161,122 @@ mod tests {
     #[test]
     fn ggml_whisper_uses_gpu_span_on_apple_silicon_macos() {
         assert_eq!(span_kind_from_template(&ggml_whisper_template()), "gpu");
+    }
+
+    fn zzz_embed_template() -> ExecutionTemplate {
+        ExecutionTemplate::ZzzEmbed {
+            model_file: "kitten-tts-2-q2_0.gguf".into(),
+            decoder_file: "kitten-s3-meanflow-f32.gguf".into(),
+            language_voice_file: "voices/bruno-lm.json".into(),
+            decoder_voice_file: "voices/bruno-s3.json".into(),
+            language: Some("en".into()),
+            threads: 4,
+            max_tokens: 128,
+            seed: 0,
+            sentence_chunks: false,
+            accelerate: false,
+        }
+    }
+
+    #[test]
+    fn zzz_embed_template_labels_cpu_pinned_zzz_runtime() {
+        // The template fixes the runtime label; no backend hint participates.
+        assert_eq!(
+            backend_label_from_template(&zzz_embed_template(), Some("llamacpp")),
+            Some("zzz")
+        );
+        assert_eq!(span_kind_from_template(&zzz_embed_template()), "cpu");
+    }
+
+    #[test]
+    fn zzz_embed_template_round_trips_serde() {
+        let original = zzz_embed_template();
+        let serialized = serde_json::to_string(&original).expect("serialize");
+        let round_tripped: ExecutionTemplate =
+            serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(original, round_tripped);
+    }
+
+    fn forms_scorer_json() -> serde_json::Value {
+        // The runtime CARGO_MANIFEST_DIR, not `env!`: under Bazel the test
+        // runs in a sandbox where the compile-time path points nowhere.
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let path = std::path::Path::new(&manifest_dir)
+            .join("../../integration-tests/fixtures/choice/specs/cua-s1-forms.json");
+        let spec: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        serde_json::json!({ "type": "ChoiceScorer", "scorer": spec })
+    }
+
+    #[test]
+    fn choice_scorer_template_round_trips_serde() {
+        let template: ExecutionTemplate = serde_json::from_value(forms_scorer_json()).unwrap();
+        let ExecutionTemplate::ChoiceScorer { scorer } = &template else {
+            panic!("expected a ChoiceScorer template, got {template:?}");
+        };
+        let fixed: Vec<&str> = scorer
+            .fixed_choices()
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(fixed, ["check", "click", "skip"]);
+        let serialized = serde_json::to_string(&template).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ExecutionTemplate>(&serialized).unwrap(),
+            template
+        );
+
+        assert_eq!(
+            backend_label_from_template(&template, Some("llamacpp")),
+            Some("ort")
+        );
+        assert_eq!(span_kind_from_template(&template), "cpu");
+        assert_eq!(stage_kind_from_task("decision"), Some("decision"));
+
+        // The spec itself refuses unknown fields.
+        let mut typo = forms_scorer_json();
+        typo["scorer"]["max_choice"] = 8.into();
+        assert!(serde_json::from_value::<ExecutionTemplate>(typo).is_err());
+    }
+
+    #[cfg(feature = "schema")]
+    #[test]
+    fn the_metadata_schema_describes_choice_scorers() {
+        let schema = serde_json::to_string(&schemars::schema_for!(ModelMetadata)).unwrap();
+        for name in ["ChoiceScorer", "OnnxByteOptionScorer", "fixed_choices"] {
+            assert!(schema.contains(name), "the schema is missing {name}");
+        }
+    }
+
+    #[test]
+    fn zzz_phonon_defaults_round_trip_without_kitten_assets() {
+        let template: ExecutionTemplate = serde_json::from_value(serde_json::json!({
+            "type":"ZzzPhonon", "model_file":"phonon.gguf"
+        }))
+        .unwrap();
+        assert!(matches!(
+            &template,
+            ExecutionTemplate::ZzzPhonon {
+                voice: None,
+                language: None,
+                temperature: None,
+                seed: None,
+                max_frames_per_chunk: None,
+                max_chunk_tokens: None,
+                ..
+            }
+        ));
+        assert_eq!(
+            backend_label_from_template(&template, Some("llamacpp")),
+            Some("zzz")
+        );
+        assert_eq!(span_kind_from_template(&template), "cpu");
+        assert_eq!(
+            serde_json::from_str::<ExecutionTemplate>(&serde_json::to_string(&template).unwrap())
+                .unwrap(),
+            template
+        );
     }
 
     #[cfg(not(all(
@@ -1148,6 +1400,39 @@ mod tests {
             std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
         let fixture_path = std::path::PathBuf::from(manifest_dir)
             .join("../../bindings/web/test/fixtures/rust-metadata-litertlm.json");
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(fixture_path).unwrap()).unwrap();
+
+        assert_eq!(serialized, fixture);
+    }
+
+    #[test]
+    fn test_gguf_serialization_matches_web_fixture() {
+        let metadata = ModelMetadata {
+            model_id: "browser-smollm2".to_string(),
+            version: "1".to_string(),
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 512,
+                generation_params: None,
+            },
+            preprocessing: Vec::new(),
+            postprocessing: Vec::new(),
+            files: vec!["model.gguf".to_string()],
+            vision_encoder: None,
+            description: None,
+            backend: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+        let serialized = serde_json::to_value(&metadata).unwrap();
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let fixture_path = std::path::PathBuf::from(manifest_dir)
+            .join("../../bindings/web/test/fixtures/rust-metadata-gguf.json");
         let fixture: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(fixture_path).unwrap()).unwrap();
 

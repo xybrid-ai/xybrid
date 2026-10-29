@@ -14,7 +14,7 @@ use crate::registry_client::{
     registry_format_for_auto_local_backend,
     registry_format_preference_for_backend_choice_with_registry_context,
     registry_format_preference_for_backend_choice_with_task, RegistryClient,
-    RegistryFormatPreference,
+    RegistryFormatPreference, ResolvedVariant,
 };
 use crate::result::{InferenceResult, OutputType};
 use crate::run_options::{
@@ -30,13 +30,17 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 use tokio_stream::wrappers::ReceiverStream;
 use xybrid_core::conversation::ConversationContext;
+use xybrid_core::execution::choice::{
+    ensure_no_choice_kinds, validate_choice_request, validate_scorer_spec, EntryPoint,
+};
+use xybrid_core::execution::template::backend_label_from_template;
 use xybrid_core::execution::template::{
     is_mlx_embedding_safetensors_metadata, is_mlx_llm_safetensors_metadata, stage_kind_from_task,
 };
 use xybrid_core::execution::{
     ExecutionTemplate, ModelMetadata, TemplateExecutor, VoiceConfig, VoiceInfo,
 };
-use xybrid_core::ir::Envelope;
+use xybrid_core::ir::{Choice, Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::authority::{
     ExecutionOutcome, LocalAuthority, OrchestrationAuthority, OutcomeCategory, PolicyOutcome,
     PolicyRequest, ResolvedTarget, SignalContext, StageContext,
@@ -385,6 +389,34 @@ impl xybrid_core::http::RetryableError for SdkError {
     }
 }
 
+/// A request any choice scorer accepts, to warm one up: a one-byte context
+/// and as many empty candidates as it takes to offer two alongside the fixed
+/// choices, under ids no fixed choice uses. Every spec allows at least two
+/// candidates and fields of at least one byte, so no limit can refuse it.
+fn choice_warmup_request(fixed: &[Choice]) -> Envelope {
+    let caller = (0..)
+        .map(|n| format!("warmup-{n}"))
+        .filter(|id| fixed.iter().all(|choice| &choice.id != id))
+        .take(2usize.saturating_sub(fixed.len()))
+        .map(|id| Choice::new(id, ""))
+        .collect();
+    Envelope::choice_request(Envelope::new(EnvelopeKind::Text(".".to_string())), caller)
+}
+
+/// Adds a choice scorer's decision fields to its `ModelComplete` data: the
+/// task, the backend and how many candidates were scored. Never their ids,
+/// texts or scores. Other models' data is left as it is.
+fn add_choice_telemetry(data: &mut serde_json::Value, metadata: &ModelMetadata, output: &Envelope) {
+    let EnvelopeKind::ChoiceScores(scores) = &output.kind else {
+        return;
+    };
+    data["task"] = "decision".into();
+    if let Some(backend) = backend_label_from_template(&metadata.execution_template, None) {
+        data["backend"] = backend.into();
+    }
+    data["choice_count"] = scores.entries.len().into();
+}
+
 fn streaming_execution_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
     match error {
         xybrid_core::runtime_adapter::AdapterError::AbortedForCloudFallback { reason } => {
@@ -411,6 +443,24 @@ fn streaming_pre_run_abort_error(
         };
     }
     SdkError::inference(format!("Execution aborted: {reason}"))
+}
+
+fn finish_tts_stream(
+    result: xybrid_core::runtime_adapter::AdapterResult<xybrid_core::execution::TtsStreamResult>,
+    stopped_reason: Option<crate::run_options::AbortReason>,
+    fallback_to_cloud: bool,
+    user_cancelled: bool,
+) -> SdkResult<xybrid_core::execution::TtsStreamResult> {
+    let summary = result.map_err(|e| sdk_execution_error("TTS streaming failed", e))?;
+    // A watcher may observe pressure after the backend has finished. Only a
+    // confirmed interruption can trigger fallback; completed/limited audio and
+    // backend failures retain their original result even if a late poll fired.
+    if summary.status == xybrid_core::execution::TtsStatus::Cancelled && !user_cancelled {
+        if let Some(reason) = stopped_reason {
+            return Err(streaming_pre_run_abort_error(reason, fallback_to_cloud));
+        }
+    }
+    Ok(summary)
 }
 
 /// Stamp the live-capture tag onto a telemetry-event `data` object.
@@ -454,6 +504,7 @@ pub struct SeamInfo {
 
 const FALLBACK_POLICY_RESOURCE_MAX_AGE: Duration = Duration::from_millis(500);
 const CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON: &str = "cloud_fallback_unsupported_tools";
+const CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON: &str = "cloud_fallback_unsupported_choice_request";
 
 static FALLBACK_AUTHORITY: OnceLock<LocalAuthority> = OnceLock::new();
 
@@ -666,6 +717,37 @@ where
                     "Execution aborted: {}",
                     crate::run_options::AbortReason::UserCancelled
                 )));
+            }
+
+            // Choice requests never leave the device: no cloud leg scores
+            // candidates, and the gateway would read the request as text. The
+            // entry guards refuse them before a local run can abort, so this
+            // only backs them up.
+            if envelope.kind.contains_choice_kind() {
+                crate::telemetry::publish_cloud_denied_by_policy(
+                    &correlation_id,
+                    cloud_model_id,
+                    reason,
+                    CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON,
+                    local_latency_ms,
+                );
+                record_cloud_outcome(
+                    authority,
+                    cloud_model_id,
+                    cloud_provider.as_deref(),
+                    0,
+                    false,
+                    Some(CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON.to_string()),
+                    OutcomeCategory::HardFail {
+                        reason: CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON.to_string(),
+                    },
+                    signal_context,
+                );
+                return Err(SdkError::UnsupportedModelCapability {
+                    model_id: model_id.to_string(),
+                    capability: "cloud fallback for choice requests".to_string(),
+                    hint: "choice requests run only on the device".to_string(),
+                });
             }
 
             // Tool-bearing requests fail closed before policy or cloud
@@ -1158,9 +1240,9 @@ pub(crate) fn registry_format_for_load(
 
 /// Resolve the load format for `id`, then fetch and extract that variant.
 ///
-/// `load()`, the speculative background download and `start_download()` all
-/// go through here so they download the same artifact into the same cache
-/// entry; a later `load()` then hits the cache instead of downloading again.
+/// `start_download()` uses this helper. Model loads share its format selection,
+/// then download their already-resolved variant when checking speculative
+/// eligibility, so that check and the background download select the same files.
 pub(crate) fn fetch_registry_model_for_load<F>(
     client: &RegistryClient,
     id: &str,
@@ -2122,11 +2204,11 @@ impl ModelLoader {
     /// Prefer the cloud while this model downloads, for this load only.
     ///
     /// Overrides the process-global default set via
-    /// [`crate::set_speculative_cloud`]. When the gate in
-    /// [`Self::will_speculate`] is satisfied, the first run is served from the
-    /// Xybrid gateway while the local weights download in the background,
-    /// instead of blocking on the download. Has no effect for already-local
-    /// sources (bundle/directory).
+    /// [`crate::set_speculative_cloud`]. When [`Self::will_speculate`] holds
+    /// and the registry reports a chat model, runs are served from the Xybrid
+    /// gateway while the local weights download in the background, instead of
+    /// blocking on the download. Has no effect for already-local sources
+    /// (bundle/directory).
     ///
     /// # Examples
     /// ```
@@ -2205,25 +2287,41 @@ impl ModelLoader {
         }
     }
 
-    /// Whether this load would serve from the cloud while the model downloads.
+    /// Whether this load may serve from the cloud while the model downloads.
     ///
-    /// True only when all three hold: speculation is enabled (per-load override
-    /// or global default), a cloud API key is resolvable, and the model is not
-    /// already extracted in the local cache. Only registry sources can be
-    /// "not yet downloaded"; bundle, directory, and HuggingFace loads are
-    /// treated as already-local and never speculate.
+    /// A local precondition, not the decision. True only when all three hold:
+    /// speculation is enabled (per-load override or global default), a cloud
+    /// API key is resolvable, and the model is not already extracted in the
+    /// local cache. Only registry sources can be "not yet downloaded"; bundle,
+    /// directory, and HuggingFace loads are treated as already-local and never
+    /// speculate.
+    ///
+    /// The load then resolves the model once and speculates only when the
+    /// registry's answer describes a chat model: a variant served as a direct
+    /// download whose inline metadata declares a `Gguf` or `VisionLanguage`
+    /// template. Any other model, including one packaged as a `.xyb` bundle,
+    /// downloads and loads as if speculation were off.
+    /// [`XybridModel::is_speculative`] on the loaded model reports the
+    /// outcome.
     ///
     /// Performs a local cache lookup only — it never touches the network.
     ///
     /// # Examples
     /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
     /// use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_registry("qwen2.5-0.5b-instruct")
     ///     .with_speculative_cloud(true);
     /// if loader.will_speculate() {
-    ///     // Not cached locally and a key is set: this load is served from the
-    ///     // cloud while the download runs in the background.
+    ///     // Not cached locally and a key is set: the load asks the registry
+    ///     // whether this is a chat model it can serve from the cloud.
     /// }
+    /// let model = loader.load()?;
+    /// if model.is_speculative() {
+    ///     // Runs go to the cloud until the background download lands.
+    /// }
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn will_speculate(&self) -> bool {
         // Short-circuit: skip the API-key lookup and the local-cache disk check
@@ -2394,22 +2492,66 @@ impl ModelLoader {
     where
         F: Fn(DownloadStatus),
     {
-        // Speculative cloud: when enabled, a key is set, and the model isn't
-        // cached yet, serve from cloud while the weights download in the
-        // background instead of blocking the caller on the download.
-        if self.will_speculate() {
-            return Ok(self.load_speculative(id, platform));
+        // Create registry client (uses default API or environment variable)
+        let client = Arc::new(RegistryClient::from_env()?);
+        let speculate = self.speculative_enabled() && cloud_api_key_present();
+        self.load_from_registry_client(client, id, platform, speculate, progress_callback)
+    }
+
+    /// [`Self::load_from_registry_api`] through `client`, with the speculation
+    /// preference already settled.
+    ///
+    /// The extracted cache comes first: a cached model loads locally without
+    /// a registry call, even when speculation is requested and the registry is
+    /// down. An uncached model under speculation is resolved once, and the
+    /// resolved variant decides: a chat model (see [`resolved_is_chat`]) serves
+    /// from the cloud while that variant downloads in the background, anything
+    /// else downloads that same variant and loads normally. A failed resolve
+    /// fails the load; it never leaves a cloud-backed placeholder.
+    ///
+    /// [`resolved_is_chat`]: crate::registry_client::resolved_is_chat
+    fn load_from_registry_client<F>(
+        &self,
+        client: Arc<RegistryClient>,
+        id: &str,
+        platform: Option<&str>,
+        speculate: bool,
+        progress_callback: F,
+    ) -> SdkResult<XybridModel>
+    where
+        F: Fn(DownloadStatus),
+    {
+        let format =
+            registry_format_for_load(&client, id, self.backend_override, &SelectorCfg::current())?;
+        let cached = match format {
+            Some(format) => client.resolve_offline_with_format(id, format),
+            None => client.resolve_offline(id),
+        };
+        if speculate && cached.is_none() {
+            let resolved = match format {
+                Some(format) => client.resolve_with_format(id, platform, format)?,
+                None => client.resolve(id, platform)?,
+            };
+            if crate::registry_client::resolved_is_chat(&resolved) {
+                return Ok(self.load_speculative(client, id, format, resolved));
+            }
+            let cache_key =
+                format.map(|format| crate::registry_client::format_cache_key(id, format));
+            let model_dir = client.fetch_extracted_resolved(
+                id,
+                cache_key.as_deref(),
+                &resolved,
+                Arc::new(AtomicBool::new(false)),
+                &progress_callback,
+            )?;
+            return self.load_from_directory(&model_dir);
         }
 
-        // Create registry client (uses default API or environment variable)
-        let client = RegistryClient::from_env()?;
-
         // Fetch and extract model (handles both .xyb bundles and passthrough GGUF files)
-        let model_dir = fetch_registry_model_for_load(
-            &client,
+        let model_dir = client.fetch_extracted_preferring_format(
             id,
             platform,
-            self.backend_override,
+            format,
             Arc::new(AtomicBool::new(false)),
             progress_callback,
         )?;
@@ -2424,18 +2566,26 @@ impl ModelLoader {
     ///
     /// The returned model holds a placeholder handle (`loaded == false`); every
     /// run routes to cloud via [`XybridModel::speculative`] until the download
-    /// thread installs the extracted local handle. Never blocks the caller.
-    fn load_speculative(&self, id: &str, platform: Option<&str>) -> XybridModel {
+    /// thread installs the extracted local handle. The thread downloads
+    /// `resolved`, the variant the caller judged a chat model, without
+    /// resolving again. Never blocks the caller.
+    fn load_speculative(
+        &self,
+        client: Arc<RegistryClient>,
+        id: &str,
+        format: Option<&str>,
+        resolved: ResolvedVariant,
+    ) -> XybridModel {
         // The future extraction directory for the placeholder executor. The
         // executor is lazy (no weights touched until `execute`), so pointing it
         // at a not-yet-populated path is fine — it is never executed while the
         // handle stays `loaded == false`.
-        let model_dir = crate::cache::CacheManager::new()
-            .map(|cache| cache.extraction_dir(id))
-            .unwrap_or_else(|_| PathBuf::from(id));
+        let cache_key = format.map(|format| crate::registry_client::format_cache_key(id, format));
+        let model_dir = client.extraction_dir(cache_key.as_deref().unwrap_or(id));
 
-        // Speculation is LLM/chat-only and the gateway streams tokens, so mark
-        // the placeholder as GGUF. Otherwise `is_llm()` / `supports_token_streaming()`
+        // Only chat models get here (the caller checked the resolved variant)
+        // and the gateway streams tokens, so mark the placeholder as GGUF.
+        // Otherwise `is_llm()` / `supports_token_streaming()`
         // read this metadata and report `false`, dropping the REPL to batch mode
         // until the real handle swaps in. The background download replaces the
         // whole handle (with real metadata) once it completes.
@@ -2468,30 +2618,24 @@ impl ModelLoader {
         let download = Arc::new(SpeculativeDownload::default());
         let bg_download = Arc::clone(&download);
         let id_owned = id.to_string();
-        let platform_owned = platform.map(String::from);
         let thread_name = format!("speculative-download-{id_owned}");
         let backend_override = self.backend_override;
         if let Err(err) = std::thread::Builder::new()
             .name(thread_name)
             .spawn(move || {
-                let built = RegistryClient::from_env().and_then(|client| {
-                    // Same format resolution as a blocking `load()`, so an MLX
-                    // (or explicitly pinned) model downloads the artifact the
-                    // handle can actually run, into the cache entry `load()`
-                    // reuses.
-                    let dir = fetch_registry_model_for_load(
-                        &client,
+                let built = client
+                    .fetch_extracted_resolved(
                         &id_owned,
-                        platform_owned.as_deref(),
-                        backend_override,
+                        cache_key.as_deref(),
+                        &resolved,
+                        // Nothing cancels a speculative download.
                         Arc::new(AtomicBool::new(false)),
                         // Feed the poll-able progress cell; hosts read it via
                         // `XybridModel::download_status` or subscribe with
                         // `XybridModel::watch_download`.
-                        |status| bg_download.set_progress(status),
-                    )?;
-                    Self::create_model_handle(&dir, backend_override)
-                });
+                        &|status| bg_download.set_progress(status),
+                    )
+                    .and_then(|dir| Self::create_model_handle(&dir, backend_override));
                 match built {
                     Ok(real) => {
                         *bg_handle.write().unwrap_or_else(|e| e.into_inner()) = real;
@@ -3281,6 +3425,12 @@ impl ModelLoader {
         let browser_format = match &metadata.execution_template {
             ExecutionTemplate::TfLite { .. } => "TFLite",
             ExecutionTemplate::LiteRtLm { .. } => "LiteRT-LM",
+            // Checked once at load, so a bad spec fails here rather than on
+            // the first run.
+            ExecutionTemplate::ChoiceScorer { scorer } => {
+                return validate_scorer_spec(scorer)
+                    .map_err(|e| SdkError::MetadataInvalid(e.to_string()));
+            }
             _ => return Ok(()),
         };
 
@@ -3299,8 +3449,16 @@ impl ModelLoader {
     }
 
     fn check_streaming_support(metadata: &ModelMetadata) -> bool {
+        // Speech packets use run_tts_streaming, not the token/ASR stream APIs.
         if Self::is_llm_template(metadata) {
             return true;
+        }
+        // A scorer answers one batch run, whatever task its bundle declares.
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ChoiceScorer { .. }
+        ) {
+            return false;
         }
 
         // Check if this is an ASR model (supports streaming)
@@ -3330,8 +3488,20 @@ impl ModelLoader {
     }
 
     fn infer_output_type(metadata: &ModelMetadata) -> OutputType {
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. }
+        ) {
+            return OutputType::Audio;
+        }
         if Self::is_llm_template(metadata) {
             return OutputType::Text;
+        }
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ChoiceScorer { .. }
+        ) {
+            return OutputType::ChoiceScores;
         }
 
         // Check metadata hints (metadata is HashMap<String, serde_json::Value>)
@@ -3530,6 +3700,69 @@ impl XybridModel {
         crate::model_registry::touch(&self.last_accessed);
     }
 
+    /// Refuses input this entry point must not run, before any cloud leg or
+    /// backend call: a choice request (or choice scores) for a model that is
+    /// not a choice scorer, any other input for a scorer, and a scorer reached
+    /// through anything but a batch run (see [`validate_choice_request`]).
+    ///
+    /// Reads the installed metadata, so a speculative model is checked
+    /// against the model that answers now. Called right after
+    /// [`Self::touch`] at every run entry point.
+    fn guard_input(&self, envelope: &Envelope, entry: EntryPoint) -> SdkResult<()> {
+        let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
+        validate_choice_request(&handle.metadata, envelope, entry)
+            .map_err(|e| sdk_execution_error("Execution failed", e))
+    }
+
+    /// [`Self::guard_input`] plus the conversation history, where no model
+    /// reads a choice request.
+    fn guard_context_input(
+        &self,
+        envelope: &Envelope,
+        context: &ConversationContext,
+        entry: EntryPoint,
+    ) -> SdkResult<()> {
+        self.guard_input(envelope, entry)?;
+        ensure_no_choice_kinds(
+            &self.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )
+        .map_err(|e| sdk_execution_error("Execution failed", e))
+    }
+
+    /// Whether this model is a choice scorer: it scores the candidates of an
+    /// [`Envelope::choice_request`] instead of generating output.
+    ///
+    /// A scorer accepts only a choice request, and only through [`Self::run`],
+    /// [`Self::run_with_options`] or [`Self::run_async`]; every other entry
+    /// point refuses it.
+    pub fn is_choice_scorer(&self) -> bool {
+        self.handle.read().ok().is_some_and(|h| {
+            matches!(
+                h.metadata.execution_template,
+                ExecutionTemplate::ChoiceScorer { .. }
+            )
+        })
+    }
+
+    /// The candidates a choice scorer appends after the caller's, in order.
+    ///
+    /// Their ids are reserved: a caller choice may not reuse one. Empty for a
+    /// model that is not a choice scorer.
+    pub fn fixed_choices(&self) -> Vec<Choice> {
+        self.handle
+            .read()
+            .ok()
+            .and_then(|h| match &h.metadata.execution_template {
+                ExecutionTemplate::ChoiceScorer { scorer } => Some(scorer.fixed_choices().to_vec()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
     /// Whether this run should be served speculatively from the cloud.
     ///
     /// `true` when this model was loaded under speculative cloud fallback *and*
@@ -3555,6 +3788,18 @@ impl XybridModel {
     /// leg fails and degrades to local mid-call.
     pub fn is_cloud_serving(&self) -> bool {
         self.cloud_serve()
+    }
+
+    /// Whether this model came from a speculative load: it answered from the
+    /// cloud while its weights downloaded.
+    ///
+    /// Stays `true` after the download lands, so it reports what the load did
+    /// even when the download finished at once; [`Self::is_cloud_serving`]
+    /// reports whether the cloud still answers. `false` for a model that
+    /// loaded from disk, including one that speculation could have served but
+    /// the registry did not describe as a chat model.
+    pub fn is_speculative(&self) -> bool {
+        self.speculative.is_some()
     }
 
     /// Snapshot of the background download behind a speculative load.
@@ -3851,6 +4096,8 @@ impl XybridModel {
     ///
     /// This pre-loads the model into memory, ensuring that the first real inference
     /// is fast. For LLM models, this loads the model weights and creates the context.
+    /// A choice scorer scores a synthetic request (a one-byte context and empty
+    /// candidates), which loads its model and checks it against its spec.
     ///
     /// Call this at app startup or after `load()` to eliminate cold-start latency.
     ///
@@ -3871,14 +4118,13 @@ impl XybridModel {
     /// # }
     /// ```
     pub fn warmup(&self) -> SdkResult<()> {
-        use xybrid_core::ir::EnvelopeKind;
-
         self.touch();
         log::info!(target: "xybrid_sdk", "Warming up model: {}", self.model_id);
         let is_llm = self.is_llm();
 
         // Create a minimal input based on expected input type
         let warmup_input = match self.output_type {
+            OutputType::ChoiceScores => choice_warmup_request(&self.fixed_choices()),
             // For TTS models, use a short text
             OutputType::Audio => Envelope {
                 kind: EnvelopeKind::Text("Hi".to_string()),
@@ -3985,14 +4231,14 @@ impl XybridModel {
         let output_type = self.output_type;
         let supports_streaming = self.supports_streaming;
         let is_llm = self.is_llm();
+        let fixed_choices = self.fixed_choices();
 
         tokio::task::spawn_blocking(move || {
-            use xybrid_core::ir::EnvelopeKind;
-
             log::info!(target: "xybrid_sdk", "Warming up model (async): {}", model_id);
 
             // Create a minimal input based on expected input type
             let warmup_input = match output_type {
+                OutputType::ChoiceScores => choice_warmup_request(&fixed_choices),
                 OutputType::Audio => Envelope {
                     kind: EnvelopeKind::Text("Hi".to_string()),
                     metadata: std::collections::HashMap::new(),
@@ -4108,6 +4354,7 @@ impl XybridModel {
     ) -> SdkResult<InferenceResult> {
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
+        self.guard_input(envelope, EntryPoint::Batch)?;
 
         // Speculative cloud: serve from the gateway until the local handle is
         // ready (see `cloud_serve`).
@@ -4151,20 +4398,19 @@ impl XybridModel {
         let latency_ms = duration_millis_u32(start.elapsed());
 
         // Emit ModelComplete telemetry event
+        let mut data = serde_json::json!({
+            "model_id": self.model_id,
+            "version": self.version,
+            "output_type": format!("{:?}", self.output_type),
+        });
+        add_choice_telemetry(&mut data, &metadata, &output);
         let event = crate::telemetry::TelemetryEvent {
             event_type: "ModelComplete".to_string(),
             stage_name: Some(self.model_id.clone()),
             target: Some("local".to_string()),
             latency_ms: Some(latency_ms),
             error: None,
-            data: Some(
-                serde_json::json!({
-                    "model_id": self.model_id,
-                    "version": self.version,
-                    "output_type": format!("{:?}", self.output_type),
-                })
-                .to_string(),
-            ),
+            data: Some(data.to_string()),
             timestamp_ms: current_timestamp_millis(),
         };
         crate::telemetry::publish_with_resource_summary(event, resource_guard);
@@ -4175,27 +4421,58 @@ impl XybridModel {
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
 
-    /// Streaming TTS: synthesize `envelope`'s text sentence-chunk by
-    /// sentence-chunk and hand each chunk's PCM (with its sample rate) to
-    /// `on_chunk` as it is produced, instead of returning one batched WAV. For
-    /// long text this lets playback start after the first sentence.
+    /// Deliver owned PCM16 audio packets during synthesis.
     ///
-    /// Audio rides the callback; there is no batched return value. `on_chunk`
-    /// returning `false` stops early, as does a cancelled
-    /// `options.cancellation_token` — both honored at the next chunk boundary
-    /// (one chunk's ONNX forward is uninterruptible). The model write-lock is
-    /// held for the whole synthesis, exactly like [`run`].
+    /// Phonon and Kitten use native callbacks and support cancellation during inference.
+    /// Phonon decodes incrementally; Kitten sentence mode computes each sentence
+    /// waveform before delivering it.
+    /// ONNX backends check cancellation at chunk boundaries; one ONNX forward
+    /// cannot be interrupted. Returning `false` also cancels delivery. The
+    /// terminal summary distinguishes completed, cancelled and limited audio;
+    /// failures use `SdkError`. The model remains resident and reusable.
+    /// Resource abort policies apply before synthesis and during delivery;
+    /// Native zzz backends also poll them during inference. Resource aborts preserve the
+    /// cloud-fallback decision. `max_grace_tokens` counts audio packets here,
+    /// while user cancellation stops delivery without grace or cloud fallback.
+    /// Completed and limited backend outcomes take precedence over late
+    /// resource signals, so finished speech does not trigger a cloud restart.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input, unavailable assets, backend failure
+    /// or a resource-policy abort (`AbortedForCloudFallback` when permitted).
     pub fn run_tts_streaming<F>(
         &self,
         envelope: &Envelope,
         options: &RunOptions,
         mut on_chunk: F,
-    ) -> SdkResult<()>
+    ) -> SdkResult<xybrid_core::execution::TtsStreamResult>
     where
-        F: FnMut(Vec<u8>, u32) -> bool,
+        F: FnMut(xybrid_core::execution::TtsAudioChunk) -> bool,
     {
+        let cancelled_result = || xybrid_core::execution::TtsStreamResult {
+            status: xybrid_core::execution::TtsStatus::Cancelled,
+            sample_rate: 24_000,
+            channels: 1,
+            samples: 0,
+            chunks: 0,
+            limited_chunks: 0,
+        };
+        if options
+            .cancellation_token
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Ok(cancelled_result());
+        }
+        let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
+        let mut abort_state = AbortState::new(options);
+        abort_state
+            .check_before_run()
+            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
+        self.guard_input(envelope, EntryPoint::Streaming)?;
         let start = Instant::now();
         let resource_guard = crate::telemetry::begin_resource_run();
         let trace_id = uuid::Uuid::new_v4();
@@ -4203,28 +4480,75 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        if options
+            .cancellation_token
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Ok(cancelled_result());
+        }
+        abort_state
+            .check_before_run()
+            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
         handle.ensure_runnable()?;
         let metadata = handle.metadata.clone();
 
-        // Between-chunk cancellation: a chunk's ONNX forward can't be aborted
-        // mid-way, so the token (and the caller's `on_chunk`) is consulted at
-        // chunk boundaries.
+        // The watcher and packet callback share policy state, independently of
+        // the model lock. Retain the reason that actually stopped synthesis so
+        // a resource abort cannot be mistaken for user cancellation or success.
+        let abort_state = Mutex::new((abort_state, None));
         let cancel = options.cancellation_token.clone();
-        let mut adapter = |pcm: Vec<u8>, sample_rate: u32| -> bool {
-            if let Some(token) = &cancel {
-                if token.is_cancelled() {
-                    return false;
-                }
+        let should_stop = |before_packet: bool| {
+            if cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
+                return true;
             }
-            on_chunk(pcm, sample_rate)
+            let mut guard = abort_state.lock().unwrap_or_else(|e| e.into_inner());
+            let (state, stopped_reason) = &mut *guard;
+            if stopped_reason.is_some() {
+                return true;
+            }
+            let check = if before_packet {
+                state.check_before_token()
+            } else {
+                state.check_during_compute()
+            };
+            if let Err(reason) = check {
+                *stopped_reason = Some(reason);
+                return true;
+            }
+            false
+        };
+        let mut delivery_cancelled = false;
+        let mut adapter = |packet: xybrid_core::execution::TtsAudioChunk| -> bool {
+            if should_stop(true) {
+                return false;
+            }
+            // Release the abort-state lock before calling consumer code.
+            let keep_going = on_chunk(packet);
+            delivery_cancelled |= !keep_going;
+            // A user cancel issued from the final callback must still stop
+            // delivery even when the backend performs no further policy poll.
+            keep_going && !cancel.as_ref().is_some_and(CancellationToken::is_cancelled)
         };
 
-        handle
+        let summary = handle
             .executor
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .execute_tts_streaming(&metadata, envelope, &mut adapter)
-            .map_err(|e| sdk_execution_error("TTS streaming failed", e))?;
+            .execute_tts_streaming_with_config(
+                &metadata,
+                envelope,
+                options.generation_config.as_ref(),
+                &|| should_stop(false),
+                &mut adapter,
+            );
+        let (_, stopped_reason) = abort_state.into_inner().unwrap_or_else(|e| e.into_inner());
+        let summary = finish_tts_stream(
+            summary,
+            stopped_reason,
+            fallback_to_cloud,
+            delivery_cancelled || cancel.as_ref().is_some_and(CancellationToken::is_cancelled),
+        )?;
 
         let latency_ms = start.elapsed().as_millis() as u32;
         let event = crate::telemetry::TelemetryEvent {
@@ -4239,6 +4563,8 @@ impl XybridModel {
                     "version": self.version,
                     "output_type": format!("{:?}", self.output_type),
                     "streaming": true,
+                    "tts_status": format!("{:?}", summary.status).to_lowercase(),
+                    "limited_chunks": summary.limited_chunks,
                 })
                 .to_string(),
             ),
@@ -4249,7 +4575,25 @@ impl XybridModel {
         };
         crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
-        Ok(())
+        Ok(summary)
+    }
+
+    /// Synthesize on a blocking worker, delivering owned audio packets.
+    pub async fn run_tts_streaming_async<F>(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+        on_chunk: F,
+    ) -> SdkResult<xybrid_core::execution::TtsStreamResult>
+    where
+        F: FnMut(xybrid_core::execution::TtsAudioChunk) -> bool + Send + 'static,
+    {
+        let model = self.clone();
+        let envelope = envelope.clone();
+        let options = options.clone();
+        tokio::task::spawn_blocking(move || model.run_tts_streaming(&envelope, &options, on_chunk))
+            .await
+            .map_err(|e| SdkError::inference_src("TTS worker failed", e))?
     }
 
     /// Run batch inference with per-run controls.
@@ -4262,6 +4606,32 @@ impl XybridModel {
         abort_state
             .check_before_run()
             .map_err(|reason| SdkError::inference(format!("Execution aborted: {reason}")))?;
+        #[cfg(feature = "tts-zzz")]
+        {
+            let is_zzz = matches!(
+                self.handle
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .metadata
+                    .execution_template,
+                ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. }
+            );
+            if is_zzz {
+                let start = Instant::now();
+                let mut pcm = Vec::new();
+                let summary = self.run_tts_streaming(envelope, options, |packet| {
+                    pcm.extend(packet.pcm);
+                    true
+                })?;
+                let mut output = summary.into_envelope();
+                output.kind = xybrid_core::ir::EnvelopeKind::Audio(pcm);
+                return Ok(InferenceResult::new(
+                    output,
+                    &self.model_id,
+                    start.elapsed().as_millis() as u32,
+                ));
+            }
+        }
         self.run(envelope, options.generation_config.as_ref())
     }
 
@@ -4315,6 +4685,7 @@ impl XybridModel {
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
         self.touch();
+        self.guard_context_input(envelope, context, EntryPoint::Conversation)?;
 
         // Speculative cloud: serve from the gateway until the local handle is
         // ready. The gateway leg is stateless — `context` is not replayed (the
@@ -4473,6 +4844,7 @@ impl XybridModel {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         self.touch();
+        self.guard_context_input(envelope, context, EntryPoint::Streaming)?;
 
         // Speculative cloud: stream from the gateway until the local handle is
         // ready. The gateway leg is stateless (`context` not replayed, matching
@@ -4690,6 +5062,7 @@ impl XybridModel {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         self.touch();
+        self.guard_input(envelope, EntryPoint::Streaming)?;
 
         // Speculative cloud: stream from the gateway until the local handle is
         // ready (see `cloud_serve`).
@@ -5021,6 +5394,10 @@ impl XybridModel {
         use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
 
+        // Before the resource scope: a refused input starts nothing. The
+        // local leg below checks again, as every streaming entry does.
+        self.guard_input(envelope, EntryPoint::Streaming)?;
+
         let correlation_id = options
             .correlation_id
             .clone()
@@ -5102,6 +5479,10 @@ impl XybridModel {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         self.touch();
+        // A refused input yields one error event; nothing is spawned.
+        if let Err(error) = self.guard_input(&envelope, EntryPoint::Streaming) {
+            return Box::pin(tokio_stream::iter([StreamEvent::Error(error.to_string())]));
+        }
         let (tx, rx) = mpsc::channel::<StreamEvent>(100);
         let handle = self.handle.clone();
         let model_id = self.model_id.clone();
@@ -5286,6 +5667,7 @@ impl XybridModel {
     ) -> SdkResult<InferenceResult> {
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
+        self.guard_input(envelope, EntryPoint::Batch)?;
 
         // Speculative cloud: serve from the gateway (off the runtime via
         // spawn_blocking, like the local path) until the local handle is ready.
@@ -5339,20 +5721,19 @@ impl XybridModel {
             let latency_ms = duration_millis_u32(start.elapsed());
 
             // Emit ModelComplete telemetry event
+            let mut data = serde_json::json!({
+                "model_id": model_id,
+                "version": version,
+                "output_type": format!("{:?}", output_type),
+            });
+            add_choice_telemetry(&mut data, &metadata, &output);
             let event = crate::telemetry::TelemetryEvent {
                 event_type: "ModelComplete".to_string(),
                 stage_name: Some(model_id.clone()),
                 target: Some("local".to_string()),
                 latency_ms: Some(latency_ms),
                 error: None,
-                data: Some(
-                    serde_json::json!({
-                        "model_id": model_id,
-                        "version": version,
-                        "output_type": format!("{:?}", output_type),
-                    })
-                    .to_string(),
-                ),
+                data: Some(data.to_string()),
                 timestamp_ms: current_timestamp_millis(),
             };
             crate::telemetry::publish_with_resource_summary(event, resource_guard);
@@ -5494,6 +5875,9 @@ impl Clone for XybridModel {
         }
     }
 }
+
+#[cfg(test)]
+mod registry_load_tests;
 
 #[cfg(test)]
 mod tests {
@@ -7449,6 +7833,47 @@ mod tests {
     }
 
     #[test]
+    fn zzz_and_onnx_tts_models_do_not_advertise_token_or_asr_streaming() {
+        let mut kokoro = ModelMetadata::onnx("kokoro", "1.0", "model.onnx");
+        kokoro
+            .metadata
+            .insert("task".into(), serde_json::json!("text-to-speech"));
+        let mut kitten = kokoro.clone();
+        kitten.execution_template = ExecutionTemplate::ZzzEmbed {
+            model_file: "language.gguf".into(),
+            decoder_file: "decoder.gguf".into(),
+            language_voice_file: "voice.lm.json".into(),
+            decoder_voice_file: "voice.s3.json".into(),
+            language: Some("en".into()),
+            threads: 6,
+            max_tokens: 0,
+            seed: 0,
+            sentence_chunks: true,
+            accelerate: false,
+        };
+        let mut phonon = kokoro.clone();
+        phonon.execution_template = serde_json::from_value(serde_json::json!({
+            "type":"ZzzPhonon", "model_file":"phonon.gguf"
+        }))
+        .unwrap();
+        for metadata in [kokoro, kitten, phonon] {
+            let directory = tempfile::tempdir().unwrap();
+            std::fs::write(
+                directory.path().join("model_metadata.json"),
+                serde_json::to_vec(&metadata).unwrap(),
+            )
+            .unwrap();
+            let model = ModelLoader::from_directory(directory.path())
+                .unwrap()
+                .load()
+                .unwrap();
+            assert_eq!(model.output_type(), OutputType::Audio);
+            assert!(!model.supports_streaming());
+            assert!(!model.supports_token_streaming());
+        }
+    }
+
+    #[test]
     #[allow(deprecated)]
     fn test_model_loader_from_legacy_registry() {
         let loader = ModelLoader::from_legacy_registry("http://localhost:8080", "whisper", "1.0");
@@ -7873,6 +8298,221 @@ mod tests {
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
         }
+    }
+
+    #[test]
+    fn tts_pre_cancelled_request_does_not_wait_for_model_lock_or_touch_assets() {
+        use xybrid_core::ir::EnvelopeKind;
+        let model = test_loaded_model(false);
+        let held = model.handle.write().unwrap();
+        let token = CancellationToken::new();
+        token.cancel();
+        let options = RunOptions::new().with_cancellation_token(token);
+        let (send, recv) = std::sync::mpsc::channel();
+        let worker_model = model.clone();
+        let worker = std::thread::spawn(move || {
+            send.send(worker_model.run_tts_streaming(
+                &Envelope::new(EnvelopeKind::Text("hello".into())),
+                &options,
+                |_| panic!("cancelled request must not deliver audio"),
+            ))
+            .unwrap();
+        });
+        let result = recv
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("pre-cancel skips held lock")
+            .unwrap();
+        assert_eq!(result.status, xybrid_core::execution::TtsStatus::Cancelled);
+        assert_eq!(result.samples, 0);
+        drop(held);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn tts_resource_abort_skips_held_model_lock_and_preserves_fallback_policy() {
+        use crate::run_options::{AbortPolicy, AbortSignal};
+        use xybrid_core::device::{MemoryPressure, ResourceSnapshot, ThermalState};
+
+        let model = test_loaded_model(false); // no valid assets: execution must be skipped
+        let held = model.handle.write().unwrap();
+        for (signal, snapshot, core_reason, reason_text) in [
+            (
+                AbortSignal::MemoryPressureCritical,
+                ResourceSnapshot {
+                    memory_pressure: MemoryPressure::Critical,
+                    ..Default::default()
+                },
+                xybrid_core::abort::AbortReason::StressMemory,
+                "memory_pressure_critical",
+            ),
+            (
+                AbortSignal::ThermalCritical,
+                ResourceSnapshot {
+                    thermal_state: ThermalState::Critical,
+                    ..Default::default()
+                },
+                xybrid_core::abort::AbortReason::StressThermal,
+                "thermal_critical",
+            ),
+        ] {
+            for fallback in [false, true] {
+                let options = RunOptions::new()
+                    .with_abort_policy(
+                        AbortPolicy::default()
+                            .stop_on(signal)
+                            .with_cloud_fallback(fallback),
+                    )
+                    .with_resource_provider(Arc::new(FixedUnitResourceProvider::new(snapshot)));
+                let (send, recv) = std::sync::mpsc::channel();
+                let worker_model = model.clone();
+                let worker = std::thread::spawn(move || {
+                    send.send(worker_model.run_tts_streaming(
+                        &text_envelope("hello"),
+                        &options,
+                        |_| panic!("resource-aborted request must not deliver audio"),
+                    ))
+                    .unwrap();
+                });
+                let result = recv
+                    .recv_timeout(Duration::from_secs(2))
+                    .expect("resource abort must skip the held model lock");
+                let error = result.expect_err("resource policy must prevent synthesis");
+                if fallback {
+                    assert!(
+                        matches!(error, SdkError::AbortedForCloudFallback { reason } if reason == core_reason)
+                    );
+                } else {
+                    assert!(
+                        matches!(error, SdkError::InferenceError { message, .. } if message.contains(reason_text))
+                    );
+                }
+                worker.join().unwrap();
+            }
+        }
+        drop(held);
+    }
+
+    #[test]
+    fn tts_user_cancellation_never_falls_back_on_concurrent_resource_pressure() {
+        use crate::run_options::{AbortPolicy, AbortSignal};
+        let model = test_loaded_model(false);
+        let token = CancellationToken::new();
+        token.cancel();
+        let options = RunOptions::new()
+            .with_cancellation_token(token)
+            .with_abort_policy(
+                AbortPolicy::default()
+                    .stop_on(AbortSignal::MemoryPressureCritical)
+                    .with_cloud_fallback(true),
+            )
+            .with_resource_provider(Arc::new(FixedUnitResourceProvider::new(
+                xybrid_core::device::ResourceSnapshot {
+                    memory_pressure: xybrid_core::device::MemoryPressure::Critical,
+                    ..Default::default()
+                },
+            )));
+        let result = model
+            .run_tts_streaming(&text_envelope("hello"), &options, |_| panic!("no audio"))
+            .unwrap();
+        assert_eq!(result.status, xybrid_core::execution::TtsStatus::Cancelled);
+    }
+
+    #[test]
+    fn tts_finished_outcomes_win_over_a_late_resource_abort() {
+        use crate::run_options::AbortReason;
+        use xybrid_core::execution::{TtsStatus, TtsStreamResult};
+        for status in [TtsStatus::Completed, TtsStatus::Limited] {
+            for fallback in [false, true] {
+                let outcome = TtsStreamResult {
+                    status,
+                    sample_rate: 24_000,
+                    channels: 1,
+                    samples: 48_000,
+                    chunks: 2,
+                    limited_chunks: u32::from(status == TtsStatus::Limited),
+                };
+                // The backend has returned, but a watcher that was already
+                // sampling resources records pressure before its join finishes.
+                let late_reason = AbortReason::Thermal(xybrid_core::device::ThermalState::Critical);
+                assert_eq!(
+                    finish_tts_stream(Ok(outcome.clone()), Some(late_reason), fallback, false)
+                        .expect("finished speech must not restart or become an error"),
+                    outcome
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tts_confirmed_resource_interruption_still_preserves_fallback_policy() {
+        use crate::run_options::AbortReason;
+        use xybrid_core::execution::{TtsStatus, TtsStreamResult};
+        let outcome = TtsStreamResult {
+            status: TtsStatus::Cancelled,
+            sample_rate: 24_000,
+            channels: 1,
+            samples: 24_000,
+            chunks: 1,
+            limited_chunks: 0,
+        };
+        let reason = AbortReason::MemoryPressure(xybrid_core::device::MemoryPressure::Critical);
+        assert!(matches!(
+            finish_tts_stream(Ok(outcome.clone()), Some(reason.clone()), true, false),
+            Err(SdkError::AbortedForCloudFallback {
+                reason: xybrid_core::abort::AbortReason::StressMemory
+            })
+        ));
+        assert!(matches!(
+            finish_tts_stream(Ok(outcome.clone()), Some(reason.clone()), false, false),
+            Err(SdkError::InferenceError { .. })
+        ));
+        assert_eq!(
+            finish_tts_stream(Ok(outcome.clone()), Some(reason), true, true).unwrap(),
+            outcome,
+            "user cancellation must not restart partial speech"
+        );
+    }
+
+    #[test]
+    fn tts_backend_failure_is_not_masked_by_a_late_resource_signal() {
+        let error = finish_tts_stream(
+            Err(xybrid_core::runtime_adapter::AdapterError::RuntimeError(
+                "decoder failed".into(),
+            )),
+            Some(crate::run_options::AbortReason::Thermal(
+                xybrid_core::device::ThermalState::Critical,
+            )),
+            true,
+            false,
+        )
+        .unwrap_err();
+        assert!(matches!(&error, SdkError::InferenceError { .. }));
+        assert!(std::error::Error::source(&error)
+            .expect("backend error cause must be retained")
+            .to_string()
+            .contains("decoder failed"));
+    }
+
+    #[test]
+    fn tts_cancelled_while_queued_never_enters_backend() {
+        use xybrid_core::ir::EnvelopeKind;
+        let model = test_loaded_model(false); // nonexistent ONNX assets catch accidental execution
+        let held = model.handle.write().unwrap();
+        let token = CancellationToken::new();
+        let options = RunOptions::new().with_cancellation_token(token.clone());
+        let worker_model = model.clone();
+        let worker = std::thread::spawn(move || {
+            worker_model.run_tts_streaming(
+                &Envelope::new(EnvelopeKind::Text("hello".into())),
+                &options,
+                |_| panic!("no audio"),
+            )
+        });
+        token.cancel();
+        drop(held);
+        let result = worker.join().unwrap().unwrap();
+        assert_eq!(result.status, xybrid_core::execution::TtsStatus::Cancelled);
+        assert_eq!(result.samples, 0);
     }
 
     #[test]
@@ -9605,5 +10245,225 @@ mod tests {
         }
         assert!(!seam_fired.load(std::sync::atomic::Ordering::SeqCst));
         assert_eq!(cloud.call_count(), 0);
+    }
+
+    // =====================================================================
+    // Choice scorers: warmup request and decision telemetry
+    // =====================================================================
+
+    /// A scorer's metadata: one-byte fields that reject longer text, and
+    /// `fixed` as its fixed choices.
+    fn tight_scorer_metadata(fixed: &[Choice]) -> ModelMetadata {
+        let spec = serde_json::json!({
+            "type": "OnnxByteOptionScorer",
+            "model_file": "scorer.onnx",
+            "context": { "offset": 1, "max_len": 1, "overflow": "Reject",
+                         "ids_input": "context_ids", "mask_input": "context_mask" },
+            "choice": { "offset": 1, "max_len": 1, "overflow": "Reject",
+                        "ids_input": "option_ids", "mask_input": "option_token_mask" },
+            "choice_mask_input": "option_mask",
+            "logits_output": "logits",
+            "max_choices": fixed.len().max(2),
+            "fixed_choices": fixed,
+        });
+        let mut metadata = ModelMetadata::onnx("scorer", "1.0", "scorer.onnx");
+        metadata.execution_template = ExecutionTemplate::ChoiceScorer {
+            scorer: serde_json::from_value(spec).unwrap(),
+        };
+        metadata
+    }
+
+    #[test]
+    fn the_warmup_request_suits_every_scorer_spec() {
+        let choice = |id: &str| Choice::new(id, "x");
+        let fixed_sets = [
+            Vec::new(),
+            vec![choice("warmup-0")],
+            vec![choice("skip"), choice("warmup-1")],
+            vec![choice("check"), choice("click"), choice("skip")],
+        ];
+        for fixed in fixed_sets {
+            let metadata = tight_scorer_metadata(&fixed);
+            validate_scorer_spec(match &metadata.execution_template {
+                ExecutionTemplate::ChoiceScorer { scorer } => scorer,
+                _ => unreachable!(),
+            })
+            .unwrap();
+            let request = choice_warmup_request(&fixed);
+            validate_choice_request(&metadata, &request, EntryPoint::Batch)
+                .unwrap_or_else(|e| panic!("{} fixed choice(s): {e}", fixed.len()));
+        }
+    }
+
+    #[test]
+    fn decision_telemetry_counts_candidates_and_nothing_else() {
+        let metadata = tight_scorer_metadata(&[]);
+        let output = Envelope::new(EnvelopeKind::ChoiceScores(xybrid_core::ir::ChoiceScores {
+            entries: ["secret-a", "secret-b"]
+                .into_iter()
+                .map(|id| xybrid_core::ir::ChoiceScore {
+                    id: id.to_string(),
+                    logit: 0.0,
+                    score: 0.5,
+                    fixed: false,
+                })
+                .collect(),
+            label_mass: None,
+        }));
+        let mut data = serde_json::json!({ "model_id": "scorer" });
+        add_choice_telemetry(&mut data, &metadata, &output);
+        assert_eq!(
+            data,
+            serde_json::json!({
+                "model_id": "scorer",
+                "task": "decision",
+                "backend": "ort",
+                "choice_count": 2,
+            })
+        );
+
+        // Any other output leaves the data as it was.
+        let mut untouched = serde_json::json!({ "model_id": "scorer" });
+        add_choice_telemetry(&mut untouched, &metadata, &text_envelope("hello"));
+        assert_eq!(untouched, serde_json::json!({ "model_id": "scorer" }));
+    }
+
+    // =====================================================================
+    // Choice requests never reach a cloud leg
+    // =====================================================================
+
+    fn choice_request_envelope() -> Envelope {
+        Envelope::choice_request(
+            text_envelope("FORM Intake"),
+            vec![
+                Choice::new("tel", "fill Tel: (503) 555-0142"),
+                Choice::new("name", "fill Name: Jane Doe"),
+            ],
+        )
+    }
+
+    #[test]
+    fn dispatch_after_local_refuses_choice_requests_before_the_cloud() {
+        let cloud = FakeCloudAdapter::new("must not run");
+        let authority = FakeAuthority::allow();
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &choice_request_envelope(),
+            &cloud,
+            "corr-choice".to_string(),
+            "local-model",
+            0,
+            50,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            None,
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::UnsupportedModelCapability { capability, .. }) => {
+                assert_eq!(capability, "cloud fallback for choice requests");
+            }
+            other => panic!("expected a choice refusal, got {other:?}"),
+        }
+        assert_eq!(cloud.call_count(), 0);
+        assert!(authority.policy_requests().is_empty());
+        let outcomes = authority.outcomes();
+        assert_eq!(outcomes.len(), 2);
+        assert!(matches!(
+            outcomes[1].category,
+            Some(xybrid_core::orchestrator::authority::OutcomeCategory::HardFail { ref reason })
+                if reason == CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON
+        ));
+    }
+
+    /// A speculative placeholder serves runs from the gateway until its
+    /// download lands. A choice request must be refused before that leg, both
+    /// while the download runs and after it has failed (when the placeholder
+    /// keeps serving from the cloud).
+    #[test]
+    fn speculative_placeholders_refuse_choice_requests_before_the_gateway() {
+        use httpmock::prelude::*;
+
+        let gateway = MockServer::start();
+        let any_request = gateway.mock(|_, then| {
+            then.status(200).json_body(serde_json::json!({}));
+        });
+        let download = Arc::new(SpeculativeDownload::default());
+        let mut placeholder = ModelMetadata::onnx("spec-chat", "", "");
+        placeholder.execution_template = ExecutionTemplate::Gguf {
+            model_file: String::new(),
+            chat_template: None,
+            context_length: 2048,
+            generation_params: None,
+        };
+        let model = XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
+                metadata: placeholder,
+                model_dir: PathBuf::from("."),
+                state: LoadState::Unloaded,
+            })),
+            model_id: "spec-chat".to_string(),
+            version: String::new(),
+            output_type: OutputType::Text,
+            supports_streaming: true,
+            default_generation_config: GenerationConfig::default(),
+            current_run: Arc::new(Mutex::new(None)),
+            speculative: Some(Arc::clone(&download)),
+            last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+        };
+        // Point any cloud leg at the mock, with a key, so a leaked request
+        // would be counted rather than fail before sending.
+        let mut request = choice_request_envelope();
+        request
+            .metadata
+            .insert("gateway_url".to_string(), gateway.url("/v1"));
+        request
+            .metadata
+            .insert("api_key".to_string(), "test-key".to_string());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+
+        for downloaded in [None, Some(false)] {
+            if let Some(installed) = downloaded {
+                download.finish(installed);
+            }
+            assert!(
+                model.is_cloud_serving(),
+                "the placeholder serves from the cloud"
+            );
+            let refusals = [
+                model.run(&request, None).unwrap_err(),
+                runtime
+                    .block_on(model.run_async(&request, None))
+                    .unwrap_err(),
+                model.run_streaming(&request, None, |_| Ok(())).unwrap_err(),
+                model
+                    .run_with_context(&request, &ConversationContext::new(), None)
+                    .unwrap_err(),
+            ];
+            for error in refusals {
+                assert!(
+                    matches!(
+                        &error,
+                        SdkError::UnsupportedModelCapability { capability, .. }
+                            if capability == "choice requests"
+                    ),
+                    "{error:?}"
+                );
+            }
+        }
+        any_request.assert_hits(0);
     }
 }

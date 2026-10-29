@@ -2,12 +2,7 @@ import ky, { isHTTPError } from "ky";
 import { z } from "zod";
 
 import { HuggingFaceError } from "../errors.ts";
-import {
-  type ParsedMetadata,
-  parseMetadata,
-  validateBrowserMetadata,
-  validateLlmBrowserMetadata,
-} from "../metadata.ts";
+import { type ParsedMetadata, parseMetadata, validateLlmBrowserMetadata } from "../metadata.ts";
 import { loadMetadata } from "./loading.ts";
 import type { ModelResolution } from "./registry.ts";
 
@@ -152,7 +147,7 @@ const topLevelFiles = (entries: readonly HuggingFaceTreeEntry[]): readonly Huggi
 const selectModelFile = (
   repo: string,
   files: readonly HuggingFaceTreeEntry[],
-  expectedExtension: ".litertlm" | ".tflite",
+  expectedExtension: ".gguf",
   requestedFile: string | undefined,
 ): string => {
   const candidates = files.filter((entry) => entry.path.endsWith(expectedExtension));
@@ -196,34 +191,24 @@ const synthesizeMetadata = (
   repoName: string,
   revision: string,
   modelFile: string,
-  expectedFormat: "litertlm" | "tflite",
 ): ParsedMetadata => {
   const metadata = parseMetadata({
     model_id: sanitizedModelId(repoName),
     version: revision,
     execution_template: {
-      type: expectedFormat === "litertlm" ? "LiteRtLm" : "TfLite",
+      type: "Gguf",
       model_file: modelFile,
     },
     files: [modelFile],
     preprocessing: [],
     postprocessing: [],
   });
-  if (expectedFormat === "litertlm") {
-    validateLlmBrowserMetadata(metadata);
-  } else {
-    validateBrowserMetadata(metadata);
-  }
+  validateLlmBrowserMetadata(metadata);
   return metadata;
 };
 
-const validateSurfaceMetadata = (
-  metadata: ParsedMetadata,
-  expectedFormat: "litertlm" | "tflite",
-): string =>
-  expectedFormat === "litertlm"
-    ? validateLlmBrowserMetadata(metadata).modelFile
-    : validateBrowserMetadata(metadata);
+const validateSurfaceMetadata = (metadata: ParsedMetadata): string =>
+  validateLlmBrowserMetadata(metadata).modelFile;
 
 const validateModelSize = (
   repo: string,
@@ -246,7 +231,7 @@ const validateModelSize = (
 
 export const resolveHuggingFaceModel = async (
   repo: unknown,
-  expectedFormat: "litertlm" | "tflite",
+  _expectedFormat: "gguf",
   options: HuggingFaceResolveOptions = {},
 ): Promise<ModelResolution> => {
   const validatedRepo = validateHfRepo(repo);
@@ -255,7 +240,7 @@ export const resolveHuggingFaceModel = async (
   const files = topLevelFiles(
     await fetchTree(validatedRepoString, validatedRepo, revision, options.signal),
   );
-  const expectedExtension = expectedFormat === "litertlm" ? ".litertlm" : ".tflite";
+  const expectedExtension = ".gguf";
   if (options.file !== undefined && !options.file.endsWith(expectedExtension)) {
     throw new HuggingFaceError(
       `HuggingFace options.file ${options.file} must end with ${expectedExtension}.`,
@@ -270,7 +255,7 @@ export const resolveHuggingFaceModel = async (
       resolveUrl(validatedRepo, revision, metadataEntry.path),
       options.signal,
     );
-    modelFile = validateSurfaceMetadata(metadata, expectedFormat);
+    modelFile = validateSurfaceMetadata(metadata);
     if (!files.some((entry) => entry.path === modelFile)) {
       throw new HuggingFaceError(
         `HuggingFace metadata model_file ${modelFile} was not found in the repo ${validatedRepoString} tree.`,
@@ -283,7 +268,7 @@ export const resolveHuggingFaceModel = async (
     }
   } else {
     modelFile = selectModelFile(validatedRepoString, files, expectedExtension, options.file);
-    metadata = synthesizeMetadata(validatedRepo.name, revision, modelFile, expectedFormat);
+    metadata = synthesizeMetadata(validatedRepo.name, revision, modelFile);
   }
 
   const modelEntry = files.find((entry) => entry.path === modelFile);

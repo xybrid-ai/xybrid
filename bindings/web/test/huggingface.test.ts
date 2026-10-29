@@ -12,10 +12,10 @@ import type { LlmEngine, LlmGeneration, LlmRuntime } from "../src/internal/runti
 import { downloadVerifiedModel } from "../src/internal/verified-download.ts";
 import { loadLlmFromResolution } from "../src/llm.ts";
 
-const REPO = "litert-community/SmolLM2-135M-Instruct";
-const MODEL_FILE = "SmolLM2_135M_Instruct.litertlm";
+const REPO = "QuantFactory/SmolLM2-135M-Instruct-GGUF";
+const MODEL_FILE = "SmolLM2-135M-Instruct.Q4_0.gguf";
 const HF_BASE = "https://huggingface.co";
-const FIXTURE_PATH = "test/fixtures/hf-tree-smollm2-litertlm.json";
+const FIXTURE_PATH = "test/fixtures/hf-tree-smollm2-gguf.json";
 
 type TreeEntry = {
   type: "file" | "directory";
@@ -33,7 +33,7 @@ const fileEntry = (path: string, size = 4): TreeEntry => ({
   size,
 });
 
-const metadata = (modelFile: string, type: "LiteRtLm" | "TfLite" = "TfLite") => ({
+const metadata = (modelFile: string, type = "Gguf") => ({
   model_id: "metadata-model",
   version: "1",
   execution_template: { type, model_file: modelFile },
@@ -119,7 +119,7 @@ describe("HuggingFace resolution", () => {
     for (const repo of ["org", "org/", "/name", "org/na me", "org/../x", "a/b/c"]) {
       expect(() => validateHfRepo(repo)).toThrow(HuggingFaceError);
     }
-    expect(validateHfRepo(REPO).name).toBe("SmolLM2-135M-Instruct");
+    expect(validateHfRepo(REPO).name).toBe("SmolLM2-135M-Instruct-GGUF");
   });
 
   test("validates revisions and defaults to main", () => {
@@ -138,10 +138,10 @@ describe("HuggingFace resolution", () => {
     if (modelEntry === undefined) {
       throw new Error("fixture must contain the model file");
     }
-    expect(modelEntry.size).toBe(142819328);
-    expect(modelEntry.lfs?.size).toBe(142819328);
+    expect(modelEntry.size).toBe(91_726_912);
+    expect(modelEntry.lfs?.size).toBe(91_726_912);
     expect(modelEntry.lfs?.oid).toBe(
-      "ccdc5c85735743f081b7d44ca309cab569f76c0f2f0e8e163449a63721969c37",
+      "f68203bfb98b1b1e8c64fac75fab10c4e36acac081609573b4df0fcc19c90dd9",
     );
     modelEntry.size = bytes.byteLength;
     modelEntry.lfs = {
@@ -165,15 +165,17 @@ describe("HuggingFace resolution", () => {
         "https://app.test/",
         "/xybrid/llm-runtime",
       );
-      const resolution = await resolveHuggingFaceModel(REPO, "litertlm", options);
+      const resolution = await resolveHuggingFaceModel(REPO, "gguf", options);
       expect(resolution.sizeBytes).toBe(bytes.byteLength);
       expect(resolution.sha256).toBe(expectedSha256);
-      expect(resolution.metadata.modelId).toBe("smollm2-135m-instruct");
+      expect(resolution.metadata.modelId).toBe("smollm2-135m-instruct-gguf");
       expect(resolution.metadata.version).toBe("main");
       expect(resolution.metadata.template).toEqual({
-        type: "LiteRtLm",
+        type: "Gguf",
         modelFile: MODEL_FILE,
         contextLength: undefined,
+        chatTemplate: undefined,
+        generationParams: undefined,
       });
 
       const control = createLlmRuntime();
@@ -186,8 +188,8 @@ describe("HuggingFace resolution", () => {
       expect(control.initialized).toEqual(["https://app.test/llm-runtime"]);
       expect(control.created).toEqual([{ accelerator: "wasm", contextLength: undefined }]);
       expect(requests.map((request) => request.href)).toEqual([
-        `${HF_BASE}/api/models/litert-community/SmolLM2-135M-Instruct/tree/main`,
-        `${HF_BASE}/litert-community/SmolLM2-135M-Instruct/resolve/main/${MODEL_FILE}`,
+        `${HF_BASE}/api/models/${REPO}/tree/main`,
+        `${HF_BASE}/${REPO}/resolve/main/${MODEL_FILE}`,
       ]);
       expect(requestCredentials).toEqual(["omit", "omit"]);
       await session.dispose();
@@ -197,34 +199,32 @@ describe("HuggingFace resolution", () => {
   });
 
   test("rejects ambiguous files and honors options.file", async () => {
-    const tree = [fileEntry("first.litertlm"), fileEntry("second.litertlm")];
+    const tree = [fileEntry("first.gguf"), fileEntry("second.gguf")];
     const restoreFetch = installFetch(async () => jsonResponse(tree));
     try {
-      await expect(resolveHuggingFaceModel("org/model", "litertlm")).rejects.toThrow(
-        /first\.litertlm.*second\.litertlm.*options\.file/,
+      await expect(resolveHuggingFaceModel("org/model", "gguf")).rejects.toThrow(
+        /first\.gguf.*second\.gguf.*options\.file/,
       );
-      const selected = await resolveHuggingFaceModel("org/model", "litertlm", {
-        file: "second.litertlm",
+      const selected = await resolveHuggingFaceModel("org/model", "gguf", {
+        file: "second.gguf",
       });
-      expect(selected.modelUrl.pathname).toBe("/org/model/resolve/main/second.litertlm");
+      expect(selected.modelUrl.pathname).toBe("/org/model/resolve/main/second.gguf");
       await expect(
-        resolveHuggingFaceModel("org/model", "litertlm", { file: "missing.litertlm" }),
+        resolveHuggingFaceModel("org/model", "gguf", { file: "missing.gguf" }),
       ).rejects.toThrow(HuggingFaceError);
       await expect(
-        resolveHuggingFaceModel("org/model", "litertlm", { file: "second.tflite" }),
+        resolveHuggingFaceModel("org/model", "gguf", { file: "second.litertlm" }),
       ).rejects.toThrow(HuggingFaceError);
     } finally {
       restoreFetch();
     }
   });
 
-  test("rejects a tensor surface with no tflite candidate", async () => {
-    const tree = await fixtureTree();
+  test("rejects repositories containing only legacy browser formats", async () => {
+    const tree = [fileEntry("model.tflite"), fileEntry("model.litertlm")];
     const restoreFetch = installFetch(async () => jsonResponse(tree));
     try {
-      await expect(resolveHuggingFaceModel(REPO, "tflite")).rejects.toThrow(
-        /no \.tflite file in repo/,
-      );
+      await expect(resolveHuggingFaceModel(REPO, "gguf")).rejects.toThrow(/no \.gguf file in repo/);
     } finally {
       restoreFetch();
     }
@@ -232,35 +232,35 @@ describe("HuggingFace resolution", () => {
 
   test("ignores directories and nested paths", async () => {
     const tree: TreeEntry[] = [
-      { type: "directory", path: "nested.tflite" },
-      { type: "file", path: "sub/nested.tflite", size: 5 },
-      fileEntry("top.tflite", 5),
+      { type: "directory", path: "nested.gguf" },
+      { type: "file", path: "sub/nested.gguf", size: 5 },
+      fileEntry("top.gguf", 5),
     ];
     const restoreFetch = installFetch(async () => jsonResponse(tree));
     try {
-      const resolution = await resolveHuggingFaceModel("org/model", "tflite");
-      expect(resolution.modelUrl.pathname).toBe("/org/model/resolve/main/top.tflite");
+      const resolution = await resolveHuggingFaceModel("org/model", "gguf");
+      expect(resolution.modelUrl.pathname).toBe("/org/model/resolve/main/top.gguf");
     } finally {
       restoreFetch();
     }
   });
 
   test("loads metadata from the repository and validates its model file", async () => {
-    const tree = [fileEntry("actual.tflite"), fileEntry("model_metadata.json")];
+    const tree = [fileEntry("actual.gguf"), fileEntry("model_metadata.json")];
     const requests: URL[] = [];
     const requestCredentials: string[] = [];
     const restoreFetch = installFetch(async (url, _init, request) => {
       requests.push(url);
       requestCredentials.push(request.credentials);
       if (url.pathname.endsWith("model_metadata.json")) {
-        return jsonResponse(metadata("actual.tflite"));
+        return jsonResponse(metadata("actual.gguf"));
       }
       return jsonResponse(tree);
     });
     try {
-      const resolution = await resolveHuggingFaceModel("org/model", "tflite");
+      const resolution = await resolveHuggingFaceModel("org/model", "gguf");
       expect(resolution.metadata.modelId).toBe("metadata-model");
-      expect(resolution.modelUrl.pathname).toBe("/org/model/resolve/main/actual.tflite");
+      expect(resolution.modelUrl.pathname).toBe("/org/model/resolve/main/actual.gguf");
       expect(requests.map((request) => request.pathname)).toEqual([
         "/api/models/org/model/tree/main",
         "/org/model/resolve/main/model_metadata.json",
@@ -274,12 +274,12 @@ describe("HuggingFace resolution", () => {
   test("rejects missing and conflicting metadata model files", async () => {
     const restoreMissing = installFetch(async (url) =>
       url.pathname.endsWith("model_metadata.json")
-        ? jsonResponse(metadata("missing.tflite"))
-        : jsonResponse([fileEntry("model_metadata.json"), fileEntry("actual.tflite")]),
+        ? jsonResponse(metadata("missing.gguf"))
+        : jsonResponse([fileEntry("model_metadata.json"), fileEntry("actual.gguf")]),
     );
     try {
-      await expect(resolveHuggingFaceModel("org/model", "tflite")).rejects.toThrow(
-        /missing\.tflite.*not found/,
+      await expect(resolveHuggingFaceModel("org/model", "gguf")).rejects.toThrow(
+        /missing\.gguf.*not found/,
       );
     } finally {
       restoreMissing();
@@ -287,17 +287,17 @@ describe("HuggingFace resolution", () => {
 
     const restoreConflict = installFetch(async (url) =>
       url.pathname.endsWith("model_metadata.json")
-        ? jsonResponse(metadata("actual.tflite"))
+        ? jsonResponse(metadata("actual.gguf"))
         : jsonResponse([
             fileEntry("model_metadata.json"),
-            fileEntry("actual.tflite"),
-            fileEntry("other.tflite"),
+            fileEntry("actual.gguf"),
+            fileEntry("other.gguf"),
           ]),
     );
     try {
       await expect(
-        resolveHuggingFaceModel("org/model", "tflite", { file: "other.tflite" }),
-      ).rejects.toThrow(/conflicts.*actual\.tflite/);
+        resolveHuggingFaceModel("org/model", "gguf", { file: "other.gguf" }),
+      ).rejects.toThrow(/conflicts.*actual\.gguf/);
     } finally {
       restoreConflict();
     }
@@ -305,11 +305,11 @@ describe("HuggingFace resolution", () => {
 
   test("verifies non-LFS files by size only", async () => {
     const bytes = new Uint8Array([1, 2, 3]);
-    const resolutionTree = [fileEntry("model.tflite", bytes.byteLength)];
+    const resolutionTree = [fileEntry("model.gguf", bytes.byteLength)];
     const restoreTree = installFetch(async () => jsonResponse(resolutionTree));
     let resolution: Awaited<ReturnType<typeof resolveHuggingFaceModel>> | undefined;
     try {
-      resolution = await resolveHuggingFaceModel("org/model", "tflite");
+      resolution = await resolveHuggingFaceModel("org/model", "gguf");
     } finally {
       restoreTree();
     }
@@ -342,12 +342,10 @@ describe("HuggingFace resolution", () => {
       if (!url.pathname.includes("/api/models/")) {
         modelDownloads += 1;
       }
-      return jsonResponse([fileEntry("model.tflite", 512 * 1024 * 1024 + 1)]);
+      return jsonResponse([fileEntry("model.gguf", 512 * 1024 * 1024 + 1)]);
     });
     try {
-      await expect(resolveHuggingFaceModel("org/model", "tflite")).rejects.toThrow(
-        HuggingFaceError,
-      );
+      await expect(resolveHuggingFaceModel("org/model", "gguf")).rejects.toThrow(HuggingFaceError);
       expect(modelDownloads).toBe(0);
     } finally {
       restoreFetch();
@@ -358,7 +356,7 @@ describe("HuggingFace resolution", () => {
     const restoreFetch = installFetch(async () => new Response("missing", { status: 404 }));
     try {
       await expect(
-        resolveHuggingFaceModel("org/model", "tflite", { revision: "v1" }),
+        resolveHuggingFaceModel("org/model", "gguf", { revision: "v1" }),
       ).rejects.toThrow(/org\/model.*v1/);
     } finally {
       restoreFetch();
@@ -381,7 +379,7 @@ describe("HuggingFace resolution", () => {
       });
     });
     try {
-      const pending = resolveHuggingFaceModel("org/model", "tflite", {
+      const pending = resolveHuggingFaceModel("org/model", "gguf", {
         signal: controller.signal,
       });
       await Bun.sleep(0);
@@ -396,7 +394,7 @@ describe("HuggingFace resolution", () => {
 
   test("passes the caller signal to an in-flight metadata request", async () => {
     const controller = new AbortController();
-    const tree = [fileEntry("model.tflite"), fileEntry("model_metadata.json")];
+    const tree = [fileEntry("model.gguf"), fileEntry("model_metadata.json")];
     let metadataSignal: AbortSignal | undefined;
     let resolveMetadataStarted: (() => void) | undefined;
     const metadataStarted = new Promise<void>((resolve) => {
@@ -421,7 +419,7 @@ describe("HuggingFace resolution", () => {
       });
     });
     try {
-      const pending = resolveHuggingFaceModel("org/model", "tflite", {
+      const pending = resolveHuggingFaceModel("org/model", "gguf", {
         signal: controller.signal,
       });
       await metadataStarted;

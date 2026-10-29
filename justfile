@@ -133,3 +133,21 @@ doc:
 # Generate and open documentation
 doc-open:
     cargo doc --workspace --no-deps --open
+
+# =============================================================================
+# Workspace
+# =============================================================================
+
+# Runs every folder's clean.sh (in parallel) plus the root's own tiers.
+# Opt-in tiers: --worktrees (merged .context checkouts), --bazel (this output
+# base), --bazel-orphans (bases of deleted workspaces), --all.
+# One folder alone: run its clean.sh, e.g. bindings/flutter/example/clean.sh.
+#
+# Examples:
+#   just clean                  # dry run, build outputs only
+#   just clean --all            # dry run, every tier
+#   just clean --all --apply
+#
+# Reclaim disk: list what a rebuild recreates (dry run), delete with --apply
+clean *args:
+    ./clean.sh {{args}}

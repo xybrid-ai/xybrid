@@ -42,3 +42,7 @@ test_driver/
 # so a future test directory cannot silently grow the archive either.
 example/macos/
 example/test/
+
+# Per-folder clean scripts source tools/scripts/clean-lib.sh, which is not
+# in the published package.
+clean.sh

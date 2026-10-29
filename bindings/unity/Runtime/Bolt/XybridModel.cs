@@ -51,9 +51,11 @@ namespace XybridBolt
         /// download in the background.
         ///
         /// Returns almost immediately instead of blocking on the download. Requires
-        /// a resolvable API key and an uncached model; otherwise it behaves exactly
-        /// like `from_registry`. Poll `download_status` for progress and
-        /// `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+        /// a resolvable API key, an uncached model, and a chat model the registry
+        /// serves as a direct download (GGUF or vision-language, not a `.xyb`
+        /// bundle); otherwise it behaves exactly like `from_registry`. Poll
+        /// `download_status` for progress and `is_cloud_serving` to know which leg
+        /// is answering.
         /// </summary>
         public static XybridModel FromRegistrySpeculative(string id)
         {

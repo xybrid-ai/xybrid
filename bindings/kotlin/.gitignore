@@ -9,6 +9,12 @@
 # directory so the Gradle jniLibs srcDir resolves on a fresh checkout.
 libs/**/*.so
 
+# The speech engine's notices (Phonon/Kitten TTS 2, arm64-v8a). Staged here at
+# publish time from the release zip by `verify_zzz_android.py stage-gradle`
+# (release-publish.yml) so Gradle packages them at assets/xybrid/zzz/ in the
+# AAR; never committed.
+src/main/assets/xybrid/zzz/
+
 # Built application files
 *.apk
 *.ap_

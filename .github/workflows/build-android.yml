@@ -1,4 +1,5 @@
-name: Build Android
+# Purpose: Build the Android .so files for every ABI, test the Kotlin wrapper, and gate dlopen on an x86_64 emulator.
+name: "SDK: Android"
 
 on:
   pull_request:
@@ -12,12 +13,21 @@ on:
       - 'tools/scripts/android-dlopen-gate.sh'
       - 'tools/scripts/android-dlopen-probe.c'
       - 'tools/scripts/verify_android_jni.py'
+      - 'tools/scripts/verify_android_api_level.py'
       - 'xtask/**'
       # llama.cpp's Android build config and sources (see //:llama_android_dl).
       - 'BUILD.bazel'
       - 'bazel/ggml/**'
+      # The Android NDK toolchains: @androidndk (API 28) and the AAR arm64
+      # slice's @androidndk_api29 (see //bazel/toolchains/android), the patch
+      # that generates both, and the .bazelrc NDK download pins.
+      - 'MODULE.bazel'
+      - 'bazel/toolchains/android/**'
+      - 'rules_android_ndk.patch'
+      - '.bazelrc'
       - 'crates/llama-cpp-sys/**'
       - 'vendor/llama-cpp'
+      - 'vendor/ort-android/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
       - '.github/workflows/build-android.yml'
@@ -42,12 +52,18 @@ on:
       - 'tools/scripts/android-dlopen-gate.sh'
       - 'tools/scripts/android-dlopen-probe.c'
       - 'tools/scripts/verify_android_jni.py'
+      - 'tools/scripts/verify_android_api_level.py'
       - 'xtask/**'
       # llama.cpp's Android build config and sources (see //:llama_android_dl).
       - 'BUILD.bazel'
       - 'bazel/ggml/**'
+      - 'MODULE.bazel'
+      - 'bazel/toolchains/android/**'
+      - 'rules_android_ndk.patch'
+      - '.bazelrc'
       - 'crates/llama-cpp-sys/**'
       - 'vendor/llama-cpp'
+      - 'vendor/ort-android/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
       - '.github/workflows/build-android.yml'
@@ -55,7 +71,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-android-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all
@@ -176,6 +192,16 @@ jobs:
               exit 1
             fi
             echo "  DT_NEEDED libc++_shared.so: present"
+            # The Android API level the slice was linked for, from its
+            # .note.android.ident: arm64-v8a builds with @androidndk_api29
+            # (Android 10, the SDK's minSdk); the other slices stay on
+            # @androidndk at API 28. Either fallback changes which devices load it.
+            case "$abi" in
+              arm64-v8a) api=29 ;;
+              *) api=28 ;;
+            esac
+            python3 tools/scripts/verify_android_api_level.py --readelf "$READELF" \
+              --api "$api" "$SO"
             # The 64-bit ABIs must be 16 KB-aligned or they won't load on
             # Android 15+ (16 KB-page) devices. A LOAD segment aligned below
             # 0x4000 means the shim's -Wl,-z,max-page-size=16384 didn't land.
@@ -229,6 +255,9 @@ jobs:
             done < <("$READELF" -l "$SO" | awk '$1=="LOAD"{if(NF>4){print $NF}else{getline;print $NF}}')
             echo "OK: $lib ($(du -h "$SO" | cut -f1), 16 KB aligned)"
           done
+          # Same configuration as libxybrid_bolt.so, so the same API-29 link.
+          python3 tools/scripts/verify_android_api_level.py --readelf "$READELF" --api 29 \
+            $(printf "$SO_BASE/%s\n" libllama.so libggml.so libggml-base.so libmtmd.so $shipped)
 
       - name: Verify ORT runtime bundled (arm64-v8a, x86_64)
         run: |

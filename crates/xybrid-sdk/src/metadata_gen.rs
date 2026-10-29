@@ -1305,6 +1305,7 @@ fn build_onnx_metadata(
                     tokenizer_type: TokenizerType::WordPiece,
                     max_length: supporting_files.max_position_embeddings.map(|v| v as usize),
                     backend: TokenizerBackend::HuggingFace,
+                    add_special_tokens: false,
                 });
                 postprocessing.push(PostprocessingStep::Argmax { dim: None });
             }
@@ -1314,6 +1315,7 @@ fn build_onnx_metadata(
                     tokenizer_type: TokenizerType::WordPiece,
                     max_length: supporting_files.max_position_embeddings.map(|v| v as usize),
                     backend: TokenizerBackend::HuggingFace,
+                    add_special_tokens: false,
                 });
                 postprocessing.push(PostprocessingStep::Argmax { dim: None });
             }
@@ -1337,6 +1339,7 @@ fn build_onnx_metadata(
                     tokenizer_type: TokenizerType::WordPiece,
                     max_length: supporting_files.max_position_embeddings.map(|v| v as usize),
                     backend: TokenizerBackend::HuggingFace,
+                    add_special_tokens: false,
                 });
             }
             _ => {
@@ -1770,6 +1773,7 @@ fn infer_from_pipeline_tag(
                 tokenizer_type,
                 max_length,
                 backend: TokenizerBackend::HuggingFace,
+                add_special_tokens: false,
             }],
             postprocessing: vec![PostprocessingStep::Softmax { dim: None }],
             confidence: Confidence::High,
@@ -1782,6 +1786,7 @@ fn infer_from_pipeline_tag(
                 tokenizer_type,
                 max_length,
                 backend: TokenizerBackend::HuggingFace,
+                add_special_tokens: false,
             }],
             postprocessing: vec![PostprocessingStep::Argmax { dim: None }],
             confidence: Confidence::High,
@@ -1804,6 +1809,7 @@ fn infer_from_pipeline_tag(
                 tokenizer_type,
                 max_length,
                 backend: TokenizerBackend::HuggingFace,
+                add_special_tokens: false,
             }],
             postprocessing: vec![PostprocessingStep::MeanPool { dim: 1 }],
             confidence: Confidence::High,
@@ -1831,6 +1837,7 @@ fn infer_nlp_task_from_outputs(
         tokenizer_type: tokenizer_type.clone(),
         max_length,
         backend: TokenizerBackend::HuggingFace,
+        add_special_tokens: false,
     };
 
     // Analyze output shapes
@@ -1955,6 +1962,7 @@ fn infer_from_output_shapes(
                         tokenizer_type,
                         max_length,
                         backend: TokenizerBackend::HuggingFace,
+                        add_special_tokens: false,
                     }],
                     postprocessing: vec![PostprocessingStep::Softmax { dim: None }],
                     confidence: Confidence::Low,
@@ -2024,6 +2032,7 @@ fn infer_steps_from_onnx(
             tokenizer_type: TokenizerType::WordPiece,
             max_length: Some(512),
             backend: TokenizerBackend::HuggingFace,
+            add_special_tokens: false,
         });
         files.push(tokenizer_file.to_string());
     }

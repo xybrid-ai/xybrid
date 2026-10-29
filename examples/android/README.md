@@ -17,7 +17,7 @@ This is a native Android example app demonstrating how to integrate the Xybrid S
 |------|------------------|-------|
 | Android Studio | Hedgehog (2023.1.1) or later | [Download](https://developer.android.com/studio) |
 | JDK | 11+ | Included with Android Studio |
-| Android SDK | API 28+ (Android 9.0) | Via SDK Manager |
+| Android SDK | API 29+ (Android 10) | Via SDK Manager |
 | Rust toolchain | With Android targets | For building native libraries |
 | Android NDK | r26+ | For cross-compilation |
 
@@ -124,7 +124,7 @@ The app defaults to `<app-files-dir>/models/kokoro-82m` — you can edit the pat
 
 ### 5. Run the App
 
-1. Select a device or emulator (API 28+)
+1. Select a device or emulator (API 29+)
 2. Click **Run** (Shift+F10)
 3. Tap **Initialize SDK**
 4. Enter the model bundle path (or use the default)
@@ -266,7 +266,7 @@ adb shell ls -la /data/local/tmp/models/kokoro-82m/
 
 | Requirement | Value |
 |-------------|-------|
-| Minimum SDK | API 28 (Android 9.0) |
+| Minimum SDK | API 29 (Android 10) |
 | Target SDK | API 34 (Android 14) |
 | Kotlin | 1.8.22 |
 | Compose BOM | 2023.06.01 |

@@ -36,9 +36,10 @@ rust_shared_library(
     # shared object — so the link resolved only inside the build container.
     # "static" selects static_runtime_lib, the runtime the CLI binary gets.
     #
-    # LINUX ONLY: on android the dynamic runtime lib is the NDK's
-    # libc++_shared.so, whose DT_NEEDED is load-bearing (see the bolt cdylib's
-    # note — A/B showed a blanket "static" drops it).
+    # LINUX ONLY: on android this library NEEDs the NDK's libc++_shared.so
+    # (-lc++_shared below), which the Flutter plugin packages beside it. There
+    # "static" would select every NDK sysroot archive, bionic's libc.a included
+    # (see the bolt cdylib's note).
     cc_runtime_linkage = select({
         "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": "static",
         "//conditions:default": "dynamic",

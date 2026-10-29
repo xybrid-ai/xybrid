@@ -2,17 +2,18 @@ import ky, { isHTTPError, isTimeoutError } from "ky";
 import { z } from "zod";
 
 import { RegistryError } from "../errors.ts";
-import {
-  type ParsedMetadata,
-  parseMetadata,
-  validateBrowserMetadata,
-  validateLlmBrowserMetadata,
-} from "../metadata.ts";
+import { type ParsedMetadata, parseMetadata, validateLlmBrowserMetadata } from "../metadata.ts";
+import { SDK_VERSION } from "../version.ts";
 import { abortReason, isAbortError } from "./loading.ts";
 
 const DEFAULT_REGISTRY_URLS = ["https://registry.xybrid.dev", "https://r2.xybrid.dev"] as const;
 const REGISTRY_TIMEOUT_MS = 30_000;
 const MAX_MODEL_BYTES = 512 * 1024 * 1024;
+// Which SDK made the call, never who: the anonymous identity every xybrid SDK
+// sends the registry (docs/telemetry/registry.md). The registry allows the
+// header cross-origin. Model downloads never carry it, since a custom header
+// would cost each one a CORS preflight on hosts that may not allow it.
+const CLIENT_HEADER = `binding=web; sdk_version=${SDK_VERSION}; platform=web`;
 
 const resolvedSchema = z
   .object({
@@ -74,7 +75,7 @@ const validateModelId = (id: unknown): string => {
 const registryEndpoint = (
   registryUrl: string | URL,
   id: string,
-  expectedFormat: "litertlm" | "tflite",
+  expectedFormat: "gguf",
   version: string | undefined,
 ): URL => {
   const base = new URL(registryUrl);
@@ -114,10 +115,7 @@ const isNetworkError = (error: unknown): boolean => {
   return error instanceof TypeError;
 };
 
-const validateResolution = (
-  input: unknown,
-  expectedFormat: "litertlm" | "tflite",
-): RegistryResolution => {
+const validateResolution = (input: unknown, expectedFormat: "gguf"): RegistryResolution => {
   const parsed = registryEnvelopeSchema.safeParse(input);
   if (!parsed.success) {
     throw new RegistryError(
@@ -166,10 +164,7 @@ const validateResolution = (
 
   try {
     const metadata = parseMetadata(resolved.model_metadata);
-    const modelFile =
-      expectedFormat === "litertlm"
-        ? validateLlmBrowserMetadata(metadata).modelFile
-        : validateBrowserMetadata(metadata);
+    const modelFile = validateLlmBrowserMetadata(metadata).modelFile;
     if (resolved.file !== modelFile) {
       throw new RegistryError(
         `Registry resolved file ${resolved.file} does not match execution_template.model_file ${modelFile}.`,
@@ -189,21 +184,20 @@ const validateResolution = (
   }
 };
 
-export const parseRegistryResponse = (
-  input: unknown,
-  expectedFormat: "litertlm" | "tflite",
-): RegistryResolution => validateResolution(input, expectedFormat);
+export const parseRegistryResponse = (input: unknown, expectedFormat: "gguf"): RegistryResolution =>
+  validateResolution(input, expectedFormat);
 
 const fetchRegistryResolution = async (
   endpoint: URL,
   id: string,
-  expectedFormat: "litertlm" | "tflite",
+  expectedFormat: "gguf",
   signal: AbortSignal | undefined,
 ): Promise<RegistryResolution> => {
   let response: Response;
   try {
     response = await ky.get(endpoint, {
       credentials: "omit",
+      headers: { "X-Xybrid-Client": CLIENT_HEADER },
       retry: 0,
       timeout: REGISTRY_TIMEOUT_MS,
       ...(signal === undefined ? {} : { signal }),
@@ -234,7 +228,7 @@ const fetchRegistryResolution = async (
 
 export const resolveRegistryModel = async (
   id: unknown,
-  expectedFormat: "litertlm" | "tflite",
+  expectedFormat: "gguf",
   options: RegistryResolveOptions = {},
 ): Promise<RegistryResolution> => {
   const validatedId = validateModelId(id);

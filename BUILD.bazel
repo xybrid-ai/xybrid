@@ -6,8 +6,23 @@ exports_files([
 ])
 
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "objc_library")
+load("@rules_python//python:py_binary.bzl", "py_binary")
 load("//bazel/ggml:android.bzl", "ANDROID_ARM64_CPU_VARIANTS", "ANDROID_ARM64_GGML_LIBS")
+
+# Kitten is opt-in and consumes a privately staged, verified static archive.
+#
+# scope = "target": the exec configuration resets the flag. rules_rust's
+# wrappers configure every Rust dep a second time in exec (proc_macro_deps),
+# so with the default "universal" scope a flag-on Android AAR build also
+# resolved xybrid-core's engine dep for the Linux build host and required the
+# host's private slice (@zzz_linux) besides @zzz_android. No build tool links
+# the engine, so exec builds never need it.
+bool_flag(name = "tts_zzz", build_setting_default = False, scope = "target", visibility = ["//visibility:public"])
+config_setting(
+    name = "tts_zzz_enabled", flag_values = {":tts_zzz": "true"},
+    visibility = ["//visibility:public"],
+)
 
 # The macOS GPU lane toggle (Flip 2). Both darwin lanes share the SAME Rust
 # feature set (candle-metal/CoreML/vision are bindings — pure Rust, cross-
@@ -73,6 +88,127 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# The browser runtime uses the same pinned sources as //:llama. These sources
+# mirror ggml/src/{,ggml-cpu/}CMakeLists.txt and src/CMakeLists.txt. Keeping the
+# browser build in Bazel lets Emscripten's registered toolchain own compilation
+# and the final JS/WASM link, including the Rust static library.
+py_binary(
+    name = "browser_version_tool",
+    srcs = ["//tools/scripts:llama_browser_version.py"],
+    main = "//tools/scripts:llama_browser_version.py",
+)
+
+genrule(
+    name = "browser_version",
+    srcs = [
+        ".github/llamacpp-version.json",
+        "vendor/llama-cpp/CMakeLists.txt",
+        "vendor/llama-cpp/ggml/CMakeLists.txt",
+    ],
+    outs = ["browser_version/llama-version.h", "browser_version/ggml-version.h"],
+    cmd = "$(execpath :browser_version_tool) $(location vendor/llama-cpp/CMakeLists.txt) $(location vendor/llama-cpp/ggml/CMakeLists.txt) $(location .github/llamacpp-version.json) $(RULEDIR)/browser_version",
+    tools = [":browser_version_tool"],
+)
+
+cc_library(
+    name = "llama_browser",
+    srcs = glob([
+        "vendor/llama-cpp/src/*.cpp",
+        "vendor/llama-cpp/src/models/*.cpp",
+    ]) + [
+        "vendor/llama-cpp/ggml/src/ggml.c",
+        "vendor/llama-cpp/ggml/src/ggml.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-alloc.c",
+        "vendor/llama-cpp/ggml/src/ggml-backend.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-backend-dl.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-backend-meta.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-backend-reg.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-opt.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-quants.c",
+        "vendor/llama-cpp/ggml/src/ggml-threading.cpp",
+        "vendor/llama-cpp/ggml/src/gguf.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/ggml-cpu.c",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/ggml-cpu.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/arch/wasm/quants.c",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/binary-ops.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/hbm.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/ops.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/quants.c",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/repack.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/traits.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/unary-ops.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/tiled/tiled.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/tiled/tiled-kernel.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/vec.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/amx/amx.cpp",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/amx/mmq.cpp",
+    ] + select({
+        "//bindings/web/runtime:webgpu_enabled": ["vendor/llama-cpp/ggml/src/ggml-webgpu/ggml-webgpu.cpp"],
+        "//conditions:default": [],
+    }),
+    hdrs = [":browser_version"] + glob([
+        "vendor/llama-cpp/include/*.h",
+        "vendor/llama-cpp/src/*.h",
+        "vendor/llama-cpp/src/models/*.h",
+        "vendor/llama-cpp/ggml/include/*.h",
+        "vendor/llama-cpp/ggml/src/*.h",
+        "vendor/llama-cpp/ggml/src/ggml-cpu/**/*.h",
+    ]) + select({
+        "//bindings/web/runtime:webgpu_enabled": [":browser_wgsl"] + glob([
+            "vendor/llama-cpp/ggml/src/ggml-webgpu/*.hpp",
+        ]),
+        "//conditions:default": [],
+    }),
+    copts = ["-fexceptions"] + select({
+        "//bindings/web/runtime:webgpu_enabled": ["--use-port=emdawnwebgpu"],
+        "//conditions:default": [],
+    }),
+    defines = [
+        "GGML_USE_CPU",
+        "GGML_SCHED_MAX_COPIES=4",
+    ] + select({
+        "//bindings/web/runtime:webgpu_enabled": ["GGML_USE_WEBGPU"],
+        "//conditions:default": [],
+    }),
+    includes = [
+        "browser_version",
+        "vendor/llama-cpp/include",
+        "vendor/llama-cpp/src",
+        "vendor/llama-cpp/ggml/include",
+        "vendor/llama-cpp/ggml/src",
+        "vendor/llama-cpp/ggml/src/ggml-cpu",
+        "browser_wgsl",
+    ],
+    linkopts = select({
+        "//bindings/web/runtime:webgpu_enabled": ["--use-port=emdawnwebgpu", "-fexceptions"],
+        "//conditions:default": ["-fexceptions"],
+    }),
+    # Virtual include paths keep the port's absolute header paths out of the
+    # dependency file, while declaring those headers to Bazel.
+    deps = select({
+        "//bindings/web/runtime:webgpu_enabled": ["@emscripten_cache//:emdawnwebgpu_cpp_headers"],
+        "//conditions:default": [],
+    }),
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "browser_embed_wgsl",
+    srcs = ["vendor/llama-cpp/ggml/src/ggml-webgpu/wgsl-shaders/embed_wgsl.py"],
+    main = "vendor/llama-cpp/ggml/src/ggml-webgpu/wgsl-shaders/embed_wgsl.py",
+    tags = ["manual"],
+)
+
+genrule(
+    name = "browser_wgsl",
+    srcs = glob(["vendor/llama-cpp/ggml/src/ggml-webgpu/wgsl-shaders/*.wgsl", "vendor/llama-cpp/ggml/src/ggml-webgpu/wgsl-shaders/*.tmpl"]),
+    outs = ["browser_wgsl/ggml-wgsl-shaders.hpp"],
+    cmd = "$(execpath :browser_embed_wgsl) --input_dir vendor/llama-cpp/ggml/src/ggml-webgpu/wgsl-shaders --output_file $@",
+    tools = [":browser_embed_wgsl"],
+    tags = ["manual"],
+)
+
 # OPTION B: build llama.cpp's libraries hermetically via its own CMakeLists,
 # driven by rules_foreign_cc + the hermetic-llvm clang. Feature flags are MINE
 # here (not build.rs's hardcoded ones) → CPU-only, Metal/Accelerate/BLAS OFF, so
@@ -81,16 +217,23 @@ filegroup(
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 
 # Base llama cmake configuration (CPU-only, hermetic on desktop: Metal OFF).
-# Desktop stays lean: TOOLS/COMMON OFF → just llama + ggml (the proven config).
+# SDK builds omit the application and tools; vision adds standalone mtmd.
 _LLAMA_CACHE_ENTRIES = {
     "CMAKE_BUILD_TYPE": "Release",
     "BUILD_SHARED_LIBS": "OFF",
+    "CMAKE_INSTALL_LIBDIR": "lib",
     "LLAMA_BUILD_EXAMPLES": "OFF",
     "LLAMA_BUILD_TESTS": "OFF",
+    "LLAMA_BUILD_APP": "OFF",
     "LLAMA_BUILD_TOOLS": "OFF",
     "LLAMA_BUILD_SERVER": "OFF",
     "LLAMA_BUILD_COMMON": "OFF",
+    "LLAMA_SUBPROCESS": "OFF",
+    "LLAMA_BUILD_IS_DEV": "OFF",
     "LLAMA_CURL": "OFF",
+    # Current llama.cpp uses OpenSSL in its optional HTTP helper. Match the
+    # Cargo embedding build and avoid discovering host headers in cross builds.
+    "LLAMA_OPENSSL": "OFF",
     "GGML_OPENMP": "OFF",
     "GGML_NATIVE": "OFF",  # reproducible: no -march=native
     "GGML_METAL": "OFF",  # <-- the key: no Apple GPU => no Xcode => hermetic
@@ -100,16 +243,11 @@ _LLAMA_CACHE_ENTRIES = {
     "GGML_VULKAN": "OFF",
 }
 
-# Android extras. VISION: TOOLS+COMMON=ON unlock tools/ so the `mtmd` library
-# (multimodal vision/audio) is built — mirrors build.rs's mobile vision path.
-# TOOLS=ON also builds the tool executables (batched-bench, …); those need libc++
-# explicitly linked (cargo's NDK does this automatically, rfcc's doesn't — the
-# static libs we collect are unaffected). GGML_LLAMAFILE=OFF mirrors build.rs.
-# Vision is Android-only (a mobile backend, like candle): desktop never builds
-# mtmd, so the proven desktop chain is untouched.
+# Android vision uses standalone mtmd, matching Cargo. Subprocess and video
+# support stay disabled because Android packaging does not ship ffmpeg.
+# GGML_LLAMAFILE=OFF mirrors build.rs's mobile configuration.
 _ANDROID_LLAMA = {
-    "LLAMA_BUILD_TOOLS": "ON",
-    "LLAMA_BUILD_COMMON": "ON",
+    "LLAMA_BUILD_MTMD": "ON",
     "GGML_LLAMAFILE": "OFF",
     "CMAKE_EXE_LINKER_FLAGS": "-lc++_shared",
 }
@@ -151,15 +289,16 @@ _LLAMA_LIBS = [
     "libggml-cpu.a",
 ]
 
+# Upstream links this internal archive into mtmd but does not install it.
+_STAGE_VENDOR_HASH = "mkdir -p $$INSTALLDIR/lib && cp $$BUILD_TMPDIR/vendor/hash/libvendor-hash.a $$INSTALLDIR/lib/"
+
 # Shared darwin cmake config (CPU lane //:llama darwin arm + //:llama_metal).
 # CMAKE_SYSTEM pair: same rfcc gap as windows — no darwin _TARGET_OS_PARAMS
 # entry, so without it cmake detects the Linux exec host and ggml defines
 # _GNU_SOURCE instead of _DARWIN_C_SOURCE. With SYSTEM_NAME=Darwin cmake also
 # requires Mach-O binutils (CMakeFindBinUtils) — pointed at the hermetic llvm
 # equivalents via $(execpath) (labels ride in via build_data, cfg=exec).
-# Vision (TOOLS/COMMON=ON -> libmtmd) for parity with the shipped
-# platform-macos CLI; the throwaway tool exes get a C++ runtime via
-# CMAKE_CXX_STANDARD_LIBRARIES (lands AFTER objects, unlike EXE_LINKER_FLAGS).
+# Vision (standalone mtmd) for parity with the shipped platform-macos CLI.
 # Metal GPU backend, shared by the Apple Metal lanes (macOS //:llama_metal + iOS).
 _METAL_CMAKE_FLAGS = {
     "GGML_METAL": "ON",
@@ -211,6 +350,7 @@ _VULKAN_CMAKE_FLAGS = {
     # glslc is executed, never linked or included, so it has neither hazard and
     # comes straight from the exec machine.
     "Vulkan_GLSLC_EXECUTABLE": "/usr/bin/glslc",
+    "SPIRV-Headers_DIR": "$$EXT_BUILD_ROOT/bazel/vulkan",
 }
 
 # The static C++ runtime archives the linux and windows-gnu lanes hand to cmake
@@ -225,15 +365,9 @@ _STATIC_CXX_RUNTIME_LIBS = [
 # Desktop-linux config, shared by the CPU lane (//:llama's linux arm) and the
 # GPU lane (//:llama_vulkan).
 #
-# VISION (Flip 1): TOOLS+COMMON=ON unlock tools/ -> libmtmd, mirroring the
-# android arms — the shipped cargo CLI is built with platform-desktop =
-# vision+huggingface, so the Bazel artifact must match. The tool EXECUTABLES
-# need a C++ runtime: the hermetic toolchain links C++ via staged inputs
-# (-nostdlib++), which rfcc's cmake doesn't replicate — hand the static
-# libc++/abi/unwind archives to the exe links via CMAKE_CXX_STANDARD_LIBRARIES
-# (lands AFTER objects, unlike EXE_LINKER_FLAGS). The tools themselves are
-# discarded; only the static libs ship. GGML_LLAMAFILE stays default-ON
-# (android-only off).
+# Vision uses standalone mtmd, matching Cargo's platform-desktop feature.
+# Keep the static C++ runtimes available to CMake's hermetic link checks.
+# GGML_LLAMAFILE stays default-ON (android-only off).
 #
 # PIC so these static libs also link into a -shared consumer (the Flutter
 # cdylib, //bindings/flutter/rust): stb_image's __thread globals otherwise emit
@@ -241,8 +375,7 @@ _STATIC_CXX_RUNTIME_LIBS = [
 # (macOS/arm64 is PIC by default, Android via the NDK, so only the linux GNU arm
 # needs this explicitly).
 _LINUX_LLAMA = _LLAMA_CACHE_ENTRIES | {
-    "LLAMA_BUILD_TOOLS": "ON",
-    "LLAMA_BUILD_COMMON": "ON",
+    "LLAMA_BUILD_MTMD": "ON",
     "CMAKE_CXX_STANDARD_LIBRARIES": "$$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxx.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxxabi.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libunwind:libunwind.static)",
     "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
 }
@@ -252,8 +385,7 @@ _DARWIN_LLAMA = _LLAMA_CACHE_ENTRIES | {
     "CMAKE_SYSTEM_PROCESSOR": "arm64",
     "CMAKE_INSTALL_NAME_TOOL": "$$EXT_BUILD_ROOT/$(execpath @llvm//tools:llvm-install-name-tool)",
     "CMAKE_OTOOL": "$$EXT_BUILD_ROOT/$(execpath @llvm//tools:llvm-otool)",
-    "LLAMA_BUILD_TOOLS": "ON",
-    "LLAMA_BUILD_COMMON": "ON",
+    "LLAMA_BUILD_MTMD": "ON",
 }
 
 # iOS device (Apple G1+G2), built LOCALLY on a Mac via Xcode's iphoneos SDK
@@ -272,11 +404,8 @@ _IOS_LLAMA = _LLAMA_CACHE_ENTRIES | {
     "CMAKE_OSX_ARCHITECTURES": "arm64",
     "CMAKE_OSX_DEPLOYMENT_TARGET": "16.0",
     "IOS": "ON",
-    # Vision (mtmd) parity: TOOLS/COMMON unlock tools/ -> libmtmd (the shipped
-    # platform-ios bolt has vision). The throwaway tool exes get the SDK's -lc++
-    # (resolves against iphoneos libc++.tbd), like the darwin/metal lanes.
-    "LLAMA_BUILD_TOOLS": "ON",
-    "LLAMA_BUILD_COMMON": "ON",
+    # Standalone mtmd matches platform-ios vision without building CLI tools.
+    "LLAMA_BUILD_MTMD": "ON",
     "CMAKE_CXX_STANDARD_LIBRARIES": "-lc++",
 } | _METAL_CMAKE_FLAGS
 
@@ -318,19 +447,12 @@ cmake(
         # Set the pair explicitly (rfcc only folds CMAKE_SYSTEM_PROCESSOR into the
         # crossfile when CMAKE_SYSTEM_NAME is user-set); AMD64 → ggml x86 arch.
         # Same shape as the armv7 seeding above.
-        # Windows vision (the .exe chapter): TOOLS+COMMON=ON unlock tools/ ->
-        # libmtmd, mirroring the linux arm — cargo ships the windows CLI with
-        # platform-desktop (vision + huggingface), so the Bazel artifact must
-        # match. The throwaway tool EXES need a C++ runtime exactly like linux
-        # (the hermetic toolchain links libc++ via staged inputs, which rfcc's
-        # cmake doesn't replicate) — hand them the same static archives, built
-        # for the windows target (hermetic-llvm builds its runtimes from source
-        # per target on windows; the darwin-only breakage doesn't apply).
+        # Windows vision uses standalone mtmd, matching platform-desktop.
+        # CMake's link checks use the same hermetic runtimes as the Linux arm.
         "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": _LLAMA_CACHE_ENTRIES | {
             "CMAKE_SYSTEM_NAME": "Windows",
             "CMAKE_SYSTEM_PROCESSOR": "AMD64",
-            "LLAMA_BUILD_TOOLS": "ON",
-            "LLAMA_BUILD_COMMON": "ON",
+            "LLAMA_BUILD_MTMD": "ON",
             "CMAKE_CXX_STANDARD_LIBRARIES": "$$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxx.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxxabi.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libunwind:libunwind.static)",
             # mtmd-audio uses M_PI, which MinGW's math.h hides under strict
             # ANSI (glibc/bionic expose it by default — this bites only the
@@ -348,8 +470,7 @@ cmake(
         "@rules_rs//rs/platforms/config:x86_64-pc-windows-msvc": _LLAMA_CACHE_ENTRIES | {
             "CMAKE_SYSTEM_NAME": "Windows",
             "CMAKE_SYSTEM_PROCESSOR": "AMD64",
-            "LLAMA_BUILD_TOOLS": "ON",
-            "LLAMA_BUILD_COMMON": "ON",
+            "LLAMA_BUILD_MTMD": "ON",
             # CMake's Windows-Clang module enables the RC language and there is
             # no resource compiler on a Linux worker's PATH ("No
             # CMAKE_RC_COMPILER could be found"). llvm-rc is the hermetic
@@ -427,24 +548,19 @@ cmake(
         "//conditions:default": [],
     }),
     lib_source = ":llama_src",
-    # Build cmake's default `all` target — same as build.rs's vision path (it
-    # sets TOOLS=ON and builds everything). Building only `mtmd` breaks cmake's
-    # blanket `--install` step (it still runs the un-built tools' install rules).
-    # SERVER=OFF already excludes the heavy cli/server; the rest are the standard
-    # llama tools cargo compiles for android today, so `all` is proven to
-    # cross-compile. We collect only the static libs we need below.
+    # The default target builds the libraries; application and tools are off.
     out_static_libs = select({
-        "@rules_rs//rs/platforms/config:aarch64-linux-android": ["libmtmd.a"] + _LLAMA_LIBS,
-        "@rules_rs//rs/platforms/config:armv7-linux-androideabi": ["libmtmd.a"] + _LLAMA_LIBS,
-        "@rules_rs//rs/platforms/config:x86_64-linux-android": ["libmtmd.a"] + _LLAMA_LIBS,
+        "@rules_rs//rs/platforms/config:aarch64-linux-android": ["libmtmd.a", "libvendor-hash.a"] + _LLAMA_LIBS,
+        "@rules_rs//rs/platforms/config:armv7-linux-androideabi": ["libmtmd.a", "libvendor-hash.a"] + _LLAMA_LIBS,
+        "@rules_rs//rs/platforms/config:x86_64-linux-android": ["libmtmd.a", "libvendor-hash.a"] + _LLAMA_LIBS,
         # Desktop-linux vision (Flip 1) also collects libmtmd.
-        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": ["libmtmd.a"] + _LLAMA_LIBS,
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": ["libmtmd.a", "libvendor-hash.a"] + _LLAMA_LIBS,
         # Darwin vision (Flip 2 parity — both CPU and Metal lanes).
-        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": ["libmtmd.a"] + _LLAMA_LIBS,
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": ["libmtmd.a", "libvendor-hash.a"] + _LLAMA_LIBS,
         # iOS parity: Metal backend archive + vision (libmtmd), like darwin.
-        "@rules_rs//rs/platforms/config:aarch64-apple-ios": ["libmtmd.a", "libggml-metal.a"] + _LLAMA_LIBS,
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios": ["libmtmd.a", "libvendor-hash.a", "libggml-metal.a"] + _LLAMA_LIBS,
         # iOS simulator (G4a): same archive set as the device arm.
-        "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim": ["libmtmd.a", "libggml-metal.a"] + _LLAMA_LIBS,
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim": ["libmtmd.a", "libvendor-hash.a", "libggml-metal.a"] + _LLAMA_LIBS,
         # Windows/MinGW: ggml/CMakeLists.txt sets CMAKE_STATIC_LIBRARY_PREFIX=""
         # on WIN32, so the ggml archives have NO `lib` prefix (ggml.a, not
         # libggml.a) — while llama (sibling scope) keeps it (libllama.a), and
@@ -455,6 +571,7 @@ cmake(
         # follow the same rule as ggml.
         "@rules_rs//rs/platforms/config:x86_64-pc-windows-msvc": [
             "mtmd.lib",
+            "vendor-hash.lib",
             "llama.lib",
             "ggml.lib",
             "ggml-base.lib",
@@ -462,6 +579,7 @@ cmake(
         ],
         "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": [
             "libmtmd.a",
+            "libvendor-hash.a",
             "libllama.a",
             "ggml.a",
             "ggml-base.a",
@@ -478,7 +596,7 @@ cmake(
     postfix_script = select({
         "@rules_rs//rs/platforms/config:x86_64-pc-windows-msvc": "mkdir -p $$INSTALLDIR/lib && find $$BUILD_TMPDIR \\( -name '*.a' -o -name '*.lib' \\) -exec cp -f {} $$INSTALLDIR/lib/ \\;",
         "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": "mkdir -p $$INSTALLDIR/lib && find $$BUILD_TMPDIR -name '*.a' -exec cp -f {} $$INSTALLDIR/lib/ \\;",
-        "//conditions:default": "",
+        "//conditions:default": _STAGE_VENDOR_HASH,
     }),
     visibility = ["//visibility:public"],
 )
@@ -508,10 +626,12 @@ cmake(
     lib_source = ":llama_src",
     out_static_libs = [
         "libmtmd.a",
+        "libvendor-hash.a",
         # ggml's Metal backend is its own archive, linked unconditionally by
         # cargo's apple path (build.rs:681).
         "libggml-metal.a",
     ] + _LLAMA_LIBS,
+    postfix_script = _STAGE_VENDOR_HASH,
     # Never on a remote (Linux) worker: needs Xcode's metal compiler.
     # exec_compatible_with pins the EXEC PLATFORM (toolchain resolution) to a
     # Mac — the no-remote-exec tag alone only pins the spawn strategy, and
@@ -561,6 +681,7 @@ cmake(
 # doing only if this needs to build on RBE.
 cmake(
     name = "llama_vulkan",
+    build_data = ["//bazel/vulkan:SPIRV-HeadersConfig.cmake"],
     # rfcc sanitizes PATH; /usr/bin is where the apt payload's glslc and the
     # runner's gcc (for vulkan-shaders-gen) live.
     env = {"PATH": "/usr/local/bin:/usr/bin:/bin"},
@@ -571,10 +692,12 @@ cmake(
     lib_source = ":llama_src",
     out_static_libs = [
         "libmtmd.a",
+        "libvendor-hash.a",
         # ggml's Vulkan backend is its own archive (ggml_add_backend_library),
         # linked alongside the rest exactly like cargo does it (build.rs:725).
         "libggml-vulkan.a",
     ] + _LLAMA_LIBS,
+    postfix_script = _STAGE_VENDOR_HASH,
     # "manual" for the same reason as //:llama_metal: keep `bazel build //...`
     # on a machine with no Vulkan SDK from analyzing/building this. Explicit
     # requests and the transitive path (llama-cpp-sys' --//:vulkan select) work.
@@ -667,7 +790,14 @@ cc_library(
         # replacement matches upstream's later definition without a warning.
         "_USE_MATH_DEFINES=",
         'WHISPER_VERSION=\\"1.9.2\\"',
-    ],
+    ] + select({
+        # Core ML encoder, see :whisper_coreml.
+        "@platforms//os:ios": [
+            "WHISPER_USE_COREML",
+            "WHISPER_COREML_ALLOW_FALLBACK",
+        ],
+        "//conditions:default": [],
+    }),
     includes = [
         "vendor/whisper-cpp/include",
         "vendor/whisper-cpp/src",
@@ -677,8 +807,43 @@ cc_library(
         "//:vulkan_enabled": ["//:llama_vulkan"],
         "//bazel/ggml:cpu_variants_enabled": ["//:llama_android_dl"],
         "//conditions:default": ["//:llama"],
+    }) + select({
+        "@platforms//os:ios": [":whisper_coreml"],
+        "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
+)
+
+# whisper.cpp's Core ML encoder bridge: the Bazel half of xybrid-whisper-sys's
+# `coreml` feature. With WHISPER_USE_COREML on //:whisper, a model whose
+# `<name>-encoder.mlmodelc` sits beside its `.bin` runs the encoder through
+# Core ML; WHISPER_COREML_ALLOW_FALLBACK keeps every other model on the ggml
+# encoder. The source is xybrid's own (crates/whisper-cpp-sys/native), which
+# implements the C ABI of upstream's coreml/whisper-encoder.h; none of
+# upstream's src/coreml/* is compiled — its bridge ignores prediction errors
+# and copies unchecked output, and its compat category replaces Core ML's
+# async prediction methods process-wide. iOS only: on macOS Metal is the faster
+# encoder. objc_library compiles `srcs` with ARC.
+objc_library(
+    name = "whisper_coreml",
+    srcs = ["//crates/whisper-cpp-sys:native/xybrid-whisper-coreml.mm"],
+    hdrs = [
+        "vendor/whisper-cpp/src/coreml/whisper-encoder.h",
+        "//crates/whisper-cpp-sys:native/xybrid-whisper-coreml.h",
+    ],
+    copts = [
+        "-std=c++17",
+        # Consumers may target older iOS than the bridge needs (the Flutter pod
+        # declares 13.0); every newer API must sit behind @available.
+        "-Werror=unguarded-availability-new",
+    ],
+    # The bridge includes upstream's ABI header as "coreml/whisper-encoder.h".
+    includes = ["vendor/whisper-cpp/src"],
+    sdk_frameworks = [
+        "CoreML",
+        "Foundation",
+    ],
+    target_compatible_with = ["@platforms//os:ios"],
 )
 
 # The `//:ndk_smoke` PoC (a trivial cc_library that proved the NDK

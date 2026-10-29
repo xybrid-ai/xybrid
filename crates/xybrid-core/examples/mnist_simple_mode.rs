@@ -160,6 +160,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ids.len()
             );
         }
+        EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+            println!("Choice output (unexpected for MNIST)");
+        }
     }
 
     println!();

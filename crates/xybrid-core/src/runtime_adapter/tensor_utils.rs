@@ -72,6 +72,9 @@ pub fn envelope_to_tensors(
                 "EnvelopeKind::TokenIds cannot be converted to an ONNX f32 tensor".to_string(),
             ))
         }
+        EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+            return Err(crate::execution::choice::choice_kind_not_runtime_input())
+        }
     };
 
     let mut result = std::collections::HashMap::new();

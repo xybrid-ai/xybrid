@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="../../bindings/unity/Runtime/Bolt/*.cs" />
+    <Compile Include="../../bindings/unity/Runtime/BoltSupplement/*.cs" />
+    <Compile Include="../../bindings/unity/Runtime/Api/*.cs" />
+  </ItemGroup>
+</Project>

@@ -8,12 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@litert-lm/core':
-        specifier: 0.14.0
-        version: 0.14.0
-      '@litertjs/core':
-        specifier: 2.5.2
-        version: 2.5.2
       hash-wasm:
         specifier: ^4.12.0
         version: 4.12.0
@@ -303,15 +297,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
-
-  '@litert-lm/core@0.14.0':
-    resolution: {integrity: sha512-JQhvU6o6JY/Hyg5D59Xblp2H/Ynu4+a6omjekV3a+N2weh9pLnI3+ZP8AlkTbTjJjST893p3VuXd7O8dWelDCA==}
-
-  '@litertjs/core@2.5.2':
-    resolution: {integrity: sha512-2O4p5Me8B3KbW9EPU9Xe6iKl2jZ5nZeGxRBvhm5x42Wj7qb3xk2CjibPLA0eSyt2HuELu2hCIZ+7gHZM5cipcw==}
-
-  '@litertjs/wasm-utils@2.5.0':
-    resolution: {integrity: sha512-zhMAqJRJ3ROi48flZxYx+K2MiMllJVuH7oeumpSIfQMBeOb6JyLV/7ltLbY6E+nERUAfNwzIBqjslWAeXcO6iQ==}
 
   '@napi-rs/wasm-runtime@1.1.6':
     resolution: {integrity: sha512-ZLv/JdUfkvOy9eCnnBaGfiO+XimbjebAeO+MRQqD/B+FR1tnRN0tpKSJHRbE8sFfS6aqsXZ67TQjfwfsxULVbg==}
@@ -1022,16 +1007,6 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
-
-  '@litert-lm/core@0.14.0':
-    dependencies:
-      '@litertjs/wasm-utils': 2.5.0
-
-  '@litertjs/core@2.5.2':
-    dependencies:
-      '@litertjs/wasm-utils': 2.5.0
-
-  '@litertjs/wasm-utils@2.5.0': {}
 
   '@napi-rs/wasm-runtime@1.1.6(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)':
     dependencies:

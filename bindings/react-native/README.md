@@ -23,7 +23,7 @@ await model.release();
 |---|---|
 | React Native | 0.76 or newer, **New Architecture** (the default since 0.76; the only option since 0.82) |
 | iOS | 16.0+. Simulator builds need an Apple Silicon Mac (there is no x86_64 simulator slice) |
-| Android | API 24+, `arm64-v8a`, `armeabi-v7a`, `x86_64` |
+| Android | API 29+ (Android 10; 0.15.0 and earlier: API 24+), `arm64-v8a`, `armeabi-v7a`, `x86_64`. Phonon / Kitten TTS 2 speech on `arm64-v8a` only ([below](#phonon-and-kitten-tts-2-android-arm64-v8a)) |
 | Expo | SDK 52+ with a [development build](https://docs.expo.dev/develop/development-builds/introduction/) — not Expo Go |
 
 ## Install
@@ -39,10 +39,15 @@ cd ios && pod install
   offline, point `XYBRID_NATIVES_BASE_URL` at a mirror, or
   `XYBRID_XCFRAMEWORK_PATH` at a local copy (directory or `.zip`). If your app
   targets iOS below 16.0, raise it in the Podfile (`platform :ios, '16.0'`).
-- **Android** — nothing to do: Gradle pulls `ai.xybrid:xybrid-kotlin` (the
-  Kotlin SDK with the native libraries) from Maven Central.
+- **Android** — Gradle pulls `ai.xybrid:xybrid-kotlin` (the Kotlin SDK with
+  the native libraries) from Maven Central. It requires Android 10: set
+  `minSdkVersion = 29` (or higher) in the `ext` block of `android/build.gradle`.
+  Below that, the build fails at the manifest merge.
 - **Expo** — `npx expo install @xybrid/react-native`, then
-  `npx expo prebuild` / `npx expo run:ios|android`. No config plugin needed.
+  `npx expo prebuild` / `npx expo run:ios|android`. The package needs no config
+  plugin, but the app's Android `minSdkVersion` must be 29 or higher: add
+  `expo-build-properties` with `android.minSdkVersion: 29` (or set the
+  `android.minSdkVersion=29` gradle property from your own config plugin).
 
 ## Quick tour
 
@@ -174,6 +179,28 @@ const speech = await tts.run(Envelope.text('Hello!', { voiceId: voices[0].id, sp
 speech.audioBytesBase64; // WAV/PCM, base64
 ```
 
+#### Phonon and Kitten TTS 2 (Android arm64-v8a)
+
+On Android, the Kotlin SDK's arm64-v8a library links the zzz speech engine,
+so arm64-v8a devices also run Phonon (`phonon-31m-en` from the registry) and
+Kitten TTS 2 (a local bundle through `ModelLoader.fromDirectory`). iOS and the
+armeabi-v7a and x86_64 libraries do not include the engine: there the registry
+does not serve `phonon-31m-en` and a Kitten bundle fails to run.
+
+```ts
+const phonon = await ModelLoader.fromRegistry('phonon-31m-en').load();
+const hello = await phonon.run(Envelope.text('Hello from Phonon.', { voiceId: 'easton' }));
+hello.audioBytesBase64; // raw PCM16 little-endian, 24 kHz mono, base64
+
+const kitten = await ModelLoader.fromDirectory(kittenBundleDir).load();
+```
+
+The engine's runtime terms and upstream licenses ship in the AAR under
+`assets/xybrid/zzz/`, and Android merges them into every APK that includes the
+package; do not exclude them. Voices and options are in
+[Phonon speech](../../docs/sdk/PHONON.md); the Kitten bundle layout is in the
+[Kotlin README](../kotlin/README.md#speech-phonon--kitten-tts-2).
+
 ### Speech recognition
 
 Batch — transcribe a recording:
@@ -215,8 +242,9 @@ const download = await loader.download();
 for await (const status of download!.progress()) setProgress(status.progress);
 const model = await loader.load();
 
-// Answer from the cloud while the weights download (needs an API key).
-const fast = await ModelLoader.fromRegistrySpeculative('qwen3.5-0.8b').load();
+// Answer from the cloud while the weights download (needs an API key and a
+// chat model the registry serves as a direct GGUF download).
+const fast = await ModelLoader.fromRegistrySpeculative('lfm2.5-350m').load();
 await fast.isCloudServing(); // true until the local weights land
 
 await Xybrid.modelCacheStatus();       // bytes and models on disk

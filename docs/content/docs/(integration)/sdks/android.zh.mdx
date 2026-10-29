@@ -11,11 +11,11 @@ Android SDK 通过 BoltFFI 为 Xybrid 运行时提供原生 Kotlin 绑定，支�
 
 ```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.6.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.13.1")
 }
 ```
 
-最低 SDK 版本：**24**（Android 7.0）
+最低 SDK 版本：0.15.0 之后的版本为 **29**（Android 10）：请在应用的 `defaultConfig` 中将 `minSdk` 设为 29 或更高，否则构建会在清单合并阶段失败。0.15.0 及更早版本为 **24**（Android 7.0）。
 
 ## 快速开始
 
@@ -34,7 +34,7 @@ if (result.success) {
 }
 ```
 
-`Xybrid.init(context)` 还会注册 `BatteryManager` 以及（在 API 29+ 上）`PowerManager.OnThermalStatusChangedListener` 观察者，将读数转发给路由引擎。
+`Xybrid.init(context)` 还会注册 `BatteryManager` 以及 `PowerManager.OnThermalStatusChangedListener` 观察者，将读数转发给路由引擎。
 
 ## 初始化
 
@@ -220,10 +220,37 @@ try {
 
 ---
 
+## 语音合成（Phonon / Kitten TTS 2）
+
+arm64-v8a 库静态链接了 zzz 语音引擎，因此 arm64 设备可以在本地运行 Phonon 和
+Kitten TTS 2，arm64-v8a 模拟器镜像（例如 Apple Silicon Mac 上的模拟器）同样可以。
+armeabi-v7a 和 x86_64 库（包括 x86_64 模拟器镜像加载的库）不包含该引擎：在这些
+ABI 上，注册表不会提供 `phonon-31m-en`，Kitten 模型包也无法运行。请在 `abiFilters`
+或 App Bundle 拆分中保留 arm64-v8a。
+
+```kotlin
+// 从注册表加载 Phonon：输出 24 kHz 单声道 PCM16 小端音频。
+val phonon = Xybrid.model("phonon-31m-en").load()
+val pcm = phonon.runAsync(Envelope.text("Hello from Phonon.", voiceId = "easton")).audioBytes
+
+// 从本地目录加载 Kitten TTS 2（目录中包含 ZzzEmbed 模板的 model_metadata.json）。
+val kitten = Xybrid.model(ModelSource.directory(kittenDir.path)).load()
+val speech = kitten.runAsync(Envelope.text("Hello from Kitten."))
+```
+
+引擎的运行时条款和上游许可证随 AAR 一起发布，位于 `assets/xybrid/zzz/`。Android
+会把它们合并进你的 APK，因此所有包含本 SDK 的应用都会携带这些文件；请不要在打包时
+排除它们。音色和选项见
+[Phonon speech](https://github.com/xybrid-ai/xybrid/blob/master/docs/sdk/PHONON.md)，
+Kitten 模型包和流式播放见
+[Kotlin README](https://github.com/xybrid-ai/xybrid/blob/master/bindings/kotlin/README.md#speech-phonon--kitten-tts-2)。
+
+---
+
 ## 平台支持
 
 | 架构 | 状态 |
 |-------------|--------|
-| arm64-v8a | 支持 |
-| armeabi-v7a | 支持 |
-| x86_64 | 支持（模拟器） |
+| arm64-v8a | 支持，含 Phonon / Kitten TTS 2 语音合成（设备和 arm64 模拟器镜像） |
+| armeabi-v7a | 支持，不含语音合成 |
+| x86_64 | 支持（x86_64 模拟器镜像），不含语音合成 |

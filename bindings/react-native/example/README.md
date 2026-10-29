@@ -44,7 +44,10 @@ npx expo run:android
 ```
 
 The config plugin in `plugins/withXybridDevAndroid.js` puts `mavenLocal()`
-first, so the app links the Kotlin SDK you just published.
+first, so the app links the Kotlin SDK you just published. It also sets
+`android.minSdkVersion=29` in `gradle.properties`, because the Kotlin SDK
+requires Android 10 (API 29); run the example on an Android 10+ device or
+emulator.
 
 ## Choosing models
 
@@ -73,8 +76,8 @@ EXPO_PUBLIC_XYBRID_SMOKE_MODEL=/data/user/0/com.anonymous.example/files/smoke/lf
 
 - Watch the logs with `adb logcat -s ReactNativeJS` (Android) or the Metro
   terminal.
-- LLM output on the **iOS Simulator** is garbage today: llama.cpp offloads to
-  Metal, which the simulator does not support. Use a device, or Android.
+- LLM inference on the **iOS Simulator** uses the CPU. Physical iOS devices
+  still use Metal acceleration.
 - `metro.config.js` pins `react` and `react-native` to this app's copies, so a
   `node_modules` in `bindings/react-native` can never put a second React
   Native in the bundle.

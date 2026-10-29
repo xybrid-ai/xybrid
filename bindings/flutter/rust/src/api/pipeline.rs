@@ -1,16 +1,58 @@
 //! Pipeline FFI wrappers for Flutter.
 use flutter_rust_bridge::frb;
 use std::sync::Arc;
-use xybrid_sdk::{Pipeline, PipelineRef};
+use xybrid_sdk::{InferenceMetrics, Pipeline, PipelineExecutionResult, PipelineRef};
 
 use super::envelope::FfiEnvelope;
-use super::result::{FfiExecutionTarget, FfiResult};
+use super::result::{ensure_ffi_payload, FfiExecutionTarget, FfiResult};
 
 fn final_execution_target(target: Option<&str>) -> FfiExecutionTarget {
     match target {
         Some("device" | "local") | None => FfiExecutionTarget::Local,
         Some(_) => FfiExecutionTarget::Cloud,
     }
+}
+
+/// Build the Dart result of a pipeline run from its final output, failing
+/// when `FfiResult` has no field for that output (see [`ensure_ffi_payload`]).
+fn pipeline_ffi_result(result: &PipelineExecutionResult) -> Result<FfiResult, String> {
+    ensure_ffi_payload(&result.output.kind)?;
+
+    let mut metrics =
+        InferenceMetrics::from_metadata(&result.output.metadata, result.total_latency_ms);
+    metrics.stage_latencies_ms = result
+        .stages
+        .iter()
+        .map(|s| xybrid_sdk::StageLatency {
+            stage_id: s.name.clone(),
+            latency_ms: s.latency_ms,
+        })
+        .collect();
+
+    Ok(FfiResult {
+        success: true,
+        text: result.text().map(|s| s.to_string()),
+        reasoning_content: result.output.metadata.get("reasoning_content").cloned(),
+        audio_bytes: result.audio_bytes().map(|b| b.to_vec()),
+        embedding: result.embedding().map(|e| e.to_vec()),
+        latency_ms: result.total_latency_ms,
+        // A pipeline can mix local and remote stages, so there is no single
+        // provenance for the run: report the final stage's target, which is
+        // what produced `output`. The stage records it directly; the
+        // envelope carries no `execution_target` key on this path, since
+        // pipeline stages do not go through `InferenceResult`.
+        //
+        // The orchestrator records `local`, `cloud` or `fallback:<id>` (a
+        // xybrid-hosted server). Only the explicitly local spellings may
+        // be reported as on-device; unknown targets fail closed to cloud.
+        execution_target: final_execution_target(
+            result.stages.last().map(|stage| stage.target.as_str()),
+        ),
+        metrics: crate::api::result::FfiInferenceMetrics::from_core(&metrics),
+        // Pipelines don't offer tools, so a pipeline run never produces
+        // tool calls.
+        tool_calls: Vec::new(),
+    })
 }
 
 /// FFI wrapper for a loaded Pipeline ready for execution.
@@ -60,46 +102,9 @@ impl FfiPipeline {
     /// Hoisting them from intermediate stages is a follow-up at the SDK
     /// layer.
     pub fn run(&self, envelope: FfiEnvelope) -> Result<FfiResult, String> {
-        use xybrid_sdk::InferenceMetrics;
-
         let input = envelope.into_envelope();
         let result = self.0.run(&input).map_err(|e| e.to_string())?;
-
-        let mut metrics =
-            InferenceMetrics::from_metadata(&result.output.metadata, result.total_latency_ms);
-        metrics.stage_latencies_ms = result
-            .stages
-            .iter()
-            .map(|s| xybrid_sdk::StageLatency {
-                stage_id: s.name.clone(),
-                latency_ms: s.latency_ms,
-            })
-            .collect();
-
-        Ok(FfiResult {
-            success: true,
-            text: result.text().map(|s| s.to_string()),
-            reasoning_content: result.output.metadata.get("reasoning_content").cloned(),
-            audio_bytes: result.audio_bytes().map(|b| b.to_vec()),
-            embedding: result.embedding().map(|e| e.to_vec()),
-            latency_ms: result.total_latency_ms,
-            // A pipeline can mix local and remote stages, so there is no single
-            // provenance for the run: report the final stage's target, which is
-            // what produced `output`. The stage records it directly; the
-            // envelope carries no `execution_target` key on this path, since
-            // pipeline stages do not go through `InferenceResult`.
-            //
-            // The orchestrator records `local`, `cloud` or `fallback:<id>` (a
-            // xybrid-hosted server). Only the explicitly local spellings may
-            // be reported as on-device; unknown targets fail closed to cloud.
-            execution_target: final_execution_target(
-                result.stages.last().map(|stage| stage.target.as_str()),
-            ),
-            metrics: crate::api::result::FfiInferenceMetrics::from_core(&metrics),
-            // Pipelines don't offer tools, so a pipeline run never produces
-            // tool calls.
-            tool_calls: Vec::new(),
-        })
+        pipeline_ffi_result(&result)
     }
 
     /// Get the pipeline name (if specified in YAML).
@@ -143,5 +148,47 @@ mod tests {
             final_execution_target(Some("unexpected-remote-target")),
             FfiExecutionTarget::Cloud
         );
+    }
+
+    fn pipeline_ending_in(kind: xybrid_sdk::ir::EnvelopeKind) -> PipelineExecutionResult {
+        let output = xybrid_sdk::ir::Envelope::new(kind);
+        PipelineExecutionResult {
+            name: None,
+            stages: vec![xybrid_sdk::PipelineStageTiming {
+                name: "tts".into(),
+                latency_ms: 30,
+                target: "cloud".into(),
+                reason: "test".into(),
+                output: output.clone(),
+            }],
+            total_latency_ms: 30,
+            output_type: xybrid_sdk::OutputType::Unknown,
+            output,
+        }
+    }
+
+    #[test]
+    fn a_pipeline_result_converts_its_final_output_as_before() {
+        let output = pipeline_ending_in(xybrid_sdk::ir::EnvelopeKind::Audio(vec![9, 8]));
+        let Ok(result) = pipeline_ffi_result(&output) else {
+            panic!("audio converts");
+        };
+
+        assert_eq!(result.audio_bytes.as_deref(), Some([9u8, 8].as_slice()));
+        assert_eq!(result.latency_ms, 30);
+        assert_eq!(result.execution_target, FfiExecutionTarget::Cloud);
+        assert_eq!(result.metrics.stage_latencies_ms.len(), 1);
+    }
+
+    /// Before, this came back as `success: true` with every payload field
+    /// empty.
+    #[test]
+    fn a_pipeline_whose_final_output_has_no_ffi_field_fails() {
+        let output = pipeline_ending_in(xybrid_sdk::ir::EnvelopeKind::MultiPart(vec![]));
+        let Err(error) = pipeline_ffi_result(&output) else {
+            panic!("an output FfiResult cannot carry must fail");
+        };
+
+        assert!(error.contains("a multi-part message"), "{error}");
     }
 }

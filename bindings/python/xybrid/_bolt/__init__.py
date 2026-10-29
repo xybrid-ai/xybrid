@@ -425,18 +425,18 @@ def _boltffi_read_94828222bbb26957(data: bytes):
 _native._register_wire_codec("read_94828222bbb26957", _boltffi_read_94828222bbb26957)
 
 
-def _boltffi_read_4d62ca46c12c8415(data: bytes):
+def _boltffi_read_6cf2e6f5d394fbfa(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_4d62ca46c12c8415", _boltffi_read_4d62ca46c12c8415)
+_native._register_wire_codec("read_6cf2e6f5d394fbfa", _boltffi_read_6cf2e6f5d394fbfa)
 
 
-def _boltffi_read_9105d99f798275b3(data: bytes):
+def _boltffi_read_3080a66fe4c1dfdc(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_9105d99f798275b3", _boltffi_read_9105d99f798275b3)
+_native._register_wire_codec("read_3080a66fe4c1dfdc", _boltffi_read_3080a66fe4c1dfdc)
 
 
 def _boltffi_read_146d324414895b9b(data: bytes):
@@ -446,11 +446,11 @@ def _boltffi_read_146d324414895b9b(data: bytes):
 _native._register_wire_codec("read_146d324414895b9b", _boltffi_read_146d324414895b9b)
 
 
-def _boltffi_read_b467de4c6abf182c(data: bytes):
+def _boltffi_read_54628a54c0f4d4bd(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridStreamEvent._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_b467de4c6abf182c", _boltffi_read_b467de4c6abf182c)
+_native._register_wire_codec("read_54628a54c0f4d4bd", _boltffi_read_54628a54c0f4d4bd)
 
 
 def _boltffi_read_f45d365d172a914e(data: bytes):
@@ -481,18 +481,18 @@ def _boltffi_read_1497d20162db7713(data: bytes):
 _native._register_wire_codec("read_1497d20162db7713", _boltffi_read_1497d20162db7713)
 
 
-def _boltffi_read_14429286c6374023(data: bytes):
+def _boltffi_read_34528e6dc3960a70(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridCacheStatus._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_14429286c6374023", _boltffi_read_14429286c6374023)
+_native._register_wire_codec("read_34528e6dc3960a70", _boltffi_read_34528e6dc3960a70)
 
 
-def _boltffi_read_6cf2e6f5d394fbfa(data: bytes):
+def _boltffi_read_0ced92fe29cab88b(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridCacheEntry._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_6cf2e6f5d394fbfa", _boltffi_read_6cf2e6f5d394fbfa)
+_native._register_wire_codec("read_0ced92fe29cab88b", _boltffi_read_0ced92fe29cab88b)
 
 
 
@@ -510,11 +510,11 @@ def _boltffi_write_cfe97cd6dcce32b6(platform) -> bytes:
 _native._register_wire_codec("write_cfe97cd6dcce32b6", _boltffi_write_cfe97cd6dcce32b6)
 
 
-def _boltffi_write_6ff5cf7b33e854ed(config) -> bytes:
+def _boltffi_write_cffb2372ddb2985c(config) -> bytes:
     return config._boltffi_wire()
 
 
-_native._register_wire_codec("write_6ff5cf7b33e854ed", _boltffi_write_6ff5cf7b33e854ed)
+_native._register_wire_codec("write_cffb2372ddb2985c", _boltffi_write_cffb2372ddb2985c)
 
 
 def _boltffi_write_766cdeb069dd2b0a(path) -> bytes:
@@ -1344,6 +1344,7 @@ _native._register_xybrid_download_state(XybridDownloadState)
 class XybridStreamEventKind(IntEnum):
     TOKEN = 0
     COMPLETE = 1
+    AUDIO = 2
 
 _native._register_xybrid_stream_event_kind(XybridStreamEventKind)
 
@@ -2119,6 +2120,46 @@ _native._register_xybrid_stream_token(XybridStreamToken)
 
 
 @dataclass(frozen=True, slots=True)
+class XybridTtsAudioChunk:
+    """Owned PCM16 LE packet. Offsets count samples per channel."""
+    pcm: bytes
+    sample_rate: int
+    channels: int
+    first_sample: int
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_bytes(self.pcm),
+            _boltffi_wire_u32(self.sample_rate),
+            _boltffi_wire_u32(self.channels),
+            _boltffi_wire_u64(self.first_sample),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridTtsAudioChunk":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridTtsAudioChunk":
+        return cls(
+            pcm=reader.bytes(),
+            sample_rate=reader.u32(),
+            channels=reader.u32(),
+            first_sample=reader.u64(),
+        )
+
+
+_native._register_xybrid_tts_audio_chunk(XybridTtsAudioChunk)
+
+
+
+@dataclass(frozen=True, slots=True)
 class XybridStreamEvent:
     """One pull from a streaming inference session.
 
@@ -2131,11 +2172,13 @@ class XybridStreamEvent:
     """
     kind: XybridStreamEventKind
     token: XybridStreamToken | None
+    audio: XybridTtsAudioChunk | None
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
             _boltffi_wire_i32(_boltffi_enum_value(self.kind, XybridStreamEventKind, "XybridStreamEventKind")),
             _boltffi_wire_optional(self.token, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            _boltffi_wire_optional(self.audio, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
         ))
 
     @classmethod
@@ -2153,6 +2196,7 @@ class XybridStreamEvent:
         return cls(
             kind=XybridStreamEventKind(reader.i32()),
             token=reader.optional(lambda: XybridStreamToken._boltffi_from_reader(reader)),
+            audio=reader.optional(lambda: XybridTtsAudioChunk._boltffi_from_reader(reader)),
         )
 
 
@@ -2676,9 +2720,11 @@ class XybridModel:
         download in the background.
 
         Returns almost immediately instead of blocking on the download. Requires
-        a resolvable API key and an uncached model; otherwise it behaves exactly
-        like `from_registry`. Poll `download_status` for progress and
-        `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+        a resolvable API key, an uncached model, and a chat model the registry
+        serves as a direct download (GGUF or vision-language, not a `.xyb`
+        bundle); otherwise it behaves exactly like `from_registry`. Poll
+        `download_status` for progress and `is_cloud_serving` to know which leg
+        is answering.
         """
         return XybridModel._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_from_registry_speculative(id)))
 
@@ -3225,11 +3271,12 @@ def set_platform_url(url: str) -> None:
     """
     _native.set_platform_url(url)
 def set_speculative_cloud(enabled: bool) -> None:
-    """Enable speculative cloud fallback globally: a registry model that isn't
-    downloaded yet is served from the gateway while the weights download.
+    """Enable speculative cloud fallback globally: a registry chat model that
+    isn't downloaded yet is served from the gateway while the weights download.
 
-    LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
-    also loads ASR/TTS models, which cannot be served this way.
+    An uncached load asks the registry first, so other models (ASR, TTS,
+    `.xyb` bundles) download and load as usual.
+    `XybridModel.fromRegistrySpeculative` opts a single load in instead.
     """
     _native.set_speculative_cloud(enabled)
 def has_api_key() -> bool:
@@ -3239,11 +3286,13 @@ def is_speculative_cloud_enabled() -> bool:
     """Whether the global speculative-cloud default is on."""
     return _native.is_speculative_cloud_enabled()
 def will_speculate_for_model(model_id: str) -> bool:
-    """Whether `XybridModel::from_registry_speculative(model_id)` would actually
-    speculate: an API key resolves and the model is not already cached.
+    """Whether `XybridModel::from_registry_speculative(model_id)` may speculate:
+    an API key resolves and the model is not already cached.
 
-    Lets the hand-written Swift/Kotlin loader facades answer "will this
-    speculate?" before loading. Never touches the network.
+    Lets the hand-written Swift/Kotlin loader facades answer "can this
+    speculate?" before loading. Never touches the network, so it cannot know
+    the model type: the load asks the registry and speculates only for a chat
+    model.
     """
     return _native.will_speculate_for_model(model_id)
 def version() -> str:
@@ -3281,7 +3330,7 @@ def telemetry_shutdown() -> None:
 
 MODULE_NAME = "xybrid_bolt"
 PACKAGE_NAME = "xybrid_bolt"
-PACKAGE_VERSION = "0.10.0-rc1"
+PACKAGE_VERSION = "0.15.0"
 
 __all__ = [
     "MODULE_NAME",
@@ -3301,6 +3350,7 @@ __all__ = [
     "XybridStageResult",
     "XybridPipelineResult",
     "XybridStreamToken",
+    "XybridTtsAudioChunk",
     "XybridStreamEvent",
     "XybridVoiceInfo",
     "XybridCacheEntry",

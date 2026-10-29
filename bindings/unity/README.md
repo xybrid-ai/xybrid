@@ -42,7 +42,7 @@ Or edit `Packages/manifest.json` directly:
     }
   ],
   "dependencies": {
-    "ai.xybrid.sdk": "0.6.0"
+    "ai.xybrid.sdk": "0.15.0"
   }
 }
 ```
@@ -59,7 +59,7 @@ https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 Pin a version by appending a tag:
 
 ```
-https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity#v0.6.0
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity#v0.15.0
 ```
 
 (**Window → Package Manager → + → Add package from git URL**, or add it under
@@ -79,10 +79,12 @@ If you've cloned the xybrid repository:
 
 ### Native libraries (fetched automatically)
 
-The package ships **no native binaries**. On first import — and before each
-player build — the SDK downloads the platform libraries for the installed
-version from the [GitHub Release](https://github.com/xybrid-ai/xybrid/releases),
-verifies their SHA-256, and installs them into `Assets/Xybrid/Plugins/`. This
+The package ships **no native binaries**. The SDK downloads the platform
+libraries for the installed version from the
+[GitHub Release](https://github.com/xybrid-ai/xybrid/releases), verifies their
+SHA-256, and installs them into `Assets/Xybrid/Plugins/`: the editor's own
+platform on first import, and the build target's before a player build if they
+aren't installed yet. This
 keeps the package small and sidesteps Git/registry size limits — **including the
 ~326 MB iOS static library, which now installs automatically** (no manual step).
 The Windows and Linux bundles include the matching ONNX Runtime shared library,
@@ -154,17 +156,26 @@ Debug.Log($"Inference completed in {result.LatencyMs}ms");
 ### Speech Recognition
 
 ```csharp
+using System.IO;
+using UnityEngine;
 using Xybrid;
 
-// Load an ASR model
-using var model = XybridClient.LoadModel("whisper-tiny");
+// English ASR; use "whisper-tiny-ggml" for multilingual recognition.
+using var model = XybridClient.LoadModel("whisper-tiny-en-ggml");
 
-// Transcribe player voice command
-using var result = model.Run(Envelope.Audio(microphoneBytes, sampleRate: 16000, channels: 1));
+// A complete WAV file: 16-bit PCM, mono, 16 kHz.
+byte[] wavBytes = File.ReadAllBytes("voice-command.wav");
+using var envelope = Envelope.Audio(wavBytes, sampleRate: 16000, channels: 1);
+using var result = model.Run(envelope);
 result.ThrowIfFailed();
 
 Debug.Log($"Player said: {result.Text}");
 ```
+
+These GGML models use the speech-recognition runtime included in the prebuilt
+native libraries. For these models, `Envelope.Audio` and `Model.RunAudio` require
+a complete WAV file, including its header. For Unity `Microphone` input, encode
+the recorded samples as WAV first.
 
 ### Vision-Language Input
 
@@ -243,7 +254,7 @@ Debug.Log(result2.Text);
 |----------|------|------|-------------|
 | `gemma-3-4b-it-qat-q4_0` | LLM | ~2.5GB | Conversational AI |
 | `kokoro-82m` | TTS | ~330MB | Text-to-speech |
-| `whisper-tiny` | ASR | ~75MB | Speech recognition |
+| `whisper-tiny-en-ggml` | ASR | ~32MB (~44MB on iOS) | English speech recognition (WAV input) |
 
 Models are automatically downloaded from the Xybrid registry on first use.
 
@@ -251,12 +262,50 @@ Models are automatically downloaded from the Xybrid registry on first use.
 
 | Platform | Architecture | Status |
 |----------|--------------|--------|
-| macOS | Apple Silicon (arm64) | Supported |
-| macOS | Intel (x86_64) | Via Rosetta 2 |
+| macOS 14+ | Apple Silicon (arm64) | Supported |
+| macOS | Intel (x86_64) | Not supported |
 | Windows | x64 | Supported |
 | Linux | x64 | Supported |
-| iOS | arm64 | Supported (auto-fetched) |
-| Android | arm64-v8a, armeabi-v7a, x86_64 | Supported |
+| iOS | arm64 (devices, iOS 16+) | Supported |
+| Android | arm64-v8a, armeabi-v7a | Supported |
+| Android | x86_64 | Supported up to Unity 6.4 |
+
+**macOS:** the native library requires **macOS 14 or later** and **Apple Silicon
+(arm64)** for both the editor and players. Set the player's minimum macOS version
+to **14.0** or later. Use the Apple silicon Unity Editor: the Intel editor can't
+load the library, on an Intel Mac or under Rosetta 2, which runs x86_64 code on
+Apple Silicon and not the reverse. Build macOS players for **Apple Silicon**. An
+**Intel 64-bit + Apple Silicon** player can load Xybrid only when it runs natively
+on an Apple Silicon Mac, not on an Intel Mac or when opened using Rosetta.
+
+**iOS:** the library is built for devices running iOS 16 or later, with no
+Simulator build. Set **Target minimum iOS Version** to 16.0 or later.
+
+**Android:** Unity 6.5 removed the x86_64 architecture
+([announcement](https://discussions.unity.com/t/planned-breaking-changes-in-unity-6-5-updated-2026-03-27/1694205)),
+and Unity 6.3 and 6.4 offer it only in projects that already target it
+([Android Player settings](https://docs.unity3d.com/6000.4/Documentation/Manual/class-PlayerSettingsAndroid.html)).
+armeabi-v7a ships without ONNX Runtime, so ONNX models such as `kokoro-82m`
+don't run on it.
+
+On Android, models are cached under `Application.persistentDataPath/xybrid`
+(the SDK is given its `models` subfolder and keeps runtime-ready files beside it
+in `extracted`). To use another folder, call `XybridBolt.XybridBolt.InitSdkCacheDir(path)` before
+loading or listing any model; the first folder set wins.
+
+Xybrid's Android library links the C++ runtime statically, so its Android
+natives include no `libc++_shared.so` to collide with the one Unity's
+GameActivity packages. Earlier releases installed a copy under
+`Assets/Xybrid/Plugins/Android/<abi>/`; after you update the package, it is
+removed the next time the Android natives are downloaded: before the next
+Android build, or from **Xybrid > Native Libraries > Download for Active Build
+Target** while Android is the active build target.
+
+Device coverage: the Android natives have run end to end in a Unity app on an
+arm64 phone, and the release workflow loads the x86_64 library on a standard
+(4 KB-page) emulator. Loading on 16 KB-page devices and on armeabi-v7a, and
+running a Unity app on an emulator, are tracked in
+[#680](https://github.com/xybrid-ai/xybrid/issues/680).
 
 ## Building Native Libraries
 
@@ -286,8 +335,17 @@ cargo xtask build-ffi --release --deploy-unity
 # iOS (from macOS)
 cargo xtask build-ffi --release --target aarch64-apple-ios
 
-# Android (requires NDK)
-cargo xtask build-ffi --release --target aarch64-linux-android
+# Android (Bazel, one build per ABI, staged as CI does in build-unity.yml;
+# off a Linux x86_64 host, add --config=remote to bazel build and bazel-output.sh)
+bazel build --config=android-arm64 //crates/xybrid-bolt:xybrid_bolt_cdylib
+LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib --config=android-arm64)
+python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target aarch64-linux-android
+# Likewise --config=android-armv7 with armv7-linux-androideabi,
+# and --config=android-x86_64 with x86_64-linux-android
+# Then run the check CI runs on the staged tree (no libc++_shared.so, static
+# C++ runtime, right ELF machine per ABI, 16 KB alignment). macOS has no
+# readelf: add --readelf "$(brew --prefix llvm)/bin/llvm-readelf"
+python3 tools/scripts/verify_unity_android_natives.py --require-abis
 ```
 
 ## Package Structure
@@ -328,8 +386,10 @@ bindings/unity/
 1. Fetch the native library: **Xybrid → Native Libraries → Download for Current
    Editor** (the auto-download on import needs network access and the matching
    GitHub Release). Confirm it landed under `Assets/Xybrid/Plugins/`.
-2. On macOS, you may need to remove quarantine: `xattr -d com.apple.quarantine libxybrid_bolt.dylib`
-3. Check the plugin import settings in Unity (select the .dylib and verify platform settings)
+2. On macOS 14 or later, use the Apple silicon Unity Editor. The library is
+   arm64 only, so the Intel editor can't load it, including under Rosetta 2.
+3. On macOS, you may need to remove quarantine: `xattr -d com.apple.quarantine libxybrid_bolt.dylib`
+4. Check the plugin import settings in Unity (select the .dylib and verify platform settings)
 
 ### "Model download failed"
 
@@ -339,7 +399,7 @@ bindings/unity/
 
 ## API Reference
 
-See the [full API documentation](https://docs.xybrid.ai/unity) for detailed reference.
+See the [full API documentation](https://docs.xybrid.dev/en/docs/sdks/unity) for detailed reference.
 
 ## Telemetry
 

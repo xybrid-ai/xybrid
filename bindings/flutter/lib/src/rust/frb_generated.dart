@@ -71,7 +71,7 @@ class XybridRustLib extends BaseEntrypoint<XybridRustLibApi,
 
   @override
   Future<void> executeRustInitializers() async {
-    await api.crateApiSdkClientInitNativeLogging();
+    await api.crateApiSdkClientInitApp();
   }
 
   @override
@@ -82,7 +82,7 @@ class XybridRustLib extends BaseEntrypoint<XybridRustLibApi,
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 722433718;
+  int get rustContentHash => 2039367483;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -358,7 +358,7 @@ abstract class XybridRustLibApi extends BaseApi {
 
   FfiGenerationConfig crateApiModelFfiGenerationConfigGreedy();
 
-  Future<void> crateApiSdkClientInitNativeLogging();
+  Future<void> crateApiSdkClientInitApp();
 
   String crateApiModelJsonSchemaToGbnf({required String schemaJson});
 
@@ -2917,7 +2917,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       );
 
   @override
-  Future<void> crateApiSdkClientInitNativeLogging() {
+  Future<void> crateApiSdkClientInitApp() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -2928,15 +2928,14 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateApiSdkClientInitNativeLoggingConstMeta,
+      constMeta: kCrateApiSdkClientInitAppConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiSdkClientInitNativeLoggingConstMeta =>
-      const TaskConstMeta(
-        debugName: "init_native_logging",
+  TaskConstMeta get kCrateApiSdkClientInitAppConstMeta => const TaskConstMeta(
+        debugName: "init_app",
         argNames: [],
       );
 
@@ -6875,8 +6874,10 @@ class FfiModelLoaderImpl extends RustOpaque implements FfiModelLoader {
       XybridRustLib.instance.api.crateApiModelFfiModelLoaderLoadWithProgress(
           that: this, backend: backend);
 
-  /// Whether `load()` would actually speculate: enabled, an API key
-  /// resolves, and the model is not already cached. Never hits the network.
+  /// Whether `load()` may speculate: enabled, an API key resolves, and the
+  /// model is not already cached. Never hits the network, so it cannot know
+  /// the model type: the load asks the registry and speculates only for a
+  /// chat model.
   bool willSpeculate() =>
       XybridRustLib.instance.api.crateApiModelFfiModelLoaderWillSpeculate(
         that: this,

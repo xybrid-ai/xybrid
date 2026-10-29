@@ -9,7 +9,7 @@ default = []
 
 # Candle (pure-Rust ML) backend — gates tests/whisper_candle_integration.rs.
 # Off by default because it pulls candle-core/nn/transformers into the build;
-# CI turns it on in the Test Candle workflow.
+# CI turns it on in test-candle.yml.
 candle = ["xybrid-core/candle"]
 
 # whisper.cpp ASR backend — gates tests/whispercpp_integration.rs. The real
@@ -18,6 +18,9 @@ asr-whispercpp = ["xybrid-core/asr-whispercpp"]
 
 # Native Apple Core ML adapter and its real-model integration test.
 coreml = ["xybrid-core/coreml"]
+
+# Kitten TTS resource-abort checks against a locally prepared rc.4 bundle.
+tts-zzz = ["xybrid-sdk/tts-zzz"]
 
 # Local LLM inference
 llm-mistral = ["xybrid-core/llm-mistral"]              # mistral.rs (CPU)

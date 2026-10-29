@@ -1,0 +1,11 @@
+# convert environment: convert_gguf.sh. Compatible pins for the Qwen fixture's
+# converter and tokenizer. Its bundled gguf-py is imported from the submodule,
+# not PyPI. lock.sh locks this environment.
+numpy==1.26.4
+protobuf==4.25.8
+pyyaml==6.0.3
+requests==2.32.5
+sentencepiece==0.2.1
+torch==2.6.0
+tqdm==4.67.1
+transformers==5.5.1

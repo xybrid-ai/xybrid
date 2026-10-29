@@ -12,7 +12,7 @@ Set the environment variable before any registry call is made:
 export XYBRID_TELEMETRY_OPTOUT=1
 ```
 
-When the variable is set to any of `1`, `true`, or `yes` (case-insensitive, surrounding whitespace ignored), the SDK omits `X-Xybrid-Client` from every registry request. The opt-out also disables the platform telemetry exporter described in [telemetry.md](../sdk/telemetry.md).
+When the variable is set to any of `1`, `true`, or `yes` (case-insensitive, surrounding whitespace ignored), the SDK omits `X-Xybrid-Client` from every registry request. The opt-out also disables the platform telemetry exporter described in [telemetry.md](../sdk/telemetry.md). It does not remove `&backends=` from resolve requests, because that parameter decides which file the registry serves; see [When the header is sent](#when-the-header-is-sent).
 
 The value is read once per process and cached, so changing it after the first registry call has no effect for that run.
 
@@ -37,12 +37,12 @@ The command exits 0 in both cases — it is a status report, not an error.
 The header is a single line, semicolon-separated:
 
 ```
-X-Xybrid-Client: binding=flutter; sdk_version=0.6.0; core_version=0.6.0; platform=ios-arm64; backends=asr-whispercpp,llm-llamacpp,llm-llamacpp-vision,ort-coreml,ort-download,vision
+X-Xybrid-Client: binding=flutter; sdk_version=0.11.0; core_version=0.11.0; platform=ios-arm64; backends=asr-whispercpp,asr-whispercpp-coreml,llm-llamacpp,llm-llamacpp-vision,ort-coreml,ort-download,vision
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `binding` | enum string | The platform binding that made the call. One of `rust`, `flutter`, `kotlin`, `swift`, `unity`. Defaults to `rust` when no binding is registered. |
+| `binding` | enum string | The platform binding that made the call. One of `rust`, `cli`, `flutter`, `kotlin`, `python`, `react-native`, `swift`, `unity`, `web`. Defaults to `rust` when no binding is registered. |
 | `sdk_version` | semver-ish string | `xybrid-sdk` package version, baked in at compile time via `CARGO_PKG_VERSION`. |
 | `core_version` | semver-ish string | `xybrid-core` package version, baked in via the same mechanism. Usually equal to `sdk_version` but reported independently so version skews surface. |
 | `platform` | enum string | Compile-time target triple summary. See the table below. |
@@ -52,11 +52,17 @@ X-Xybrid-Client: binding=flutter; sdk_version=0.6.0; core_version=0.6.0; platfor
 
 | Value | Source | Set by |
 |-------|--------|--------|
-| `rust` | Default — used when no platform binding registers itself. | `xybrid_sdk::DEFAULT_BINDING` |
-| `flutter` | Flutter plugin via `flutter_rust_bridge`. | `XybridSdkClient` (`bindings/flutter/rust/src/api/sdk_client.rs`) |
-| `kotlin` | Android library via UniFFI. | `Xybrid.init(context)` (`bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt`) |
-| `swift` | iOS / macOS Swift package via UniFFI. | `Xybrid.initialize()` (`bindings/apple/Sources/Xybrid/Xybrid.swift`) |
-| `unity` | Unity / C# binding via the C FFI. | `XybridClient.Initialize()` (`bindings/unity/Runtime/Api/XybridClient.cs`) |
+| `rust` | Default — used when nothing registers a binding, e.g. a Rust app built on `xybrid-sdk`. | `xybrid_sdk::DEFAULT_BINDING` |
+| `cli` | The `xybrid` command-line tool. | `main()` (`crates/xybrid-cli/src/main.rs`) |
+| `flutter` | Flutter plugin via `flutter_rust_bridge`. | `XybridRustLib.init()`, through the `#[frb(init)]` hook `init_app` (`bindings/flutter/rust/src/api/sdk_client.rs`) |
+| `kotlin` | Android library via BoltFFI. | `Xybrid.init(context)` (`bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt`); until then, the native library's Android fallback (`crates/xybrid-bolt/src/lib.rs`) |
+| `python` | Python package via BoltFFI. | `import xybrid` (`bindings/python/xybrid/__init__.py`) |
+| `react-native` | React Native package, wrapping the Swift and Kotlin SDKs. | Every bridged call, before the SDK it wraps (`bindings/react-native/ios/XybridModuleImpl.swift`, `bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt`) |
+| `swift` | iOS / macOS Swift package via BoltFFI. | `Xybrid.initialize()` (`bindings/apple/Sources/Xybrid/Xybrid.swift`); until then, the native library's Apple-platform fallback, set by any model, download or pipeline constructor (`crates/xybrid-bolt/src/lib.rs`) |
+| `unity` | Unity / C# binding via BoltFFI. | Static constructors on the generated types that reach native code (`bindings/unity/Runtime/BoltSupplement/BindingRegistration.cs`) |
+| `web` | Browser SDK (`@xybrid/web`). It sends only `binding`, `sdk_version` and `platform`, and has no opt-out: browsers have no environment variables. | Every registry resolve request (`bindings/web/src/internal/registry.ts`) |
+
+The first registration in a process wins. The native library's `swift` / `kotlin` fallback on Apple platforms and Android is not a registration: it applies only until an SDK registers, so React Native, Unity and Python report their own names even if a native call ran first.
 
 Any value containing characters outside `[a-z0-9_-]` is replaced with `rust` before being placed in the header. This is a defensive sanitization step — it prevents user-controlled strings from injecting additional fields or terminators into the header.
 
@@ -72,6 +78,7 @@ Any value containing characters outside `[a-z0-9_-]` is replaced with `rust` bef
 | `linux-x86_64` | Linux on x86_64 |
 | `linux-arm64` | Linux on aarch64 |
 | `windows-x86_64` | Windows on x86_64 |
+| `web` | Browser (`@xybrid/web`) |
 | `unknown` | Any target outside the table above |
 
 Source: `xybrid_sdk::current_platform()` (`crates/xybrid-sdk/src/platform.rs`). The string is decided at compile time; switching architectures requires rebuilding.
@@ -81,6 +88,7 @@ Source: `xybrid_sdk::current_platform()` (`crates/xybrid-sdk/src/platform.rs`). 
 | Value | Cargo feature | Notes |
 |-------|---------------|-------|
 | `asr-whispercpp` | `asr-whispercpp` | whisper.cpp speech recognition; in every `platform-*` preset. Pulls `llm-llamacpp` transitively — whisper.cpp links the ggml that llama.cpp builds |
+| `asr-whispercpp-coreml` | `asr-whispercpp` + `coreml`, iOS only | The build can run whisper.cpp's encoder through Core ML (iOS 16 and later). The registry serves the `ios-arm64` Whisper bundles, which carry the encoder, only to clients that list it, so `resolve` also sends it in its query (see [When the header is sent](#when-the-header-is-sent)) |
 | `candle-cuda` | `candle-cuda` | Candle backend with CUDA acceleration. Opt-in only — no `platform-*` preset enables it |
 | `candle-metal` | `candle-metal` | Candle backend with Metal acceleration. Opt-in only — no `platform-*` preset enables it |
 | `espeak` | `espeak` | espeak-ng phonemizer (multi-language TTS) |
@@ -93,7 +101,9 @@ Source: `xybrid_sdk::current_platform()` (`crates/xybrid-sdk/src/platform.rs`). 
 | `ort-cuda` | `ort-cuda` | ONNX Runtime with CUDA execution provider |
 | `ort-download` | `ort-download` | ONNX Runtime resolved via prebuilt downloads |
 | `ort-dynamic` | `ort-dynamic` | ONNX Runtime loaded dynamically at runtime (Android) |
+| `tts-zzz` | `tts-zzz` | Kitten TTS 2 and Phonon through the pinned zzz CPU engine (macOS ARM64, Linux x86-64-v3, Android ARM64). Opt-in only — no `platform-*` preset enables it |
 | `vision` | _(none — always on)_ | Vision envelopes + preprocessing pipeline; compiled in unconditionally, so this value appears on every build |
+| `zzz-phonon-31m` | `tts-zzz` | The build's pinned zzz engine loads Gradium's `phonon-31m-en` ([Phonon speech](../sdk/PHONON.md)). 0.12.0 builds report `tts-zzz` too, but their engine rejects that model, so the registry serves `phonon-31m-en` only to clients that list `zzz-phonon-31m`, and `resolve` also sends it in its query (see [When the header is sent](#when-the-header-is-sent)) |
 
 Source: `xybrid_core::features::enabled()` (`crates/xybrid-core/src/features.rs`). The list is computed once per process from `cfg!(feature = "...")` checks and cached.
 
@@ -132,6 +142,8 @@ The SDK adds `X-Xybrid-Client` to the three metadata calls:
 | `RegistryClient::get_model` | `GET /v1/models/{mask}` | Fetch metadata for one model |
 | `RegistryClient::resolve` | `GET /v1/models/{mask}/resolve?platform=…` | Resolve a model+platform to a bundle URL |
 
+`resolve` also lists, as `&backends=` in its query, the backends that decide which file the registry serves; today those are `asr-whispercpp-coreml` and `zzz-phonon-31m`. Unlike the header, it is sent when telemetry is opted out too: without it, an opted-out iOS client would get the plain `.bin` instead of the bundle with the Core ML encoder, and an opted-out `tts-zzz` client could not resolve `phonon-31m-en`. The registry does not record it in analytics.
+
 Bundle download requests are intentionally **not** instrumented in this version. They are downloads, not metadata calls, and a per-byte header is not interesting in aggregate.
 
 ## Setting `binding` from a custom client
@@ -142,14 +154,13 @@ Most users never need to think about `binding` — the platform binding sets it 
 xybrid_sdk::set_binding("my-tool");
 ```
 
-The first `set_binding` call wins — once a value is registered, subsequent calls are silent no-ops, matching the lifecycle of "one process, one binding." A second route is the per-config field on [`SdkConfig::with_binding`](../sdk/API_REFERENCE.md#9-configuration-types):
+The first `set_binding` call wins — once a value is registered, subsequent calls are silent no-ops, matching the lifecycle of "one process, one binding." The init builder does the same:
 
 ```rust
-use xybrid_sdk::{SdkConfig, DEFAULT_BINDING};
-
-let config = SdkConfig::default().with_binding("my-tool");
-assert_eq!(config.binding(), "my-tool");
+xybrid_sdk::init().binding("my-tool").run();
 ```
+
+`SdkConfig::with_binding` is deprecated: nothing reads a config's binding, so it never reaches a request.
 
 If your value contains anything outside `[a-z0-9_-]`, the SDK substitutes `rust` before placing the value into the header. There is no way to inject a custom field name; the format is fixed.
 
@@ -161,5 +172,5 @@ Run the CLI command above, or instrument an HTTP proxy in front of the registry 
 
 - [Platform telemetry exporter](../sdk/telemetry.md) — the opt-in exporter for inference events
 - [Resource telemetry](../sdk/resource-telemetry.md) — per-inference resource summaries
-- [API reference](../sdk/API_REFERENCE.md) — full SDK API surface, including `SdkConfig.binding`
+- [API reference](../sdk/API_REFERENCE.md) — full SDK API surface
 - [Feature matrix](../FEATURE_MATRIX.md) — which backend features compile together

@@ -137,6 +137,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("❌ Unexpected token IDs output: {} ids", ids.len());
                 return Err("Expected text output, got token IDs".into());
             }
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                println!("❌ Unexpected choice output");
+                return Err("Expected text output, got choice output".into());
+            }
         }
     } else {
         // Load real audio file
@@ -188,6 +192,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             EnvelopeKind::TokenIds(ids) => {
                 println!("❌ Unexpected token IDs output: {} ids", ids.len());
                 return Err("Expected text output, got token IDs".into());
+            }
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                println!("❌ Unexpected choice output");
+                return Err("Expected text output, got choice output".into());
             }
         }
     }

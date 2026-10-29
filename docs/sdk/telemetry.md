@@ -221,9 +221,10 @@ Inference events (`ModelComplete`, `PipelineComplete`) carry per-call attributio
 
 | field | type | events | values | source |
 |---|---|---|---|---|
-| `backend` | string | inference | `llamacpp` \| `whispercpp` \| `mlx` \| `mistralrs` \| `ort` \| `candle` \| `cloud` | `ExecutionTemplate` variant + `metadata.backend` hint. `GgmlWhisper` → `whispercpp` unconditionally (the template fixes the runtime, so no hint is consulted); `Gguf` / `VisionLanguage` → the hint when it normalises to `mistralrs`, else `llamacpp`; `SafeTensors` → `candle` (a deferred `mlx` hint does **not** override it); `Onnx` → `ort`; `cloud` for the cloud adapter |
+| `backend` | string | inference | `llamacpp` \| `whispercpp` \| `mlx` \| `mistralrs` \| `ort` \| `candle` \| `cloud` | `ExecutionTemplate` variant + `metadata.backend` hint. `GgmlWhisper` → `whispercpp` unconditionally (the template fixes the runtime, so no hint is consulted); `Gguf` / `VisionLanguage` → the hint when it normalises to `mistralrs`, else `llamacpp`; `SafeTensors` → `candle` (a deferred `mlx` hint does **not** override it); `Onnx` and `ChoiceScorer` → `ort`; `cloud` for the cloud adapter |
 | `provider` | string | inference (cloud only) | `openai` \| `anthropic` \| `google` \| `elevenlabs` \| `openrouter` \| `custom` | Cloud `IntegrationProvider` resolved from envelope metadata |
-| `task` | string | inference | `chat` \| `vlm` \| `asr` \| `tts` \| `embedding` \| `image-gen` \| `ocr` \| `rerank` \| `classify` (open string for forward-compat) | `ModelMetadata.metadata["task"]` from `model_metadata.json` |
+| `task` | string | inference | `chat` \| `vlm` \| `asr` \| `tts` \| `embedding` \| `image-gen` \| `ocr` \| `rerank` \| `classify` \| `decision` (open string for forward-compat) | `ModelMetadata.metadata["task"]` from `model_metadata.json`; always `decision` for a choice scorer |
+| `choice_count` | u64 | inference (choice scorers) | — | Candidates a choice request offered: the caller's choices plus the scorer's fixed ones |
 | `quantization` | string | inference | `q4_0` \| `q4_k_m` \| `q5_k_m` \| `q8_0` \| `fp16` \| `fp32` (open string — common GGUF labels) | `ModelMetadata.metadata["quantization"]` first; falls back to GGUF filename inference; absent (not empty) when unknown |
 | `execution_provider` | string | inference (local only) | `coreml` \| `cpu` \| `metal` \| `vulkan` \| `cuda` \| `mlx-metal` \| `ane` (open string) | ORT path: harvested from per-session profiling JSON after the first inference (ORT exposes no session-level resolved-EP getter, so we read `args.provider` from the Chrome-trace output and pick the EP that ran the most ops). LLM path: build-configuration-derived label keyed on the backend name. Cloud paths omit — `provider` carries attribution. |
 | `prompt_cached_tokens` | u64 | inference (local LLM, llama.cpp only) | — | Count of prompt tokens served from the backend's KV cache on this call (longest common prefix with the previous turn). Local mirror of cloud's `cache_read_input_tokens`. Absent on first turns and for backends that don't track prefix reuse (cloud, mistralrs, mock). Only emitted when positive — `0` looks indistinguishable from "no cache" so the field stays absent rather than reporting a misleading zero. |
@@ -240,6 +241,22 @@ For local LLM events `provider` is always absent; for cloud events it is always 
 `execution_provider` is the diagnostic complement to `backend`: `backend` says *which engine we asked for*, `execution_provider` says *what actually ran*. The two diverge most often on the ORT path (CoreML can silently fall back to CPU per-op when an op isn't supported) — the field is the analytics signal that explains "why is this run slow on this chip?" The field is absent for cloud events because cloud `provider` already attributes execution end-to-end.
 
 `prompt_cached_tokens` is the local-LLM analogue of cloud's `cache_read_input_tokens`. Multi-turn workloads with a stable system prompt and conversation prefix routinely see 70-90% of the prompt served from the backend's KV cache on every call after the first — that's the difference between a 7B model feeling responsive and feeling sluggish, and it's also a billing-correctness signal (prefill is the expensive part; cached tokens shouldn't count toward "tokens processed"). Stack with `cache_read_input_tokens` on the same dashboard axis to compare local vs cloud cache savings.
+
+A choice scorer's `ModelComplete` carries `task = "decision"`, `backend` and `choice_count` in its `data` and on the payload top level, with or without span tracing. Candidate ids and texts, the context and the scores are never sent. When ONNX Runtime fails a scorer run, its message is withheld from the error, and so is the shape of a wrong-shaped output, which a model can derive from the request. Scorer sessions and runs set ONNX Runtime's own log level to fatal, so ONNX Runtime logs nothing below fatal for them, such as that message or a warning that quotes what the request produced; its process-wide logger is not covered, and by default follows `ORT_LOG`. A scorer's completion:
+
+```json
+{
+  "event_type": "ModelComplete",
+  "payload": {
+    "status": "success",
+    "stage_name": "cua-s1-forms",
+    "target": "local",
+    "task": "decision",
+    "backend": "ort",
+    "choice_count": 5
+  }
+}
+```
 
 For vision-language models, `task = "vlm"` and `image_preprocess_ms` travel as top-level payload fields on the same inference event:
 

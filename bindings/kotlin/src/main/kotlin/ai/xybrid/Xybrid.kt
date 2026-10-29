@@ -16,7 +16,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
-import android.os.Build
 import android.os.PowerManager
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -81,10 +80,9 @@ object Xybrid {
      * application context so they survive Activity rotation. Battery
      * monitoring uses the sticky `ACTION_BATTERY_CHANGED` broadcast,
      * which delivers the current value immediately on registration —
-     * no separate seed call is needed. Thermal monitoring requires
-     * API 29+ ([`PowerManager.OnThermalStatusChangedListener`]); on
-     * older devices the routing engine sees `thermal_state = None`
-     * (treated as "no signal" rather than an optimistic default).
+     * no separate seed call is needed. Thermal monitoring seeds the
+     * current status, then follows
+     * [`PowerManager.OnThermalStatusChangedListener`].
      *
      * @param context Android context (application or activity).
      * @param apiKey Xybrid API key. When set, starts the telemetry exporter.
@@ -177,8 +175,9 @@ object Xybrid {
      * [XybridModelLoader.fromRegistrySpeculative] opts in explicitly and is
      * unaffected by this toggle. Off by default. Either way, speculation also
      * needs a resolvable API key and a model that is not already cached —
-     * [XybridModelLoader.willSpeculate] reports the combined answer for a
-     * specific loader.
+     * [XybridModelLoader.willSpeculate] checks both for a specific loader —
+     * and the load asks the registry first, so only chat models are served
+     * this way.
      */
     @JvmStatic
     fun setSpeculativeCloud(enabled: Boolean) = ai.xybrid.setSpeculativeCloud(enabled)
@@ -302,12 +301,11 @@ object Xybrid {
         }
         appContext.registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
-            setThermalState(thermalStatusToXybrid(pm.currentThermalStatus))
-            pm.addThermalStatusListener { status ->
-                setThermalState(thermalStatusToXybrid(status))
-            }
+        // The thermal APIs are API 29, the SDK's minSdk, so no version check.
+        val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+        setThermalState(thermalStatusToXybrid(pm.currentThermalStatus))
+        pm.addThermalStatusListener { status ->
+            setThermalState(thermalStatusToXybrid(status))
         }
     }
 
@@ -436,10 +434,13 @@ class XybridModelLoader private constructor(
     }
 
     /**
-     * Whether [load] would actually speculate: speculation is possible for this
-     * source, an API key resolves, and the model is not already cached.
+     * Whether [load] may speculate: speculation is possible for this source,
+     * an API key resolves, and the model is not already cached.
      *
-     * Always `false` for non-speculative sources. Never touches the network.
+     * Always `false` for non-speculative sources. Never touches the network,
+     * so it cannot know the model type: [load] asks the registry and
+     * speculates only for a chat model. [XybridModel.isCloudServing] reports
+     * the outcome.
      */
     val willSpeculate: Boolean
         get() = when (val current = source) {
@@ -463,9 +464,10 @@ class XybridModelLoader private constructor(
          *
          * [load] returns almost immediately with a cloud-backed model that
          * switches to on-device by itself once the download lands. Requires an
-         * API key and an uncached model — otherwise it behaves exactly like
-         * [fromRegistry], which [willSpeculate] reports up front. LLM/chat
-         * models only.
+         * API key, an uncached model, and a chat model the registry serves as a
+         * direct download (GGUF or vision-language, not a `.xyb` bundle) —
+         * otherwise it behaves exactly like [fromRegistry]. [willSpeculate]
+         * checks the first two up front.
          */
         @JvmStatic
         fun fromRegistrySpeculative(id: String): XybridModelLoader =
@@ -821,6 +823,9 @@ fun XybridModel.streamTokens(
                 when (event.kind) {
                     XybridStreamEventKind.TOKEN -> event.token?.let { emit(it) }
                     XybridStreamEventKind.COMPLETE -> break
+                    XybridStreamEventKind.AUDIO -> throw XybridError.InferenceError(
+                        "Token streams cannot deliver audio; use runAsync for batch speech"
+                    )
                 }
             }
         } finally {

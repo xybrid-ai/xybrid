@@ -2749,7 +2749,7 @@ dependencies = [
 
 [[package]]
 name = "integration-tests"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3226,7 +3226,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-c-sys"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "bindgen",
 ]
@@ -6278,7 +6278,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -6292,14 +6292,14 @@ dependencies = [
 
 [[package]]
 name = "xybrid"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "xybrid-sdk",
 ]
 
 [[package]]
 name = "xybrid-cli"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6331,7 +6331,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-core"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6396,13 +6396,14 @@ dependencies = [
  "xybrid-llama-sys",
  "xybrid-mlx",
  "xybrid-whisper",
+ "xybrid-zzz-sys",
  "yuvutils-rs",
  "zstd",
 ]
 
 [[package]]
 name = "xybrid-ffi-facade"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "log",
  "serde_json",
@@ -6414,7 +6415,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-llama"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -6423,7 +6424,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-llama-sys"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -6436,7 +6437,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-macros"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6445,7 +6446,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-mlx"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "metal 0.29.0",
  "mlx-c-sys",
@@ -6455,7 +6456,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-sdk"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6483,8 +6484,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xybrid-web-runtime"
+version = "0.15.0"
+dependencies = [
+ "xybrid-llama",
+]
+
+[[package]]
 name = "xybrid-whisper"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -6493,7 +6501,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-whisper-sys"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -6501,8 +6509,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xybrid-zzz-sys"
+version = "0.15.0"
+dependencies = [
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "xybrid_bolt"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "android_logger",
  "boltffi",
@@ -6514,7 +6530,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid_flutter"
-version = "0.10.0-rc1"
+version = "0.15.0"
 dependencies = [
  "android_logger",
  "flutter_rust_bridge",

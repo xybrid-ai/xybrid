@@ -112,6 +112,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("❌ Unexpected token IDs output: {} ids", ids.len());
             return Err("Expected audio output, got token IDs".into());
         }
+        EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+            println!("❌ Unexpected choice output");
+            return Err("Expected audio output, got choice output".into());
+        }
     }
 
     println!();

@@ -1,0 +1,9 @@
+# labels environment: the Qwen3.5-0.8B label goldens (lock.sh locks it).
+huggingface-hub==1.32.0
+# HF apply_chat_template renders with Jinja2, so its version is part of G0.
+jinja2==3.1.6
+numpy==2.4.6
+safetensors==0.8.0
+tokenizers==0.23.2
+torch==2.14.0
+transformers==5.17.0

@@ -5,7 +5,7 @@
 
 namespace XybridBolt
 {
-    public sealed class XybridPipeline : global::System.IDisposable
+    public sealed partial class XybridPipeline : global::System.IDisposable
     {
         private long handle;
 

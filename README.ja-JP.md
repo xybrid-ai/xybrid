@@ -393,6 +393,11 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 データで、ループを回すのは自分のコードです。詳しくは
 [ツール呼び出しガイド](https://docs.xybrid.dev/en/docs/guides/tool-calling)を参照してください。
 
+**埋め込み:** テキスト埋め込みモデル（EmbeddingGemma 2、all-MiniLM など）は、すでに
+持ち込みモデルとして実行できます。詳しくは
+[カスタムモデルガイド](docs/guides/custom-models.md#sentence-embeddings)（英語）を参照してください。
+レジストリのモデルは近日公開予定です。
+
 ---
 
 ## なぜXybridなのか？

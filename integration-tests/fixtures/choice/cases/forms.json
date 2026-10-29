@@ -1,0 +1,484 @@
+{
+  "description": "CUA-S1-FORMS conformance cases. Each case is one scorer request: the caller's context and choices. The effective candidates are the caller choices in order followed by the scorer's fixed choices (specs/cua-s1-forms.json). Contexts follow cua_s1.schema.render_context at trycua/cua@bf6c767.",
+  "provenance": {
+    "sources": {
+      "trycua-cua": "bf6c76786d938070f4ecf1e44004752f69f518b8"
+    }
+  },
+  "cases": [
+    {
+      "id": "phone-fill",
+      "description": "Empty phone field; the Tel entity is the intended answer.",
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Edit \"Phone number\" value=\"\"",
+      "choices": [
+        {
+          "id": "name",
+          "text": "fill Name: Jane Doe"
+        },
+        {
+          "id": "tel",
+          "text": "fill Tel: (503) 555-0142"
+        },
+        {
+          "id": "dob",
+          "text": "fill DOB: 03/14/1987"
+        },
+        {
+          "id": "email",
+          "text": "fill Email: jane.doe@example.invalid"
+        }
+      ]
+    },
+    {
+      "id": "phone-fill-reordered",
+      "description": "phone-fill with the caller choices reversed; scores must follow ids, not positions.",
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Edit \"Phone number\" value=\"\"",
+      "choices": [
+        {
+          "id": "email",
+          "text": "fill Email: jane.doe@example.invalid"
+        },
+        {
+          "id": "dob",
+          "text": "fill DOB: 03/14/1987"
+        },
+        {
+          "id": "tel",
+          "text": "fill Tel: (503) 555-0142"
+        },
+        {
+          "id": "name",
+          "text": "fill Name: Jane Doe"
+        }
+      ]
+    },
+    {
+      "id": "checkbox-check",
+      "description": "Unchecked consent box; the fixed 'check' choice is the intended answer.",
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT CheckBox \"I agree to the privacy policy\" unchecked",
+      "choices": [
+        {
+          "id": "name",
+          "text": "fill Name: Jane Doe"
+        },
+        {
+          "id": "tel",
+          "text": "fill Tel: (503) 555-0142"
+        },
+        {
+          "id": "dob",
+          "text": "fill DOB: 03/14/1987"
+        },
+        {
+          "id": "email",
+          "text": "fill Email: jane.doe@example.invalid"
+        }
+      ]
+    },
+    {
+      "id": "submit-click",
+      "description": "Submit button; the fixed 'click' choice is the intended answer.",
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Button \"Submit registration\" value=\"\"",
+      "choices": [
+        {
+          "id": "name",
+          "text": "fill Name: Jane Doe"
+        },
+        {
+          "id": "tel",
+          "text": "fill Tel: (503) 555-0142"
+        },
+        {
+          "id": "dob",
+          "text": "fill DOB: 03/14/1987"
+        },
+        {
+          "id": "email",
+          "text": "fill Email: jane.doe@example.invalid"
+        }
+      ]
+    },
+    {
+      "id": "filled-skip",
+      "description": "Field already holds the document value; the fixed 'skip' choice is the intended answer.",
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Edit \"Full name\" value=\"Jane Doe\"",
+      "choices": [
+        {
+          "id": "name",
+          "text": "fill Name: Jane Doe"
+        },
+        {
+          "id": "tel",
+          "text": "fill Tel: (503) 555-0142"
+        },
+        {
+          "id": "dob",
+          "text": "fill DOB: 03/14/1987"
+        },
+        {
+          "id": "email",
+          "text": "fill Email: jane.doe@example.invalid"
+        }
+      ]
+    },
+    {
+      "id": "fixed-only",
+      "description": "No caller choices: the three fixed choices alone form the candidate set.",
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Edit \"Middle name\" value=\"\"",
+      "choices": []
+    },
+    {
+      "id": "single-entity",
+      "description": "One caller choice plus the three fixed choices.",
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Edit \"Date of birth\" value=\"\" hint=\"MM/DD/YYYY\"",
+      "choices": [
+        {
+          "id": "dob",
+          "text": "fill DOB: 03/14/1987"
+        }
+      ]
+    },
+    {
+      "id": "context-split-2byte",
+      "description": "Context truncation at byte 224 cuts a 2-byte character after its first byte.",
+      "context": "TASK fill the form from the document, then submit\nFORM Clinique Médicale Nord-Est — Dossier d'admission\nELEMENT Edit \"Numéro de téléphone (domicile)\" value=\"\" hint=\"format : 06 12 34 56 78, fixe/mobile — indicatif régional\"",
+      "choices": [
+        {
+          "id": "tel",
+          "text": "fill Téléphone: 06 12 34 56 78"
+        },
+        {
+          "id": "name",
+          "text": "fill Nom: Élodie Bérard"
+        }
+      ]
+    },
+    {
+      "id": "context-split-3byte",
+      "description": "Context truncation at byte 224 cuts a 3-byte character.",
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic — New Patient Registration (Montréal site)\nELEMENT Edit \"Emergency contact phone\" value=\"\" hint=\"reachable on weekdays between nine and five — Mon–Fri\"",
+      "choices": [
+        {
+          "id": "emergency_tel",
+          "text": "fill Emergency contact phone: (503) 555-0199"
+        },
+        {
+          "id": "tel",
+          "text": "fill Tel: (503) 555-0142"
+        }
+      ]
+    },
+    {
+      "id": "choice-split",
+      "description": "Choice truncation at byte 96 cuts a 2-byte and a 4-byte character.",
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Edit \"Address\" value=\"\"",
+      "choices": [
+        {
+          "id": "address",
+          "text": "fill Address: 1600 Rue de la Paix, Building C, Apartment 12B, Floor 3, north wing, near the Café Élysée entrance"
+        },
+        {
+          "id": "mobile",
+          "text": "fill Mobile phone: +1 (503) 555-0142 ext. 12 — preferred for SMS reminders, calls after 6pm 📞 ok"
+        },
+        {
+          "id": "name",
+          "text": "fill Name: Jane Doe"
+        }
+      ]
+    },
+    {
+      "id": "max-choices-64",
+      "description": "61 caller choices plus the three fixed choices: exactly the declared 64-choice maximum.",
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Edit \"Insurance member ID\" value=\"\"",
+      "choices": [
+        {
+          "id": "p1_name",
+          "text": "fill Name: Jane Doe"
+        },
+        {
+          "id": "p1_tel",
+          "text": "fill Tel: (503) 555-0142"
+        },
+        {
+          "id": "p1_dob",
+          "text": "fill DOB: 03/14/1987"
+        },
+        {
+          "id": "p1_email",
+          "text": "fill Email: jane.doe@example.invalid"
+        },
+        {
+          "id": "p1_street",
+          "text": "fill Street: 1200 SE Morrison St"
+        },
+        {
+          "id": "p1_city",
+          "text": "fill City: Portland"
+        },
+        {
+          "id": "p1_state",
+          "text": "fill State: OR"
+        },
+        {
+          "id": "p1_zip",
+          "text": "fill ZIP: 97214"
+        },
+        {
+          "id": "p1_employer",
+          "text": "fill Employer: Acme Robotics"
+        },
+        {
+          "id": "p1_job_title",
+          "text": "fill Job title: Field engineer"
+        },
+        {
+          "id": "p1_insurance_provider",
+          "text": "fill Insurance provider: Cascade Health"
+        },
+        {
+          "id": "p1_member_id",
+          "text": "fill Member ID: CH-4471-2209"
+        },
+        {
+          "id": "p1_group_number",
+          "text": "fill Group number: GRP-88102"
+        },
+        {
+          "id": "p1_emergency_contact",
+          "text": "fill Emergency contact: John Doe"
+        },
+        {
+          "id": "p1_emergency_phone",
+          "text": "fill Emergency phone: (503) 555-0199"
+        },
+        {
+          "id": "p1_allergies",
+          "text": "fill Allergies: Penicillin"
+        },
+        {
+          "id": "p1_medications",
+          "text": "fill Medications: Lisinopril 10 mg"
+        },
+        {
+          "id": "p1_primary_physician",
+          "text": "fill Primary physician: Dr. Ana Ruiz"
+        },
+        {
+          "id": "p1_pharmacy",
+          "text": "fill Pharmacy: Hawthorne Pharmacy"
+        },
+        {
+          "id": "p1_pharmacy_phone",
+          "text": "fill Pharmacy phone: (503) 555-0110"
+        },
+        {
+          "id": "p2_name",
+          "text": "fill Name: Omar Haddad"
+        },
+        {
+          "id": "p2_tel",
+          "text": "fill Tel: (971) 555-0127"
+        },
+        {
+          "id": "p2_dob",
+          "text": "fill DOB: 11/02/1990"
+        },
+        {
+          "id": "p2_email",
+          "text": "fill Email: omar.h@example.invalid"
+        },
+        {
+          "id": "p2_street",
+          "text": "fill Street: 45 NW 23rd Ave"
+        },
+        {
+          "id": "p2_city",
+          "text": "fill City: Beaverton"
+        },
+        {
+          "id": "p2_state",
+          "text": "fill State: OR"
+        },
+        {
+          "id": "p2_zip",
+          "text": "fill ZIP: 97005"
+        },
+        {
+          "id": "p2_employer",
+          "text": "fill Employer: Riverside Labs"
+        },
+        {
+          "id": "p2_job_title",
+          "text": "fill Job title: Data analyst"
+        },
+        {
+          "id": "p2_insurance_provider",
+          "text": "fill Insurance provider: Blue Ridge Mutual"
+        },
+        {
+          "id": "p2_member_id",
+          "text": "fill Member ID: BR-9031-5562"
+        },
+        {
+          "id": "p2_group_number",
+          "text": "fill Group number: GRP-11873"
+        },
+        {
+          "id": "p2_emergency_contact",
+          "text": "fill Emergency contact: Leila Haddad"
+        },
+        {
+          "id": "p2_emergency_phone",
+          "text": "fill Emergency phone: (971) 555-0188"
+        },
+        {
+          "id": "p2_allergies",
+          "text": "fill Allergies: None known"
+        },
+        {
+          "id": "p2_medications",
+          "text": "fill Medications: Metformin 500 mg"
+        },
+        {
+          "id": "p2_primary_physician",
+          "text": "fill Primary physician: Dr. Kim Lee"
+        },
+        {
+          "id": "p2_pharmacy",
+          "text": "fill Pharmacy: Cedar Mill Drugs"
+        },
+        {
+          "id": "p2_pharmacy_phone",
+          "text": "fill Pharmacy phone: (971) 555-0131"
+        },
+        {
+          "id": "p3_name",
+          "text": "fill Name: Priya Natarajan"
+        },
+        {
+          "id": "p3_tel",
+          "text": "fill Tel: (360) 555-0164"
+        },
+        {
+          "id": "p3_dob",
+          "text": "fill DOB: 07/29/1984"
+        },
+        {
+          "id": "p3_email",
+          "text": "fill Email: priya.n@example.invalid"
+        },
+        {
+          "id": "p3_street",
+          "text": "fill Street: 88 Main St"
+        },
+        {
+          "id": "p3_city",
+          "text": "fill City: Vancouver"
+        },
+        {
+          "id": "p3_state",
+          "text": "fill State: WA"
+        },
+        {
+          "id": "p3_zip",
+          "text": "fill ZIP: 98660"
+        },
+        {
+          "id": "p3_employer",
+          "text": "fill Employer: Summit Credit Union"
+        },
+        {
+          "id": "p3_job_title",
+          "text": "fill Job title: Loan officer"
+        },
+        {
+          "id": "p3_insurance_provider",
+          "text": "fill Insurance provider: Evergreen Care"
+        },
+        {
+          "id": "p3_member_id",
+          "text": "fill Member ID: EC-2210-7784"
+        },
+        {
+          "id": "p3_group_number",
+          "text": "fill Group number: GRP-50931"
+        },
+        {
+          "id": "p3_emergency_contact",
+          "text": "fill Emergency contact: Ravi Natarajan"
+        },
+        {
+          "id": "p3_emergency_phone",
+          "text": "fill Emergency phone: (360) 555-0101"
+        },
+        {
+          "id": "p3_allergies",
+          "text": "fill Allergies: Latex"
+        },
+        {
+          "id": "p3_medications",
+          "text": "fill Medications: Levothyroxine 50 mcg"
+        },
+        {
+          "id": "p3_primary_physician",
+          "text": "fill Primary physician: Dr. Sam Ortiz"
+        },
+        {
+          "id": "p3_pharmacy",
+          "text": "fill Pharmacy: Esther Short Pharmacy"
+        },
+        {
+          "id": "p3_pharmacy_phone",
+          "text": "fill Pharmacy phone: (360) 555-0155"
+        },
+        {
+          "id": "p1_preferred_language",
+          "text": "fill Preferred language: English"
+        }
+      ]
+    },
+    {
+      "id": "tie-duplicate-text",
+      "description": "Two caller choices with identical text: an exact tie that the first candidate wins.",
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Edit \"Phone number\" value=\"\"",
+      "choices": [
+        {
+          "id": "name",
+          "text": "fill Name: Jane Doe"
+        },
+        {
+          "id": "tel_home",
+          "text": "fill Tel: (503) 555-0142"
+        },
+        {
+          "id": "tel_copy",
+          "text": "fill Tel: (503) 555-0142"
+        },
+        {
+          "id": "email",
+          "text": "fill Email: jane.doe@example.invalid"
+        }
+      ]
+    },
+    {
+      "id": "near-tie-telephone",
+      "description": "Two phone entities for a field labelled 'Telephone': a natural near tie (reference margin below 0.05).",
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Edit \"Telephone\" value=\"\"",
+      "choices": [
+        {
+          "id": "tel",
+          "text": "fill Tel: (503) 555-0142"
+        },
+        {
+          "id": "mobile",
+          "text": "fill Mobile: (503) 555-0187"
+        },
+        {
+          "id": "name",
+          "text": "fill Name: Jane Doe"
+        }
+      ]
+    }
+  ]
+}

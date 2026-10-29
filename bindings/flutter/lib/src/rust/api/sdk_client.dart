@@ -164,12 +164,14 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
       XybridRustLib.instance.api
           .crateApiSdkClientXybridSdkClientSetPlatformUrl(url: url);
 
-  /// Enable speculative cloud fallback globally: a registry model that isn't
-  /// downloaded yet is served from the gateway while the weights download.
+  /// Enable speculative cloud fallback globally: a registry chat model that
+  /// isn't downloaded yet is served from the gateway while the weights
+  /// download.
   ///
-  /// Only takes effect when an API key resolves. Speculation is LLM/chat
-  /// only — prefer `FfiModelLoader.fromRegistrySpeculative` when the app also
-  /// loads ASR/TTS models, which cannot be served this way.
+  /// Only takes effect when an API key resolves. An uncached load asks the
+  /// registry first, so other models (ASR, TTS, `.xyb` bundles) download and
+  /// load as usual. `FfiModelLoader.fromRegistrySpeculative` opts a single
+  /// load in instead.
   static void setSpeculativeCloud({required bool enabled}) => XybridRustLib
       .instance.api
       .crateApiSdkClientXybridSdkClientSetSpeculativeCloud(enabled: enabled);
