@@ -49,8 +49,9 @@ cc = "1.0"
 cmake = "0.1"
 # Phase 5 of the `llamacpp-crate-split` epic: generate the FFI surface
 # from `wrapper.h` via bindgen instead of the prior 26 hand-written
-# extern declarations. Pinned to the same major as `mlx-c-sys`.
-bindgen = "0.70"
+# extern declarations.
+# Keep both native binding generators on the Clang 22+ forward-declaration fix.
+bindgen = "0.72.1"
 # Automatic prebuilt-natives download (see the "Prebuilt natives" section of
 # build.rs). Not optional: a build script cannot be feature-gated with
 # `cfg(feature = ...)`, and this crate is itself an optional dependency of
