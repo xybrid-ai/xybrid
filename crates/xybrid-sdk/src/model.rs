@@ -7069,6 +7069,12 @@ mod tests {
             .insert("task".into(), serde_json::json!("text-to-speech"));
         let mut kitten = kokoro.clone();
         kitten.model_id = "kitten".into();
+        kitten.files = vec![
+            "language.gguf".into(),
+            "decoder.gguf".into(),
+            "voice.lm.json".into(),
+            "voice.s3.json".into(),
+        ];
         kitten.execution_template = ExecutionTemplate::ZzzEmbed {
             model_file: "language.gguf".into(),
             decoder_file: "decoder.gguf".into(),
@@ -7083,6 +7089,7 @@ mod tests {
         };
         let mut phonon = kokoro.clone();
         phonon.model_id = "phonon".into();
+        phonon.files = vec!["phonon.gguf".into()];
         phonon.execution_template = serde_json::from_value(serde_json::json!({
             "type":"ZzzPhonon", "model_file":"phonon.gguf"
         }))
@@ -7140,6 +7147,14 @@ mod tests {
                 serde_json::to_vec(&metadata).unwrap(),
             )
             .unwrap();
+            for file in &metadata.files {
+                std::fs::write(directory.join(file), b"fixture").unwrap();
+            }
+            assert_eq!(
+                client.resolve_offline(&metadata.model_id),
+                Some(directory.clone()),
+                "fixture must exercise the ready-cache path"
+            );
             let loader = ModelLoader::from_registry(&metadata.model_id);
             let local_loader = ModelLoader::from_directory(&directory).unwrap();
             let results = [
@@ -7162,11 +7177,14 @@ mod tests {
                     Err(error) => error,
                 };
                 assert!(!error.is_retryable());
-                assert!(matches!(
-                    error,
-                    SdkError::UnsupportedBackendCapability { ref model_id, ref backend, .. }
-                        if model_id == &metadata.model_id && backend == "zzz"
-                ));
+                assert!(
+                    matches!(
+                        error,
+                        SdkError::UnsupportedBackendCapability { ref model_id, ref backend, .. }
+                            if model_id == &metadata.model_id && backend == "zzz"
+                    ),
+                    "unexpected load error: {error:?}"
+                );
                 let message = error.to_string();
                 assert!(message.contains("tts-zzz"));
                 assert!(message.contains("pinned engine slice"));
