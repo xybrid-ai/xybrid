@@ -88,6 +88,14 @@ both GGUFs gain 32 bytes of metadata while all 320 tensors remain byte-identical
 to v0.6.0. Their artifact digests and the Q4_K_M fixture's F16 input digest are
 updated together; templates, reference goldens and scoring bounds are preserved.
 
+The move to llama.cpp master `19ff817` adds
+`tokenizer.ggml.clean_spaces = false`, matching `clean_up_tokenization_spaces`
+in the pinned tokenizer configuration. Both GGUFs gain 64 bytes of metadata.
+Their artifact digests and the Q4_K_M fixture's F16 input digest are updated
+together from macOS arm64 rebuilds, with the embedded chat templates verified
+against the committed template. Reference goldens and scoring bounds are
+preserved.
+
 ## Environments
 
 Each environment is Python 3.12 plus a full lock. `requirements-<env>.in` holds
