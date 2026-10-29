@@ -228,7 +228,7 @@ impl From<sdk::SdkError> for Error {
         let with_cause =
             |message: String, source: Option<Box<dyn std::error::Error + Send + Sync>>| match source
             {
-                Some(cause) => format!("{message}: {cause}"),
+                Some(cause) => format!("{message}: {}", error_chain(cause.as_ref())),
                 None => message,
             };
         match err {
@@ -2796,12 +2796,18 @@ fn asr_worker_gone() -> Error {
 ///
 /// SDK errors carry the root cause as `#[source]`, which `Display` alone drops
 /// — "Feed failed" instead of "Feed failed: Inference error: dtype mismatch".
-fn asr_error_chain(e: &dyn std::error::Error) -> String {
+fn error_chain(e: &dyn std::error::Error) -> String {
     let mut out = e.to_string();
     let mut source = e.source();
     while let Some(cause) = source {
-        out.push_str(": ");
-        out.push_str(&cause.to_string());
+        let message = cause.to_string();
+        // `thiserror` wrappers such as XybridError::Inference already render
+        // their source at the end of Display. Keep traversing for deeper SDK
+        // causes, but don't append that same diagnostic a second time.
+        if !out.ends_with(&message) {
+            out.push_str(": ");
+            out.push_str(&message);
+        }
         source = cause.source();
     }
     out
@@ -2827,10 +2833,7 @@ fn asr_worker(stream: sdk::XybridStream, commands: Receiver<AsrCommand>, state: 
     // arrive meanwhile queue on the command channel and drain against a warm
     // model. Non-fatal: a real failure resurfaces on the first chunk.
     if let Err(e) = stream.warmup() {
-        log::warn!(
-            "ASR warm-up failed (continuing cold): {}",
-            asr_error_chain(&e)
-        );
+        log::warn!("ASR warm-up failed (continuing cold): {}", error_chain(&e));
     }
 
     // The SDK returns its cached latest partial from *every* feed, and feeds
@@ -2866,7 +2869,7 @@ fn asr_worker(stream: sdk::XybridStream, commands: Receiver<AsrCommand>, state: 
                     // chunk's audio is already gone and will never reach the
                     // transcript. `flush` reports this instead of handing back
                     // a holed transcript that looks complete.
-                    let message = format!("ASR chunk failed: {}", asr_error_chain(&e));
+                    let message = format!("ASR chunk failed: {}", error_chain(&e));
                     log::warn!("{message}");
                     let mut recorded = failure.lock().unwrap_or_else(|e| e.into_inner());
                     recorded.get_or_insert(message);
@@ -2877,14 +2880,14 @@ fn asr_worker(stream: sdk::XybridStream, commands: Receiver<AsrCommand>, state: 
                     .flush()
                     .map(|r| r.text)
                     .map_err(|e| Error::InferenceError {
-                        message: format!("ASR flush failed: {}", asr_error_chain(&e)),
+                        message: format!("ASR flush failed: {}", error_chain(&e)),
                     });
                 let _ = reply.send(outcome);
                 break; // session finalized
             }
             AsrCommand::Reset(reply) => {
                 let outcome = stream.reset().map_err(|e| Error::InferenceError {
-                    message: format!("ASR reset failed: {}", asr_error_chain(&e)),
+                    message: format!("ASR reset failed: {}", error_chain(&e)),
                 });
                 // A fresh utterance starts clean — including any failure
                 // recorded against the audio that is being discarded.
@@ -3852,6 +3855,67 @@ stages:
         match Error::from(sdk_err) {
             Error::IoError { message } => assert!(message.contains("disk on fire")),
             other => panic!("expected IoError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_from_sdk_preserves_nested_causes() {
+        let constructors: [fn(String, sdk::SdkError) -> sdk::SdkError; 6] = [
+            |message, cause| sdk::SdkError::LoadError {
+                message,
+                source: Some(Box::new(cause)),
+            },
+            |message, cause| sdk::SdkError::InferenceError {
+                message,
+                source: Some(Box::new(cause)),
+            },
+            |message, cause| sdk::SdkError::NetworkError {
+                message,
+                source: Some(Box::new(cause)),
+            },
+            |message, cause| sdk::SdkError::Offline {
+                message,
+                source: Some(Box::new(cause)),
+            },
+            |message, cause| sdk::SdkError::CacheError {
+                message,
+                source: Some(Box::new(cause)),
+            },
+            |message, cause| sdk::SdkError::PipelineError {
+                message,
+                source: Some(Box::new(cause)),
+            },
+        ];
+        for wrap in constructors {
+            let inner = sdk::SdkError::LoadError {
+                message: "read metadata".into(),
+                source: Some(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "access denied",
+                ))),
+            };
+            let error = Error::from(wrap("operation failed".into(), inner));
+            assert!(error
+                .to_string()
+                .ends_with("operation failed: Failed to load model: read metadata: access denied"));
+        }
+    }
+
+    #[test]
+    fn error_from_sdk_does_not_repeat_displayed_core_causes() {
+        let causes = [
+            xybrid_core::error::XybridError::Inference(
+                xybrid_core::error::InferenceError::Backend("dtype mismatch".into()),
+            ),
+            xybrid_core::error::XybridError::Io(std::io::Error::other("disk unreadable")),
+        ];
+        for cause in causes {
+            let expected = format!("Inference failed: Execution failed: {cause}");
+            let error = sdk::SdkError::InferenceError {
+                message: "Execution failed".into(),
+                source: Some(Box::new(cause)),
+            };
+            assert_eq!(Error::from(error).to_string(), expected);
         }
     }
 

@@ -3167,6 +3167,19 @@ impl ModelLoader {
         let browser_format = match &metadata.execution_template {
             ExecutionTemplate::TfLite { .. } => "TFLite",
             ExecutionTemplate::LiteRtLm { .. } => "LiteRT-LM",
+            ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. } => {
+                // Cached bundles bypass registry backend selection. Check the
+                // runtime's availability too, before publishing a loaded handle.
+                if !xybrid_core::features::enabled().contains(&"tts-zzz") {
+                    return Err(SdkError::UnsupportedBackendCapability {
+                        model_id: metadata.model_id.clone(),
+                        backend: "zzz".into(),
+                        capability: "speech synthesis".into(),
+                        hint: "Use a build with the 'tts-zzz' feature and its pinned engine slice available on this host".into(),
+                    });
+                }
+                return Ok(());
+            }
             // Checked once at load, so a bad spec fails here rather than on
             // the first run.
             ExecutionTemplate::ChoiceScorer { scorer } => {
@@ -7049,13 +7062,13 @@ mod tests {
         assert_eq!(ModelLoader::infer_output_type(&metadata), OutputType::Text);
     }
 
-    #[test]
-    fn zzz_and_onnx_tts_models_do_not_advertise_token_or_asr_streaming() {
+    fn tts_model_metadata() -> [ModelMetadata; 3] {
         let mut kokoro = ModelMetadata::onnx("kokoro", "1.0", "model.onnx");
         kokoro
             .metadata
             .insert("task".into(), serde_json::json!("text-to-speech"));
         let mut kitten = kokoro.clone();
+        kitten.model_id = "kitten".into();
         kitten.execution_template = ExecutionTemplate::ZzzEmbed {
             model_file: "language.gguf".into(),
             decoder_file: "decoder.gguf".into(),
@@ -7069,11 +7082,24 @@ mod tests {
             accelerate: false,
         };
         let mut phonon = kokoro.clone();
+        phonon.model_id = "phonon".into();
         phonon.execution_template = serde_json::from_value(serde_json::json!({
             "type":"ZzzPhonon", "model_file":"phonon.gguf"
         }))
         .unwrap();
-        for metadata in [kokoro, kitten, phonon] {
+        [kokoro, kitten, phonon]
+    }
+
+    #[test]
+    fn zzz_and_onnx_tts_models_do_not_advertise_token_or_asr_streaming() {
+        for metadata in tts_model_metadata() {
+            assert_eq!(ModelLoader::infer_output_type(&metadata), OutputType::Audio);
+            assert!(!ModelLoader::check_streaming_support(&metadata));
+            if !matches!(metadata.execution_template, ExecutionTemplate::Onnx { .. })
+                && !xybrid_core::features::enabled().contains(&"tts-zzz")
+            {
+                continue;
+            }
             let directory = tempfile::tempdir().unwrap();
             std::fs::write(
                 directory.path().join("model_metadata.json"),
@@ -7088,6 +7114,65 @@ mod tests {
             assert!(!model.supports_streaming());
             assert!(!model.supports_token_streaming());
         }
+    }
+
+    #[test]
+    fn unavailable_speech_backend_rejects_directory_and_cached_registry_loads() {
+        if xybrid_core::features::enabled().contains(&"tts-zzz") {
+            return;
+        }
+        let server = httpmock::MockServer::start();
+        let registry = server.mock(|when, then| {
+            when.any_request();
+            then.status(500);
+        });
+        for metadata in tts_model_metadata().into_iter().skip(1) {
+            let cache = tempfile::tempdir().unwrap();
+            let client = Arc::new(
+                RegistryClient::with_url(server.base_url())
+                    .unwrap()
+                    .with_cache_dir(cache.path().join("cache")),
+            );
+            let directory = client.extraction_dir(&metadata.model_id);
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                directory.join("model_metadata.json"),
+                serde_json::to_vec(&metadata).unwrap(),
+            )
+            .unwrap();
+            let loader = ModelLoader::from_registry(&metadata.model_id);
+            let local_loader = ModelLoader::from_directory(&directory).unwrap();
+            let results = [
+                local_loader.load(),
+                tokio::runtime::Runtime::new()
+                    .unwrap()
+                    .block_on(local_loader.load_async()),
+                loader.load_from_registry_client(
+                    Arc::clone(&client),
+                    &metadata.model_id,
+                    None,
+                    false,
+                    |_| {},
+                ),
+                loader.load_from_registry_client(client, &metadata.model_id, None, true, |_| {}),
+            ];
+            for result in results {
+                let error = match result {
+                    Ok(_) => panic!("unavailable speech backend must fail during load"),
+                    Err(error) => error,
+                };
+                assert!(!error.is_retryable());
+                assert!(matches!(
+                    error,
+                    SdkError::UnsupportedBackendCapability { ref model_id, ref backend, .. }
+                        if model_id == &metadata.model_id && backend == "zzz"
+                ));
+                let message = error.to_string();
+                assert!(message.contains("tts-zzz"));
+                assert!(message.contains("pinned engine slice"));
+            }
+        }
+        registry.assert_hits(0);
     }
 
     #[test]

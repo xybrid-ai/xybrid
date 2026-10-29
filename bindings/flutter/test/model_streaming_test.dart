@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:xybrid_flutter/src/rust/api/context.dart';
 import 'package:xybrid_flutter/src/rust/api/envelope.dart';
 import 'package:xybrid_flutter/src/rust/api/model.dart';
 import 'package:xybrid_flutter/src/rust/api/result.dart';
@@ -14,6 +15,7 @@ const _unsupported = 'Unsupported model capability: a multi-part message '
 class _StreamApi implements XybridRustLibApi {
   /// The native events every streaming run replays.
   List<FfiStreamEvent> events = const [];
+  Object? streamError;
 
   @override
   FfiModelLoader crateApiModelFfiModelLoaderFromRegistry({
@@ -28,6 +30,10 @@ class _StreamApi implements XybridRustLibApi {
     double? speed,
   }) =>
       _Envelope();
+
+  @override
+  FfiConversationContext crateApiContextFfiConversationContextCreate() =>
+      _Context();
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -50,6 +56,13 @@ class _Model implements FfiModel {
 
   final _StreamApi _api;
 
+  Stream<FfiStreamEvent> _stream() {
+    final error = _api.streamError;
+    return error == null
+        ? Stream.fromIterable(_api.events)
+        : Stream.error(error);
+  }
+
   @override
   Stream<FfiStreamEvent> runStream({
     required FfiEnvelope envelope,
@@ -58,7 +71,18 @@ class _Model implements FfiModel {
     required bool preempt,
     String? frameSessionId,
   }) =>
-      Stream.fromIterable(_api.events);
+      _stream();
+
+  @override
+  Stream<FfiStreamEvent> runStreamWithContext({
+    required FfiEnvelope envelope,
+    required FfiConversationContext context,
+    FfiGenerationConfig? config,
+    FfiCancellationToken? cancellationToken,
+    required bool preempt,
+    String? frameSessionId,
+  }) =>
+      _stream();
 
   @override
   Stream<FfiStreamEvent> runStreamWithFallback({
@@ -67,13 +91,18 @@ class _Model implements FfiModel {
     FfiGenerationConfig? config,
     FfiCancellationToken? cancellationToken,
   }) =>
-      Stream.fromIterable(_api.events);
+      _stream();
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 class _Envelope implements FfiEnvelope {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _Context implements FfiConversationContext {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -109,6 +138,11 @@ void main() {
   });
   tearDownAll(XybridRustLib.dispose);
 
+  setUp(() {
+    api.events = const [];
+    api.streamError = null;
+  });
+
   final runs = <String, Stream<StreamToken> Function()>{
     'runStreaming': () => model.runStreaming(XybridEnvelope.text('Hi')),
     'runStreamingWithFallback': () => model.runStreamingWithFallback(
@@ -143,6 +177,49 @@ void main() {
         expect(tokens.single.finishReason, 'stop');
         expect(tokens.single.cumulativeText, 'Hello');
       });
+
+      test('bridge stream errors become error tokens', () async {
+        api.streamError = _unsupported;
+
+        final tokens = await run().toList();
+
+        expect(tokens.single.isFinal, isTrue);
+        expect(tokens.single.isError, isTrue);
+        expect(tokens.single.errorMessage, _unsupported);
+      });
     });
   }
+
+  group('runStreamingWithContext', () {
+    Stream<StreamToken> run() => model.runStreamingWithContext(
+          XybridEnvelope.text('Hi'),
+          ConversationContext(),
+        );
+
+    test('an error after the final token still ends the stream', () async {
+      api.events = [
+        _finalToken('Hello'),
+        const FfiStreamEvent.error(_unsupported),
+      ];
+
+      final tokens = await run().toList();
+
+      expect(
+        tokens.map((token) => token.finishReason),
+        ['stop', 'error: $_unsupported'],
+      );
+      expect(tokens.last.isError, isTrue);
+      expect(tokens.last.errorMessage, _unsupported);
+    });
+
+    test('bridge stream errors become error tokens', () async {
+      api.streamError = _unsupported;
+
+      final tokens = await run().toList();
+
+      expect(tokens.single.isFinal, isTrue);
+      expect(tokens.single.isError, isTrue);
+      expect(tokens.single.errorMessage, _unsupported);
+    });
+  });
 }
