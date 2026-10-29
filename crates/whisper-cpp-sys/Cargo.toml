@@ -55,4 +55,5 @@ xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.15.0" }
 # whisper's CMake would configure its bundled ggml, which is exactly what this
 # crate must not do.
 cc = "1.0"
-bindgen = "0.70"
+# 0.72.1 fixes forward-declared struct generation with libclang 22.
+bindgen = "0.72.1"
