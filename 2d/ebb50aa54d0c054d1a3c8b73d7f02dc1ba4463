@@ -1,0 +1,1068 @@
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridCodec.kt
+  s_0f33a1949fd6cf::t_104797a5bad9ed 212-214
+crates/xybrid-sdk/src/model.rs
+  s_0f33a1949fd6cf::t_33da6987227dfa 1243-1245
+  s_0f33a1949fd6cf::t_b4dfc3e44cb7de 17,33-36,43,392-419,448-465,507,722-752,2207-2211,2290-2297,2299-2305,2311,2316-2321,2323-2324,2496-2548,2551,2554,2569-2578,2583-2584,2586-2588,2626-2627,2629-2631,2636-2638,3428-3433,3452,3456-3462,3491-3496,3500-3505,3703-3765,3793-3804,4099-4100,4127,4234,4241,4357,4401-4406,4413,4424-4438,4440-4443,4449,4451,4453-4472,4475,4483-4492,4496-4499,4501-4503,4505-4531,4534,4538-4551,4566-4567,4578-4596,4609-4634,4688,4847,5065,5397-5400,5482-5485,5670,5724-5729,5736,5879-5881,7835-7875,8303-8517,10249-10468
+crates/xybrid-core/examples/cifar10_classification.rs
+  s_0f33a1949fd6cf::t_85cf66c3679312 1-183
+bindings/react-native/tests/parity.test.mjs
+  s_0f33a1949fd6cf::t_104797a5bad9ed 86-89
+crates/xybrid-core/src/ir/envelope.rs
+  s_0f33a1949fd6cf::t_9d198026fb2d4f 34,1043-1044,1057-1064,1110-1113,1132-1133,1142-1143,1152-1183,1357-1380,1695-1697,1701-1702,1737-1739,1743-1744,1756-1771,2328-2499
+  s_fac6e092681508::t_88cd7770e9abe6 2500
+bindings/react-native/parity.json
+  s_0f33a1949fd6cf::t_104797a5bad9ed 131,152
+bindings/flutter/rust/src/api/result.rs
+  s_0f33a1949fd6cf::t_7727715adceebf 2-3,89-110,112-116,134,156-215,217-243
+  s_0f33a1949fd6cf::t_4369198422b309 216
+crates/xybrid-core/src/execution/template/metadata.rs
+  s_0f33a1949fd6cf::t_685ad847343b25 5,23,63,111-118,137-140,167-263,290,319,360,740,956-963,1032-1042,1125-1131,1166-1281,1404-1435
+  s_0f33a1949fd6cf::t_1b6e6fffc9ddc0 1436
+bindings/react-native/tests/swift/main.swift
+  s_0f33a1949fd6cf::t_104797a5bad9ed 158
+  s_0f33a1949fd6cf::t_85cf66c3679312 87-93
+crates/xybrid-cli/src/commands/repl.rs
+  s_0f33a1949fd6cf::t_1e19ffd6109345 147-148
+  s_0f33a1949fd6cf::t_2c0ca8b2d7e1f3 31,34-37,119-120,129,132-146,149-156,306-312,391-393,926-934,1411-1413
+  s_0f33a1949fd6cf::t_0155abdd5b6616 1414
+bindings/react-native/tests/kotlin/CodecTest.kt
+  s_0f33a1949fd6cf::t_85cf66c3679312 103-109
+crates/xybrid-core/src/execution/chat_template.rs
+  s_0f33a1949fd6cf::t_685ad847343b25 97-106,138-147,229-238
+bindings/react-native/ios/XybridCodec.swift
+  s_0f33a1949fd6cf::t_104797a5bad9ed 184,205-207,335,337,415,418,426,428,431
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_0f33a1949fd6cf::t_104797a5bad9ed 377,571,618-620,623,811
+bindings/flutter/test/model_streaming_test.dart
+  s_0f33a1949fd6cf::t_7727715adceebf 1-148
+.agents/skills/xybrid-init/SKILL.md
+  s_0f33a1949fd6cf::t_8cb18e88cf68c9 148,152-153,181,183,261-262,268-281
+.claude/settings.local.json
+  s_0f33a1949fd6cf::t_1606bbe1dbfd03 1-82
+.gitattributes
+  s_0f33a1949fd6cf::t_77fab592038b8d 1-12
+.github/actionlint.yaml
+  s_0f33a1949fd6cf::t_6aff81ce4339e0 1-3
+.github/actions/bazel-repo-cache/action.yml
+  s_0f33a1949fd6cf::t_d11365ae225089 1,3-5,19,22-26,28-34,39-50,59-77,91-96,108,112-113,117,123-187
+.github/actions/setup-vulkan-sdk/action.yml
+  s_0f33a1949fd6cf::t_2bdd56cd93cd3f 4-15,19-21,26-57,60-61,63
+.github/llamacpp-version.json
+  s_0f33a1949fd6cf::t_03d149b3269cd7 1-10
+.github/workflows/README.md
+  s_0f33a1949fd6cf::t_ac85088a20df17 1,3-5,7,9-11,13-35,37,39-42,44-201
+.github/workflows/bazel.yml
+  s_0f33a1949fd6cf::t_eb6780337c7382 11-12,41,44,48,61,90,155-237,454-474,631,717-722,726-729,809-813,816-817
+.github/workflows/build-android.yml
+  s_0f33a1949fd6cf::t_e9af35efdd265b 1-2,16,21-27,30,55,60-63,66,74,195-204,258-260
+.github/workflows/build-apple.yml
+  s_0f33a1949fd6cf::t_21dedb073db0c4 1-2,55
+.github/workflows/build-flutter.yml
+  s_0f33a1949fd6cf::t_5cafcc2d40d9a7 1-2,33
+.github/workflows/build-mlx-xcframework.yml
+  s_32055b82cd744d::t_50f8c782e7026f 1-2
+.github/workflows/build-natives.yml
+  s_0f33a1949fd6cf::t_f0af4a986ac314 1-2,48,202
+.github/workflows/build-react-native.yml
+  s_0f33a1949fd6cf::t_d7a9ae85452e17 1-2,35,263-266
+.github/workflows/build-unity.yml
+  s_0f33a1949fd6cf::t_1b76edb2939571 1-2,43,74-76,183-185,190,277-284,299-301,323-327,330-334,343-468,546
+.github/workflows/ci.yml
+  s_0f33a1949fd6cf::t_a0388aa026e356 1-2,11,22,25,32,44-45,47,49-50,126-128,132-140,180-181,191-201,204-205,218-219,234-235,257-258,275-276,312-313,316-318,334,460-461,486-487,507-508,566-567,580-582,584,587-608,642-643,647-652,656-657,661-662,669,671-672,675-690,697,699,704
+.github/workflows/clean-scripts.yml
+  s_0f33a1949fd6cf::t_a223efe6558396 1-2,4-9,14-20,24-34,39-40,42,44-46
+.github/workflows/codeql.yml
+  s_0f33a1949fd6cf::t_f2349d6b843879 1-2
+.github/workflows/discord-notify.yml
+  s_0f33a1949fd6cf::t_660ab425d93783 1-2,18
+.github/workflows/gradle-wrapper-validation.yml
+  s_0f33a1949fd6cf::t_9af1e1463860e1 5-6
+.github/workflows/llamacpp-update.yml
+  s_0f33a1949fd6cf::t_949449fb8b8a92 1-159
+.github/workflows/llamacpp-validate.yml
+  s_0f33a1949fd6cf::t_55447443c99b45 1-82
+.github/workflows/release-dryrun.yml
+  s_0f33a1949fd6cf::t_749ab6773e1cc1 1-2
+.github/workflows/release-notify.yml
+  s_0f33a1949fd6cf::t_cfcb7beb46dade 1-2,9
+.github/workflows/release-prep.yml
+  s_0f33a1949fd6cf::t_b6dcde39e3ec9a 1-2,20-21,40-53,96-97,163,170,173,191-295,578-579,587-594,599-603,608-651,654-657,677-685,687-711,713-715,721,723-725,732-735,742-803,918-920,940-941,1056-1059,1062-1063,1332-1335,1348,1363,1372,1394,1398,1421,1435-1436,1444,1449-1453,1465-1472,1567,1584-1585,1593-1615
+.github/workflows/release-publish.yml
+  s_0f33a1949fd6cf::t_5227fc900f868f 1-2,28-29,61-64,270,426-434,470-493,495-501,503-505,595-668,726-727
+.github/workflows/scorecard.yml
+  s_0f33a1949fd6cf::t_6cdeb5222b1f57 1-2,13
+.github/workflows/star-history.yml
+  s_0f33a1949fd6cf::t_e005530433218b 1-2
+.github/workflows/test-candle.yml
+  s_0f33a1949fd6cf::t_d34f9fccfaeb32 1-2,55
+.github/workflows/test-choice-conformance.yml
+  s_0f33a1949fd6cf::t_07658c8f433e92 1-355
+.github/workflows/test-ci.yml
+  s_0f33a1949fd6cf::t_fc6f78eceffc8f 1-2,223-228,358-366
+.github/workflows/test-policy-routing.yml
+  s_0f33a1949fd6cf::t_d5d8c7d9457ca3 1-2,45
+.github/workflows/test-whispercpp.yml
+  s_0f33a1949fd6cf::t_4731f2f4e723ca 1-2,20,38,47
+.github/workflows/test-zzz-android.yml
+  s_0f33a1949fd6cf::t_2b787464e49fdf 1-466
+.github/workflows/test-zzz-engine.yml
+  s_0f33a1949fd6cf::t_a46ea938efac25 1-205
+.github/workflows/trusted-zzz-sdk.yml
+  s_0f33a1949fd6cf::t_2d7281ab281a61 1-124
+.github/workflows/unity-activation.yml
+  s_0f33a1949fd6cf::t_03d809c60422d3 19-20
+.github/workflows/unity-editor.yml
+  s_0f33a1949fd6cf::t_a663c0671202cb 17-18,58
+.github/workflows/web-webgpu.yml
+  s_0f33a1949fd6cf::t_b73ba5649417e8 1-65
+.github/workflows/welcome.yml
+  s_0f33a1949fd6cf::t_a137e0fd0c8a33 1-2,11
+.gitignore
+  s_0f33a1949fd6cf::t_456b54b2f870c3 88-96
+AGENTS.md
+  s_0f33a1949fd6cf::t_6b1c9344846078 42-55,89-90,100-103,129-192,323-340,508-510,541-589
+BUILD.bazel
+  s_0f33a1949fd6cf::t_1fa5b407b6db9a 9-10,13-26,91-211,220,224,227,231-232,234-236,246-248,250,292-294,301,353,368-370,378,388,407-408,450-451,455,473,551,553-555,557,559,561,563,574,582,599,629,634,684,695,700,793-800,810-812,817-848
+CHANGELOG.md
+  s_0f33a1949fd6cf::t_82917ea5fa0f78 10-439,450,452-455,2399
+CONTRIBUTING.md
+  s_0f33a1949fd6cf::t_f36add1266f145 213-215
+Cargo.lock
+  s_0f33a1949fd6cf::t_2e6d70e5d7e203 2752,3229,6281,6295,6302,6334,6399,6406,6418,6427,6440,6449,6459,6486-6492,6495,6504,6511-6518,6521,6533
+Cargo.toml
+  s_0f33a1949fd6cf::t_7fcc1a0d1e7971 12,18,25
+MODULE.bazel
+  s_0f33a1949fd6cf::t_15c0ba62753e8e 84-117,248-253,260-285,406,408,534-545
+Package.swift
+  s_0f33a1949fd6cf::t_b050133a905605 40,45
+README.ja-JP.md
+  s_0f33a1949fd6cf::t_209dc787411334 396-400
+README.md
+  s_0f33a1949fd6cf::t_e5fac8ff7d8d81 15,39,75-76,104,122,139,157,169-193,231,419,421,427-431
+README.zh-CN.md
+  s_0f33a1949fd6cf::t_d076967af305ca 394-396
+agents/skills/xybrid-init/SKILL.md
+  s_0f33a1949fd6cf::t_1f42b81b8bde41 143,147-148,176,178,256-257,263-276
+bazel/ggml/BUILD.bazel
+  s_0f33a1949fd6cf::t_67a5bfb1fae5bf 9-16,32-35
+bazel/toolchains/android/BUILD.bazel
+  s_0f33a1949fd6cf::t_a7f1f00048fdfb 1-53
+bazel/vulkan/BUILD.bazel
+  s_0f33a1949fd6cf::t_f2369811ec947c 11-12
+bazel/vulkan/SPIRV-HeadersConfig.cmake
+  s_0f33a1949fd6cf::t_fd417408811696 1-7
+bazel/vulkan/vulkan_stub.c
+  s_0f33a1949fd6cf::t_d548d1bc451b3e 4-5,9,24,39-44
+bazel/zzz/BUILD.bazel
+  s_0f33a1949fd6cf::t_8d5c4e3185b98e 1-103
+bazel/zzz/isolate.bzl
+  s_0f33a1949fd6cf::t_e892ce64e9888e 1-190
+bazel/zzz/isolate_engine.sh
+  s_0f33a1949fd6cf::t_c7dca9d4262d13 1-130
+bazel/zzz/notices.bzl
+  s_0f33a1949fd6cf::t_920fafb4d4f4b7 1-75
+bazel/zzz/repositories.bzl
+  s_0f33a1949fd6cf::t_520217c4b23da7 1-85
+bazel/zzz/selftest/BUILD.bazel
+  s_0f33a1949fd6cf::t_a51354df507b87 1-90
+bazel/zzz/selftest/check.bzl
+  s_0f33a1949fd6cf::t_ab599db2e86e8d 1-62
+bazel/zzz/selftest/check.sh
+  s_0f33a1949fd6cf::t_f0368872f2c962 1-112
+bazel/zzz/selftest/fake_engine.c
+  s_0f33a1949fd6cf::t_f36ed6e2b6989e 1-72
+bazel/zzz/selftest/fake_engine_unused.c
+  s_0f33a1949fd6cf::t_d463629d6112ad 1-11
+bazel/zzz/selftest/host.c
+  s_0f33a1949fd6cf::t_7818cce0b9222d 1-18
+bindings/apple/BUILD.bazel
+  s_0f33a1949fd6cf::t_37e28449002afd 11-12,48-66
+bindings/apple/README.md
+  s_0f33a1949fd6cf::t_1ee4b476ed7c79 40-43,191-223
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_0f33a1949fd6cf::t_3d41d636bb93c2 165-167,370-373,381-382,384-387,651-655
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_0f33a1949fd6cf::t_3a6632ec6db9ef 595-630,642,644,647,651,657,1170,1463-1467,2479-2480,2482-2484,2499-2500,2502-2505
+bindings/apple/Tests/XybridTests/TokenStreamTests.swift
+  s_0f33a1949fd6cf::t_190239aeea2e39 83-106,292-293,298
+bindings/apple/XybridFFI-Info.plist
+  s_0f33a1949fd6cf::t_5be8ee6167d3e0 10,12
+bindings/apple/clean.sh
+  s_0f33a1949fd6cf::t_7d22e0dc278116 1-5
+bindings/apple/include/xybrid-bolt.h
+  s_0f33a1949fd6cf::t_7d50aa050912e9 134
+bindings/apple/pack_zzz_notices.py
+  s_0f33a1949fd6cf::t_6c75254991b31d 1-274
+bindings/apple/zzz_notices.bzl
+  s_0f33a1949fd6cf::t_b478e365640179 1-67
+bindings/flutter/.claude/settings.local.json
+  s_0f33a1949fd6cf::t_c7d78236978f7a 1-14
+bindings/flutter/.pubignore
+  s_0f33a1949fd6cf::t_00317a1ac7a807 45-48
+bindings/flutter/CHANGELOG.md
+  s_0f33a1949fd6cf::t_0aad3766780ee8 5-70
+bindings/flutter/clean.sh
+  s_0f33a1949fd6cf::t_3a002d043d12d0 1-7
+bindings/flutter/example/clean.sh
+  s_0f33a1949fd6cf::t_86ee8dd391538b 1-7
+bindings/flutter/example/pubspec.lock
+  s_0f33a1949fd6cf::t_7f031fdfe8b967 422
+bindings/flutter/lib/src/model_loader.dart
+  s_0f33a1949fd6cf::t_a3927385c59f71 215-219,229-232,464-465,554-562,610-612,667-675
+bindings/flutter/lib/src/rust/api/model.dart
+  s_0f33a1949fd6cf::t_560d14518d6e16 19,274-278,297-300
+bindings/flutter/lib/src/rust/api/pipeline.dart
+  s_0f33a1949fd6cf::t_fb503018ac78ed 16
+bindings/flutter/lib/src/rust/api/result.dart
+  s_0f33a1949fd6cf::t_8d82ab3a1de436 14
+bindings/flutter/lib/src/rust/api/sdk_client.dart
+  s_0f33a1949fd6cf::t_3e07b825293a37 167-169,171-174
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_0f33a1949fd6cf::t_770748b4a8ab7e 74,85,361,2920,2931,2937-2938,6877-6880
+bindings/flutter/lib/src/xybrid.dart
+  s_0f33a1949fd6cf::t_2d7f375dd9f6bd 183-185,187-190
+bindings/flutter/pubspec.yaml
+  s_0f33a1949fd6cf::t_1485069a82c1c1 3
+bindings/flutter/rust/BUILD.bazel
+  s_0f33a1949fd6cf::t_10138d2899a159 39-42
+bindings/flutter/rust/Cargo.toml
+  s_0f33a1949fd6cf::t_2ad1a360362b3d 3
+bindings/flutter/rust/src/api/device.rs
+  s_0f33a1949fd6cf::t_4be44beb8eed02 40-53
+bindings/flutter/rust/src/api/mod.rs
+  s_0f33a1949fd6cf::t_e00b9237454bd6 4-7,14
+bindings/flutter/rust/src/api/model.rs
+  s_0f33a1949fd6cf::t_534660a711694c 10-11,734-744,765,795-799,805-808,839,842-846,868-872,876-877,993,1102,1158,1160-1163,1182,1192-1198,1252,1374,1472,1772-1796
+bindings/flutter/rust/src/api/pipeline.rs
+  s_0f33a1949fd6cf::t_3da4a6cf830baa 4,7,16-57,107,152-193
+bindings/flutter/rust/src/api/sdk_client.rs
+  s_0f33a1949fd6cf::t_754903f79739fd 9-10,13-15,17,19,214-216,218-221,264,306,390,394
+bindings/flutter/rust/src/frb_generated.rs
+  s_0f33a1949fd6cf::t_52e09191eff035 47,3780,3788,3806,5210
+bindings/kotlin/.gitignore
+  s_0f33a1949fd6cf::t_4a8329a7d98542 12-17
+bindings/kotlin/BUILD.bazel
+  s_0f33a1949fd6cf::t_04815434772429 18-22,30,204-218,228-233
+bindings/kotlin/README.md
+  s_0f33a1949fd6cf::t_a30c527bc140f9 19-22,45-50,77-127,272-273,276-277,280-281,297,299,353-357,361-365,382,384-385,389,396-397,406,435-436,466-469
+bindings/kotlin/bazel/AndroidManifest.xml
+  s_0f33a1949fd6cf::t_53936312e6f6f1 3,6
+bindings/kotlin/bazel/jni/ggml_cpu_backend.cpp
+  s_0f33a1949fd6cf::t_41426f510d9606 19-26
+bindings/kotlin/bazel/jni/xybrid_bolt.h
+  s_0f33a1949fd6cf::t_443e7f0d8b9e8d 134
+bindings/kotlin/build.gradle.kts
+  s_0f33a1949fd6cf::t_1b72525a068a8f 8,15-17
+bindings/kotlin/clean.sh
+  s_0f33a1949fd6cf::t_5bc0ececcaed34 1-6
+bindings/kotlin/consumer-smoke/app/build.gradle.kts
+  s_0f33a1949fd6cf::t_59fca8e7cf1217 12
+bindings/kotlin/consumer-smoke/app/src/androidTest/kotlin/ai/xybrid/smoke/SpeechDeviceTest.kt
+  s_0f33a1949fd6cf::t_0ad3e4a07f8e45 1-91
+bindings/kotlin/consumer-smoke/app/src/main/AndroidManifest.xml
+  s_0f33a1949fd6cf::t_2eaaaffd2938b1 2-7
+bindings/kotlin/consumer-smoke/clean.sh
+  s_0f33a1949fd6cf::t_a048b7404382ae 1-5
+bindings/kotlin/libs/.gitignore
+  s_0f33a1949fd6cf::t_286328d0904459 3-5
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_0f33a1949fd6cf::t_1b3175a56e9f37 83-85,178-180,304-308,437-438,440-443,467-470,826-828
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_0f33a1949fd6cf::t_f94fcce97d89fd 1872-1920,1933-1934,1937,1943,1961-1962,2791-2792,3174-3178,4358-4359,4361-4363,4384-4385,4387-4390
+bindings/python/clean.sh
+  s_0f33a1949fd6cf::t_ba20bcb14c1ca3 1-8
+bindings/python/pyproject.toml
+  s_0f33a1949fd6cf::t_686719821d58de 7
+bindings/python/xybrid/__init__.py
+  s_0f33a1949fd6cf::t_fa9fbf511f53a3 27-31,39-40
+bindings/python/xybrid/_bolt/__init__.py
+  s_0f33a1949fd6cf::t_82ed6180a561cf 428,432,435,439,449,453,484,488,491,495,513,517,1347,2122-2161,2175,2181,2199,2723-2727,3274-3275,3277-3279,3289-3290,3292-3295,3333,3353
+bindings/python/xybrid/_bolt/__init__.pyi
+  s_0f33a1949fd6cf::t_5cfb793e2206ff 250-259,273,565,768-772,1097-1098,1100-1102,1109-1110,1112-1115
+bindings/python/xybrid/_bolt/_native.c
+  s_0f33a1949fd6cf::t_df0496bf8be5af 2186-2187,2190-2191,2198-2199,2218-2219,2222-2223,2235-2236,4680-4740,6386-6387,6389-6390,6392,6394-6395,6399,6449-6451,6482-6487,9318,10506
+bindings/react-native/README.md
+  s_0f33a1949fd6cf::t_33cb57c63f21fa 26,42-45,47-50,182-203,245-247
+bindings/react-native/android/build.gradle
+  s_0f33a1949fd6cf::t_46b6881d4c24b8 34-36,62
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_0f33a1949fd6cf::t_9d1b2795b26ada 432-434,437
+bindings/react-native/clean.sh
+  s_0f33a1949fd6cf::t_08ca456f6a82f6 1-7
+bindings/react-native/example/README.md
+  s_0f33a1949fd6cf::t_ae9cc4d49b2437 47-50,79-80
+bindings/react-native/example/clean.sh
+  s_0f33a1949fd6cf::t_b6e258c32c04eb 1-9
+bindings/react-native/example/plugins/withXybridDevAndroid.js
+  s_0f33a1949fd6cf::t_4071bc19d434cd 3-4,6-14,33-55,58
+bindings/react-native/package.json
+  s_0f33a1949fd6cf::t_c6f7c9735a8038 3,73
+bindings/react-native/src/model.ts
+  s_0f33a1949fd6cf::t_53bc152e58c6d9 104-107,139-142
+bindings/react-native/src/xybrid.ts
+  s_0f33a1949fd6cf::t_1483a426cc1dea 78-80
+bindings/unity/Editor/NativeLibraryBuildHook.cs
+  s_0f33a1949fd6cf::t_bc9746dbea6145 6,52-86
+bindings/unity/Editor/NativeLibraryResolver.cs
+  s_0f33a1949fd6cf::t_47290eb32d9646 55-66,147-148,376-400
+bindings/unity/README.md
+  s_0f33a1949fd6cf::t_1a70dc556a29b6 45,62,82-87,159-160,163-164,166-169,175-179,257,265-266,269-308,338-348,389-392,402
+bindings/unity/Runtime/Api/InferenceResult.cs
+  s_0f33a1949fd6cf::t_2e4fe161db7f4d 75-79,169-173,175-176,185-189
+bindings/unity/Runtime/Api/Model.cs
+  s_0f33a1949fd6cf::t_1d2824c49b98ad 6,399-472
+bindings/unity/Runtime/Api/ModelLoader.cs
+  s_0f33a1949fd6cf::t_0fb5afa1b5f4da 122-127,141-142,149-151,153-166
+bindings/unity/Runtime/Api/TtsStreaming.cs
+  s_0f33a1949fd6cf::t_be6d59be83de0e 1-61
+bindings/unity/Runtime/Api/TtsStreaming.cs.meta
+  s_0f33a1949fd6cf::t_e73c9edc6d5f5a 1-2
+bindings/unity/Runtime/Api/XybridClient.cs
+  s_0f33a1949fd6cf::t_3ae9be465f10c9 75-76,278
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_0f33a1949fd6cf::t_d061ea80dd5f30 517,970-971,973-975,999-1000,1002-1005,1139-1141,1143
+bindings/unity/Runtime/Bolt/XybridDownload.cs
+  s_0f33a1949fd6cf::t_920faab5b9b926 8
+bindings/unity/Runtime/Bolt/XybridModel.cs
+  s_0f33a1949fd6cf::t_fe77b462091079 54-58
+bindings/unity/Runtime/Bolt/XybridPipeline.cs
+  s_0f33a1949fd6cf::t_62a2612f183eb9 8
+bindings/unity/Runtime/Bolt/XybridStreamEvent.cs
+  s_0f33a1949fd6cf::t_e2adbf4c2e7d79 22,25,30-31,50-60
+bindings/unity/Runtime/Bolt/XybridStreamEventKind.cs
+  s_0f33a1949fd6cf::t_ea498922756eb0 11-12
+bindings/unity/Runtime/Bolt/XybridTelemetryConfig.cs
+  s_0f33a1949fd6cf::t_0751198fbf5d98 8
+bindings/unity/Runtime/Bolt/XybridTtsAudioChunk.cs
+  s_0f33a1949fd6cf::t_93a885fae31f7f 1-46
+bindings/unity/Runtime/Bolt/XybridTtsAudioChunk.cs.meta
+  s_0f33a1949fd6cf::t_bc6447257c1f89 1-2
+bindings/unity/Runtime/BoltSupplement/AndroidCacheFolder.cs
+  s_0f33a1949fd6cf::t_803a1f2108188e 1-94
+bindings/unity/Runtime/BoltSupplement/AndroidCacheFolder.cs.meta
+  s_0f33a1949fd6cf::t_5ea41a39f5a0fd 1-2
+bindings/unity/Runtime/BoltSupplement/BindingRegistration.cs
+  s_0f33a1949fd6cf::t_3c28e945557e3e 1-73
+bindings/unity/Runtime/BoltSupplement/BindingRegistration.cs.meta
+  s_0f33a1949fd6cf::t_e3895f76976739 1-2
+bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+  s_0f33a1949fd6cf::t_aab54730869e7b 91-92,98-99,101-106,115-120
+bindings/unity/Runtime/Plugins/.gitignore
+  s_0f33a1949fd6cf::t_6d9c291beb02f5 13,15-18
+bindings/unity/Samples~/KittenTts/README.md
+  s_0f33a1949fd6cf::t_cb958f5c082dea 1-191
+bindings/unity/Samples~/KittenTts/model_metadata.json
+  s_0f33a1949fd6cf::t_aebf4c1f34ba64 2-3,5-15,17-23
+bindings/unity/Tests/Editor/NativeLibraryBuildHookTests.cs
+  s_0f33a1949fd6cf::t_6fb2881596cf47 1-202
+bindings/unity/Tests/Editor/NativeLibraryBuildHookTests.cs.meta
+  s_0f33a1949fd6cf::t_07e2ecea0d39d6 1-2
+bindings/unity/Tests/Editor/NativeLibraryResolverTests.cs
+  s_0f33a1949fd6cf::t_3f2715152369df 3-6,8,82-141
+bindings/unity/package.json
+  s_0f33a1949fd6cf::t_98a5a5ec25ed2c 3
+bindings/web/.gitignore
+  s_0f33a1949fd6cf::t_d1a647629dff37 2-3,8-12
+bindings/web/README.md
+  s_0f33a1949fd6cf::t_f2af48d43a5678 1,3-6,8,10,12-16,18-21,23-30,32-35,37,39,41-47,49-52,54-59,61,63,65-69,71-88,91,93,95-112,115-156,158-161,163,165-170,172-175,178-186,189-218
+bindings/web/RELEASING.md
+  s_0f33a1949fd6cf::t_8f7a73454efa80 1-90
+bindings/web/biome.json
+  s_0f33a1949fd6cf::t_8090700ae9e518 34-37
+bindings/web/browser-test/runtime.spec.ts
+  s_0f33a1949fd6cf::t_e6aa8ee850e07c 1-42,44-69,71-108,110-112,114-122,124-126,128-131,133-138,140-142,144-153,155-167,169-174,176-223,225-232,234-236,239-242,244-269,271-299,302-308,310-316,318-324,326-327,329-332,334-338,340-349,351-353,355-363,365-368,370-375,377-421,423-430,432,434-452
+bindings/web/clean.sh
+  s_0f33a1949fd6cf::t_4ecb523d812b4b 1-10
+bindings/web/example/index.html
+  s_0f33a1949fd6cf::t_faf1ca1e2ac79f 6-7,10-22,24-33,35,37-41,43-47
+bindings/web/example/model.ts
+  s_0f33a1949fd6cf::t_cca668769d7377 1-7
+bindings/web/example/scripts/prepare-assets.ts
+  s_0f33a1949fd6cf::t_9346c84b9d02ac 1-4,6-21,23-32,34,36,40-41,43
+bindings/web/example/src/main.ts
+  s_0f33a1949fd6cf::t_1481dd97e72fd4 1-2,4-7,9-27,29-31,33-35,38-46,48,50-69,72-112,115-120,123-142
+bindings/web/example/src/style.css
+  s_0f33a1949fd6cf::t_fab03ac59cd8ed 2-5,13-14,16,19-21,24-28,30-32,34-39,41-42,45-46,49,52-55,58-60,62,65-66,68-71,73-77,79-80,82-85,88-89,91-93,95-100,102-106,109-149,151-153,155-157
+bindings/web/example/vite.config.ts
+  s_0f33a1949fd6cf::t_c33ad6a851b466 1,5-10,13-16
+bindings/web/package.json
+  s_0f33a1949fd6cf::t_8af367506189df 3,5-7,12-14,17-19,22,26,29-31,35,39-51
+bindings/web/playwright.config.ts
+  s_0f33a1949fd6cf::t_950aad4393a72c 5-6,10,14-16,19-20,23
+bindings/web/runtime/BUILD.bazel
+  s_0f33a1949fd6cf::t_cdebaae5d3f057 1-68
+bindings/web/runtime/Cargo.toml
+  s_0f33a1949fd6cf::t_c4fa38fd6515da 1-20
+bindings/web/runtime/bridge.cpp
+  s_0f33a1949fd6cf::t_002c5e106d751c 1-16
+bindings/web/runtime/clean.sh
+  s_0f33a1949fd6cf::t_3a3e2a04d11a4c 1-5
+bindings/web/runtime/src/lib.rs
+  s_0f33a1949fd6cf::t_de47b41da1fff9 1-234
+bindings/web/scripts/build-runtime.ts
+  s_0f33a1949fd6cf::t_82d0655018453d 1-38
+bindings/web/scripts/build.ts
+  s_0f33a1949fd6cf::t_4b4d0d3a14fc98 1-35
+bindings/web/scripts/check-pack.mjs
+  s_0f33a1949fd6cf::t_0a1acceb0846d1 1-8,10-33,35-51,53-75,77,79-112,114-118,120-130
+bindings/web/scripts/measure-size.ts
+  s_0f33a1949fd6cf::t_e6ae6ae659ce48 1-36
+bindings/web/scripts/serve-release.ts
+  s_0f33a1949fd6cf::t_1a455f5770f0bd 1-48
+bindings/web/src/errors.ts
+  s_0f33a1949fd6cf::t_31e7bf534a2e6a 14,59,76,84-88,102
+bindings/web/src/index.ts
+  s_0f33a1949fd6cf::t_7cb9c3882a4ec2 17,23
+bindings/web/src/internal/huggingface.ts
+  s_0f33a1949fd6cf::t_0d63a7f9e0f2d5 5,150,199,206,210-211,234,243,258,271
+bindings/web/src/internal/loading.ts
+  s_0f33a1949fd6cf::t_dc911404dd6bac 18
+bindings/web/src/internal/model-download.ts
+  s_0f33a1949fd6cf::t_05b3fd4fb3dcad 55,57
+bindings/web/src/internal/protocol.ts
+  s_0f33a1949fd6cf::t_de34716d0ab76d 1-48
+bindings/web/src/internal/registry.ts
+  s_0f33a1949fd6cf::t_102f031646eee5 5-6,12-16,78,118,167,187-188,193,200,231
+bindings/web/src/internal/runtime.ts
+  s_0f33a1949fd6cf::t_cbc8002b7d2a9e 1-2,19-21,34,39
+bindings/web/src/internal/rust-llm-runtime.ts
+  s_0f33a1949fd6cf::t_e4acfce3d11bc7 1-5,13-14,16-26,28-49,52-62,65-85,88-126,128-135,137-147,149,151-152,154-158,160-203
+bindings/web/src/llm.ts
+  s_0f33a1949fd6cf::t_d932cb64722ab6 27,30,33-38,41,49,114,117-119,124-145,173-174,179,183,195-205,245-246,268,276,285-355,360,368,380,388,400-415,462,485,490-492,497-500,504,508
+bindings/web/src/metadata.ts
+  s_0f33a1949fd6cf::t_a86ae510cb0606 22-23,41-42,66-67,102-118,121,131,140,159-166
+bindings/web/src/types.ts
+  s_0f33a1949fd6cf::t_804a8edccfebaf 35-39
+bindings/web/src/version.ts
+  s_0f33a1949fd6cf::t_26748fe00e3933 1-2
+bindings/web/src/worker.ts
+  s_0f33a1949fd6cf::t_0168be5fc53162 1-23,25-27,29-32,34-42,44-46,49-54,57-60,63-68,70-80,82-105,107-126,129-176,179-183,185-187,189-212,214-215
+bindings/web/test/fixtures/hf-tree-smollm2-gguf.json
+  s_0f33a1949fd6cf::t_63d0573725bc31 5,7-8,12
+bindings/web/test/fixtures/rust-metadata-gguf.json
+  s_0f33a1949fd6cf::t_4af2aef09ace97 2,5-9,11,14-15
+bindings/web/test/helpers.ts
+  s_0f33a1949fd6cf::t_ee8bb2bc40d606 2-5,7-8,10-11,17,19,23-33,35,38-43
+bindings/web/test/huggingface.test.ts
+  s_0f33a1949fd6cf::t_3d855f1ad7de19 15-16,18,36,122,141-142,144,168,171,174,177-178,191-192,202,205-206,208-209,211,213,216,223-224,227,235-237,241-242,249,256,261,263,277-278,281-282,290,293-294,299-300,308,312,345,348,359,382,397,422
+bindings/web/test/llm.test.ts
+  s_0f33a1949fd6cf::t_4b895c91c14580 16,20,23,25,29-30,35,240,262-263,271-282,292,299-301,306,308-309,354,373,375,385,387,391,403,413,456,458,520-545
+bindings/web/test/metadata.test.ts
+  s_0f33a1949fd6cf::t_43c280935a6287 12-13,18,21,24,30,72,80,88,92,96,98,103,106,108,112,116-117,122-125,127-128,130-138,141-142,146-147,151-177,240-243,260-270,274-275,278-279,291-292
+bindings/web/test/registry.test.ts
+  s_0f33a1949fd6cf::t_b98505600bee5e 11-12,15,23,25,31,40-41,46,120,122-123,128-129,131,137,140,146,151,158,165,169-171,175,186-187,215,229-232,291,305,310,327,340,387,390,393,395,402
+bindings/web/tsconfig.json
+  s_0f33a1949fd6cf::t_78500f57159124 7,25-32
+bindings/web/tsdown.config.ts
+  s_0f33a1949fd6cf::t_29d74c5d082c3b 6-7,9-10
+clean.sh
+  s_0f33a1949fd6cf::t_65b7ca45bcd029 1-289
+crates/llama-cpp-sys/BUILD.bazel
+  s_0f33a1949fd6cf::t_ace1eadb1138b2 44,78,106
+crates/llama-cpp-sys/build.rs
+  s_0f33a1949fd6cf::t_70a3c8d16aecd1 9,45,654,657-659,661,665-666,743,745-768,807,908
+crates/llama-cpp-sys/natives-manifest.txt
+  s_0f33a1949fd6cf::t_e049fc586590b7 12-35
+crates/llama-cpp-sys/src/bindings.rs
+  s_0f33a1949fd6cf::t_7555387e670e0b 9,11-12,60-61,118-164,264-265,329,359-372,428-430,459-460,471,486-488,491,508,519,551,579-590,617-621,640-643,661-662,686,715-719,722,728-736,739,750-752,754-761,770-890,934-955
+crates/llama-cpp-sys/src/lib.rs
+  s_0f33a1949fd6cf::t_929ccf0982e5c1 15-16,81-82
+crates/llama-cpp-sys/wrapper.cpp
+  s_0f33a1949fd6cf::t_4b9250c9f8f535 137-143,185-187,318,320,417-470,741-744,746
+crates/llama-cpp-sys/wrapper.h
+  s_0f33a1949fd6cf::t_21a9ee5855ae3a 78-85
+crates/whisper-cpp-sys/BUILD.bazel
+  s_0f33a1949fd6cf::t_d8ab906d103512 25-30,52-58
+crates/whisper-cpp-sys/Cargo.toml
+  s_0f33a1949fd6cf::t_cdc83c060d5c64 36-42,49
+crates/whisper-cpp-sys/build.rs
+  s_0f33a1949fd6cf::t_d28b1abebdf76c 203-211,213-215,246-281
+crates/whisper-cpp-sys/native/xybrid-whisper-coreml.h
+  s_0f33a1949fd6cf::t_37bdcc49e8ea7f 1-35
+crates/whisper-cpp-sys/native/xybrid-whisper-coreml.mm
+  s_0f33a1949fd6cf::t_d9351ca86381a7 1-269
+crates/whisper-cpp-sys/src/lib.rs
+  s_0f33a1949fd6cf::t_d2bd4b2273c67c 72-106
+crates/xybrid-bolt/BUILD.bazel
+  s_0f33a1949fd6cf::t_240908c493b94e 37-38,43,60-67,72-77,81-93,146-151
+crates/xybrid-bolt/Cargo.toml
+  s_0f33a1949fd6cf::t_135e4766557de8 63-65
+crates/xybrid-bolt/clean.sh
+  s_0f33a1949fd6cf::t_a1327ffb8746d7 1-5
+crates/xybrid-bolt/src/lib.rs
+  s_0f33a1949fd6cf::t_0cb35f59b2d60b 831,875-894,908,917-922,927,1104-1118,1131,1221-1222,1224-1226,1245-1246,1248-1251,1322,1330,1665,1676-1680,1682,1691,1699,1707,1719,1729,1921,1928-1930,2062,2069,2076,2274,2369-2388
+crates/xybrid-cli/BUILD.bazel
+  s_0f33a1949fd6cf::t_96e947771b1dda 51-58,83-90,97
+crates/xybrid-cli/src/commands/repl/warmup.rs
+  s_0f33a1949fd6cf::t_26cd8a3d76da66 4-5,7,12-40,70,74,97-180
+crates/xybrid-cli/src/commands/run.rs
+  s_0f33a1949fd6cf::t_991eb1549a8b72 11,17,33-36,397-532,870-873,925-927,978,1022,1096-1099,1105,1111,1234,1244-1254,1284-1286,1306-1311,1328-1331,1333-1346,1348,1361,1387,1428,1476,1517,1570-1578,1588-1596,1651,1682-1690,1698-1706,1830-1831,1877-1906,1977-1979,1983-2046,2048,2050-2058,2060-2067,3270-3639
+crates/xybrid-cli/src/commands/utils.rs
+  s_0f33a1949fd6cf::t_30c8c97bac2faa 4,6,71-145,199-261
+crates/xybrid-cli/src/main.rs
+  s_0f33a1949fd6cf::t_6ce57ffdadfa95 37,205-225,230-231,269-270,329-331,412-422,424-427,637,658,696,702,716,734,752,1028-1127
+crates/xybrid-cli/tests/choice_cli_test.rs
+  s_0f33a1949fd6cf::t_1d2c057bff8de1 1-745
+crates/xybrid-core/BUILD.bazel
+  s_0f33a1949fd6cf::t_308326fffa086e 94-98,116-121,237-244,247-248
+crates/xybrid-core/Cargo.toml
+  s_0f33a1949fd6cf::t_12c22ecdaf42dd 28-29,32-33,119,164-165,214-223
+crates/xybrid-core/examples/asr_whisper.rs
+  s_0f33a1949fd6cf::t_332d7f319df98b 140-143,196-199
+crates/xybrid-core/examples/local_llm_qwen.rs
+  s_0f33a1949fd6cf::t_f55cc702e4ab9e 117-119
+crates/xybrid-core/examples/local_llm_qwen35.rs
+  s_0f33a1949fd6cf::t_b7755da17d313f 115-117
+crates/xybrid-core/examples/mnist_simple_mode.rs
+  s_0f33a1949fd6cf::t_0cefc32ccd2e57 163-165
+crates/xybrid-core/examples/mobilenetv2_imagenet.rs
+  s_0f33a1949fd6cf::t_2c7a274465430a 128-130
+crates/xybrid-core/examples/resnet50_imagenet.rs
+  s_0f33a1949fd6cf::t_079c9cc2ecc74c 145-147
+crates/xybrid-core/examples/sentence_embedding.rs
+  s_0f33a1949fd6cf::t_26949ad3bc00d0 122-124
+crates/xybrid-core/examples/tts_kitten.rs
+  s_0f33a1949fd6cf::t_2e6c05002042bd 115-118
+crates/xybrid-core/src/execution/choice/encode.rs
+  s_0f33a1949fd6cf::t_b0ce4055e403d9 1-196
+crates/xybrid-core/src/execution/choice/math.rs
+  s_0f33a1949fd6cf::t_40cee2cebd304f 1-96
+crates/xybrid-core/src/execution/choice/mod.rs
+  s_0f33a1949fd6cf::t_12c3cc897ba335 1-546
+crates/xybrid-core/src/execution/choice/onnx.rs
+  s_0f33a1949fd6cf::t_690e63c60cb579 1-377
+crates/xybrid-core/src/execution/choice/tests.rs
+  s_0f33a1949fd6cf::t_38ce3a518f2069 1-1295
+crates/xybrid-core/src/execution/executor.rs
+  s_0f33a1949fd6cf::t_a584e7acd1a90d 52-53,62,70,295,300,305-318,373-381,447-448,468-477,487-488,492-494,646-653,690-693,761-772,1030-1035,1063-1087,1123-1125,1325-1335,1598-1599,1796-1804,3202,3204-3216,3218-3253,3255-3265,3269-3271,3274,3276,3279-3282,3335-3336,3343-3351,3366-3367,3370,3385-3386,3400-3408,3411,3413-3416,3420-3597,3600-3605,3614,3624-3631,3656-3661,3704-3787,3790-3791,3804,3811-3812,3817-3820,3822-3830,3839,3853-3866,3871-3873,4030-4035,4047-4048,6746-7477
+crates/xybrid-core/src/execution/mod.rs
+  s_0f33a1949fd6cf::t_b9fce59b73dd9a 20,65-67,101-103,140-142
+crates/xybrid-core/src/execution/modes/bert.rs
+  s_0f33a1949fd6cf::t_3a520ad007350f 5-9,14,20-95,99-100,117-118,130-132,134-148,165-255
+crates/xybrid-core/src/execution/modes/mod.rs
+  s_0f33a1949fd6cf::t_12a0906bf6b6d7 41
+crates/xybrid-core/src/execution/modes/tts.rs
+  s_0f33a1949fd6cf::t_81715a43b9b452 8,19-54,68-69,167,210-273
+crates/xybrid-core/src/execution/postprocessing/mod.rs
+  s_0f33a1949fd6cf::t_b2286f0227e3e1 9,63-64
+crates/xybrid-core/src/execution/postprocessing/tensor_ops.rs
+  s_0f33a1949fd6cf::t_042b961596a429 10,15,297-332,1066-1122
+crates/xybrid-core/src/execution/preprocessing/mod.rs
+  s_0f33a1949fd6cf::t_974e38d09ac7c3 73,76-83
+crates/xybrid-core/src/execution/preprocessing/text.rs
+  s_0f33a1949fd6cf::t_ab38434dd442cd 19-20,22-27,33,62,79-106,119-128,1296-1457
+crates/xybrid-core/src/execution/session_cache.rs
+  s_0f33a1949fd6cf::t_8e4965c470f061 1-43,45-65,67-94,96-149,152-153,156-168,170-185,188-203,206-220,222-238,240-262,265-279
+crates/xybrid-core/src/execution/session_factory.rs
+  s_0f33a1949fd6cf::t_2f6637dc916f58 105-108
+crates/xybrid-core/src/execution/template/choice.rs
+  s_0f33a1949fd6cf::t_8e9d257b4d1afd 1-179
+crates/xybrid-core/src/execution/template/mod.rs
+  s_0f33a1949fd6cf::t_8d488d46639289 8,12,27-29
+crates/xybrid-core/src/execution/template/steps.rs
+  s_0f33a1949fd6cf::t_5cad35ff4afeb6 82-86,382-387,455,687-690,718-773
+crates/xybrid-core/src/execution/tokenizer_cache.rs
+  s_0f33a1949fd6cf::t_b1fbc32b47aca7 11
+crates/xybrid-core/src/execution/tts_stream.rs
+  s_0f33a1949fd6cf::t_122071008850ba 1-57
+crates/xybrid-core/src/execution/types.rs
+  s_0f33a1949fd6cf::t_5ddf8ecd44d654 96-98,310-312
+crates/xybrid-core/src/executor.rs
+  s_0f33a1949fd6cf::t_a0295001f5f73b 38,258-261,380-383,737-739,1566-1671
+crates/xybrid-core/src/features.rs
+  s_0f33a1949fd6cf::t_221d95327b76ff 3,8-14,23,36,40-43,53,57-71,74-77,89,100,111,180-211
+crates/xybrid-core/src/ir/choice.rs
+  s_0f33a1949fd6cf::t_3bb3e7cefe84c3 1-328
+crates/xybrid-core/src/ir/mod.rs
+  s_0f33a1949fd6cf::t_761f4ce4f2d71b 8,11
+crates/xybrid-core/src/orchestrator/bootstrap.rs
+  s_0f33a1949fd6cf::t_3d8f355d1084bf 375-377
+crates/xybrid-core/src/orchestrator/policy_engine.rs
+  s_0f33a1949fd6cf::t_e45a7ace31c172 517-518
+crates/xybrid-core/src/pipeline/runner.rs
+  s_0f33a1949fd6cf::t_e625827a95eea1 18,257-264,388-393,488-502,565-567,852-950
+crates/xybrid-core/src/runtime_adapter/candle/adapter.rs
+  s_0f33a1949fd6cf::t_7ed27510ae78ce 224-226
+crates/xybrid-core/src/runtime_adapter/coreml/adapter.rs
+  s_0f33a1949fd6cf::t_29bf74cc23d546 137,143,165-168,242,267
+crates/xybrid-core/src/runtime_adapter/llama_cpp/chat.rs
+  s_0f33a1949fd6cf::t_a415fd456b8ade 222,229-231,238-251,254,295-372
+crates/xybrid-core/src/runtime_adapter/llama_cpp/jinja_template.rs
+  s_0f33a1949fd6cf::t_ae3f3fc655913e 50-55,66,70,155-161,164-167,359,389,411,420-447,608-689
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_0f33a1949fd6cf::t_71878a73a369a1 102-104,280-283,482-485,697-707,840-844,847,893-894,1506,1685,1897-1903
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_0f33a1949fd6cf::t_54cbf7057e6e3a 45-48,64-67,69,73-79,886-888
+crates/xybrid-core/src/runtime_adapter/mod.rs
+  s_0f33a1949fd6cf::t_30a35d3bfb74f8 124-126
+crates/xybrid-core/src/runtime_adapter/onnx/mobile.rs
+  s_0f33a1949fd6cf::t_5441b2bba948f3 191,204-206,218-220,224
+crates/xybrid-core/src/runtime_adapter/onnx/session.rs
+  s_0f33a1949fd6cf::t_ef279333868a89 9-18,48-49,60-62,138-139,153-154,204-240,265-269,299,315,400,403,414,421,424,487-573,593-613,615-619,693-697
+crates/xybrid-core/src/runtime_adapter/tensor_utils.rs
+  s_0f33a1949fd6cf::t_d02f23941079ff 75-77
+crates/xybrid-core/src/runtime_adapter/types.rs
+  s_0f33a1949fd6cf::t_6f62cb80d34baa 351-358,381,391
+crates/xybrid-core/src/runtime_adapter/whisper_cpp/runtime.rs
+  s_0f33a1949fd6cf::t_1ad03ad293b778 2-5,178-184,315-316,320-322,407-422,425,427-428
+crates/xybrid-core/src/runtime_adapter/zzz/mod.rs
+  s_0f33a1949fd6cf::t_234e2edddfb045 1-9
+crates/xybrid-core/src/runtime_adapter/zzz/phonon.rs
+  s_0f33a1949fd6cf::t_2384bf1246561b 1-226
+crates/xybrid-core/src/runtime_adapter/zzz/runtime.rs
+  s_0f33a1949fd6cf::t_b0eeaa60004144 1-311
+crates/xybrid-core/src/runtime_adapter/zzz/stream.rs
+  s_0f33a1949fd6cf::t_cf082df4b0c4a2 1-105
+crates/xybrid-core/src/streaming/session.rs
+  s_0f33a1949fd6cf::t_10b054cac97773 542-543
+crates/xybrid-core/src/testing/model_fixtures.rs
+  s_0f33a1949fd6cf::t_18999e902f9490 238-314
+crates/xybrid-core/tests/tts_smoke.rs
+  s_0f33a1949fd6cf::t_18ce511b974466 3-8,18-21,25,29-51,117-159,193,195,197-210,212-226,228-264,266,268-279
+crates/xybrid-core/tests/zzz_tts_integration.rs
+  s_0f33a1949fd6cf::t_8a539262a0284f 1-219
+crates/xybrid-ffi-facade/BUILD.bazel
+  s_0f33a1949fd6cf::t_252456e509fde2 34-35
+crates/xybrid-ffi-facade/src/lib.rs
+  s_0f33a1949fd6cf::t_998d626251d9d1 458,462,523-533,544-546,548-553,555-558,561,564-583,587-605,659-662,752,1174-1175,1366-1384,1389,1394-1407,1417,1430,1440-1452,1461-1494,1496-1501,1512-1513,1521,1606,1609-1610,1617,1643-1648,1654-1656,1726,1873-1878,1893-1896,1990,1998,2218,2236,2260,2286,2297,2321-2363,2376,2419,3111,3123-3130,3136,3168-3169,3171-3174,3184-3185,3189-3190,3532-3589,3785,3879,3920,3932,4317,4469-4759,4762,4767-4840,4861,4872
+crates/xybrid-ffi-facade/tests/zzz_phonon.rs
+  s_0f33a1949fd6cf::t_7b0817d0672e04 1-112
+crates/xybrid-llama/BUILD.bazel
+  s_0f33a1949fd6cf::t_70ca0a993d7a87 59,65-67,70
+crates/xybrid-llama/Cargo.toml
+  s_0f33a1949fd6cf::t_e6cdd8c7f2a773 24
+crates/xybrid-llama/src/context.rs
+  s_0f33a1949fd6cf::t_84f3eb51d77e17 3-6,17-20,24-32,37-72,78-80,91-93,99-101,110-135,144-163,170-192,219-302,309-311,323-389
+crates/xybrid-llama/src/ffi.rs
+  s_0f33a1949fd6cf::t_05414932192db3 18-36,85-86,89-91,94,130-181,195-196,223-224,325-329,353-354,406-407,437-441,464-465,488-608,624-625,835-837,850-851
+crates/xybrid-llama/src/generation.rs
+  s_0f33a1949fd6cf::t_f20ab42ccca9e0 13,160-188,261,311-313,333,378-381,412,461-464,595-596,621-691,748-806
+crates/xybrid-llama/src/lib.rs
+  s_0f33a1949fd6cf::t_1b884b1424e19d 19-23,73-74,79,88-89,111-114
+crates/xybrid-llama/src/model.rs
+  s_0f33a1949fd6cf::t_c726f752f6a206 3-8,11,17-20,22-29,33-51,66-68,77-94,127-133,144,172,187,210-211,217-218,226-227,232-233,241-242,256-257,264,267,310-314
+crates/xybrid-llama/src/scoring.rs
+  s_0f33a1949fd6cf::t_ad0214041032f2 1-357
+crates/xybrid-llama/src/vision.rs
+  s_0f33a1949fd6cf::t_e708de24bf6250 9,14,23-24,27-29,33-34,40,71-74,86-87,94-96,99-127,141-144,158-163,166-167,481-488,515-626
+crates/xybrid-llama/tests/callback_stop_boundaries.rs
+  s_0f33a1949fd6cf::t_f971a4dd2a6466 1-20,22,24-26,28,30-47,49-56,58-61,63-67,69,71-83,85-89,91-97,99-144,146
+crates/xybrid-llama/tests/choice_logits.rs
+  s_0f33a1949fd6cf::t_85b3a683990bca 1-373
+crates/xybrid-llama/tests/model_lifetime_smoke.rs
+  s_0f33a1949fd6cf::t_55de59fe1b7be5 1-104
+crates/xybrid-llama/tests/state_seq_snapshot_smoke.rs
+  s_0f33a1949fd6cf::t_a89db7638dce6c 1-250
+crates/xybrid-mlx/Cargo.toml
+  s_0f33a1949fd6cf::t_5962b2f1badec4 24
+crates/xybrid-sdk/BUILD.bazel
+  s_0f33a1949fd6cf::t_d86bc5e5243621 73-78,144-145,157-167,208
+crates/xybrid-sdk/Cargo.toml
+  s_0f33a1949fd6cf::t_85d1b6d9da019e 17,41,46,103-108,134-137
+crates/xybrid-sdk/examples/choice_scoring.rs
+  s_0f33a1949fd6cf::t_fccbfbf1897700 1-63
+crates/xybrid-sdk/examples/semantic_search.rs
+  s_0f33a1949fd6cf::t_34be181378b9de 1-204
+crates/xybrid-sdk/src/cache/cache_manager.rs
+  s_0f33a1949fd6cf::t_bcb17991cd18f1 160-161,163-165
+crates/xybrid-sdk/src/lib.rs
+  s_0f33a1949fd6cf::t_83025bbee33fcc 266-267,270,322-324,328-329,357-368,371-372,374-378,386-387,392-395,401-402,421-423,441-450,452-453,584-585,1188
+crates/xybrid-sdk/src/metadata_gen.rs
+  s_0f33a1949fd6cf::t_a1eddbcf73d549 1308,1318,1342,1776,1789,1812,1840,1965,2035
+crates/xybrid-sdk/src/model/registry_load_tests.rs
+  s_0f33a1949fd6cf::t_bc552c8e1edc07 1-369
+crates/xybrid-sdk/src/registry_client.rs
+  s_0f33a1949fd6cf::t_6278308d1fdce2 56,119-142,871-879,1015,1707,2864-2891,3506-3693,4655-4701
+crates/xybrid-sdk/src/result.rs
+  s_0f33a1949fd6cf::t_61bff377ddc65b 9,98-100,110,134,361-370,439-443
+crates/xybrid-sdk/src/run_options.rs
+  s_0f33a1949fd6cf::t_3c97449321327a 374-388,635-687
+crates/xybrid-sdk/src/telemetry.rs
+  s_0f33a1949fd6cf::t_9a1106789b938b 347-348,1075-1084,3355-3385,3422-3425
+crates/xybrid-sdk/tests/cache_dir_first_call_wins.rs
+  s_0f33a1949fd6cf::t_67fde21572e1af 1-20
+crates/xybrid-sdk/tests/choice_scoring.rs
+  s_0f33a1949fd6cf::t_5c796fc110fe4b 1-804
+crates/xybrid-sdk/tests/cloud_fallback_e2e.rs
+  s_0f33a1949fd6cf::t_bd94270aa02fdb 11-17,21,35-36,180-272,289,307,366-540
+crates/xybrid-sdk/tests/zzz_phonon.rs
+  s_0f33a1949fd6cf::t_fc35fc8e3934b5 1-312
+crates/xybrid-whisper/BUILD.bazel
+  s_0f33a1949fd6cf::t_9a28f0feef5212 10-18,28-32,37-40
+crates/xybrid-whisper/Cargo.toml
+  s_0f33a1949fd6cf::t_0e40c54b588440 21-24,27
+crates/xybrid-whisper/src/coreml.rs
+  s_0f33a1949fd6cf::t_bc5fec7125adae 1-188
+crates/xybrid-whisper/src/error.rs
+  s_0f33a1949fd6cf::t_308084515e7292 53-74
+crates/xybrid-whisper/src/lib.rs
+  s_0f33a1949fd6cf::t_f0dff38af0414e 24,61-64,69-72
+crates/xybrid-whisper/src/model.rs
+  s_0f33a1949fd6cf::t_1441eafb4dddf0 11,39,41-42,45-48,51-52,55-59,84-85,89-94,100-101,104,138-141,143-146,164-177,181-187,222-229,231,233,239-255,260,262,267-288,290-292,344-346,353-356,370-371,387-400,403-405
+crates/xybrid-whisper/src/params.rs
+  s_0f33a1949fd6cf::t_e46ada3223b2ba 46-51,77
+crates/xybrid/Cargo.toml
+  s_0f33a1949fd6cf::t_d422d133e71aba 17,41-43
+crates/zzz-sys/BUILD.bazel
+  s_0f33a1949fd6cf::t_c22324c209691e 1-34
+crates/zzz-sys/Cargo.toml
+  s_0f33a1949fd6cf::t_2f1eb3ece0b070 1-40
+crates/zzz-sys/README.md
+  s_0f33a1949fd6cf::t_d7c5b61c8891f3 1-158
+crates/zzz-sys/build.rs
+  s_0f33a1949fd6cf::t_373af51e8b999e 1-35,37-39,41-50,52-58,60-65,67-73,75-79,81-94,96-101,103-112,114-132,134-136,138-181,183-188
+crates/zzz-sys/natives-manifest.json
+  s_0f33a1949fd6cf::t_b4208388b18daa 1-261
+crates/zzz-sys/src/api.rs
+  s_0f33a1949fd6cf::t_be243494cc5ddf 1-168
+crates/zzz-sys/src/api/tests.rs
+  s_0f33a1949fd6cf::t_856a0aa76578f8 1,3-6,8-13,15-19,21-23,25-27,29-39,41-133,135-146,148-152,154-163,165-229,231-258,260-265
+crates/zzz-sys/src/cpu.rs
+  s_0f33a1949fd6cf::t_d827d9615fc872 1-242
+crates/zzz-sys/src/lib.rs
+  s_0f33a1949fd6cf::t_ceaffaf1b557db 1-244
+crates/zzz-sys/src/session.rs
+  s_0f33a1949fd6cf::t_4228db3c3dc528 1-745
+crates/zzz-sys/tests/phonon.rs
+  s_0f33a1949fd6cf::t_7112daa532872c 1-223
+crates/zzz-sys/tests/synthesis.rs
+  s_0f33a1949fd6cf::t_f297376b14ec2a 1-311
+crates/zzz-sys/zzz_pull.py
+  s_0f33a1949fd6cf::t_d97e833b709794 1-625
+docs/FEATURE_MATRIX.md
+  s_0f33a1949fd6cf::t_37c64b87ad9d8d 39,172
+docs/FEATURE_MATRIX.zh.md
+  s_0f33a1949fd6cf::t_4f9c519c4d2e0d 108
+docs/INSTALLATION.md
+  s_0f33a1949fd6cf::t_19cbf5fdbcf9db 393,395
+docs/clean.sh
+  s_0f33a1949fd6cf::t_9b8294bc0df937 1-5
+docs/content/docs/(integration)/sdks/android.mdx
+  s_0f33a1949fd6cf::t_8f094fa95630f3 14,18,44,242-270,275-277
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_0f33a1949fd6cf::t_0a54649cc64879 14,18,37,223-249,254-256
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_0f33a1949fd6cf::t_a9255e31beb228 14
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_0f33a1949fd6cf::t_5db214a3165c57 14
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_0f33a1949fd6cf::t_26f34cb5b8a5e4 18
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_0f33a1949fd6cf::t_fff2a5cd80c020 18
+docs/content/docs/(integration)/sdks/react-native.mdx
+  s_0f33a1949fd6cf::t_1c83b2ba98de25 12,17,20-40,102
+docs/content/docs/(integration)/sdks/unity.mdx
+  s_0f33a1949fd6cf::t_4844f96c618ba0 6,10,12-19,22,24-40,57-58,90,172-181,185,191-192,200-201,431-445
+docs/content/docs/(integration)/sdks/unity.zh.mdx
+  s_0f33a1949fd6cf::t_d9c5668d31c82d 6,10,12-19,22,24-40,57-58,90,169-178,182,188-189,197-198,423-437
+docs/content/docs/(integration)/sdks/web.mdx
+  s_0f33a1949fd6cf::t_3560f4a5035078 6-9,11-17,19,21,24-27,31-34,36,38-41,46-47,49,51-60,64-67,69,71-76,79-82,85-117
+docs/content/docs/(integration)/sdks/web.zh.mdx
+  s_0f33a1949fd6cf::t_cb0978b75dfa9b 6-9,11-17,19,21,24-27,31-33,35,37-39,44-45,47,49-58,62-64,66,68-73,76-79,82-84,86-89,91,93-96,98-100,102-104,106-107
+docs/content/docs/cli/reference/run.mdx
+  s_0f33a1949fd6cf::t_9e59beb65b388a 14,26-27,140-217
+docs/content/docs/concepts/models.mdx
+  s_0f33a1949fd6cf::t_e7bc1b378c0e69 91
+docs/content/docs/concepts/models.zh.mdx
+  s_0f33a1949fd6cf::t_3a50c126d8ef9a 91
+docs/content/docs/introduction.mdx
+  s_0f33a1949fd6cf::t_641ceb11a87629 22-23,25-26
+docs/content/docs/introduction.zh.mdx
+  s_0f33a1949fd6cf::t_7cb1ae8f464290 22-26
+docs/content/docs/quickstart.mdx
+  s_0f33a1949fd6cf::t_b0cb0494c1a620 8,15,57,88,112-137,148,177,179-180,191,206-208,214,222
+docs/content/docs/quickstart.zh.mdx
+  s_0f33a1949fd6cf::t_8865cba5f70a41 8,15,57,88,112-137,148,177,179-180,191,205-207,213,221
+docs/development/llamacpp-updates.md
+  s_0f33a1949fd6cf::t_7e3e63e6e1dcd5 1-128
+docs/guides/custom-models.md
+  s_0f33a1949fd6cf::t_075202b3819868 139-140,144-145,155-196,419-420,424-425,436-438,456,529,582,593
+docs/guides/custom-models.zh.md
+  s_0f33a1949fd6cf::t_2420b56926e06f 139-140,144-145,155-189,412-413,417-418,429-430,448,521,574,585
+docs/sdk/API_REFERENCE.md
+  s_0f33a1949fd6cf::t_b0000294cf43bf 241-242,465-470,725-747,829-883,1047-1050,1384-1389,1752-1753,1781-1794,2092-2096,2099-2101,2104-2106,2132-2133,2142-2144
+docs/sdk/MODEL_METADATA.md
+  s_0f33a1949fd6cf::t_3ea3226dcbcd87 79-86,132-133,147,195-279,352,356-361,460-464,537-547,607,648-685
+docs/sdk/PHONON.md
+  s_0f33a1949fd6cf::t_bbb804bb2f8141 1-185
+docs/sdk/api-surface.yaml
+  s_0f33a1949fd6cf::t_32dc4e97495b4c 219-222,385-386,607-611,722-723,784,1167-1170,1179-1180,1188,1193
+docs/sdk/model_metadata.schema.json
+  s_0f33a1949fd6cf::t_5449f45010273f 104-241,476,574-610,655-811,1258-1270,1452-1455
+docs/sdk/telemetry.md
+  s_0f33a1949fd6cf::t_cfb0ffa392cb48 224,226-227,245-260
+docs/telemetry/registry.md
+  s_0f33a1949fd6cf::t_4acc988fe6fa59 15,40,45,55-65,81,91,104,106,145-146,157,160,163-164,175
+emsdk.patch
+  s_0f33a1949fd6cf::t_0a99290b961780 1-94
+examples/README.md
+  s_0f33a1949fd6cf::t_8e7095794bc3be 124,240
+examples/android/.claude/settings.local.json
+  s_0f33a1949fd6cf::t_f8cdf8967e8504 1-7
+examples/android/README.md
+  s_0f33a1949fd6cf::t_c2fe0381260534 20,127,269
+examples/android/app/build.gradle.kts
+  s_0f33a1949fd6cf::t_fa4c3cb90a0af6 33
+examples/android/clean.sh
+  s_0f33a1949fd6cf::t_de9b5fd656123a 1-5
+examples/flutter/clean.sh
+  s_0f33a1949fd6cf::t_2fdab6f449f72c 1-8
+examples/unity/Telemetry/clean.sh
+  s_0f33a1949fd6cf::t_eed940e32a2e03 1-6
+examples/unity/starter/clean.sh
+  s_0f33a1949fd6cf::t_9e0b0515fd5a23 1-6
+hermetic_llvm.patch
+  s_0f33a1949fd6cf::t_2e41fca5e06a01 1-23
+integration-tests/.gitignore
+  s_0f33a1949fd6cf::t_12d99b1ff52790 9-11
+integration-tests/BUILD.bazel
+  s_0f33a1949fd6cf::t_af4f5862063b54 58-93,113,116,118,127,129-138,145-148,165-167,187-207
+integration-tests/Cargo.toml
+  s_0f33a1949fd6cf::t_6ae445170b210c 12,22-24
+integration-tests/README.md
+  s_0f33a1949fd6cf::t_5cfb2a0f557bb6 80,118-138,147-153
+integration-tests/download.sh
+  s_0f33a1949fd6cf::t_d5083252fe1539 8-9,13,56-57,185-197,210,661-663,682-689,728,735
+integration-tests/fixtures/chat_render/render_embedded.json
+  s_0f33a1949fd6cf::t_8cfe8240c5126f 1-153
+integration-tests/fixtures/choice/cases/forms.json
+  s_0f33a1949fd6cf::t_6d85e953b90c27 1-484
+integration-tests/fixtures/choice/cases/labels.json
+  s_0f33a1949fd6cf::t_0c04acb46e5158 1-241
+integration-tests/fixtures/choice/goldens/forms.json
+  s_0f33a1949fd6cf::t_db8670b83dfe1c 1-937
+integration-tests/fixtures/choice/goldens/labels.json
+  s_0f33a1949fd6cf::t_adf5629de79b9f 1-203
+integration-tests/fixtures/choice/provenance.json
+  s_0f33a1949fd6cf::t_989381fd54af06 1-400
+integration-tests/fixtures/choice/specs/cua-s1-forms.json
+  s_0f33a1949fd6cf::t_76d079ecf264ac 1-26
+integration-tests/fixtures/choice/templates/qwen3.5.jinja
+  s_0f33a1949fd6cf::t_36b7c81fba1196 1-154
+integration-tests/fixtures/embedding/embeddinggemma-2.json
+  s_0f33a1949fd6cf::t_ca64ff58160745 1-13
+integration-tests/fixtures/models/.gitignore
+  s_0f33a1949fd6cf::t_9e03fcf3834314 17-21
+integration-tests/fixtures/models/cua-s1-forms/model_metadata.json
+  s_0f33a1949fd6cf::t_f033bd2eefbf53 1-49
+integration-tests/fixtures/models/models.json
+  s_0f33a1949fd6cf::t_52584e7ce1ff0c 435-502,620-682,1079-1197
+integration-tests/tests/choice_forms_conformance.rs
+  s_0f33a1949fd6cf::t_c4ea76fdc61d91 1-204
+integration-tests/tests/embedding_parity.rs
+  s_0f33a1949fd6cf::t_015712eb4c79bb 1-137
+integration-tests/tests/llamacpp_release.rs
+  s_0f33a1949fd6cf::t_90bc829be5a662 1-51
+integration-tests/tests/tts_abort.rs
+  s_0f33a1949fd6cf::t_42d691a3676336 1-300
+integration-tests/tests/whispercpp_integration.rs
+  s_0f33a1949fd6cf::t_56e9862e3361ca 324-340,549-562,564,567-568
+justfile
+  s_0f33a1949fd6cf::t_b7f6cea72e3120 136-153
+rules_android_ndk.patch
+  s_0f33a1949fd6cf::t_298b5f123dd9c8 4,15-22
+rules_rs.patch
+  s_0f33a1949fd6cf::t_94883ff95c310d 185-196
+tools/README.md
+  s_0f33a1949fd6cf::t_5d29dddf5cade3 9-10,16,81-86,111-112,121-130
+tools/conformance/README.md
+  s_0f33a1949fd6cf::t_f9755b697b1a7a 1-220
+tools/conformance/common.py
+  s_0f33a1949fd6cf::t_6db92588153fd0 1-87
+tools/conformance/convert_gguf.sh
+  s_0f33a1949fd6cf::t_24df8f6ffef0f2 1-170
+tools/conformance/export_forms_onnx.py
+  s_0f33a1949fd6cf::t_7aece9305cd180 1-338
+tools/conformance/gen_fake_scorers.py
+  s_0f33a1949fd6cf::t_ae6315c42c67fb 1-238
+tools/conformance/gen_forms_goldens.py
+  s_0f33a1949fd6cf::t_07e6da98cd0406 1-141
+tools/conformance/gen_label_goldens.py
+  s_0f33a1949fd6cf::t_a1efd063f88fbc 1-205
+tools/conformance/llama_harness/build.sh
+  s_0f33a1949fd6cf::t_8ddcb67c451fe1 1-98
+tools/conformance/llama_harness/main.cpp
+  s_0f33a1949fd6cf::t_966b65cd5563c1 1-154
+tools/conformance/lock.sh
+  s_0f33a1949fd6cf::t_9c9bfb5b82533b 1-20
+tools/conformance/prepare.sh
+  s_0f33a1949fd6cf::t_2b95198328a8f7 1-168
+tools/conformance/requirements-convert.in
+  s_0f33a1949fd6cf::t_8d2467e7138c15 1-11
+tools/conformance/requirements-convert.txt
+  s_0f33a1949fd6cf::t_c2849c95297eac 1-41
+tools/conformance/requirements-forms.in
+  s_0f33a1949fd6cf::t_2178e1d98fa8db 1-10
+tools/conformance/requirements-forms.txt
+  s_0f33a1949fd6cf::t_87d3ab8b898b9b 1-24
+tools/conformance/requirements-labels.in
+  s_0f33a1949fd6cf::t_8e090120987ac0 1-9
+tools/conformance/requirements-labels.txt
+  s_0f33a1949fd6cf::t_c95effd4186327 1-36
+tools/scripts/BUILD.bazel
+  s_0f33a1949fd6cf::t_1796cc772051aa 1-5
+tools/scripts/android-dlopen-gate.sh
+  s_0f33a1949fd6cf::t_ef28aedf38fd23 9-17,23,25,27-28
+tools/scripts/android-dlopen-probe.c
+  s_0f33a1949fd6cf::t_71613efa70f569 3-5,16-21
+tools/scripts/check_choice_provenance.py
+  s_0f33a1949fd6cf::t_78f31f110ad839 1-552
+tools/scripts/ci_gate.py
+  s_0f33a1949fd6cf::t_af0903b173d528 1-118
+tools/scripts/clean-lib.sh
+  s_0f33a1949fd6cf::t_699328f0c134dd 1-204
+tools/scripts/gen_embedding_goldens.py
+  s_0f33a1949fd6cf::t_7c1bca43ffde78 1-90
+tools/scripts/gen_unity_bolt_csharp.py
+  s_0f33a1949fd6cf::t_7fdd58debe580b 53-60,91-97,116,300-311,438,444,460-467,486-495,558,565-569
+tools/scripts/gen_workflow_index.py
+  s_0f33a1949fd6cf::t_cb2906f2df4ad0 1-407
+tools/scripts/install-vulkan-sdk-linux.sh
+  s_0f33a1949fd6cf::t_0e955f220704a5 1-74
+tools/scripts/llama_browser_version.py
+  s_0f33a1949fd6cf::t_bf7eff1a1e8f10 1-42
+tools/scripts/llamacpp_update.py
+  s_0f33a1949fd6cf::t_134edf301ae8ad 1-593
+tools/scripts/natives-push.sh
+  s_0f33a1949fd6cf::t_6e6b99825d4086 44-45,56
+tools/scripts/stage_unity_native.py
+  s_0f33a1949fd6cf::t_d9446432174195 17-21,106,223-230,282-286
+tools/scripts/tests/test_check_choice_provenance.py
+  s_0f33a1949fd6cf::t_091f95fda897fc 1-456
+tools/scripts/tests/test_ci_gate.py
+  s_0f33a1949fd6cf::t_c0e501f36120e7 1-113
+tools/scripts/tests/test_clean.py
+  s_0f33a1949fd6cf::t_76258e52b97dab 1-468
+tools/scripts/tests/test_gen_workflow_index.py
+  s_0f33a1949fd6cf::t_349267d2cf5588 1-275
+tools/scripts/tests/test_install_vulkan_sdk.py
+  s_0f33a1949fd6cf::t_df4aa8e361dba6 1-181
+tools/scripts/tests/test_llamacpp_update.py
+  s_0f33a1949fd6cf::t_a4e4368b421d52 1-639
+tools/scripts/tests/test_natives_push.py
+  s_0f33a1949fd6cf::t_d5a17a22c8142a 1-102
+tools/scripts/tests/test_release_publish.py
+  s_0f33a1949fd6cf::t_99d6dce2d94d2c 1-44
+tools/scripts/tests/test_stage_unity_native.py
+  s_0f33a1949fd6cf::t_764e7d308070b9 60-115,137-141,150-200
+tools/scripts/tests/test_verify_android_api_level.py
+  s_0f33a1949fd6cf::t_d9005722c1ee10 1-169
+tools/scripts/tests/test_verify_unity_android_natives.py
+  s_0f33a1949fd6cf::t_778e34e3cccd08 1-474
+tools/scripts/tests/test_verify_zzz_android.py
+  s_0f33a1949fd6cf::t_89043d8d751be1 1-1121
+tools/scripts/tests/test_version_sync.py
+  s_0f33a1949fd6cf::t_3a623bcb863025 1-25
+tools/scripts/tests/test_zzz_aar_notices.py
+  s_0f33a1949fd6cf::t_ae49d0a42536c8 1-143
+tools/scripts/tests/test_zzz_apple_package.py
+  s_0f33a1949fd6cf::t_8f4b245a910a9e 1-304
+tools/scripts/tests/test_zzz_candidate_extract.py
+  s_0f33a1949fd6cf::t_ae17284229ba2b 1-561
+tools/scripts/tests/test_zzz_candidate_reconcile.py
+  s_0f33a1949fd6cf::t_08982ba98a8c33 1-297
+tools/scripts/tests/test_zzz_feature_wiring.py
+  s_0f33a1949fd6cf::t_5712a4c6d6b9f5 1-457
+tools/scripts/tests/test_zzz_isolation.py
+  s_0f33a1949fd6cf::t_301ad6926d9c01 1-405
+tools/scripts/tests/test_zzz_platforms.py
+  s_0f33a1949fd6cf::t_3de7a20e8e7b89 1-199
+tools/scripts/tests/test_zzz_producer_verify.py
+  s_0f33a1949fd6cf::t_9b9029a19f066b 1-490
+tools/scripts/tests/test_zzz_pull.py
+  s_0f33a1949fd6cf::t_e01959f94c1a2d 1-1046
+tools/scripts/tests/test_zzz_sdk_stage.py
+  s_0f33a1949fd6cf::t_8ccf5d48fb017c 1-700
+tools/scripts/tests/test_zzz_source_policy.py
+  s_0f33a1949fd6cf::t_c52c33389a9924 1-598
+tools/scripts/verify_android_api_level.py
+  s_0f33a1949fd6cf::t_f5b81ef4426304 1-147
+tools/scripts/verify_unity_android_natives.py
+  s_0f33a1949fd6cf::t_272e309bf0a4f6 1-380
+tools/scripts/verify_zzz_android.py
+  s_0f33a1949fd6cf::t_9969e41aec1731 1-961
+tools/scripts/version-sync.sh
+  s_0f33a1949fd6cf::t_de5418aa7c41ec 46-57,124-162,287-324,336,375,377,401,404,418,420-425,427-432,444,446,448
+tools/scripts/zzz_candidate_extract.md
+  s_0f33a1949fd6cf::t_c3ca9b9e521e62 1-188
+tools/scripts/zzz_candidate_extract.py
+  s_0f33a1949fd6cf::t_d63b439046f7f6 1-465
+tools/scripts/zzz_candidate_reconcile.md
+  s_0f33a1949fd6cf::t_c9f01e3d1b9834 1-135
+tools/scripts/zzz_candidate_reconcile.py
+  s_0f33a1949fd6cf::t_6797722ddbd091 1-185
+tools/scripts/zzz_producer_verify.md
+  s_0f33a1949fd6cf::t_a56acf0fda91e8 1-200
+tools/scripts/zzz_producer_verify.py
+  s_0f33a1949fd6cf::t_880431a09804a0 1-405
+tools/scripts/zzz_pull.py
+  s_0f33a1949fd6cf::t_4071511a836c85 1-12
+tools/scripts/zzz_sdk_stage.md
+  s_0f33a1949fd6cf::t_e444480929adcf 1-192
+tools/scripts/zzz_sdk_stage.py
+  s_0f33a1949fd6cf::t_3cc7e464c213c8 1-688
+tools/scripts/zzz_source_policy.md
+  s_0f33a1949fd6cf::t_93fb1a31ff040e 1-184
+tools/scripts/zzz_source_policy.py
+  s_0f33a1949fd6cf::t_b792fa2b370beb 1-436
+tools/tts-stream-smoke/Program.cs
+  s_0f33a1949fd6cf::t_b9b33aaf668b72 1-179
+tools/tts-stream-smoke/README.md
+  s_0f33a1949fd6cf::t_1eeb5d22681025 1-32
+tools/tts-stream-smoke/TtsStreamSmoke.csproj
+  s_0f33a1949fd6cf::t_dfc1eabad04ea1 1-16
+tools/tts-stream-smoke/clean.sh
+  s_0f33a1949fd6cf::t_80ae5c5a391daa 1-5
+tools/unity-bolt-compile-check/NativeImportCheck.cs
+  s_0f33a1949fd6cf::t_9bbf6a0f297085 1-45
+tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj
+  s_0f33a1949fd6cf::t_439f4ea0f78dcb 13-16,20-21,40
+tools/unity-bolt-compile-check/clean.sh
+  s_0f33a1949fd6cf::t_2ef330a6a1251e 1-5
+tools/unity-runtime-smoke/clean.sh
+  s_0f33a1949fd6cf::t_6533789cb6704b 1-5
+tools/windows-smoke/.gitignore
+  s_0f33a1949fd6cf::t_d7b95968edea9b 1-5
+tools/windows-smoke/clean.sh
+  s_0f33a1949fd6cf::t_08111f4e278481 1-5
+vendor/llama-cpp
+  s_0f33a1949fd6cf::t_2efb77408707f9 1
+vendor/ort-android/README.md
+  s_0f33a1949fd6cf::t_a0fa4ddf6f12ff 15,17,20-23,25,27-33,40
+xtask/BUILD.bazel
+  s_0f33a1949fd6cf::t_caaa9cef1a04bc 20
+xtask/src/main.rs
+  s_0f33a1949fd6cf::t_c4dbfe01d9a20d 86,241-242,291-292,313,469-482,596-598,608-639,641-645,648-650,652,662-663,671-677,682-685,703-714,881,883-884,888-920,935-970,978,993-994,1571-1572,1609-1620,1663-1664,1828-1921
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2debb50aa54d0c054d1a3c8b73d7f02dc1ba4463",
+  "prompts": {},
+  "sessions": {
+    "s_0f33a1949fd6cf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a188ed-7207-7071-bec4-7221f0ec4720",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_32055b82cd744d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c59210e-c9dc-40ce-baf6-62cd567a4c81",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    },
+    "s_fac6e092681508": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a18483-8c9e-79b1-ba86-301522b67b31",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
