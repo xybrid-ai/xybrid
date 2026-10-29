@@ -1,0 +1,23 @@
+crates/mlx-c-sys/BUILD.bazel
+  s_be0f25c33b96f6::t_98fa3a56658c4d 9,13
+crates/xybrid-mlx/BUILD.bazel
+  s_be0f25c33b96f6::t_98fa3a56658c4d 10,14
+crates/xybrid-cli/src/commands/run.rs
+  s_be0f25c33b96f6::t_8f22e4d899b8f1 2557
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "9c67b5992bc1c99f95ea898c4b68403fb9784b0c",
+  "prompts": {},
+  "sessions": {
+    "s_be0f25c33b96f6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b633c7b1-cca3-44d5-a1a9-0ece827e883e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
