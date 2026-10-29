@@ -10,7 +10,12 @@ use crate::cache::layout::CacheLayout;
 use crate::cache::CacheManager;
 use crate::download::{ModelDownload, MAX_IN_FLIGHT_PROGRESS_BP};
 use crate::model_registry::AutoReleasePolicy;
-use crate::registry_client::{RegistryClient, ResolvedVariant};
+use crate::registry_client::{
+    registry_format_for_auto_local_backend,
+    registry_format_preference_for_backend_choice_with_registry_context,
+    registry_format_preference_for_backend_choice_with_task, RegistryClient,
+    RegistryFormatPreference, ResolvedVariant,
+};
 use crate::result::{InferenceResult, OutputType};
 use crate::run_options::{
     check_abort_for_streaming, AbortState, CancellationToken, LiveModeTag, RunOptions,
@@ -21,7 +26,7 @@ use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 use tokio_stream::wrappers::ReceiverStream;
 use xybrid_core::conversation::ConversationContext;
@@ -29,6 +34,9 @@ use xybrid_core::execution::choice::{
     ensure_no_choice_kinds, validate_choice_request, validate_scorer_spec, EntryPoint,
 };
 use xybrid_core::execution::template::backend_label_from_template;
+use xybrid_core::execution::template::{
+    is_mlx_embedding_safetensors_metadata, is_mlx_llm_safetensors_metadata, stage_kind_from_task,
+};
 use xybrid_core::execution::{
     ExecutionTemplate, ModelMetadata, TemplateExecutor, VoiceConfig, VoiceInfo,
 };
@@ -40,8 +48,8 @@ use xybrid_core::orchestrator::authority::{
 use xybrid_core::orchestrator::routing_engine::LocalReliabilityHint;
 use xybrid_core::runtime_adapter::types::GenerationConfig;
 use xybrid_core::runtime_adapter::{
-    encode_stop_sequences, CloudRuntimeAdapter, CloudStreaming, RuntimeAdapter,
-    STOP_SEQUENCES_METADATA_KEY,
+    encode_stop_sequences, select_with_cfg, BackendChoice, CloudRuntimeAdapter, CloudStreaming,
+    RegistryView, RuntimeAdapter, SelectionParams, SelectorCfg, STOP_SEQUENCES_METADATA_KEY,
 };
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
 
@@ -244,6 +252,21 @@ sdk_error_ctors! {
 
 /// Result type for SDK operations.
 pub type SdkResult<T> = Result<T, SdkError>;
+
+fn duration_millis_u64(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn duration_millis_u32(duration: Duration) -> u32 {
+    u32::try_from(duration.as_millis()).unwrap_or(u32::MAX)
+}
+
+fn current_timestamp_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(duration_millis_u64)
+        .unwrap_or(0)
+}
 
 impl SdkError {
     /// Whether retrying the operation that produced this error could
@@ -854,7 +877,7 @@ where
             // the trace would just stop after `LocalAborted` and the
             // dashboard would show no cloud activity at all.
             let cloud_result = cloud_adapter.execute_streaming(&cloud_envelope, cloud_callback);
-            let cloud_latency_ms = cloud_start.elapsed().as_millis() as u32;
+            let cloud_latency_ms = duration_millis_u32(cloud_start.elapsed());
             let cloud_token_count = cloud_tokens.load(std::sync::atomic::Ordering::SeqCst);
 
             match cloud_result {
@@ -1168,6 +1191,177 @@ pub(crate) fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) ->
         .to_string())
 }
 
+struct EmptyRegistryView;
+
+impl RegistryView for EmptyRegistryView {
+    fn has_variant(&self, _model_id: &str, _format: &str) -> bool {
+        false
+    }
+}
+
+fn selector_error_to_sdk(err: xybrid_core::runtime_adapter::SelectorError) -> SdkError {
+    SdkError::ConfigError(err.to_string())
+}
+
+fn explicit_registry_format_for_backend(
+    model_id: &str,
+    task: Option<&str>,
+    backend: BackendChoice,
+    cfg: &SelectorCfg,
+) -> SdkResult<Option<&'static str>> {
+    match registry_format_preference_for_backend_choice_with_task(model_id, task, backend, cfg)? {
+        RegistryFormatPreference::Auto => Ok(None),
+        RegistryFormatPreference::ExplicitBackend { format } => Ok(format),
+    }
+}
+
+/// Registry format a load of `id` should fetch.
+///
+/// An explicit backend pins its artifact format; otherwise the auto selector
+/// decides (MLX SafeTensors on a capable Apple Silicon host, else the registry
+/// default).
+pub(crate) fn registry_format_for_load(
+    client: &RegistryClient,
+    id: &str,
+    backend_override: Option<BackendChoice>,
+    cfg: &SelectorCfg,
+) -> SdkResult<Option<&'static str>> {
+    if let Some(backend) = backend_override {
+        return match registry_format_preference_for_backend_choice_with_registry_context(
+            client, id, backend, cfg,
+        )? {
+            RegistryFormatPreference::Auto => Ok(None),
+            RegistryFormatPreference::ExplicitBackend { format } => Ok(format),
+        };
+    }
+
+    registry_format_for_auto_local_backend(client, id, cfg)
+}
+
+/// Resolve the load format for `id`, then fetch and extract that variant.
+///
+/// `start_download()` uses this helper. Model loads share its format selection,
+/// then download their already-resolved variant when checking speculative
+/// eligibility, so that check and the background download select the same files.
+pub(crate) fn fetch_registry_model_for_load<F>(
+    client: &RegistryClient,
+    id: &str,
+    platform: Option<&str>,
+    backend_override: Option<BackendChoice>,
+    cancel: Arc<AtomicBool>,
+    progress_callback: F,
+) -> SdkResult<PathBuf>
+where
+    F: Fn(DownloadStatus),
+{
+    let format = registry_format_for_load(client, id, backend_override, &SelectorCfg::current())?;
+    client.fetch_extracted_preferring_format(id, platform, format, cancel, progress_callback)
+}
+
+fn validate_local_backend_override(
+    metadata: &ModelMetadata,
+    backend: BackendChoice,
+    cfg: &SelectorCfg,
+) -> SdkResult<()> {
+    if !metadata_uses_local_backend_selector(metadata) {
+        return Ok(());
+    }
+
+    validate_local_backend_artifact_compatibility(metadata, backend)?;
+
+    let params = SelectionParams::new(&metadata.model_id).with_explicit(Some(backend));
+    select_with_cfg(&params, &EmptyRegistryView, cfg)
+        .map(|_| ())
+        .map_err(selector_error_to_sdk)
+}
+
+fn metadata_uses_local_backend_selector(metadata: &ModelMetadata) -> bool {
+    if matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
+        || is_mlx_llm_safetensors_metadata(metadata)
+        || is_mlx_embedding_safetensors_metadata(metadata)
+    {
+        return true;
+    }
+
+    metadata
+        .metadata
+        .get("task")
+        .and_then(|v| v.as_str())
+        .and_then(stage_kind_from_task)
+        .is_some_and(|kind| matches!(kind, "llm" | "embed"))
+}
+
+fn validate_local_backend_artifact_compatibility(
+    metadata: &ModelMetadata,
+    backend: BackendChoice,
+) -> SdkResult<()> {
+    match &metadata.execution_template {
+        ExecutionTemplate::Gguf { .. } => match backend {
+            BackendChoice::Mlx => Err(SdkError::ConfigError(format!(
+                "backend `mlx` does not support local GGUF model `{}`; use `auto`, `llamacpp`, or `mistral`",
+                metadata.model_id
+            ))),
+            BackendChoice::LlamaCpp | BackendChoice::Mistral => Ok(()),
+        },
+        ExecutionTemplate::SafeTensors { architecture, .. } => match backend {
+            BackendChoice::Mlx => {
+                if metadata_is_mlx_compatible_safetensors(metadata) {
+                    Ok(())
+                } else {
+                    Err(SdkError::ConfigError(format!(
+                        "backend `mlx` does not support local SafeTensors architecture `{}` for model `{}`",
+                        architecture.as_deref().unwrap_or("unknown"),
+                        metadata.model_id
+                    )))
+                }
+            }
+            BackendChoice::LlamaCpp | BackendChoice::Mistral => Err(SdkError::ConfigError(format!(
+                "backend `{}` does not support local SafeTensors model `{}`; use `auto` or `mlx`",
+                backend.as_str(),
+                metadata.model_id
+            ))),
+        },
+        _ => Ok(()),
+    }
+}
+
+fn metadata_is_mlx_compatible_safetensors(metadata: &ModelMetadata) -> bool {
+    let mut forced = metadata.clone();
+    forced.backend = Some("mlx".to_string());
+    is_mlx_llm_safetensors_metadata(&forced) || is_mlx_embedding_safetensors_metadata(&forced)
+}
+
+fn metadata_is_llm(metadata: &ModelMetadata) -> bool {
+    ModelLoader::is_llm_template(metadata) || is_mlx_llm_safetensors_metadata(metadata)
+}
+
+fn metadata_supports_token_streaming(metadata: &ModelMetadata) -> bool {
+    // GGUF and VisionLanguage both stream through the llama.cpp / mistral.rs
+    // adapters, so they share the same feature gate.
+    let native_streaming = ModelLoader::is_llm_template(metadata)
+        && cfg!(any(feature = "llm-mistral", feature = "llm-llamacpp"));
+    if native_streaming {
+        return true;
+    }
+
+    if !is_mlx_llm_safetensors_metadata(metadata) {
+        return false;
+    }
+
+    let cfg = SelectorCfg::current();
+    metadata_supports_mlx_token_streaming_with_cfg(metadata, &cfg)
+}
+
+fn metadata_supports_mlx_token_streaming_with_cfg(
+    metadata: &ModelMetadata,
+    cfg: &SelectorCfg,
+) -> bool {
+    is_mlx_llm_safetensors_metadata(metadata)
+        && cfg.mlx_compiled
+        && cfg.host_is_apple_arm64
+        && cfg.mlx_runtime_ok
+}
+
 pub(crate) fn select_huggingface_files_to_download<'a>(
     repo: &str,
     all_filenames: &[&'a str],
@@ -1411,6 +1605,7 @@ pub struct ModelLoader {
     /// Per-load speculative-cloud override. `None` inherits the process-global
     /// default set via [`crate::set_speculative_cloud`].
     speculative_cloud: Option<bool>,
+    backend_override: Option<BackendChoice>,
     /// Per-load auto-release override. `None` inherits the process-global
     /// default set via [`crate::set_auto_release`].
     auto_release: Option<AutoReleasePolicy>,
@@ -1770,6 +1965,7 @@ impl ModelLoader {
             model_id: Some(id.to_string()),
             version: None, // Version is resolved by registry API
             speculative_cloud: None,
+            backend_override: None,
             auto_release: None,
         }
     }
@@ -1791,6 +1987,7 @@ impl ModelLoader {
             model_id: Some(id.to_string()),
             version: None,
             speculative_cloud: None,
+            backend_override: None,
             auto_release: None,
         }
     }
@@ -1807,6 +2004,7 @@ impl ModelLoader {
             model_id: Some(model_id.to_string()),
             version: Some(version.to_string()),
             speculative_cloud: None,
+            backend_override: None,
             auto_release: None,
         }
     }
@@ -1831,6 +2029,7 @@ impl ModelLoader {
             model_id: Some(model_id.to_string()),
             version: Some(version.to_string()),
             speculative_cloud: None,
+            backend_override: None,
             auto_release: None,
         }
     }
@@ -1849,6 +2048,7 @@ impl ModelLoader {
             model_id: None,
             version: None,
             speculative_cloud: None,
+            backend_override: None,
             auto_release: None,
         })
     }
@@ -1884,6 +2084,7 @@ impl ModelLoader {
             model_id: None,
             version: None,
             speculative_cloud: None,
+            backend_override: None,
             auto_release: None,
         })
     }
@@ -1916,6 +2117,7 @@ impl ModelLoader {
             model_id: Some(repo.to_string()),
             version: None,
             speculative_cloud: None,
+            backend_override: None,
             auto_release: None,
         }
     }
@@ -1938,6 +2140,7 @@ impl ModelLoader {
             source,
             version: Some(revision.to_string()),
             speculative_cloud: None,
+            backend_override: None,
             auto_release: None,
         }
     }
@@ -1964,8 +2167,23 @@ impl ModelLoader {
             model_id: Some(repo),
             version: None,
             speculative_cloud: None,
+            backend_override: None,
             auto_release: None,
         }
+    }
+
+    /// Force a local generation or embedding backend for this loader.
+    ///
+    /// Registry loads use this override to request a matching artifact format
+    /// when the registry can distinguish one, for example MLX SafeTensors
+    /// instead of llama.cpp GGUF. The override is also applied to the
+    /// in-memory `ModelMetadata.backend` at load time, so cached metadata files
+    /// are not mutated. Local GGUF and MLX SafeTensors metadata validate the
+    /// requested backend against the same availability gate before the model is
+    /// returned to callers.
+    pub fn with_backend(mut self, backend: BackendChoice) -> Self {
+        self.backend_override = Some(backend);
+        self
     }
 
     /// Get the model ID (if known).
@@ -2128,7 +2346,17 @@ impl ModelLoader {
                 // A local cache check only — instantiate `CacheManager` directly
                 // rather than `RegistryClient::from_env()`, which would spin up
                 // an HTTP agent and circuit breakers we don't need here.
-                CacheManager::new().is_ok_and(|cache| cache.is_extracted(id))
+                // Registry downloads may extract under a format-variant key
+                // (`id__safetensors` / `id__gguf`) instead of the base id, so
+                // check those too — otherwise a fully-downloaded variant keeps
+                // `will_speculate()` true forever.
+                CacheManager::new().is_ok_and(|cache| {
+                    cache.is_extracted(id)
+                        || ["safetensors", "gguf"].iter().any(|format| {
+                            cache
+                                .is_extracted(&crate::registry_client::format_cache_key(id, format))
+                        })
+                })
             }
             _ => true,
         }
@@ -2238,7 +2466,7 @@ impl ModelLoader {
     /// # }
     /// ```
     pub fn start_download(&self) -> Arc<ModelDownload> {
-        ModelDownload::spawn(self.source.clone())
+        ModelDownload::spawn(self.source.clone(), self.backend_override)
     }
 
     /// Load the model asynchronously.
@@ -2293,22 +2521,40 @@ impl ModelLoader {
     where
         F: Fn(DownloadStatus),
     {
-        if speculate && client.resolve_offline(id).is_none() {
-            let resolved = client.resolve(id, platform)?;
+        let format =
+            registry_format_for_load(&client, id, self.backend_override, &SelectorCfg::current())?;
+        let cached = match format {
+            Some(format) => client.resolve_offline_with_format(id, format),
+            None => client.resolve_offline(id),
+        };
+        if speculate && cached.is_none() {
+            let resolved = match format {
+                Some(format) => client.resolve_with_format(id, platform, format)?,
+                None => client.resolve(id, platform)?,
+            };
             if crate::registry_client::resolved_is_chat(&resolved) {
-                return Ok(Self::load_speculative(client, id, resolved));
+                return Ok(self.load_speculative(client, id, format, resolved));
             }
+            let cache_key =
+                format.map(|format| crate::registry_client::format_cache_key(id, format));
             let model_dir = client.fetch_extracted_resolved(
                 id,
+                cache_key.as_deref(),
                 &resolved,
                 Arc::new(AtomicBool::new(false)),
-                progress_callback,
+                &progress_callback,
             )?;
             return self.load_from_directory(&model_dir);
         }
 
         // Fetch and extract model (handles both .xyb bundles and passthrough GGUF files)
-        let model_dir = client.fetch_extracted(id, platform, progress_callback)?;
+        let model_dir = client.fetch_extracted_preferring_format(
+            id,
+            platform,
+            format,
+            Arc::new(AtomicBool::new(false)),
+            progress_callback,
+        )?;
 
         // Load from extracted directory
         self.load_from_directory(&model_dir)
@@ -2324,15 +2570,18 @@ impl ModelLoader {
     /// `resolved`, the variant the caller judged a chat model, without
     /// resolving again. Never blocks the caller.
     fn load_speculative(
+        &self,
         client: Arc<RegistryClient>,
         id: &str,
+        format: Option<&str>,
         resolved: ResolvedVariant,
     ) -> XybridModel {
         // The future extraction directory for the placeholder executor. The
         // executor is lazy (no weights touched until `execute`), so pointing it
         // at a not-yet-populated path is fine — it is never executed while the
         // handle stays `loaded == false`.
-        let model_dir = client.extraction_dir(id);
+        let cache_key = format.map(|format| crate::registry_client::format_cache_key(id, format));
+        let model_dir = client.extraction_dir(cache_key.as_deref().unwrap_or(id));
 
         // Only chat models get here (the caller checked the resolved variant)
         // and the gateway streams tokens, so mark the placeholder as GGUF.
@@ -2370,21 +2619,23 @@ impl ModelLoader {
         let bg_download = Arc::clone(&download);
         let id_owned = id.to_string();
         let thread_name = format!("speculative-download-{id_owned}");
+        let backend_override = self.backend_override;
         if let Err(err) = std::thread::Builder::new()
             .name(thread_name)
             .spawn(move || {
                 let built = client
                     .fetch_extracted_resolved(
                         &id_owned,
+                        cache_key.as_deref(),
                         &resolved,
                         // Nothing cancels a speculative download.
                         Arc::new(AtomicBool::new(false)),
                         // Feed the poll-able progress cell; hosts read it via
                         // `XybridModel::download_status` or subscribe with
                         // `XybridModel::watch_download`.
-                        |status| bg_download.set_progress(status),
+                        &|status| bg_download.set_progress(status),
                     )
-                    .and_then(|dir| Self::create_model_handle(&dir));
+                    .and_then(|dir| Self::create_model_handle(&dir, backend_override));
                 match built {
                     Ok(real) => {
                         *bg_handle.write().unwrap_or_else(|e| e.into_inner()) = real;
@@ -2494,7 +2745,7 @@ impl ModelLoader {
         let extract_dir = cache.ensure_extracted(path)?;
 
         // Load from extracted directory (extraction is permanent in cache)
-        let handle = Self::create_model_handle(&extract_dir)?;
+        let handle = Self::create_model_handle(&extract_dir, self.backend_override)?;
 
         Ok(Self::publish_loaded_model(handle))
     }
@@ -3107,7 +3358,7 @@ impl ModelLoader {
     }
 
     fn load_from_directory(&self, path: &PathBuf) -> SdkResult<XybridModel> {
-        let handle = Self::create_model_handle(path)?;
+        let handle = Self::create_model_handle(path, self.backend_override)?;
 
         Ok(Self::publish_loaded_model(handle))
     }
@@ -3143,14 +3394,21 @@ impl ModelLoader {
         }
     }
 
-    fn create_model_handle(model_dir: &PathBuf) -> SdkResult<ModelHandle> {
+    fn create_model_handle(
+        model_dir: &PathBuf,
+        backend_override: Option<BackendChoice>,
+    ) -> SdkResult<ModelHandle> {
         // Load metadata
         let metadata_path = model_dir.join("model_metadata.json");
         let metadata_str = std::fs::read_to_string(&metadata_path)
             .map_err(|e| SdkError::load_src("Failed to read model_metadata.json", e))?;
-        let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
+        let mut metadata: ModelMetadata = serde_json::from_str(&metadata_str)
             .map_err(|e| SdkError::load_src("Failed to parse metadata", e))?;
         Self::validate_native_execution_template(&metadata)?;
+        if let Some(backend) = backend_override {
+            validate_local_backend_override(&metadata, backend, &SelectorCfg::current())?;
+            metadata.backend = Some(backend.as_str().to_string());
+        }
 
         // Create executor with base path
         let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
@@ -3249,9 +3507,12 @@ impl ModelLoader {
         // Check metadata hints (metadata is HashMap<String, serde_json::Value>)
         if let Some(task) = metadata.metadata.get("task").and_then(|v| v.as_str()) {
             match task {
-                "speech-recognition" | "asr" | "transcription" => return OutputType::Text,
+                "speech-recognition" | "asr" | "transcription" | "text-generation" | "llm"
+                | "chat-completion" => return OutputType::Text,
                 "text-to-speech" | "tts" | "speech-synthesis" => return OutputType::Audio,
-                "embedding" | "feature-extraction" => return OutputType::Embedding,
+                "embedding" | "text-embedding" | "feature-extraction" | "sentence-similarity" => {
+                    return OutputType::Embedding
+                }
                 _ => {}
             }
         }
@@ -3746,7 +4007,7 @@ impl XybridModel {
         self.handle
             .read()
             .ok()
-            .map(|h| ModelLoader::is_llm_template(&h.metadata))
+            .map(|h| metadata_is_llm(&h.metadata))
             .unwrap_or(false)
     }
 
@@ -4134,7 +4395,7 @@ impl XybridModel {
             .execute(&metadata, envelope, config)
             .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
-        let latency_ms = start.elapsed().as_millis() as u32;
+        let latency_ms = duration_millis_u32(start.elapsed());
 
         // Emit ModelComplete telemetry event
         let mut data = serde_json::json!({
@@ -4150,10 +4411,7 @@ impl XybridModel {
             latency_ms: Some(latency_ms),
             error: None,
             data: Some(data.to_string()),
-            timestamp_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0),
+            timestamp_ms: current_timestamp_millis(),
         };
         crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
@@ -4466,7 +4724,7 @@ impl XybridModel {
             .execute_with_context(&metadata, envelope, context, config)
             .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
-        let latency_ms = start.elapsed().as_millis() as u32;
+        let latency_ms = duration_millis_u32(start.elapsed());
 
         // Emit ModelComplete telemetry event
         let event = crate::telemetry::TelemetryEvent {
@@ -4484,10 +4742,7 @@ impl XybridModel {
                 })
                 .to_string(),
             ),
-            timestamp_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0),
+            timestamp_ms: current_timestamp_millis(),
         };
         crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
@@ -4619,8 +4874,7 @@ impl XybridModel {
         // Clone metadata to check execution template
         let metadata = handle.metadata.clone();
 
-        // Check if this is an LLM model (GGUF template)
-        let is_llm = ModelLoader::is_llm_template(&metadata);
+        let is_llm = metadata_supports_token_streaming(&metadata);
 
         let output = if is_llm {
             // True streaming with context for LLM models
@@ -4663,7 +4917,7 @@ impl XybridModel {
             result
         };
 
-        let latency_ms = start.elapsed().as_millis() as u32;
+        let latency_ms = duration_millis_u32(start.elapsed());
 
         // Emit telemetry event
         let mut data = serde_json::json!({
@@ -4681,10 +4935,7 @@ impl XybridModel {
             latency_ms: Some(latency_ms),
             error: None,
             data: Some(data.to_string()),
-            timestamp_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0),
+            timestamp_ms: current_timestamp_millis(),
         };
         crate::telemetry::publish_telemetry_event(event);
 
@@ -4735,7 +4986,9 @@ impl XybridModel {
     /// Run inference with streaming output.
     ///
     /// This method provides a unified streaming interface for all model types:
-    /// - **LLM models (GGUF)**: True token-by-token streaming via the callback
+    /// - **LLM models**: true token-by-token streaming for GGUF backends when
+    ///   llama.cpp or mistral.rs is compiled, and for MLX SafeTensors only
+    ///   when the Apple Silicon macOS MLX runtime is available.
     /// - **Other models (TTS, ASR, etc.)**: Single callback with the full result
     ///
     /// This "everything is a stream" pattern allows consumers to use the same
@@ -4837,8 +5090,7 @@ impl XybridModel {
         // Clone metadata to check execution template
         let metadata = handle.metadata.clone();
 
-        // Check if this is an LLM model (GGUF template)
-        let is_llm = ModelLoader::is_llm_template(&metadata);
+        let is_llm = metadata_supports_token_streaming(&metadata);
 
         let output = if is_llm {
             // True streaming for LLM models
@@ -4875,7 +5127,7 @@ impl XybridModel {
             result
         };
 
-        let latency_ms = start.elapsed().as_millis() as u32;
+        let latency_ms = duration_millis_u32(start.elapsed());
 
         // Emit telemetry event
         let mut data = serde_json::json!({
@@ -4892,10 +5144,7 @@ impl XybridModel {
             latency_ms: Some(latency_ms),
             error: None,
             data: Some(data.to_string()),
-            timestamp_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0),
+            timestamp_ms: current_timestamp_millis(),
         };
         crate::telemetry::publish_telemetry_event(event);
 
@@ -5166,7 +5415,7 @@ impl XybridModel {
             })
         };
 
-        let local_latency_ms = local_start.elapsed().as_millis() as u32;
+        let local_latency_ms = duration_millis_u32(local_start.elapsed());
         let local_resource_summary = local_resource_guard.finish();
         let policy_metrics = fallback_policy_metrics(options);
         let signal_context = Some(SignalContext::from_metrics(&policy_metrics));
@@ -5290,7 +5539,7 @@ impl XybridModel {
                 guard.ensure_runnable()?;
 
                 let metadata = guard.metadata.clone();
-                let is_llm = ModelLoader::is_llm_template(&metadata);
+                let is_llm = metadata_supports_token_streaming(&metadata);
 
                 // Clone tx for the streaming callback (so we can use tx in the else branch)
                 let tx_for_callback = tx.clone();
@@ -5348,7 +5597,7 @@ impl XybridModel {
                     result
                 };
 
-                let latency_ms = start.elapsed().as_millis() as u32;
+                let latency_ms = duration_millis_u32(start.elapsed());
 
                 // Emit telemetry
                 let event = crate::telemetry::TelemetryEvent {
@@ -5366,10 +5615,7 @@ impl XybridModel {
                         })
                         .to_string(),
                     ),
-                    timestamp_ms: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0),
+                    timestamp_ms: current_timestamp_millis(),
                 };
                 crate::telemetry::publish_telemetry_event(event);
 
@@ -5400,23 +5646,17 @@ impl XybridModel {
 
     /// Check if this model supports true token streaming.
     ///
-    /// Returns `true` for LLM models (GGUF) when LLM features are enabled,
-    /// `false` for other model types or when LLM features are disabled.
+    /// Returns `true` for token-streaming LLM models when their backend feature
+    /// is enabled and runtime-ready. MLX SafeTensors returns `false` on
+    /// non-linking `llm-mlx` builds.
     /// Note: `run_streaming()` works for all models, but only LLM models
     /// get true token-by-token streaming; others emit a single result.
     pub fn supports_token_streaming(&self) -> bool {
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-        {
-            self.handle
-                .read()
-                .ok()
-                .map(|h| ModelLoader::is_llm_template(&h.metadata))
-                .unwrap_or(false)
-        }
-        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
-        {
-            false
-        }
+        self.handle
+            .read()
+            .ok()
+            .map(|h| metadata_supports_token_streaming(&h.metadata))
+            .unwrap_or(false)
     }
 
     /// Run batch inference asynchronously.
@@ -5478,7 +5718,7 @@ impl XybridModel {
                 .execute(&metadata, &envelope, config.as_ref())
                 .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
-            let latency_ms = start.elapsed().as_millis() as u32;
+            let latency_ms = duration_millis_u32(start.elapsed());
 
             // Emit ModelComplete telemetry event
             let mut data = serde_json::json!({
@@ -5494,10 +5734,7 @@ impl XybridModel {
                 latency_ms: Some(latency_ms),
                 error: None,
                 data: Some(data.to_string()),
-                timestamp_ms: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0),
+                timestamp_ms: current_timestamp_millis(),
             };
             crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
@@ -5645,6 +5882,108 @@ mod registry_load_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry_client::{
+        registry_format_for_backend, select_auto_registry_format_for_detail, ModelDetail,
+        VariantInfo,
+    };
+    use std::collections::HashMap;
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    use std::io::Write;
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    use std::path::Path;
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    use std::sync::MutexGuard;
+
+    #[test]
+    fn duration_millis_conversions_saturate() {
+        assert_eq!(
+            duration_millis_u64(std::time::Duration::from_millis(42)),
+            42
+        );
+        assert_eq!(
+            duration_millis_u64(std::time::Duration::from_secs(u64::MAX)),
+            u64::MAX
+        );
+        assert_eq!(
+            duration_millis_u32(std::time::Duration::from_millis(u64::from(u32::MAX) + 1)),
+            u32::MAX
+        );
+    }
+
+    fn apple_mlx_selector_cfg() -> SelectorCfg {
+        SelectorCfg {
+            target: "macos-aarch64".to_string(),
+            host_is_apple_arm64: true,
+            mlx_compiled: true,
+            llamacpp_compiled: true,
+            mistral_compiled: false,
+            mlx_runtime_ok: true,
+        }
+    }
+
+    fn linux_llamacpp_selector_cfg() -> SelectorCfg {
+        SelectorCfg {
+            target: "linux-x86_64".to_string(),
+            host_is_apple_arm64: false,
+            mlx_compiled: false,
+            llamacpp_compiled: true,
+            mistral_compiled: false,
+            mlx_runtime_ok: false,
+        }
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    fn mlx_test_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("MLX SDK test lock poisoned")
+    }
+
+    fn registry_detail(task: &str, variants: &[(&str, &str)]) -> ModelDetail {
+        let variants = variants
+            .iter()
+            .map(|(name, format)| {
+                (
+                    (*name).to_string(),
+                    VariantInfo {
+                        platform: "macos-arm64".to_string(),
+                        format: (*format).to_string(),
+                        quantization: "fp16".to_string(),
+                        size_bytes: 1,
+                        hf_repo: "xybrid-ai/test".to_string(),
+                        file: format!("{name}.xyb"),
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        ModelDetail {
+            id: "qwen3.5-3b".to_string(),
+            family: "qwen".to_string(),
+            task: task.to_string(),
+            parameters: 3_000_000_000,
+            description: "test".to_string(),
+            default_variant: None,
+            variants,
+        }
+    }
 
     #[cfg(feature = "huggingface")]
     #[test]
@@ -6306,7 +6645,8 @@ mod tests {
             std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
                 .expect("model metadata should be written");
 
-            let error = match ModelLoader::create_model_handle(&temp_dir.path().to_path_buf()) {
+            let error = match ModelLoader::create_model_handle(&temp_dir.path().to_path_buf(), None)
+            {
                 Ok(_) => panic!("{format} metadata must be rejected during load"),
                 Err(error) => error,
             };
@@ -6359,6 +6699,16 @@ mod tests {
         assert!(ModelLoader::is_llm_template(&metadata));
         assert!(ModelLoader::check_streaming_support(&metadata));
         assert_eq!(ModelLoader::infer_output_type(&metadata), OutputType::Text);
+
+        // The public surface must agree with the template check: a VLM is an
+        // LLM (chat/REPL mode, no ASR warmup) and streams tokens whenever a
+        // native LLM runtime is compiled in.
+        let model = test_loaded_model_with_metadata(metadata);
+        assert!(model.is_llm());
+        assert_eq!(
+            model.supports_token_streaming(),
+            cfg!(any(feature = "llm-mistral", feature = "llm-llamacpp"))
+        );
     }
 
     #[test]
@@ -7033,6 +7383,439 @@ mod tests {
     }
 
     #[test]
+    fn model_loader_with_backend_stamps_loaded_metadata() {
+        let tmp = TempDir::new().unwrap();
+        let metadata =
+            xybrid_core::execution::ModelMetadata::onnx("local-test", "1.0", "model.onnx");
+        std::fs::write(
+            tmp.path().join("model_metadata.json"),
+            serde_json::to_string_pretty(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        let loader = ModelLoader::from_directory(tmp.path())
+            .unwrap()
+            .with_backend(crate::BackendChoice::Mlx);
+        let model = loader.load().unwrap();
+        let handle = model.handle.read().unwrap();
+
+        assert_eq!(handle.metadata.backend.as_deref(), Some("mlx"));
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn model_loader_runs_synthetic_mlx_embedding_directory() {
+        let _guard = mlx_test_lock();
+        let tmp = TempDir::new().unwrap();
+        let prompt = "Hello";
+        write_synthetic_canonical_bert_bundle(tmp.path(), prompt);
+
+        assert_model_loader_runs_synthetic_mlx_embedding_directory(tmp.path(), prompt);
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn model_loader_runs_synthetic_mlx_embedding_indexed_shards() {
+        let _guard = mlx_test_lock();
+        let tmp = TempDir::new().unwrap();
+        let prompt = "Hello";
+        write_synthetic_canonical_bert_bundle(tmp.path(), prompt);
+        convert_single_weights_to_indexed_shard(tmp.path());
+
+        assert_model_loader_runs_synthetic_mlx_embedding_directory(tmp.path(), prompt);
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    fn assert_model_loader_runs_synthetic_mlx_embedding_directory(dir: &Path, prompt: &str) {
+        let mut metadata = xybrid_core::execution::ModelMetadata::safetensors(
+            "synthetic-bert-embed",
+            "1.0",
+            "model.safetensors",
+            "bert",
+        );
+        metadata.backend = Some("auto".to_string());
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!("text-embedding"));
+        metadata
+            .metadata
+            .insert("pooling".to_string(), serde_json::json!("mean"));
+        metadata
+            .metadata
+            .insert("normalize".to_string(), serde_json::json!(false));
+        metadata
+            .metadata
+            .insert("max_seq_len".to_string(), serde_json::json!(16));
+
+        std::fs::write(
+            dir.join("model_metadata.json"),
+            serde_json::to_string_pretty(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        let model = ModelLoader::from_directory(dir).unwrap().load().unwrap();
+        assert_eq!(model.output_type(), OutputType::Embedding);
+
+        let result = model
+            .run(
+                &Envelope::new(xybrid_core::ir::EnvelopeKind::Text(prompt.to_string())),
+                None,
+            )
+            .expect("SDK model loader should run synthetic MLX embedding directory");
+
+        assert_eq!(result.output_type(), OutputType::Embedding);
+        let values = result.unwrap_embedding();
+        assert_eq!(values.len(), 2);
+        assert!((values[0] + 1.0).abs() < 1.0e-5, "got {values:?}");
+        assert!((values[1] - 1.0).abs() < 1.0e-5, "got {values:?}");
+    }
+
+    #[test]
+    fn local_llm_backend_override_stamps_explicit_mlx_when_available() {
+        let mut metadata = xybrid_core::execution::ModelMetadata::safetensors(
+            "qwen3-4b",
+            "1.0",
+            "model.safetensors",
+            "qwen3",
+        );
+
+        validate_local_backend_override(
+            &metadata,
+            crate::BackendChoice::Mlx,
+            &apple_mlx_selector_cfg(),
+        )
+        .unwrap();
+        metadata.backend = Some(crate::BackendChoice::Mlx.as_str().to_string());
+
+        assert_eq!(metadata.backend.as_deref(), Some("mlx"));
+    }
+
+    #[test]
+    fn local_safetensors_backend_override_rejects_llamacpp_artifact_mismatch() {
+        let metadata = xybrid_core::execution::ModelMetadata::safetensors(
+            "qwen3-4b",
+            "1.0",
+            "model.safetensors",
+            "qwen3",
+        );
+
+        let err = validate_local_backend_override(
+            &metadata,
+            crate::BackendChoice::LlamaCpp,
+            &apple_mlx_selector_cfg(),
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("does not support local SafeTensors model"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn local_gguf_backend_override_rejects_explicit_mlx_artifact_mismatch() {
+        let mut metadata =
+            xybrid_core::execution::ModelMetadata::onnx("qwen3-4b-gguf", "1.0", "model.gguf");
+        metadata.execution_template = ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: None,
+        };
+
+        let err = validate_local_backend_override(
+            &metadata,
+            crate::BackendChoice::Mlx,
+            &apple_mlx_selector_cfg(),
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("does not support local GGUF model"),
+            "{err}"
+        );
+    }
+
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn mlx_safetensors_llm_reports_token_streaming_support_when_runtime_available() {
+        let metadata = xybrid_core::execution::ModelMetadata::safetensors(
+            "qwen3-4b",
+            "1.0",
+            "model.safetensors",
+            "qwen3",
+        );
+
+        assert!(metadata_is_llm(&metadata));
+        assert!(metadata_supports_mlx_token_streaming_with_cfg(
+            &metadata,
+            &apple_mlx_selector_cfg()
+        ));
+
+        let mut unavailable = apple_mlx_selector_cfg();
+        unavailable.mlx_runtime_ok = false;
+        assert!(!metadata_supports_mlx_token_streaming_with_cfg(
+            &metadata,
+            &unavailable
+        ));
+
+        let model = test_loaded_model_with_metadata(metadata);
+
+        assert!(model.is_llm());
+        assert_eq!(
+            model.supports_token_streaming(),
+            metadata_supports_token_streaming(&model.handle.read().unwrap().metadata)
+        );
+    }
+
+    #[test]
+    fn infer_output_type_maps_registry_llm_and_embedding_tasks() {
+        let mut metadata = xybrid_core::execution::ModelMetadata::safetensors(
+            "qwen3-4b",
+            "1.0",
+            "model.safetensors",
+            "qwen3",
+        );
+
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!("text-generation"));
+        assert_eq!(ModelLoader::infer_output_type(&metadata), OutputType::Text);
+
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!("text-embedding"));
+        assert_eq!(
+            ModelLoader::infer_output_type(&metadata),
+            OutputType::Embedding
+        );
+    }
+
+    #[test]
+    fn local_embedding_backend_override_rejects_unavailable_explicit_mlx() {
+        let mut metadata = xybrid_core::execution::ModelMetadata::safetensors(
+            "nomic-embed",
+            "1.0",
+            "model.safetensors",
+            "nomic_bert",
+        );
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!("text-embedding"));
+
+        let err = validate_local_backend_override(
+            &metadata,
+            crate::BackendChoice::Mlx,
+            &linux_llamacpp_selector_cfg(),
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("MLX backend requested but not available"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn backend_override_maps_to_registry_format_when_available() {
+        assert_eq!(
+            registry_format_for_backend(crate::BackendChoice::Mlx),
+            Some("safetensors")
+        );
+        assert_eq!(
+            registry_format_for_backend(crate::BackendChoice::LlamaCpp),
+            Some("gguf")
+        );
+        assert_eq!(
+            registry_format_for_backend(crate::BackendChoice::Mistral),
+            None
+        );
+    }
+
+    #[test]
+    fn auto_registry_selection_prefers_safetensors_on_apple_runtime() {
+        let detail = registry_detail(
+            "text-generation",
+            &[("llamacpp-q4", "gguf"), ("mlx-fp16", "safetensors")],
+        );
+
+        assert_eq!(
+            select_auto_registry_format_for_detail(
+                "qwen3.5-3b",
+                &detail,
+                &apple_mlx_selector_cfg()
+            )
+            .unwrap(),
+            Some("safetensors")
+        );
+    }
+
+    #[test]
+    fn auto_registry_selection_prefers_safetensors_for_embeddings_on_apple_runtime() {
+        let detail = registry_detail(
+            "text-embedding",
+            &[("llamacpp-q4", "gguf"), ("mlx-fp16", "safetensors")],
+        );
+
+        assert_eq!(
+            select_auto_registry_format_for_detail(
+                "nomic-embed-text-v1.5",
+                &detail,
+                &apple_mlx_selector_cfg()
+            )
+            .unwrap(),
+            Some("safetensors")
+        );
+    }
+
+    #[test]
+    fn auto_registry_selection_keeps_embedding_default_without_mlx_safetensors() {
+        let detail = registry_detail("text-embedding", &[("llamacpp-q4", "gguf")]);
+
+        assert_eq!(
+            select_auto_registry_format_for_detail(
+                "nomic-embed-text-v1.5",
+                &detail,
+                &apple_mlx_selector_cfg()
+            )
+            .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn auto_registry_selection_keeps_embedding_default_when_mlx_runtime_unavailable() {
+        let detail = registry_detail(
+            "text-embedding",
+            &[("llamacpp-q4", "gguf"), ("mlx-fp16", "safetensors")],
+        );
+        let mut cfg = apple_mlx_selector_cfg();
+        cfg.mlx_runtime_ok = false;
+
+        assert_eq!(
+            select_auto_registry_format_for_detail("nomic-embed-text-v1.5", &detail, &cfg).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn auto_registry_selection_falls_back_to_gguf_without_safetensors() {
+        let detail = registry_detail("text-generation", &[("llamacpp-q4", "gguf")]);
+
+        assert_eq!(
+            select_auto_registry_format_for_detail(
+                "qwen3.5-3b",
+                &detail,
+                &apple_mlx_selector_cfg()
+            )
+            .unwrap(),
+            Some("gguf")
+        );
+    }
+
+    #[test]
+    fn auto_registry_selection_ignores_non_backend_selectable_registry_tasks() {
+        let detail = registry_detail("text-to-speech", &[("mlx-fp16", "safetensors")]);
+
+        assert_eq!(
+            select_auto_registry_format_for_detail(
+                "qwen3.5-3b",
+                &detail,
+                &apple_mlx_selector_cfg()
+            )
+            .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn explicit_mlx_registry_selection_errors_when_backend_unavailable() {
+        let err = explicit_registry_format_for_backend(
+            "qwen3.5-3b",
+            None,
+            crate::BackendChoice::Mlx,
+            &linux_llamacpp_selector_cfg(),
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("MLX backend requested but not available"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn model_loader_rejects_llamacpp_for_registry_embedding_task() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let model_id = format!("test-embed-{}", uuid::Uuid::new_v4());
+        let detail_body = format!(
+            r#"{{
+                "id":"{model_id}",
+                "family":"test",
+                "task":"text-embedding",
+                "parameters":1,
+                "description":"d",
+                "default_variant":null,
+                "variants":{{
+                    "llamacpp-q4":{{
+                        "platform":"macos-arm64",
+                        "format":"gguf",
+                        "quantization":"q4",
+                        "size_bytes":34,
+                        "hf_repo":"xybrid-ai/{model_id}",
+                        "file":"model.gguf"
+                    }}
+                }}
+            }}"#
+        );
+        let detail_mock = server.mock(|when, then| {
+            when.method(GET).path(format!("/v1/models/{model_id}"));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(detail_body);
+        });
+        let client = RegistryClient::with_url(server.base_url()).unwrap();
+        let loader =
+            ModelLoader::from_registry(&model_id).with_backend(crate::BackendChoice::LlamaCpp);
+
+        let err = registry_format_for_load(
+            &client,
+            &model_id,
+            loader.backend_override,
+            &apple_mlx_selector_cfg(),
+        )
+        .unwrap_err();
+
+        assert!(
+            detail_mock.hits() > 0,
+            "explicit embedding backend validation must inspect registry task metadata"
+        );
+        assert!(
+            err.to_string()
+                .contains("does not support registry embedding model"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn gguf_models_are_streaming_text_models() {
         let mut metadata = ModelMetadata::onnx("qwen2.5-0.5b-instruct", "1.0", "model.gguf");
         metadata.execution_template = ExecutionTemplate::Gguf {
@@ -7234,6 +8017,217 @@ mod tests {
 
     fn text_envelope(text: &str) -> xybrid_core::ir::Envelope {
         xybrid_core::ir::Envelope::new(xybrid_core::ir::EnvelopeKind::Text(text.to_string()))
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    fn write_synthetic_canonical_bert_bundle(dir: &Path, prompt: &str) {
+        let tok_src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../xybrid-core/tests/fixtures/qwen_tokenizer.json");
+        std::fs::copy(&tok_src, dir.join("tokenizer.json")).expect("copy tokenizer");
+        let tokenizer = tokenizers::Tokenizer::from_file(&tok_src).expect("load tokenizer");
+        let encoding = tokenizer.encode(prompt, true).expect("encode prompt");
+        let token_ids = encoding.get_ids();
+        let seq_len = token_ids.len().max(1);
+        let vocab_size = token_ids
+            .iter()
+            .copied()
+            .max()
+            .map(|id| id as usize + 1)
+            .unwrap_or(1);
+
+        let cfg = serde_json::json!({
+            "model_type": "bert",
+            "hidden_size": 2,
+            "num_hidden_layers": 1,
+            "num_attention_heads": 1,
+            "intermediate_size": 4,
+            "vocab_size": vocab_size,
+            "max_position_embeddings": seq_len,
+            "type_vocab_size": 2,
+            "layer_norm_eps": 0.0,
+            "use_rotary_embeddings": false,
+            "use_swiglu": false
+        });
+        let mut f = std::fs::File::create(dir.join("config.json")).expect("create config");
+        f.write_all(cfg.to_string().as_bytes())
+            .expect("write config");
+
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+
+        let mut tensors: Vec<(String, Vec<usize>, Vec<u8>)> = Vec::new();
+        push_f32_tensor(
+            &mut tensors,
+            "embeddings.word_embeddings.weight",
+            vec![vocab_size, 2],
+            vec![0.0; vocab_size * 2],
+        );
+        let mut position_values = Vec::with_capacity(seq_len * 2);
+        for pos in 0..seq_len {
+            let base = pos as f32 + 1.0;
+            position_values.push(base);
+            position_values.push(base * 10.0);
+        }
+        push_f32_tensor(
+            &mut tensors,
+            "embeddings.position_embeddings.weight",
+            vec![seq_len, 2],
+            position_values,
+        );
+        push_f32_tensor(
+            &mut tensors,
+            "embeddings.token_type_embeddings.weight",
+            vec![2, 2],
+            vec![0.0; 4],
+        );
+        push_f32_tensor(
+            &mut tensors,
+            "embeddings.LayerNorm.weight",
+            vec![2],
+            vec![1.0; 2],
+        );
+        push_f32_tensor(
+            &mut tensors,
+            "embeddings.LayerNorm.bias",
+            vec![2],
+            vec![0.0; 2],
+        );
+
+        let base = "encoder.layer.0";
+        for name in [
+            "attention.self.query",
+            "attention.self.key",
+            "attention.self.value",
+            "attention.output.dense",
+        ] {
+            push_f32_tensor(
+                &mut tensors,
+                &format!("{base}.{name}.weight"),
+                vec![2, 2],
+                vec![0.0; 4],
+            );
+            push_f32_tensor(
+                &mut tensors,
+                &format!("{base}.{name}.bias"),
+                vec![2],
+                vec![0.0; 2],
+            );
+        }
+        for name in ["attention.output.LayerNorm", "output.LayerNorm"] {
+            push_f32_tensor(
+                &mut tensors,
+                &format!("{base}.{name}.weight"),
+                vec![2],
+                vec![1.0; 2],
+            );
+            push_f32_tensor(
+                &mut tensors,
+                &format!("{base}.{name}.bias"),
+                vec![2],
+                vec![0.0; 2],
+            );
+        }
+        push_f32_tensor(
+            &mut tensors,
+            &format!("{base}.intermediate.dense.weight"),
+            vec![4, 2],
+            vec![0.0; 8],
+        );
+        push_f32_tensor(
+            &mut tensors,
+            &format!("{base}.intermediate.dense.bias"),
+            vec![4],
+            vec![0.0; 4],
+        );
+        push_f32_tensor(
+            &mut tensors,
+            &format!("{base}.output.dense.weight"),
+            vec![2, 4],
+            vec![0.0; 8],
+        );
+        push_f32_tensor(
+            &mut tensors,
+            &format!("{base}.output.dense.bias"),
+            vec![2],
+            vec![0.0; 2],
+        );
+
+        let views: Vec<(String, TensorView<'_>)> = tensors
+            .iter()
+            .map(|(name, shape, bytes)| {
+                (
+                    name.clone(),
+                    TensorView::new(Dtype::F32, shape.clone(), bytes).expect("tensor view"),
+                )
+            })
+            .collect();
+        safetensors::serialize_to_file(views, &None, &dir.join("model.safetensors"))
+            .expect("write safetensors");
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    fn convert_single_weights_to_indexed_shard(dir: &Path) {
+        let single = dir.join("model.safetensors");
+        let shard_name = "model-00001-of-00001.safetensors";
+        let shard = dir.join(shard_name);
+        std::fs::rename(&single, &shard).expect("rename single weights to shard");
+
+        let bytes = std::fs::read(&shard).expect("read shard");
+        let (_, meta) = safetensors::SafeTensors::read_metadata(&bytes)
+            .expect("read shard safetensors metadata");
+        let weight_map = meta
+            .tensors()
+            .into_keys()
+            .map(|name| (name, serde_json::Value::String(shard_name.to_string())))
+            .collect::<serde_json::Map<_, _>>();
+        let index = serde_json::json!({ "metadata": {}, "weight_map": weight_map });
+        std::fs::write(dir.join("model.safetensors.index.json"), index.to_string())
+            .expect("write shard index");
+    }
+
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    fn push_f32_tensor(
+        tensors: &mut Vec<(String, Vec<usize>, Vec<u8>)>,
+        name: &str,
+        shape: Vec<usize>,
+        values: Vec<f32>,
+    ) {
+        let mut bytes = Vec::with_capacity(values.len() * 4);
+        for value in values {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        tensors.push((name.to_string(), shape, bytes));
+    }
+
+    fn test_loaded_model_with_metadata(metadata: ModelMetadata) -> XybridModel {
+        XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
+                metadata,
+                model_dir: PathBuf::from("."),
+                state: LoadState::Loaded,
+            })),
+            model_id: "local-test-model".to_string(),
+            version: "1.0".to_string(),
+            output_type: OutputType::Text,
+            supports_streaming: false,
+            current_run: Arc::new(Mutex::new(None)),
+            speculative: None,
+            default_generation_config: GenerationConfig::default(),
+            last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+        }
     }
 
     fn tool_generation_config() -> GenerationConfig {

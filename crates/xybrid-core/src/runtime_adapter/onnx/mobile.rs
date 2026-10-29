@@ -200,6 +200,7 @@ impl ONNXMobileRuntimeAdapter {
                 EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                     "onnx-mobile-throttled-vision-unsupported".to_string()
                 }
+                EnvelopeKind::TokenIds(_) => "onnx-mobile-throttled-tokens output".to_string(),
                 EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
                     return Err(crate::execution::choice::choice_kind_not_runtime_input())
                 }
@@ -213,6 +214,7 @@ impl ONNXMobileRuntimeAdapter {
                 EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                     "onnx-mobile-vision-unsupported".to_string()
                 }
+                EnvelopeKind::TokenIds(_) => "onnx-mobile-tokens output".to_string(),
                 EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
                     return Err(crate::execution::choice::choice_kind_not_runtime_input())
                 }

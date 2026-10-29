@@ -39,7 +39,7 @@ class _Loader implements FfiModelLoader {
   final FfiModel _model;
 
   @override
-  Future<FfiModel> load() async => _model;
+  Future<FfiModel> load({FfiBackend? backend}) async => _model;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

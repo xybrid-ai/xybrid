@@ -105,6 +105,7 @@ typedef uint32_t ___XybridEnvelopeKind;
 #define XYBRID_ENVELOPE_KIND_EMBEDDING ((___XybridEnvelopeKind)2)
 #define XYBRID_ENVELOPE_KIND_IMAGE ((___XybridEnvelopeKind)3)
 #define XYBRID_ENVELOPE_KIND_MULTI_PART ((___XybridEnvelopeKind)4)
+#define XYBRID_ENVELOPE_KIND_TOKEN_IDS ((___XybridEnvelopeKind)5)
 typedef int32_t ___XybridMessageRole;
 #define XYBRID_MESSAGE_ROLE_SYSTEM ((___XybridMessageRole)0)
 #define XYBRID_MESSAGE_ROLE_USER ((___XybridMessageRole)1)

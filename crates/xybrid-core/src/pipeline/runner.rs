@@ -436,6 +436,7 @@ impl PipelineRunner {
             provider: stage_config.provider,
             model: Some(stage_config.model.clone()),
             options: Some(stage_config.options.clone()),
+            backend: None,
         }
     }
 
@@ -475,6 +476,13 @@ impl PipelineRunner {
                 serde_json::json!({
                     "type": "multipart",
                     "parts": parts.iter().map(|part| self.envelope_to_value(part)).collect::<Vec<_>>()
+                })
+            }
+            EnvelopeKind::TokenIds(ids) => {
+                serde_json::json!({
+                    "type": "tokens",
+                    "length": ids.len(),
+                    "output": ids
                 })
             }
             // Refused before and after every stage, so these never reach a
@@ -559,6 +567,10 @@ impl PipelineRunner {
             | EnvelopeKind::ChoiceScores(_) => (
                 OutputResultType::Json,
                 OutputResult::Json(self.envelope_to_value(envelope)),
+            ),
+            EnvelopeKind::TokenIds(ids) => (
+                OutputResultType::Json,
+                OutputResult::Json(serde_json::json!({ "tokens": ids })),
             ),
         }
     }

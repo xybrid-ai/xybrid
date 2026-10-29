@@ -101,6 +101,7 @@ impl ChatTemplateFormatter {
                 | EnvelopeKind::Embedding(_)
                 | EnvelopeKind::Image { .. }
                 | EnvelopeKind::MultiPart(_)
+                | EnvelopeKind::TokenIds(_)
                 | EnvelopeKind::ChoiceRequest(_)
                 | EnvelopeKind::ChoiceScores(_) => continue,
             };
@@ -141,6 +142,7 @@ impl ChatTemplateFormatter {
                 | EnvelopeKind::Embedding(_)
                 | EnvelopeKind::Image { .. }
                 | EnvelopeKind::MultiPart(_)
+                | EnvelopeKind::TokenIds(_)
                 | EnvelopeKind::ChoiceRequest(_)
                 | EnvelopeKind::ChoiceScores(_) => continue,
             };
@@ -231,6 +233,7 @@ impl ChatTemplateFormatter {
                 | EnvelopeKind::Embedding(_)
                 | EnvelopeKind::Image { .. }
                 | EnvelopeKind::MultiPart(_)
+                | EnvelopeKind::TokenIds(_)
                 | EnvelopeKind::ChoiceRequest(_)
                 | EnvelopeKind::ChoiceScores(_) => continue,
             };

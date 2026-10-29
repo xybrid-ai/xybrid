@@ -98,6 +98,7 @@ pub(crate) fn ensure_ffi_payload(kind: &EnvelopeKind) -> Result<(), String> {
         }
         EnvelopeKind::Image { .. } => "an image",
         EnvelopeKind::MultiPart(_) => "a multi-part message",
+        EnvelopeKind::TokenIds(_) => "token IDs",
         EnvelopeKind::ChoiceRequest(_) => "a choice request",
         EnvelopeKind::ChoiceScores(_) => "choice scores",
     };
@@ -212,6 +213,7 @@ mod tests {
                 result_of(EnvelopeKind::MultiPart(vec![])),
             ),
             ("an image", InferenceResult::new(raw_pixel_image(), "m", 0)),
+            ("token IDs", result_of(EnvelopeKind::TokenIds(vec![1, 2]))),
             (
                 "a choice request",
                 InferenceResult::new(

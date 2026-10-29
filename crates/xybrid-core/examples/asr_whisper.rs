@@ -133,6 +133,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("❌ Unexpected vision output");
                 return Err("Expected text output, got vision output".into());
             }
+            EnvelopeKind::TokenIds(ids) => {
+                println!("❌ Unexpected token IDs output: {} ids", ids.len());
+                return Err("Expected text output, got token IDs".into());
+            }
             EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
                 println!("❌ Unexpected choice output");
                 return Err("Expected text output, got choice output".into());
@@ -184,6 +188,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                 println!("❌ Unexpected vision output");
                 return Err("Expected text output, got vision output".into());
+            }
+            EnvelopeKind::TokenIds(ids) => {
+                println!("❌ Unexpected token IDs output: {} ids", ids.len());
+                return Err("Expected text output, got token IDs".into());
             }
             EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
                 println!("❌ Unexpected choice output");

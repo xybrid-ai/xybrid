@@ -209,6 +209,9 @@ internal object XybridCodec {
         out["kind"] = "multipart"
         out["parts"] = kind.parts.map(::encodeEnvelope)
       }
+      is XybridEnvelopeKind.TokenIds -> throw BridgeException.InvalidArgument(
+        "Raw token-ID envelopes are internal and unavailable in React Native",
+      )
     }
     out["metadata"] = envelope.metadata.associate { it.key to it.value }
     return out

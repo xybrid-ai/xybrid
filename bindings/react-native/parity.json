@@ -128,7 +128,7 @@
     "XybridBundle::extract": { "excluded": "See XybridBundle::open." }
   },
   "records": {
-    "XybridEnvelopeKind": { "ts": "EnvelopeKind", "variants": { "Text": "text", "Audio": "audio", "Embedding": "embedding", "Image": "image", "MultiPart": "multipart" } },
+    "XybridEnvelopeKind": { "ts": "EnvelopeKind", "variants": { "Text": "text", "Audio": "audio", "Embedding": "embedding", "TokenIds": { "excluded": "Internal tokenizer/prefill payload; React Native accepts text instead of raw token IDs." }, "Image": "image", "MultiPart": "multipart" } },
     "XybridMetadataEntry": { "native": "One key/value pair of Envelope.metadata (a Record<string, string>)." },
     "XybridEnvelope": { "ts": "Envelope", "fields": { "kind": "kind", "metadata": "metadata" } },
     "XybridMessageRole": { "ts": "MessageRole", "variants": { "System": "system", "User": "user", "Assistant": "assistant" } },

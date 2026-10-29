@@ -6,6 +6,21 @@ library;
 import 'result.dart';
 import 'tools.dart';
 
+/// Typed reason for a local stream abort that is eligible for cloud fallback.
+enum CloudFallbackReason {
+  userCancelled('user_cancelled'),
+  stressThrottle('stress_throttle'),
+  stressMemory('stress_memory'),
+  stressThermal('stress_thermal'),
+  stressCpuSustained('stress_cpu_sustained'),
+  budgetExceeded('budget_exceeded');
+
+  const CloudFallbackReason(this.wireName);
+
+  /// Stable snake_case value used by the Rust SDK and telemetry.
+  final String wireName;
+}
+
 /// A single token emitted during streaming generation.
 class StreamToken {
   /// The generated token text.
@@ -26,6 +41,9 @@ class StreamToken {
 
   /// Final inference metrics. Present only on the completion token.
   final XybridInferenceMetrics? metrics;
+
+  /// Reason for a local abort that crossed the stream as a cloud-fallback marker.
+  final CloudFallbackReason? cloudFallbackReason;
 
   /// Tool calls the model asked for this turn — final token only.
   ///
@@ -54,9 +72,13 @@ class StreamToken {
     required this.isFinal,
     this.finishReason,
     this.metrics,
+    this.cloudFallbackReason,
     this.toolCalls = const [],
     this.rawText,
   });
+
+  /// Check if this token marks a typed local-to-cloud fallback abort.
+  bool get isCloudFallbackAbort => cloudFallbackReason != null;
 
   /// Check if this token represents an error.
   bool get isError =>

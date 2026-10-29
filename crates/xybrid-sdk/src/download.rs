@@ -38,9 +38,10 @@
 //! # }
 //! ```
 
-use crate::model::{SdkError, SdkResult};
+use crate::model::{fetch_registry_model_for_load, SdkError, SdkResult};
 use crate::registry_client::RegistryClient;
 use crate::source::ModelSource;
+use crate::BackendChoice;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -396,7 +397,7 @@ impl ModelDownload {
     ///
     /// Returns immediately. Non-registry sources have nothing to fetch and
     /// come back already [`DownloadState::Ready`].
-    pub(crate) fn spawn(source: ModelSource) -> Arc<Self> {
+    pub(crate) fn spawn(source: ModelSource, backend_override: Option<BackendChoice>) -> Arc<Self> {
         let (id, platform) = match &source {
             ModelSource::Registry { id, platform } => (id.clone(), platform.clone()),
             // Bundles, directories and Hugging Face repos either need no
@@ -429,9 +430,13 @@ impl ModelDownload {
                 let id = worker_id;
                 let publisher = Arc::clone(&worker);
                 let outcome = RegistryClient::from_env().and_then(|client| {
-                    client.fetch_extracted_cancellable(
+                    // Resolve the format exactly as `load()` does, so the
+                    // later `load()` finds this download in its cache entry.
+                    fetch_registry_model_for_load(
+                        &client,
                         &id,
                         platform.as_deref(),
+                        backend_override,
                         Arc::clone(&worker.cancel),
                         move |status| publisher.publish(status),
                     )
@@ -864,9 +869,12 @@ mod tests {
 
     #[test]
     fn non_registry_sources_report_ready_immediately() {
-        let download = ModelDownload::spawn(ModelSource::Directory {
-            path: "/tmp/does-not-need-downloading".into(),
-        });
+        let download = ModelDownload::spawn(
+            ModelSource::Directory {
+                path: "/tmp/does-not-need-downloading".into(),
+            },
+            None,
+        );
         let status = download.status();
         assert_eq!(status.state, DownloadState::Ready);
         assert_eq!(status.progress, 1.0);
@@ -875,9 +883,12 @@ mod tests {
 
     #[test]
     fn watch_delivers_a_first_frame_then_stops_after_terminal() {
-        let download = ModelDownload::spawn(ModelSource::Directory {
-            path: "/tmp/does-not-need-downloading".into(),
-        });
+        let download = ModelDownload::spawn(
+            ModelSource::Directory {
+                path: "/tmp/does-not-need-downloading".into(),
+            },
+            None,
+        );
         let calls = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&calls);
         download.watch(move |_| {
@@ -992,9 +1003,12 @@ mod tests {
 
     #[test]
     fn next_status_returns_at_once_when_terminal() {
-        let download = ModelDownload::spawn(ModelSource::Directory {
-            path: "/tmp/does-not-need-downloading".into(),
-        });
+        let download = ModelDownload::spawn(
+            ModelSource::Directory {
+                path: "/tmp/does-not-need-downloading".into(),
+            },
+            None,
+        );
         let started = Instant::now();
         let status = download
             .next_status(Duration::from_secs(30))

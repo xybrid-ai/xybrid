@@ -84,6 +84,13 @@ expectInvalidArgument("non-string metadata") {
   _ = try XybridCodec.decodeEnvelope(js(["kind": "text", "text": "x", "metadata": ["n": 1]]))
 }
 expectInvalidArgument("not an object") { _ = try XybridCodec.decodeEnvelope("text") }
+let tokenIds = XybridEnvelope(kind: .tokenIds(ids: [1, 2]), metadata: [])
+expectInvalidArgument("internal token IDs cannot be encoded") {
+  _ = try XybridCodec.encodeEnvelope(tokenIds)
+}
+expectInvalidArgument("nested internal token IDs cannot be encoded") {
+  _ = try XybridCodec.encodeEnvelope(XybridEnvelope(kind: .multiPart(parts: [tokenIds]), metadata: []))
+}
 
 // MARK: - Run options
 
@@ -148,7 +155,7 @@ let result = XybridResult(
   toolCalls: [XybridToolCall(id: "1", name: "f", argumentsJson: "{\"a\":1}")],
   reasoningContent: "because"
 )
-let encodedResult = XybridCodec.encodeResult(result)
+let encodedResult = try XybridCodec.encodeResult(result)
 check(encodedResult["outputType"] as? String == "text", "output type")
 check(encodedResult["executionTarget"] as? String == "cloud", "execution target")
 check(encodedResult["reasoningContent"] as? String == "because", "reasoning")

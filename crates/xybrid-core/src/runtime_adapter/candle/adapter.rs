@@ -218,6 +218,9 @@ impl RuntimeAdapter for CandleRuntimeAdapter {
                     hint: "Candle Whisper models accept preprocessed mel embeddings; select a VisionLanguage model and a llama.cpp vision build for image input.".to_string(),
                 })
             }
+            EnvelopeKind::TokenIds(_) => Err(AdapterError::InvalidInput(
+                "Whisper expects Embedding (mel spectrogram) input, not TokenIds".to_string(),
+            )),
             EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
                 Err(crate::execution::choice::choice_kind_not_runtime_input())
             }

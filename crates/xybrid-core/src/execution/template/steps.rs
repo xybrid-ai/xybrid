@@ -73,6 +73,12 @@ pub enum PreprocessingStep {
         #[serde(default)]
         max_length: Option<usize>,
 
+        /// Tokenizer backend implementation.
+        ///
+        /// Defaults to [`TokenizerBackend::HuggingFace`] when absent so existing
+        /// model metadata remains backwards-compatible.
+        #[serde(default)]
+        backend: TokenizerBackend,
         /// Wrap the text in the special tokens the tokenizer's post-processor
         /// defines, such as `<bos>`/`<eos>` or `[CLS]`/`[SEP]` (default:
         /// false). Truncation to `max_length` keeps the closing ones.
@@ -552,6 +558,37 @@ pub enum TokenizerType {
 
     /// SentencePiece (T5, ALBERT, XLNet)
     SentencePiece,
+}
+
+/// Tokenizer backend implementation.
+///
+/// Selects which tokenization library handles a [`PreprocessingStep::Tokenize`]
+/// step. Defaults to [`TokenizerBackend::HuggingFace`], which covers the
+/// HuggingFace `tokenizer.json` format (BPE, Unigram, WordPiece) used by
+/// MLX-community models and most modern LLMs.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub enum TokenizerBackend {
+    /// HuggingFace `tokenizers` crate (handles `tokenizer.json` format).
+    ///
+    /// Default. Covers BPE, Unigram, and WordPiece as configured inside the
+    /// tokenizer file itself.
+    #[default]
+    HuggingFace,
+
+    /// SentencePiece backend (for `.model` / `.spm` tokenizers).
+    ///
+    /// Reserved for future integration — currently selecting this backend has
+    /// no custom handler and falls back to whatever the runtime adapter
+    /// provides.
+    Sentencepiece,
+
+    /// Tiktoken backend (for OpenAI BPE merges/vocab files).
+    ///
+    /// Reserved for future integration — currently selecting this backend has
+    /// no custom handler and falls back to whatever the runtime adapter
+    /// provides.
+    Tiktoken,
 }
 
 /// Interpolation method for image resizing

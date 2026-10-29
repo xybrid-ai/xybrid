@@ -1062,6 +1062,8 @@ pub enum EnvelopeKind {
     ChoiceRequest(ChoiceRequest),
     /// The scores a choice scorer returned, one per candidate.
     ChoiceScores(ChoiceScores),
+    /// Token IDs produced by tokenizer preprocessing for LLM prefill.
+    TokenIds(Vec<i64>),
 }
 
 impl fmt::Debug for EnvelopeKind {
@@ -1104,6 +1106,7 @@ impl fmt::Debug for EnvelopeKind {
                 }
             },
             EnvelopeKind::MultiPart(parts) => f.debug_tuple("MultiPart").field(parts).finish(),
+            EnvelopeKind::TokenIds(data) => f.debug_tuple("TokenIds").field(data).finish(),
             // Both print counts and sizes only: ids, texts and the context
             // are caller content.
             EnvelopeKind::ChoiceRequest(request) => request.fmt(f),
@@ -1125,6 +1128,7 @@ impl EnvelopeKind {
             EnvelopeKind::Embedding(_) => "Embedding",
             EnvelopeKind::Image { .. } => "Image",
             EnvelopeKind::MultiPart(_) => "MultiPart",
+            EnvelopeKind::TokenIds(_) => "TokenIds",
             EnvelopeKind::ChoiceRequest(_) => "ChoiceRequest",
             EnvelopeKind::ChoiceScores(_) => "ChoiceScores",
         }
@@ -1144,6 +1148,7 @@ impl EnvelopeKind {
             EnvelopeKind::Embedding(data) => data.len() * std::mem::size_of::<f32>(),
             EnvelopeKind::Image { source } => source.byte_len(),
             EnvelopeKind::MultiPart(parts) => parts.iter().map(Envelope::payload_size).sum(),
+            EnvelopeKind::TokenIds(data) => data.len() * std::mem::size_of::<i64>(),
             EnvelopeKind::ChoiceRequest(request) => {
                 request.context().payload_size()
                     + request
@@ -1174,7 +1179,8 @@ impl EnvelopeKind {
             EnvelopeKind::Audio(_)
             | EnvelopeKind::Text(_)
             | EnvelopeKind::Embedding(_)
-            | EnvelopeKind::Image { .. } => false,
+            | EnvelopeKind::Image { .. }
+            | EnvelopeKind::TokenIds(_) => false,
         }
     }
 }
@@ -1692,6 +1698,7 @@ impl Envelope {
             EnvelopeKind::Audio(_)
             | EnvelopeKind::Text(_)
             | EnvelopeKind::Embedding(_)
+            | EnvelopeKind::TokenIds(_)
             | EnvelopeKind::ChoiceScores(_) => {}
         }
     }
@@ -1733,6 +1740,7 @@ impl Envelope {
             EnvelopeKind::Audio(_)
             | EnvelopeKind::Text(_)
             | EnvelopeKind::Embedding(_)
+            | EnvelopeKind::TokenIds(_)
             | EnvelopeKind::ChoiceScores(_) => Ok(()),
         }
     }
@@ -2386,6 +2394,7 @@ mod tests {
         assert_eq!(bincode_ordinal(&EnvelopeKind::MultiPart(vec![])), 4);
         assert_eq!(bincode_ordinal(&choice_request_envelope().kind), 5);
         assert_eq!(bincode_ordinal(&choice_scores_kind()), 6);
+        assert_eq!(bincode_ordinal(&EnvelopeKind::TokenIds(vec![1, 2])), 7);
     }
 
     #[test]

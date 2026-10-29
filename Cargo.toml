@@ -11,6 +11,8 @@ members = [
     "crates/whisper-cpp-sys",
     "crates/zzz-sys",
     "crates/xybrid-llama",
+    "crates/mlx-c-sys",
+    "crates/xybrid-mlx",
     "crates/xybrid-whisper",
     "bindings/flutter/rust",
     "bindings/web/runtime",

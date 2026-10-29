@@ -181,7 +181,7 @@ enum XybridCodec {
     }
   }
 
-  static func encodeEnvelope(_ envelope: XybridEnvelope) -> JSObject {
+  static func encodeEnvelope(_ envelope: XybridEnvelope) throws -> JSObject {
     var out: JSObject = [
       "metadata": Dictionary(envelope.metadata.map { ($0.key, $0.value) },
                              uniquingKeysWith: { _, last in last }),
@@ -202,7 +202,9 @@ enum XybridCodec {
       out["format"] = format
     case .multiPart(let parts):
       out["kind"] = "multipart"
-      out["parts"] = parts.map(encodeEnvelope)
+      out["parts"] = try parts.map(encodeEnvelope)
+    case .tokenIds:
+      throw BridgeError.invalidArgument("Raw token-ID envelopes are internal and unavailable in React Native")
     }
     return out
   }
@@ -330,9 +332,9 @@ enum XybridCodec {
     ["id": call.id, "name": call.name, "argumentsJson": call.argumentsJson]
   }
 
-  static func encodeResult(_ result: XybridResult) -> JSObject {
+  static func encodeResult(_ result: XybridResult) throws -> JSObject {
     var out: JSObject = [
-      "envelope": encodeEnvelope(result.envelope),
+      "envelope": try encodeEnvelope(result.envelope),
       "outputType": encodeOutputType(result.outputType),
       "modelId": result.modelId,
       "latencyMs": result.latencyMs,
@@ -410,10 +412,10 @@ enum XybridCodec {
     ]
   }
 
-  static func encodeStageResult(_ stage: XybridStageResult) -> JSObject {
+  static func encodeStageResult(_ stage: XybridStageResult) throws -> JSObject {
     [
       "stageId": stage.stageId,
-      "envelope": encodeEnvelope(stage.envelope),
+      "envelope": try encodeEnvelope(stage.envelope),
       "outputType": encodeOutputType(stage.outputType),
       "latencyMs": stage.latencyMs,
       "executionTarget": encodeExecutionTarget(stage.executionTarget),
@@ -421,12 +423,12 @@ enum XybridCodec {
     ]
   }
 
-  static func encodePipelineResult(_ result: XybridPipelineResult) -> JSObject {
+  static func encodePipelineResult(_ result: XybridPipelineResult) throws -> JSObject {
     [
-      "envelope": encodeEnvelope(result.envelope),
+      "envelope": try encodeEnvelope(result.envelope),
       "outputType": encodeOutputType(result.outputType),
       "latencyMs": result.latencyMs,
-      "stages": result.stages.map(encodeStageResult),
+      "stages": try result.stages.map(encodeStageResult),
     ]
   }
 

@@ -439,6 +439,7 @@ pub(crate) fn output_type_for_envelope(envelope: &Envelope) -> OutputType {
         EnvelopeKind::ChoiceScores(_) => OutputType::ChoiceScores,
         EnvelopeKind::Image { .. }
         | EnvelopeKind::MultiPart(_)
+        | EnvelopeKind::TokenIds(_)
         | EnvelopeKind::ChoiceRequest(_) => OutputType::Unknown,
     }
 }
