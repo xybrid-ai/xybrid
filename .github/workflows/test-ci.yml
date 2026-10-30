@@ -62,6 +62,9 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: test-precompile-darwin
+          # Per-image cache: ort-sys's build-script output records this image's
+          # Xcode clang-runtime path, which other images may lack.
+          env-vars: ImageOS
 
       - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1
 

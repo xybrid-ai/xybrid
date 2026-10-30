@@ -73,6 +73,9 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: candle
+          # Per-image cache: ort-sys's build-script output records this image's
+          # Xcode clang-runtime path, which other images may lack.
+          env-vars: ImageOS
       - name: Test Candle (xybrid-core only)
         run: cargo test -p xybrid-core --features "ort-download,candle" --lib --tests
 
@@ -93,6 +96,9 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: candle-integration
+          # Per-image cache: ort-sys's build-script output records this image's
+          # Xcode clang-runtime path, which other images may lack.
+          env-vars: ImageOS
 
       # The registry bundle is a zstd tarball and download.sh parses the
       # resolve response with jq, so both have to exist before it runs. Present
