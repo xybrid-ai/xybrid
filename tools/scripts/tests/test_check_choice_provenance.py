@@ -299,16 +299,21 @@ class CheckerTests(unittest.TestCase):
         self.tree.save()
         self.assertRejects(r"templates\.templates/t\.jinja: differs from the pinned")
 
-    def test_gate_bounds_must_be_positive(self) -> None:
+    def test_gate_bounds_must_not_be_negative(self) -> None:
+        self.tree.manifest["gates"]["track"]["g1"]["max_abs_logit"] = -1e-9
+        self.tree.save()
+        self.assertRejects(r"gates\.track\.g1\.max_abs_logit: expected a finite non-negative bound")
+
+    def test_a_zero_bound_is_an_exact_gate(self) -> None:
         self.tree.manifest["gates"]["track"]["g1"]["max_abs_logit"] = 0
         self.tree.save()
-        self.assertRejects(r"gates\.track\.g1\.max_abs_logit: expected a finite positive bound")
+        self.tree.checker().check()
 
     def test_gate_bounds_must_be_finite_numbers(self) -> None:
         for bad in ("0.15", float("inf"), True):
             self.tree.manifest["gates"]["track"]["g1"]["max_abs_logit"] = bad
             self.tree.save()
-            self.assertRejects(r"gates\.track\.g1\.max_abs_logit: expected a finite positive bound")
+            self.assertRejects(r"gates\.track\.g1\.max_abs_logit: expected a finite non-negative bound")
 
     def test_each_gate_track_has_its_own_status(self) -> None:
         for bad in (None, "measured"):

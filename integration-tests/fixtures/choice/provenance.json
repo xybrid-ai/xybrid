@@ -368,18 +368,18 @@
       }
     },
     "labels": {
-      "status": "provisional",
+      "status": "frozen",
+      "note": "Frozen with the label scorer at 4x the worst measured |delta|, rounded up and capped at the starting bounds (0.15, 0.02), as the FORMS track was capped at its starting bound. Measured through LlamaCppBackend::score_labels on the F16 GGUF against goldens/labels.json (6 cases; macOS arm64; n_ctx 2048, n_batch 512, every prompt decoded in one chunk; gpu_layers 0 and 99 x flash attention off and on x threads 1/4/8 x 5 repeats, repeats and thread counts bit-identical; gpu_layers 0 with GGML_OP_OFFLOAD_MIN_BATCH=1000000, so it ran on the CPU only). Worst on the CPU: |dlogit| 6.37e-2 (flash attention on), |dscore| 7.15e-3 (off), |dlabel_mass| 6.62e-4 (on); Metal at most 7.12e-3, 6.22e-4, 4.12e-5. With llama.cpp's default operation offload, gpu_layers 0 runs its large matrix products on Metal and stays within 1.46e-2, 2.74e-3, 6.20e-5. The best label matches the reference outside the near ties. G2 is exact: the C++ harness (tools/conformance/llama_harness) reads the same bits on the same GGUF, natives and settings, on the CPU with flash attention off and on, and on Metal.",
       "g1": {
         "max_abs_logit": 0.15,
         "max_abs_score": 0.02,
-        "max_abs_label_mass": 0.02,
+        "max_abs_label_mass": 0.003,
         "near_tie_margin": 0.05
       },
       "g2": {
-        "max_abs_logit": 0.001,
-        "max_abs_score": 0.0001,
-        "max_abs_label_mass": 0.0001,
-        "near_tie_margin": 0.001
+        "max_abs_logit": 0,
+        "max_abs_score": 0,
+        "max_abs_label_mass": 0
       }
     }
   },

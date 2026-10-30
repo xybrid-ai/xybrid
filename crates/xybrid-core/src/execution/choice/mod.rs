@@ -9,7 +9,7 @@
 //! |--------|----------|
 //! | (this) | [`ChoiceError`], [`validate_choice_request`], [`ensure_no_choice_kinds`], [`effective_candidates`], [`validate_scorer_spec`] |
 //! | [`encode`] | UTF-8 byte-id rows and masks for byte scorers |
-//! | [`math`] | Softmax with temperature, tie and non-finite rules |
+//! | [`math`] | Softmax with temperature, tie and non-finite rules; label mass |
 //! | [`onnx`] | Binding a byte-scorer spec to an ONNX session and running it |
 //!
 //! # Where requests may go

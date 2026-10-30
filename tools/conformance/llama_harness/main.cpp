@@ -7,10 +7,11 @@
 // order. Linked against the llama.cpp libraries cargo links into
 // xybrid-llama, its output must equal the Rust result bit for bit.
 //
-// Usage: llama_harness MODEL N_CTX N_BATCH N_THREADS < REQUEST
+// Usage: llama_harness MODEL N_CTX N_BATCH N_THREADS [FLASH_ATTN [GPU_LAYERS]] < REQUEST
 //   REQUEST is two lines of whitespace-separated token ids: the prompt, then
-//   the labels. The model is loaded on the CPU (no GPU layers) and flash
-//   attention is off, matching the test that drives this harness.
+//   the labels. FLASH_ATTN is 1 to turn flash attention on, 0 (the default)
+//   to leave it off; GPU_LAYERS is how many layers to offload, 0 (the
+//   default) to run on the CPU. Pass the settings of the run being checked.
 // Output: "logsumexp BITS" then "labels BITS BITS ...", each BITS being the
 //   IEEE-754 bit pattern of an f32, in decimal.
 
@@ -59,13 +60,17 @@ int fail(const char * message) {
 }  // namespace
 
 int main(int argc, char ** argv) {
-    if (argc != 5) {
-        std::fprintf(stderr, "usage: %s MODEL N_CTX N_BATCH N_THREADS < REQUEST\n", argv[0]);
+    if (argc < 5 || argc > 7) {
+        std::fprintf(stderr,
+                     "usage: %s MODEL N_CTX N_BATCH N_THREADS [FLASH_ATTN [GPU_LAYERS]] < REQUEST\n",
+                     argv[0]);
         return 2;
     }
     const int n_ctx = std::atoi(argv[2]);
     const int n_batch = std::atoi(argv[3]);
     const int n_threads = std::atoi(argv[4]);
+    const bool flash_attn = argc > 5 && std::atoi(argv[5]) != 0;
+    const int gpu_layers = argc > 6 ? std::atoi(argv[6]) : 0;
     const std::vector<int32_t> tokens = read_ids(std::cin);
     const std::vector<int32_t> labels = read_ids(std::cin);
     if (n_ctx <= 0 || n_threads <= 0 || tokens.empty() || labels.empty()) {
@@ -76,7 +81,7 @@ int main(int argc, char ** argv) {
     llama_backend_init();
 
     llama_model_params model_params = llama_model_default_params();
-    model_params.n_gpu_layers = 0;
+    model_params.n_gpu_layers = gpu_layers;
     llama_model * model = llama_model_load_from_file(argv[1], model_params);
     if (!model) {
         return fail("cannot load the model");
@@ -86,7 +91,8 @@ int main(int argc, char ** argv) {
     llama_context_params context_params = llama_context_default_params();
     context_params.n_ctx = static_cast<uint32_t>(n_ctx);
     context_params.n_batch = static_cast<uint32_t>(n_batch > 0 ? n_batch : 512);
-    context_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    context_params.flash_attn_type =
+        flash_attn ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
     context_params.n_threads = n_threads;
     context_params.n_threads_batch = n_threads;
     llama_context * ctx = llama_init_from_model(model, context_params);

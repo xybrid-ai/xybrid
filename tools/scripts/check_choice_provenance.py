@@ -474,9 +474,10 @@ class Checker:
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
                 or not math.isfinite(value)
-                or value <= 0
+                or value < 0
             ):
-                raise ProvenanceError(f"{where}: expected a finite positive bound")
+                # 0 is an exact gate: the same artifact read twice, bit for bit.
+                raise ProvenanceError(f"{where}: expected a finite non-negative bound")
 
         for track, raw in tracks.items():
             where = f"gates.{track}"

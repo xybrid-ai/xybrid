@@ -193,8 +193,23 @@ reverts to `provisional`.
 |Δlogit| 1.9e-5 and |Δscore| 4.4e-7 on macOS arm64, and 1.2e-5 and 2.0e-6 on
 Linux x86_64, the same at 1, 4 and 8 threads and bit-identical across repeats.
 G1 allows 8e-5 and 1e-5: the larger of the export bound and four times the
-worst measurement. `labels` stays provisional until the label scorer's runtime
-tests freeze it.
+worst measurement.
+
+`labels` is frozen. Through `LlamaCppBackend::score_labels`, the F16 GGUF
+reaches |Δlogit| 6.4e-2, |Δscore| 7.2e-3 and |Δlabel_mass| 6.6e-4 against the
+float32 reference on the CPU (Metal: 7.1e-3, 6.2e-4, 4.1e-5), on macOS arm64
+at 1, 4 and 8 threads, bit-identical across repeats. G1 allows four times
+that, rounded up and capped at the starting bounds: 0.15, 0.02 and 0.003; the
+best label must match the reference's unless the reference margin is below
+0.05. G2's bounds are 0: on the same GGUF, natives and settings the harness
+below reads the same bits. Q4_K_M is not gated; the label tests write its
+drift to `target/choice-conformance/reports/label-token-g3.json`.
+
+With Metal built in, llama.cpp sends large matrix products to the GPU even
+with no GPU layers (operation offload, for a batch of 32 tokens or more).
+Run the label tests with `GGML_OP_OFFLOAD_MIN_BATCH=1000000` so their CPU
+settings run on the CPU, as a CPU-only build does; CI does, and G1 requires
+it when models are required.
 
 One input is outside what these gates prove: an empty context. With every
 context position masked, the model averages over all padding positions, and its
@@ -214,10 +229,18 @@ bit, so a mismatch points at the Rust readout rather than at the model or
 llama.cpp.
 
 ```bash
-tools/conformance/prepare.sh qwen3.5-0.8b-f16-cf
-XYBRID_LLAMA_HARNESS="$(tools/conformance/llama_harness/build.sh)" \
-  cargo test -p xybrid-llama --features bindings --test choice_logits
+tools/conformance/prepare.sh qwen3.5-0.8b-f16-cf qwen3.5-0.8b-q4km-cf
+export XYBRID_LLAMA_HARNESS="$(tools/conformance/llama_harness/build.sh)"
+cargo test -p xybrid-llama --features bindings --test choice_logits
+GGML_OP_OFFLOAD_MIN_BATCH=1000000 cargo test -p xybrid-core --features llm-llamacpp --lib -- \
+  runtime_adapter::llama_cpp::choice_scoring_tests::
 ```
+
+The second suite is the label scorer's: state isolation, label rules, G0, G1,
+G2 and the G3 report. Its G2 runs the harness with the backend's settings:
+`llama_harness MODEL N_CTX N_BATCH N_THREADS [FLASH_ATTN [GPU_LAYERS]]` turns
+flash attention on with `FLASH_ATTN` 1 and offloads `GPU_LAYERS` layers (both
+0 by default).
 
 `build.sh [FEATURES]` builds that test, without running it, with
 `xybrid-llama`'s features `FEATURES` (`bindings` by default), then links the
