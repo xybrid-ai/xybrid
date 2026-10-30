@@ -47,6 +47,8 @@ pub struct TranscribeParams {
     ///
     /// Passed as whisper.cpp's `initial_prompt` on this request. This is text
     /// context for recognition, not an instruction for an assistant to follow.
+    /// Surrounding whitespace is trimmed and a single leading space is prepended
+    /// before tokenization. Blank prompts are treated as absent.
     /// Interior null bytes are rejected without echoing the prompt.
     pub prompt: Option<String>,
     /// Language code (e.g. `"en"`). `None` auto-detects.
