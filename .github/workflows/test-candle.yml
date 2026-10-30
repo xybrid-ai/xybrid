@@ -64,7 +64,7 @@ env:
 jobs:
   test-candle:
     name: Test Candle
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
@@ -83,7 +83,7 @@ jobs:
   # which is what keeps a silently failed download from leaving the suite green.
   test-candle-integration:
     name: Test Candle (integration, real model)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

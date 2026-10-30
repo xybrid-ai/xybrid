@@ -294,7 +294,7 @@ jobs:
           if-no-files-found: error
 
   # =========================================================================
-  # Apple builds split into three parallel macos-14 jobs.
+  # Apple builds split into three parallel macOS jobs.
   #
   # Previously these ran sequentially on one runner to amortize sccache /
   # toolchain setup. The bundled job was the critical-path long pole
@@ -312,7 +312,7 @@ jobs:
     # Skipped in a dry-run rehearsal (which validates only the CLI release path).
     if: needs.check-release-branch.outputs.dry_run != 'true'
     needs: [check-release-branch]
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: read       # actions/checkout
       id-token: write      # Sigstore OIDC for attest-build-provenance
@@ -387,7 +387,7 @@ jobs:
     permissions:
       contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch]
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -500,7 +500,7 @@ jobs:
     # anything ships; artifact name, attestation, and downstream unchanged.
     name: Build CLI (macos-arm64, Bazel)
     needs: [check-release-branch]
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: read       # actions/checkout
       id-token: write      # Sigstore OIDC for attest-build-provenance
@@ -511,7 +511,7 @@ jobs:
           submodules: true
 
       # build:macos-metal uses the host's preinstalled cmake/make/pkg-config
-      # for rfcc's exec tools (macos-14 images ship them; guard just in case).
+      # for rfcc's exec tools (the runner images ship them; guard just in case).
       - name: Ensure rfcc host tools
         run: |
           which cmake >/dev/null || brew install cmake

@@ -54,7 +54,7 @@ env:
 jobs:
   test-policy-routing:
     name: Test policy routing (real local model, fake DeepSeek)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
