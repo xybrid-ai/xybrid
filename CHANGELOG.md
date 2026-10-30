@@ -50,6 +50,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Registry resolution sends the runtime Android API, Apple OS or GNU libc
+  version and retains backend/OS compatibility refusal reasons. Rust registry
+  responses expose the artifact's `min_os` floors; older registry responses
+  remain readable.
+- Flutter Android builds support Gradle 9 / AGP 9 and copy `libc++_shared.so`
+  from the host app's selected NDK. Apple build logs no longer dump the environment.
+- Custom speech builds accept a configurable Python 3.11+ interpreter through
+  `XYBRID_ZZZ_PYTHON` and a per-target root in `XYBRID_ZZZ_PREBUILT_DIR`.
 - Speech models fail during load when the runtime lacks a usable zzz backend,
   including when the model is cached. Flutter load failures throw
   `XybridException`, and native diagnostics retain their causes without an extra

@@ -233,6 +233,11 @@ impl From<sdk::SdkError> for Error {
             };
         match err {
             sdk::SdkError::ModelNotFound(id) => Error::ModelNotFound { id },
+            // Keep the existing foreign error surface while preserving the
+            // registry code, runtime version and required floor in the message.
+            err @ sdk::SdkError::OsVersionUnsupported { .. } => Error::ConfigError {
+                message: err.to_string(),
+            },
             sdk::SdkError::DirectoryNotFound(path) => Error::DirectoryNotFound { path },
             sdk::SdkError::MetadataNotFound(path) => Error::MetadataNotFound { path },
             sdk::SdkError::MetadataInvalid(message) => Error::MetadataInvalid { message },
@@ -3855,6 +3860,28 @@ stages:
         match Error::from(sdk_err) {
             Error::IoError { message } => assert!(message.contains("disk on fire")),
             other => panic!("expected IoError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn os_compatibility_refusal_keeps_its_diagnostic_at_the_foreign_boundary() {
+        let error = Error::from(sdk::SdkError::OsVersionUnsupported {
+            model_id: "phonon-31m-en".into(),
+            platform: "ios-arm64".into(),
+            os: "ios-15.7".into(),
+            min_os: vec!["ios-16.0".into()],
+            message: "This model needs iOS 16 or later".into(),
+        });
+        assert!(matches!(error, Error::ConfigError { .. }));
+        assert_eq!(error.code(), 10);
+        for detail in [
+            "OS_VERSION_UNSUPPORTED",
+            "phonon-31m-en",
+            "ios-15.7",
+            "ios-16.0",
+            "This model needs iOS 16 or later",
+        ] {
+            assert!(error.to_string().contains(detail));
         }
     }
 

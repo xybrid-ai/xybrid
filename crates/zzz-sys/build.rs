@@ -16,8 +16,8 @@
 //! # Resolution order
 //!
 //!   1. `XYBRID_ZZZ_PREBUILT_DIR` — a verified slice path (what
-//!      `zzz_pull.py` prints). Re-verified via `--verify-only` on every
-//!      invocation.
+//!      `zzz_pull.py` prints), or a private root with `<Rust target>` children.
+//!      Re-verified via `--verify-only` on every invocation.
 //!   2. Otherwise the tool's own private staging root. A cache hit is
 //!      reverified on every hit; a cache miss attempts an authenticated
 //!      fetch and fails loudly when no dedicated `ZZZ_GITHUB_TOKEN` is
@@ -51,6 +51,7 @@ const SUPPORTED_TARGETS: [&str; 6] = [
 
 fn main() {
     println!("cargo:rerun-if-env-changed=XYBRID_ZZZ_PREBUILT_DIR");
+    println!("cargo:rerun-if-env-changed=XYBRID_ZZZ_PYTHON");
     println!("cargo:rerun-if-env-changed=XYBRID_ZZZ_USE_GH_AUTH");
     println!("cargo:rerun-if-env-changed=ZZZ_RELEASE_REPOSITORY");
     println!("cargo:rerun-if-env-changed=ZZZ_GITHUB_TOKEN");
@@ -69,6 +70,14 @@ fn main() {
     // A changed library, receipt or integrity anchor must re-run verification,
     // even when the manifest and the staging path themselves did not change.
     println!("cargo:rerun-if-changed={}", slice.display());
+    if let Some(prebuilt) = env::var_os("XYBRID_ZZZ_PREBUILT_DIR") {
+        // Root entries affect selection too (for example a target child added
+        // beside a previously selected single slice).
+        println!(
+            "cargo:rerun-if-changed={}",
+            PathBuf::from(prebuilt).display()
+        );
+    }
     emit_link_directives(&slice);
 }
 
@@ -100,7 +109,8 @@ fn verified_slice() -> PathBuf {
         .unwrap_or_else(|| fail("cargo CARGO_MANIFEST_DIR unset"));
     let verifier = crate_dir.join("zzz_pull.py");
 
-    let mut command = process::Command::new("python3");
+    let python = env::var_os("XYBRID_ZZZ_PYTHON").unwrap_or_else(|| "python3".into());
+    let mut command = process::Command::new(python);
     command.arg(verifier).arg("--target").arg(&target);
     if env::var_os("XYBRID_ZZZ_PREBUILT_DIR").is_some() {
         command.arg("--verify-only");
@@ -126,9 +136,11 @@ fn verified_slice() -> PathBuf {
                  (see its README.md)"
             ));
         }
-        Err(err) => fail(&format!(
-            "cannot run python3 to verify the pinned zzz engine slice: {err}"
-        )),
+        Err(_) => fail(
+            "cannot run the Python interpreter to verify the pinned zzz engine slice; \
+             install Python 3.11+ or set XYBRID_ZZZ_PYTHON to its executable \
+             (default: python3)",
+        ),
     };
 
     let slice = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
