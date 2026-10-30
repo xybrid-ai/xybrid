@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Fixed: `load()` throws `XybridException` with the native diagnostic, and run
+  failures retain their causes without duplicated inference prefixes. Cached
+  speech models fail during load when the build lacks a usable zzz backend.
+
 ## 0.15.0
 
 * Changed: precompiled native libraries now use llama.cpp v0.7.0.
