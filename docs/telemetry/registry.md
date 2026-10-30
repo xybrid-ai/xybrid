@@ -3,6 +3,8 @@
 The Xybrid SDK attaches a single header — `X-Xybrid-Client` — to every metadata request it makes against the model registry. The header reports the binding that originated the call, the SDK and core versions, the build platform, and the active backend feature set. It is the only telemetry surface on registry traffic; outcome reporting (`/v1/anon` and friends) is intentionally not part of this path.
 
 This page documents exactly what is sent, why it exists, and how to opt out.
+Resolve requests also carry functional compatibility parameters, including
+an optional runtime OS token; these are separate from the telemetry header.
 
 ## Opting out
 
@@ -12,7 +14,7 @@ Set the environment variable before any registry call is made:
 export XYBRID_TELEMETRY_OPTOUT=1
 ```
 
-When the variable is set to any of `1`, `true`, or `yes` (case-insensitive, surrounding whitespace ignored), the SDK omits `X-Xybrid-Client` from every registry request. The opt-out also disables the platform telemetry exporter described in [telemetry.md](../sdk/telemetry.md). It does not remove `&backends=` from resolve requests, because that parameter decides which file the registry serves; see [When the header is sent](#when-the-header-is-sent).
+When the variable is set to any of `1`, `true`, or `yes` (case-insensitive, surrounding whitespace ignored), the SDK omits `X-Xybrid-Client` from every registry request. The opt-out also disables the platform telemetry exporter described in [telemetry.md](../sdk/telemetry.md). It does not remove the `backends` or optional `os` query parameters from resolve requests, because they decide which file the registry serves; see [Resolve compatibility](#resolve-compatibility).
 
 The value is read once per process and cached, so changing it after the first registry call has no effect for that run.
 
@@ -118,7 +120,12 @@ The header carries only the fields above. It does **not** carry:
 - No prompts, no inputs, no outputs, no error messages
 - No `device_id` or any session/trace identifier
 
-The platform-ingest exporter described in [telemetry.md](../sdk/telemetry.md) is a separate, opt-in surface that does collect device context for inference performance analysis. Registry-call telemetry — the subject of this document — is the smaller and always-present surface used for fleet attribution.
+The optional `os` query parameter does report a runtime OS or GNU libc version
+for resolve compatibility. It is separate from the header, is excluded from
+registry analytics, and remains visible in Worker request logs. Opting out of
+telemetry does not suppress it; see [Resolve compatibility](#resolve-compatibility).
+
+The platform-ingest exporter described in [telemetry.md](../sdk/telemetry.md) is a separate, opt-in surface that does collect device context for inference performance analysis. Registry-call telemetry — the subject of this document — is the smaller surface used for fleet attribution and is enabled by default unless opted out.
 
 ## Why this exists
 
@@ -140,9 +147,82 @@ The SDK adds `X-Xybrid-Client` to the three metadata calls:
 | `RegistryClient::get_model` | `GET /v1/models/{mask}` | Fetch metadata for one model |
 | `RegistryClient::resolve` | `GET /v1/models/{mask}/resolve?platform=…` | Resolve a model+platform to a bundle URL |
 
-`resolve` also lists, as `&backends=` in its query, the backends that decide which file the registry serves; today those are `asr-whispercpp-coreml` and `zzz-phonon-31m`. Unlike the header, it is sent when telemetry is opted out too: without it, an opted-out iOS client would get the plain `.bin` instead of the bundle with the Core ML encoder, and an opted-out `tts-zzz` client could not resolve `phonon-31m-en`. The registry does not record it in analytics.
+`resolve` also lists, as `&backends=` in its query, the backends that decide which file the registry serves; today those are `asr-whispercpp-coreml` and `zzz-phonon-31m`. Unlike the header, it is sent when telemetry is opted out too: without it, an opted-out iOS client would get the plain `.bin` instead of the bundle with the Core ML encoder, and an opted-out `tts-zzz` client could not resolve `phonon-31m-en`. An optional `&os=` supplies the runtime version for OS compatibility. The registry does not record either query parameter's value in analytics.
 
 Bundle download requests are intentionally **not** instrumented in this version. They are downloads, not metadata calls, and a per-byte header is not interesting in aggregate.
+
+## Resolve compatibility
+
+The Rust SDK sends `os` when it can detect the runtime version and the
+requested platform matches the current platform. It omits the parameter
+when the version is unknown or the caller explicitly resolves a different
+platform. These tokens describe the running environment, not a build target's
+deployment minimum:
+
+| Runtime | Token | Example |
+|---|---|---|
+| Android | `android-api-N` | `android-api-35` |
+| iOS / iPadOS | `ios-X.Y` | `ios-18.5` |
+| macOS | `macos-X.Y` | `macos-15.4` |
+| Linux with GNU libc | `glibc-X.Y` | `glibc-2.34` |
+
+On Linux, `X.Y` is the GNU libc runtime version, never the kernel release.
+For example, a native Android request can be:
+
+```text
+GET /v1/models/phonon-31m-en/resolve?platform=android-arm64&backends=zzz-phonon-31m&os=android-api-35
+```
+
+The `os` and `backends` parameters are functional compatibility inputs,
+independent of `XYBRID_TELEMETRY_OPTOUT`. The `X-Xybrid-Client` header has no
+OS field. Browser registry requests follow the separate web client described
+in the binding table above.
+
+Model-detail variants and the selected `resolved` record may include
+`min_os`, an array of OS floor tokens. Rust's `VariantInfo` and
+`ResolvedVariant` preserve it as `Vec<String>`, defaulting an omitted array to
+empty. Missing floors mean no OS minimum was declared, not that native execution was
+qualified. Floors are per variant and are not inherited from another entry.
+The registry compares numeric versions only for matching OS names; absent,
+malformed or unrelated OS tokens preserve legacy selection without enforcing
+that floor.
+
+Resolution tries exact platform, platform family, then `universal`, skipping
+incompatible candidates. If no candidate serves the client, a format-matching
+candidate's compatibility refusal keeps HTTP 404 and adds structured fields
+inside `error`:
+
+| `error.code` | Diagnostic fields alongside `message` and `status` |
+|---|---|
+| `BACKEND_REQUIRED` | `platform`, `requires_backends` (required backends the client did not advertise) |
+| `OS_VERSION_UNSUPPORTED` | `platform`, `os` (the client's token), `min_os` (unmet floors) |
+
+The first refusing candidate in selection order supplies the diagnostic; an
+unmet OS floor takes precedence over missing backends on that candidate.
+Ordinary missing models or variants still return `NOT_FOUND`.
+The registry gives the client header's platform precedence over the legacy
+`platform` query parameter. Refusal diagnostics retain that effective platform,
+even when the caller supplied a different query platform.
+
+In Rust, `BACKEND_REQUIRED` maps to the existing
+`SdkError::UnsupportedBackendCapability`; its hint retains the exact registry
+code and server message. `OS_VERSION_UNSUPPORTED` maps to
+`SdkError::OsVersionUnsupported` with `model_id`, `platform`, `os`, `min_os`
+and `message`. Both are permanent, nonretryable errors. Unknown codes,
+malformed bodies and legacy 404 responses keep the existing `ModelNotFound`
+behavior.
+
+Foreign binding error shapes stay stable: backend refusals use
+`UnsupportedBackendCapability`, and OS refusals use `ConfigError` containing
+the full `OS_VERSION_UNSUPPORTED` diagnostic. Callers can display the reason
+and required floor without relying on a new generated binding error variant.
+
+The deployed [platform compatibility update](https://github.com/xybrid-ai/xybrid-platform/pull/308)
+adds `ios-arm64` resolution of the existing Phonon GGUF with
+`requires_backends: ["zzz-phonon-31m"]` and `min_os: ["ios-16.0"]`.
+Native Swift/Flutter speech linkage remains unqualified. Of the standard
+prebuilt SDK artifacts, only the Android AAR's arm64-v8a library ships the
+speech engine; see [Phonon speech](../sdk/PHONON.md).
 
 ## Setting `binding` from a custom client
 

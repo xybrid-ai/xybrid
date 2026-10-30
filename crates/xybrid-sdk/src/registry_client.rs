@@ -123,7 +123,13 @@ const ARTIFACT_BACKENDS: &[&str] = &["asr-whispercpp-coreml", "zzz-phonon-31m"];
 /// Takes the feature list as a parameter (the caller passes
 /// [`xybrid_core::features::enabled`]) so unit tests can cover both branches;
 /// only names in [`ARTIFACT_BACKENDS`] reach the query.
-fn resolve_url(api_url: &str, mask: &str, platform: &str, features: &[&str]) -> String {
+fn resolve_url(
+    api_url: &str,
+    mask: &str,
+    platform: &str,
+    features: &[&str],
+    os: Option<&str>,
+) -> String {
     let mut url = format!("{api_url}/v1/models/{mask}/resolve?platform={platform}");
     let backends: Vec<&str> = features
         .iter()
@@ -134,7 +140,108 @@ fn resolve_url(api_url: &str, mask: &str, platform: &str, features: &[&str]) -> 
         url.push_str("&backends=");
         url.push_str(&backends.join(","));
     }
+    if let Some(os) = os {
+        url.push_str("&os=");
+        url.push_str(os);
+    }
     url
+}
+
+/// A cross-platform lookup must not inherit the caller's runtime OS version.
+fn resolve_os_version(platform: &str, host_platform: &str, os: Option<String>) -> Option<String> {
+    if platform == host_platform {
+        os
+    } else {
+        None
+    }
+}
+
+/// Decode only known, well-formed compatibility refusals. Old registries and
+/// unrelated/malformed 404 bodies keep the historical `ModelNotFound` result.
+/// Bound the body before parsing: an error page is never a model artifact.
+/// The refusal's platform is authoritative: the registry gives a platform in
+/// the client header precedence over the legacy query platform.
+fn resolve_not_found(response: ureq::Response, mask: &str, platform: &str) -> SdkError {
+    const MAX_ERROR_BODY_BYTES: u64 = 16 * 1024;
+
+    #[derive(Deserialize)]
+    struct ErrorResponse {
+        error: Refusal,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(tag = "code")]
+    enum Refusal {
+        #[serde(rename = "BACKEND_REQUIRED")]
+        BackendRequired {
+            message: String,
+            platform: String,
+            requires_backends: Vec<String>,
+        },
+        #[serde(rename = "OS_VERSION_UNSUPPORTED")]
+        OsVersionUnsupported {
+            message: String,
+            platform: String,
+            os: String,
+            min_os: Vec<String>,
+        },
+    }
+
+    let mut body = Vec::new();
+    let parsed = response
+        .into_reader()
+        .take(MAX_ERROR_BODY_BYTES + 1)
+        .read_to_end(&mut body)
+        .ok()
+        .filter(|_| body.len() <= MAX_ERROR_BODY_BYTES as usize)
+        .and_then(|_| serde_json::from_slice::<ErrorResponse>(&body).ok());
+    match parsed.map(|response| response.error) {
+        Some(Refusal::BackendRequired {
+            message,
+            platform: refused_platform,
+            requires_backends,
+        }) if !refused_platform.trim().is_empty()
+            && !message.trim().is_empty()
+            && !requires_backends.is_empty()
+            && requires_backends
+                .iter()
+                .all(|backend| !backend.trim().is_empty()) =>
+        {
+            let enabled = xybrid_core::features::enabled();
+            SdkError::UnsupportedBackendCapability {
+                model_id: mask.to_owned(),
+                backend: if enabled.is_empty() {
+                    "none".to_owned()
+                } else {
+                    enabled.join(", ")
+                },
+                capability: requires_backends.join(", "),
+                hint: format!("BACKEND_REQUIRED: {message} (platform '{refused_platform}')"),
+            }
+        }
+        Some(Refusal::OsVersionUnsupported {
+            message,
+            platform: refused_platform,
+            os,
+            min_os,
+        }) if !refused_platform.trim().is_empty()
+            && !message.trim().is_empty()
+            && !os.trim().is_empty()
+            && !min_os.is_empty()
+            && min_os.iter().all(|floor| !floor.trim().is_empty()) =>
+        {
+            SdkError::OsVersionUnsupported {
+                model_id: mask.to_owned(),
+                platform: refused_platform,
+                os,
+                min_os,
+                message,
+            }
+        }
+        _ => SdkError::ModelNotFound(format!(
+            "Model '{mask}' not found or no compatible variant for platform '{platform}'"
+        )),
+    }
 }
 
 /// Header identifying which version of a file a partial download holds, so a
@@ -568,7 +675,7 @@ impl RegistryClient {
             let url = format!("{}/v1/models/{}", api_url, mask);
             let req = self.apply_client_header(self.agent.get(&url));
             let response = req.call();
-            self.handle_response_with_404(response, "get model", || {
+            self.handle_response_with_404(response, "get model", |_| {
                 SdkError::ModelNotFound(format!("Model '{}' not found", mask))
             })
         })
@@ -582,20 +689,34 @@ impl RegistryClient {
     /// Resolve a model mask to the best variant for the given platform.
     ///
     /// If platform is None, auto-detects the current platform.
+    /// Sends the runtime OS version when known and resolving the current
+    /// platform. Compatibility refusals retain the registry's reason and
+    /// required backend or OS floor instead of becoming `ModelNotFound`.
     /// Tries primary URL first, falls back to secondary on failure.
     /// Automatically retries on transient failures and respects circuit breaker.
     pub fn resolve(&self, mask: &str, platform: Option<&str>) -> Result<ResolvedVariant, SdkError> {
         let platform = platform.map(String::from).unwrap_or_else(detect_platform);
+        // OS version is a functional input to artifact selection, independent
+        // of the optional client telemetry header. Never send the host's
+        // version when a caller explicitly resolves a different platform.
+        let os = resolve_os_version(
+            &platform,
+            current_platform(),
+            xybrid_core::device::runtime_os_version(),
+        );
 
         self.execute_with_fallback(|api_url| {
-            let url = resolve_url(api_url, mask, &platform, xybrid_core::features::enabled());
+            let url = resolve_url(
+                api_url,
+                mask,
+                &platform,
+                xybrid_core::features::enabled(),
+                os.as_deref(),
+            );
             let req = self.apply_client_header(self.agent.get(&url));
             let response = req.call();
-            self.handle_response_with_404(response, "resolve model", || {
-                SdkError::ModelNotFound(format!(
-                    "Model '{}' not found or no compatible variant for platform '{}'",
-                    mask, platform
-                ))
+            self.handle_response_with_404(response, "resolve model", |response| {
+                resolve_not_found(response, mask, &platform)
             })
         })
         .and_then(|response| {
@@ -701,6 +822,17 @@ impl RegistryClient {
                         return Err(err);
                     }
 
+                    // A successful compatibility check refused this model on
+                    // this runtime; the registry is healthy. Repeated refusals
+                    // must not open its circuit for other, compatible models.
+                    if matches!(
+                        &err,
+                        SdkError::UnsupportedBackendCapability { .. }
+                            | SdkError::OsVersionUnsupported { .. }
+                    ) {
+                        return Err(err);
+                    }
+
                     circuit.record_failure();
 
                     // Check for rate limit (opens circuit immediately)
@@ -749,19 +881,19 @@ impl RegistryClient {
         not_found_err: F,
     ) -> Result<ureq::Response, SdkError>
     where
-        F: FnOnce() -> SdkError,
+        F: FnOnce(ureq::Response) -> SdkError,
     {
         match response {
             Ok(resp) => {
                 if resp.status() == 200 {
                     Ok(resp)
                 } else if resp.status() == 404 {
-                    Err(not_found_err())
+                    Err(not_found_err(resp))
                 } else {
                     Err(self.response_status_to_error(&resp, operation))
                 }
             }
-            Err(ureq::Error::Status(404, _)) => Err(not_found_err()),
+            Err(ureq::Error::Status(404, response)) => Err(not_found_err(response)),
             Err(e) => Err(self.ureq_error_to_sdk_error(e, operation)),
         }
     }
@@ -1869,6 +2001,10 @@ pub struct VariantInfo {
     pub hf_repo: String,
     /// Bundle filename
     pub file: String,
+    /// Minimum runtime versions as registry tokens (e.g. `ios-16.0` or
+    /// `glibc-2.28`). Empty when an older registry supplies no OS floor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub min_os: Vec<String>,
 }
 
 /// Response from GET /v1/models/registry/{mask}/resolve
@@ -1898,6 +2034,10 @@ pub struct ResolvedVariant {
     pub size_bytes: u64,
     /// SHA256 hash for verification
     pub sha256: String,
+    /// Minimum runtime versions for the selected artifact. Empty means the
+    /// registry has not declared a floor, not that every OS can run it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub min_os: Vec<String>,
     /// Additional files required by this variant, such as VLM mmproj siblings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<ResolvedArtifact>,
@@ -3522,7 +3662,7 @@ mod tests {
             "vision",
         ];
         assert_eq!(
-            resolve_url("http://r", "whisper", "ios-arm64", &features),
+            resolve_url("http://r", "whisper", "ios-arm64", &features, None),
             "http://r/v1/models/whisper/resolve?platform=ios-arm64&backends=asr-whispercpp-coreml"
         );
     }
@@ -3531,7 +3671,7 @@ mod tests {
     fn resolve_url_omits_backends_without_an_artifact_backend() {
         let features = ["asr-whispercpp", "ort-coreml", "vision"];
         assert_eq!(
-            resolve_url("http://r", "whisper", "macos-arm64", &features),
+            resolve_url("http://r", "whisper", "macos-arm64", &features, None),
             "http://r/v1/models/whisper/resolve?platform=macos-arm64"
         );
     }
@@ -3540,7 +3680,7 @@ mod tests {
     fn resolve_url_sends_the_phonon_31m_backend_but_not_tts_zzz() {
         let features = ["asr-whispercpp", "tts-zzz", "vision", "zzz-phonon-31m"];
         assert_eq!(
-            resolve_url("http://r", "phonon-31m-en", "android-arm64", &features),
+            resolve_url("http://r", "phonon-31m-en", "android-arm64", &features, None),
             "http://r/v1/models/phonon-31m-en/resolve?platform=android-arm64&backends=zzz-phonon-31m"
         );
     }
@@ -3555,8 +3695,224 @@ mod tests {
             "zzz-phonon-31m",
         ];
         assert_eq!(
-            resolve_url("http://r", "m", "p", &features),
+            resolve_url("http://r", "m", "p", &features, None),
             "http://r/v1/models/m/resolve?platform=p&backends=asr-whispercpp-coreml,zzz-phonon-31m"
+        );
+    }
+
+    #[test]
+    fn resolve_compatibility_query_survives_telemetry_opt_out() {
+        let client = RegistryClient::with_url("http://r").unwrap();
+        for (platform, os) in [
+            ("android-arm64", "android-api-29"),
+            ("ios-arm64", "ios-16.0"),
+            ("macos-arm64", "macos-13.0"),
+            ("linux-x86_64", "glibc-2.28"),
+        ] {
+            let url = resolve_url(
+                "http://r",
+                "phonon-31m-en",
+                platform,
+                &["tts-zzz", "zzz-phonon-31m"],
+                Some(os),
+            );
+            let request = client.apply_client_header_with_optout(client.agent.get(&url), true);
+            assert_eq!(request.header(CLIENT_HEADER_NAME), None);
+            assert_eq!(
+                request.url(),
+                format!("http://r/v1/models/phonon-31m-en/resolve?platform={platform}&backends=zzz-phonon-31m&os={os}"),
+            );
+        }
+    }
+
+    #[test]
+    fn resolves_for_other_platforms_and_unknown_versions_omit_os() {
+        assert_eq!(
+            resolve_os_version("linux-x86_64", "linux-x86_64", Some("glibc-2.34".into())),
+            Some("glibc-2.34".into()),
+        );
+        assert_eq!(resolve_os_version("ios-arm64", "ios-arm64", None), None);
+        // Even two platforms with the same OS can run different versions.
+        assert_eq!(
+            resolve_os_version("macos-arm64", "macos-x86_64", Some("macos-15.0".into())),
+            None,
+        );
+        assert_eq!(
+            resolve_os_version("ios-arm64", "macos-arm64", Some("macos-15.0".into())),
+            None,
+        );
+    }
+
+    #[test]
+    fn resolve_sends_the_runtime_os_and_reads_the_selected_floor() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let resolve = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models/phonon-31m-en/resolve")
+                .query_param("platform", current_platform())
+                .matches(|request| {
+                    let sent = request.query_params.as_ref().and_then(|params| {
+                        params
+                            .iter()
+                            .find(|(name, _)| name == "os")
+                            .map(|(_, value)| value)
+                    });
+                    sent == xybrid_core::device::runtime_os_version().as_ref()
+                });
+            then.status(200).json_body(serde_json::json!({
+                "mask": "phonon-31m-en",
+                "platform": current_platform(),
+                "resolved": {
+                    "hf_repo": "xybrid-ai/phonon",
+                    "file": "model.gguf",
+                    "download_url": "https://example.com/model.gguf",
+                    "format": "gguf",
+                    "quantization": "q8_0",
+                    "size_bytes": 1,
+                    "sha256": "",
+                    "min_os": ["glibc-2.28"]
+                }
+            }));
+        });
+        let client = RegistryClient::with_url(server.base_url()).unwrap();
+        let resolved = client.resolve("phonon-31m-en", None).unwrap();
+        assert_eq!(resolved.min_os, ["glibc-2.28"]);
+        resolve.assert_hits(1);
+    }
+
+    #[test]
+    fn resolve_reports_effective_platform_backend_refusal_without_retry_or_fallback() {
+        use httpmock::prelude::*;
+
+        let primary = MockServer::start();
+        let fallback = MockServer::start();
+        let refusal = primary.mock(|when, then| {
+            when.method(GET).path("/v1/models/phonon-31m-en/resolve");
+            then.status(404).json_body(serde_json::json!({
+                "error": {
+                    "code": "BACKEND_REQUIRED",
+                    "message": "This build needs the speech backend",
+                    // The deployed registry gives the header's platform
+                    // precedence over an explicit cross-platform query.
+                    "platform": current_platform(),
+                    "requires_backends": ["zzz-phonon-31m"],
+                    "status": 404
+                }
+            }));
+        });
+        let fallback_request = fallback.mock(|_, then| {
+            then.status(500);
+        });
+        let client = RegistryClient::new(vec![primary.base_url(), fallback.base_url()]).unwrap();
+        let error = client
+            .resolve("phonon-31m-en", Some("ios-arm64"))
+            .unwrap_err();
+        assert!(!error.is_retryable());
+        assert_eq!(error.retry_after(), None);
+        assert!(matches!(
+            &error,
+            SdkError::UnsupportedBackendCapability { model_id, capability, hint, .. }
+                if model_id == "phonon-31m-en" && capability == "zzz-phonon-31m"
+                    && hint.contains("BACKEND_REQUIRED")
+                    && hint.contains("This build needs the speech backend")
+                    && hint.contains(current_platform())
+        ));
+        refusal.assert_hits(1);
+        fallback_request.assert_hits(0);
+        assert_eq!(client.circuits[0].failure_count(), 0);
+    }
+
+    #[test]
+    fn resolve_reports_os_refusal_without_retry_or_fallback() {
+        use httpmock::prelude::*;
+
+        let primary = MockServer::start();
+        let fallback = MockServer::start();
+        let refusal = primary.mock(|when, then| {
+            when.method(GET).path("/v1/models/phonon-31m-en/resolve");
+            then.status(404).json_body(serde_json::json!({
+                "error": {
+                    "code": "OS_VERSION_UNSUPPORTED",
+                    "message": "This model needs iOS 16 or later",
+                    "platform": "ios-arm64",
+                    "os": "ios-15.7",
+                    "min_os": ["ios-16.0"],
+                    "status": 404
+                }
+            }));
+        });
+        let fallback_request = fallback.mock(|_, then| {
+            then.status(500);
+        });
+        let client = RegistryClient::new(vec![primary.base_url(), fallback.base_url()]).unwrap();
+        let error = client
+            .resolve("phonon-31m-en", Some("ios-arm64"))
+            .unwrap_err();
+        assert!(!error.is_retryable());
+        assert!(matches!(
+            &error,
+            SdkError::OsVersionUnsupported { model_id, platform, os, min_os, message }
+                if model_id == "phonon-31m-en" && platform == "ios-arm64"
+                    && os == "ios-15.7" && min_os == &["ios-16.0"]
+                    && message == "This model needs iOS 16 or later"
+        ));
+        for detail in ["OS_VERSION_UNSUPPORTED", "ios-15.7", "ios-16.0"] {
+            assert!(error.to_string().contains(detail));
+        }
+        refusal.assert_hits(1);
+        fallback_request.assert_hits(0);
+        assert_eq!(client.circuits[0].failure_count(), 0);
+    }
+
+    #[test]
+    fn unknown_or_malformed_404_bodies_keep_model_not_found() {
+        for body in [
+            "not found".to_owned(),
+            serde_json::json!({"error": {"code": "NOT_FOUND", "message": "missing"}}).to_string(),
+            serde_json::json!({"error": {"code": "FUTURE_REASON", "message": "future"}}).to_string(),
+            serde_json::json!({"error": {"code": "BACKEND_REQUIRED"}}).to_string(),
+            serde_json::json!({"error": {
+                "code": "OS_VERSION_UNSUPPORTED", "message": "old OS", "platform": "ios-arm64",
+                "os": "ios-15.0", "min_os": "ios-16.0"
+            }}).to_string(),
+            serde_json::json!({"error": {
+                "code": "BACKEND_REQUIRED", "message": "missing platform", "platform": "",
+                "requires_backends": ["zzz-phonon-31m"]
+            }}).to_string(),
+            serde_json::json!({"error": {
+                "code": "BACKEND_REQUIRED", "message": "oversized".repeat(4096), "platform": "ios-arm64",
+                "requires_backends": ["zzz-phonon-31m"]
+            }}).to_string(),
+        ] {
+            let response = ureq::Response::new(404, "Not Found", &body).unwrap();
+            let error = resolve_not_found(response, "phonon-31m-en", "ios-arm64");
+            assert!(matches!(error, SdkError::ModelNotFound(_)), "{error:?}");
+            assert!(!error.is_retryable());
+        }
+    }
+
+    #[test]
+    fn model_detail_and_resolve_floors_are_optional_and_preserved() {
+        let mut resolved_json = serde_json::to_value(variant_with_sizes(10, &[])).unwrap();
+        assert!(resolved_json.get("min_os").is_none());
+        resolved_json["min_os"] = serde_json::json!(["ios-16.0"]);
+        let resolved: ResolvedVariant = serde_json::from_value(resolved_json).unwrap();
+        assert_eq!(resolved.min_os, ["ios-16.0"]);
+
+        let mut variant_json = serde_json::json!({
+            "platform": "ios-arm64", "format": "gguf", "quantization": "q8_0",
+            "size_bytes": 10, "hf_repo": "xybrid-ai/phonon", "file": "model.gguf"
+        });
+        let old: VariantInfo = serde_json::from_value(variant_json.clone()).unwrap();
+        assert!(old.min_os.is_empty());
+        variant_json["min_os"] = serde_json::json!(["ios-16.0"]);
+        let current: VariantInfo = serde_json::from_value(variant_json).unwrap();
+        assert_eq!(current.min_os, ["ios-16.0"]);
+        assert_eq!(
+            serde_json::to_value(current).unwrap()["min_os"],
+            serde_json::json!(["ios-16.0"])
         );
     }
 
@@ -3679,6 +4035,7 @@ mod tests {
             quantization: "fp16".to_string(),
             size_bytes: 100000,
             sha256: "abc123".to_string(),
+            min_os: Vec::new(),
             artifacts: Vec::new(),
             passthrough: false,
             model_metadata: None,

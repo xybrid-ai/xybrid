@@ -114,6 +114,17 @@ pub type SdkErrorSource = Box<dyn std::error::Error + Send + Sync>;
 pub enum SdkError {
     #[error("Model not found: {0}")]
     ModelNotFound(String),
+    /// The registry found the model, but this runtime is below its OS floor.
+    /// This is a permanent compatibility refusal, not a missing model or a
+    /// transient download failure. Tokens use the registry's `min_os` format.
+    #[error("OS_VERSION_UNSUPPORTED: model '{model_id}' on '{platform}' requires {required}, but this runtime reports {os}; {message}", required = .min_os.join(", "))]
+    OsVersionUnsupported {
+        model_id: String,
+        platform: String,
+        os: String,
+        min_os: Vec<String>,
+        message: String,
+    },
     #[error("Directory not found: {0}")]
     DirectoryNotFound(String),
     #[error("model_metadata.json not found in directory: {0}")]
@@ -275,6 +286,7 @@ impl SdkError {
 
             // Non-retryable errors (permanent failures)
             SdkError::ModelNotFound(_) => false,
+            SdkError::OsVersionUnsupported { .. } => false,
             SdkError::DirectoryNotFound(_) => false,
             SdkError::MetadataNotFound(_) => false,
             SdkError::MetadataInvalid(_) => false,
@@ -6863,6 +6875,16 @@ mod tests {
             (SdkError::CircuitOpen("x".into()), false),
             (SdkError::NotLoaded, false),
             (SdkError::ConfigError("x".into()), false),
+            (
+                SdkError::OsVersionUnsupported {
+                    model_id: "phonon-31m-en".into(),
+                    platform: "ios-arm64".into(),
+                    os: "ios-15.7".into(),
+                    min_os: vec!["ios-16.0".into()],
+                    message: "requires iOS 16".into(),
+                },
+                false,
+            ),
         ];
         for (err, expected) in &cases {
             assert_eq!(err.is_retryable(), *expected, "inherent for {err:?}");
