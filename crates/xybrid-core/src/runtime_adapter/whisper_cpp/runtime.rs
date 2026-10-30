@@ -3,6 +3,9 @@
 //! Set envelope metadata `prompt` to vocabulary or preceding transcript text
 //! that should guide recognition, such as `"Jarv, Quarry, Bluff."`. The runtime
 //! applies it per request; omitted or blank prompts leave the default unchanged.
+//! `xybrid-whisper` trims the prompt and prepends a single space before
+//! tokenizing, matching openai-whisper, so the first prompt word gets the same
+//! leading-space token whisper emits for words mid-sentence.
 
 use std::collections::HashMap;
 use std::path::Path;

@@ -179,12 +179,7 @@ impl WhisperModel {
         // borrows the language pointer rather than copying it.
         let language = self.resolve_language(params.language.as_deref())?;
         // Native parameters borrow both strings until whisper_full returns.
-        let prompt = params
-            .prompt
-            .as_deref()
-            .map(CString::new)
-            .transpose()
-            .map_err(|_| WhisperError::InvalidInput("prompt contains a null byte".into()))?;
+        let prompt = native_prompt(params.prompt.as_deref())?;
 
         // SAFETY: pure value constructor, no preconditions.
         let mut wparams = unsafe {
@@ -419,6 +414,21 @@ impl std::fmt::Debug for WhisperModel {
     }
 }
 
+/// Normalises a caller prompt the way openai-whisper and faster-whisper do
+/// (`" " + prompt.strip()`). Whisper emits words with a leading space
+/// (`" And"`, `" so"`), and whisper.cpp tokenizes `" Jarv"` and `"Jarv"`
+/// differently, so the first prompt word needs the space to condition the
+/// decoder on the token split it saw in training. A prompt that is blank after
+/// trimming is treated as no prompt (a null `initial_prompt`).
+fn native_prompt(prompt: Option<&str>) -> Result<Option<CString>, WhisperError> {
+    prompt
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|p| CString::new(format!(" {p}")))
+        .transpose()
+        .map_err(|_| WhisperError::InvalidInput("prompt contains a null byte".into()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::default_context_params;
@@ -433,5 +443,39 @@ mod tests {
     #[test]
     fn other_targets_keep_gpu_disabled_by_default() {
         assert!(!default_context_params().use_gpu);
+    }
+
+    mod native_prompt {
+        use super::super::{native_prompt, WhisperError};
+
+        fn render(prompt: Option<&str>) -> Option<String> {
+            native_prompt(prompt)
+                .expect("valid prompt")
+                .map(|c| c.into_string().expect("utf-8"))
+        }
+
+        #[test]
+        fn prepends_a_single_leading_space() {
+            assert_eq!(render(Some("Jarv, Quarry.")).as_deref(), Some(" Jarv, Quarry."));
+        }
+
+        #[test]
+        fn trims_before_prepending() {
+            assert_eq!(render(Some("  Jarv  ")).as_deref(), Some(" Jarv"));
+        }
+
+        #[test]
+        fn blank_or_missing_prompt_is_no_prompt() {
+            assert_eq!(render(Some("   ")), None);
+            assert_eq!(render(None), None);
+        }
+
+        #[test]
+        fn interior_null_byte_is_rejected() {
+            assert!(matches!(
+                native_prompt(Some("Jarv\0Quarry")),
+                Err(WhisperError::InvalidInput(_))
+            ));
+        }
     }
 }
