@@ -592,7 +592,7 @@ JSON Schema：https://github.com/xybrid-ai/xybrid/blob/main/docs/sdk/model_metad
 
 ### 实战示例：配置 BERT NER 模型
 
-假设你下载了 ONNX 格式的 [dslim/bert-base-NER](https://huggingface.co/dslim/bert-base-NER)，但不确定如何配置。
+下面是一次真实的交互过程。假设你下载了 ONNX 格式的 [dslim/bert-base-NER](https://huggingface.co/dslim/bert-base-NER)，但不确定如何配置。
 
 **第一步：检查模型**
 
@@ -644,6 +644,8 @@ Outputs:
 ```
 
 **第三步：AI Agent生成配置**
+
+Agent 生成的结果：
 
 ```json
 {
