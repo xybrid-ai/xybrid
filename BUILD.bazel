@@ -614,7 +614,7 @@ cmake(
     name = "llama_metal",
     # rfcc sanitizes PATH to /bin:/usr/bin:/usr/local/bin; the preinstalled
     # cmake/make/pkg-config (build:macos-metal --extra_toolchains) live in
-    # /opt/homebrew/bin on Apple silicon (incl. macos-14 runners).
+    # /opt/homebrew/bin on Apple silicon (incl. the macOS CI runners).
     env = {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"},
     build_data = [
         "@llvm//tools:llvm-install-name-tool",
