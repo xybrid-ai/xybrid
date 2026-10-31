@@ -24,6 +24,12 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     ("candle-cuda", cfg!(feature = "candle-cuda")),
     ("candle-metal", cfg!(feature = "candle-metal")),
     ("espeak", cfg!(feature = "espeak")),
+    // The registry serves `lfm3-1.7b` only to clients that list
+    // `llamacpp-lfm3`, and `lfm3-vl-2b` only to those that list
+    // `llamacpp-lfm3vl`. 0.15.0 builds report `llm-llamacpp` too, but pin a
+    // llama.cpp without the `lfm3` architecture, so it cannot gate them.
+    ("llamacpp-lfm3", cfg!(feature = "llm-llamacpp")),
+    ("llamacpp-lfm3vl", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-llamacpp", cfg!(feature = "llm-llamacpp")),
     ("llm-llamacpp-vision", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-mistral", cfg!(feature = "llm-mistral")),
@@ -155,6 +161,18 @@ mod tests {
     #[test]
     fn llamacpp_reports_enabled() {
         assert!(enabled().contains(&"llm-llamacpp"));
+    }
+
+    #[test]
+    fn lfm3_backends_follow_the_llama_cpp_features() {
+        assert_eq!(
+            enabled().contains(&"llamacpp-lfm3"),
+            cfg!(feature = "llm-llamacpp")
+        );
+        assert_eq!(
+            enabled().contains(&"llamacpp-lfm3vl"),
+            cfg!(feature = "llm-llamacpp-vision")
+        );
     }
 
     #[cfg(feature = "asr-whispercpp")]

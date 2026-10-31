@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Loading `LiquidAI/LFM3-VL-2B-GGUF` from Hugging Face now loads its vision
   projector too (it ran text-only), with a 1,024-token image cap and LiquidAI's
   recommended sampling.
+- **`llamacpp-lfm3` and `llamacpp-lfm3vl` registry backends.** Every
+  `llm-llamacpp` build reports `llamacpp-lfm3`, and every
+  `llm-llamacpp-vision` build also reports `llamacpp-lfm3vl`. `resolve` sends
+  both in its `&backends=` query even when telemetry is opted out, so the
+  registry can serve the LFM3 models only to builds that run them. 0.15.0
+  builds report `llm-llamacpp` but cannot load LFM3.
 - **Android, React Native:** on-device speech with Phonon and Kitten TTS 2 in
   `ai.xybrid:xybrid-kotlin` and `@xybrid/react-native` on Android. The AAR's
   arm64-v8a library now links the zzz speech engine statically, so on Android

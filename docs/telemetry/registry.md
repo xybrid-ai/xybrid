@@ -94,6 +94,8 @@ Source: `xybrid_sdk::current_platform()` (`crates/xybrid-sdk/src/platform.rs`). 
 | `candle-cuda` | `candle-cuda` | Candle backend with CUDA acceleration. Opt-in only — no `platform-*` preset enables it |
 | `candle-metal` | `candle-metal` | Candle backend with Metal acceleration. Opt-in only — no `platform-*` preset enables it |
 | `espeak` | `espeak` | espeak-ng phonemizer (multi-language TTS) |
+| `llamacpp-lfm3` | `llm-llamacpp` | The build's llama.cpp loads LiquidAI's LFM3 architecture, and xybrid renders LFM3's thinking state and BOS. 0.15.0 builds report `llm-llamacpp` too but cannot load LFM3, so the registry serves `lfm3-1.7b` only to clients that list `llamacpp-lfm3`, and `resolve` also sends it in its query (see [When the header is sent](#when-the-header-is-sent)) |
+| `llamacpp-lfm3vl` | `llm-llamacpp-vision` | Like `llamacpp-lfm3`, for LFM3-VL: the build also loads the `lfm3vl` projector and can cap image tokens (`vision_encoder.max_image_tokens`). The registry serves `lfm3-vl-2b` only to clients that list it, and `resolve` also sends it in its query |
 | `llm-llamacpp` | `llm-llamacpp` | llama.cpp backend (universal LLM runtime) |
 | `llm-llamacpp-vision` | `llm-llamacpp-vision` | Native llama multimodal (mtmd) VLM backend layered on `llm-llamacpp`; in every `platform-*` preset |
 | `llm-mistral` | `llm-mistral` | mistral.rs backend |
@@ -147,7 +149,7 @@ The SDK adds `X-Xybrid-Client` to the three metadata calls:
 | `RegistryClient::get_model` | `GET /v1/models/{mask}` | Fetch metadata for one model |
 | `RegistryClient::resolve` | `GET /v1/models/{mask}/resolve?platform=…` | Resolve a model+platform to a bundle URL |
 
-`resolve` also lists, as `&backends=` in its query, the backends that decide which file the registry serves; today those are `asr-whispercpp-coreml` and `zzz-phonon-31m`. Unlike the header, it is sent when telemetry is opted out too: without it, an opted-out iOS client would get the plain `.bin` instead of the bundle with the Core ML encoder, and an opted-out `tts-zzz` client could not resolve `phonon-31m-en`. An optional `&os=` supplies the runtime version for OS compatibility. The registry does not record either query parameter's value in analytics.
+`resolve` also lists, as `&backends=` in its query, the backends that decide which file the registry serves; today those are `asr-whispercpp-coreml`, `llamacpp-lfm3`, `llamacpp-lfm3vl` and `zzz-phonon-31m`. Unlike the header, it is sent when telemetry is opted out too: without it, an opted-out iOS client would get the plain `.bin` instead of the bundle with the Core ML encoder, an opted-out `tts-zzz` client could not resolve `phonon-31m-en`, and an opted-out llama.cpp client could not resolve the LFM3 models. An optional `&os=` supplies the runtime version for OS compatibility. The registry does not record either query parameter's value in analytics.
 
 Bundle download requests are intentionally **not** instrumented in this version. They are downloads, not metadata calls, and a per-byte header is not interesting in aggregate.
 
