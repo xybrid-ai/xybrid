@@ -206,6 +206,72 @@ fn lfm3_calls_a_tool_and_answers_from_its_result() {
     assert!(text(&answer).contains("21"), "{:?}", text(&answer));
 }
 
+/// The same tool turn with thinking on, as the registry entries ship: the
+/// model reasons before it calls, and again before it answers from the result.
+#[test]
+fn lfm3_calls_a_tool_with_thinking_on() {
+    let Some(model_dir) = model_fixtures::model_or_skip(TEXT_MODEL_ID) else {
+        return;
+    };
+    let mut metadata = load_metadata(&model_dir);
+    metadata
+        .metadata
+        .insert("reasoning".to_string(), serde_json::Value::Bool(true));
+    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
+    let question = "What's the weather in Paris?";
+    let config = GenerationConfig::greedy()
+        .with_max_tokens(1024)
+        .with_tools([weather_tool()]);
+
+    let first = executor
+        .execute(
+            &metadata,
+            &Envelope::new(EnvelopeKind::Text(question.to_string())),
+            Some(&config),
+        )
+        .expect("tool-bearing LFM3 turn succeeds");
+    let calls = tool_calls(&first);
+    eprintln!(
+        "thinking-on call turn: {:?} -> {calls:?}\nreasoning: {:?}",
+        text(&first),
+        first.metadata.get("reasoning_content")
+    );
+
+    assert_eq!(calls.len(), 1, "{:?}", text(&first));
+    assert_eq!(calls[0].function.name, "get_weather");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&calls[0].function.arguments).unwrap(),
+        serde_json::json!({"city": "Paris"})
+    );
+    assert_eq!(
+        first.metadata.get("finish_reason").map(String::as_str),
+        Some("tool_calls")
+    );
+    assert!(!text(&first).contains("think>"), "{:?}", text(&first));
+
+    let continuation = Envelope::tool_results(
+        question,
+        text(&first),
+        &[ToolCallResult {
+            call_id: calls[0].id.clone(),
+            name: calls[0].function.name.clone(),
+            content: serde_json::json!({"temperature_c": 21, "condition": "sunny"}),
+        }],
+    );
+    let answer = executor
+        .execute(&metadata, &continuation, Some(&config))
+        .expect("LFM3 tool continuation succeeds");
+    eprintln!(
+        "thinking-on answer turn: {:?}\nreasoning: {:?}",
+        text(&answer),
+        answer.metadata.get("reasoning_content")
+    );
+
+    assert!(tool_calls(&answer).is_empty(), "{:?}", text(&answer));
+    assert!(text(&answer).contains("21"), "{:?}", text(&answer));
+    assert!(!text(&answer).contains("think>"), "{:?}", text(&answer));
+}
+
 /// LFM3 writes argument values as text; the schema types them.
 #[test]
 fn lfm3_tool_arguments_follow_their_schema_types() {
