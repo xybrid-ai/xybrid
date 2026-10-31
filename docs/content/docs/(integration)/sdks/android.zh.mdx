@@ -22,6 +22,13 @@ dependencies {
 ```kotlin
 import ai.xybrid.*
 
+class MyApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        Xybrid.init(this)
+    }
+}
+
 // 先描述模型来源，再显式加载
 val model = Xybrid.model("kokoro-82m").load()
 
@@ -62,8 +69,10 @@ val model = Xybrid.model("whisper-tiny-ggml").load()
 val model = Xybrid.model(ModelSource.bundle("/path/to/model.xyb")).load()
 ```
 
-`Xybrid.model(...)` 只创建廉价的、未加载的引用。`load()` 是显式的加载边界，
-可能解析元数据、下载文件、访问磁盘并初始化运行时。
+`Xybrid.model(...)` 只创建廉价的、未加载的引用。解压后的目录与 Hugging Face
+分别使用 `ModelSource.directory(path)` 和 `ModelSource.huggingFace("org/repo")`。
+挂起函数 `load()` 是显式的加载边界，可能解析元数据、下载文件、访问磁盘并初始化运行时。
+`loadBlocking()` 仅应从 Java 代码或已有的工作线程中调用。
 
 ---
 
@@ -144,7 +153,7 @@ scope.launch {
     session.partials().collect { partial -> textView.text = partial.text }
 }
 
-// From the AudioRecord loop, converted to float mono 16 kHz:
+// 来自 AudioRecord 循环，已转换为 float 单声道 16 kHz：
 session.feed(pcm)
 
 val transcript = session.flush()

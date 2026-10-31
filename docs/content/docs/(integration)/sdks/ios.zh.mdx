@@ -28,6 +28,12 @@ dependencies: [
 ```swift
 import Xybrid
 
+@main
+struct MyApp: App {
+    init() { Xybrid.initialize() }
+    var body: some Scene { /* ... */ }
+}
+
 // 先描述模型来源，再显式加载
 let model = try await Xybrid.model("kokoro-82m").load()
 
@@ -71,8 +77,10 @@ let model = try await Xybrid.model("whisper-tiny-ggml").load()
 let model = try await Xybrid.model(.bundle(bundleURL)).load()
 ```
 
-`Xybrid.model(...)` 只创建廉价的、未加载的引用。本地 Bundle 和目录使用
-`URL` 与 `.bundle(url)` / `.directory(url)`。`load()` 是显式的异步加载边界。
+`Xybrid.model(...)` 只创建廉价的、未加载的引用。本地 Bundle 与目录来源通过
+`.bundle(url)` 和 `.directory(url)` 传入 `URL`；Hugging Face 使用
+`.huggingFace("org/repo")`。异步的 `load()` 是显式的加载边界，负责解析、下载、
+磁盘访问与运行时初始化。`loadSync()` 仅应从已有的工作线程中调用。
 
 ---
 
@@ -155,10 +163,10 @@ Task {
     }
 }
 
-// From the AVAudioEngine tap, converted to 16 kHz mono Float32:
+// 来自 AVAudioEngine tap，已转换为 16 kHz 单声道 Float32：
 try session.feed(samples: pcm)
 
-// When the user stops talking:
+// 用户停止说话时：
 let transcript = try session.flush()
 ```
 
