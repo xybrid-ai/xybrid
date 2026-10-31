@@ -44,6 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixtures `lfm3-1.7b` and `lfm3-vl-2b` pin LiquidAI's quantization-aware Q4_0
   builds. LFM3-Audio 2B and LFM3-Omni 2B are not supported: they need
   llama.cpp's audio input and speech generation, which xybrid does not wrap.
+- **`llamacpp-lfm3` and `llamacpp-lfm3vl` registry backends.** Every
+  `llm-llamacpp` build reports `llamacpp-lfm3`, and every
+  `llm-llamacpp-vision` build also reports `llamacpp-lfm3vl`. `resolve` sends
+  both in its `&backends=` query even when telemetry is opted out, so the
+  registry can serve the LFM3 models only to builds that run them. Older
+  builds report `llm-llamacpp` too but can't run LFM3: 0.15.0 and earlier
+  lack the `lfm3` architecture, and 0.16.0 loads it without LFM3's prompt
+  format, tool calls or image-token cap.
 
 ### Changed
 
