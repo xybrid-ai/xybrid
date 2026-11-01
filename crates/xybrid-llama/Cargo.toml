@@ -26,5 +26,8 @@ thiserror = { workspace = true }
 tracing = "0.1"
 
 [dev-dependencies]
-# tests/d1_native_parity.rs reads the decision cases' prepared passes.
+# tests/d1_native_parity.rs reads the decision cases' prepared passes and
+# verifies the staged GGUF and the linked native archives by sha256.
+serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = "0.10"

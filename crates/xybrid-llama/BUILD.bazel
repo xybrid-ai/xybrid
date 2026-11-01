@@ -85,8 +85,9 @@ _LLAMA_INTEGRATION_TESTS = {
 ]
 
 # G2 readout parity: its harness calls llama.cpp's C API directly, so it links
-# llama-cpp-sys itself, and it reads the decision cases with serde_json.
-# Model-gated and release-only, so in the sandbox it compiles and skips.
+# llama-cpp-sys itself; it reads the decision cases with serde and hashes the
+# model and the native archives with sha2. Model-gated and release-only, so in
+# the sandbox it compiles and skips.
 rust_test(
     name = "d1_native_parity",
     version = XYBRID_VERSION,
@@ -96,7 +97,9 @@ rust_test(
     deps = [
         ":xybrid_llama",
         "//crates/llama-cpp-sys:llama_cpp_sys",
+        "@crates//:serde",
         "@crates//:serde_json",
+        "@crates//:sha2",
     ],
 )
 
