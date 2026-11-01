@@ -12,13 +12,20 @@ Add to your `build.gradle.kts`:
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.6.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.16.0")
 }
 ```
 
-Releases after 0.15.0 require Android 10 (API 29): set `minSdk = 29` or higher
-in your app's `defaultConfig`, or the build fails at the manifest merge.
-0.15.0 and earlier require API 24.
+Releases 0.16.0 and later require Android 10 (API 29): set `minSdk = 29` or
+higher in your app's `defaultConfig`, or the build fails at the manifest merge.
+Releases before 0.16.0 require API 24.
+
+Downloading models from the registry needs network access, and the SDK
+declares no permissions. Add this to your app's `AndroidManifest.xml`:
+
+```xml
+<uses-permission android:name="android.permission.INTERNET" />
+```
 
 ### Local Development
 
@@ -465,8 +472,8 @@ for armeabi-v7a and x86_64.
 
 | Android API | Version Name | SDK releases |
 |-------------|--------------|--------------|
-| API 29+ | Android 10 | after 0.15.0 |
-| API 24+ | Android 7.0 (Nougat) | 0.15.0 and earlier |
+| API 29+ | Android 10 | 0.16.0 and later |
+| API 24+ | Android 7.0 (Nougat) | before 0.16.0 |
 
 ## NDK ABIs
 
