@@ -67,9 +67,10 @@
 //!    [`NotDecision`].
 //! 5. `<arch>.decision.type` of any type but a UTF-8 string (an array, a
 //!    number) is an error, not absence.
-//! 6. A decision type other than `lfm3-d1` is
-//!    [`Unsupported`] ([`UnsupportedReason::Protocol`]). That includes
-//!    `lfm3-d1-omni`, which a later profile admits with its own pins.
+//! 6. A decision type other than `lfm3-d1` is [`Unsupported`]: for
+//!    `lfm3-d1-omni`, which a later profile admits with its own pins,
+//!    [`UnsupportedReason::ProtocolNotYetAdmitted`]; for any other,
+//!    [`UnsupportedReason::Protocol`].
 //! 7. `lfm3-d1` is the `lfm3-d1/text/v1` profile
 //!    ([`DecisionProfileId::Lfm3D1Text`]) when:
 //!    - `<arch>` is `lfm3`, else [`UnsupportedReason::Architecture`];
@@ -80,10 +81,12 @@
 //!      an error; absent is [`UnsupportedReason::MissingTemplate`]);
 //!    - every other `lfm3.decision.*` key is a temperature,
 //!      `lfm3.decision.temperature.<name>`, of type `f32` (another type is
-//!      an error) whose effective value is finite and positive (otherwise
-//!      an error: llama.cpp refuses such a model at load). Any other
-//!      decision key, such as `score_bias`, is
-//!      [`UnsupportedReason::DecisionKey`].
+//!      an error: a restriction of this profile, since llama.cpp would read
+//!      any numeric type through its string accessor) whose effective value
+//!      is finite and positive (otherwise an error: llama.cpp refuses such
+//!      a model at load). `temperature.image`, which llama.cpp uses for
+//!      requests with media, is allowed and unused. Any other decision key,
+//!      such as `score_bias`, is [`UnsupportedReason::DecisionKey`].
 //!
 //!    The architecture is checked first, since the profile's keys are named
 //!    after it; then every type and temperature error is reported before
