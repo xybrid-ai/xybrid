@@ -10,3 +10,7 @@ integration-tests/fixtures/choice/templates/** -text
 crates/llama-cpp-sys/build.rs -text
 crates/llama-cpp-sys/wrapper.cpp -text
 crates/llama-cpp-sys/wrapper.h -text
+
+# G1's conformance tools are identified by their SHA-256 (the held-out recipe's
+# digest, the comparator stamped into reports), so check them out byte for byte.
+tools/conformance/decision_g1/** -text
