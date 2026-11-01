@@ -9,9 +9,11 @@
 //! case's edits (and, for a token-type edit, the edited token's spelling
 //! among the CONTROL ones), and in
 //! [`metadata_variants_built_by_the_oracle`], on the variant GGUF P3a's
-//! oracle builds (`tools/conformance/decision`, `decision-oracle variant`),
-//! read as the model's header. That test needs the oracle binary:
-//! `XYBRID_DECISION_ORACLE=<path to decision-oracle>`.
+//! oracle builds (`tools/conformance/decision`, `decision-oracle variant`):
+//! its header, and its own vocabulary loaded as upstream loads it
+//! (`LlamaModel::load_vocab_only`; a variant has no tensors). That test
+//! needs the oracle binary: `XYBRID_DECISION_ORACLE=<path to
+//! decision-oracle>`.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -479,10 +481,9 @@ fn build_variant(oracle: &Path, base: &Path, case: &Case, dir: &Path) -> PathBuf
 
 #[test]
 fn metadata_variants_built_by_the_oracle() {
-    let Some((base, model)) = d1_2b() else { return };
+    let Some((base, _)) = d1_2b() else { return };
     let Some(oracle) = oracle() else { return };
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let vocab = LlamaVocab::new(model).expect("d1-2B's vocabulary");
     let mut checked = std::collections::BTreeMap::<&str, usize>::new();
     let mut parity = F64Parity::new();
     for case in cases::all() {
@@ -506,13 +507,18 @@ fn metadata_variants_built_by_the_oracle() {
             continue;
         }
         let facts = facts.unwrap_or_else(|error| panic!("{}: {error}", case.id));
-        // The variant keeps d1-2B's vocabulary but for its token types: its
-        // tokenizer is d1-2B's, its CONTROL spellings its own.
-        let variant_vocab = SpellingsOf {
-            tokenizer: &vocab,
-            control: header_control_spellings(&header),
-        };
-        let outcome = check_case(&case, &facts, &variant_vocab, &mut parity);
+        // The variant's own vocabulary: its tokenizer and its CONTROL
+        // spellings follow its own token types, which are the header's.
+        let model = LlamaModel::load_vocab_only(variant.to_str().expect("a UTF-8 path"))
+            .unwrap_or_else(|error| panic!("{}: {error}", case.id));
+        let vocab = LlamaVocab::new(&model).expect("the variant's vocabulary");
+        assert_eq!(
+            vocab.control_spellings(),
+            header_control_spellings(&header),
+            "{}",
+            case.id
+        );
+        let outcome = check_case(&case, &facts, &vocab, &mut parity);
         *checked.entry(outcome).or_default() += 1;
     }
     eprintln!("metadata_variants_built_by_the_oracle: {checked:?}");
