@@ -118,7 +118,7 @@ fn first_greedy_token(ctx: &LlamaContext, model: &LlamaModel, prompt: &[i32]) ->
 
 /// The first token greedy generation picks, from an empty state.
 fn greedy_next_token(ctx: &LlamaContext, model: &LlamaModel, prompt: &[i32]) -> i32 {
-    ctx.kv_cache_clear();
+    ctx.kv_cache_clear().expect("clear the memory");
     first_greedy_token(ctx, model, prompt)
 }
 

@@ -7,6 +7,9 @@
 //! and named), the GGUF metadata llama.cpp loaded, vocabulary entries, and
 //! the recurrent / hybrid architecture predicates the KV-cache prefix-reuse
 //! path gates on.
+//!
+//! A model from [`LlamaModel::load_vocab_only`] has all of that but no
+//! tensors: it tokenizes and answers lookups, and no context runs it.
 
 use std::ffi::{c_void, CStr};
 use std::sync::Arc;
@@ -21,6 +24,8 @@ use crate::ffi;
 /// the native model stays loaded until the last of them is dropped.
 pub struct LlamaModel {
     handle: Arc<ModelHandle>,
+    /// Loaded by [`Self::load_vocab_only`]: no context may be created.
+    vocab_only: bool,
 }
 
 /// The native `llama_model*`, freed when its last owner drops.
@@ -41,9 +46,10 @@ impl ModelHandle {
 impl Drop for ModelHandle {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
-            // SAFETY: ptr came from `ffi::load_model_from_file`, checked
-            // non-null on construction. Drop runs once, after every
-            // `LlamaModel` and context sharing this handle is gone.
+            // SAFETY: ptr came from `ffi::load_model_from_file` or
+            // `ffi::load_model_vocab_only`, checked non-null on
+            // construction. Drop runs once, after every `LlamaModel` and
+            // context sharing this handle is gone.
             unsafe { ffi::free_model(self.ptr) };
             self.ptr = std::ptr::null_mut();
         }
@@ -56,17 +62,78 @@ impl LlamaModel {
     /// `n_gpu_layers` is forwarded verbatim to llama.cpp's loader (a
     /// negative value means "all layers on the GPU"; zero forces CPU
     /// inference).
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::LoadFailed`] when llama.cpp cannot load the file (it
+    /// reports its own exceptions, an allocation failure included, this
+    /// way), [`LlamaError::Internal`] when an exception escaped llama.cpp,
+    /// and [`LlamaError::InvalidInput`] when `path` contains a NUL byte.
     pub fn load(path: &str, n_gpu_layers: i32) -> LlamaResult<Self> {
         let c_path = ffi::cstring(path, "model path")?;
         // SAFETY: `c_path` outlives the call; `n_gpu_layers` is plain
-        // data. A null return surfaces as `LoadFailed`.
-        let ptr = unsafe { ffi::load_model_from_file(&c_path, n_gpu_layers) };
+        // data. A null model surfaces as `LoadFailed`.
+        let ptr = unsafe { ffi::load_model_from_file(&c_path, n_gpu_layers) }?;
         if ptr.is_null() {
             return Err(LlamaError::LoadFailed(path.to_string()));
         }
         Ok(Self {
             handle: Arc::new(ModelHandle { ptr }),
+            vocab_only: false,
         })
+    }
+
+    /// Load only the vocabulary and metadata of a GGUF file, on the CPU.
+    ///
+    /// llama.cpp parses the whole header, tensor descriptions included (the
+    /// file may have none), builds the vocabulary, and reads no tensor data:
+    /// nothing is mapped and no device is used. It still checks that each
+    /// described tensor's data lies inside the file, so a header cut from a
+    /// model is refused: drop its tensor entries too. The model tokenizes and
+    /// answers the vocabulary, metadata and named chat template lookups as
+    /// one from [`Self::load`] does, but cannot run: every context
+    /// constructor refuses it with [`LlamaError::VocabOnly`]. One answer
+    /// differs: [`Self::chat_template`] loses llama.cpp's one built-in
+    /// fallback that counts the model's layers (for Mistral-Small-2503), so
+    /// it can be `None` where a full load has a template.
+    ///
+    /// llama.cpp needs no backend for this load, but logs it, so xybrid's
+    /// log policy is applied first ([`crate::backend_init`]).
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::LoadFailed`] when llama.cpp cannot load the file (it
+    /// reports its own exceptions, an allocation failure included, this
+    /// way), [`LlamaError::Internal`] when an exception escaped llama.cpp,
+    /// and [`LlamaError::InvalidInput`] when `path` contains a NUL byte.
+    pub fn load_vocab_only(path: &str) -> LlamaResult<Self> {
+        let c_path = ffi::cstring(path, "model path")?;
+        crate::backend_init();
+        // SAFETY: `c_path` outlives the call. A null model surfaces as
+        // `LoadFailed`.
+        let ptr = unsafe { ffi::load_model_vocab_only(&c_path) }?;
+        if ptr.is_null() {
+            return Err(LlamaError::LoadFailed(path.to_string()));
+        }
+        Ok(Self {
+            handle: Arc::new(ModelHandle { ptr }),
+            vocab_only: true,
+        })
+    }
+
+    /// Whether the model came from [`Self::load_vocab_only`], so that no
+    /// context can run it.
+    pub fn is_vocab_only(&self) -> bool {
+        self.vocab_only
+    }
+
+    /// Refuses a model from [`Self::load_vocab_only`]: context constructors
+    /// call this before any native call.
+    pub(crate) fn ensure_runnable(&self) -> LlamaResult<()> {
+        if self.vocab_only {
+            return Err(LlamaError::VocabOnly);
+        }
+        Ok(())
     }
 
     /// Returns the raw pointer for the `xybrid-llama` internals.
@@ -92,6 +159,17 @@ impl LlamaModel {
             handle: Arc::new(ModelHandle {
                 ptr: std::ptr::null_mut(),
             }),
+            vocab_only: false,
+        }
+    }
+
+    /// [`Self::test_stub`] marked vocabulary-only, as from
+    /// [`Self::load_vocab_only`].
+    #[cfg(test)]
+    pub(crate) fn test_stub_vocab_only() -> Self {
+        Self {
+            vocab_only: true,
+            ..Self::test_stub()
         }
     }
 
@@ -492,6 +570,7 @@ impl TokenAttr {
 // `ffi::*` and called above:
 //
 //   - llama_load_model_from_file_c  : constructor, never aliased
+//   - llama_load_model_vocab_only_c : constructor, never aliased
 //   - llama_free_model_c            : Drop only, never aliased
 //   - llama_tokenize_c              : read-only over model vocab; the
 //                                     mutable write target is the caller's
@@ -534,7 +613,131 @@ unsafe impl Sync for ModelHandle {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_models::staged_d1;
+    use crate::test_models::{run_test_in_child, staged_d1};
+
+    #[test]
+    fn a_vocab_only_load_reports_a_file_it_cannot_load() {
+        let path = "/nonexistent/xybrid/vocab-only.gguf";
+        match LlamaModel::load_vocab_only(path) {
+            Err(LlamaError::LoadFailed(failed)) => assert_eq!(failed, path),
+            other => panic!("{:?}", other.map(|_| ())),
+        }
+        assert!(matches!(
+            LlamaModel::load_vocab_only("nul\0path").map(|_| ()),
+            Err(LlamaError::InvalidInput(_))
+        ));
+    }
+
+    /// The stub has no native model, so a constructor that reached
+    /// llama.cpp would fail some other way.
+    #[test]
+    fn every_context_constructor_refuses_a_vocab_only_model() {
+        let model = LlamaModel::test_stub_vocab_only();
+        assert!(model.is_vocab_only());
+        assert!(!LlamaModel::test_stub().is_vocab_only());
+        let calls = ffi::native_calls();
+        assert!(matches!(
+            crate::LlamaContext::new(&model, 512, 1, 512, false),
+            Err(LlamaError::VocabOnly)
+        ));
+        // Before its parameters are checked, too.
+        assert!(matches!(
+            crate::MemorylessContext::new(&model, crate::MemorylessParams::new(0, 0, false)),
+            Err(LlamaError::VocabOnly)
+        ));
+        #[cfg(feature = "vision")]
+        assert!(matches!(
+            crate::MtmdContext::from_file(
+                "/nonexistent/mmproj.gguf",
+                &model,
+                false,
+                false,
+                1,
+                false,
+                None
+            ),
+            Err(LlamaError::VocabOnly)
+        ));
+        assert_eq!(ffi::native_calls(), calls);
+    }
+
+    #[cfg(target_os = "linux")]
+    const FILE_USE_ENV: &str = "XYBRID_VOCAB_ONLY_FILE_USE";
+
+    /// Whether this process maps `path`, and whether it holds it open.
+    #[cfg(target_os = "linux")]
+    fn file_use(path: &std::path::Path) -> (bool, bool) {
+        let path = std::fs::canonicalize(path).expect("a canonical path");
+        let name = path.to_str().expect("a UTF-8 path");
+        let maps = std::fs::read_to_string("/proc/self/maps").expect("read /proc/self/maps");
+        let mapped = maps.lines().any(|line| line.ends_with(name));
+        let open = std::fs::read_dir("/proc/self/fd")
+            .expect("list /proc/self/fd")
+            .filter_map(Result::ok)
+            .any(|fd| std::fs::read_link(fd.path()).is_ok_and(|target| target == path));
+        (mapped, open)
+    }
+
+    /// A vocabulary-only load reads no tensor: llama.cpp neither maps the
+    /// file nor keeps it open, where a full load maps it. In a child
+    /// process, where no other test holds the model.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_vocab_only_load_neither_maps_nor_keeps_its_file() {
+        if staged_d1().is_none() {
+            return;
+        }
+        let output = run_test_in_child("model::tests::vocab_only_file_use", &[(FILE_USE_ENV, "1")]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report = stdout
+            .lines()
+            .find_map(|line| {
+                line.split_once("FILE USE ")
+                    .map(|(_, rest)| rest.to_string())
+            })
+            .unwrap_or_else(|| panic!("no report in {stdout}"));
+        assert!(
+            report.starts_with("vocab-only (false, false), full (true, "),
+            "(mapped, open): {report}"
+        );
+    }
+
+    /// The child of [`a_vocab_only_load_neither_maps_nor_keeps_its_file`]
+    /// (returns at once in a normal test run).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn vocab_only_file_use() {
+        if std::env::var_os(FILE_USE_ENV).is_none() {
+            return;
+        }
+        let path = staged_d1().expect("the parent checked the model is staged");
+        let name = path.to_str().expect("a UTF-8 path");
+        let rss_kb = || {
+            std::fs::read_to_string("/proc/self/status")
+                .expect("read /proc/self/status")
+                .lines()
+                .find_map(|line| line.strip_prefix("VmRSS:"))
+                .and_then(|rest| rest.split_whitespace().next())
+                .and_then(|kb| kb.parse::<i64>().ok())
+                .expect("VmRSS")
+        };
+        let (rss, start) = (rss_kb(), std::time::Instant::now());
+        let vocab = LlamaModel::load_vocab_only(name).expect("a vocabulary-only load");
+        let vocab_cost = (start.elapsed(), (rss_kb() - rss) / 1024);
+        let vocab_use = file_use(&path);
+        let (rss, start) = (rss_kb(), std::time::Instant::now());
+        let full = LlamaModel::load(name, 0).expect("a full load");
+        let full_cost = (start.elapsed(), (rss_kb() - rss) / 1024);
+        let full_use = file_use(&path);
+        drop((vocab, full));
+        println!("\nFILE USE vocab-only {vocab_use:?}, full {full_use:?}");
+        eprintln!("vocab-only load: {vocab_cost:?} (time, +MiB RSS); full load: {full_cost:?}");
+    }
 
     #[test]
     fn metadata_takes_two_native_calls_whatever_the_number_of_keys() {

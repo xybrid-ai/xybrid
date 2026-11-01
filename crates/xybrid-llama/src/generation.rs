@@ -259,6 +259,7 @@ pub fn generate_with_stops(
     grammar: Option<&str>,
 ) -> LlamaResult<Vec<i32>> {
     ctx.ensure_created_from(model)?;
+    ctx.ensure_usable()?;
     let (stop_tokens, stop_lens, mut output_tokens) =
         prepare_generation(model, input_tokens, max_tokens, stop_sequences)?;
     let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = stop_array_ptrs(&stop_tokens, &stop_lens);
@@ -310,7 +311,9 @@ pub fn generate_with_stops(
 /// returned bool indicates whether the closure stopped generation early.
 ///
 /// Like every generation entry point, this fails with
-/// [`LlamaError::InvalidInput`] when `ctx` was not created from `model`.
+/// [`LlamaError::InvalidInput`] when `ctx` was not created from `model`, and
+/// with [`LlamaError::ContextUnusable`] after a failed clear or trim of its
+/// memory (see [`LlamaContext::kv_cache_clear`]).
 #[allow(clippy::too_many_arguments)]
 pub fn generate_streaming<F>(
     ctx: &LlamaContext,
@@ -331,6 +334,7 @@ where
     F: FnMut(i32, &str) -> Result<(), Box<dyn StdError + Send + Sync>>,
 {
     ctx.ensure_created_from(model)?;
+    ctx.ensure_usable()?;
     let (stop_tokens, stop_lens, mut output_tokens) =
         prepare_generation(model, input_tokens, max_tokens, stop_sequences)?;
     let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = stop_array_ptrs(&stop_tokens, &stop_lens);
@@ -410,6 +414,7 @@ where
     F: FnMut(i32, &str) -> Result<(), Box<dyn StdError + Send + Sync>>,
 {
     ctx.ensure_created_from(model)?;
+    ctx.ensure_usable()?;
     if max_tokens == 0 {
         return Err(LlamaError::InvalidInput(
             "max_tokens must be greater than zero".to_string(),

@@ -18,11 +18,16 @@
 //! configuration's alone, and prints one table row per configuration.
 //! `XYBRID_MEASURE_BUDGETS` (comma-separated) overrides the budgets and
 //! `XYBRID_MEASURE_OUT` names a file for the table.
+//!
+//! `cancel_latency` (same flags, minutes rather than an hour) measures how
+//! long a readout takes to return after its cancel, by pass length:
+//! `XYBRID_MEASURE_LENGTHS` (comma-separated) overrides the lengths.
 
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::{MemorylessContext, MemorylessParams, OUTPUT_CAP};
+use crate::error::LlamaError;
 use crate::model::LlamaModel;
 use crate::test_models::staged_d1;
 
@@ -221,4 +226,77 @@ fn readout_resources_case() {
         mib(anon),
         mib(vm_peak)
     );
+}
+
+/// The time from `cancel()` to the readout's return, on settings
+/// `cpu-t4-fa-off`, by pass length. llama.cpp checks for the cancel between
+/// two graph nodes, so this is what remains of the node running at the
+/// cancel, plus the threads' synchronization: one node is a whole-batch
+/// matrix product, so the latency grows with the pass length. Each length
+/// is cancelled at 10, 30, 50, 70 and 90 % of a full pass, twice.
+#[test]
+#[ignore = "needs the d1-2B GGUF; run in release, see the module docs"]
+fn cancel_latency() {
+    if std::env::var_os("XYBRID_MEASURE").is_none() {
+        eprintln!("Skipping: set XYBRID_MEASURE=1 to run the measurements");
+        return;
+    }
+    let Some(path) = staged_d1() else { return };
+    crate::backend_init();
+    let model = LlamaModel::load(path.to_str().expect("a UTF-8 path"), 0).expect("load d1-2B");
+    let prompt = model.tokenize_special(PROMPT, false).expect("tokenize");
+    let lengths: Vec<usize> = std::env::var("XYBRID_MEASURE_LENGTHS")
+        .unwrap_or_else(|_| "256,512,1024,2048,4096".to_string())
+        .split(',')
+        .map(|length| length.trim().parse().expect("a length"))
+        .collect();
+    println!("\nCANCEL length | full pass ms | cancel-to-return ms: min / median / max (n)");
+    for length in lengths {
+        let tokens: Vec<i32> = prompt.iter().copied().cycle().take(length).collect();
+        let budget = u32::try_from(length).expect("a u32 length");
+        let mut ctx = MemorylessContext::new(&model, MemorylessParams::new(budget, THREADS, false))
+            .expect("a readout context");
+        ctx.read_last(&tokens, &[0]).expect("a warm-up pass");
+        let start = Instant::now();
+        ctx.read_last(&tokens, &[0]).expect("a full pass");
+        let pass = start.elapsed();
+
+        let mut latencies: Vec<Duration> = Vec::new();
+        for fraction in [0.1, 0.3, 0.5, 0.7, 0.9, 0.1, 0.3, 0.5, 0.7, 0.9] {
+            ctx.clear_cancel();
+            let cancel = ctx.cancel_handle();
+            let delay = pass.mul_f64(fraction);
+            let canceller = std::thread::spawn(move || {
+                std::thread::sleep(delay);
+                let at = Instant::now();
+                cancel.cancel();
+                at
+            });
+            let result = ctx.read_last(&tokens, &[0]);
+            let returned = Instant::now();
+            let cancelled_at = canceller.join().expect("the cancelling thread");
+            match result {
+                Err(LlamaError::Cancelled) => {
+                    latencies.push(returned.saturating_duration_since(cancelled_at));
+                }
+                Ok(_) => {} // finished before the cancel
+                Err(error) => panic!("{error}"),
+            }
+        }
+        latencies.sort();
+        let ms_of = |d: Duration| d.as_secs_f64() * 1e3;
+        let (min, median, max) = match latencies.as_slice() {
+            [] => (f64::NAN, f64::NAN, f64::NAN),
+            all => (
+                ms_of(all[0]),
+                ms_of(all[all.len() / 2]),
+                ms_of(all[all.len() - 1]),
+            ),
+        };
+        println!(
+            "CANCEL {length:>6} | {:>12.0} | {min:>7.1} / {median:>7.1} / {max:>7.1} ({})",
+            ms_of(pass),
+            latencies.len()
+        );
+    }
 }

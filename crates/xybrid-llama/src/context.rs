@@ -14,13 +14,14 @@
 //! `xybrid-core::runtime_adapter::llama_cpp::LlamaCppBackend` behind
 //! `&self` — must serialize through a [`std::sync::Mutex`].
 
+use std::cell::Cell;
 use std::ffi::{c_int, c_void};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::error::{LlamaError, LlamaResult};
-use crate::ffi;
+use crate::ffi::{self, Trim};
 use crate::model::{LlamaModel, ModelHandle};
 
 /// Source of [`LlamaContext::id`]: identifies the context a snapshot came
@@ -39,6 +40,9 @@ pub struct LlamaContext {
     n_batch: usize,
     /// The most tokens one decode call may carry (see [`decode_limit`]).
     decode_limit: usize,
+    /// Set when a clear or trim of the memory failed, so what it holds is
+    /// unknown; unset by a full clear that succeeds.
+    unusable: Cell<bool>,
     /// The model this context was created from. Fields drop after
     /// [`Drop::drop`] frees the native context, so the model outlives it.
     model: Arc<ModelHandle>,
@@ -81,6 +85,13 @@ impl LlamaContext {
     /// `n_threads = 0` means "auto-detect"; `n_batch = 0` means "use the
     /// 512-token llama.cpp default". `flash_attn` enables Flash Attention
     /// (2-4× speedup on longer contexts) where supported.
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::VocabOnly`], before any native call, for a model from
+    /// [`LlamaModel::load_vocab_only`], and
+    /// [`LlamaError::ContextCreationFailed`] when llama.cpp cannot create
+    /// the context.
     pub fn new(
         model: &LlamaModel,
         n_ctx: usize,
@@ -88,6 +99,7 @@ impl LlamaContext {
         n_batch: usize,
         flash_attn: bool,
     ) -> LlamaResult<Self> {
+        model.ensure_runnable()?;
         // llama.cpp receives the sizes as C ints; the decode limit below is
         // derived from these same values.
         let (n_ctx_c, n_batch_c) = (n_ctx as c_int, n_batch as c_int);
@@ -118,6 +130,7 @@ impl LlamaContext {
                 n_batch
             },
             decode_limit: decode_limit(n_ctx_c, n_batch_c, native_n_ctx),
+            unusable: Cell::new(false),
             model: Arc::clone(model.handle()),
         })
     }
@@ -131,6 +144,7 @@ impl LlamaContext {
             id: NEXT_CONTEXT_ID.fetch_add(1, Ordering::Relaxed),
             n_batch: DEFAULT_N_BATCH,
             decode_limit: DEFAULT_N_BATCH,
+            unusable: Cell::new(false),
             model: Arc::clone(model.handle()),
         }
     }
@@ -200,12 +214,45 @@ impl LlamaContext {
         usize::try_from(n).unwrap_or(0)
     }
 
-    /// Fully clear the KV cache, resetting context state for a new
-    /// conversation. Cheap; used as the fallback when prefix-reuse is
-    /// not viable.
-    pub fn kv_cache_clear(&self) {
-        // SAFETY: self.ptr is a live context pointer.
-        unsafe { ffi::kv_cache_clear(self.ptr) };
+    /// Fully clear the context's memory (the KV cache and any recurrent
+    /// state), resetting it for a new conversation. Cheap; used as the
+    /// fallback when prefix-reuse is not viable.
+    ///
+    /// It is also how a context recovers from a failed clear or trim: a
+    /// clear that succeeds leaves the memory empty, whatever it held.
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::Internal`] when llama.cpp fails while clearing (an
+    /// exception, such as running out of memory). What the memory holds is
+    /// then unknown, so until a clear succeeds every call that runs the
+    /// context or touches its memory returns
+    /// [`LlamaError::ContextUnusable`].
+    pub fn kv_cache_clear(&self) -> LlamaResult<()> {
+        self.clear_memory().map(|_| ())
+    }
+
+    /// [`Self::kv_cache_clear`], saying whether the context has any memory
+    /// (`false`: there was nothing to clear).
+    pub(crate) fn clear_memory(&self) -> LlamaResult<bool> {
+        // SAFETY: self.ptr is a live context pointer (a test stub's null is
+        // an error).
+        let cleared = unsafe { ffi::clear_memory(self.ptr) };
+        self.unusable.set(cleared.is_err());
+        cleared
+    }
+
+    /// Refuses a context whose memory could not be reset.
+    pub(crate) fn ensure_usable(&self) -> LlamaResult<()> {
+        if self.unusable.get() {
+            return Err(LlamaError::ContextUnusable);
+        }
+        Ok(())
+    }
+
+    /// Records that what the memory holds is unknown.
+    pub(crate) fn mark_unusable(&self) {
+        self.unusable.set(true);
     }
 
     /// Truncate the KV cache for `seq_id` to a prefix length `p_keep`,
@@ -222,9 +269,32 @@ impl LlamaContext {
     /// recurrent state remains keyed to the original prefix and
     /// `llama_decode` fails on the diverging tail. Gate calls on
     /// [`LlamaModel::has_recurrent_state`] = false.
-    pub fn kv_cache_seq_rm(&self, seq_id: i32, p_keep: usize) {
-        // SAFETY: self.ptr is a live context pointer.
-        unsafe { ffi::kv_cache_seq_rm(self.ptr, seq_id, p_keep) };
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::ContextUnusable`] after a failed clear or trim (see
+    /// [`Self::kv_cache_clear`]); [`LlamaError::InvalidInput`], changing
+    /// nothing, when `seq_id` is not one of the context's sequences (`0` for
+    /// contexts from [`Self::new`]) or llama.cpp cannot drop part of the
+    /// sequence (a recurrent state); [`LlamaError::Internal`] when llama.cpp
+    /// fails while trimming, which leaves the context unusable until a clear
+    /// succeeds.
+    pub fn kv_cache_seq_rm(&self, seq_id: i32, p_keep: usize) -> LlamaResult<()> {
+        self.ensure_usable()?;
+        // SAFETY: self.ptr is a live context pointer; the shim refuses a
+        // seq_id outside the context's sequences.
+        match unsafe { ffi::kv_cache_seq_rm(self.ptr, seq_id, p_keep) } {
+            Ok(Trim::Done | Trim::NoMemory) => Ok(()),
+            Ok(Trim::Refused) => Err(LlamaError::InvalidInput(format!(
+                "llama.cpp cannot drop positions {p_keep}.. of sequence {seq_id}: it is not one \
+                 of the context's sequences, or a recurrent state that cannot be trimmed \
+                 (nothing changed)"
+            ))),
+            Err(error) => {
+                self.mark_unusable();
+                Err(error)
+            }
+        }
     }
 
     /// Snapshot the full state of `seq_id`: its KV cache and, on
@@ -243,10 +313,13 @@ impl LlamaContext {
     ///
     /// # Errors
     ///
-    /// [`LlamaError::Internal`] if `seq_id` is not one of this context's
-    /// sequences (`0` for contexts from [`Self::new`]), the snapshot buffer
-    /// cannot be allocated, or llama.cpp fails to serialize the sequence.
+    /// [`LlamaError::ContextUnusable`] after a failed clear or trim (see
+    /// [`Self::kv_cache_clear`]); [`LlamaError::Internal`] if `seq_id` is
+    /// not one of this context's sequences (`0` for contexts from
+    /// [`Self::new`]), the snapshot buffer cannot be allocated, or llama.cpp
+    /// fails to serialize the sequence.
     pub fn state_seq_save(&self, seq_id: i32) -> LlamaResult<LlamaSeqSnapshot> {
+        self.ensure_usable()?;
         // SAFETY: self.ptr is a live context pointer; the shim rejects a
         // seq_id outside this context's sequences.
         let size = unsafe { ffi::state_seq_get_size(self.ptr, seq_id) };
@@ -287,12 +360,15 @@ impl LlamaContext {
     ///
     /// # Errors
     ///
-    /// [`LlamaError::InvalidInput`] if `snapshot` was saved by another
-    /// context; [`LlamaError::Internal`] if `seq_id` is not one of this
-    /// context's sequences or llama.cpp fails to load the snapshot (for
-    /// example, an allocation failure inside it). A failed load leaves
-    /// `seq_id` empty, so it can be prefilled again from position 0.
+    /// [`LlamaError::ContextUnusable`] after a failed clear or trim (see
+    /// [`Self::kv_cache_clear`]); [`LlamaError::InvalidInput`] if
+    /// `snapshot` was saved by another context; [`LlamaError::Internal`] if
+    /// `seq_id` is not one of this context's sequences or llama.cpp fails to
+    /// load the snapshot (for example, an allocation failure inside it). A
+    /// failed load leaves `seq_id` empty, so it can be prefilled again from
+    /// position 0.
     pub fn state_seq_restore(&self, snapshot: &LlamaSeqSnapshot, seq_id: i32) -> LlamaResult<()> {
+        self.ensure_usable()?;
         if snapshot.context_id != self.id {
             return Err(LlamaError::InvalidInput(
                 "state_seq_restore: the snapshot was saved by another context".to_string(),
@@ -391,6 +467,51 @@ fn decode_limit(n_ctx: c_int, n_batch: c_int, native_n_ctx: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_models::other_gguf;
+
+    /// llama.cpp's KV cache asserts, aborting, on a sequence it does not
+    /// have; the trim refuses one first. Needs a causal GGUF with memory.
+    #[test]
+    fn a_trim_outside_the_contexts_sequences_is_refused_and_changes_nothing() {
+        let Some(path) = other_gguf() else { return };
+        crate::backend_init();
+        let model = LlamaModel::load(path.to_str().unwrap(), 0).expect("load the GGUF");
+        let ctx = LlamaContext::new(&model, 128, 1, 32, false).expect("a context");
+        for seq_id in [1, -1, i32::MAX] {
+            assert!(
+                matches!(
+                    ctx.kv_cache_seq_rm(seq_id, 0),
+                    Err(LlamaError::InvalidInput(_))
+                ),
+                "sequence {seq_id}"
+            );
+        }
+        assert!(ctx.kv_cache_seq_rm(0, 0).is_ok());
+        assert!(ctx.state_seq_save(0).is_ok(), "the context is still usable");
+    }
+
+    /// A context whose memory could not be reset refuses every call that
+    /// runs it or touches its memory, before any native call.
+    #[test]
+    fn an_unusable_context_refuses_before_any_native_call() {
+        let model = LlamaModel::test_stub();
+        let ctx = LlamaContext::test_stub(&model);
+        ctx.mark_unusable();
+        let calls = ffi::native_calls();
+        assert!(matches!(
+            ctx.kv_cache_seq_rm(0, 0),
+            Err(LlamaError::ContextUnusable)
+        ));
+        assert!(matches!(
+            ctx.state_seq_save(0),
+            Err(LlamaError::ContextUnusable)
+        ));
+        assert!(matches!(
+            crate::generate_with_stops(&ctx, &model, &[1], 1, 0.0, 1.0, 0.0, 0, 1.0, &[], None),
+            Err(LlamaError::ContextUnusable)
+        ));
+        assert_eq!(ffi::native_calls(), calls);
+    }
 
     #[test]
     fn the_decode_limit_is_llama_cpps_own_batch_size() {

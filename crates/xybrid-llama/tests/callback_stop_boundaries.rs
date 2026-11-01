@@ -97,7 +97,7 @@ fn callback_stop_surfaces_as_callback_error_on_every_token() {
         .expect("tokenize prompt");
 
     for stop_at in [1, 2, 3, 4, 5, 6, 8] {
-        ctx.kv_cache_clear();
+        ctx.kv_cache_clear().expect("clear the memory");
         let mut calls = 0;
         let result = generate_streaming(
             &ctx,

@@ -34,6 +34,17 @@ cc_library(
     name = "wrapper_cc",
     srcs = ["wrapper.cpp"],
     hdrs = ["wrapper.h"],
+    # The shims catch llama.cpp's C++ exceptions at the C boundary, so the
+    # wrapper is compiled with exceptions on every toolchain: copts do not
+    # reach it from its llama dep (//:llama_browser's -fexceptions stays
+    # there). wrapper.cpp refuses to compile without them; Emscripten's
+    # no-catch default is invisible to the preprocessor, so that lane vouches
+    # for -fexceptions with a define.
+    copts = ["-fexceptions"],
+    local_defines = select({
+        "@rules_rs//rs/platforms/config:wasm32-unknown-emscripten": ["XYBRID_EMSCRIPTEN_EXCEPTIONS"],
+        "//conditions:default": [],
+    }),
     defines = select({
         cfg: ["XYBRID_LLAMA_VISION"]
         for cfg in _VISION_PLATFORMS

@@ -16,7 +16,8 @@
 //! - [`GgufHeader::verify_file_unchanged`] and `verify_native_load` (feature
 //!   `llm-llamacpp`): after a native load, that the file is still the one
 //!   scanned (identity and header digest) and that llama.cpp holds the
-//!   metadata the header predicts.
+//!   metadata the header predicts. [`GgufHeader::file_unchanged_cheap`] is
+//!   the advisory form for status queries: one `stat`, no hashing.
 //!
 //! # When to use
 //!

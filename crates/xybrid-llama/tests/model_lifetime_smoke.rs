@@ -73,7 +73,7 @@ fn a_context_stays_usable_after_its_model_is_dropped() {
     // Saving and restoring the sequence read the model's hyperparameters
     // through the context.
     let snapshot = ctx.state_seq_save(0).expect("save the sequence");
-    ctx.kv_cache_clear();
+    ctx.kv_cache_clear().expect("clear the memory");
     ctx.state_seq_restore(&snapshot, 0)
         .expect("restore the sequence");
     assert!(ctx.n_ctx() >= 512, "n_ctx is {}", ctx.n_ctx());

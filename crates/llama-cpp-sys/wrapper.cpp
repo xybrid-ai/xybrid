@@ -58,44 +58,75 @@
 // body through `guarded`, which turns any exception into the shim's failure
 // status. GGML_ASSERT and GGML_ABORT stop the process without an exception;
 // callers prevent those by validating arguments first.
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
-#define XYBRID_HAS_EXCEPTIONS 1
-#else
-#define XYBRID_HAS_EXCEPTIONS 0
+//
+// The boundary needs C++ exceptions, so every build compiles this file with
+// them (cargo: build.rs; Bazel: :wrapper_cc), and a build that does not fails
+// here rather than shipping shims that cannot catch.
+#if !defined(__cpp_exceptions) && !defined(__EXCEPTIONS) && !defined(_CPPUNWIND)
+#error "wrapper.cpp needs C++ exceptions: compile it with /EHsc (MSVC) or -fexceptions"
+#endif
+// Emscripten's default, -fignore-exceptions, compiles catch blocks away and
+// still defines the macros above, so its builds pass -fexceptions and vouch
+// for it with XYBRID_EMSCRIPTEN_EXCEPTIONS.
+#if defined(__EMSCRIPTEN__) && !defined(XYBRID_EMSCRIPTEN_EXCEPTIONS)
+#error "wrapper.cpp needs Emscripten exceptions: compile it with -fexceptions and define XYBRID_EMSCRIPTEN_EXCEPTIONS"
 #endif
 
 // Fault injection for the Rust tests, armed with llama_xybrid_fail_next_c:
-// the next call of the named shim throws std::bad_alloc inside its boundary.
-static std::atomic<bool> g_fail_armed{false};
-static char g_fail_shim[64];
+// a later call of the named shim, on any thread, throws std::bad_alloc
+// inside its boundary. The arm is one atomic word holding an index into
+// k_failpoints (whose names never change) and the number of calls still to
+// let through, and each call of the shim takes its turn with a
+// compare-exchange: exactly one call fails, and no shim reads memory an arm
+// writes. With nothing armed, a shim pays one relaxed load.
+static const char* const k_failpoints[] = {
+    "",  // nothing armed
+    "llama_load_model_from_file_c",
+    "llama_load_model_vocab_only_c",
+    "llama_new_readout_context_c",
+    "llama_context_facts_c",
+    "llama_set_abort_callback_c",
+    "llama_kv_cache_clear_c",
+    "llama_kv_cache_seq_rm_c",
+    "llama_tokenize_c",
+    "llama_model_has_encoder_c",
+    "llama_model_meta_count_c",
+    "llama_model_meta_val_str_c",
+    "llama_model_meta_lookup_c",
+    "llama_model_chat_template_named_c",
+    "llama_vocab_get_attr_c",
+    "llama_vocab_get_text_c",
+    "llama_decode_c",
+    "llama_get_logits_c",
+    "llama_get_logits_ith_c",
+};
+static std::atomic<uint64_t> g_failpoint{0};  // calls to let through << 32 | index
 
 static void xybrid_failpoint(const char* shim) {
-#if XYBRID_HAS_EXCEPTIONS
-    if (g_fail_armed.load(std::memory_order_acquire) && strcmp(g_fail_shim, shim) == 0) {
-        g_fail_armed.store(false, std::memory_order_relaxed);
-        throw std::bad_alloc();
+    uint64_t armed = g_failpoint.load(std::memory_order_relaxed);
+    while ((armed & 0xffffffffu) != 0 && strcmp(k_failpoints[armed & 0xffffffffu], shim) == 0) {
+        const uint64_t skip = armed >> 32;
+        const uint64_t next = skip == 0 ? 0 : armed - (uint64_t(1) << 32);
+        // On failure the exchange reloads `armed`, and the loop checks it again.
+        if (g_failpoint.compare_exchange_weak(armed, next, std::memory_order_relaxed)) {
+            if (skip == 0) {
+                throw std::bad_alloc();
+            }
+            return;
+        }
     }
-#else
-    (void)shim;
-#endif
 }
 
 // Runs `body` and returns its result, or `on_exception` when it (or llama.cpp
 // under it) throws.
 template <typename T, typename F>
 static T guarded(const char* shim, T on_exception, F&& body) noexcept {
-#if XYBRID_HAS_EXCEPTIONS
     try {
         xybrid_failpoint(shim);
         return body();
     } catch (...) {
         return on_exception;
     }
-#else
-    (void)shim;
-    (void)on_exception;
-    return body();
-#endif
 }
 
 // =============================================================================
@@ -139,13 +170,16 @@ static void xybrid_log_callback(enum ggml_log_level level, const char* text, voi
 
 extern "C" {
 
-void llama_xybrid_fail_next_c(const char* shim_name) {
-    g_fail_armed.store(false, std::memory_order_relaxed);
-    if (shim_name) {
-        strncpy(g_fail_shim, shim_name, sizeof(g_fail_shim) - 1);
-        g_fail_shim[sizeof(g_fail_shim) - 1] = '\0';
-        g_fail_armed.store(true, std::memory_order_release);
+bool llama_xybrid_fail_next_c(const char* shim_name, uint32_t skip) {
+    uint64_t index = 0;
+    for (size_t i = 1; shim_name && i < sizeof(k_failpoints) / sizeof(k_failpoints[0]); i++) {
+        if (strcmp(k_failpoints[i], shim_name) == 0) {
+            index = i;
+            break;
+        }
     }
+    g_failpoint.store(index == 0 ? 0 : (uint64_t(skip) << 32) | index, std::memory_order_relaxed);
+    return index != 0;
 }
 
 // =============================================================================
@@ -189,9 +223,28 @@ void llama_backend_free_c(void) {
 // Model Loading (using new API)
 // =============================================================================
 
-llama_model* llama_load_model_from_file_c(
+// Both loaders' boundary. llama.cpp catches its own exceptions while it
+// loads, but copies the path into a std::string before it gets there.
+static int32_t load_model(
+    const char* shim, const char* path_model, llama_model_params params, llama_model** out_model
+) noexcept {
+    if (out_model == nullptr) {
+        return LLAMA_XYBRID_FAILED;
+    }
+    *out_model = nullptr;
+    return guarded<int32_t>(shim, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (path_model == nullptr) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        *out_model = llama_model_load_from_file(path_model, params);
+        return 0;
+    });
+}
+
+int32_t llama_load_model_from_file_c(
     const char* path_model,
-    int n_gpu_layers
+    int n_gpu_layers,
+    llama_model** out_model
 ) {
     llama_model_params params = llama_model_default_params();
     params.n_gpu_layers = n_gpu_layers;
@@ -202,8 +255,20 @@ llama_model* llama_load_model_from_file_c(
     // into owned backend buffers that llama_model_free can release instead.
     params.load_mode = LLAMA_LOAD_MODE_NONE;
 #endif
+    return load_model(__func__, path_model, params, out_model);
+}
 
-    return llama_model_load_from_file(path_model, params);
+int32_t llama_load_model_vocab_only_c(const char* path_model, llama_model** out_model) {
+    // An empty device list: without one, llama.cpp enumerates every GPU
+    // backend's devices before it skips the tensors.
+    static ggml_backend_dev_t no_devices[] = {nullptr};
+    llama_model_params params = llama_model_default_params();
+    params.devices = no_devices;
+    params.n_gpu_layers = 0;
+    // No tensor is read, so nothing is mapped either way.
+    params.load_mode = LLAMA_LOAD_MODE_NONE;
+    params.vocab_only = true;
+    return load_model(__func__, path_model, params, out_model);
 }
 
 void llama_free_model_c(llama_model* model) {
@@ -452,6 +517,54 @@ llama_context* llama_new_context_with_model_c(
 // and 0 means n_batch of them. The attention type is left to the model, and
 // whether the context gets memory is the model's choice too, so the caller
 // checks both on the result.
+// The parameters of a readout context (llama_new_readout_context_c).
+static llama_context_params readout_params(
+    uint32_t n_ctx,
+    uint32_t n_batch,
+    uint32_t n_ubatch,
+    uint32_t n_outputs_max,
+    int n_threads,
+    bool flash_attn
+) {
+    llama_context_params params = llama_context_default_params();
+    params.n_ctx = n_ctx;
+    params.n_batch = n_batch;
+    params.n_ubatch = n_ubatch;
+    params.n_seq_max = 1;
+    params.n_outputs_max = n_outputs_max;
+    params.n_outputs_max_per_seq = 1;
+    params.embeddings = false;
+    params.attention_type = LLAMA_ATTENTION_TYPE_UNSPECIFIED;
+    params.flash_attn_type = flash_attn ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    // Every operation runs where its weights are. With op_offload, ggml's
+    // scheduler moves a large-batch operation on weights in host memory to a
+    // GPU backend that asks for it (Metal, CUDA and Vulkan do), even for a
+    // model loaded with no GPU layers, and a readout is one large batch. Off,
+    // such a model stays on the CPU as far as the scheduler goes: necessary
+    // for a CPU-only readout, not measured to be sufficient on an
+    // accelerator build (its device backends are still created).
+    params.op_offload = false;
+    int actual_threads = n_threads > 0 ? n_threads : std::thread::hardware_concurrency();
+    if (actual_threads == 0) actual_threads = 4;  // Fallback if detection fails
+    params.n_threads = static_cast<int32_t>(actual_threads);
+    params.n_threads_batch = static_cast<int32_t>(actual_threads);
+    return params;
+}
+
+void llama_xybrid_readout_params_c(
+    uint32_t n_ctx,
+    uint32_t n_batch,
+    uint32_t n_ubatch,
+    uint32_t n_outputs_max,
+    int n_threads,
+    bool flash_attn,
+    llama_context_params* out
+) {
+    if (out) {
+        *out = readout_params(n_ctx, n_batch, n_ubatch, n_outputs_max, n_threads, flash_attn);
+    }
+}
+
 llama_context* llama_new_readout_context_c(
     llama_model* model,
     uint32_t n_ctx,
@@ -465,22 +578,8 @@ llama_context* llama_new_readout_context_c(
         if (!model || n_ctx == 0 || n_batch == 0 || n_ubatch == 0) {
             return nullptr;
         }
-        llama_context_params params = llama_context_default_params();
-        params.n_ctx = n_ctx;
-        params.n_batch = n_batch;
-        params.n_ubatch = n_ubatch;
-        params.n_seq_max = 1;
-        params.n_outputs_max = n_outputs_max;
-        params.n_outputs_max_per_seq = 1;
-        params.embeddings = false;
-        params.attention_type = LLAMA_ATTENTION_TYPE_UNSPECIFIED;
-        params.flash_attn_type = flash_attn ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
-        int actual_threads = n_threads > 0 ? n_threads : std::thread::hardware_concurrency();
-        if (actual_threads == 0) actual_threads = 4;  // Fallback if detection fails
-        params.n_threads = static_cast<int32_t>(actual_threads);
-        params.n_threads_batch = static_cast<int32_t>(actual_threads);
-
-        return llama_init_from_model(model, params);
+        return llama_init_from_model(
+            model, readout_params(n_ctx, n_batch, n_ubatch, n_outputs_max, n_threads, flash_attn));
     });
 }
 
@@ -515,15 +614,19 @@ void llama_free_c(llama_context* ctx) {
     }
 }
 
-void llama_kv_cache_clear_c(llama_context* ctx) {
-    guarded<int>(__func__, 0, [&]() -> int {
-        if (ctx) {
-            // Use the new memory API: get memory and clear it
-            llama_memory_t mem = llama_get_memory(ctx);
-            if (mem) {
-                llama_memory_clear(mem, true);  // Clear data buffers too
-            }
+// Clear the whole memory: KV cache and recurrent state. Returns 0, -1 when
+// the context has no memory, and LLAMA_XYBRID_FAILED on a null context or
+// when llama.cpp raised an exception.
+int32_t llama_kv_cache_clear_c(llama_context* ctx) {
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (!ctx) {
+            return LLAMA_XYBRID_FAILED;
         }
+        llama_memory_t mem = llama_get_memory(ctx);
+        if (!mem) {
+            return -1;
+        }
+        llama_memory_clear(mem, true);  // Clear data buffers too
         return 0;
     });
 }
@@ -536,12 +639,19 @@ void llama_kv_cache_clear_c(llama_context* ctx) {
 // at position p_keep. Pairs with the n_past_in parameter on
 // llama_generate_streaming_c.
 //
-// Returns 0 on success, -1 on null context / no memory available, and
-// LLAMA_XYBRID_FAILED when llama.cpp raised an exception.
+// Returns 0 on success, -1 when the context has no memory,
+// LLAMA_XYBRID_REFUSED, changing nothing, for a seq_id outside the
+// context's sequences (llama.cpp's KV cache asserts, aborting, on one) and
+// when llama.cpp cannot remove that part of the sequence (a recurrent state:
+// its memories refuse before they change anything), and LLAMA_XYBRID_FAILED
+// on a null context or when llama.cpp raised an exception.
 int llama_kv_cache_seq_rm_c(llama_context* ctx, int seq_id, int p_keep) {
     return guarded<int>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int {
         if (!ctx) {
-            return -1;
+            return LLAMA_XYBRID_FAILED;
+        }
+        if (seq_id < 0 || (uint32_t) seq_id >= llama_n_seq_max(ctx)) {
+            return LLAMA_XYBRID_REFUSED;
         }
         llama_memory_t mem = llama_get_memory(ctx);
         if (!mem) {
@@ -550,7 +660,9 @@ int llama_kv_cache_seq_rm_c(llama_context* ctx, int seq_id, int p_keep) {
         // llama.cpp's seq_rm semantics: remove tokens in the half-open range
         // [p0, p1). p1 = -1 means "to the end". We keep [0, p_keep) and drop
         // everything from p_keep onward.
-        llama_memory_seq_rm(mem, (llama_seq_id) seq_id, (llama_pos) p_keep, -1);
+        if (!llama_memory_seq_rm(mem, (llama_seq_id) seq_id, (llama_pos) p_keep, -1)) {
+            return LLAMA_XYBRID_REFUSED;
+        }
         return 0;
     });
 }

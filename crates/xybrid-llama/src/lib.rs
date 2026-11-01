@@ -14,13 +14,15 @@
 //!
 //! # Public surface
 //!
-//! - [`LlamaModel`] — owning handle to a loaded GGUF model
+//! - [`LlamaModel`] — owning handle to a loaded GGUF model, or to only its
+//!   vocabulary and metadata ([`LlamaModel::load_vocab_only`]), which no
+//!   context runs
 //! - [`LlamaContext`] — owning handle to a llama context, with KV-cache
 //!   manipulation and per-sequence state snapshot methods
 //! - [`MemorylessContext`] / [`MemorylessParams`] — a context without memory
 //!   for one-shot readouts of decision models (LFM3 d1): one sequence, one
-//!   output row, an explicit token budget; [`ReadoutCancel`] stops its
-//!   readouts from another thread
+//!   output row, an explicit token budget; [`ReadoutCancel`] stops one
+//!   request's readouts from another thread
 //! - [`ContextFacts`] — the sizes, memory and attention llama.cpp actually
 //!   gave a context
 //! - [`TokenAttr`] — a vocabulary entry's attributes, from
