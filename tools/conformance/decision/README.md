@@ -229,6 +229,13 @@ the path for evidence other gates rely on, so it fails closed:
     `--only` ids.
   - Every `--only` id must be a valid case there.
   - `--collect` refuses `--check`.
+
+  A corpus that holds any invalid file is not sound, whatever `--only`
+  selects: every invalid file still gets its `invalid` receipt, so an `--only`
+  run over that corpus is `incomplete` and exits 1 even when every selected case
+  is observed. Its counts include those files: `corpus.selected` in
+  `collection.json` and the printed summary count the invalid files among the
+  selected ones, selected or not.
 - **Every file is read as a strict envelope:**
   - a JSON object with no key twice and no `NaN`/`Infinity`;
   - `schema_version` the integer 1, `profile` `lfm3-d1/text/v1`, `id` matching
@@ -251,12 +258,23 @@ It writes, all inside `--out`:
   - the `upstream` stages as in a case file, `server` included;
   - `case_file_sha256`, the digest of the whole case file;
   - `request_sha256`, the join key;
-  - `inputs`, everything that can change the observation: the request
-    digest, the media flag, the metadata edits, the synthetic scores, and the
-    artifact with its sha256 and the sha256 of the metadata-only variant built
-    from it;
+  - `inputs`, the identity of the case: the request digest, the media flag,
+    the metadata edits, the synthetic scores, and the artifact with its sha256
+    and the sha256 of the metadata-only variant built from it;
   - `inputs_sha256`, its canonical digest;
   - the collector, the build fingerprint, and the digest of the recipe.
+
+  `inputs_sha256` identifies the case, not the computation. What the
+  computation ran on is recorded once per run, in `collection.json`:
+  - `settings`: the settings tuple, with the server arguments, the effective
+    context and the devices; flash attention alone changes the logits;
+  - `build`: the build identity;
+  - `platform`.
+
+  An observation names only its settings id, or `null` when the model did not
+  evaluate it: synthetic scores (a metadata-only variant always has them), or a
+  refusal before evaluation. Evidence must bind both: the case through
+  `inputs_sha256`, the computation through those run-level blocks.
 - `collection.json`, the receipt:
   - `status` (`complete` or `incomplete`);
   - the corpus counts;
