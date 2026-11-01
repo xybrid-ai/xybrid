@@ -1,5 +1,5 @@
 //! llama.cpp's string view of GGUF metadata, and the check that a loaded
-//! model matches the header read from its file.
+//! model is the file whose header was read.
 //!
 //! llama.cpp keeps a model's scalar metadata as strings (`gguf_kv_to_str`)
 //! and its accessors (`llama_model_meta_val_str` and friends) return those.
@@ -68,30 +68,48 @@ fn c_fixed6(x: f64) -> String {
     format!("{x:.6}")
 }
 
-/// Checks that llama.cpp loaded the model `header` describes: the same
-/// scalar keys, each with the string [`native_value`] predicts. A
-/// disagreement between this scanner and llama.cpp's parser fails here.
+/// Checks, after a native load of `path`, that llama.cpp loaded the file
+/// `header` was read from, and read it the way this scanner did.
 ///
-/// This compares llama.cpp's string projection of the scalars, so it cannot
-/// see a type change that keeps the string (`f32` 1.3373984 and the string
-/// `"1.337398"`) or an array-valued key: on its own it does not prove the
-/// loaded file is the scanned one.
+/// Two checks, both always run:
 ///
-/// llama.cpp's metadata is read with one bulk lookup of the header's keys
-/// and a count, never enumerated: its only enumeration goes by index and
-/// walks its map from the start each time.
+/// 1. The file is unchanged since the scan
+///    ([`GgufHeader::verify_file_unchanged`]): same size, modification time
+///    and (on Unix) device and inode, and byte-identical header bytes (by
+///    SHA-256). This is what catches a replaced file, including a change only
+///    the typed header can see: a scalar retyped with the same string (the
+///    `f32` 1.3373984 and the string `"1.337398"`) or an added array-valued
+///    key, both invisible to llama.cpp's string view.
+/// 2. llama.cpp holds exactly the header's scalar keys, each with the string
+///    [`native_value`] predicts, decision temperatures included: llama.cpp's
+///    six-decimal string is the effective temperature, and this ties it to
+///    the typed value. It is read with one bulk lookup of the header's keys
+///    and a count, never enumerated (llama.cpp's only enumeration goes by
+///    index and walks its map from the start each time).
+///
+/// It is a consistency check, not a cryptographic identity: a file replaced
+/// after llama.cpp read it and put back before this check, or changed in
+/// place without changing its size, time or header bytes, is not caught.
+/// Registry downloads are verified by their sha256 before they are scanned.
+///
+/// `header` must come from [`GgufHeader::read_file`] (or
+/// [`GgufHeader::read_file_with_limits`]) on the same `path`.
 ///
 /// # Errors
 ///
+/// [`GgufError::NoFileStamp`] for a header not read from a file,
+/// [`GgufError::FileChanged`] when the file changed,
 /// [`GgufError::NativeMismatch`] naming the first key (in file order) whose
-/// presence or value differs, [`GgufError::NativeKeyCount`] when llama.cpp
-/// holds keys the header does not, and [`GgufError::Native`] when llama.cpp
-/// cannot report the model's metadata.
+/// presence or value differs in llama.cpp, [`GgufError::NativeKeyCount`] when
+/// llama.cpp holds keys the header does not, and [`GgufError::Io`] or
+/// [`GgufError::Native`] when the file or llama.cpp cannot be read.
 #[cfg(feature = "llm-llamacpp")]
-pub fn verify_native_metadata(
+pub fn verify_native_load(
+    path: impl AsRef<std::path::Path>,
     header: &GgufHeader,
     model: &xybrid_llama::LlamaModel,
 ) -> Result<(), GgufError> {
+    header.verify_file_unchanged(path)?;
     let native = |error: xybrid_llama::LlamaError| GgufError::Native(error.to_string());
     let scalars = scalar_projection(header);
     let keys: Vec<&str> = scalars.iter().map(|(key, _)| *key).collect();
@@ -109,7 +127,7 @@ pub(crate) fn scalar_projection(header: &GgufHeader) -> Vec<(&str, Vec<u8>)> {
         .collect()
 }
 
-/// The comparison behind [`verify_native_metadata`]: `values[i]` is what
+/// The comparison behind `verify_native_load`'s second check: `values[i]` is what
 /// llama.cpp holds for `scalars[i]`'s key, and `native_count` the number of
 /// keys it holds. All of the header's keys found with equal values, and no
 /// more keys than that, means the two sets are equal.

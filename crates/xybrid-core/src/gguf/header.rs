@@ -2,9 +2,12 @@
 
 use std::collections::HashSet;
 use std::fmt;
-use std::fs::File;
+use std::fs::{File, Metadata};
 use std::io::{BufReader, Read};
 use std::path::Path;
+use std::time::SystemTime;
+
+use sha2::{Digest, Sha256};
 
 use super::error::GgufError;
 
@@ -445,6 +448,83 @@ pub struct GgufHeader {
     metadata: Vec<(String, GgufValue)>,
     tensors: Vec<GgufTensorInfo>,
     header_bytes: u64,
+    file: Option<GgufFileStamp>,
+}
+
+/// What a header scan recorded about the file it read: its identity and a
+/// digest of the header bytes, so that a later check can tell whether the
+/// file at the same path is still the one scanned.
+///
+/// This is a consistency check, not a cryptographic identity of the model:
+/// it compares the file's size, modification time and (on Unix) device and
+/// inode, and the SHA-256 of the header bytes the scan parsed. The tensor
+/// data is not hashed; registry downloads are verified by their sha256
+/// before they are scanned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GgufFileStamp {
+    len: u64,
+    modified: Option<SystemTime>,
+    identity: Option<(u64, u64)>,
+    header_sha256: [u8; 32],
+}
+
+impl GgufFileStamp {
+    fn new(metadata: &Metadata, header_sha256: [u8; 32]) -> Self {
+        Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+            identity: file_identity(metadata),
+            header_sha256,
+        }
+    }
+
+    /// The file's size in bytes when it was scanned.
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    /// Whether the scanned file was empty (a scan of one always fails, so
+    /// a stamp never is).
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Its modification time, where the platform reports one.
+    pub fn modified(&self) -> Option<SystemTime> {
+        self.modified
+    }
+
+    /// The SHA-256 of the header bytes the scan parsed.
+    pub fn header_sha256(&self) -> &[u8; 32] {
+        &self.header_sha256
+    }
+}
+
+/// The device and inode of a file, on Unix.
+#[cfg(unix)]
+fn file_identity(metadata: &Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Some((metadata.dev(), metadata.ino()))
+}
+
+/// No stable file identity outside Unix: size and time stand in for it.
+#[cfg(not(unix))]
+fn file_identity(_metadata: &Metadata) -> Option<(u64, u64)> {
+    None
+}
+
+/// Hashes what passes through it, exactly the bytes its reader consumes.
+struct Hashing<R> {
+    inner: R,
+    hasher: Sha256,
+}
+
+impl<R: Read> Read for Hashing<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.hasher.update(&buf[..n]);
+        Ok(n)
+    }
 }
 
 impl GgufHeader {
@@ -471,8 +551,61 @@ impl GgufHeader {
         limits: &GgufLimits,
     ) -> Result<Self, GgufError> {
         let file = File::open(path)?;
-        let file_len = file.metadata()?.len();
-        Self::read_bounded(BufReader::new(file), limits, Some(file_len))
+        let metadata = file.metadata()?;
+        let mut reader = Hashing {
+            inner: BufReader::new(file),
+            hasher: Sha256::new(),
+        };
+        let mut header = Self::read_bounded(&mut reader, limits, Some(metadata.len()))?;
+        header.file = Some(GgufFileStamp::new(
+            &metadata,
+            reader.hasher.finalize().into(),
+        ));
+        Ok(header)
+    }
+
+    /// What the scan recorded about the file it read; `None` for a header
+    /// read from another source ([`Self::read`]).
+    pub fn file_stamp(&self) -> Option<&GgufFileStamp> {
+        self.file.as_ref()
+    }
+
+    /// Checks that the file at `path` is still the one this header was read
+    /// from: same size, modification time and (on Unix) device and inode,
+    /// and header bytes with the same SHA-256.
+    ///
+    /// Run it after a native load of `path` to know that the load read the
+    /// scanned file. A replacement between the scan and this check fails it,
+    /// including one that changes only types the native string view cannot
+    /// see. What it cannot see: a file replaced after the native load read
+    /// it and put back before this check, or changed in place without
+    /// changing its size, time or header bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`GgufError::NoFileStamp`] for a header not read from a file,
+    /// [`GgufError::FileChanged`] naming what differs, and
+    /// [`GgufError::Io`] when the file cannot be read.
+    pub fn verify_file_unchanged(&self, path: impl AsRef<Path>) -> Result<(), GgufError> {
+        let stamp = self.file.as_ref().ok_or(GgufError::NoFileStamp)?;
+        let file = File::open(path)?;
+        let metadata = file.metadata()?;
+        let changed = |what| Err(GgufError::FileChanged { what });
+        if metadata.len() != stamp.len {
+            return changed("its size");
+        }
+        if metadata.modified().ok() != stamp.modified {
+            return changed("its modification time");
+        }
+        if file_identity(&metadata) != stamp.identity {
+            return changed("its device and inode");
+        }
+        let mut hasher = Sha256::new();
+        let read = std::io::copy(&mut file.take(self.header_bytes), &mut hasher)?;
+        if read != self.header_bytes || <[u8; 32]>::from(hasher.finalize()) != stamp.header_sha256 {
+            return changed("its header bytes");
+        }
+        Ok(())
     }
 
     /// Read a GGUF header from `reader`, which must be at the start of the
@@ -583,6 +716,7 @@ impl GgufHeader {
             metadata,
             tensors,
             header_bytes: r.consumed,
+            file: None,
         })
     }
 

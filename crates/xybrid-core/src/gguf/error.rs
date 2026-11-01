@@ -78,6 +78,20 @@ pub enum GgufError {
     #[error("invalid decision metadata: {0}")]
     InvalidDecision(String),
 
+    /// The file changed since its header was read: what a native load read
+    /// may not be what was classified.
+    #[error("the GGUF file changed since its header was read ({what})")]
+    FileChanged {
+        /// What differs: its size, modification time, device and inode, or
+        /// header bytes.
+        what: &'static str,
+    },
+
+    /// The header was not read from a file, so there is nothing to check a
+    /// file against.
+    #[error("the GGUF header was not read from a file")]
+    NoFileStamp,
+
     /// llama.cpp's view of a loaded model differs from the header read
     /// from its file.
     #[error("the loaded model's metadata differs from its GGUF header at {key:?}")]

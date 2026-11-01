@@ -685,7 +685,7 @@ fn d1_native() -> Vec<(&'static str, &'static str)> {
 }
 
 /// Compares `header` with a llama.cpp that holds `native`, looked up the way
-/// `verify_native_metadata` looks it up.
+/// `verify_native_load` looks it up.
 fn compare_with(header: &GgufHeader, native: &[(&str, &str)]) -> Result<(), GgufError> {
     let scalars = scalar_projection(header);
     let values: Vec<Option<Vec<u8>>> = scalars
@@ -734,6 +734,147 @@ fn the_native_view_matches_the_header_it_was_loaded_from() {
             header: 8
         })
     ));
+}
+
+// ---------------------------------------------------------------------------
+// The file a native load reads is the one scanned
+// ---------------------------------------------------------------------------
+
+const TEMPERATURE: &str = "lfm3.decision.temperature.choice";
+
+/// The d1 header with the temperature retyped from `f32` to the string
+/// llama.cpp prints for it, and with an array-valued decision key added:
+/// llama.cpp's string view of the scalars cannot tell either from the
+/// original.
+fn d1_lookalikes() -> [Vec<u8>; 2] {
+    [
+        d1_builder()
+            .without(TEMPERATURE)
+            .str(TEMPERATURE, "1.337398")
+            .build(),
+        d1_builder()
+            .str_array("lfm3.decision.labels", &["yes", "no"])
+            .build(),
+    ]
+}
+
+/// The string view llama.cpp keeps of `bytes`'s scalars, sorted.
+fn sorted_projection(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+    let header = read(bytes).unwrap();
+    let mut projection: Vec<(String, Vec<u8>)> = scalar_projection(&header)
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect();
+    projection.sort();
+    projection
+}
+
+#[test]
+fn lookalikes_differ_only_in_what_the_typed_header_sees() {
+    let original = d1_builder().build();
+    let [retyped, with_array] = d1_lookalikes();
+    assert_eq!(sorted_projection(&retyped), sorted_projection(&original));
+    assert_eq!(sorted_projection(&with_array), sorted_projection(&original));
+    assert!(matches!(
+        classify_bytes(&retyped),
+        Err(GgufError::WrongType { key, .. }) if key == TEMPERATURE
+    ));
+    assert_eq!(
+        classify_bytes(&with_array).unwrap(),
+        unsupported(
+            "lfm3-d1",
+            UnsupportedReason::DecisionKey {
+                key: "lfm3.decision.labels".to_string()
+            }
+        )
+    );
+}
+
+#[test]
+fn a_file_replaced_after_the_scan_is_caught() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("model.gguf");
+    let original = d1_builder().build();
+    for replacement in d1_lookalikes() {
+        for in_place in [false, true] {
+            std::fs::write(&path, &original).unwrap();
+            let header = GgufHeader::read_file(&path).unwrap();
+            assert_eq!(classify(&header).unwrap(), D1);
+            assert!(header.verify_file_unchanged(&path).is_ok());
+            if in_place {
+                std::fs::write(&path, &replacement).unwrap();
+            } else {
+                let next = dir.path().join("next.gguf");
+                std::fs::write(&next, &replacement).unwrap();
+                std::fs::rename(&next, &path).unwrap();
+            }
+            assert!(
+                matches!(
+                    header.verify_file_unchanged(&path),
+                    Err(GgufError::FileChanged { .. })
+                ),
+                "in place: {in_place}"
+            );
+        }
+    }
+}
+
+/// Same size, same inode and the modification time put back: only the
+/// header digest differs.
+#[test]
+fn a_same_size_edit_in_place_is_caught_by_the_header_digest() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("model.gguf");
+    let original = d1_builder().build();
+    std::fs::write(&path, &original).unwrap();
+    let header = GgufHeader::read_file(&path).unwrap();
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+    let at = original
+        .windows(11)
+        .position(|w| w == b"{{ state }}")
+        .unwrap();
+    let mut edited = original.clone();
+    edited[at..at + 11].copy_from_slice(b"{{ STATE }}");
+    std::fs::write(&path, &edited).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+
+    assert!(matches!(
+        header.verify_file_unchanged(&path),
+        Err(GgufError::FileChanged {
+            what: "its header bytes"
+        })
+    ));
+}
+
+#[test]
+fn the_stamp_records_the_file_and_the_header_bytes() {
+    use sha2::{Digest, Sha256};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("model.gguf");
+    let mut bytes = d1_builder().build();
+    let header_len = bytes.len();
+    bytes.extend_from_slice(&[0u8; 100]); // tensor data, not hashed
+    std::fs::write(&path, &bytes).unwrap();
+
+    let header = GgufHeader::read_file(&path).unwrap();
+    let stamp = header.file_stamp().expect("read from a file");
+    assert_eq!(stamp.len(), bytes.len() as u64);
+    assert_eq!(header.header_bytes(), header_len as u64);
+    assert_eq!(
+        stamp.header_sha256().as_slice(),
+        Sha256::digest(&bytes[..header_len]).as_slice()
+    );
+    assert!(matches!(
+        read(&bytes).unwrap().verify_file_unchanged(&path),
+        Err(GgufError::NoFileStamp)
+    ));
+    assert!(read(&bytes).unwrap().file_stamp().is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -856,14 +997,17 @@ mod published {
             let path = std::path::Path::new(&path);
             let model = xybrid_llama::LlamaModel::load(path.to_str().expect("a UTF-8 path"), 0)
                 .expect("load the GGUF");
-            verify_native_metadata(&header, &model).expect("the same metadata");
+            verify_native_load(path, &header, &model).expect("the same file and metadata");
         }
     }
 
-    /// `XYBRID_OTHER_GGUF` with `extra` more scalar keys: the original
-    /// header, re-encoded with the keys added, then the original tensor data
-    /// at the new header's alignment.
-    pub(super) fn with_extra_keys(original: &[u8], extra: usize) -> Vec<u8> {
+    /// A real GGUF with its header edited: the original header, re-encoded
+    /// through `edit`, then the original tensor data at the new header's
+    /// alignment.
+    pub(super) fn rewritten(
+        original: &[u8],
+        edit: impl FnOnce(GgufBuilder) -> GgufBuilder,
+    ) -> Vec<u8> {
         let header = read(original).expect("the original header");
         let alignment = header
             .get("general.alignment")
@@ -871,14 +1015,73 @@ mod published {
             .unwrap_or(32);
         let align = |n: u64| n.div_ceil(alignment) * alignment;
         let data = usize::try_from(align(header.header_bytes())).unwrap();
-        let mut builder = GgufBuilder::from_header(&header);
-        for i in 0..extra {
-            builder = builder.u32(&format!("xybrid.test.key.{i}"), i as u32);
-        }
-        let mut bytes = builder.build();
+        let mut bytes = edit(GgufBuilder::from_header(&header)).build();
         bytes.resize(usize::try_from(align(bytes.len() as u64)).unwrap(), 0);
         bytes.extend_from_slice(&original[data..]);
         bytes
+    }
+
+    /// `original` with `extra` more scalar keys.
+    pub(super) fn with_extra_keys(original: &[u8], extra: usize) -> Vec<u8> {
+        rewritten(original, |mut builder| {
+            for i in 0..extra {
+                builder = builder.u32(&format!("xybrid.test.key.{i}"), i as u32);
+            }
+            builder
+        })
+    }
+
+    /// A model swapped between the scan and the native load is refused,
+    /// even where llama.cpp's strings match the scanned header: a scalar
+    /// retyped with the same string, and an added array-valued key. Set
+    /// `XYBRID_OTHER_GGUF` to a small ordinary GGUF (stories260K).
+    #[cfg(feature = "llm-llamacpp")]
+    #[test]
+    fn a_model_swapped_before_the_native_load_is_refused() {
+        let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") else {
+            eprintln!("Skipping test: set XYBRID_OTHER_GGUF to a small ordinary GGUF");
+            return;
+        };
+        let source = std::fs::read(&path).expect("read the GGUF");
+        let scanned = rewritten(&source, |b| b.f32("xybrid.test.value", 1.5));
+        let retyped = rewritten(&source, |b| b.str("xybrid.test.value", "1.500000"));
+        let with_array = rewritten(&source, |b| {
+            b.f32("xybrid.test.value", 1.5)
+                .str_array("xybrid.test.labels", &["yes", "no"])
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("model.gguf");
+        xybrid_llama::backend_init();
+        let load = |file: &std::path::Path| {
+            xybrid_llama::LlamaModel::load(file.to_str().unwrap(), 0).expect("llama.cpp loads it")
+        };
+
+        std::fs::write(&file, &scanned).unwrap();
+        let header = GgufHeader::read_file(&file).unwrap();
+        verify_native_load(&file, &header, &load(&file)).expect("an unchanged file passes");
+
+        for swapped in [&retyped, &with_array] {
+            std::fs::write(&file, &scanned).unwrap();
+            let header = GgufHeader::read_file(&file).unwrap();
+            let next = dir.path().join("next.gguf");
+            std::fs::write(&next, swapped).unwrap();
+            std::fs::rename(&next, &file).unwrap();
+            let model = load(&file);
+
+            // llama.cpp's strings alone cannot tell the swap.
+            let scalars = scalar_projection(&header);
+            let keys: Vec<&str> = scalars.iter().map(|(key, _)| *key).collect();
+            assert!(compare_native(
+                &scalars,
+                model.meta_count().unwrap(),
+                &model.meta_values(&keys).unwrap()
+            )
+            .is_ok());
+            assert!(matches!(
+                verify_native_load(&file, &header, &model),
+                Err(GgufError::FileChanged { .. })
+            ));
+        }
     }
 
     /// The native check reads llama.cpp's metadata with one bulk lookup of
@@ -912,7 +1115,7 @@ mod published {
             let model = xybrid_llama::LlamaModel::load(file.to_str().unwrap(), 0)
                 .expect("llama.cpp loads the rewritten GGUF");
             let start = std::time::Instant::now();
-            verify_native_metadata(&header, &model).expect("the same metadata");
+            verify_native_load(&file, &header, &model).expect("the same file and metadata");
             let elapsed = start.elapsed();
             eprintln!(
                 "{} keys checked against llama.cpp in {elapsed:?}",
@@ -936,7 +1139,7 @@ mod published {
         let model = xybrid_llama::LlamaModel::load(path.to_str().expect("a UTF-8 path"), 0)
             .expect("load d1-2B");
 
-        verify_native_metadata(&header, &model).expect("the same metadata");
+        verify_native_load(&path, &header, &model).expect("the same file and metadata");
         let template = model
             .named_chat_template("systemone")
             .unwrap()
