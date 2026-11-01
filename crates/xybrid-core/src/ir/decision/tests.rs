@@ -135,20 +135,31 @@ fn answers_round_trip_through_json_and_bincode() {
 
     let text = serde_json::to_string(&decisions).unwrap();
     assert!(text.contains(r#""raw_score":"-Infinity""#), "{text}");
-    assert!(!text.contains("null,\"probability\""), "{text}");
-    let back: Decisions = serde_json::from_str(&text).unwrap();
-    assert_eq!(back, decisions);
-
+    assert!(
+        text.contains(r#""probability":"0.4999999981306987""#),
+        "{text}"
+    );
     let bytes = bincode::serialize(&decisions).unwrap();
-    let back: Decisions = bincode::deserialize(&bytes).unwrap();
-    assert_eq!(back, decisions);
-    for (answer, original) in back.answers().iter().zip(decisions.answers()) {
-        for (entry, original) in answer.distribution().iter().zip(original.distribution()) {
-            assert_eq!(entry.raw_score().to_bits(), original.raw_score().to_bits());
+
+    // Both formats give back every bit: f64 fields travel as decimal strings
+    // in JSON, so serde_json's float parsing never touches them.
+    for back in [
+        serde_json::from_str::<Decisions>(&text).unwrap(),
+        bincode::deserialize::<Decisions>(&bytes).unwrap(),
+    ] {
+        assert_eq!(back, decisions);
+        for (answer, original) in back.answers().iter().zip(decisions.answers()) {
             assert_eq!(
-                entry.probability().to_bits(),
-                original.probability().to_bits()
+                answer.confidence().map(f64::to_bits),
+                original.confidence().map(f64::to_bits)
             );
+            for (entry, original) in answer.distribution().iter().zip(original.distribution()) {
+                assert_eq!(entry.raw_score().to_bits(), original.raw_score().to_bits());
+                assert_eq!(
+                    entry.probability().to_bits(),
+                    original.probability().to_bits()
+                );
+            }
         }
     }
 }
@@ -215,9 +226,9 @@ fn serde_forms_are_pinned() {
         serde_json::to_string(&decisions).unwrap(),
         concat!(
             r#"{"answers":[{"question_id":"q","distribution":["#,
-            r#"{"key":"x","raw_score":"-Infinity","probability":0.0,"origin":"Caller"},"#,
-            r#"{"key":"y","raw_score":1.5,"probability":1.0,"origin":"Fixed"}],"#,
-            r#""value":{"Choice":{"key":"y"}},"confidence":1.0}],"#,
+            r#"{"key":"x","raw_score":"-Infinity","probability":"0.0","origin":"Caller"},"#,
+            r#"{"key":"y","raw_score":1.5,"probability":"1.0","origin":"Fixed"}],"#,
+            r#""value":{"Choice":{"key":"y"}},"confidence":"1.0"}],"#,
             r#""usage":{"passes":1,"evaluated_tokens":12}}"#,
         )
     );
@@ -396,4 +407,7 @@ fn json_schemas_generate() {
     assert!(text.contains("-Infinity"), "{text}");
     let ordered = &request["$defs"]["OrderedJson"];
     assert_eq!(ordered["type"], "string", "{request}");
+    // f64 fields are decimal strings in human-readable formats.
+    let probability = &decisions["$defs"]["DecisionScore"]["properties"]["probability"];
+    assert_eq!(probability["type"], "string", "{decisions}");
 }

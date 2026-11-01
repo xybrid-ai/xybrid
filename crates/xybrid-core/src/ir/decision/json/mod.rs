@@ -471,6 +471,28 @@ impl OrderedJson {
     }
 }
 
+/// A finite `f64` as decimal text: the shortest digits that read back as
+/// the same `f64`, spelled as [`OrderedJson::to_json_text`] spells a float
+/// (serde_json's style). For the decimal-string serde form of `f64` fields.
+pub(crate) fn float_text(value: f64) -> String {
+    debug_assert!(value.is_finite());
+    let mut text = String::new();
+    write::number(JsonNumber::F64(value), &mut text);
+    text
+}
+
+/// The `f64` a JSON number literal denotes, correctly rounded (the inverse
+/// of [`float_text`]); `None` for anything that is not one finite number
+/// in JSON's grammar (`NaN`, `inf`, `+1`, `.5`, a string, ...).
+pub(crate) fn parse_float(text: &str) -> Option<f64> {
+    let value = OrderedJson::parse(text).ok()?;
+    match value.as_number()? {
+        JsonNumber::F64(value) => Some(value),
+        JsonNumber::I64(value) => Some(value as f64),
+        JsonNumber::U64(value) => Some(value as f64),
+    }
+}
+
 impl FromStr for OrderedJson {
     type Err = DecisionError;
 
