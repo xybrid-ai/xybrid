@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "id": "parse-duplicate-criteria-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "The same choice key twice: upstream keeps the last description",
+  "covers": ["transport", "divergence"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Team?\", \"criteria\": {\"billing\": \"First\", \"technical\": \"Tech\", \"billing\": \"Second\"}}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "choice",
+          "keys": ["billing", "technical"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nTeam?\n\nOptions:\nA Second\nB Tech\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 30671, 64929, 13314, 833, 41, 7795, 207, 42, 23346, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 42,
+          "select": [41, 334, 42, 378]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "billing",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "technical",
+              "code": "B",
+              "range": [2, 4]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x410e644a", "0x40a2b9fc", "0x410d329c", "0x40a6885a"]
+      ],
+      "scores": [
+        ["0x410e644a", "0x410d329c"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "choice",
+          "choice": "billing",
+          "probabilities": {
+            "billing": 0.51394675857167882,
+            "technical": 0.48605324142832113
+          },
+          "confidence": 0.51394675857167882
+        }
+      },
+      "usage": {
+        "input_tokens": 43,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "duplicate_key"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

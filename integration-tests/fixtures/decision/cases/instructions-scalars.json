@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "id": "instructions-scalars",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Number, boolean and empty-string instructions are accepted: tojson for the first ones, nothing for the last",
+  "covers": ["instructions-structured", "json-literals", "multi-question"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"int\": {\"type\": \"noul\", \"instructions\": 42}, \"float\": {\"type\": \"noul\", \"instructions\": 0.5}, \"false\": {\"type\": \"noul\", \"instructions\": false}, \"true\": {\"type\": \"noul\", \"instructions\": true}, \"empty\": {\"type\": \"noul\", \"instructions\": \"\"}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "int",
+          "type": "noul",
+          "keys": ["true", "false"]
+        },
+        {
+          "id": "float",
+          "type": "noul",
+          "keys": ["true", "false"]
+        },
+        {
+          "id": "false",
+          "type": "noul",
+          "keys": ["true", "false"]
+        },
+        {
+          "id": "true",
+          "type": "noul",
+          "keys": ["true", "false"]
+        },
+        {
+          "id": "empty",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "int",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\n42\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 3843, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 34,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        },
+        {
+          "question": "float",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\n0.5\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 24, 22, 29, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 36,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        },
+        {
+          "question": "false",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nfalse\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 13389, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 34,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        },
+        {
+          "question": "true",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\ntrue\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 10066, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 34,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        },
+        {
+          "question": "empty",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\n\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 89289, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 32,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "int",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "float",
+          "type": "noul",
+          "pass": 1,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "false",
+          "type": "noul",
+          "pass": 2,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "true",
+          "type": "noul",
+          "pass": 3,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "empty",
+          "type": "noul",
+          "pass": 4,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4076b991", "0x40e4fafc", "0x4086456f", "0x40f6e047", "0x4022d41e"],
+        ["0x40c35f7c", "0x410c9fe2", "0x409c2fd0", "0x40f3dac9", "0x401aa59a"],
+        ["0x40b3a1d9", "0x410634de", "0x409a6a28", "0x40fa4553", "0x4031bdc9"],
+        ["0x40c20f60", "0x4100ea4c", "0x408f37cd", "0x40cf5304", "0x3fed867c"],
+        ["0x40bbf1f9", "0x412085c6", "0x407b5fe0", "0x41005d7b", "0x4020bd0a"]
+      ],
+      "scores": [
+        ["0x40e4fafc", "0x40f6e047"],
+        ["0x410c9fe2", "0x40f3dac9"],
+        ["0x410634de", "0x40fa4553"],
+        ["0x4100ea4c", "0x40cf5304"],
+        ["0x412085c6", "0x41005d7b"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "int": {
+          "type": "noul",
+          "noul": 0.39695829406897254
+        },
+        "float": {
+          "type": "noul",
+          "noul": 0.70552930535767933
+        },
+        "false": {
+          "type": "noul",
+          "noul": 0.60441996324866465
+        },
+        "true": {
+          "type": "noul",
+          "noul": 0.76497306995984693
+        },
+        "empty": {
+          "type": "noul",
+          "noul": 0.8179911981862652
+        }
+      },
+      "usage": {
+        "input_tokens": 175,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

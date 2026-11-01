@@ -100,7 +100,11 @@ Each stage holds one of:
 | `"out_of_scope"` | Upstream behavior xybrid has no counterpart for in this profile (the media temperature override); informational |
 | `{"refuse": "<kind>"}` | Refuse at this stage, with an error of this kind (below). Refusing at an earlier stage than upstream is the norm: xybrid checks budgets in `prepare`, and metadata at load |
 
-`load` is present only for cases with `metadata` edits.
+`load` is present only for cases with `metadata` edits. Such a case runs on a
+metadata-only copy of the artifact's GGUF (no tensors, so synthetic scores);
+`decision-oracle variant` rebuilds it from the artifact and the edits, and a
+consumer that tokenizes needs that copy's vocabulary when the edits change token
+types.
 
 Stage isolation: `prepare` is checked from the parsed request and the artifact;
 `evaluate` from upstream's `token_ids` and `select`; `finalize` from upstream's
@@ -110,7 +114,8 @@ and the answer arithmetic is checked exactly even where logits differ.
 ### Comparing values
 
 - Strings (`prompt`, keys, codes, `request_text`) compare as exact UTF-8 bytes.
-  The prompt holds the U+200B that `d1_break` inserts.
+  The prompt holds the U+200B that `d1_break` inserts, and whatever the request
+  carried, U+0000 included.
 - f32 values are their bit pattern, `"0x3fab2fdc"`. Rust:
   `f32::from_bits(u32::from_str_radix(&s[2..], 16)?)`.
 - f64 values are JSON numbers printed with 17 significant digits (`%.17g`), so
@@ -118,7 +123,7 @@ and the answer arithmetic is checked exactly even where logits differ.
   `str::parse::<f64>` on the number's text, or serde_json with its
   `float_roundtrip` feature. **serde_json's default float parser is not
   guaranteed to round-trip 17 digits**; do not compare through it. An integral
-  value prints without a fraction (`0`, `1`).
+  value keeps a `.0` (`0.0`, `1.0`), so every f64 reads back as a float.
 - Non-finite values are the strings `"NaN"`, `"Infinity"`, `"-Infinity"`
   (llama-server itself writes NaN as `null`).
 - `legend` values are the request's descriptions as upstream serializes JSON
@@ -135,6 +140,7 @@ its own error variants.
 | Kind | When |
 |---|---|
 | `invalid_json` | The body is not one JSON value (syntax, trailing data) |
+| `invalid_request` | The body is JSON but not an object |
 | `duplicate_key` | An object has the same key twice, anywhere in the request (upstream keeps the last value) |
 | `unknown_field` | A field the v1 transport does not define, at the top level (other than `model`) or in a question or its criteria (upstream ignores it) |
 | `missing_state` | No `state` |
@@ -176,3 +182,21 @@ missing:
 | Answer arithmetic | `math-reference`, `math-median-b3`, `math-median-not-mode`, `math-tie`, `math-underflow`, `math-neg-inf`, `math-non-finite`, `math-alias-max`, `math-temperature-bucket`, `math-temperature-default`, `math-score-bias`, `math-media-temperature` |
 | Refusals | `refusal-load`, `refusal-parse`, `refusal-prepare`, `refusal-evaluate`, `refusal-finalize` |
 | Divergence | `divergence` (xybrid's expectation differs from upstream's behavior) |
+
+## The G0 checklist, case by case
+
+| Review item | Cases |
+|---|---|
+| Structured, null and empty values | `state-null`, `state-empty-string`, `state-whitespace`, `instructions-object`, `instructions-array`, `instructions-scalars`, `choice-null-descriptions`, `choice-falsy-descriptions`, `choice-structured-descriptions`, `score-null-levels`, `score-structured-levels`, `noul-structured-descriptions` |
+| Nested, unsorted objects | `state-object-nested`, `state-wrapped-messages`, `instructions-object`, `choice-criteria-order` |
+| Float and integer formatting | `state-numbers`, `state-u64-above-i64`, `state-number-overflow`, `choice-structured-descriptions` |
+| All-letter and lowercase keys | `choice-letter-keys`, `choice-lowercase-keys`, `choice-mixed-case-keys`, `choice-letter-and-word-keys`, `choice-non-letter-short-keys` |
+| One option; 26 and 27 options | `choice-one-option`, `math-one-option`; `choice-26-options`, `choice-27-options` |
+| A real pool fallback | `choice-36-options` (AJ becomes 00), `choice-120-options`, `choice-255-options` |
+| Overlapping control spellings | `escape-adjacent-and-partial`, `escape-overlap-variant` (the d1-2B spellings cannot overlap; the variant makes `\|>` CONTROL) |
+| Escaped-key collisions | `escape-key-collision-state`, `escape-key-collision-nested` |
+| Noul criteria: partial, all null | `noul-partial-true`, `noul-partial-false`, `noul-empty-string-description`, `noul-all-null`, `noul-criteria-null`, `noul-criteria-empty-object`, `noul-false-first` |
+| Score with 2 and 10 levels | `score-2-levels`, `score-10-levels` |
+| Null state against empty text | `state-null`, `state-empty-string` |
+| Malformed requests | the `parse-*` cases, `instructions-null`, `instructions-missing`, `choice-criteria-*`, `choice-256-options`, `score-1-level`, `score-11-levels`, `score-criteria-object`, `noul-criteria-array`, `depth-*-over-limit`, `budget-over-limit` |
+| Answer arithmetic | `math-median-b3` (the review's float32 counterexample), `math-median-exact-half`, `math-median-not-mode`, `math-choice-tie`, `math-noul-tie`, `math-underflow`, `math-neg-inf-some`, `math-neg-inf-all`, `math-nan*`, `math-pos-inf*`, `math-alias-max`, `math-temperature-*`, `math-score-bias`, `math-media-temperature*` |

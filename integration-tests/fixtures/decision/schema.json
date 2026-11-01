@@ -304,7 +304,7 @@
             "refuse": {
               "description": "xybrid refuses at this stage, with an error of this kind (README.md).",
               "enum": [
-                "invalid_json", "duplicate_key", "unknown_field", "missing_state", "invalid_questions",
+                "invalid_json", "invalid_request", "duplicate_key", "unknown_field", "missing_state", "invalid_questions",
                 "invalid_question", "missing_instructions", "invalid_question_type", "invalid_criteria",
                 "level_count", "too_many_options", "empty_question_id", "empty_option_key",
                 "media_unsupported", "spoken_instructions", "json_too_deep", "number_out_of_range",

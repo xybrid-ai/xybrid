@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "id": "choice-falsy-descriptions",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Every falsy description (empty string, false, 0, 0.0, [], {}) prints the key; truthy ones print themselves",
+  "covers": ["description-falsy", "description-structured"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"empty_string\": \"\", \"false_value\": false, \"zero\": 0, \"zero_float\": 0.0, \"empty_list\": [], \"empty_object\": {}, \"null_value\": null, \"truthy\": \"kept\", \"true_value\": true, \"space\": \" \"}}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "choice",
+          "keys": ["empty_string", "false_value", "zero", "zero_float", "empty_list", "empty_object", "null_value", "truthy", "true_value", "space"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA empty string\nB false value\nC zero\nD zero float\nE empty list\nF empty object\nG null value\nH kept\nI true\nJ  \n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 41, 11209, 4160, 207, 42, 4330, 2035, 207, 43, 9116, 207, 44, 9116, 14163, 207, 45, 11209, 1815, 207, 46, 11209, 2431, 207, 47, 3495, 2035, 207, 48, 8042, 207, 49, 2846, 207, 50, 64650, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 74,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407, 46, 410, 47, 417, 48, 403, 49, 358, 50, 461]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "empty_string",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "false_value",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "zero",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "zero_float",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "empty_list",
+              "code": "E",
+              "range": [8, 10]
+            },
+            {
+              "key": "empty_object",
+              "code": "F",
+              "range": [10, 12]
+            },
+            {
+              "key": "null_value",
+              "code": "G",
+              "range": [12, 14]
+            },
+            {
+              "key": "truthy",
+              "code": "H",
+              "range": [14, 16]
+            },
+            {
+              "key": "true_value",
+              "code": "I",
+              "range": [16, 18]
+            },
+            {
+              "key": "space",
+              "code": "J",
+              "range": [18, 20]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40b709d6", "0x3fa396a8", "0x40cc4526", "0x3ffcbac3", "0x40bf472c", "0x3fe0ee5f", "0x40a5f062", "0x3f9ffde4", "0x409c03e8", "0x3f6b8952", "0x40a40c13", "0x3fa8ba24", "0x409a892d", "0x3f5e5cf8", "0x40fecd47", "0x408302b4", "0x4120585c", "0x40c07e2b", "0x41065b9a", "0x409e36ac"]
+      ],
+      "scores": [
+        ["0x40b709d6", "0x40cc4526", "0x40bf472c", "0x40a5f062", "0x409c03e8", "0x40a40c13", "0x409a892d", "0x40fecd47", "0x4120585c", "0x41065b9a"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "choice",
+          "choice": "true_value",
+          "probabilities": {
+            "empty_string": 0.022777443462089101,
+            "false_value": 0.037407680693280175,
+            "zero": 0.027613347652359062,
+            "zero_float": 0.015275052840307014,
+            "empty_list": 0.012113739275330106,
+            "empty_object": 0.014614525757330115,
+            "null_value": 0.011702141496379104,
+            "truthy": 0.12182852163866796,
+            "true_value": 0.56803409775235236,
+            "space": 0.168633449431905
+          },
+          "confidence": 0.56803409775235236
+        }
+      },
+      "usage": {
+        "input_tokens": 75,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

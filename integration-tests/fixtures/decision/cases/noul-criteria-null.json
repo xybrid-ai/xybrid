@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "id": "noul-criteria-null",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Null criteria: no Yes/No lines",
+  "covers": ["noul-no-criteria"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\", \"criteria\": null}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nIs the customer asking for a refund?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 4439, 278, 13107, 13564, 374, 267, 52966, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 40,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x41286a29", "0x41739c63", "0x4041c28e", "0x40e91546", "0x3fbbba6d"]
+      ],
+      "scores": [
+        ["0x41739c63", "0x40e91546"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "noul",
+          "noul": 0.9973703517289787
+        }
+      },
+      "usage": {
+        "input_tokens": 41,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

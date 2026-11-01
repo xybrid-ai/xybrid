@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "parse-images-http-url",
+  "profile": "lfm3-d1/text/v1",
+  "title": "An http URL in images is refused",
+  "covers": ["media", "refusal-parse"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"images\": [\"http://example.com/cat.png\"], \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "invalid_argument",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "media must be data URLs (data:image/..., data:audio/... or data:video/...;base64,...)"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "media_unsupported"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

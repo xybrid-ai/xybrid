@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "id": "score-structured-levels",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Object, array, number and boolean level descriptions",
+  "covers": ["description-structured", "score-null-level"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"How urgent is this?\", \"criteria\": [{\"label\": \"low\", \"hours\": 72}, [\"mid\"], 3, true, \"\", 0.5]}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "score",
+          "keys": ["0", "1", "2", "3", "4", "5"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nHow urgent is this?\n\n0 {\"label\": \"low\", \"hours\": 72}\n1 [\"mid\"]\n2 3\n3 true\n4 \n5 0.5\n\nReply with a single digit 0-5 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 3522, 30648, 355, 532, 64929, 24, 36579, 2782, 6380, 496, 10030, 1377, 496, 99300, 6380, 229, 7832, 604, 25, 34564, 10964, 50150, 26, 229, 27, 207, 27, 2846, 207, 28, 469, 29, 229, 24, 22, 29, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 29, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 73,
+          "select": [24, 25, 26, 27, 28, 29]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            },
+            {
+              "key": "4",
+              "code": "4",
+              "range": [4, 5]
+            },
+            {
+              "key": "5",
+              "code": "5",
+              "range": [5, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4133713e", "0x4126bfe3", "0x411df69a", "0x410ebe51", "0x40fc107d", "0x40b82b0f"]
+      ],
+      "scores": [
+        ["0x4133713e", "0x4126bfe3", "0x411df69a", "0x410ebe51", "0x40fc107d", "0x40b82b0f"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": {
+              "label": "low",
+              "hours": 72
+            },
+            "1": ["mid"],
+            "2": 3,
+            "3": true,
+            "4": "",
+            "5": 0.5
+          },
+          "probabilities": {
+            "0": 0.45489540374929183,
+            "1": 0.25136373802857076,
+            "2": 0.16671676875944563,
+            "3": 0.08186189087940407,
+            "4": 0.037490063411404498,
+            "5": 0.0076721351718833999
+          },
+          "confidence": 0.45489540374929183
+        }
+      },
+      "usage": {
+        "input_tokens": 74,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}
