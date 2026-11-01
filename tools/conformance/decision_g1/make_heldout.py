@@ -1058,15 +1058,20 @@ def filler_sentences(topic: Topic, n: int) -> List[str]:
 
 
 def with_padding(request: Dict[str, Any], sentences: List[str], words: List[str]) -> Dict[str, Any]:
-    """`request` with the filler appended to its state: to a text state, or as a `notes` list of an object state."""
+    """`request` with the filler appended to its state: to a text state, or as a `notes` list of an object state.
+
+    Words go at the end of a text state, and before the final period of an object state's last note, so that the
+    note's closing `."` (which tokenizes with the quote) stays as it was and a word adds its own tokens only."""
     padded = json.loads(json.dumps(request))
-    tail = " ".join(sentences + words)
     if isinstance(padded["state"], str):
+        tail = " ".join(sentences + words)
         padded["state"] = (padded["state"] + " " + tail).strip() if tail else padded["state"]
     elif isinstance(padded["state"], dict):
         notes = list(sentences)
         if words:
-            notes = notes[:-1] + [(notes[-1] + " " if notes else "") + " ".join(words)]
+            last = notes.pop() if notes else ""
+            stem, period = (last[:-1], ".") if last.endswith(".") else (last, "")
+            notes.append((stem + " " if stem else "") + " ".join(words) + period)
         if notes:
             padded["state"]["notes"] = notes
     else:
@@ -1074,12 +1079,20 @@ def with_padding(request: Dict[str, Any], sentences: List[str], words: List[str]
     return padded
 
 
+# The most word levels one slot's search may take (each level is one batched measurement).
+MAX_WORD_LEVELS = 40
+
+
 def pad(slot: Slot, topic: Topic, request: Dict[str, Any], measure: Measure) -> Tuple[Dict[str, Any], int]:
     """The request padded to exactly `slot.target` prompt tokens (its first pass).
 
     Sentences first: the most of the slot's filler sentences (in order) that keep the prompt within the target, found
-    with two batched measurements (every `step`-th prefix, then each prefix of the last step). Then filler words, in
-    order, each kept only if the prompt stays within the target. Lengths must not decrease as text is appended."""
+    with two batched measurements (every `step`-th prefix, then each prefix of the last step). Then words, a
+    breadth-first search: each level appends one more FILLER_WORDS entry (a later one than the sequence's last) to
+    every sequence kept so far, measures all of them in one batch, and keeps the first sequence found for each new
+    prompt length within the target; the first sequence to reach the target exactly wins. It starts from the most
+    sentences, then one and two fewer. The order is fixed, so the result is too. Lengths must not decrease as text is
+    appended. No exact hit fails the recipe."""
     target = slot.target
     assert target is not None
     base = measure([request_text(request)])[0][0]
@@ -1101,24 +1114,43 @@ def pad(slot: Slot, topic: Topic, request: Dict[str, Any], measure: Measure) -> 
     if coarse[ceiling] <= target:
         raise RecipeError(f"{case_id(slot)}: {ceiling} filler sentences do not exceed {target} tokens")
     k0 = max(k for k in coarse_ks if coarse[k] <= target)
-    fine_ks = list(range(k0, min(k0 + step, ceiling) + 1))
+    fine_ks = sorted(set(range(max(0, k0 - 2), min(k0 + step, ceiling) + 1)))
     fine = lengths(fine_ks)
-    n = max(k for k in fine_ks if fine[k] <= target)
-    sentences = pool[:n]
-    current = fine[n]
-    words: List[str] = []
-    for word in FILLER_WORDS:
-        if current == target:
-            break
-        trial = measure([request_text(with_padding(request, sentences, words + [word]))])[0][0]
-        if trial < current:
-            raise RecipeError(f"{case_id(slot)}: the prompt got shorter as a word was appended")
-        if trial <= target:
-            words.append(word)
-            current = trial
-    if current != target:
-        raise RecipeError(f"{case_id(slot)}: padding reaches {current} tokens, not {target}")
-    return with_padding(request, sentences, words), current
+    n_max = max(k for k in fine_ks if fine[k] <= target)
+
+    def search(sentences: List[str], start: int) -> Optional[List[str]]:
+        kept: Dict[int, List[int]] = {start: []}  # prompt length -> the first word-index sequence reaching it
+        frontier: List[Tuple[int, List[int]]] = [(start, [])]
+        for _ in range(MAX_WORD_LEVELS):
+            if target in kept:
+                return [FILLER_WORDS[i] for i in kept[target]]
+            candidates = [(length, seq + [i]) for length, seq in frontier
+                          for i in range((seq[-1] + 1) if seq else 0, len(FILLER_WORDS))]
+            if not candidates:
+                return None
+            rows = measure([request_text(with_padding(request, sentences, [FILLER_WORDS[i] for i in seq]))
+                            for _, seq in candidates])
+            frontier = []
+            for (parent, seq), row in zip(candidates, rows):
+                length = row[0]
+                if length < parent:
+                    raise RecipeError(f"{case_id(slot)}: the prompt got shorter as a word was appended")
+                if length <= target and length not in kept:
+                    kept[length] = seq
+                    frontier.append((length, seq))
+        return [FILLER_WORDS[i] for i in kept[target]] if target in kept else None
+
+    for n in range(n_max, max(-1, n_max - 3), -1):
+        if n not in fine:
+            continue
+        words = search(pool[:n], fine[n])
+        if words is not None:
+            padded = with_padding(request, pool[:n], words)
+            length = measure([request_text(padded)])[0][0]
+            if length != target:
+                raise RecipeError(f"{case_id(slot)}: the padded prompt measures {length}, not {target}")
+            return padded, length
+    raise RecipeError(f"{case_id(slot)}: no exact padding to {target} tokens")
 
 
 # ---------------------------------------------------------------------------------------------------------------------

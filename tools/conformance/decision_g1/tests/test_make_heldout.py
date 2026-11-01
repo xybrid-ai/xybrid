@@ -146,6 +146,33 @@ class PaddingTest(unittest.TestCase):
         self.assertEqual(length, 300)
         self.assertEqual(fake_measure([mh.request_text(padded)])[0][0], 300)
 
+    def test_padding_backtracks_when_every_word_adds_two_tokens(self):
+        # The stall the real tokenizer showed on a JSON note: from an odd gap, no single word fits. The search
+        # takes a sentence back and combines words (two tokens each, three for one of them) to hit the target.
+        slot = mh.Slot(96, "pad", "noul", target=331, criteria="none")
+        topic = mh.TOPICS[2]
+        request = mh.build_request(slot, topic, mh.SplitMix64(4))
+
+        def coarse_words(texts):
+            out = []
+            for text in texts:
+                req = json.loads(text)
+                state = req["state"]
+                words = state.split()
+                n = 20 + 9 * sum(1 for w in words if w.startswith("("))
+                n += sum(3 if w.strip(".") == "thanks" else 2 for w in words if w.strip(".") in mh.FILLER_WORDS)
+                out.append([n])
+            return out
+
+        padded, length = mh.pad(slot, topic, request, coarse_words)
+        self.assertEqual(length, 331)
+        self.assertEqual(coarse_words([mh.request_text(padded)])[0][0], 331)
+
+    def test_words_go_before_the_last_period_of_a_json_note(self):
+        request = {"state": {"a": 1}, "questions": {"q": {"type": "noul", "instructions": "Yes?"}}}
+        padded = mh.with_padding(request, ["(1) First.", "(2) Second."], ["also", "noted"])
+        self.assertEqual(padded["state"]["notes"], ["(1) First.", "(2) Second also noted."])
+
     def test_a_shrinking_prompt_fails_the_recipe(self):
         slot = mh.Slot(97, "pad", "noul", target=200, criteria="none")
         topic = mh.TOPICS[1]
