@@ -14,7 +14,14 @@
 //!   llama.cpp's metadata accessors write it, which is what llama.cpp's
 //!   decision code reads (temperatures included), and
 //!   `verify_native_metadata` (feature `llm-llamacpp`), which checks a
-//!   loaded `xybrid_llama::LlamaModel` against the header of its file.
+//!   loaded `xybrid_llama::LlamaModel` against the header of its file: a
+//!   scalar consistency check (llama.cpp's string view of every scalar
+//!   key), not a file identity, since arrays and tensor data are not
+//!   compared.
+//! - [`admit_gguf`]: the load-boundary check that a model's GGUF is what its
+//!   metadata declares: a decision model only as the `GgufDecision` scorer
+//!   of its protocol, an ordinary model only as anything else
+//!   ([`GgufAdmission`], [`AdmittedDecisionModel`]).
 //!
 //! # When to use
 //!
@@ -23,9 +30,10 @@
 //! (bundles, sidecars, cached models, standalone files, auto-generated
 //! metadata) reads the header and classifies it before it allocates a
 //! context, and refuses anything that is not [`NotDecision`] or a
-//! [`Supported`] profile it implements. Reading a header opens and reads
-//! the file (only the header: a few MB for a 125,000-token vocabulary);
-//! there are no other side effects.
+//! [`Supported`] profile it implements. [`admit_gguf`] does both for a
+//! model's metadata. Reading a header opens and reads the file (only the
+//! header: a few MB for a 125,000-token vocabulary); there are no other
+//! side effects.
 //!
 //! llama.cpp's own metadata accessors cannot replace the scan: they skip
 //! array-valued keys and stringify scalars, so they cannot prove a key
@@ -102,6 +110,7 @@
 //! [`Supported`]: DecisionClassification::Supported
 //! [`Unsupported`]: DecisionClassification::Unsupported
 
+mod admission;
 mod classify;
 mod error;
 mod header;
@@ -112,6 +121,7 @@ mod testing;
 #[cfg(test)]
 mod tests;
 
+pub use admission::{admit_gguf, AdmittedDecisionModel, GgufAdmission};
 pub use classify::{classify, DecisionClassification, DecisionProfileId, UnsupportedReason};
 pub use error::GgufError;
 pub use header::{GgufArray, GgufHeader, GgufLimits, GgufTensorInfo, GgufType, GgufValue};
