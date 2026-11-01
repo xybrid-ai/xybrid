@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "depth-description-over-limit",
   "profile": "lfm3-d1/text/v1",
-  "title": "125 nested arrays in a choice description are refused",
+  "title": "A choice description 126 levels deep is refused",
   "covers": ["json-depth", "refusal-prepare"],
   "artifact": "d1-2b-q4km",
   "settings": null,

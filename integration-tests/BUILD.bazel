@@ -68,6 +68,19 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# Decision conformance fixtures: the case schema, the artifact and settings
+# manifest, the upstream oracle's record and cases (tools/conformance/decision),
+# and the HF reference's hf/ subtree. The GGUFs they name are downloaded
+# (integration-tests/download.sh) and are not part of this group.
+filegroup(
+    name = "decision_fixtures",
+    srcs = glob(
+        ["fixtures/decision/**"],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)
+
 # Byte fixtures for the llama.cpp adapter's embedded chat-template render,
 # read by xybrid-core's inline chat tests. Two of their cases render the
 # Qwen3.5 template from choice_fixtures; the lfm3 cases render
