@@ -9,7 +9,7 @@
 //! | Test | Needs | Checks |
 //! |------|-------|--------|
 //! | `the_case_census_is_the_one_expected` | — | every case has an expectation per stage; the counts |
-//! | `every_case_finalizes_as_upstream` | — | `finish` on upstream's plan and raw scores: answers bit for bit, refusals |
+//! | `every_case_finalizes_as_upstream` | — | `finish` on upstream's plan and raw scores: answers (their `f64`s as below), refusals |
 //! | `every_load_stage_is_upstreams` | — | metadata edits on d1-2B's decision metadata: refusals, temperatures |
 //! | `prompts_render_as_upstream` | `llm-llamacpp` | `prepare` with d1-2B's spellings and labels, without the tokenizer: prompt bytes, codes, refusals |
 //! | `model::every_case_prepares_as_upstream_on_d1_2b` | `llm-llamacpp`, d1-2B | `prepare` with the real tokenizer: everything upstream observed |
