@@ -57,6 +57,7 @@
 //!
 //! ### Bundles
 //! - [`bundler`] - .xyb bundle creation and extraction
+//! - [`gguf`] - Typed GGUF header scanning and decision-model classification
 //!
 //! ### High-Level APIs
 //! - [`tts`] - Text-to-speech client
@@ -271,6 +272,9 @@ pub mod audio;
 
 /// .xyb bundle creation and extraction
 pub mod bundler;
+
+/// Typed GGUF header scanning and decision-model classification
+pub mod gguf;
 
 /// Device detection (CPU, GPU, Metal, NNAPI)
 pub mod device;
