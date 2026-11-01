@@ -307,6 +307,8 @@ class Observation:
             self.sha = doc.get("request_sha256")
             stages = doc.get("upstream")
             self.detail = {}
+            self.receipt = {k: doc.get(k) for k in ("case_file_sha256", "inputs", "inputs_sha256", "collector",
+                                                    "build_fingerprint", "recipe_sha256")}
             if path.name != f"{self.case_id}.{self.sha}.json" or doc.get("source_file") != f"{self.case_id}.json":
                 raise Failure(f"{rel(path)}: not the collection file of case {self.case_id!r}")
         self.artifact = doc.get("artifact")
@@ -523,25 +525,49 @@ def pinned_llama_cpp() -> Optional[str]:
         return None
 
 
+ORACLE_TOOL = REPO / "tools" / "conformance" / "decision"
+
+
+def expected_inputs(case: "Case", artifact: str, pinned: Dict[str, Any]) -> Dict[str, Any]:
+    """The canonical inputs record of a G1 case (oracle.py case_inputs): its request, no media, no metadata edits,
+    no synthetic scores, the pinned artifact with no metadata variant."""
+    return {"request_sha256": case.sha, "has_media": False, "metadata": None, "select_logits": None,
+            "model": {"artifact": artifact, "sha256": pinned.get("sha256"), "variant_sha256": None}}
+
+
 def native_identity(directory: Path, artifact: str, settings: str, artifacts: Dict[str, Any],
-                    cases: Dict[str, "Case"], cases_dir: Path) -> Tuple[List[str], Optional[str]]:
-    """The oracle's collection record next to its observations, checked; and its computation fingerprint: what
-    determines the numbers (sources, build, settings as they ran, devices, platform, artifact bytes), not where or
-    when the record was written."""
+                    cases: Dict[str, "Case"], cases_dir: Path, observations: Dict[str, "Observation"]) \
+        -> Tuple[List[str], Optional[str]]:
+    """The oracle's collection receipt next to its observations, checked, and every observation bound to it; and the
+    computation fingerprint: what determines the numbers (recipe, build, settings as they ran, devices, platform,
+    artifact bytes), not where or when the receipt was written."""
     path = directory / COLLECTION_FILE
     if not path.is_file():
         return [f"{rel(directory)}: no {COLLECTION_FILE} (oracle.py --collect writes it)"], None
     record = load_json(path)
     where = rel(path)
     failures = []
-    if record.get("schema_version") != 1:
-        failures.append(f"{where}: schema_version must be 1")
+    if record.get("schema_version") != 1 or record.get("status") != "complete":
+        failures.append(f"{where}: not a complete schema-v1 collection ({record.get('status')!r})")
     collector = record.get("collector") or {}
-    if collector.get("official") is not True or collector.get("problems"):
-        failures.append(f"{where}: not an official collection: {collector.get('problems')}")
-    recorded_dir = record.get("cases_dir")
+    if collector.get("official") is not True or collector.get("problems") or collector.get("developer_run"):
+        failures.append(f"{where}: not an official collection: {collector}")
+    corpus = record.get("corpus") or {}
+    recorded_dir = corpus.get("dir")
     if not recorded_dir or (REPO / recorded_dir).resolve() != cases_dir.resolve():
         failures.append(f"{where}: collected {recorded_dir!r}, not {rel(cases_dir)}")
+    want_counts = {"files": len(cases), "selected": len(cases), "expected": len(cases), "only": None}
+    got_counts = {k: corpus.get(k) for k in want_counts}
+    if got_counts != want_counts:
+        failures.append(f"{where}: corpus counts {got_counts}, not {want_counts}")
+    recipe = record.get("recipe") or {}
+    if not recipe or record.get("recipe_sha256") != canonical_digest(recipe):
+        failures.append(f"{where}: no recipe, or a recipe digest that is not its recipe's")
+    for name, digest in sorted(recipe.items()):
+        current = ORACLE_TOOL / name
+        if not current.is_file() or sha256_file(current) != digest:
+            failures.append(f"{where}: made by another tools/conformance/decision/{name} than the tree's (the tool "
+                            f"changed: collect again)")
     pinned = artifacts["artifacts"].get(artifact) or {}
     want_artifact = {"id": artifact, "file": pinned.get("file"), "bytes": pinned.get("bytes"),
                      "sha256": pinned.get("sha256")}
@@ -553,6 +579,8 @@ def native_identity(directory: Path, artifact: str, settings: str, artifacts: Di
     if source.get("commit") is None or (tree and source.get("commit") != tree) or source.get("dirty") is not False:
         failures.append(f"{where}: llama.cpp {source}, the tree pins {tree!r} (a llama.cpp update makes these "
                         f"observations stale: regenerate them with oracle.py --collect)")
+    if not build.get("fingerprint"):
+        failures.append(f"{where}: no build fingerprint")
     compiled = build.get("build") or {}
     if compiled.get("build_type") != "Release" or compiled.get("backends") != ["cpu"]:
         failures.append(f"{where}: a {compiled.get('build_type')!r} build with backends {compiled.get('backends')}")
@@ -586,14 +614,29 @@ def native_identity(directory: Path, artifact: str, settings: str, artifacts: Di
         if e is None:
             failures.append(f"{where}: case {case_id} was not collected")
             continue
-        if e.get("status") != "observed" or e.get("request_sha256") != case.sha or \
+        inputs = expected_inputs(case, artifact, pinned)
+        if e.get("status") != "observed" or e.get("file") != case.path.name or \
+                e.get("file_sha256") != sha256_file(case.path) or e.get("request_sha256") != case.sha or \
+                e.get("inputs") != inputs or e.get("inputs_sha256") != canonical_digest(inputs) or \
                 e.get("observation") != f"{case_id}.{case.sha}.json":
-            failures.append(f"{where}: case {case_id} is {e.get('status')!r}: {e.get('error', '')}")
+            failures.append(f"{where}: case {case_id}: {e.get('status')!r}, or not this case file, request and "
+                            f"inputs {e.get('error', '')}")
         if e.get("server_agrees") is False:
             failures.append(f"{where}: the stock llama-server disagrees with the oracle on {case_id}")
+        obs = observations.get(case_id)
+        if obs is not None:
+            receipt = obs.receipt
+            if receipt.get("case_file_sha256") != e.get("file_sha256") or receipt.get("inputs") != inputs or \
+                    receipt.get("inputs_sha256") != canonical_digest(inputs) or \
+                    receipt.get("build_fingerprint") != build.get("fingerprint") or \
+                    receipt.get("recipe_sha256") != record.get("recipe_sha256") or \
+                    receipt.get("collector") != collector:
+                failures.append(f"{rel(obs.path)}: not bound to its collection's case file, inputs, build, recipe "
+                                f"and collector")
     for case_id in sorted(set(by_id) - set(cases)):
         failures.append(f"{where}: collected a case that is not in the corpus: {case_id}")
     fingerprint = canonical_digest({
+        "recipe_sha256": record.get("recipe_sha256"),
         "build": {k: v for k, v in build.items() if k != "llama_cpp_dir"},
         "artifact": record.get("artifact"),
         "settings": {k: entry.get(k) for k in ("llama_server_args", "context", "oracle_devices", "model_devices")},
@@ -1115,7 +1158,8 @@ def evaluate_g1(ctx: Context, bounds: Optional[Dict[str, float]], run: Run,
             directory = corpus.oracle_path(F16, settings)
             oracle = load_dir(directory, "oracle")
             run.failures.extend(check_join(corpus, cases, oracle, f"{F16}/{settings}", F16, settings))
-            failures, fingerprint = native_identity(directory, F16, settings, artifacts, cases, corpus.cases_dir)
+            failures, fingerprint = native_identity(directory, F16, settings, artifacts, cases, corpus.cases_dir,
+                                                    oracle)
             run.failures.extend(f"{corpus.name}: {f}" for f in failures)
             run.identities[f"{corpus.name}/{F16}/{settings}"] = fingerprint
             for path in sorted(directory.glob("*.json")):
@@ -1343,7 +1387,7 @@ def evaluate_drift(ctx: Context, run: Run) -> Dict[str, Any]:
                 side = load_dir(directory, "oracle")
                 run.failures.extend(check_join(corpus, cases, side, f"{artifact}/{settings}", artifact, settings))
                 failures, fingerprint = native_identity(directory, artifact, settings, artifacts, cases,
-                                                        corpus.cases_dir)
+                                                        corpus.cases_dir, side)
                 run.failures.extend(f"{corpus.name}: {f}" for f in failures)
                 run.identities[f"{corpus.name}/{artifact}/{settings}"] = fingerprint
                 for path in sorted(directory.glob("*.json")):

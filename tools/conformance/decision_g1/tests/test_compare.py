@@ -53,6 +53,7 @@ QUESTIONS = {
                   ("one", "choice", ["only"], ["A"], 2, [3.0, 1.0])],
 }
 EXCLUDED = {"syn-refused": "upstream_refuses", "syn-different": "prompt_differs"}
+RECIPE_FILES = ("CMakeLists.txt", "identity.cmake", "oracle.cpp", "test_access.h", "build.sh", "cases.py", "oracle.py")
 
 
 def request_text(case_id):
@@ -171,6 +172,13 @@ class Tree:
 
     def write_oracle(self, settings, perturb):
         directory = self.oracle / cmp.F16 / settings
+        artifacts = json.loads((self.fixtures / "artifacts.json").read_text())
+        art, st = artifacts["artifacts"][cmp.F16], artifacts["settings"][settings]
+        recipe = {name: cmp.sha256_file(cmp.ORACLE_TOOL / name) for name in RECIPE_FILES}
+        collector = {"official": True, "problems": []}
+        build = {"fingerprint": "f" * 64, "llama_cpp_dir": "/x",
+                 "llama_cpp": {"checkout": "git", "commit": cmp.pinned_llama_cpp(), "dirty": False},
+                 "build": {"build_type": "Release", "backends": ["cpu"], "cxx_compiler": "GNU 11.5.0"}}
         entries = []
         for case_id in self.ids:
             sha = self.sha(case_id)
@@ -185,22 +193,29 @@ class Tree:
             else:
                 up = stages(case_id, "oracle", perturb)
                 ran = settings
-            doc = {"schema_version": 1, "id": case_id, "request_sha256": sha, "source_file": f"{case_id}.json",
-                   "artifact": cmp.F16, "settings": ran, "upstream": up}
+            inputs = {"request_sha256": sha, "has_media": False, "metadata": None, "select_logits": None,
+                      "model": {"artifact": cmp.F16, "sha256": art["sha256"], "variant_sha256": None}}
+            file_sha = cmp.sha256_file(self.cases / f"{case_id}.json")
+            doc = {"schema_version": 1, "id": case_id, "source_file": f"{case_id}.json",
+                   "case_file_sha256": file_sha, "request_sha256": sha, "inputs_sha256": cmp.canonical_digest(inputs),
+                   "inputs": inputs, "artifact": cmp.F16, "settings": ran, "collector": collector,
+                   "build_fingerprint": build["fingerprint"], "recipe_sha256": cmp.canonical_digest(recipe),
+                   "upstream": up}
             name = f"{case_id}.{sha}.json"
             self.write(directory / name, doc)
-            entries.append({"file": f"{case_id}.json", "id": case_id, "request_sha256": sha, "status": "observed",
+            entries.append({"file": f"{case_id}.json", "id": case_id, "file_sha256": file_sha, "request_sha256": sha,
+                            "inputs_sha256": cmp.canonical_digest(inputs), "inputs": inputs, "status": "observed",
                             "observation": name})
-        art = json.loads((self.fixtures / "artifacts.json").read_text())["artifacts"][cmp.F16]
-        st = json.loads((self.fixtures / "artifacts.json").read_text())["settings"][settings]
         record = {
             "schema_version": 1,
-            "cases_dir": str(self.cases),
+            "status": "complete",
+            "corpus": {"dir": str(self.cases), "files": len(self.ids), "selected": len(self.ids),
+                       "expected": len(self.ids), "only": None},
             "artifact": {"id": cmp.F16, "file": art["file"], "bytes": art["bytes"], "sha256": art["sha256"]},
-            "collector": {"official": True, "problems": []},
-            "build": {"fingerprint": "f" * 64, "llama_cpp_dir": "/x",
-                      "llama_cpp": {"checkout": "git", "commit": cmp.pinned_llama_cpp(), "dirty": False},
-                      "build": {"build_type": "Release", "backends": ["cpu"], "cxx_compiler": "GNU 11.5.0"}},
+            "recipe": recipe,
+            "recipe_sha256": cmp.canonical_digest(recipe),
+            "collector": collector,
+            "build": build,
             "settings": {settings: {
                 "llama_server_args": ["-t", "4"],
                 "context": {"n_ctx": 4096, "n_batch": 4096, "n_ubatch": 4096, "n_seq_max": 1, "n_outputs_max": 1,
@@ -365,7 +380,7 @@ class RevalidationTest(Quiet):
         record = heldout / "oracle" / cmp.F16
         for settings in cmp.SETTINGS:
             t.edit(record / settings / "collection.json",
-                   lambda d: d.update({"cases_dir": str(heldout / "cases")}))
+                   lambda d: d["corpus"].update({"dir": str(heldout / "cases")}))
         t.write(heldout / "allowlist.json", {"schema_version": 1, "corpora": {"heldout": spec}})
 
     def rebuilt(self, t, compiler):
@@ -465,6 +480,47 @@ class MutationTest(Quiet):
         path = t.oracle / cmp.F16 / "cpu-t4-fa-on" / "collection.json"
         t.edit(path, lambda d: d["build"]["build"].update({"cxx_compiler": "Clang 15"}))
         self.assert_gate_fails(t, "a computation identity other than the one the bounds were frozen on")
+
+    def test_an_incomplete_collection(self):
+        t = self.frozen_tree()
+        path = t.oracle / cmp.F16 / "cpu-t4-fa-off" / "collection.json"
+        t.edit(path, lambda d: d.update({"status": "incomplete"}))
+        self.assert_gate_fails(t, "not a complete schema-v1 collection")
+
+    def test_a_collection_by_another_tool(self):
+        t = self.frozen_tree()
+        path = t.oracle / cmp.F16 / "cpu-t4-fa-off" / "collection.json"
+
+        def other(doc):
+            doc["recipe"]["oracle.py"] = "0" * 64
+            doc["recipe_sha256"] = cmp.canonical_digest(doc["recipe"])
+        t.edit(path, other)
+        self.assert_gate_fails(t, "made by another tools/conformance/decision/oracle.py")
+
+    def test_a_case_file_edited_after_collection(self):
+        t = self.frozen_tree()
+        t.edit(t.cases / "syn-score.json", lambda d: d.update({"title": "edited"}))
+        self.assert_gate_fails(t, "case syn-score: 'observed', or not this case file")
+
+    def test_inputs_with_media(self):
+        t = self.frozen_tree()
+
+        def media(doc):
+            doc["inputs"]["has_media"] = True
+            doc["inputs_sha256"] = cmp.canonical_digest(doc["inputs"])
+        t.edit(t.oracle_file("syn-choice"), media)
+        self.assert_gate_fails(t, "not bound to its collection's case file, inputs, build, recipe")
+
+    def test_an_observation_from_another_build(self):
+        t = self.frozen_tree()
+        t.edit(t.oracle_file("syn-choice"), lambda d: d.update({"build_fingerprint": "0" * 64}))
+        self.assert_gate_fails(t, "not bound to its collection's case file, inputs, build, recipe")
+
+    def test_a_partial_collection(self):
+        t = self.frozen_tree()
+        path = t.oracle / cmp.F16 / "cpu-t4-fa-off" / "collection.json"
+        t.edit(path, lambda d: d["corpus"].update({"selected": 4}))
+        self.assert_gate_fails(t, "corpus counts")
 
     def test_an_unofficial_collection(self):
         t = self.frozen_tree()
