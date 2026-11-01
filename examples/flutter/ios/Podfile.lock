@@ -66,8 +66,8 @@ SPEC CHECKSUMS:
   path_provider_foundation: 0b743cbb62d8e47eab856f09262bb8c1ddcfe6ba
   permission_handler_apple: 9878588469a2b0d0fc1e048d9f43605f92e6cec2
   record_ios: 26294aaa39e4bb7665b0fef78bdc23d723b432f2
-  xybrid_flutter: 620b4479aee6d76d57da5a30ffc8cb18e42d4af0
+  xybrid_flutter: 8b3ec4e46da7c9bf2dc882e5fe606cb4f8360365
 
-PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+PODFILE CHECKSUM: 92cdf02e2c80e98a226428ad0dd413d823f2c76d
 
 COCOAPODS: 1.16.2

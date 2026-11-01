@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking (Flutter):** `xybrid_flutter` now declares the platform minimums
+  its precompiled libraries are built for: iOS 16.0 (was 13.0), macOS 14.0
+  (was 10.15) and Android 9, API 28 (`minSdkVersion` was 21). An app that
+  targets an older version used to build and could then fail to load the
+  native library on an older device; now `pod install` rejects the plugin or
+  the Android manifest merge fails. Raise the app's minimums: `minSdk = 28` in
+  the app's Gradle `defaultConfig` (Flutter's default, `flutter.minSdkVersion`,
+  is lower); `platform :ios, '16.0'` in `ios/Podfile` and an iOS Deployment
+  Target of 16.0 for the Runner target; `platform :osx, '14.0'` in
+  `macos/Podfile` and a macOS Deployment Target of 14.0. The libraries are
+  unchanged. The Flutter README's macOS 13.3 was too low: the libraries'
+  llama.cpp and whisper.cpp code is built for macOS 14.0.
+
 ## [0.16.0] - 2026-10-30
 
 ### Added

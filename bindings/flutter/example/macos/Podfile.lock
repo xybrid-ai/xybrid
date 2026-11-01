@@ -28,8 +28,8 @@ SPEC CHECKSUMS:
   battery_plus: 0ed4cf1e771b535a89ac7323e0855ec734cf745f
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   path_provider_foundation: 0b743cbb62d8e47eab856f09262bb8c1ddcfe6ba
-  xybrid_flutter: 6bdc9742e4ad5a35f7587b7951a37382ed03f7ca
+  xybrid_flutter: e04ee30ec8e689c744f5fb9334e9a734bc6ad35d
 
-PODFILE CHECKSUM: 54d867c82ac51cbd61b565781b9fada492027009
+PODFILE CHECKSUM: d3100dfb09e6decb727cf5bac9bcc2fd3ca5d128
 
 COCOAPODS: 1.16.2
