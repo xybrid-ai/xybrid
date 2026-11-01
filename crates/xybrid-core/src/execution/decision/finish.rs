@@ -1,7 +1,7 @@
 //! Answers from readouts: LFM3 d1's arithmetic, in llama.cpp's operation
 //! order (`format_answer`, `tools/server/server-decision.cpp:1651-1747`).
 
-use super::plan::{AnswerPlan, FinalizeRule};
+use super::plan::{AnswerPlan, FinalizeRule, RequestDigest};
 use super::protocol::option_count;
 use super::DecisionPlan;
 use crate::ir::decision::{
@@ -14,6 +14,10 @@ pub(super) fn finish(
     plan: &DecisionPlan,
     readouts: Vec<Vec<f32>>,
 ) -> Result<Decisions, DecisionError> {
+    assert!(
+        plan.request == RequestDigest::of(request),
+        "finish was given a plan prepared for another request"
+    );
     if readouts.len() != plan.passes.len() {
         return Err(DecisionError::ReadoutCount {
             expected: plan.passes.len(),

@@ -102,7 +102,7 @@ use crate::gguf::{DecisionProfileId, GgufHeader};
 use crate::ir::decision::{DecisionError, DecisionRequest, DecisionUsage, Decisions};
 
 use facts::Temperatures;
-use plan::AnswerPlan;
+use plan::{AnswerPlan, RequestDigest};
 
 /// The sha256 of the one `tokenizer.chat_template.systemone` template this
 /// build renders: 1,380 bytes, shared by d1-2B and d1-omni-2B, ending in
@@ -354,11 +354,15 @@ impl fmt::Debug for DecisionPass {
 /// A prepared request: the passes to evaluate, in order, and how each
 /// question's answer is read from them.
 ///
+/// It also keeps a digest of the request it was prepared for, so that
+/// [`finish`] can tell when it is given another one.
+///
 /// `Debug` prints counts only.
 #[derive(Clone)]
 pub struct DecisionPlan {
     passes: Vec<DecisionPass>,
     answers: Vec<AnswerPlan>,
+    request: RequestDigest,
 }
 
 impl DecisionPlan {
@@ -457,8 +461,10 @@ pub fn prepare(
 ///
 /// # Panics
 ///
-/// When `plan` was not prepared for `request` (a different number of
-/// questions or options): a bug in the caller.
+/// When `plan` was not prepared for `request`: a bug in the caller. Any
+/// other request is detected, even one of the same shape (the plan keeps a
+/// digest of its request); an equal one, such as a clone, is the same
+/// request.
 pub fn finish(
     request: &DecisionRequest,
     plan: &DecisionPlan,

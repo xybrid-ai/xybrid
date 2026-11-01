@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use super::escape::{Escaped, Spellings};
 use super::labels::{self, Label, LabelTokens};
-use super::plan::{AnswerPlan, FinalizeRule, LabelGroup};
+use super::plan::{AnswerPlan, FinalizeRule, LabelGroup, RequestDigest};
 use super::render::{RenderError, Renderer};
 use super::{protocol, DecisionModelFacts, DecisionPass, DecisionPlan, DecisionVocab, Token};
 use crate::ir::decision::{
@@ -107,7 +107,11 @@ pub(super) fn prepare(
             prompts.push(prompt);
         }
     }
-    Ok(DecisionPlan { passes, answers })
+    Ok(DecisionPlan {
+        passes,
+        answers,
+        request: RequestDigest::of(request),
+    })
 }
 
 /// What a question's kind decides: its rule, its type as the template names

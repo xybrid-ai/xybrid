@@ -26,7 +26,7 @@ use super::cases::{self, f32_of, f64_of, int, items, Case, Fixture};
 use super::fake::{d1_header, GgufWriter};
 use super::parity::F64Parity;
 use crate::execution::decision::facts::Temperature;
-use crate::execution::decision::plan::{AnswerPlan, FinalizeRule, LabelGroup};
+use crate::execution::decision::plan::{AnswerPlan, FinalizeRule, LabelGroup, RequestDigest};
 use crate::execution::decision::{
     finish, DecisionLimits, DecisionModelFacts, DecisionPass, DecisionPlan,
 };
@@ -207,7 +207,11 @@ pub(super) fn upstream_plan(case: &Case, request: &DecisionRequest) -> DecisionP
             }
         })
         .collect();
-    DecisionPlan { passes, answers }
+    DecisionPlan {
+        passes,
+        answers,
+        request: RequestDigest::of(request),
+    }
 }
 
 /// Upstream's readouts for `case` (`upstream.evaluate.raw_scores`).

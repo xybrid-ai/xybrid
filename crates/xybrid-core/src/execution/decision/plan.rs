@@ -1,10 +1,30 @@
-//! How a question's answer is read from its pass.
+//! How a question's answer is read from its pass, and which request a plan
+//! was prepared for.
 
 use std::fmt;
 use std::ops::Range;
 
+use sha2::{Digest, Sha256};
+
 use super::facts::Temperature;
-use crate::ir::decision::DecisionOrigin;
+use crate::ir::decision::{DecisionOrigin, DecisionRequest};
+
+/// Which request a plan was prepared for: the SHA-256 of the request's
+/// bincode serialization, which covers every question id, option key and
+/// piece of content. Equal requests (a clone, a decoded copy) share one.
+///
+/// No `Debug`: a digest of the caller's content is not content-free.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct RequestDigest([u8; 32]);
+
+impl RequestDigest {
+    pub(super) fn of(request: &DecisionRequest) -> Self {
+        let mut hasher = Sha256::new();
+        bincode::serialize_into(&mut hasher, request)
+            .expect("bincode serializes every decision request, and a hasher takes any bytes");
+        Self(hasher.finalize().into())
+    }
+}
 
 /// How the answer to one question is read.
 #[derive(Clone)]

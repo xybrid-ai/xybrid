@@ -1,7 +1,7 @@
 //! `finish` on synthetic plans and readouts.
 
 use crate::execution::decision::facts::Temperature;
-use crate::execution::decision::plan::{AnswerPlan, FinalizeRule, LabelGroup};
+use crate::execution::decision::plan::{AnswerPlan, FinalizeRule, LabelGroup, RequestDigest};
 use crate::execution::decision::{finish, DecisionPass, DecisionPlan, Token};
 use crate::ir::decision::{
     DecisionContent, DecisionError, DecisionLevel, DecisionOption, DecisionOrigin,
@@ -36,6 +36,7 @@ fn single(
             }
         })
         .collect();
+    let request = DecisionRequest::new(DecisionState::text("s"), vec![question]);
     let plan = DecisionPlan {
         passes: vec![DecisionPass {
             tokens: (0..10).collect(),
@@ -51,11 +52,9 @@ fn single(
                 value: t,
             },
         }],
+        request: RequestDigest::of(&request),
     };
-    (
-        DecisionRequest::new(DecisionState::text("s"), vec![question]),
-        plan,
-    )
+    (request, plan)
 }
 
 fn choice(keys: &[&str], t: f32) -> (DecisionRequest, DecisionPlan) {
@@ -261,4 +260,34 @@ fn a_plan_for_another_request_is_a_bug() {
     let (_, plan) = choice(&["a", "b"], 1.0);
     let (other, _) = choice(&["a", "b", "c"], 1.0);
     let _ = finish(&other, &plan, vec![vec![0.0, 1.0]]);
+}
+
+/// Another request of the same shape: the plan's digest tells it apart.
+#[test]
+#[should_panic(expected = "a plan prepared for another request")]
+fn a_plan_for_other_keys_of_the_same_shape_is_a_bug() {
+    let (_, plan) = choice(&["a", "b"], 1.0);
+    let (other, _) = choice(&["a", "c"], 1.0);
+    let _ = finish(&other, &plan, vec![vec![0.0, 1.0]]);
+}
+
+#[test]
+#[should_panic(expected = "a plan prepared for another request")]
+fn a_plan_for_another_state_of_the_same_shape_is_a_bug() {
+    let (request, plan) = choice(&["a", "b"], 1.0);
+    let (_, questions) = request.into_parts();
+    let other = DecisionRequest::new(DecisionState::text("t"), questions);
+    let _ = finish(&other, &plan, vec![vec![0.0, 1.0]]);
+}
+
+#[test]
+fn an_equal_request_is_the_same_request() {
+    let (request, plan) = choice(&["a", "b"], 1.0);
+    let decoded: DecisionRequest =
+        bincode::deserialize(&bincode::serialize(&request).unwrap()).unwrap();
+    for same in [request.clone(), decoded] {
+        assert!(same == request);
+        let decisions = finish(&same, &plan, vec![vec![0.0, 1.0]]).unwrap();
+        assert_eq!(decisions.answers()[0].value().as_choice(), Some("b"));
+    }
 }
