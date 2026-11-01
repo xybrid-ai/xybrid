@@ -23,8 +23,11 @@ version and the Kotlin SDK pin (`tools/scripts/version-sync.sh`).
    `bindings/react-native/package.json` (`scripts/pin-ios-checksum.sh`) and
    pushes that to the release branch.
 2. **`release-publish.yml`**, after the release PR merges:
+   - `publish-release` checks the draft's zip against both pins at the merge
+     commit and, on a mismatch, stops before the release or its tag goes
+     public;
    - `verify-spm-checksum` downloads the now-public zip and checks both pins
-     (`pin-ios-checksum.sh --check`);
+     again (`pin-ios-checksum.sh --check`);
    - `publish-npm` runs the test suite and the tarball check at the tag,
      waits (up to 30 minutes) until Maven Central serves
      `ai.xybrid:xybrid-kotlin:<version>` — without it the package's Android
