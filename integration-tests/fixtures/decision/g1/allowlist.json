@@ -1,0 +1,284 @@
+{
+  "schema_version": 1,
+  "what": "G1's shared domain: the questions both references evaluate as the same prompt, token ids, selectors and label groups. It replaces the blanket hf-diff- prefix rule (C16): inclusion is explicit, every exclusion names a kind and the exact refusal or differing fields it expects, and compare.py checks both.",
+  "notes": {
+    "hf-diff-packing": "Included from observations/ at set_size = 1 (each question alone), never packed/.",
+    "hf-diff-duplicate-keys": "Both references keep the last value at the first position, so they evaluate the same sequence: reference-to-reference numeric evidence. xybrid itself refuses the request at parse (duplicate_key); that stays a G0 requirement.",
+    "hf-choice-one": "Its question has one group, so its AGE is 0 by construction: counted, never cited as evidence."
+  },
+  "corpora": {
+    "representative": {
+      "cases": "integration-tests/fixtures/decision/hf/cases",
+      "hf": "integration-tests/fixtures/decision/hf/observations",
+      "oracle": "integration-tests/fixtures/decision/g1/oracle",
+      "counts": {
+        "cases": 46,
+        "included_cases": 26,
+        "included_questions": 32,
+        "excluded_cases": 20
+      },
+      "included": {
+        "hf-card-three": [
+          "refund",
+          "team",
+          "urgency"
+        ],
+        "hf-choice-27": [
+          "department"
+        ],
+        "hf-choice-36": [
+          "department"
+        ],
+        "hf-choice-ambiguous": [
+          "team"
+        ],
+        "hf-choice-card": [
+          "team"
+        ],
+        "hf-choice-key-fallback": [
+          "route"
+        ],
+        "hf-choice-letter-keys": [
+          "planet"
+        ],
+        "hf-choice-lower-keys": [
+          "category"
+        ],
+        "hf-choice-one": [
+          "queue"
+        ],
+        "hf-diff-duplicate-keys": [
+          "open"
+        ],
+        "hf-diff-packing": [
+          "refund",
+          "team",
+          "urgency",
+          "angry",
+          "language"
+        ],
+        "hf-noul-card": [
+          "refund"
+        ],
+        "hf-noul-criteria": [
+          "damaged"
+        ],
+        "hf-noul-criteria-partial": [
+          "legal"
+        ],
+        "hf-score-borderline": [
+          "urgency"
+        ],
+        "hf-score-card": [
+          "urgency"
+        ],
+        "hf-score-ten": [
+          "rating"
+        ],
+        "hf-score-two": [
+          "risk"
+        ],
+        "hf-state-empty": [
+          "enough"
+        ],
+        "hf-state-json-array": [
+          "resolved"
+        ],
+        "hf-state-json-object": [
+          "need"
+        ],
+        "hf-state-long": [
+          "team"
+        ],
+        "hf-state-null": [
+          "formality"
+        ],
+        "hf-state-special-token-key": [
+          "injection"
+        ],
+        "hf-state-special-tokens": [
+          "injection"
+        ],
+        "hf-state-unicode": [
+          "language"
+        ]
+      },
+      "excluded": {
+        "hf-diff-chat-media-part": {
+          "kind": "upstream_refuses",
+          "stage": "parse",
+          "exception": "not_supported",
+          "status": 501,
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.11: upstream takes media parts out of a messages state and, without an mmproj, refuses them"
+        },
+        "hf-diff-choice-256": {
+          "kind": "upstream_refuses",
+          "stage": "parse",
+          "exception": "invalid_argument",
+          "status": 400,
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 3.3: upstream allows at most 255 options"
+        },
+        "hf-diff-choice-multiple": {
+          "kind": "hf_no_groups",
+          "question": "topics",
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 3.1: HF answers a multiple choice option by option, without option groups; upstream ignores the field"
+        },
+        "hf-diff-description-nonstring": {
+          "kind": "prompt_differs",
+          "questions": {
+            "action": [
+              "prompt bytes",
+              "token ids"
+            ]
+          },
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.5: a non-string description is Python str() on HF, JSON upstream"
+        },
+        "hf-diff-escape-tool-call": {
+          "kind": "prompt_differs",
+          "questions": {
+            "tool": [
+              "prompt bytes",
+              "token ids",
+              "output index"
+            ]
+          },
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.2: upstream breaks every CONTROL spelling (124), HF only its special tokens (122)"
+        },
+        "hf-diff-escaped-key-collision": {
+          "kind": "prompt_differs",
+          "questions": {
+            "injection": [
+              "prompt bytes",
+              "token ids",
+              "output index"
+            ]
+          },
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.3: upstream keeps one of two keys that escaping makes equal, HF both"
+        },
+        "hf-diff-instructions-blank": {
+          "kind": "hf_refuses",
+          "stage": "parse",
+          "exception": "ValueError",
+          "question": "refund",
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.8: HF refuses blank instructions"
+        },
+        "hf-diff-instructions-empty": {
+          "kind": "hf_refuses",
+          "stage": "parse",
+          "exception": "ValueError",
+          "question": "refund",
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.8: HF refuses empty instructions"
+        },
+        "hf-diff-instructions-object": {
+          "kind": "prompt_differs",
+          "questions": {
+            "spam": [
+              "prompt bytes",
+              "token ids"
+            ]
+          },
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.4: object instructions are Python str() on HF, compact JSON upstream (same token count, other bytes)"
+        },
+        "hf-diff-key-nonascii": {
+          "kind": "prompt_differs",
+          "questions": {
+            "capital": [
+              "prompt bytes",
+              "token ids",
+              "selected tokens",
+              "label groups"
+            ]
+          },
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.1: HF takes single non-ASCII letters as codes, upstream only ASCII letters"
+        },
+        "hf-diff-key-whitespace": {
+          "kind": "prompt_differs",
+          "questions": {
+            "capital": [
+              "prompt bytes",
+              "token ids",
+              "selected tokens",
+              "label groups"
+            ]
+          },
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.1: HF strips keys before taking them as codes, upstream does not"
+        },
+        "hf-diff-lone-surrogate": {
+          "kind": "upstream_refuses",
+          "stage": "parse",
+          "exception": "common_json_error",
+          "status": 400,
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 3.5: upstream's JSON parser refuses a lone surrogate (HF fails later, at prepare)"
+        },
+        "hf-diff-noul-alias-criteria": {
+          "kind": "prompt_differs",
+          "questions": {
+            "refund": [
+              "prompt bytes",
+              "token ids",
+              "output index"
+            ]
+          },
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.7: HF prints yes/no criteria under alias keys, upstream reads only true/false"
+        },
+        "hf-diff-noul-null-criteria": {
+          "kind": "prompt_differs",
+          "questions": {
+            "refund": [
+              "prompt bytes",
+              "token ids",
+              "output index"
+            ]
+          },
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.7: HF prints criteria lines for all-null criteria, upstream does not"
+        },
+        "hf-diff-questions-empty": {
+          "kind": "upstream_refuses",
+          "stage": "parse",
+          "exception": "invalid_argument",
+          "status": 400,
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 3.4: upstream refuses an empty questions object"
+        },
+        "hf-diff-score-nonstring-levels": {
+          "kind": "hf_refuses",
+          "stage": "parse",
+          "exception": "ValueError",
+          "question": "urgency",
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.6: HF refuses score levels that are not strings"
+        },
+        "hf-diff-spoken-input-audio": {
+          "kind": "upstream_refuses",
+          "stage": "parse",
+          "exception": "invalid_argument",
+          "status": 400,
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.10: upstream refuses input_audio instructions without an audio model"
+        },
+        "hf-diff-state-big-integer": {
+          "kind": "prompt_differs",
+          "questions": {
+            "valid": [
+              "prompt bytes",
+              "token ids",
+              "output index"
+            ]
+          },
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 2.9: upstream's template reads integers past int64 as wrapped int64, HF prints every digit"
+        },
+        "hf-diff-state-nan": {
+          "kind": "upstream_refuses",
+          "stage": "parse",
+          "exception": "common_json_error",
+          "status": 400,
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 3.5: upstream's JSON parser refuses NaN"
+        },
+        "hf-diff-typed-text": {
+          "kind": "upstream_refuses",
+          "stage": "parse",
+          "exception": "invalid_argument",
+          "status": 400,
+          "reason": "tools/conformance/decision_hf/DIFFERENCES.md 3.2: upstream answers only choice, score and noul"
+        }
+      }
+    }
+  }
+}
