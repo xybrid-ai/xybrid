@@ -21,7 +21,8 @@ pub(crate) struct InitFlags {
 
 /// Handle the `xybrid init <directory>` command.
 ///
-/// Exit codes: 0=success, 1=no model files, 2=inspection failed, 3=user cancelled
+/// Exit codes: 0=success, 1=no model files, 2=inspection failed or refused,
+/// 3=user cancelled
 pub(crate) fn handle_init_command(dir: &str, flags: InitFlags) -> Result<()> {
     let dir_path = PathBuf::from(dir)
         .canonicalize()
@@ -77,6 +78,18 @@ pub(crate) fn handle_init_command(dir: &str, flags: InitFlags) -> Result<()> {
                 eprintln!("{} {}", "error:".bright_red().bold(), msg);
             }
             std::process::exit(1);
+        }
+        // A refusal (a decision model this build does not run, a GGUF over
+        // its metadata-key limit) or a header that cannot be read: the SDK's
+        // message says which, so it is not called an inspection failure.
+        Err(e @ (SdkError::UnsupportedModelCapability { .. } | SdkError::IoError(_))) => {
+            let msg = e.to_string();
+            if flags.json {
+                print_json_error(2, &msg);
+            } else {
+                eprintln!("{} {}", "error:".bright_red().bold(), msg);
+            }
+            std::process::exit(2);
         }
         Err(e) => {
             let msg = format!("Inspection failed: {}", e);
