@@ -17,7 +17,7 @@
       "bytes": 3466628416,
       "sha256": "f785c92583aa83ad2ecccd88d222a5b6b81ba1e66cb1465e7747eb9f857c67c2",
       "url": "https://huggingface.co/LiquidAI/d1-2B-GGUF/resolve/e968f6575f0d4fad928312d7af15cad90fd365c0/d1-2B-BF16.gguf",
-      "role": "G1 artifact"
+      "role": "unquantized GGUF (reported)"
     },
     "d1-2b-f16": {
       "repo": "LiquidAI/d1-2B-GGUF",
@@ -26,7 +26,7 @@
       "bytes": 3466628416,
       "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
       "url": "https://huggingface.co/LiquidAI/d1-2B-GGUF/resolve/e968f6575f0d4fad928312d7af15cad90fd365c0/d1-2B-F16.gguf",
-      "role": "unquantized GGUF"
+      "role": "G1 artifact"
     },
     "d1-2b-q8": {
       "repo": "LiquidAI/d1-2B-GGUF",
