@@ -66,25 +66,30 @@ impl Default for StructuralLimits {
 }
 
 impl StructuralLimits {
-    /// Override the question ceiling.
+    /// Override the question ceiling. Not clamped: 16, the decode ceiling, is
+    /// the hard limit (a request with more validates but does not decode).
     pub fn with_max_questions(mut self, max_questions: usize) -> Self {
         self.max_questions = max_questions;
         self
     }
 
-    /// Override the option and level ceiling.
+    /// Override the option and level ceiling. Not clamped: 255, the decode
+    /// ceiling, is the hard limit (more options or levels validate but do
+    /// not decode).
     pub fn with_max_options(mut self, max_options: usize) -> Self {
         self.max_options = max_options;
         self
     }
 
-    /// Override the content-byte ceiling.
+    /// Override the content-byte ceiling. Not clamped: whatever it allows,
+    /// no string field over 1 MiB or JSON text over 2 MiB decodes.
     pub fn with_max_bytes(mut self, max_bytes: usize) -> Self {
         self.max_bytes = max_bytes;
         self
     }
 
-    /// Override the JSON value ceiling.
+    /// Override the JSON value ceiling. Not clamped: whatever it allows, no
+    /// JSON value of more than 65,536 values decodes.
     pub fn with_max_json_nodes(mut self, max_json_nodes: usize) -> Self {
         self.max_json_nodes = max_json_nodes;
         self

@@ -84,16 +84,17 @@
 //! | a choice's options, a score's levels, an answer's distribution | 255 |
 //! | each string: question id, option key, text content, answer question id, distribution key, chosen key | 1 MiB |
 //! | an [`OrderedJson`]'s text | 2 MiB, and 65,536 values |
+//! | a state's media | 0, while [`DecisionMedia`] has no variant |
 //!
 //! A sequence is refused on its declared length when the format declares
 //! one (bincode does), before any element is read, and otherwise at the
-//! element past its ceiling; a string is measured before it is copied, and
-//! JSON text before it is parsed. A refusal names the kind of field and the
-//! ceiling, never content. The ceilings are the IR's, the same for every
-//! model, and at or above the default [`StructuralLimits`], so data within
-//! the defaults always decodes (JSON text has room for its compact form,
-//! which can be longer than the text it was parsed from); configured limits
-//! should stay within them.
+//! element past its ceiling, before that element is decoded; a string is
+//! measured before it is copied, and JSON text before it is parsed. A
+//! refusal names the kind of field and the ceiling, never content. The
+//! ceilings are the IR's, the same for every model, and at or above the
+//! default [`StructuralLimits`], so data within the defaults always decodes
+//! (JSON text has room for its compact form, which can be longer than the
+//! text it was parsed from); configured limits should stay within them.
 //!
 //! With bincode, how the input arrives decides what bounds allocation:
 //!

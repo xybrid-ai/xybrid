@@ -176,6 +176,7 @@ impl fmt::Debug for DecisionMedia {
 #[serde(deny_unknown_fields)]
 pub struct DecisionState {
     body: Option<DecisionContent>,
+    #[serde(deserialize_with = "super::decode::media")]
     media: Vec<DecisionMedia>,
 }
 

@@ -10,10 +10,11 @@
 //!
 //! A sequence is refused when its declared length (serde's `size_hint`,
 //! which bincode reports exactly) is over its ceiling, before any element is
-//! read; otherwise its elements are counted as they arrive and the one past
-//! the ceiling is refused. A string is measured before it is copied.
-//! Refusals are fixed texts naming the kind of field and its ceiling, never
-//! content.
+//! read; otherwise its elements are counted as they arrive, and one past the
+//! ceiling is refused before it is decoded, so that its own decoding errors
+//! (which may quote it) never surface. A string is measured before it is
+//! copied. Refusals are fixed texts naming the kind of field and its
+//! ceiling, never content.
 //!
 //! What a format allocates before a visitor runs is outside what a visitor
 //! can bound. serde_json unescapes a string into a buffer before handing it
@@ -25,10 +26,11 @@
 //! only `with_limit` with `deserialize_from` bounds that allocation.
 
 use super::{
-    DecisionAnswer, DecisionLevel, DecisionOption, DecisionQuestion, DecisionScore,
+    DecisionAnswer, DecisionLevel, DecisionMedia, DecisionOption, DecisionQuestion, DecisionScore,
     DEFAULT_MAX_OPTIONS, DEFAULT_MAX_QUESTIONS, DEFAULT_MAX_REQUEST_BYTES,
 };
-use serde::de::{self, Deserialize, Deserializer, SeqAccess, Visitor};
+use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, SeqAccess, Visitor};
+use std::convert::Infallible;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -38,6 +40,10 @@ pub(super) const MAX_QUESTIONS: usize = DEFAULT_MAX_QUESTIONS;
 /// Most options of a choice, levels of a score, and entries of a
 /// distribution.
 pub(super) const MAX_ALTERNATIVES: usize = DEFAULT_MAX_OPTIONS;
+
+/// Most media in a state: none, while [`DecisionMedia`] has no variant.
+/// The first variant must raise it, or no media will decode.
+pub(super) const MAX_MEDIA: usize = 0;
 
 /// Most bytes of one string field.
 pub(super) const MAX_STRING_BYTES: usize = DEFAULT_MAX_REQUEST_BYTES;
@@ -134,21 +140,48 @@ impl<'de, T: Deserialize<'de>> Visitor<'de> for BoundedSequence<T> {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<T>, A::Error> {
-        let too_many = || de::Error::custom(format_args!("more than {} {}", self.max, self.what));
+        let past = PastCeiling {
+            max: self.max,
+            what: self.what,
+        };
         // A declared length over the ceiling is refused before anything is
         // read or allocated (bincode declares every length up front).
         let declared = seq.size_hint();
         if declared.is_some_and(|len| len > self.max) {
-            return Err(too_many());
+            return Err(past.refusal());
         }
         let mut items = Vec::with_capacity(declared.unwrap_or(0));
-        while let Some(item) = seq.next_element()? {
-            if items.len() == self.max {
-                return Err(too_many());
+        while items.len() < self.max {
+            match seq.next_element()? {
+                Some(item) => items.push(item),
+                None => return Ok(items),
             }
-            items.push(item);
         }
-        Ok(items)
+        match seq.next_element_seed(past)? {
+            None => Ok(items),
+            Some(never) => match never {},
+        }
+    }
+}
+
+/// The element past a sequence's ceiling: refused without being read.
+#[derive(Clone, Copy)]
+struct PastCeiling {
+    max: usize,
+    what: &'static str,
+}
+
+impl PastCeiling {
+    fn refusal<E: de::Error>(self) -> E {
+        E::custom(format_args!("more than {} {}", self.max, self.what))
+    }
+}
+
+impl<'de> DeserializeSeed<'de> for PastCeiling {
+    type Value = Infallible;
+
+    fn deserialize<D: Deserializer<'de>>(self, _: D) -> Result<Infallible, D::Error> {
+        Err(self.refusal())
     }
 }
 
@@ -185,6 +218,13 @@ pub(super) fn distribution<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Vec<DecisionScore>, D::Error> {
     sequence(deserializer, MAX_ALTERNATIVES, "distribution entries")
+}
+
+/// A state's media, at most [`MAX_MEDIA`].
+pub(super) fn media<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<DecisionMedia>, D::Error> {
+    sequence(deserializer, MAX_MEDIA, "media")
 }
 
 #[cfg(test)]
@@ -425,6 +465,35 @@ mod tests {
         refused(&values, "more than 65536 values");
     }
 
+    #[test]
+    fn media_is_refused_unread_and_quotes_nothing() {
+        // No media keeps its forms, and decodes.
+        let state = DecisionState::default();
+        let json = serde_json::to_string(&state).unwrap();
+        assert_eq!(json, r#"{"body":null,"media":[]}"#);
+        assert_eq!(bincode::serialize(&state).unwrap(), [0; 9]);
+        decodes(&state);
+
+        // Any medium is refused before it is read, even one that would not
+        // parse: serde's own errors for an unknown variant or an unexpected
+        // value would quote it.
+        for medium in [
+            format!(r#"{{"{CANARY}":{{"uri":"{CANARY}"}}}}"#),
+            format!(r#""{CANARY}""#),
+            String::from("[1e999]"),
+        ] {
+            let json = format!(r#"{{"body":null,"media":[{medium}]}}"#);
+            let error = serde_json::from_str::<DecisionState>(&json).unwrap_err();
+            let error = error.to_string();
+            assert!(error.contains("more than 0 media"), "{error}");
+            assert!(!error.contains(CANARY), "{error}");
+        }
+        // One medium declared, then its variant index.
+        let mut one = declaring(bincode::serialize(&state).unwrap(), 1, 1);
+        one.extend_from_slice(&0u32.to_le_bytes());
+        refused_at_once::<DecisionState>(&one, "more than 0 media");
+    }
+
     /// `bytes` with the eight-byte little-endian length at `at` set to `len`.
     fn declaring(mut bytes: Vec<u8>, at: usize, len: u64) -> Vec<u8> {
         bytes[at..at + 8].copy_from_slice(&len.to_le_bytes());
@@ -473,6 +542,9 @@ mod tests {
         // The answers' length (8), then the question id's length (8) and "q".
         let bomb = declaring(one.unwrap(), 17, huge);
         refused_at_once::<Decisions>(&bomb, "more than 255 distribution entries");
+        let none = bincode::serialize(&DecisionState::default()).unwrap();
+        // The body's option tag (1), then the media's length.
+        refused_at_once::<DecisionState>(&declaring(none, 1, huge), "more than 0 media");
 
         // A string or a JSON text declaring more than the input holds ends
         // at the input: bincode checks a slice's length before reading.
