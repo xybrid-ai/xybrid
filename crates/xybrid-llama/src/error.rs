@@ -86,6 +86,12 @@ pub enum LlamaError {
     /// contextual string the safe wrapper could gather.
     #[error("internal llama.cpp error: {0}")]
     Internal(String),
+
+    /// A readout stopped because its context's cancel handle was used
+    /// (`MemorylessContext::cancel_handle`). The context can read again
+    /// once the request is cleared.
+    #[error("the readout was cancelled")]
+    Cancelled,
 }
 
 /// Result alias used throughout the safe wrappers.
