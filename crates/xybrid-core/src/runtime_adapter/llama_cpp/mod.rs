@@ -686,6 +686,19 @@ fn generation_truncated_by_budget(stopped_in_text: bool, end: GenerationEnd) -> 
     !stopped_in_text && end == GenerationEnd::MaxTokens
 }
 
+/// Whether a streaming run ends with the terminal token, the empty chunk that
+/// carries `finish_reason` and any parsed tool calls.
+///
+/// Every run that generated a token other than a final EOG token sends one,
+/// even when the text filter suppressed every delta (a reasoning block cut off
+/// by the budget, a tool block, a held stop suffix): it is the only place the
+/// callback learns how the turn ended. A run that generated nothing, such as an
+/// immediate EOG, sends none, so it never produces a stray chunk.
+fn should_emit_terminal_token(output_tokens: &[i32], end: GenerationEnd) -> bool {
+    !text_tokens_without_terminal_eog(output_tokens, end == GenerationEnd::EndOfGeneration)
+        .is_empty()
+}
+
 /// The native loop stores the terminal EOG token before breaking, and
 /// `detokenize` renders special tokens verbatim — without trimming by token
 /// identity, a model whose EOG literal is missing from the stop-pattern
@@ -1181,7 +1194,7 @@ impl LlmBackend for LlamaCppBackend {
             // nothing to recover — the text was either a suppressed tool block
             // (signalled by the terminal token) or empty after cleanup.
 
-            if token_index > 0 || tool_block_suppressed {
+            if should_emit_terminal_token(&output_tokens, end) {
                 let final_cumulative = if tool_block_suppressed {
                     filter.cumulative_emitted().to_string()
                 } else {
@@ -1358,12 +1371,11 @@ impl LlmBackend for LlamaCppBackend {
 
             // Send final empty token with finish_reason — matches the
             // pre-refactor contract so downstream consumers see a
-            // terminal signal. Guarded on `token_index > 0` to avoid
-            // emitting a stray terminal chunk when nothing was ever
-            // emitted (e.g. immediate stop) — except when a tool block was
-            // suppressed: then the stream showed nothing on purpose and the
-            // terminal token is the caller's only signal.
-            if token_index > 0 || tool_block_suppressed {
+            // terminal signal. It goes out even when the filter suppressed
+            // every delta (a primed thought the budget cut off, a tool
+            // block, a held stop suffix); only a run that generated nothing
+            // skips it. See `should_emit_terminal_token`.
+            if should_emit_terminal_token(&output_tokens, end) {
                 // The filter's cumulative view only differs from the final text
                 // when a tool block was deliberately suppressed; keying on mere
                 // tool CONFIGURATION would send an empty cumulative whenever the
@@ -1800,7 +1812,7 @@ impl LlmBackend for LlamaCppBackend {
                 on_token(recovered_partial).map_err(AdapterError::from_streaming_callback_error)?;
             }
 
-            if token_index > 0 || tool_block_suppressed {
+            if should_emit_terminal_token(&output_tokens, end) {
                 // The filter's cumulative view only differs from the final text
                 // when a tool block was deliberately suppressed; keying on mere
                 // tool CONFIGURATION would send an empty cumulative whenever the
@@ -1948,6 +1960,31 @@ mod tests {
             false,
             GenerationEnd::Interrupted
         ));
+    }
+
+    /// The terminal token carries `finish_reason`, so every run that
+    /// generated a real token sends it, however much of the stream the filter
+    /// held back. Only a run with nothing but a final EOG token stays silent.
+    #[test]
+    fn terminal_token_follows_any_generated_token() {
+        const EOG: i32 = 2;
+        assert!(should_emit_terminal_token(&[7], GenerationEnd::MaxTokens));
+        assert!(should_emit_terminal_token(
+            &[7, 8],
+            GenerationEnd::StopSequence
+        ));
+        assert!(should_emit_terminal_token(
+            &[7, EOG],
+            GenerationEnd::EndOfGeneration
+        ));
+        assert!(should_emit_terminal_token(&[7], GenerationEnd::Interrupted));
+
+        assert!(!should_emit_terminal_token(
+            &[EOG],
+            GenerationEnd::EndOfGeneration
+        ));
+        assert!(!should_emit_terminal_token(&[], GenerationEnd::Interrupted));
+        assert!(!should_emit_terminal_token(&[], GenerationEnd::MaxTokens));
     }
 
     #[test]

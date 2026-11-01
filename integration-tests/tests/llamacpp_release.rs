@@ -198,3 +198,30 @@ fn text_paths_ignore_empty_and_partial_stops() {
         assert_eq!(terminal.cumulative_text, text);
     }
 }
+
+/// With the `<think>` channel primed, output starts inside the thought and the
+/// stream filter suppresses all of it. When the budget ends the turn there, the
+/// terminal token is the only chunk left, and it must still arrive carrying
+/// `length`. Priming comes from the config, so FunctionGemma runs the path a
+/// thinking model does; `reasoning_budget.rs` repeats this on qwen3-0.6b.
+#[test]
+fn a_fully_suppressed_stream_still_sends_its_terminal_token() {
+    let Some(model_dir) = functiongemma_dir() else {
+        return;
+    };
+    let mut chunks: Vec<PartialToken> = Vec::new();
+    let output = functiongemma(&model_dir, true)
+        .generate_streaming(
+            &[ChatMessage::user("Think it over.")],
+            &constrained(r#"root ::= "Let""#, 1, &[]),
+            collect_into(&mut chunks),
+        )
+        .expect("streaming chat generation succeeds");
+
+    assert_eq!(output.finish_reason, "length");
+    assert_eq!(output.text, "");
+    assert_eq!(output.reasoning_content.as_deref(), Some("Let"));
+    assert_eq!(chunks.len(), 1, "only the terminal token: {chunks:?}");
+    assert_eq!(chunks[0].token, "");
+    assert_eq!(chunks[0].finish_reason.as_deref(), Some("length"));
+}

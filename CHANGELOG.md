@@ -58,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unaffected. In chat and streaming generation, an empty stop sequence no longer
   erases the answer or suppresses the whole stream, and a partial stop trimmed
   off an answer the budget cut short no longer counts as `stop`.
+- llama.cpp streaming always ends with the terminal token that carries
+  `finish_reason` once any token was generated. When the text filter suppressed
+  every delta, as for a reasoning model whose budget ran out mid-thought, the
+  callback never received it.
 - Registry resolution sends the runtime Android API, Apple OS or GNU libc
   version and retains backend/OS compatibility refusal reasons. Rust registry
   responses expose the artifact's `min_os` floors; older registry responses
