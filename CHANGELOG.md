@@ -71,6 +71,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `android/build.gradle` `ext` block. Flutter and Unity Android requirements are
   unchanged.
 
+- **Generated metadata for GGUFs:** xybrid now classifies a GGUF from its full
+  header before it writes `model_metadata.json` for it (a Hugging Face repo
+  without one, `--model-file`, `fromModelFile`, `xybrid init`). A decision model
+  such as LiquidAI's d1-2B gets a `ChoiceScorer` with a
+  [`GgufDecision`](docs/sdk/MODEL_METADATA.md#ggufdecision-scorers) scorer
+  instead of chat or vision metadata (this build still refuses every request to
+  it). Refusals come by category: a decision model this build does not run
+  (`lfm3-d1-omni`, for one) or a GGUF with more than 4,096 metadata keys is
+  `UnsupportedModelCapability`, an unreadable header an I/O error, and a header
+  that cannot be classified a load error, never assumed to be a chat model.
+  `xybrid init` prints those refusals as the SDK words them, with exit code 2.
+
 ### Removed
 
 - **Breaking (Rust):** the inert Android speech companion is removed: the
