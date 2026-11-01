@@ -2,16 +2,31 @@
 """Write or check integration-tests/fixtures/decision/hf/provenance.json (stdlib only).
 
     provenance.py --update --runs DIR [--llama-build DIR]   # after regenerating the fixtures
-    provenance.py --check               # every fixture file matches its digest, and the pins match
+    provenance.py --check
 
-`--update` assembles what the observations were made from and under: the pinned snapshot (pins.json and every file
-the reference imported), the environment (requirements.txt digest, library versions), the settings ids, the hardware,
-timings and memory, the verification runs (float32 parity, thread count, repeatability) and a summary of each
-cross-check file with the llama.cpp build behind it (`--llama-build`, its CMake build directory), from the run logs
-run_reference.py wrote with `--run-log` (observations.run.json, packed.run.json, parity.run.json and threads.run.json
-in DIR; the last two are optional) and the comparisons in DIR (threads.compare.json, repeat.compare.json,
-bf16.compare.json, packed.compare.json, optional). Then it records the sha256 of every other file under the fixtures
-folder. `--check` recomputes those digests and the pins' digest, and fails on any difference or unlisted file.
+Every committed file here comes from a recipe: the sources that produced it, the pins and the lock it ran under, and
+the requests it read. The producers record those identities when they run: run_reference.py's and
+synthetic_median.py's `--run-log`, and the outputs of crosscheck_server.py and compare_observations.py --json.
+
+`--update` carries the recorded identities into provenance.json, taking nothing from disk that a run should have
+recorded, and refuses (exit 1, nothing written) when any of them no longer holds. It refuses if:
+
+- the pins, the snapshot files they pin, the lock, the settings or the recipe sources differ from what a run recorded;
+- a committed observation is not the bytes its run wrote, or was made from a different request than its case's;
+- an observation or packed run's float32 parity proof is missing, failed or verified nothing;
+- a cross-check or comparison was computed from other observations or by another version of its script;
+- the cases do not regenerate, validate or name known artifacts and settings (`make_cases.py --check`).
+
+`--check` needs no run log. It recomputes the digests of every committed file, of the pins, the lock and every recipe
+source, regenerates and validates the cases, re-binds each observation to its case's request and each cross-check to
+the observations, and checks that the recorded parity proofs passed.
+
+Run logs read from DIR:
+
+- observations.run.json and packed.run.json: run_reference.py with --check-f32-parity;
+- synthetic.run.json: synthetic_median.py;
+- for the verification block, when present: repeat.run.json, threads.run.json and bf16.run.json, with
+  repeat.compare.json, threads.compare.json, bf16.compare.json and packed.compare.json (compare_observations.py --json).
 """
 
 from __future__ import annotations
@@ -23,12 +38,42 @@ import sys
 from pathlib import Path
 from typing import Any
 
+sys.dont_write_bytecode = True  # importing make_cases.py must leave no __pycache__ in this folder
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import make_cases  # noqa: E402
+
 REPO_ROOT = HERE.parents[2]
 FIXTURES = REPO_ROOT / "integration-tests/fixtures/decision/hf"
 PROVENANCE = FIXTURES / "provenance.json"
 PINS = HERE / "pins.json"
 REQUIREMENTS = HERE / "requirements.txt"
+WEIGHTS = "model.safetensors"
+
+# The sources whose bytes decide each kind of committed file, besides the pins and the lock.
+RECIPES = {
+    "observations": ("run_reference.py", "run.sh"),
+    "synthetic": ("synthetic_median.py", "run_reference.py", "run.sh"),
+    "cases": ("make_cases.py",),
+    "crosscheck": ("crosscheck_server.py",),
+    "comparisons": ("compare_observations.py",),
+    "provenance": ("provenance.py",),  # the writer of provenance.json and the checker: recorded at --update
+}
+# run_reference.py's run logs: the settings each must have run under, and whether its parity proof is required.
+RUNS = {
+    "observations": ("hf-cpu-f32-t1", True),
+    "packed": ("hf-cpu-f32-t1-packed", True),
+    "repeat": ("hf-cpu-f32-t1", False),
+    "threads": ("hf-cpu-f32-t4", False),
+    "bf16": ("hf-cpu-bf16-t1", False),
+}
+COMPARISONS = {
+    "repeat": "a second hf-cpu-f32-t1 run of a subset of the cases",
+    "threads": "a subset of the cases at 4 threads instead of 1",
+    "bf16": "the shared-domain cases with the bfloat16 forward instead",
+    "packed": "the multi-question cases packed at the checkpoint's set size instead of alone",
+}
 
 SETTINGS = {
     "hf-cpu-f32-t1": {
@@ -37,7 +82,7 @@ SETTINGS = {
         "precision": (
             "float32 forward over the checkpoint's bfloat16 weights: each decoder layer, the embeddings, the final "
             "norm and the LM head compute with exact float32 widenings of their own parameters (run_reference.py "
-            "Float32Compute), bit-identical to a float32 load module by module (verification.float32_parity)"
+            "Float32Compute), proven bit-identical to a float32 load during the run (verification.float32_parity)"
         ),
         "set_size": 1,
         "batch": 1,
@@ -60,6 +105,10 @@ SETTINGS = {
 }
 
 
+class ProvenanceError(Exception):
+    """An identity that no longer holds: the fixtures must be regenerated, not re-blessed."""
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -68,53 +117,129 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def fixture_digests() -> dict[str, str]:
-    return {
-        str(path.relative_to(FIXTURES)): sha256_file(path)
-        for path in sorted(FIXTURES.rglob("*"))
-        if path.is_file() and path != PROVENANCE
-    }
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def recipe(names: tuple[str, ...], base: Path = HERE) -> dict[str, str]:
+    return {name: sha256_file(base / name) for name in names}
 
 
 def load(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
-def run_summary(log: dict | None) -> dict | None:
-    if log is None:
-        return None
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise ProvenanceError(message)
+
+
+def current_inputs() -> dict[str, Any]:
+    pins = json.loads(PINS.read_text(encoding="utf-8"))
     return {
-        "settings": log["numerics"]["settings"],
-        "model_load_seconds": log["model_load_seconds"],
-        "peak_rss_gib": log["peak_rss_gib"],
-        "peak_anon_gib_between_calls": log["peak_anon_gib_between_calls"],
-        "seconds_total": round(sum(c["seconds"] for c in log["cases"]), 1),
-        "cases": {c["case"]: {"seconds": c["seconds"], "input_tokens": c["input_tokens"]} for c in log["cases"]},
+        "pins_sha256": sha256_file(PINS),
+        "requirements_sha256": sha256_file(REQUIREMENTS),
+        "snapshot": {name: pin["sha256"] for name, pin in pins["files"].items()},
     }
 
 
-def comparison(rows: list | None, what: str) -> dict | None:
-    if rows is None:
-        return None
-    scored = [r for r in rows if "bits_equal" in r]
-    return {
-        "what": what,
-        "questions": len(rows),
-        "bit_identical": sum(r["bits_equal"] == r["n_selected"] for r in scored),
-        "max_abs_logit": max((r["max_abs_logit"] for r in scored), default=0.0),
-        "max_abs_probability": max((r.get("max_abs_p", 0.0) for r in scored), default=0.0),
-        "answers_changed": sum(not r["same_answer"] for r in rows),
-    }
+def check_inputs(name: str, recorded: dict, current: dict, sources: tuple[str, ...], without=(), base=HERE) -> None:
+    """The pins, the snapshot files, the lock and the recipe sources a run recorded are the current ones."""
+    problems = []
+    if recorded.get("pins_sha256") != current["pins_sha256"]:
+        problems.append("pins.json differs")
+    if recorded.get("requirements_sha256") != current["requirements_sha256"]:
+        problems.append("requirements.txt differs")
+    expected = {n: digest for n, digest in current["snapshot"].items() if n not in without}
+    if {f["file"]: f["sha256"] for f in recorded.get("snapshot_files", [])} != expected:
+        problems.append("the snapshot files it verified are not the pinned ones")
+    now = recipe(sources, base)
+    changed = sorted(n for n in sources if recorded.get("recipe", {}).get(n) != now[n])
+    if changed:
+        problems.append(f"recipe sources differ: {', '.join(changed)}")
+    require(not problems, f"{name}: {'; '.join(problems)}; rerun it")
 
 
-def crosscheck_summary(path: Path) -> dict:
-    """The shared-domain numbers of one cross-check file (hf-* cases without hf-diff-*)."""
+def check_parity(name: str, parity: Any) -> None:
+    """A passed proof: calls verified, all bit-identical with float32 inputs, every hooked module verified."""
+    require(bool(parity), f"{name}: no float32 parity proof; rerun it with --check-f32-parity")
+    passed = (
+        parity.get("calls", 0) > 0
+        and parity.get("bit_identical") == parity["calls"]
+        and parity.get("non_float32_inputs") == 0
+        and 0 < parity.get("modules_verified", 0) == parity.get("modules_hooked")
+    )
+    require(passed, f"{name}: the float32 parity proof failed or verified nothing: {parity}")
+
+
+def case_requests(cases: Path) -> dict[str, str]:
+    """Each case's request digest: what an observation of it must have been made from."""
+    out = {}
+    for path in sorted(cases.glob("*.json")):
+        document = json.loads(path.read_text(encoding="utf-8"))
+        out[document["id"]] = sha256_text(document["request_text"])
+    return out
+
+
+def check_run(role: str, log: dict, current: dict, requests: dict[str, str]) -> None:
+    settings, gate = RUNS[role]
+    check_inputs(role, log["inputs"], current, RECIPES["observations"])
+    require(log["numerics"]["settings"] == settings, f"{role}: ran under {log['numerics']['settings']}, not {settings}")
+    if gate:
+        check_parity(role, log.get("float32_parity"))
+    for case, digest in log["inputs"]["requests"].items():
+        require(case in requests, f"{role}: {case} is no longer a case")
+        require(requests[case] == digest, f"{role}: {case}'s request changed since the run; rerun it")
+
+
+def check_outputs(role: str, log: dict, directory: Path, cases: set[str] | None) -> None:
+    """The committed files of a run are exactly the bytes it wrote (and, for `cases`, one per case)."""
+    outputs = log["outputs"]
+    if cases is not None:
+        require(set(outputs) == cases, f"{role}: observed {sorted(set(outputs) ^ cases)} do not match the cases")
+    files = {path.stem for path in directory.glob("*.json")}
+    require(files == set(outputs), f"{role}: {directory.name}/ holds {sorted(files ^ set(outputs))} beyond the run")
+    for case, digest in outputs.items():
+        actual = sha256_file(directory / f"{case}.json")
+        require(actual == digest, f"{role}: {directory.name}/{case}.json is not what the run wrote")
+
+
+def check_comparison(role: str, comparison: dict, b_files: dict[str, str] | None) -> None:
+    script = sha256_file(HERE / "compare_observations.py")
+    require(comparison.get("recipe", {}).get("compare_observations.py") == script,
+            f"{role}.compare.json: made by another compare_observations.py; recompute it")
+    for name, digest in comparison["a"]["files"].items():
+        path = FIXTURES / "observations" / name
+        require(path.is_file() and sha256_file(path) == digest,
+                f"{role}.compare.json: computed from other observations than the committed {name}")
+    if b_files is not None:
+        require(comparison["b"]["files"] == b_files, f"{role}.compare.json: its other side is not the run's output")
+
+
+def check_crosscheck(path: Path) -> dict[str, Any]:
     document = load(path)
+    script = sha256_file(HERE / "crosscheck_server.py")
+    require(document.get("recipe", {}).get("crosscheck_server.py") == script,
+            f"crosscheck/{path.name}: made by another crosscheck_server.py; rerun it")
+    require(bool(document.get("artifact")) and bool(document.get("settings")), f"crosscheck/{path.name}: no ids")
+    for case, digest in document["observations"].items():
+        observed = FIXTURES / "observations" / f"{case}.json"
+        require(observed.is_file() and sha256_file(observed) == digest,
+                f"crosscheck/{path.name}: compared other observations than the committed {case}.json; rerun it")
+    return document
+
+
+def crosscheck_summary(document: dict) -> dict[str, Any]:
+    """The shared-domain numbers of one cross-check (hf-* cases without hf-diff-*)."""
     cases = [c for c in document["cases"] if not c["case"].startswith("hf-diff-")]
     questions = [q for c in cases for q in c.get("questions", {}).values()]
     return {
         "server": document["server"],
+        "artifact": document["artifact"],
+        "settings": document["settings"],
         "temperature": document["temperature"],
+        "recipe": document["recipe"],
+        "cases": len(document["cases"]),
         "shared_cases": len(cases),
         "shared_questions": len(questions),
         "equal_token_counts": sum(bool(c.get("same_usage")) for c in cases),
@@ -135,11 +260,9 @@ def llama_build(directory: Path | None) -> dict | None:
             cache[key.split(":", 1)[0]] = value
     compiler = None
     for path in sorted(directory.glob("CMakeFiles/*/CMakeCXXCompiler.cmake")):
-        text = path.read_text()
-        ident = next((l.split('"')[1] for l in text.splitlines() if l.startswith("set(CMAKE_CXX_COMPILER_ID ")), "")
-        version = next(
-            (l.split('"')[1] for l in text.splitlines() if l.startswith("set(CMAKE_CXX_COMPILER_VERSION ")), ""
-        )
+        lines = path.read_text().splitlines()
+        ident = next((l.split('"')[1] for l in lines if l.startswith("set(CMAKE_CXX_COMPILER_ID ")), "")
+        version = next((l.split('"')[1] for l in lines if l.startswith("set(CMAKE_CXX_COMPILER_VERSION ")), "")
         compiler = f"{ident} {version}".strip()
     return {
         "source": "vendor/llama-cpp",
@@ -151,28 +274,117 @@ def llama_build(directory: Path | None) -> dict | None:
     }
 
 
+def run_summary(log: dict | None) -> dict | None:
+    if log is None:
+        return None
+    return {
+        "settings": log["numerics"]["settings"],
+        "float32_parity_gate": log["numerics"].get("float32_parity_gate", False),
+        "model_load_seconds": log["model_load_seconds"],
+        "peak_rss_gib": log["peak_rss_gib"],
+        "peak_anon_gib_between_calls": log["peak_anon_gib_between_calls"],
+        "seconds_total": round(sum(c["seconds"] for c in log["cases"]), 1),
+        "cases": {c["case"]: {"seconds": c["seconds"], "input_tokens": c["input_tokens"]} for c in log["cases"]},
+    }
+
+
+def comparison_summary(role: str, comparison: dict | None) -> dict | None:
+    if comparison is None:
+        return None
+    rows = comparison["rows"]
+    scored = [r for r in rows if "bits_equal" in r]
+    return {
+        "what": COMPARISONS[role],
+        "questions": len(rows),
+        "bit_identical": sum(r["bits_equal"] == r["n_selected"] for r in scored),
+        "max_abs_logit": max((r["max_abs_logit"] for r in scored), default=0.0),
+        "max_abs_probability": max((r.get("max_abs_p", 0.0) for r in scored), default=0.0),
+        "answers_changed": sum(not r["same_answer"] for r in rows),
+        "recipe": comparison["recipe"],
+    }
+
+
+def fixture_digests() -> dict[str, str]:
+    return {
+        str(path.relative_to(FIXTURES)): sha256_file(path)
+        for path in sorted(FIXTURES.rglob("*"))
+        if path.is_file() and path != PROVENANCE
+    }
+
+
+def check_cases() -> None:
+    problems = make_cases.check()
+    more = f" (and {len(problems) - 10} more)" if len(problems) > 10 else ""
+    require(not problems, "cases: " + "; ".join(problems[:10]) + more)
+
+
 def update(runs: Path, build: Path | None) -> None:
-    observations = load(runs / "observations.run.json")
-    if observations is None:
-        raise SystemExit(f"{runs}/observations.run.json is missing")
-    parity = load(runs / "parity.run.json")
+    current = current_inputs()
+    requests = case_requests(FIXTURES / "cases")
+    check_cases()
+    logs: dict[str, dict] = {}
+    for role in RUNS:
+        log = load(runs / f"{role}.run.json")
+        if log is None:
+            require(role not in ("observations", "packed"), f"{runs}/{role}.run.json is missing")
+            continue
+        check_run(role, log, current, requests)
+        logs[role] = log
+    check_outputs("observations", logs["observations"], FIXTURES / "observations", set(requests))
+    check_outputs("packed", logs["packed"], FIXTURES / "packed", None)
+
+    synthetic = load(runs / "synthetic.run.json")
+    require(synthetic is not None, f"{runs}/synthetic.run.json is missing")
+    check_inputs("synthetic", synthetic["inputs"], current, RECIPES["synthetic"], without=(WEIGHTS,))
+    median = FIXTURES / "synthetic/median.json"
+    require(synthetic["outputs"] == {"synthetic/median.json": sha256_file(median)},
+            "synthetic: synthetic/median.json is not what the run wrote")
+
+    comparisons: dict[str, dict] = {}
+    for role in COMPARISONS:
+        comparison = load(runs / f"{role}.compare.json")
+        if comparison is None:
+            continue
+        if role == "packed":
+            b_files = {f"{case}.json": digest for case, digest in logs["packed"]["outputs"].items()}
+        else:
+            require(role in logs, f"{role}.compare.json: its run log {role}.run.json is missing")
+            b_files = {f"{case}.json": digest for case, digest in logs[role]["outputs"].items()}
+        check_comparison(role, comparison, b_files)
+        comparisons[role] = comparison
+
+    crosschecks = {path.name: check_crosscheck(path) for path in sorted((FIXTURES / "crosscheck").glob("*.json"))}
+
+    observations = logs["observations"]
+    recorded = {
+        **observations["inputs"]["recipe"],
+        **synthetic["inputs"]["recipe"],
+        **{k: v for c in comparisons.values() for k, v in c["recipe"].items()},
+        **{k: v for c in crosschecks.values() for k, v in c["recipe"].items()},
+        "make_cases.py": sha256_file(HERE / "make_cases.py"),  # also checked by regenerating the cases
+        "provenance.py": sha256_file(HERE / "provenance.py"),  # the writer of this file
+    }
+    unrecorded = sorted({name for names in RECIPES.values() for name in names} - set(recorded))
+    require(not unrecorded, f"no committed output records {unrecorded}: run the comparisons and cross-checks")
     document = {
         "description": (
             "Provenance of the HF reference observations in this folder: LiquidAI's own d1 code and weights "
             "(contract artifact d1-2b-hf) run by tools/conformance/decision_hf/run_reference.py, one question per "
-            "sequence. Written by tools/conformance/decision_hf/provenance.py --update; checked by --check."
+            "sequence. Every identity below is the one its run recorded when it ran, checked equal to the current "
+            "inputs. Written by tools/conformance/decision_hf/provenance.py --update; checked by --check."
         ),
         "reference": {
-            "artifact": json.loads(PINS.read_text())["artifact"],
+            "artifact": observations["reference"]["artifact"],
             "repo": observations["reference"]["repo"],
             "revision": observations["reference"]["revision"],
             "pins": "tools/conformance/decision_hf/pins.json",
-            "pins_sha256": sha256_file(PINS),
+            "pins_sha256": observations["inputs"]["pins_sha256"],
+            "snapshot_files": observations["inputs"]["snapshot_files"],
             "code_imported": observations["code_imported"],
         },
         "environment": {
             "requirements": "tools/conformance/decision_hf/requirements.txt",
-            "requirements_sha256": sha256_file(REQUIREMENTS),
+            "requirements_sha256": observations["inputs"]["requirements_sha256"],
             "versions": observations["environment"]["versions"],
             "cpu_capability": observations["environment"]["cpu_capability"],
             "blas": next(
@@ -180,45 +392,31 @@ def update(runs: Path, build: Path | None) -> None:
                 None,
             ),
         },
+        "recipe": dict(sorted(recorded.items())),
         "settings": SETTINGS,
         "hardware": observations["hardware"],
-        "runs": {
-            "observations": run_summary(observations),
-            "packed": run_summary(load(runs / "packed.run.json")),
-        },
+        "runs": {"observations": run_summary(observations), "packed": run_summary(logs["packed"])},
         "verification": {
-            "float32_parity": None
-            if parity is None
-            else {
+            "float32_parity": {
                 "what": (
-                    "every module call of every forward replayed on a float32 deep copy of the module, the "
-                    "parameters a float32 load holds: bit-identical outputs, float32 inputs throughout"
+                    "during the observation and packed runs, every module call of every forward replayed on a float32 "
+                    "deep copy of the module (the parameters a float32 load holds): bit-identical outputs from "
+                    "float32 inputs, every hooked module verified; any failure would have ended the run unwritten"
                 ),
-                "cases": [c["case"] for c in parity["cases"]],
-                **parity["float32_parity"],
+                "observations": observations["float32_parity"],
+                "packed": logs["packed"]["float32_parity"],
             },
-            "repeatability": comparison(
-                load(runs / "repeat.compare.json"), "a second hf-cpu-f32-t1 run of the parity cases"
-            ),
-            "threads": comparison(load(runs / "threads.compare.json"), "the same cases at 4 threads instead of 1"),
-            "bf16": comparison(
-                load(runs / "bf16.compare.json"), "the shared-domain cases with the bfloat16 forward instead"
-            ),
-            "packed": comparison(
-                load(runs / "packed.compare.json"), "packed at the checkpoint's set size instead of alone"
-            ),
+            **{role: comparison_summary(role, comparisons.get(role)) for role in COMPARISONS},
         },
         "crosscheck": {
             "what": (
                 "the stock llama-server answering the same requests, compared with the observations: a black-box "
-                "check of DIFFERENCES.md and a G1 feasibility measurement, not the upstream oracle"
+                "check of DIFFERENCES.md and a G1 feasibility measurement, not the upstream oracle. The G1 "
+                "counterpart is d1-2b-f16; the BF16 and Q4_K_M files are reports"
             ),
             "build": llama_build(build),
-            "artifacts": "integration-tests/fixtures/decision/artifacts.json (the coordinator's pins: d1-2b-bf16, "
-            "d1-2b-f16, d1-2b-q4km, each checked against its sha256 before use)",
-            "files": {
-                path.name: crosscheck_summary(path) for path in sorted((FIXTURES / "crosscheck").glob("*.json"))
-            },
+            "artifacts": "integration-tests/fixtures/decision/artifacts.json (each GGUF checked against its sha256)",
+            "files": {name: crosscheck_summary(document) for name, document in crosschecks.items()},
         },
         "files": fixture_digests(),
     }
@@ -226,16 +424,25 @@ def update(runs: Path, build: Path | None) -> None:
     print(f"wrote {PROVENANCE.relative_to(REPO_ROOT)}: {len(document['files'])} files")
 
 
-def check() -> int:
+def check() -> list[str]:
     document = load(PROVENANCE)
     if document is None:
-        print(f"{PROVENANCE} is missing", file=sys.stderr)
-        return 1
+        return [f"{PROVENANCE} is missing"]
     problems = []
-    if document["reference"]["pins_sha256"] != sha256_file(PINS):
+    current = current_inputs()
+    if document["reference"]["pins_sha256"] != current["pins_sha256"]:
         problems.append("pins.json changed since the observations were made")
-    if document["environment"]["requirements_sha256"] != sha256_file(REQUIREMENTS):
+    recorded_snapshot = {f["file"]: f["sha256"] for f in document["reference"]["snapshot_files"]}
+    if recorded_snapshot != current["snapshot"]:
+        problems.append("the pinned snapshot files changed since the observations were made")
+    if document["environment"]["requirements_sha256"] != current["requirements_sha256"]:
         problems.append("requirements.txt changed since the observations were made")
+    expected_sources = sorted({name for names in RECIPES.values() for name in names})
+    if sorted(document["recipe"]) != expected_sources:
+        problems.append(f"the recorded recipe names {sorted(document['recipe'])}, not {expected_sources}")
+    for name, digest in document["recipe"].items():
+        if not (HERE / name).is_file() or sha256_file(HERE / name) != digest:
+            problems.append(f"{name} changed since the fixtures were made: regenerate them (README.md)")
     actual = fixture_digests()
     for name in sorted(actual.keys() | document["files"].keys()):
         if name not in document["files"]:
@@ -244,11 +451,24 @@ def check() -> int:
             problems.append(f"{name}: missing")
         elif actual[name] != document["files"][name]:
             problems.append(f"{name}: sha256 differs")
-    for problem in problems:
-        print(problem, file=sys.stderr)
-    if not problems:
-        print(f"provenance ok: {len(actual)} files")
-    return 1 if problems else 0
+    for role in ("observations", "packed"):
+        try:
+            check_parity(role, document["verification"]["float32_parity"].get(role))
+        except ProvenanceError as error:
+            problems.append(str(error))
+    requests = case_requests(FIXTURES / "cases")
+    for directory in ("observations", "packed"):
+        for path in sorted((FIXTURES / directory).glob("*.json")):
+            observed = json.loads(path.read_text(encoding="utf-8"))
+            if requests.get(observed["case"]) != observed["request_text_sha256"]:
+                problems.append(f"{directory}/{path.name}: made from another request than its case's")
+    for path in sorted((FIXTURES / "crosscheck").glob("*.json")):
+        try:
+            check_crosscheck(path)
+        except ProvenanceError as error:
+            problems.append(str(error))
+    problems.extend(f"cases: {problem}" for problem in make_cases.check())
+    return problems
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -262,9 +482,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.update:
         if args.runs is None:
             parser.error("--update needs --runs")
-        update(args.runs, args.llama_build)
+        try:
+            update(args.runs, args.llama_build)
+        except ProvenanceError as error:
+            print(f"provenance: {error}; provenance.json not written", file=sys.stderr)
+            return 1
         return 0
-    return check()
+    problems = check()
+    for problem in problems:
+        print(problem, file=sys.stderr)
+    if not problems:
+        print(f"provenance ok: {len(fixture_digests())} files, {len(load(PROVENANCE)['recipe'])} recipe sources")
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":

@@ -18,6 +18,12 @@ crates/llama-cpp-sys/wrapper.h -text
 integration-tests/fixtures/decision/** -text
 tools/conformance/decision/** -text
 
+# The HF reference's tooling is hashed byte for byte too: pins.json and
+# requirements.txt, and every recipe source (run_reference.py, make_cases.py,
+# provenance.py, ...) whose sha256 its runs and provenance.json record. A
+# converted checkout would fail provenance.py --check. No CRLF conversion.
+tools/conformance/decision_hf/** -text
+
 # G1's conformance tools are identified by their SHA-256 (the held-out recipe's
 # digest, the comparator stamped into reports), so check them out byte for byte.
 tools/conformance/decision_g1/** -text

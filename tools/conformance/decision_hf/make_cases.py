@@ -2,27 +2,38 @@
 """Write the HF reference's request cases (integration-tests/fixtures/decision/hf/cases/).
 
 Each file is a case in the decision case schema, version 1 (integration-tests/fixtures/decision/schema.json and its
-README.md): the exact `request_text`, a title, coverage tags, the GGUF counterpart of the HF reference
-(`d1-2b-bf16`, the G1 artifact) and the settings its upstream evaluation would use. `upstream` is empty: the upstream
-oracle (tools/conformance/decision) fills it. `xybrid` holds the expectations these requests imply under that
-README's rules; they are proposals for the shared case set, to review there. Two groups:
+README.md): the exact `request_text`, a title, coverage tags, the GGUF counterpart of the HF reference for G1
+(`d1-2b-f16`, the G1 artifact contract C10 chose; the BF16 GGUF's cross-checks are reports) and the settings its
+upstream evaluation would use. `upstream` is empty: the upstream oracle (tools/conformance/decision) fills it.
+`xybrid` holds the expectations these requests imply under that README's rules; they are proposals for the shared
+case set, to review there. Two groups:
 
 - `hf-*`: requests inside the domain where the reference and llama.cpp's server should build the same prompt, so
   their numbers are G1 material (choice, yes/no and score; string, JSON, null and empty states; 27 and 36 options);
 - `hf-diff-*`: one small request per row of DIFFERENCES.md, where the two references are known to disagree.
 
 Stdlib only; deterministic. Run it after editing a case, then rerun the reference on the changed cases.
+`--check` writes nothing: it fails unless every case file is byte for byte what this script generates, validates
+against ../schema.json, and names an artifact and a settings id (or null) that ../artifacts.json defines.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-OUT = REPO_ROOT / "integration-tests/fixtures/decision/hf/cases"
+DECISION = REPO_ROOT / "integration-tests/fixtures/decision"
+OUT = DECISION / "hf/cases"
+SCHEMA = DECISION / "schema.json"
+ARTIFACTS = DECISION / "artifacts.json"
 PROFILE = "lfm3-d1/text/v1"
+# The upstream evaluation of these cases, for G1 (contract C10): the F16 GGUF, under the coordinator's CPU settings.
+ARTIFACT = "d1-2b-f16"
+SETTINGS = "cpu-t4-fa-off"
 
 TICKET = "I was charged twice and my parcel never arrived. Please refund one charge."
 TEAM = {
@@ -746,27 +757,154 @@ def case_document(case_id: str, description: str, text: str) -> dict:
         "and the xybrid expectations are proposals."
     )
     document["notes"] = " ".join(notes)
-    document["artifact"] = "d1-2b-bf16"
-    document["settings"] = "cpu-t4-fa-off" if meta.get("evaluates", True) else None
+    document["artifact"] = ARTIFACT
+    document["settings"] = SETTINGS if meta.get("evaluates", True) else None
     document["request_text"] = text
     document["upstream"] = {}
     document["xybrid"] = expectations(meta.get("xybrid", MATCH))
     return document
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", type=Path, default=OUT)
-    args = parser.parse_args(argv)
-    args.out.mkdir(parents=True, exist_ok=True)
+def case_texts() -> dict[str, str]:
+    """Every case file's bytes, as text, by id."""
     ids = [case_id for case_id, _, _ in CASES]
     if len(set(ids)) != len(ids) or set(ids) != set(META):
         raise SystemExit("case ids are not unique, or META does not describe exactly the cases")
-    for case_id, description, text in CASES:
-        (args.out / f"{case_id}.json").write_text(
-            json.dumps(case_document(case_id, description, text), indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+    return {
+        case_id: json.dumps(case_document(case_id, description, text), indent=2, ensure_ascii=False) + "\n"
+        for case_id, description, text in CASES
+    }
+
+
+# --------------------------------------------------------------------------- #
+# the decision case schema, validated with the standard library
+# --------------------------------------------------------------------------- #
+
+# The keywords schema.json uses. Any other keyword is refused rather than ignored, so a constraint a later schema
+# adds can never pass unchecked.
+ANNOTATIONS = {"$schema", "$id", "$defs", "title", "description"}
+KEYWORDS = {
+    "$ref", "type", "const", "enum", "properties", "required", "additionalProperties", "items", "minItems",
+    "maxItems", "uniqueItems", "minLength", "pattern", "minimum", "oneOf",
+}  # fmt: skip
+TYPES = {
+    "object": lambda v: isinstance(v, dict),
+    "array": lambda v: isinstance(v, list),
+    "string": lambda v: isinstance(v, str),
+    "integer": lambda v: (isinstance(v, int) and not isinstance(v, bool)) or (isinstance(v, float) and v.is_integer()),
+    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "boolean": lambda v: isinstance(v, bool),
+    "null": lambda v: v is None,
+}
+
+
+def schema_errors(value: Any, schema: dict, root: dict, where: str = "$") -> list[str]:
+    """Where `value` breaks `schema` (JSON Schema 2020-12, the keywords above); empty when it validates."""
+    unknown = set(schema) - KEYWORDS - ANNOTATIONS
+    if unknown:
+        raise ValueError(f"{where}: unsupported schema keywords {sorted(unknown)}")
+    if "$ref" in schema:
+        node = root
+        for part in schema["$ref"].removeprefix("#/").split("/"):
+            node = node[part]
+        errors = schema_errors(value, node, root, where)
+        if errors:
+            return errors
+    if "type" in schema:
+        types = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
+        if not any(TYPES[t](value) for t in types):
+            return [f"{where}: not {' or '.join(types)}"]
+    errors: list[str] = []
+    if "const" in schema and not same(value, schema["const"]):
+        errors.append(f"{where}: not {schema['const']!r}")
+    if "enum" in schema and not any(same(value, option) for option in schema["enum"]):
+        errors.append(f"{where}: {value!r} is not one of {schema['enum']}")
+    if isinstance(value, dict):
+        properties = schema.get("properties", {})
+        errors += [f"{where}: no {key!r}" for key in schema.get("required", []) if key not in value]
+        for key, item in value.items():
+            if key in properties:
+                errors += schema_errors(item, properties[key], root, f"{where}.{key}")
+            elif schema.get("additionalProperties") is False:
+                errors.append(f"{where}: {key!r} is not allowed")
+            elif isinstance(schema.get("additionalProperties"), dict):
+                errors += schema_errors(item, schema["additionalProperties"], root, f"{where}.{key}")
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0):
+            errors.append(f"{where}: fewer than {schema['minItems']} items")
+        if "maxItems" in schema and len(value) > schema["maxItems"]:
+            errors.append(f"{where}: more than {schema['maxItems']} items")
+        if schema.get("uniqueItems") and len({json.dumps(v, sort_keys=True) for v in value}) != len(value):
+            errors.append(f"{where}: items repeat")
+        if "items" in schema:
+            for i, item in enumerate(value):
+                errors += schema_errors(item, schema["items"], root, f"{where}[{i}]")
+    if isinstance(value, str):
+        if len(value) < schema.get("minLength", 0):
+            errors.append(f"{where}: shorter than {schema['minLength']}")
+        if "pattern" in schema and not re.search(schema["pattern"], value):
+            errors.append(f"{where}: does not match {schema['pattern']}")
+    if TYPES["number"](value) and "minimum" in schema and value < schema["minimum"]:
+        errors.append(f"{where}: below {schema['minimum']}")
+    if "oneOf" in schema:
+        matches = sum(not schema_errors(value, option, root, where) for option in schema["oneOf"])
+        if matches != 1:
+            errors.append(f"{where}: matches {matches} of the oneOf alternatives, not exactly one")
+    return errors
+
+
+def same(a: Any, b: Any) -> bool:
+    """JSON equality: 1 equals 1.0, but true does not equal 1."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b
+    return a == b
+
+
+def check(out: Path = OUT, schema_path: Path = SCHEMA, artifacts_path: Path = ARTIFACTS) -> list[str]:
+    """Every problem with the committed cases: drift from this generator, schema errors, unknown ids."""
+    problems = []
+    expected = case_texts()
+    present = {path.stem: path for path in sorted(out.glob("*.json"))}
+    problems += [f"{case_id}.json is missing" for case_id in sorted(expected.keys() - present.keys())]
+    problems += [f"{case_id}.json is not generated here" for case_id in sorted(present.keys() - expected.keys())]
+    for case_id in sorted(expected.keys() & present.keys()):
+        if present[case_id].read_text(encoding="utf-8") != expected[case_id]:
+            problems.append(f"{case_id}.json differs from what make_cases.py generates")
+    for path in (schema_path, artifacts_path):
+        if not path.is_file():
+            problems.append(f"{path} is missing")
+    if problems:
+        return problems
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    artifacts = json.loads(artifacts_path.read_text(encoding="utf-8"))
+    for case_id, path in present.items():
+        case = json.loads(path.read_text(encoding="utf-8"))
+        problems += [f"{case_id}: {error}" for error in schema_errors(case, schema, schema)]
+        if case.get("artifact") not in artifacts["artifacts"]:
+            problems.append(f"{case_id}: artifact {case.get('artifact')!r} is not in {artifacts_path.name}")
+        if case.get("settings") is not None and case["settings"] not in artifacts["settings"]:
+            problems.append(f"{case_id}: settings {case['settings']!r} is not in {artifacts_path.name}")
+    return problems
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--out", type=Path, default=OUT)
+    parser.add_argument("--check", action="store_true", help="write nothing; fail unless the cases are current")
+    parser.add_argument("--schema", type=Path, default=SCHEMA, help="with --check: the decision case schema")
+    parser.add_argument("--artifacts", type=Path, default=ARTIFACTS, help="with --check: the artifacts and settings")
+    args = parser.parse_args(argv)
+    if args.check:
+        problems = check(args.out, args.schema, args.artifacts)
+        for problem in problems:
+            print(problem)
+        if not problems:
+            print(f"{len(CASES)} cases: generated, valid against {args.schema.name}, ids in {args.artifacts.name}")
+        return 1 if problems else 0
+    args.out.mkdir(parents=True, exist_ok=True)
+    ids = list(case_texts())
+    for case_id, text in case_texts().items():
+        (args.out / f"{case_id}.json").write_text(text, encoding="utf-8")
     stale = sorted(p.name for p in args.out.glob("*.json") if p.stem not in ids)
     for name in stale:
         (args.out / name).unlink()

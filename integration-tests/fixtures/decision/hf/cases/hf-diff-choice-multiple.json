@@ -8,7 +8,7 @@
     "divergence"
   ],
   "notes": "A multiple choice: the reference answers each option yes or no; llama.cpp ignores the field and answers a single choice. Upstream ignores the field and answers a single choice; xybrid refuses it. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": \"I was charged twice and my parcel never arrived. Please refund one charge.\", \"questions\": {\"topics\": {\"type\": \"choice\", \"multiple\": true, \"instructions\": \"Which topics does the message raise?\", \"criteria\": {\"billing\": \"Payments and charges\", \"delivery\": \"Shipping and parcels\", \"login\": \"Signing in to the account\"}}}}",
   "upstream": {},

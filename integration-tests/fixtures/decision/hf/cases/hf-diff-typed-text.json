@@ -7,7 +7,7 @@
     "refusal-parse"
   ],
   "notes": "A text read (typed answer): the reference answers it; llama.cpp refuses the type. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": null,
   "request_text": "{\"state\": \"ACME SA\\nInvoice 2026-117\\nTotal due: 1 234,50 EUR\\nPay before 03/04/2026 (day/month/year)\", \"questions\": {\"payee\": {\"type\": \"text\", \"instructions\": \"Who issued the invoice?\"}}}",
   "upstream": {},

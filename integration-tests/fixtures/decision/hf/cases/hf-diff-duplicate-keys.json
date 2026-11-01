@@ -8,7 +8,7 @@
     "divergence"
   ],
   "notes": "A repeated key in a JSON state: both parsers keep the first position and the last value (an agreement the xybrid profile refuses). Upstream keeps the last value at the first position, as Python's json module does; xybrid refuses. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": {\"status\": \"open\", \"owner\": \"ana\", \"status\": \"closed\"}, \"questions\": {\"open\": {\"type\": \"noul\", \"instructions\": \"Is the ticket still open?\"}}}",
   "upstream": {},

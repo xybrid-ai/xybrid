@@ -8,7 +8,7 @@
     "refusal-parse"
   ],
   "notes": "Instructions shaped as an OpenAI input_audio part: llama.cpp (lfm3-d1) refuses spoken instructions; the reference only treats image/audio/video dicts as media, so it writes this one as text (str()). Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": null,
   "request_text": "{\"state\": \"I was charged twice and my parcel never arrived. Please refund one charge.\", \"questions\": {\"refund\": {\"type\": \"noul\", \"instructions\": {\"type\": \"input_audio\", \"input_audio\": {\"data\": \"UklGRg==\", \"format\": \"wav\"}}}}}",
   "upstream": {},

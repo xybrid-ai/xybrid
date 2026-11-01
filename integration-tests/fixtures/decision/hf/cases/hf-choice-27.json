@@ -7,7 +7,7 @@
     "choice-27"
   ],
   "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": \"Looking for a waterproof case for my phone that clips onto a bike handlebar.\", \"questions\": {\"department\": {\"type\": \"choice\", \"instructions\": \"Which department sells this?\", \"criteria\": {\"appliances\": \"Appliances department\", \"automotive\": \"Automotive department\", \"baby\": \"Baby department\", \"beauty\": \"Beauty department\", \"books\": \"Books department\", \"cameras\": \"Cameras department\", \"clothing\": \"Clothing department\", \"computers\": \"Computers department\", \"crafts\": \"Crafts department\", \"electronics\": \"Electronics department\", \"furniture\": \"Furniture department\", \"garden\": \"Garden department\", \"grocery\": \"Grocery department\", \"hardware\": \"Hardware department\", \"health\": \"Health department\", \"jewelry\": \"Jewelry department\", \"kitchen\": \"Kitchen department\", \"lighting\": \"Lighting department\", \"music\": \"Music department\", \"office\": \"Office department\", \"pets\": \"Pets department\", \"phones\": \"Phones department\", \"shoes\": \"Shoes department\", \"sports\": \"Sports department\", \"toys\": \"Toys department\", \"travel\": \"Travel department\", \"video_games\": \"Video games department\"}}}}",
   "upstream": {},

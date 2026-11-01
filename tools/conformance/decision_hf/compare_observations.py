@@ -7,16 +7,28 @@ For every case observed in both directories: whether the prompts and token ids a
 logits and log-probabilities are bit-identical, the largest absolute difference of logits, log-probabilities and
 probabilities, and whether the answers agree (choice, median level, and yes/no within 0.5). Packed observations
 (`--set-size default`) compare per question against lone ones. Exit status 0 always; the report is the result.
+
+`--json` writes the rows with what they were computed from: this script's sha256 and the sha256 of every observation
+file on each side, which provenance.py checks against the committed files and the runs' logs.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import struct
 import sys
 from pathlib import Path
 from typing import Any
+
+
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def digests(directory: Path) -> dict[str, str]:
+    return {path.name: sha256_file(path) for path in sorted(directory.glob("*.json"))}
 
 
 def f32(bits: str) -> float:
@@ -128,7 +140,13 @@ def main(argv: list[str] | None = None) -> int:
             f"{sum(not r['same_answer'] for r in rows)}"
         )
     if args.json:
-        args.json.write_text(json.dumps(rows, indent=2) + "\n")
+        document = {
+            "recipe": {"compare_observations.py": sha256_file(Path(__file__).resolve())},
+            "a": {"path": str(args.a), "files": digests(args.a)},
+            "b": {"path": str(args.b), "files": digests(args.b)},
+            "rows": rows,
+        }
+        args.json.write_text(json.dumps(document, indent=2) + "\n")
     return 0
 
 

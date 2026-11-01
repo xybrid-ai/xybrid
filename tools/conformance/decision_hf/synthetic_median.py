@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic scores where the two references' score medians disagree (no model, no weights).
+"""Synthetic scores where the two references' score medians disagree (no model weights).
 
 The reference's median (`api.py` `score_level`) renormalizes as it accumulates, `mass += p / sum(p)`; llama.cpp's
 (`server-decision.cpp` `format_answer`, lines 1731-1740) accumulates `p` as it is. The reference also divides each
@@ -18,7 +18,12 @@ scores whose first two levels hold half the mass, the script walks the third sco
 The reference side runs the snapshot's own code (`prompt.readouts`, the runner's path, and `api.score_level`). The
 llama.cpp side is computed here from the lines cited above, with T = strtof("1.337398"): read from the code, not
 observed; the upstream oracle's answer-math cases confirm it. Writes one JSON document (f32 as bit patterns, f64 with
-17 significant digits). Run it through run.sh: `run.sh synthetic_median.py --out FILE`.
+17 significant digits). Run it through run.sh: `run.sh synthetic_median.py [--out FILE] [--run-log FILE]`.
+
+It needs the snapshot's code, tokenizer and calibration but not its weights, and verifies exactly that: every pinned
+file but model.safetensors (33 files, about 18 MB; `download.sh --no-weights` fetches them). `--run-log` records
+what the document was made from, as it stood when the run started (the pins, the verified files, the lock, the recipe
+sources `RECIPE`) and the document's sha256, for provenance.py.
 """
 
 from __future__ import annotations
@@ -39,12 +44,20 @@ from run_reference import (  # noqa: E402
     DEFAULT_CACHE,
     FIXTURES,
     PINS,
+    REQUIREMENTS,
+    WEIGHTS,
     dumps,
     f32_hex,
     f64,
     loaded_code,
+    recipe,
+    sha256_bytes,
+    sha256_file,
     verify_snapshot,
 )
+
+# The sources whose bytes decide the document's bytes besides the pins and the lock.
+RECIPE = ("synthetic_median.py", "run_reference.py", "run.sh")
 
 # llama.cpp's effective lfm3-d1 temperature: the GGUF's f32, printed by std::to_string (%f), read back by strtof.
 GGUF_TEMPERATURE_TEXT = "1.337398"
@@ -92,13 +105,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=FIXTURES / "synthetic/median.json")
     parser.add_argument("--seeds", type=int, default=400, help="second-level scores to start from")
     parser.add_argument("--span", type=int, default=64, help="float32 steps walked each side of the boundary")
+    parser.add_argument("--run-log", type=Path, help="write what the document was made from here (JSON)")
     args = parser.parse_args(argv)
 
+    inputs = {
+        "pins_sha256": sha256_file(PINS),
+        "requirements_sha256": sha256_file(REQUIREMENTS),
+        "recipe": recipe(RECIPE),
+    }
     pins = json.loads(PINS.read_text(encoding="utf-8"))
     snapshot = args.cache / "snapshots" / pins["revision"] / "d1-2B"
     os.environ.setdefault("HF_MODULES_CACHE", str(args.cache / "modules"))
     os.environ["HF_HUB_OFFLINE"] = "1"
-    verify_snapshot(snapshot, pins)
+    inputs["snapshot_files"] = verify_snapshot(snapshot, pins, without=(WEIGHTS,))
 
     import torch
     from transformers import AutoTokenizer
@@ -190,8 +209,20 @@ def main(argv: list[str] | None = None) -> int:
         "end_to_end": {"float32_triples_tried": tried, "cases": end_to_end},
         "renormalization": {"float64_triples_tried": tried64, "cases": renormalization, "rule": rule},
     }
+    if recipe(RECIPE) != inputs["recipe"] or sha256_file(PINS) != inputs["pins_sha256"]:
+        raise SystemExit("the recipe or the pins changed during the run; nothing written")
+    text = dumps(document)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(dumps(document), encoding="utf-8")
+    args.out.write_text(text, encoding="utf-8")
+    if args.run_log:
+        log = {
+            "reference": {"artifact": pins["artifact"], "repo": pins["repo"], "revision": pins["revision"]},
+            "inputs": inputs,
+            "code_imported": code,
+            "outputs": {"synthetic/median.json": sha256_bytes(text.encode("utf-8"))},
+        }
+        args.run_log.parent.mkdir(parents=True, exist_ok=True)
+        args.run_log.write_text(json.dumps(log, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(
         f"end to end: {len(end_to_end)} of {tried} float32 triples; renormalization: {len(renormalization)} of "
         f"{tried64} float64 triples; rule: {[(r['reference_median'], r['plain_cumulative_median']) for r in rule]}"
