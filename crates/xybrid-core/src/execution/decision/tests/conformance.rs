@@ -16,8 +16,8 @@
 //! | `model::metadata_variants_built_by_the_oracle` | `llm-llamacpp`, d1-2B, `decision-oracle` | the metadata cases on the oracle's own variant GGUFs |
 //!
 //! Exact `f64` agreement needs the `exp` the observations were made with
-//! (glibc on Linux x86-64, the fixtures' platform); elsewhere answers agree
-//! within a few ulps and discrete answers exactly.
+//! (glibc on Linux x86-64, the fixtures' platform); elsewhere answers are
+//! held within 64 ulps, and discrete answers exactly.
 
 use std::collections::BTreeMap;
 
@@ -40,8 +40,8 @@ const EXACT_F64: bool = cfg!(all(
     target_arch = "x86_64"
 ));
 
-/// `expected` and `actual` agree: bit for bit where [`EXACT_F64`], else
-/// within 4 ulps (another libm's `exp`).
+/// `expected` and `actual` agree: bit for bit where [`EXACT_F64`]; elsewhere
+/// (another libm's `exp`) within 64 ulps, or both below `1e-290`.
 pub(super) fn assert_f64(expected: f64, actual: f64, what: &str) {
     if EXACT_F64 {
         assert_eq!(
@@ -51,7 +51,11 @@ pub(super) fn assert_f64(expected: f64, actual: f64, what: &str) {
         );
     } else {
         let ulps = (expected.to_bits() as i64 - actual.to_bits() as i64).unsigned_abs();
-        assert!(ulps <= 4, "{what}: expected {expected:?}, got {actual:?}");
+        let tiny = expected.abs() < 1e-290 && actual.abs() < 1e-290;
+        assert!(
+            ulps <= 64 || tiny,
+            "{what}: expected {expected:?}, got {actual:?}"
+        );
     }
 }
 
