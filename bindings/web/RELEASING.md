@@ -39,7 +39,9 @@ described in [README.md](./README.md). Consumers need no native build tools.
 
 The npm job is off until repository variable `NPM_WEB_PUBLISH_ENABLED` is `true`.
 GitHub release packaging runs regardless of that variable. The web npm job has
-no dependency on React Native, Maven Central or Apple checksums.
+no dependency on React Native or Maven Central. Like every package publisher, it
+waits for `verify-spm-checksum`, so a release whose XCFramework fails its
+checksum check stages nothing on npm.
 
 ## One-time npm setup
 
