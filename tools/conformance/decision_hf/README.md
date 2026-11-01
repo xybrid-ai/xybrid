@@ -154,18 +154,34 @@ output during real forwards, then replays every call on a float32 deep copy of
 the module, the parameters a float32 load holds. The run stops (exit 1, nothing
 written) if:
 
-- a floating input is not float32;
+- a floating input is not float32, or an input or output holds a value the
+  checks cannot read;
 - the replay's output differs from the recorded one in structure (types,
   lengths, keys), dtype, shape or a single byte;
+- checking a call fails at all (the replay, an input check, a byte view, a
+  comparison or its message): that proves nothing, so it is a failure too;
 - the run verified no call, or left a hooked module unverified.
+
+The first failure stands: every hook is guarded and records it, so neither a
+later call nor the coverage count passes after it, even if the reference
+caught the exception on its way out. Only the reference's own code refuses a
+request, and only before its model runs (its question checks, prompt building
+and tokenizer). Whatever is raised once a forward has begun, in this runner's
+hooks, or by this machine's limits (memory, recursion) ends the run instead of
+becoming a recorded refusal.
 
 The modules chain, so a passing proof makes the whole forward a float32
 load's. The committed observation and packed runs ran under it; their
 coverage is in `hf/provenance.json` under `verification.float32_parity`, and
 `provenance.py` refuses an observation run without a passing proof.
 `run.sh tests` holds the gate's regression tests (a changed output, one
-flipped bit, an extra output, a bfloat16 input, an empty or partial proof, and
-a failed run writing nothing). They use torch, not the weights.
+flipped bit, an extra output, a bfloat16 input, an empty or partial proof,
+failures inside the checks, and a failed run writing nothing). Its production
+path tests run `main` and the real hooks around a tiny model with the same 27
+hooked modules: two cases, the first verifying every module and the second
+failing inside the comparison (or any hook, or the model once it ran), write
+nothing and exit 1, while refusals before the model runs are still recorded.
+They use torch, not the weights.
 
 Determinism:
 
@@ -175,15 +191,18 @@ Determinism:
   7.3e-7, with no answer changes. The settings id pins one thread, and this is
   the reference's own floor.
 - **bf16 forward.** It moves logits by up to 0.11 and probabilities by up to
-  0.010 on the shared-domain cases, with no answer changes.
+  0.010 on the pilot cases (below), with no answer changes.
 
 Settings ids name these runs (the coordinator's `cpu-t4-fa-off` and
-`cpu-t4-fa-on` name llama.cpp contexts):
+`cpu-t4-fa-on` name llama.cpp contexts). An id stands for every value a run
+log records under `numerics`, and `provenance.py` holds each run to all of
+them, not to the id alone (`SETTINGS` and `VERIFICATION_SETTINGS` there):
 
 | id | Meaning |
 |---|---|
 | `hf-cpu-f32-t1` | CPU, 1 thread, float32 forward as above, `set_size = 1`, batch 1, no padding, deterministic algorithms, eval and inference mode |
 | `hf-cpu-f32-t1-packed` | the same at the checkpoint's own set size (16): a request's questions packed after one state |
+| `hf-cpu-f32-t4`, `hf-cpu-bf16-t1` | verification runs only: 4 threads, or the bfloat16 forward |
 
 ## Regenerate the committed fixtures
 
@@ -202,7 +221,7 @@ $H/run.sh synthetic_median.py --run-log $RUNS/synthetic.run.json              # 
 # verification runs, under $RUNS, then compared with the committed observations:
 $H/run.sh --out $RUNS/repeat --run-log $RUNS/repeat.run.json <a few cases>
 $H/run.sh --threads 4 --out $RUNS/threads --run-log $RUNS/threads.run.json <a few cases>
-$H/run.sh --precision bf16 --out $RUNS/bf16 --run-log $RUNS/bf16.run.json <the hf-* cases>
+$H/run.sh --precision bf16 --out $RUNS/bf16 --run-log $RUNS/bf16.run.json <the pilot cases>
 for v in repeat threads bf16; do
     python3 -B $H/compare_observations.py $FIX/observations $RUNS/$v --json $RUNS/$v.compare.json
 done
@@ -216,7 +235,7 @@ $H/.cache/llama-build/bin/llama-server -m $H/.cache/gguf/d1-2B-F16.gguf \
 python3 -B $H/crosscheck_server.py --url http://127.0.0.1:8089 --hf $FIX/observations \
     --temperature 1.3373980522155762 --artifact d1-2b-f16 --settings cpu-t4-fa-off \
     --label '<how the server was built and started>' --out $FIX/crosscheck/d1-2b-f16.cpu-t4-fa-off.json $FIX/cases
-# stop it; likewise d1-2b-bf16 (cpu-t4-fa-off on every case, cpu-t4-fa-on) and d1-2b-q4km on the hf-* cases
+# stop it; likewise d1-2b-bf16 (cpu-t4-fa-off on every case, cpu-t4-fa-on) and d1-2b-q4km on the pilot cases
 python3 -B $H/provenance.py --update --runs $RUNS --llama-build $H/.cache/llama-build
 python3 -B $H/provenance.py --check
 $H/run.sh tests
@@ -234,17 +253,26 @@ Every committed file records, or is bound to, what made it:
 
 - **Run logs.** Each producer records its inputs when it starts. A
   `run_reference.py` run log has the pins, the snapshot files it verified, the
-  lock, the settings, its recipe (`run_reference.py`, `run.sh`), the digest of
-  each request it read, and the digest of each observation it wrote.
-  `synthetic_median.py --run-log` records the same over its weight-free subset.
+  lock, its recipe (`run_reference.py`, `run.sh`), the digest of each request
+  it read, the digest of each observation it wrote, its complete numerics (the
+  settings id, precision, threads, set size, deterministic algorithms, mode and
+  the parity gate) and the package versions, CPU capability and hardware it
+  ran on. `synthetic_median.py --run-log` records the same inputs and versions
+  over its weight-free subset.
 - **Outputs.** `crosscheck_server.py` and `compare_observations.py --json` write
   their own sha256 and the digests of the observations they compared into
   their output.
 - **`provenance.py --update`** carries those identities into `provenance.json`
   and never substitutes what is on disk for what a run recorded. It refuses
   (exit 1, nothing written) if:
-  - any recorded pin, snapshot file, lock, setting or recipe source differs
-    from the current one;
+  - any recorded pin, snapshot file, lock or recipe source differs from the
+    current one;
+  - a run's numerics are not its role's complete settings: a log labelled
+    `hf-cpu-f32-t1` that ran in bfloat16, at 4 threads, packed or without the
+    gate is refused, as is an observation or packed run without the gate;
+  - a run imported other package versions than the lock pins, or another
+    Python than `run.sh`'s, or ran with other versions, CPU capability or
+    hardware than the observation run;
   - a committed observation is not the bytes its run wrote, or came from
     another request than its case's;
   - an observation or packed run has no passing parity proof;
@@ -256,10 +284,12 @@ Every committed file records, or is bound to, what made it:
 - **`provenance.py --check`** needs no run logs. It recomputes every file
   digest and the pins, lock and recipe digests, including `make_cases.py` and
   `provenance.py` itself (recorded at `--update`, as the writer). It also
-  re-binds observations to requests and cross-checks to observations, checks
-  the recorded parity proofs, and reruns `make_cases.py --check`. A change to
-  any recipe source, such as the float32 hooks, fails it until the fixtures are
-  regenerated.
+  re-binds observations to their cases' requests and settings and cross-checks
+  to observations, checks the recorded parity proofs, holds the published
+  settings to `SETTINGS`, every published run's numerics to its role's and the
+  published versions to the lock, and reruns `make_cases.py --check`. A change
+  to any recipe source, such as the float32 hooks, fails it until the fixtures
+  are regenerated.
 - **Tests.** `tests/test_provenance.py` holds these refusals (standard library:
   `python3 -B -m unittest discover -s tools/conformance/decision_hf/tests -p test_provenance.py`).
 
@@ -269,29 +299,36 @@ G1 is feasible here. Two conclusions shaped the plan: the first is now contract
 C10, the second is the method P11 applies.
 
 - **The reference runs.** The `set_size = 1` float32 forward fits the 8 GiB
-  machine and is bit-reproducible at one thread. A question takes a median of
-  6.1 s (5.2 to 9.4 s for 29 to 234 prompt tokens), 28.5 s at 1,064 tokens and
-  86 s at 3,605, near the 4,096-token budget of `cpu-t4-fa-off`. The parity
-  proof the committed runs carry triples that: a median of 18.4 s, and 216 s
-  for the 3,605-token case, at a peak of 7.3 GB resident. Four threads are about
+  machine and is bit-reproducible at one thread. Without the parity proof (the
+  run first committed, at `aea334e`), a question takes a median of 6.1 s (5.2
+  to 9.4 s for 29 to 234 prompt tokens), 28.5 s at 1,064 tokens and 86 s at
+  3,605, near the 4,096-token budget of `cpu-t4-fa-off`. The proof the
+  committed runs carry triples that: a median of 18.6 s a case, and 224 s for
+  the 3,605-token case, at a peak of 7.1 GiB resident. Four threads are about
   1.9× faster but not bit-identical to one, so fixtures keep one thread. A full
   float32 load does not fit; the parity proof stands in for it.
-- **The shared domain agrees.** On the 24 shared-domain cases (26 questions),
-  the stock `llama-server` (v0.8.0, `cpu-t4-fa-off`) and the reference
+- **The pilot cases agree.** The cross-checks were first summarized on 24
+  pilot cases (26 questions): `hf-*` without `hf-diff-*`, a selection by name
+  that is historical, not the G1 allowlist (P11's, contract C16; below). On
+  them the stock `llama-server` (v0.8.0, `cpu-t4-fa-off`) and the reference
   tokenize every prompt to the same length and agree on every answer,
   including the 3,605-token case. The largest gap (difference of max-pooled
   logit differences) is 0.0033 for `d1-2b-f16` and 0.027 for `d1-2b-bf16`. The
   largest probability difference is 0.00049 and 0.0042. Flash attention on
   leaves BF16 in the same range (0.031). `d1-2b-q4km` drifts by up to 0.87 in
   gap and 0.097 in probability, still with no answer change: G3's report, not
-  G1's. On this CPU the server takes about 2 s a short question but 2 to 3
-  minutes for the 3,605-token case on BF16 and F16 (124 to 173 s across two
-  runs; 83 to 109 s on Q4_K_M). That matters for the measured budgets of P2
-  and G3.
-- **Prompt differences stand out, against F16.** The difference cases that
-  both sides answer show gaps from 0.053 (single against double quotes in
-  object instructions) to 7.9, and different token counts wherever the prompt
-  length changes. 0.053 is 16 times F16's noise but only twice BF16's.
+  G1's. With C16's two `hf-diff-*` cases added (26 cases, 32 questions),
+  `d1-2b-f16` still tokenizes alike and agrees on every answer; its largest
+  gap becomes 0.0036 (`hf-diff-packing`) and its largest probability
+  difference stays 0.00049 (BF16: 0.027 and 0.0042). On this CPU the server
+  takes about 2 s a short question but 2 to 3 minutes for the 3,605-token case
+  on BF16 and F16 (124 to 173 s across two runs; 83 to 109 s on Q4_K_M). That
+  matters for the measured budgets of P2 and G3.
+- **Prompt differences stand out, against F16.** The cases whose prompts
+  differ, where both sides answer, show gaps from 0.053 (single against double
+  quotes in object instructions) to 7.9, and different token counts wherever
+  the prompt length changes. 0.053 is about 15 times F16's noise (0.0036) but
+  only twice BF16's.
 - **`d1-2b-f16` is the G1 artifact (contract C10).** ggml rounds a matmul's
   activations to the weight type: bf16 (8 significant bits) for the BF16 GGUF,
   f16 (11) for the F16 GGUF. F16 therefore tracks the float32 reference about
@@ -305,8 +342,15 @@ C10, the second is the method P11 applies.
     the publisher temperature. The temperatures differ by 3.0e-7 relative,
     enough to flip a median at a boundary (`hf/synthetic/median.json`), and
     the reference reads log-probabilities where upstream reads logits.
-  - Leave the `hf-diff-*` cases out of the numeric bounds: their prompts
-    differ by design.
+  - Which cases bound G1 is P11's semantic allowlist (contract C16), not a
+    name prefix: `hf-*` and `hf-diff-*` say why a case was written, not
+    whether it is in the allowlist. C16 includes `hf-diff-packing`, read from
+    `observations/` (`set_size = 1`: each question alone, as upstream reads
+    it; `packed/` holds the difference), and `hf-diff-duplicate-keys` as
+    reference-to-reference evidence (both references keep the last value),
+    which xybrid still refuses at parse by design. The 24-case pilot subset
+    in `hf/crosscheck/`, `provenance.json` and `DIFFERENCES.md` section 6 is
+    historical: a summary, not the allowlist.
   - Report discrete winner and median disagreements separately from the
     numeric bounds.
   - Include the threshold-sensitive cases (`hf-choice-ambiguous`,

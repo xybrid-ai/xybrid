@@ -290,6 +290,14 @@
   "environment": {
     "requirements": "tools/conformance/decision_hf/requirements.txt",
     "requirements_sha256": "c65fa390e1cd435446a721ddfb3ffaf1aac6d35549d8079ee83ece1fc7d66a54",
+    "shared_by": [
+      "observations",
+      "packed",
+      "repeat",
+      "threads",
+      "bf16",
+      "synthetic"
+    ],
     "versions": {
       "python": "3.12.16",
       "torch": "2.14.0+cpu",
@@ -305,33 +313,40 @@
   "recipe": {
     "compare_observations.py": "013c3851e3962a420190d6bb51f7e20c7254758c32153ff4ada3d77e7232714d",
     "crosscheck_server.py": "64ff685b43153c0d4674944d05e0b5e66a8f561ce6c4e0e3f06fa3b6918d3d85",
-    "make_cases.py": "45c1e7ffb44a3967e90318a39e35e47098401d739c760b6dc038902411122cf1",
-    "provenance.py": "3aec91aec873374f40a58e2d3e441898ade8bf7b680b982f72f5f7a139ec238c",
+    "make_cases.py": "595af7a680c32bf3449299e3c9a51b0df517f73aa1dee4b523eb6cab6ec290be",
+    "provenance.py": "ae25e66a7336735c2394fed582c3e30e4370893b26a01cb7c2e4cdfdaf07a0b5",
     "run.sh": "fc01bf006a58c917ef00a6fe8f7fe054d373ac1d2137955d37f14501081fb7c9",
-    "run_reference.py": "a88bde3e86e31a85f63615bae6066c4ae840129a633b120cdca0b0536696a996",
-    "synthetic_median.py": "2c5e7f603f1c3fa6376f8ee7aa41c28f907527e9fb5d56cdd8a676197b717594"
+    "run_reference.py": "8b33725c6b6ca64bda4bf0cba3bedf4e3b0bee79a753bb10a6f0ca7e63855915",
+    "synthetic_median.py": "985ba5bb23b0b448a8c3d86c7d97f3fee3659f26f26ff0aff9e42cca6686e654"
   },
   "settings": {
     "hf-cpu-f32-t1": {
+      "numerics": {
+        "precision": "f32",
+        "threads": 1,
+        "set_size": 1,
+        "deterministic_algorithms": true,
+        "mode": "eval, inference_mode"
+      },
       "backend": "cpu (PyTorch, MKL)",
-      "threads": 1,
-      "precision": "float32 forward over the checkpoint's bfloat16 weights: each decoder layer, the embeddings, the final norm and the LM head compute with exact float32 widenings of their own parameters (run_reference.py Float32Compute), proven bit-identical to a float32 load during the run (verification.float32_parity)",
-      "set_size": 1,
+      "compute": "float32 forward over the checkpoint's bfloat16 weights: each decoder layer, the embeddings, the final norm and the LM head compute with exact float32 widenings of their own parameters (run_reference.py Float32Compute), proven bit-identical to a float32 load during the run (verification.float32_parity)",
       "batch": 1,
       "padding": false,
-      "attention": "the checkpoint's d1 attention (set): full-attention layers read the whole lone prompt both ways; sliding-window (256) and short-convolution layers stay causal",
-      "deterministic_algorithms": true,
-      "mode": "eval, inference_mode"
+      "attention": "the checkpoint's d1 attention (set): full-attention layers read the whole lone prompt both ways; sliding-window (256) and short-convolution layers stay causal"
     },
     "hf-cpu-f32-t1-packed": {
+      "numerics": {
+        "precision": "f32",
+        "threads": 1,
+        "set_size": 16,
+        "deterministic_algorithms": true,
+        "mode": "eval, inference_mode"
+      },
       "backend": "cpu (PyTorch, MKL)",
-      "threads": 1,
-      "precision": "as hf-cpu-f32-t1",
-      "set_size": "the checkpoint's d1_set_size (16): every question of a request packed after one state",
+      "compute": "as hf-cpu-f32-t1",
+      "packing": "every question of a request after one state, up to the checkpoint's d1_set_size (16) a sequence",
       "batch": 1,
-      "padding": false,
-      "deterministic_algorithms": true,
-      "mode": "eval, inference_mode"
+      "padding": false
     }
   },
   "hardware": {
@@ -355,75 +370,82 @@
   },
   "runs": {
     "observations": {
-      "settings": "hf-cpu-f32-t1",
-      "float32_parity_gate": true,
-      "model_load_seconds": 4.61,
-      "peak_rss_gib": 7.28,
-      "peak_anon_gib_between_calls": 2.26,
-      "seconds_total": 1147.7,
+      "numerics": {
+        "settings": "hf-cpu-f32-t1",
+        "precision": "f32",
+        "threads": 1,
+        "set_size": 1,
+        "deterministic_algorithms": true,
+        "mode": "eval, inference_mode",
+        "float32_parity_gate": true
+      },
+      "model_load_seconds": 4.14,
+      "peak_rss_gib": 7.14,
+      "peak_anon_gib_between_calls": 2.24,
+      "seconds_total": 1160.8,
       "cases": {
         "hf-card-three": {
-          "seconds": 55.93,
+          "seconds": 55.8,
           "input_tokens": 161
         },
         "hf-choice-27": {
-          "seconds": 23.98,
+          "seconds": 24.27,
           "input_tokens": 168
         },
         "hf-choice-36": {
-          "seconds": 25.78,
+          "seconds": 26.59,
           "input_tokens": 205
         },
         "hf-choice-ambiguous": {
-          "seconds": 19.62,
+          "seconds": 21.08,
           "input_tokens": 76
         },
         "hf-choice-card": {
-          "seconds": 18.62,
+          "seconds": 19.7,
           "input_tokens": 64
         },
         "hf-choice-key-fallback": {
-          "seconds": 19.82,
+          "seconds": 21.24,
           "input_tokens": 77
         },
         "hf-choice-letter-keys": {
-          "seconds": 18.27,
+          "seconds": 19.42,
           "input_tokens": 61
         },
         "hf-choice-lower-keys": {
-          "seconds": 18.11,
+          "seconds": 19.57,
           "input_tokens": 58
         },
         "hf-choice-one": {
-          "seconds": 17.4,
+          "seconds": 19.34,
           "input_tokens": 44
         },
         "hf-diff-chat-media-part": {
-          "seconds": 21.18,
+          "seconds": 21.81,
           "input_tokens": 110
         },
         "hf-diff-choice-256": {
-          "seconds": 70.62,
+          "seconds": 70.14,
           "input_tokens": 1064
         },
         "hf-diff-choice-multiple": {
-          "seconds": 19.98,
+          "seconds": 19.49,
           "input_tokens": null
         },
         "hf-diff-description-nonstring": {
-          "seconds": 18.9,
+          "seconds": 19.26,
           "input_tokens": 68
         },
         "hf-diff-duplicate-keys": {
-          "seconds": 17.68,
+          "seconds": 17.62,
           "input_tokens": 42
         },
         "hf-diff-escape-tool-call": {
-          "seconds": 17.68,
+          "seconds": 18.21,
           "input_tokens": 44
         },
         "hf-diff-escaped-key-collision": {
-          "seconds": 18.1,
+          "seconds": 18.46,
           "input_tokens": 53
         },
         "hf-diff-instructions-blank": {
@@ -435,15 +457,15 @@
           "input_tokens": null
         },
         "hf-diff-instructions-object": {
-          "seconds": 18.04,
+          "seconds": 18.19,
           "input_tokens": 51
         },
         "hf-diff-key-nonascii": {
-          "seconds": 17.59,
+          "seconds": 17.71,
           "input_tokens": 44
         },
         "hf-diff-key-whitespace": {
-          "seconds": 17.33,
+          "seconds": 17.49,
           "input_tokens": 44
         },
         "hf-diff-lone-surrogate": {
@@ -451,15 +473,15 @@
           "input_tokens": null
         },
         "hf-diff-noul-alias-criteria": {
-          "seconds": 18.4,
+          "seconds": 17.61,
           "input_tokens": 51
         },
         "hf-diff-noul-null-criteria": {
-          "seconds": 18.51,
+          "seconds": 17.88,
           "input_tokens": 51
         },
         "hf-diff-packing": {
-          "seconds": 92.58,
+          "seconds": 92.87,
           "input_tokens": 254
         },
         "hf-diff-questions-empty": {
@@ -471,31 +493,31 @@
           "input_tokens": null
         },
         "hf-diff-spoken-input-audio": {
-          "seconds": 19.29,
+          "seconds": 19.0,
           "input_tokens": 65
         },
         "hf-diff-state-big-integer": {
-          "seconds": 20.86,
+          "seconds": 19.55,
           "input_tokens": 74
         },
         "hf-diff-state-nan": {
-          "seconds": 18.26,
+          "seconds": 17.89,
           "input_tokens": 42
         },
         "hf-diff-typed-text": {
-          "seconds": 19.93,
+          "seconds": 19.76,
           "input_tokens": null
         },
         "hf-noul-card": {
-          "seconds": 17.81,
+          "seconds": 18.35,
           "input_tokens": 43
         },
         "hf-noul-criteria-partial": {
-          "seconds": 18.23,
+          "seconds": 18.01,
           "input_tokens": 52
         },
         "hf-noul-criteria": {
-          "seconds": 18.97,
+          "seconds": 18.78,
           "input_tokens": 67
         },
         "hf-score-borderline": {
@@ -503,65 +525,72 @@
           "input_tokens": 59
         },
         "hf-score-card": {
-          "seconds": 18.05,
+          "seconds": 17.95,
           "input_tokens": 54
         },
         "hf-score-ten": {
-          "seconds": 20.41,
+          "seconds": 19.91,
           "input_tokens": 91
         },
         "hf-score-two": {
-          "seconds": 17.82,
+          "seconds": 18.04,
           "input_tokens": 53
         },
         "hf-state-empty": {
-          "seconds": 17.04,
+          "seconds": 16.79,
           "input_tokens": 29
         },
         "hf-state-json-array": {
-          "seconds": 21.12,
+          "seconds": 20.85,
           "input_tokens": 105
         },
         "hf-state-json-object": {
-          "seconds": 27.82,
+          "seconds": 27.73,
           "input_tokens": 234
         },
         "hf-state-long": {
-          "seconds": 216.38,
+          "seconds": 224.03,
           "input_tokens": 3605
         },
         "hf-state-null": {
-          "seconds": 17.59,
+          "seconds": 17.15,
           "input_tokens": 45
         },
         "hf-state-special-token-key": {
-          "seconds": 17.87,
+          "seconds": 18.08,
           "input_tokens": 58
         },
         "hf-state-special-tokens": {
-          "seconds": 18.74,
+          "seconds": 18.31,
           "input_tokens": 70
         },
         "hf-state-unicode": {
-          "seconds": 19.16,
+          "seconds": 18.67,
           "input_tokens": 75
         }
       }
     },
     "packed": {
-      "settings": "hf-cpu-f32-t1-packed",
-      "float32_parity_gate": true,
-      "model_load_seconds": 4.17,
-      "peak_rss_gib": 6.87,
-      "peak_anon_gib_between_calls": 2.16,
-      "seconds_total": 44.7,
+      "numerics": {
+        "settings": "hf-cpu-f32-t1-packed",
+        "precision": "f32",
+        "threads": 1,
+        "set_size": 16,
+        "deterministic_algorithms": true,
+        "mode": "eval, inference_mode",
+        "float32_parity_gate": true
+      },
+      "model_load_seconds": 3.79,
+      "peak_rss_gib": 7.13,
+      "peak_anon_gib_between_calls": 2.15,
+      "seconds_total": 46.2,
       "cases": {
         "hf-diff-packing": {
-          "seconds": 23.84,
+          "seconds": 24.38,
           "input_tokens": 178
         },
         "hf-card-three": {
-          "seconds": 20.84,
+          "seconds": 21.8,
           "input_tokens": 123
         }
       }
@@ -587,6 +616,15 @@
     },
     "repeat": {
       "what": "a second hf-cpu-f32-t1 run of a subset of the cases",
+      "run": {
+        "settings": "hf-cpu-f32-t1",
+        "precision": "f32",
+        "threads": 1,
+        "set_size": 1,
+        "deterministic_algorithms": true,
+        "mode": "eval, inference_mode",
+        "float32_parity_gate": false
+      },
       "questions": 6,
       "bit_identical": 6,
       "max_abs_logit": 0.0,
@@ -598,6 +636,15 @@
     },
     "threads": {
       "what": "a subset of the cases at 4 threads instead of 1",
+      "run": {
+        "settings": "hf-cpu-f32-t4",
+        "precision": "f32",
+        "threads": 4,
+        "set_size": 1,
+        "deterministic_algorithms": true,
+        "mode": "eval, inference_mode",
+        "float32_parity_gate": false
+      },
       "questions": 9,
       "bit_identical": 1,
       "max_abs_logit": 5.185604095458984e-06,
@@ -608,7 +655,16 @@
       }
     },
     "bf16": {
-      "what": "the shared-domain cases with the bfloat16 forward instead",
+      "what": "the pilot cases (hf-* without hf-diff-*) except hf-state-long, with the bfloat16 forward instead",
+      "run": {
+        "settings": "hf-cpu-bf16-t1",
+        "precision": "bf16",
+        "threads": 1,
+        "set_size": 1,
+        "deterministic_algorithms": true,
+        "mode": "eval, inference_mode",
+        "float32_parity_gate": false
+      },
       "questions": 25,
       "bit_identical": 0,
       "max_abs_logit": 0.10782527923583984,
@@ -620,6 +676,15 @@
     },
     "packed": {
       "what": "the multi-question cases packed at the checkpoint's set size instead of alone",
+      "run": {
+        "settings": "hf-cpu-f32-t1-packed",
+        "precision": "f32",
+        "threads": 1,
+        "set_size": 16,
+        "deterministic_algorithms": true,
+        "mode": "eval, inference_mode",
+        "float32_parity_gate": true
+      },
       "questions": 8,
       "bit_identical": 0,
       "max_abs_logit": 1.361257553100586,
@@ -631,7 +696,7 @@
     }
   },
   "crosscheck": {
-    "what": "the stock llama-server answering the same requests, compared with the observations: a black-box check of DIFFERENCES.md and a G1 feasibility measurement, not the upstream oracle. The G1 counterpart is d1-2b-f16; the BF16 and Q4_K_M files are reports",
+    "what": "the stock llama-server answering the same requests, compared with the observations: a black-box check of DIFFERENCES.md and a G1 feasibility measurement, not the upstream oracle. The G1 counterpart is d1-2b-f16; the BF16 and Q4_K_M files are reports. Each summary counts the historical pilot cases, not P11's G1 allowlist (contract C16)",
     "build": {
       "source": "vendor/llama-cpp",
       "build_type": "Release",
@@ -651,8 +716,9 @@
           "crosscheck_server.py": "64ff685b43153c0d4674944d05e0b5e66a8f561ce6c4e0e3f06fa3b6918d3d85"
         },
         "cases": 46,
-        "shared_cases": 24,
-        "shared_questions": 26,
+        "pilot": "the numbers below: hf-* without hf-diff-*, a historical selection by name, not P11's G1 allowlist (contract C16)",
+        "pilot_cases": 24,
+        "pilot_questions": 26,
         "equal_token_counts": 24,
         "answers_that_differ": 0,
         "max_abs_probability": 0.0041946235652930985,
@@ -667,8 +733,9 @@
           "crosscheck_server.py": "64ff685b43153c0d4674944d05e0b5e66a8f561ce6c4e0e3f06fa3b6918d3d85"
         },
         "cases": 24,
-        "shared_cases": 24,
-        "shared_questions": 26,
+        "pilot": "the numbers below: hf-* without hf-diff-*, a historical selection by name, not P11's G1 allowlist (contract C16)",
+        "pilot_cases": 24,
+        "pilot_questions": 26,
         "equal_token_counts": 24,
         "answers_that_differ": 0,
         "max_abs_probability": 0.003103774446214791,
@@ -683,8 +750,9 @@
           "crosscheck_server.py": "64ff685b43153c0d4674944d05e0b5e66a8f561ce6c4e0e3f06fa3b6918d3d85"
         },
         "cases": 46,
-        "shared_cases": 24,
-        "shared_questions": 26,
+        "pilot": "the numbers below: hf-* without hf-diff-*, a historical selection by name, not P11's G1 allowlist (contract C16)",
+        "pilot_cases": 24,
+        "pilot_questions": 26,
         "equal_token_counts": 24,
         "answers_that_differ": 0,
         "max_abs_probability": 0.0004916459665614825,
@@ -699,8 +767,9 @@
           "crosscheck_server.py": "64ff685b43153c0d4674944d05e0b5e66a8f561ce6c4e0e3f06fa3b6918d3d85"
         },
         "cases": 24,
-        "shared_cases": 24,
-        "shared_questions": 26,
+        "pilot": "the numbers below: hf-* without hf-diff-*, a historical selection by name, not P11's G1 allowlist (contract C16)",
+        "pilot_cases": 24,
+        "pilot_questions": 26,
         "equal_token_counts": 24,
         "answers_that_differ": 0,
         "max_abs_probability": 0.0973105657218063,
@@ -709,7 +778,7 @@
     }
   },
   "files": {
-    "README.md": "086ee726aed7758825f790a3bdad4a61ae88e3f46a185c4c01687c4e82bca74e",
+    "README.md": "1b4ba6d1b90732af2eb53c29863f233e549acc502fd18b330187db8e0af78003",
     "cases/hf-card-three.json": "a22352f9ea46c0c2e7409ad2dcf1f2034074f30f21cce39ef6b06c361a4dd56c",
     "cases/hf-choice-27.json": "386929953f5a1b31467521c2dabddf31b63f8c03e6eeb64b0dcc2db36442a5da",
     "cases/hf-choice-36.json": "6f16ae518c2302c7f40c6e1daac2f815c6972a6e7c649a01728a1a37c4bc9193",

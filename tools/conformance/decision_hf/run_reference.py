@@ -21,8 +21,11 @@ The `detail` block holds what only the reference has: the vocabulary log-probabi
 (`runner.py` `_slot_logits`: logits minus their logsumexp, in float32), their group maxima, the logsumexp, the
 distribution it softmaxes from them (`prompt.readouts`, float64), its float64 temperature and the JSON parser's notes.
 A refusal is `{"refusal": {question?, exception, message}}`: the Python exception and the reference's own message (the
-reference has no HTTP status). f32 values are bit patterns, f64 values 17 significant digits (an integral one keeps a
-".0"), non-finite values strings, as in the case schema. Timings and memory go to `--run-log`, not the observations.
+reference has no HTTP status). Only the reference's own code refuses, before its model runs (its question checks, its
+prompt building, its tokenizer). Whatever is raised once its model has begun a forward, in this runner's own hooks, or
+by this machine's limits (memory, recursion) is no refusal: it ends the run. f32 values are bit patterns, f64 values
+17 significant digits (an integral one keeps a ".0"), non-finite values strings, as in the case schema. Timings and
+memory go to `--run-log`, not the observations.
 
 Numerics: eval and inference mode, deterministic algorithms, a fixed thread count, and a float32 forward. The
 checkpoint stores bfloat16 weights; `--precision f32` (the default) keeps them in bfloat16 between uses and gives each
@@ -30,15 +33,18 @@ decoder layer, the embeddings, the final norm and the LM head exact float32 copi
 duration of their forward, so every operation runs in float32 on the values a float32 load holds, within 8 GB.
 `--check-f32-parity` proves it during the run: every module call is replayed on a float32 copy of the module and
 must return the same bytes from float32 inputs, and every hooked module must be verified at least once, or the run
-fails. `--precision f32-load` is the model card's CPU recipe (`from_pretrained(dtype=torch.float32)`, about 9 GB, too
-large for this machine); `--precision bf16` runs the bfloat16 forward, for comparison.
+fails. So does any failure while checking (a replay, an input check, a comparison, its message), and the first
+failure stands: no later call or coverage count can pass after it. `--precision f32-load` is the model card's CPU
+recipe (`from_pretrained(dtype=torch.float32)`, about 9 GB, too large for this machine); `--precision bf16` runs the
+bfloat16 forward, for comparison.
 
 `--set-size default` runs each request in one call at the checkpoint's own set size (16 questions packed after one
 state), the reference's default serving mode, for the packing row of DIFFERENCES.md.
 
 A run writes its observations only once every case has run and the proof (if asked for) holds; any broken invariant
 exits 1 with nothing written. `--run-log` records what the observations were made from, as it stood when the run
-started (the pins, the verified snapshot files, the lock, the recipe sources `RECIPE`, the request digests) and the
+started (the pins, the verified snapshot files, the lock, the recipe sources `RECIPE`, the request digests), the
+run's complete numerics (its settings id and every value the id stands for), the package versions it ran on, and the
 digest of every observation written; provenance.py carries those identities and refuses any that no longer hold.
 
 Usage: README.md. Run it through run.sh, which supplies the pinned environment.
@@ -49,7 +55,9 @@ from __future__ import annotations
 import argparse
 import copy
 import dataclasses
+import functools
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -81,6 +89,10 @@ SCHEMA_VERSION = 1
 # answers (reads, estimates, boxes, multiple choices) fall outside it and are recorded as it answers them.
 OPTION_TYPES = ("noul", "choice", "score")
 MEDIA_FIELDS = ("files", "images", "videos", "media")
+# The packages whose versions a run records besides Python's: provenance.py checks them against the lock.
+VERSIONED = ("torch", "transformers", "tokenizers", "numpy", "safetensors", "torchvision")
+# This machine's limits, never the reference's decision: one raised anywhere ends the run.
+LIMITS = (MemoryError, RecursionError)
 
 
 # --------------------------------------------------------------------------- #
@@ -216,6 +228,11 @@ def loaded_code(root: str, pins: dict) -> list[dict[str, str]]:
     return modules
 
 
+def versions() -> dict[str, str]:
+    """This process's Python and the versions of the packages the reference runs on (`VERSIONED`)."""
+    return {"python": platform.python_version(), **{n: importlib.import_module(n).__version__ for n in VERSIONED}}
+
+
 # --------------------------------------------------------------------------- #
 # request parsing
 # --------------------------------------------------------------------------- #
@@ -266,6 +283,55 @@ class RunnerError(Exception):
     """A broken invariant of this runner, never a refusal by the reference."""
 
 
+class Refused(Exception):
+    """The reference's own refusal of a request: what its code raised before its model ran (`error`)."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(repr(error))
+        self.error = error
+
+
+def refused(error: Exception) -> Refused:
+    """`error`, raised by the reference's own code before its model ran, as its refusal; a limit of this machine
+    (`LIMITS`) is none, and ends the run."""
+    if isinstance(error, LIMITS):
+        raise RunnerError(f"{error!r} is this machine's limit, not a refusal by the reference") from error
+    return Refused(error)
+
+
+class Faults:
+    """The first failure of this runner's own hooks, kept apart from the exception that reports it.
+
+    The hooks run inside the reference's call stack, where an exception could be caught on its way out, or taken for
+    the reference's own. `guard` makes every exception a hook raises a `RunnerError` (a `RunnerError` stays as it
+    is) and keeps the first here; `check` raises while one is kept, so a run never passes after it, whatever became
+    of the exception."""
+
+    def __init__(self) -> None:
+        self.first: RunnerError | None = None
+
+    def guard(self, hook):
+        name = getattr(hook, "__qualname__", type(hook).__name__)
+
+        @functools.wraps(hook)
+        def guarded(*args, **kwargs):
+            try:
+                return hook(*args, **kwargs)
+            except BaseException as error:
+                failure = error if isinstance(error, RunnerError) else RunnerError(f"{name} failed: {error!r}")
+                if self.first is None:
+                    self.first = failure
+                if failure is error:
+                    raise
+                raise failure from error
+
+        return guarded
+
+    def check(self) -> None:
+        if self.first is not None:
+            raise RunnerError(f"an earlier failure stands: {self.first}")
+
+
 def refusal(error: BaseException | str, message: str | None = None, question: str | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     if question is not None:
@@ -285,14 +351,16 @@ class Float32Compute:
 
     A pre-hook replaces the data of every bfloat16 parameter under the module with its float32 widening (exact) and
     the forward hook puts the bfloat16 data back, so the module computes exactly what a float32 load computes, while
-    only one module's float32 copy exists at a time. The modules must cover every parameter the forward reads."""
+    only one module's float32 copy exists at a time. The modules must cover every parameter the forward reads. Both
+    hooks are guarded (`Faults`)."""
 
-    def __init__(self, torch_module, modules: list) -> None:
+    def __init__(self, torch_module, modules: list, faults: Faults | None = None) -> None:
         self.torch = torch_module
         self.saved: dict[int, list] = {}
+        guard = (faults if faults is not None else Faults()).guard
         for module in modules:
-            module.register_forward_pre_hook(self.widen)
-            module.register_forward_hook(self.restore)
+            module.register_forward_pre_hook(guard(self.widen))
+            module.register_forward_hook(guard(self.restore))
 
     def widen(self, module, args) -> None:
         saved = []
@@ -328,6 +396,11 @@ class ParityCheck:
     modules chain (embedding, each decoder layer, final norm, LM head), so equal outputs from equal inputs make the
     whole forward a float32 load's. A float32 load itself (about 9 GB) does not fit this machine's 8 GB.
 
+    Nothing but a proof passes. A value the checks cannot read (an input or output of another type) fails them; any
+    exception while checking (the replay, an input check, a byte view, a comparison, its message) is a `RunnerError`;
+    the hooks are guarded and share `faults`, where the first failure stands, so neither `verify` nor
+    `require_coverage` passes after it, even if the reference had caught the exception that reported it.
+
     `immediate` verifies each call as its module returns, so at most one call's tensors are held (a 3,605-token
     forward would otherwise keep every layer's hidden states until it ends); without it, calls wait for `verify`."""
 
@@ -339,17 +412,18 @@ class ParityCheck:
         "_forward_hooks_always_called",
     )
 
-    def __init__(self, torch_module, modules: list, immediate: bool = False) -> None:
+    def __init__(self, torch_module, modules: list, immediate: bool = False, faults: Faults | None = None) -> None:
         self.torch = torch_module
         self.modules = list(modules)
         self.immediate = immediate
+        self.faults = faults if faults is not None else Faults()
         self.pending: dict[int, tuple] = {}
         self.records: list[tuple] = []
         self.verified: set[int] = set()
         self.calls = 0
         for module in self.modules:
-            module.register_forward_pre_hook(self.before, with_kwargs=True)
-            module.register_forward_hook(self.after, with_kwargs=True)
+            module.register_forward_pre_hook(self.faults.guard(self.before), with_kwargs=True)
+            module.register_forward_hook(self.faults.guard(self.after), with_kwargs=True)
 
     def before(self, module, args, kwargs) -> None:
         self.pending[id(module)] = (args, kwargs)
@@ -377,7 +451,8 @@ class ParityCheck:
         return clone.to(self.torch.float32)
 
     def require_float32(self, value: Any, where: str) -> None:
-        """Every floating tensor in `value` (tuples, lists, dicts, dataclasses, walked) is float32."""
+        """Every floating tensor in `value` is float32. Tuples, lists, dicts and dataclasses are walked; a value of
+        any type but those, a tensor, None, bool, int, float or str cannot be read here, so it fails too."""
         torch = self.torch
         if torch.is_tensor(value):
             if value.is_floating_point() and value.dtype != torch.float32:
@@ -391,44 +466,52 @@ class ParityCheck:
         elif dataclasses.is_dataclass(value) and not isinstance(value, type):
             for field in dataclasses.fields(value):
                 self.require_float32(getattr(value, field.name), f"{where}.{field.name}")
+        elif not (value is None or isinstance(value, (bool, int, float, str))):
+            raise RunnerError(f"float32 parity: {where}: a {type(value).__name__} value, which this check cannot read")
 
     def bits(self, tensor):
         return tensor.detach().contiguous().reshape(-1).view(self.torch.uint8)
 
     def compare(self, recorded: Any, again: Any, where: str) -> None:
-        """Raise unless `again` has `recorded`'s structure and every tensor in it the same dtype, shape and bytes."""
+        """Raise unless `again` is `recorded` again: the same type at every level, the same lengths and keys, every
+        tensor the same dtype, shape and bytes, every other value the same repr. Any other type is a mismatch."""
         torch = self.torch
-        if torch.is_tensor(recorded) or torch.is_tensor(again):
-            if not (torch.is_tensor(recorded) and torch.is_tensor(again)):
-                raise RunnerError(f"float32 parity: {where}: {type(recorded).__name__} recorded, "
-                                  f"{type(again).__name__} replayed")
+        if type(recorded) is not type(again):
+            raise RunnerError(f"float32 parity: {where}: {type(recorded).__name__} recorded, "
+                              f"{type(again).__name__} replayed")
+        if torch.is_tensor(recorded):
             if recorded.dtype != again.dtype or recorded.shape != again.shape:
                 raise RunnerError(f"float32 parity: {where}: {recorded.dtype} {tuple(recorded.shape)} recorded, "
                                   f"{again.dtype} {tuple(again.shape)} replayed")
             a, b = self.bits(recorded), self.bits(again)
             if not torch.equal(a, b):
                 raise RunnerError(f"float32 parity: {where}: {int((a != b).sum())} of {a.numel()} bytes differ")
-            return
-        if isinstance(recorded, (tuple, list, dict)) or isinstance(again, (tuple, list, dict)):
-            if type(recorded) is not type(again) or len(recorded) != len(again):
+        elif isinstance(recorded, (tuple, list)):
+            if len(recorded) != len(again):
                 raise RunnerError(f"float32 parity: {where}: {type(recorded).__name__} of {len(recorded)} recorded, "
-                                  f"{type(again).__name__} of {len(again)} replayed")
-            if isinstance(recorded, dict):
-                if list(recorded) != list(again):
-                    raise RunnerError(
-                        f"float32 parity: {where}: keys {list(recorded)} recorded, {list(again)} replayed"
-                    )
-                for key in recorded:
-                    self.compare(recorded[key], again[key], f"{where}[{key!r}]")
-            else:
-                for i in range(len(recorded)):
-                    self.compare(recorded[i], again[i], f"{where}[{i}]")
-            return
-        if recorded != again:
-            raise RunnerError(f"float32 parity: {where}: {recorded!r} recorded, {again!r} replayed")
+                                  f"of {len(again)} replayed")
+            for i, (item, item_again) in enumerate(zip(recorded, again)):
+                self.compare(item, item_again, f"{where}[{i}]")
+        elif isinstance(recorded, dict):
+            if list(recorded) != list(again):
+                raise RunnerError(f"float32 parity: {where}: keys {list(recorded)} recorded, {list(again)} replayed")
+            for key in recorded:
+                self.compare(recorded[key], again[key], f"{where}[{key!r}]")
+        elif recorded is None or isinstance(recorded, (bool, int, float, str)):
+            if repr(recorded) != repr(again):
+                raise RunnerError(f"float32 parity: {where}: {recorded!r} recorded, {again!r} replayed")
+        else:
+            raise RunnerError(
+                f"float32 parity: {where}: a {type(recorded).__name__} value, which this check cannot compare"
+            )
 
     def verify(self) -> None:
-        """Replay every call recorded since the last `verify`; raise `RunnerError` at the first difference."""
+        """Replay every call recorded since the last `verify` (`replay`). A difference or a failure to check raises
+        `RunnerError`, and stands: neither this nor `require_coverage` passes after it."""
+        self.faults.check()
+        self.faults.guard(self.replay)()
+
+    def replay(self) -> None:
         torch = self.torch
         if self.pending:
             raise RunnerError("float32 parity: a hooked module started a call that never returned")
@@ -449,7 +532,12 @@ class ParityCheck:
             del clone, again
 
     def require_coverage(self) -> dict[str, int]:
-        """The proof's coverage, if it is a proof: at least one call verified, every hooked module at least once."""
+        """The proof's coverage, if it is a proof: no failure, at least one call verified, every hooked module at
+        least once."""
+        self.faults.check()
+        return self.faults.guard(self.coverage)()
+
+    def coverage(self) -> dict[str, int]:
         if self.pending or self.records:
             raise RunnerError("float32 parity: recorded module calls were never verified")
         if self.calls == 0:
@@ -457,10 +545,7 @@ class ParityCheck:
         unseen = [type(m).__name__ for m in self.modules if id(m) not in self.verified]
         if unseen:
             raise RunnerError(f"float32 parity: {len(unseen)} of {len(self.modules)} hooked modules never ran")
-        return self.results()
-
-    def results(self) -> dict[str, int]:
-        # every verified call was bit-identical with float32 inputs: anything else raised
+        # every verified call was bit-identical with float32 inputs, and nothing failed: anything else raised
         return {
             "calls": self.calls,
             "bit_identical": self.calls,
@@ -506,7 +591,6 @@ class Reference:
         torch.use_deterministic_algorithms(True)
         self.args = args
         self.pins = pins
-        self.capture = Capture()
         self.peak_anon_gib = 0.0
 
         started = time.perf_counter()
@@ -540,15 +624,25 @@ class Reference:
         self.code = loaded_code(self.root, pins)
         if not any(m["module"].endswith(".modeling_lfm3") for m in self.code):
             raise SystemExit("the snapshot's vendored LFM3 text model was not imported")
+        self.tokenizer = self.engine.tokenizer
+        self.instrument(attention.text_backbone(model), language_model, head)
+        self.versions = versions()
+
+    def instrument(self, body: Any, language_model: Any, head: Any) -> None:
+        """Every hook this runner adds to the reference: none changes what it computes. Each is guarded (`Faults`),
+        so a hook's failure is this run's failure, never the reference's: `call` ends the run on it."""
+        torch, args = self.torch, self.args
+        self.faults = Faults()
+        self.capture = Capture()
+        guard = self.faults.guard
 
         # Text only: the media encoders must never run.
         def no_media(module, args):
             raise RunnerError(f"{type(module).__name__} ran in a text-only reference run")
 
-        body = attention.text_backbone(model)
         for name in ("vision_tower", "multi_modal_projector", "audio_tower"):
             if getattr(body, name, None) is not None:
-                getattr(body, name).register_forward_pre_hook(no_media)
+                getattr(body, name).register_forward_pre_hook(guard(no_media))
 
         self.compute = None
         if args.precision == "f32":
@@ -557,43 +651,37 @@ class Reference:
             needed = [*language_model.parameters(), *head.parameters()]
             if any(id(p) not in covered for p in needed):
                 raise SystemExit("float32 compute does not cover every text-model parameter")
-            self.compute = Float32Compute(torch, hooked)
+            self.compute = Float32Compute(torch, hooked, self.faults)
         self.parity = None
         if args.check_f32_parity:
             if args.precision != "f32":
                 raise SystemExit("--check-f32-parity checks --precision f32")
-            self.parity = ParityCheck(torch, hooked, immediate=True)
+            self.parity = ParityCheck(torch, hooked, immediate=True, faults=self.faults)
 
         capture = self.capture
 
         def backbone_inputs(module, args, kwargs):
             capture.inputs.append(kwargs["input_ids"].tolist())
 
-        body.register_forward_pre_hook(backbone_inputs, with_kwargs=True)
+        body.register_forward_pre_hook(guard(backbone_inputs), with_kwargs=True)
 
         def slot_logits(module, args, output):
             capture.logits.append(output.detach().to(torch.float32).clone())
 
-        head.register_forward_hook(slot_logits)
+        head.register_forward_hook(guard(slot_logits))
 
         readouts = self.engine._readouts
 
+        @guard
+        def record_readouts(qs, logz, result):
+            capture.readouts.append((list(qs), logz.detach().clone(), [list(map(float, p)) for p in result]))
+
         def captured_readouts(qs, logz, tempered):
             result = readouts(qs, logz, tempered)
-            capture.readouts.append((list(qs), logz.detach().clone(), [list(map(float, p)) for p in result]))
+            record_readouts(qs, logz, result)
             return result
 
         self.engine._readouts = captured_readouts
-        self.tokenizer = self.engine.tokenizer
-        self.versions = {
-            "python": platform.python_version(),
-            "torch": torch.__version__,
-            "transformers": transformers.__version__,
-            "tokenizers": __import__("tokenizers").__version__,
-            "numpy": __import__("numpy").__version__,
-            "safetensors": __import__("safetensors").__version__,
-            "torchvision": __import__("torchvision").__version__,
-        }
 
     def note_memory(self) -> None:
         anon = rss_anon_gib()
@@ -601,29 +689,46 @@ class Reference:
             self.peak_anon_gib = max(self.peak_anon_gib, anon)
 
     def call(self, state: Any, questions: dict, set_size: int | None) -> tuple[dict, float]:
-        """`system_one`, then, with `--check-f32-parity`, the proof of every module call it made. A proof failure is
-        a `RunnerError`, never a refusal by the reference, so it ends the run before any observation is written."""
+        """`system_one`, then, with `--check-f32-parity`, the proof of every module call it made.
+
+        What `system_one` raises before its model runs is the reference's refusal (`Refused`). Everything else ends
+        the run (`RunnerError`) before any observation is written: what it raises once its model has begun a forward,
+        a limit of this machine, a failure of this runner's hooks (whatever became of its exception, even caught
+        inside the reference), and a failed proof."""
         self.capture.clear()
         started = time.perf_counter()
         try:
             result = self.model.system_one(state, questions, set_size=set_size)
-        except BaseException:
+        except BaseException as error:
             if self.parity is not None:
                 self.parity.discard()  # a forward that raised reaches no observation
-            raise
+            if isinstance(error, RunnerError):
+                raise
+            self.faults.check()
+            if self.capture.inputs:  # the model had begun a forward: nothing raised now is a refusal
+                raise RunnerError(f"system_one failed once its model ran: {error!r}") from error
+            if not isinstance(error, Exception):  # an interrupt: no refusal, no failure of the reference
+                raise
+            raise refused(error) from error
         finally:
             if self.compute is not None:
-                self.compute.restore_all()
+                self.faults.guard(self.compute.restore_all)()
+        self.faults.check()  # a hook failed and the reference went on
         seconds = time.perf_counter() - started
         self.note_memory()
         if self.parity is not None:
-            try:
-                self.parity.verify()
-            except RunnerError:
-                raise
-            except Exception as error:  # the replay itself failed: no proof
-                raise RunnerError(f"float32 parity: replaying a module call failed: {error!r}") from error
+            self.parity.verify()
         return result, seconds
+
+    def refusable(self, function: Any, *args: Any, **kwargs: Any) -> Any:
+        """`function`, the reference's own code, on a request's values: what it raises is its refusal (`Refused`)."""
+        try:
+            return function(*args, **kwargs)
+        except RunnerError:
+            raise
+        except Exception as error:
+            self.faults.check()
+            raise refused(error) from error
 
     # ------------------------------------------------------------------ stages
 
@@ -652,12 +757,13 @@ class Reference:
         raws = request["questions"]
         questions = {}
         for name, raw in raws.items():
-            if isinstance(raw, dict) and self.modules["prompt"].is_media(raw.get("instructions")):
-                return refusal("Media", "spoken instructions: this runner reads text only", name), detail, None, {}, {}
             try:
-                questions[name] = self.engine.ask(raw)
-            except Exception as error:  # the reference's own refusal, whatever its type
-                return refusal(error, question=name), detail, None, {}, {}
+                if isinstance(raw, dict) and self.refusable(self.modules["prompt"].is_media, raw.get("instructions")):
+                    media = refusal("Media", "spoken instructions: this runner reads text only", name)
+                    return media, detail, None, {}, {}
+                questions[name] = self.refusable(self.engine.ask, raw)
+            except Refused as refused_by:  # the reference's own refusal, whatever its type
+                return refusal(refused_by.error, question=name), detail, None, {}, {}
         typed = {n: q.type for n, q in questions.items() if q.type not in OPTION_TYPES or getattr(q, "multiple", False)}
         if typed:
             detail["typed"] = typed
@@ -675,26 +781,28 @@ class Reference:
         return ["true", "false"]  # prompt.py reads yes before no
 
     def prepare_one(self, state: Any, name: str, question: Any, index: int) -> tuple[dict, dict, dict]:
-        """The reference's own preparation of one lone question: rendered text, tokens, codes, groups, temperature."""
-        prompt, engine, tok = self.modules["prompt"], self.engine, self.tokenizer
-        prefix, _ = engine._prefix(state, [])
-        suffixes, _, _ = engine._suffixes([question])
+        """The reference's own preparation of one lone question: rendered text, tokens, codes, groups, temperature.
+        What the reference's own functions raise is its refusal (`refusable`); this runner's checks are not."""
+        prompt, engine, tok, refusable = self.modules["prompt"], self.engine, self.tokenizer, self.refusable
+        prefix, _ = refusable(engine._prefix, state, [])
+        suffixes, _, _ = refusable(engine._suffixes, [question])
         text = prefix + suffixes[0]
-        ((_, _, ids, state_len, _, ends, _),) = engine._sequences([(state, [question], [])], set_size=1)
+        ((_, _, ids, state_len, _, ends, _),) = refusable(engine._sequences, [(state, [question], [])], set_size=1)
         if ids != tok.encode(text, add_special_tokens=False):
             raise RunnerError("the reference's sequence is not its rendered text, tokenized")
         if ends != [[len(ids) - 1]]:
             raise RunnerError("a lone option question is read at its last token")
-        groups = prompt.readout_ids(tok, question)
+        groups = refusable(prompt.readout_ids, tok, question)
         if question.type == "choice":
-            codes = [code for code, _ in prompt.aliases(tok, list(question.criteria))]
+            codes = [code for code, _ in refusable(prompt.aliases, tok, list(question.criteria))]
         else:
             codes = self.keys(question)
         select, ranges = [], []
         for group in groups:
             ranges.append([len(select), len(select) + len(group)])
             select.extend(group)
-        temperature = engine.calibration.temperature(question) if engine.calibration is not None else 1.0
+        calibration = engine.calibration
+        temperature = refusable(calibration.temperature, question) if calibration is not None else 1.0
         passed = {"question": name, "prompt": text, "token_ids": ids, "output_index": len(ids) - 1, "select": select}
         answer = {
             "question": name,
@@ -753,24 +861,21 @@ class Reference:
         if not parsed:  # typed answers: outside the schema's stages, recorded as the reference gives them
             try:
                 result, _ = self.call(state, raws, 1)
-            except RunnerError:
-                raise
-            except Exception as error:
-                detail["typed"] = refusal(error)
+            except Refused as refused_by:
+                detail["typed"] = refusal(refused_by.error)
                 return observation
             detail["typed"] = {"answers": f64_tree(result["answers"]), "usage": result["usage"]}
             return observation
         hf["parse"] = parsed
 
-        # The reference renders and labels every question before any forward pass.
+        # The reference renders and labels every question before any forward pass. Only its refusals are recorded
+        # (`Refused`); anything else raised here ends the run.
         passes, answers, prepared = [], [], []
         for index, (name, question) in enumerate(questions.items()):
             try:
                 passed, answer, extra = self.prepare_one(state, name, question, index)
-            except RunnerError:
-                raise
-            except Exception as error:
-                hf["prepare"] = refusal(error, question=name)
+            except Refused as refused_by:
+                hf["prepare"] = refusal(refused_by.error, question=name)
                 return observation
             passes.append(passed)
             answers.append(answer)
@@ -783,10 +888,8 @@ class Reference:
             name = passed["question"]
             try:
                 raw, best, extra, result = self.evaluate_one(state, name, raws[name], passed, answer)
-            except RunnerError:
-                raise
-            except Exception as error:
-                hf["evaluate"] = refusal(error, question=name)
+            except Refused as refused_by:
+                hf["evaluate"] = refusal(refused_by.error, question=name)
                 return observation
             raw_scores.append(raw)
             scores.append(best)
@@ -808,7 +911,10 @@ class Reference:
             raise RunnerError(f"{case['id']}: packed runs take 1 to {engine.set_size} noul, choice or score questions")
         names, qs = list(questions), list(questions.values())
         ((_, _, ids, state_len, question_of_token, ends, _),) = engine._sequences([(state, qs, [])])
-        result, _ = self.call(state, raws, None)
+        try:
+            result, _ = self.call(state, raws, None)
+        except Refused as refused_by:
+            raise RunnerError(f"{case['id']}: the reference refused the packed request: {refused_by.error!r}") from None
         cap = self.capture
         if cap.inputs != [[ids]] or len(cap.logits) != 1 or cap.logits[0].shape[0] != len(qs):
             raise RunnerError("the packed forward differs from the prepared sequence")
@@ -958,6 +1064,7 @@ def main(argv: list[str] | None = None) -> int:
             tokens = observation["hf"].get("finalize", {}).get("usage", {}).get("input_tokens")
             timings.append({"case": case["id"], "seconds": round(seconds, 2), "input_tokens": tokens, "status": status})
             print(f"{case['id']:34s} {status:20s} tokens={tokens!s:>6s} {seconds:7.1f}s", flush=True)
+        reference.faults.check()
         parity = reference.parity.require_coverage() if reference.parity is not None else None
         if recipe(RECIPE) != inputs["recipe"] or sha256_file(PINS) != inputs["pins_sha256"]:
             raise RunnerError("the recipe or the pins changed during the run")
@@ -995,7 +1102,7 @@ def main(argv: list[str] | None = None) -> int:
                 "settings": settings,
                 "precision": args.precision,
                 "threads": args.threads,
-                "set_size": "default (the checkpoint's d1_set_size)" if packed else 1,
+                "set_size": reference.engine.set_size if packed else 1,  # packed: the checkpoint's d1_set_size
                 "deterministic_algorithms": True,
                 "mode": "eval, inference_mode",
                 "float32_parity_gate": parity is not None,

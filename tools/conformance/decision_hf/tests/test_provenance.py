@@ -24,6 +24,18 @@ def sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def locked() -> dict[str, str]:
+    """The versions a run through run.sh records: the lock's, and Python 3.12."""
+    lock = provenance.locked_versions()
+    return {"python": "3.12.16", **{name: lock[provenance.normalized(name)] for name in provenance.VERSIONED[1:]}}
+
+
+def numerics(role: str) -> dict:
+    """What run_reference.py records for a run of `role`, as its settings id defines it."""
+    settings, gate = provenance.RUNS[role]
+    return {"settings": settings, **provenance.NUMERICS[settings], "float32_parity_gate": gate}
+
+
 class Temp(unittest.TestCase):
     def setUp(self):
         self.temp = Path(tempfile.mkdtemp())
@@ -130,23 +142,81 @@ class OutputsTests(Temp):
 
 
 class RunTests(unittest.TestCase):
-    def log(self, settings="hf-cpu-f32-t1", requests=None):
+    def log(self, role="observations", requests=None, **changes):
         return {
             "inputs": {"requests": requests or {"a": "1" * 64}},
-            "numerics": {"settings": settings},
+            "numerics": {**numerics(role), **changes},
+            "environment": {"versions": locked()},
             "float32_parity": ParityTests.GOOD,
         }
 
-    def check(self, log, requests):
+    def check(self, log, requests=None, role="observations"):
         with mock.patch.object(provenance, "check_inputs"):
-            provenance.check_run("observations", log, {}, requests)
+            provenance.check_run(role, log, {}, requests or {"a": "1" * 64})
 
-    def test_matching_run_passes(self):
-        self.check(self.log(), {"a": "1" * 64})
+    def test_matching_runs_pass(self):
+        for role in provenance.RUNS:
+            with self.subTest(role=role):
+                self.check(self.log(role), role=role)
 
     def test_other_settings_refuse(self):
-        with self.assertRaisesRegex(ProvenanceError, "not hf-cpu-f32-t1"):
-            self.check(self.log(settings="hf-cpu-f32-t4"), {"a": "1" * 64})
+        with self.assertRaisesRegex(ProvenanceError, "not hf-cpu-f32-t1's"):
+            self.check(self.log(settings="hf-cpu-f32-t4"))
+
+    def test_settings_label_over_other_numerics_refuses(self):
+        # the review's example: labelled hf-cpu-f32-t1, run with bf16, 4 threads, set size 16, no gate
+        with self.assertRaisesRegex(ProvenanceError, "not hf-cpu-f32-t1's"):
+            self.check(self.log(precision="bf16", threads=4, set_size=16, float32_parity_gate=False))
+        for change in (
+            {"precision": "bf16"},
+            {"threads": 4},
+            {"set_size": 16},
+            {"threads": True},  # JSON true is not 1
+            {"set_size": "1"},
+            {"deterministic_algorithms": False},
+            {"mode": "train"},
+            {"batch": 2},  # a value no settings id defines
+        ):
+            with self.subTest(change=change), self.assertRaisesRegex(ProvenanceError, "not hf-cpu-f32-t1's"):
+                self.check(self.log(**change))
+
+    def test_missing_numerics_refuse(self):
+        log = self.log()
+        del log["numerics"]["threads"]
+        with self.assertRaisesRegex(ProvenanceError, "not hf-cpu-f32-t1's"):
+            self.check(log)
+        del log["numerics"]
+        with self.assertRaisesRegex(ProvenanceError, "no numerics"):
+            self.check(log)
+
+    def test_proof_run_without_the_gate_refuses(self):
+        for role in ("observations", "packed"):
+            with self.subTest(role=role), self.assertRaisesRegex(ProvenanceError, "without --check-f32-parity"):
+                self.check(self.log(role, float32_parity_gate=False), role=role)
+
+    def test_gated_run_needs_a_passing_proof_whatever_its_role(self):
+        log = self.log("threads", float32_parity_gate=True)
+        log["float32_parity"] = {**ParityTests.GOOD, "modules_verified": 26}
+        with self.assertRaisesRegex(ProvenanceError, "failed or verified nothing"):
+            self.check(log, role="threads")
+
+    def test_other_package_version_refuses(self):
+        log = self.log()
+        log["environment"]["versions"]["torch"] = "2.13.0+cpu"
+        with self.assertRaisesRegex(ProvenanceError, r"torch 2.13.0\+cpu \(locked: 2.14.0\+cpu\)"):
+            self.check(log)
+
+    def test_other_python_refuses(self):
+        log = self.log()
+        log["environment"]["versions"]["python"] = "3.11.9"
+        with self.assertRaisesRegex(ProvenanceError, r"Python 3.11.9 \(run.sh: 3.12\)"):
+            self.check(log)
+
+    def test_unrecorded_versions_refuse(self):
+        log = self.log()
+        del log["environment"]["versions"]["numpy"]
+        with self.assertRaisesRegex(ProvenanceError, "recorded the versions of"):
+            self.check(log)
 
     def test_changed_request_refuses(self):
         with self.assertRaisesRegex(ProvenanceError, "request changed"):
@@ -154,7 +224,75 @@ class RunTests(unittest.TestCase):
 
     def test_removed_case_refuses(self):
         with self.assertRaisesRegex(ProvenanceError, "no longer a case"):
-            self.check(self.log(), {})
+            self.check(self.log(), {"b": "1" * 64})
+
+
+class EnvironmentTests(unittest.TestCase):
+    def setUp(self):
+        self.observations = {
+            "environment": {"versions": locked(), "cpu_capability": "AVX512"},
+            "hardware": {"cpu": "Intel(R) Xeon(R) Processor @ 2.50GHz", "logical_cpus": 4},
+        }
+
+    def other(self):
+        return json.loads(json.dumps(self.observations))
+
+    def test_the_observation_runs_environment_passes(self):
+        provenance.check_environment("packed", self.other(), self.observations)
+
+    def test_another_environment_refuses(self):
+        for key, change in (
+            ("versions", lambda log: log["environment"]["versions"].update(transformers="5.18.0")),
+            ("cpu_capability", lambda log: log["environment"].update(cpu_capability="AVX2")),
+            ("hardware", lambda log: log["hardware"].update(logical_cpus=8)),
+        ):
+            log = self.other()
+            change(log)
+            with self.subTest(key=key), self.assertRaisesRegex(ProvenanceError, f"other {key} than the observation"):
+                provenance.check_environment("packed", log, self.observations)
+
+    def test_synthetic_run_compares_its_versions(self):
+        synthetic = {"environment": {"versions": locked()}}
+        provenance.check_environment("synthetic", synthetic, self.observations, model_run=False)
+        synthetic["environment"]["versions"]["numpy"] = "2.0.0"
+        with self.assertRaisesRegex(ProvenanceError, "other versions"):
+            provenance.check_environment("synthetic", synthetic, self.observations, model_run=False)
+
+
+class PublishedTests(unittest.TestCase):
+    """--check holds the published settings, run numerics and versions to their definitions and the lock."""
+
+    def document(self):
+        return {
+            "settings": json.loads(json.dumps(provenance.SETTINGS)),
+            "runs": {role: {"numerics": numerics(role)} for role in ("observations", "packed")},
+            "verification": {role: {"run": numerics(role)} for role in ("repeat", "threads", "bf16")},
+            "environment": {"versions": locked()},
+        }
+
+    def test_consistent_document_passes(self):
+        self.assertEqual(provenance.check_published(self.document()), [])
+
+    def test_edited_settings_definition_is_named(self):
+        document = self.document()
+        document["settings"]["hf-cpu-f32-t1"]["numerics"]["threads"] = 4
+        self.assertEqual(provenance.check_published(document), ["the published settings are not provenance.py's SETTINGS"])
+
+    def test_published_run_numerics_are_checked(self):
+        for place in ("runs", "verification"):
+            document = self.document()
+            role = "packed" if place == "runs" else "bf16"
+            target = document[place][role]["numerics" if place == "runs" else "run"]
+            target["precision"] = "f32" if role == "bf16" else "bf16"
+            with self.subTest(role=role):
+                (problem,) = provenance.check_published(document)
+                self.assertRegex(problem, f"^published {role}: ran under")
+
+    def test_published_versions_are_checked(self):
+        document = self.document()
+        document["environment"]["versions"]["torch"] = "2.13.0+cpu"
+        (problem,) = provenance.check_published(document)
+        self.assertRegex(problem, r"^published the environment: ran on torch 2.13.0\+cpu")
 
 
 class ComparisonTests(Temp):
