@@ -2346,6 +2346,648 @@ impl XybridBundle {
 }
 
 // ============================================================================
+// Decision models (P4 binding feasibility spike — not production surface)
+// ============================================================================
+//
+// Mirrors of `facade::decision`, which owns the one translation to the
+// decision IR. The `decision_spike_*` exports exist only so generated bindings
+// can round-trip these records in every language; production decisions ride
+// `XybridModel::run` as new `XybridEnvelopeKind` variants (P9), not new
+// functions. The `XybridProbe*` records each isolate one shape whose
+// representability the spike reports on.
+//
+// Kept in lib.rs on purpose: React Native's parity guard
+// (bindings/react-native/tests/support/bolt-surface.mjs) reads only this file.
+
+/// Text, or a non-string JSON value carried as JSON text.
+///
+/// The JSON text is parsed in Rust by the order-preserving parser, so object
+/// order and `1` vs `1.0` survive; never build it from a host dictionary.
+#[data]
+#[derive(Clone, PartialEq, Eq)]
+pub enum XybridDecisionContent {
+    /// Named `value`, not `text`: C# rejects a positional record member that
+    /// shares its variant's name (CS8866).
+    Text {
+        value: String,
+    },
+    Json {
+        json_text: String,
+    },
+}
+
+/// How a question is put to the model.
+#[data]
+#[derive(Clone, PartialEq, Eq)]
+pub enum XybridDecisionInstructions {
+    Content { value: XybridDecisionContent },
+}
+
+/// One choice option. The key may affect inference.
+#[data]
+#[derive(Clone, PartialEq, Eq)]
+pub struct XybridDecisionOption {
+    pub key: String,
+    pub description: Option<XybridDecisionContent>,
+}
+
+/// One score level; level `i` has key `"i"`.
+#[data]
+#[derive(Clone, PartialEq, Eq)]
+pub struct XybridDecisionLevel {
+    pub description: Option<XybridDecisionContent>,
+}
+
+/// The question types.
+#[data]
+#[derive(Clone, PartialEq, Eq)]
+pub enum XybridDecisionQuestionKind {
+    Choice {
+        options: Vec<XybridDecisionOption>,
+    },
+    YesNo {
+        yes: Option<XybridDecisionContent>,
+        no: Option<XybridDecisionContent>,
+    },
+    Score {
+        levels: Vec<XybridDecisionLevel>,
+    },
+}
+
+/// One question.
+#[data]
+#[derive(Clone, PartialEq, Eq)]
+pub struct XybridDecisionQuestion {
+    pub id: String,
+    pub instructions: Option<XybridDecisionInstructions>,
+    pub kind: XybridDecisionQuestionKind,
+}
+
+/// A state and the questions asked about it, in order.
+#[data]
+#[derive(Clone, PartialEq, Eq)]
+pub struct XybridDecisionRequest {
+    pub state: Option<XybridDecisionContent>,
+    pub questions: Vec<XybridDecisionQuestion>,
+}
+
+/// Where a scored key came from.
+#[data]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum XybridDecisionOrigin {
+    Caller,
+    Fixed,
+}
+
+/// Which statistic a score answer reports.
+#[data]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum XybridScoreStatistic {
+    Median,
+    Expected,
+}
+
+/// One key of an answer's distribution.
+#[data]
+#[derive(Clone, PartialEq)]
+pub struct XybridDecisionScore {
+    pub key: String,
+    /// `-inf` is valid when another key is finite.
+    pub raw_score: f32,
+    pub probability: f64,
+    pub origin: XybridDecisionOrigin,
+}
+
+/// The answer's value.
+#[data]
+#[derive(Clone, PartialEq)]
+pub enum XybridDecisionValue {
+    Choice {
+        key: String,
+    },
+    YesNo {
+        p_yes: f64,
+    },
+    Score {
+        value: f64,
+        statistic: XybridScoreStatistic,
+    },
+}
+
+/// One question's answer.
+#[data]
+#[derive(Clone, PartialEq)]
+pub struct XybridDecisionAnswer {
+    pub question_id: String,
+    pub distribution: Vec<XybridDecisionScore>,
+    pub value: XybridDecisionValue,
+    pub confidence: Option<f64>,
+}
+
+/// Content-free work counters.
+#[data]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct XybridDecisionUsage {
+    pub passes: u32,
+    pub evaluated_tokens: u64,
+}
+
+/// Every answer, in request order.
+#[data]
+#[derive(Clone, PartialEq)]
+pub struct XybridDecisions {
+    pub answers: Vec<XybridDecisionAnswer>,
+    pub usage: XybridDecisionUsage,
+}
+
+impl From<XybridDecisionContent> for facade::decision::DecisionContent {
+    fn from(content: XybridDecisionContent) -> Self {
+        match content {
+            XybridDecisionContent::Text { value } => Self::Text { text: value },
+            XybridDecisionContent::Json { json_text } => Self::Json { json_text },
+        }
+    }
+}
+
+impl From<facade::decision::DecisionContent> for XybridDecisionContent {
+    fn from(content: facade::decision::DecisionContent) -> Self {
+        match content {
+            facade::decision::DecisionContent::Text { text } => Self::Text { value: text },
+            facade::decision::DecisionContent::Json { json_text } => Self::Json { json_text },
+        }
+    }
+}
+
+impl From<XybridDecisionRequest> for facade::decision::DecisionRequest {
+    fn from(request: XybridDecisionRequest) -> Self {
+        use facade::decision as d;
+        Self {
+            state: request.state.map(Into::into),
+            questions: request
+                .questions
+                .into_iter()
+                .map(|question| d::DecisionQuestion {
+                    id: question.id,
+                    instructions: question
+                        .instructions
+                        .map(|instructions| match instructions {
+                            XybridDecisionInstructions::Content { value } => {
+                                d::DecisionInstructions::Content {
+                                    content: value.into(),
+                                }
+                            }
+                        }),
+                    kind: match question.kind {
+                        XybridDecisionQuestionKind::Choice { options } => {
+                            d::DecisionQuestionKind::Choice {
+                                options: options
+                                    .into_iter()
+                                    .map(|option| d::DecisionOption {
+                                        key: option.key,
+                                        description: option.description.map(Into::into),
+                                    })
+                                    .collect(),
+                            }
+                        }
+                        XybridDecisionQuestionKind::YesNo { yes, no } => {
+                            d::DecisionQuestionKind::YesNo {
+                                yes: yes.map(Into::into),
+                                no: no.map(Into::into),
+                            }
+                        }
+                        XybridDecisionQuestionKind::Score { levels } => {
+                            d::DecisionQuestionKind::Score {
+                                levels: levels
+                                    .into_iter()
+                                    .map(|level| d::DecisionLevel {
+                                        description: level.description.map(Into::into),
+                                    })
+                                    .collect(),
+                            }
+                        }
+                    },
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<facade::decision::DecisionRequest> for XybridDecisionRequest {
+    fn from(request: facade::decision::DecisionRequest) -> Self {
+        use facade::decision as d;
+        Self {
+            state: request.state.map(Into::into),
+            questions: request
+                .questions
+                .into_iter()
+                .map(|question| XybridDecisionQuestion {
+                    id: question.id,
+                    instructions: question
+                        .instructions
+                        .map(|instructions| match instructions {
+                            d::DecisionInstructions::Content { content } => {
+                                XybridDecisionInstructions::Content {
+                                    value: content.into(),
+                                }
+                            }
+                        }),
+                    kind: match question.kind {
+                        d::DecisionQuestionKind::Choice { options } => {
+                            XybridDecisionQuestionKind::Choice {
+                                options: options
+                                    .into_iter()
+                                    .map(|option| XybridDecisionOption {
+                                        key: option.key,
+                                        description: option.description.map(Into::into),
+                                    })
+                                    .collect(),
+                            }
+                        }
+                        d::DecisionQuestionKind::YesNo { yes, no } => {
+                            XybridDecisionQuestionKind::YesNo {
+                                yes: yes.map(Into::into),
+                                no: no.map(Into::into),
+                            }
+                        }
+                        d::DecisionQuestionKind::Score { levels } => {
+                            XybridDecisionQuestionKind::Score {
+                                levels: levels
+                                    .into_iter()
+                                    .map(|level| XybridDecisionLevel {
+                                        description: level.description.map(Into::into),
+                                    })
+                                    .collect(),
+                            }
+                        }
+                    },
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<facade::decision::Decisions> for XybridDecisions {
+    fn from(decisions: facade::decision::Decisions) -> Self {
+        use facade::decision as d;
+        Self {
+            answers: decisions
+                .answers
+                .into_iter()
+                .map(|answer| XybridDecisionAnswer {
+                    question_id: answer.question_id,
+                    distribution: answer
+                        .distribution
+                        .into_iter()
+                        .map(|score| XybridDecisionScore {
+                            key: score.key,
+                            raw_score: score.raw_score,
+                            probability: score.probability,
+                            origin: match score.origin {
+                                d::DecisionOrigin::Caller => XybridDecisionOrigin::Caller,
+                                d::DecisionOrigin::Fixed => XybridDecisionOrigin::Fixed,
+                            },
+                        })
+                        .collect(),
+                    value: match answer.value {
+                        d::DecisionValue::Choice { key } => XybridDecisionValue::Choice { key },
+                        d::DecisionValue::YesNo { p_yes } => XybridDecisionValue::YesNo { p_yes },
+                        d::DecisionValue::Score { value, statistic } => {
+                            XybridDecisionValue::Score {
+                                value,
+                                statistic: match statistic {
+                                    d::ScoreStatistic::Median => XybridScoreStatistic::Median,
+                                    d::ScoreStatistic::Expected => XybridScoreStatistic::Expected,
+                                },
+                            }
+                        }
+                    },
+                    confidence: answer.confidence,
+                })
+                .collect(),
+            usage: XybridDecisionUsage {
+                passes: decisions.usage.passes,
+                evaluated_tokens: decisions.usage.evaluated_tokens,
+            },
+        }
+    }
+}
+
+impl From<XybridDecisions> for facade::decision::Decisions {
+    fn from(decisions: XybridDecisions) -> Self {
+        use facade::decision as d;
+        Self {
+            answers: decisions
+                .answers
+                .into_iter()
+                .map(|answer| d::DecisionAnswer {
+                    question_id: answer.question_id,
+                    distribution: answer
+                        .distribution
+                        .into_iter()
+                        .map(|score| d::DecisionScore {
+                            key: score.key,
+                            raw_score: score.raw_score,
+                            probability: score.probability,
+                            origin: match score.origin {
+                                XybridDecisionOrigin::Caller => d::DecisionOrigin::Caller,
+                                XybridDecisionOrigin::Fixed => d::DecisionOrigin::Fixed,
+                            },
+                        })
+                        .collect(),
+                    value: match answer.value {
+                        XybridDecisionValue::Choice { key } => d::DecisionValue::Choice { key },
+                        XybridDecisionValue::YesNo { p_yes } => d::DecisionValue::YesNo { p_yes },
+                        XybridDecisionValue::Score { value, statistic } => {
+                            d::DecisionValue::Score {
+                                value,
+                                statistic: match statistic {
+                                    XybridScoreStatistic::Median => d::ScoreStatistic::Median,
+                                    XybridScoreStatistic::Expected => d::ScoreStatistic::Expected,
+                                },
+                            }
+                        }
+                    },
+                    confidence: answer.confidence,
+                })
+                .collect(),
+            usage: d::DecisionUsage {
+                passes: decisions.usage.passes,
+                evaluated_tokens: decisions.usage.evaluated_tokens,
+            },
+        }
+    }
+}
+
+fn spike_limits() -> facade::decision::stand_in::StructuralLimits {
+    facade::decision::stand_in::StructuralLimits::default()
+}
+
+fn spike_request_into_ir(
+    request: XybridDecisionRequest,
+) -> Result<facade::decision::stand_in::DecisionRequest, XybridError> {
+    facade::decision::DecisionRequest::from(request)
+        .into_ir(&spike_limits())
+        .map_err(XybridError::from)
+}
+
+/// Spike: FFI request -> facade -> IR (JSON parsed, nulls normalized,
+/// structure checked) -> facade -> FFI.
+#[export]
+pub fn decision_spike_echo_request(
+    request: XybridDecisionRequest,
+) -> Result<XybridDecisionRequest, XybridError> {
+    let ir = spike_request_into_ir(request)?;
+    Ok(facade::decision::DecisionRequest::from_ir(&ir).into())
+}
+
+/// Spike: what the Rust IR saw, one line per item in request order, so a
+/// foreign test can check order against what it sent rather than against a
+/// codec that might be wrong symmetrically.
+#[export]
+pub fn decision_spike_request_outline(
+    request: XybridDecisionRequest,
+) -> Result<Vec<String>, XybridError> {
+    use facade::decision::stand_in as ir;
+    fn content(content: Option<&ir::DecisionContent>) -> String {
+        match content.map(ir::DecisionContent::view) {
+            None => "none".into(),
+            Some(ir::DecisionContentView::Text(text)) => format!("text:{text}"),
+            Some(ir::DecisionContentView::Json(json)) => format!("json:{}", json.to_json_text()),
+        }
+    }
+    let request = spike_request_into_ir(request)?;
+    let mut lines = vec![format!("state={}", content(request.state().body()))];
+    for (q, question) in request.questions().iter().enumerate() {
+        let instructions = match question.instructions() {
+            None => "none".to_string(),
+            Some(ir::DecisionInstructions::Content(c)) => content(Some(c)),
+            // `#[non_exhaustive]` outside its crate: spoken instructions (O2).
+            Some(_) => "unknown".to_string(),
+        };
+        match question.kind() {
+            ir::DecisionQuestionKind::Choice { options } => {
+                lines.push(format!(
+                    "q{q}:id={}:choice:instructions={instructions}",
+                    question.id()
+                ));
+                for (o, option) in options.iter().enumerate() {
+                    lines.push(format!(
+                        "q{q}.o{o}:key={}:{}",
+                        option.key(),
+                        content(option.description())
+                    ));
+                }
+            }
+            ir::DecisionQuestionKind::YesNo { yes, no } => {
+                lines.push(format!(
+                    "q{q}:id={}:yes_no:instructions={instructions}",
+                    question.id()
+                ));
+                lines.push(format!("q{q}.yes:{}", content(yes.as_ref())));
+                lines.push(format!("q{q}.no:{}", content(no.as_ref())));
+            }
+            ir::DecisionQuestionKind::Score { levels } => {
+                lines.push(format!(
+                    "q{q}:id={}:score:instructions={instructions}",
+                    question.id()
+                ));
+                for (l, level) in levels.iter().enumerate() {
+                    lines.push(format!("q{q}.l{l}:{}", content(level.as_ref())));
+                }
+            }
+            _ => lines.push(format!("q{q}:id={}:unknown", question.id())),
+        }
+    }
+    Ok(lines)
+}
+
+/// Spike: run the stub engine (d1 probability math on synthetic scores) and
+/// return the result through the FFI records.
+#[export]
+pub fn decision_spike_decide(
+    request: XybridDecisionRequest,
+) -> Result<XybridDecisions, XybridError> {
+    let ir = spike_request_into_ir(request)?;
+    let decisions = facade::decision::stand_in::stub_decide(&ir);
+    Ok(facade::decision::Decisions::from_ir(&decisions).into())
+}
+
+/// Spike: the bit patterns of every float [`decision_spike_decide`] returns,
+/// as `a<i>.s<j>.raw=<hex8>`, `a<i>.s<j>.p=<hex16>`, `a<i>.value=…`,
+/// `a<i>.confidence=…` lines, so a foreign test can check what it decoded.
+#[export]
+pub fn decision_spike_decide_bits(
+    request: XybridDecisionRequest,
+) -> Result<Vec<String>, XybridError> {
+    let decisions = decision_spike_decide(request)?;
+    let mut lines = Vec::new();
+    for (a, answer) in decisions.answers.iter().enumerate() {
+        for (s, score) in answer.distribution.iter().enumerate() {
+            lines.push(format!("a{a}.s{s}.raw={:08x}", score.raw_score.to_bits()));
+            lines.push(format!("a{a}.s{s}.p={:016x}", score.probability.to_bits()));
+        }
+        lines.push(match &answer.value {
+            XybridDecisionValue::Choice { key } => format!("a{a}.value=choice:{key}"),
+            XybridDecisionValue::YesNo { p_yes } => {
+                format!("a{a}.value=yes_no:{:016x}", p_yes.to_bits())
+            }
+            XybridDecisionValue::Score { value, statistic } => {
+                format!("a{a}.value=score:{:016x}:{statistic:?}", value.to_bits())
+            }
+        });
+        lines.push(match answer.confidence {
+            Some(c) => format!("a{a}.confidence={:016x}", c.to_bits()),
+            None => format!("a{a}.confidence=none"),
+        });
+    }
+    Ok(lines)
+}
+
+/// Spike: compare a result the foreign side re-encoded with the stub
+/// engine's own output, bit for bit. `None` means identical; otherwise the
+/// path of the first difference.
+#[export]
+pub fn decision_spike_verify_decisions(
+    request: XybridDecisionRequest,
+    decisions: XybridDecisions,
+) -> Result<Option<String>, XybridError> {
+    let ir = spike_request_into_ir(request)?;
+    let expected =
+        facade::decision::Decisions::from_ir(&facade::decision::stand_in::stub_decide(&ir));
+    let received = facade::decision::Decisions::from(decisions);
+    if let Some(path) = facade::decision::first_bit_difference(&expected, &received) {
+        return Ok(Some(path));
+    }
+    // Also through the invariant-checking IR constructor.
+    received.into_ir().map_err(XybridError::from)?;
+    Ok(None)
+}
+
+/// Probe: `Vec<Option<data enum>>` and `Vec<Option<String>>`, the shape a
+/// bare `levels: Vec<Option<DecisionContent>>` would need.
+#[data]
+#[derive(Clone, PartialEq, Eq)]
+pub struct XybridProbeOptionalList {
+    pub levels: Vec<Option<XybridDecisionContent>>,
+    pub labels: Vec<Option<String>>,
+}
+
+/// Probe: nested lists (per-pass score rows) and an optional record.
+#[data]
+#[derive(Clone, PartialEq)]
+pub struct XybridProbeNesting {
+    pub raw_scores: Vec<Vec<f32>>,
+    pub probabilities: Vec<Vec<f64>>,
+    pub usage: Option<XybridDecisionUsage>,
+}
+
+/// Probe: a recursive JSON tree, the alternative to carrying JSON as text.
+#[data]
+#[derive(Clone, PartialEq)]
+pub enum XybridProbeJson {
+    Null,
+    Bool { value: bool },
+    Int { value: i64 },
+    Uint { value: u64 },
+    Float { value: f64 },
+    Text { value: String },
+    List { items: Vec<XybridProbeJson> },
+    Map { entries: Vec<XybridProbeJsonEntry> },
+}
+
+/// One entry of a [`XybridProbeJson::Map`], in document order.
+#[data]
+#[derive(Clone, PartialEq)]
+pub struct XybridProbeJsonEntry {
+    pub key: String,
+    pub value: XybridProbeJson,
+}
+
+/// Probe: records directly inside data-enum variants — how
+/// `XybridEnvelopeKind` would carry a request and a result.
+#[data]
+#[derive(Clone, PartialEq)]
+pub enum XybridProbePayload {
+    DecisionRequest { request: XybridDecisionRequest },
+    DecisionResult { decisions: XybridDecisions },
+    Nothing,
+}
+
+/// Probe echo for [`XybridProbeOptionalList`].
+#[export]
+pub fn decision_spike_probe_optional_list(
+    probe: XybridProbeOptionalList,
+) -> XybridProbeOptionalList {
+    probe
+}
+
+/// Probe echo for [`XybridProbeNesting`]; floats come back bit for bit.
+#[export]
+pub fn decision_spike_probe_nesting(probe: XybridProbeNesting) -> XybridProbeNesting {
+    probe
+}
+
+/// Probe: parse JSON text with the order-preserving parser and return it as
+/// a [`XybridProbeJson`] tree.
+#[export]
+pub fn decision_spike_probe_json(json_text: String) -> Result<XybridProbeJson, XybridError> {
+    use facade::decision::stand_in::{JsonKind, JsonNumber, JsonView, OrderedJson};
+    fn tree(view: JsonView<'_>) -> XybridProbeJson {
+        match view.kind() {
+            JsonKind::Null => XybridProbeJson::Null,
+            JsonKind::Bool => XybridProbeJson::Bool {
+                value: view.as_bool().expect("bool node"),
+            },
+            JsonKind::Number => match view.as_number().expect("number node") {
+                JsonNumber::I64(value) => XybridProbeJson::Int { value },
+                JsonNumber::U64(value) => XybridProbeJson::Uint { value },
+                JsonNumber::F64(value) => XybridProbeJson::Float { value },
+            },
+            JsonKind::String => XybridProbeJson::Text {
+                value: view.as_str().expect("string node").to_string(),
+            },
+            JsonKind::Array => XybridProbeJson::List {
+                items: view
+                    .items()
+                    .expect("array node")
+                    .into_iter()
+                    .map(tree)
+                    .collect(),
+            },
+            JsonKind::Object => XybridProbeJson::Map {
+                entries: view
+                    .entries()
+                    .expect("object node")
+                    .into_iter()
+                    .map(|(key, value)| XybridProbeJsonEntry {
+                        key: key.to_string(),
+                        value: tree(value),
+                    })
+                    .collect(),
+            },
+        }
+    }
+    let json = OrderedJson::parse(&json_text, &spike_limits()).map_err(|e| {
+        XybridError::InferenceError {
+            message: format!("invalid JSON at byte {}: {}", e.offset, e.reason),
+        }
+    })?;
+    Ok(tree(json.view()))
+}
+
+/// Probe echo for [`XybridProbeJson`].
+#[export]
+pub fn decision_spike_probe_json_echo(value: XybridProbeJson) -> XybridProbeJson {
+    value
+}
+
+/// Probe echo for [`XybridProbePayload`].
+#[export]
+pub fn decision_spike_probe_payload(payload: XybridProbePayload) -> XybridProbePayload {
+    payload
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 //
@@ -2761,5 +3403,124 @@ stages:
             &history[0].kind,
             XybridEnvelopeKind::Text { text } if text == "hello"
         ));
+    }
+
+    fn decision_request(state_json: &str) -> XybridDecisionRequest {
+        let json = |json_text: &str| XybridDecisionContent::Json {
+            json_text: json_text.into(),
+        };
+        XybridDecisionRequest {
+            state: Some(json(state_json)),
+            questions: vec![
+                XybridDecisionQuestion {
+                    id: "10".into(),
+                    instructions: None,
+                    kind: XybridDecisionQuestionKind::Choice {
+                        options: (0..30)
+                            .map(|i| XybridDecisionOption {
+                                key: ((i * 7) % 30).to_string(),
+                                description: (i % 2 == 0).then(|| json(r#"{"z":1,"a":2}"#)),
+                            })
+                            .collect(),
+                    },
+                },
+                XybridDecisionQuestion {
+                    id: "2".into(),
+                    instructions: Some(XybridDecisionInstructions::Content {
+                        value: XybridDecisionContent::Text {
+                            value: "urgent?".into(),
+                        },
+                    }),
+                    kind: XybridDecisionQuestionKind::YesNo {
+                        yes: Some(json("null")),
+                        no: Some(json(r#""no""#)),
+                    },
+                },
+                XybridDecisionQuestion {
+                    id: "1".into(),
+                    instructions: None,
+                    kind: XybridDecisionQuestionKind::Score {
+                        levels: vec![
+                            XybridDecisionLevel { description: None },
+                            XybridDecisionLevel {
+                                description: Some(json("[1.0,-0]")),
+                            },
+                        ],
+                    },
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn decision_records_cross_bolt_in_order_and_normalized() {
+        let request = decision_request(r#"{"2":1.0,"10":true,"1":null}"#);
+
+        let outline = decision_spike_request_outline(request.clone()).expect("valid request");
+        assert_eq!(outline[0], r#"state=json:{"2":1.0,"10":true,"1":null}"#);
+        let keys: Vec<String> = outline
+            .iter()
+            .filter_map(|line| line.strip_prefix("q0.o"))
+            .map(|rest| {
+                rest.split(':')
+                    .nth(1)
+                    .unwrap()
+                    .trim_start_matches("key=")
+                    .to_string()
+            })
+            .collect();
+        let expected: Vec<String> = (0..30).map(|i| ((i * 7) % 30).to_string()).collect();
+        assert_eq!(keys, expected);
+
+        let echoed = decision_spike_echo_request(request).expect("valid request");
+        let XybridDecisionQuestionKind::YesNo { yes, no } = &echoed.questions[1].kind else {
+            panic!("second question is yes/no")
+        };
+        assert!(yes.is_none(), "JSON null normalizes to absence");
+        assert!(matches!(no, Some(XybridDecisionContent::Text { value }) if value == "no"));
+        let XybridDecisionQuestionKind::Score { levels } = &echoed.questions[2].kind else {
+            panic!("third question is a score")
+        };
+        assert!(matches!(
+            &levels[1].description,
+            Some(XybridDecisionContent::Json { json_text }) if json_text == "[1.0,0]"
+        ));
+    }
+
+    #[test]
+    fn decision_results_cross_bolt_bit_for_bit() {
+        let request = decision_request(r#"{"a":1}"#);
+        let decisions = decision_spike_decide(request.clone()).expect("valid request");
+
+        assert_eq!(
+            decision_spike_verify_decisions(request.clone(), decisions.clone()).unwrap(),
+            None
+        );
+        assert_eq!(
+            decisions.answers[2].distribution[0].raw_score,
+            f32::NEG_INFINITY
+        );
+        let bits = decision_spike_decide_bits(request.clone()).unwrap();
+        assert_eq!(bits.len(), (30 + 2 + 2) * 2 + 3 * 2);
+
+        let mut nudged = decisions;
+        let p = &mut nudged.answers[0].distribution[3].probability;
+        *p = f64::from_bits(p.to_bits() + 1);
+        assert_eq!(
+            decision_spike_verify_decisions(request, nudged).unwrap(),
+            Some("answers[0].distribution[3]".to_string())
+        );
+    }
+
+    #[test]
+    fn invalid_decision_json_is_a_typed_content_free_error() {
+        let error = decision_spike_decide(decision_request(r#"{"secret":1,"secret":2}"#))
+            .err()
+            .expect("duplicate keys are refused");
+        let XybridError::InferenceError { message } = error else {
+            panic!("an invalid request is an inference error")
+        };
+        assert!(message.starts_with("state: invalid JSON"), "{message}");
+        assert!(!message.contains("secret"), "{message}");
     }
 }
