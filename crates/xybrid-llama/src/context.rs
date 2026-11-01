@@ -167,6 +167,12 @@ impl LlamaContext {
         unsafe { ffi::n_ctx(self.ptr) as usize }
     }
 
+    /// The sizes, memory and attention llama.cpp actually gave this context.
+    pub fn facts(&self) -> ContextFacts {
+        // SAFETY: self.ptr is a live context pointer.
+        unsafe { ContextFacts::read(self.ptr) }
+    }
+
     /// The batch size this context was created with, `0` mapped to the
     /// wrapper's default of 512.
     ///
@@ -320,6 +326,46 @@ impl Drop for LlamaContext {
 // concurrently. NOT Sync — see the type-level rationale at the top of
 // this file. The caller is responsible for serializing access.
 unsafe impl Send for LlamaContext {}
+
+/// What llama.cpp actually gave a context, which can differ from what was
+/// asked for: it pads the context size to a multiple of 256, caps a causal
+/// model's batch at the requested context size, and takes the memory and
+/// the attention type from the model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ContextFacts {
+    /// Context size in tokens.
+    pub n_ctx: u32,
+    /// The most tokens one decode call accepts.
+    pub n_batch: u32,
+    /// The most tokens llama.cpp evaluates at once; a model without memory
+    /// or with non-causal attention needs a whole prompt in one.
+    pub n_ubatch: u32,
+    /// Number of sequences.
+    pub n_seq_max: u32,
+    /// Whether the context has memory (a KV cache or recurrent state).
+    /// Without it, llama.cpp decodes with the encoder: the whole batch in
+    /// one microbatch, outputs only where flagged.
+    pub has_memory: bool,
+    /// Whether attention is causal.
+    pub causal_attn: bool,
+}
+
+impl ContextFacts {
+    /// # Safety
+    ///
+    /// `ctx` must be a live context pointer.
+    pub(crate) unsafe fn read(ctx: *mut c_void) -> Self {
+        Self {
+            n_ctx: u32::try_from(ffi::n_ctx(ctx)).unwrap_or(0),
+            n_batch: ffi::n_batch(ctx),
+            n_ubatch: ffi::n_ubatch(ctx),
+            n_seq_max: ffi::n_seq_max(ctx),
+            has_memory: ffi::context_has_memory(ctx),
+            causal_attn: ffi::causal_attn(ctx),
+        }
+    }
+}
 
 /// The most tokens llama.cpp accepts in one decode call on a context created
 /// with these sizes, `native_n_ctx` being the context size it then reports.

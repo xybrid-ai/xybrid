@@ -3,9 +3,10 @@
 //! Owns `llama_model*` through a shared [`ModelHandle`]: the native model is
 //! freed when the last of the [`LlamaModel`] and the contexts created from it
 //! is dropped. Inherent methods over the model pointer cover tokenization,
-//! detokenization, special-token lookup, chat template extraction, and the
-//! recurrent / hybrid architecture predicates the KV-cache prefix-reuse path
-//! gates on.
+//! detokenization, special-token lookup, chat template extraction (default
+//! and named), the GGUF metadata llama.cpp loaded, vocabulary entries, and
+//! the recurrent / hybrid architecture predicates the KV-cache prefix-reuse
+//! path gates on.
 
 use std::ffi::{c_void, CStr};
 use std::sync::Arc;
@@ -286,6 +287,202 @@ impl LlamaModel {
             .ok()
             .map(|s| s.to_string())
     }
+
+    /// The chat template stored under `tokenizer.chat_template.<name>`,
+    /// such as a decision model's `"systemone"`.
+    ///
+    /// Unlike [`Self::chat_template`], a named template gets no built-in
+    /// fallback from llama.cpp: `None` means the GGUF has no such key.
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::InvalidInput`] when `name` contains a NUL byte, and
+    /// [`LlamaError::Internal`] when the template is not UTF-8.
+    pub fn named_chat_template(&self, name: &str) -> LlamaResult<Option<String>> {
+        let c_name = ffi::cstring(name, "chat template name")?;
+        // SAFETY: the handle keeps the model pointer live and `c_name`
+        // outlives the call.
+        let ptr = unsafe { ffi::model_chat_template_named(self.as_ptr(), &c_name) };
+        if ptr.is_null() {
+            return Ok(None);
+        }
+        // SAFETY: ptr is a non-null, NUL-terminated C string owned by the
+        // model, valid for its lifetime; it is copied before returning.
+        let bytes = unsafe { CStr::from_ptr(ptr) }.to_bytes().to_vec();
+        String::from_utf8(bytes)
+            .map(Some)
+            .map_err(|_| LlamaError::Internal(format!("the {name:?} chat template is not UTF-8")))
+    }
+
+    /// Every scalar GGUF metadata key llama.cpp loaded with the model, with
+    /// its value as llama.cpp's own string accessor returns it, sorted by
+    /// key.
+    ///
+    /// These are the *effective* values: llama.cpp writes integers in
+    /// decimal, booleans as `true`/`false`, and floats through
+    /// `std::to_string`, so with six decimals (an `f32` of 1.3373984 reads
+    /// `1.337398`). Array-valued keys are not visible: llama.cpp skips them
+    /// when it loads the model, so this cannot prove a key absent from the
+    /// file (read the GGUF header for that).
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::Internal`] when llama.cpp cannot report an entry or a
+    /// key or value is not UTF-8: the scan is complete or it fails.
+    pub fn meta(&self) -> LlamaResult<Vec<(String, String)>> {
+        // SAFETY: the handle keeps the model pointer live.
+        let count = unsafe { ffi::model_meta_count(self.as_ptr()) };
+        let count = usize::try_from(count).map_err(|_| {
+            LlamaError::Internal("llama.cpp reported no metadata count".to_string())
+        })?;
+        let mut entries = Vec::with_capacity(count);
+        for i in 0..count {
+            let index = i32::try_from(i).expect("the count came from an i32");
+            let key = self.meta_entry(i, |buf, len| {
+                // SAFETY: the handle keeps the model pointer live; `buf` is
+                // writable for `len` bytes, or null with `len == 0`.
+                unsafe { ffi::model_meta_key_by_index(self.as_ptr(), index, buf, len) }
+            })?;
+            let key = String::from_utf8(key)
+                .map_err(|_| LlamaError::Internal(format!("metadata key {i} is not UTF-8")))?;
+            let value = self.meta_entry(i, |buf, len| {
+                // SAFETY: as above.
+                unsafe { ffi::model_meta_val_by_index(self.as_ptr(), index, buf, len) }
+            })?;
+            let value = String::from_utf8(value).map_err(|_| {
+                LlamaError::Internal(format!("the value of metadata key {key:?} is not UTF-8"))
+            })?;
+            entries.push((key, value));
+        }
+        entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries)
+    }
+
+    /// Entry `i` of a metadata scan; it must exist.
+    fn meta_entry(
+        &self,
+        i: usize,
+        write: impl FnMut(*mut std::os::raw::c_char, usize) -> i32,
+    ) -> LlamaResult<Vec<u8>> {
+        ffi::read_meta_string(write)?.ok_or_else(|| {
+            LlamaError::Internal(format!("llama.cpp could not read metadata entry {i}"))
+        })
+    }
+
+    /// The value of the scalar metadata key `key`, as [`Self::meta`] reports
+    /// it, or `None` when the model has no such scalar key. An array-valued
+    /// key also reads `None`.
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::InvalidInput`] when `key` contains a NUL byte, and
+    /// [`LlamaError::Internal`] when the value is not UTF-8.
+    pub fn meta_str(&self, key: &str) -> LlamaResult<Option<String>> {
+        let c_key = ffi::cstring(key, "metadata key")?;
+        let value = ffi::read_meta_string(|buf, len| {
+            // SAFETY: the handle keeps the model pointer live; `c_key`
+            // outlives the call and `buf` is writable for `len` bytes, or
+            // null with `len == 0`.
+            unsafe { ffi::model_meta_val(self.as_ptr(), &c_key, buf, len) }
+        })?;
+        value
+            .map(|bytes| {
+                String::from_utf8(bytes).map_err(|_| {
+                    LlamaError::Internal(format!("the value of metadata key {key:?} is not UTF-8"))
+                })
+            })
+            .transpose()
+    }
+
+    /// The attributes of vocabulary entry `token`, or `None` when it is
+    /// outside the vocabulary.
+    pub fn token_attr(&self, token: i32) -> Option<TokenAttr> {
+        // SAFETY: the handle keeps the model pointer live; the shim checks
+        // the id against the vocabulary.
+        let bits = unsafe { ffi::vocab_get_attr(self.as_ptr(), token) };
+        u32::try_from(bits).ok().map(TokenAttr::from_bits)
+    }
+
+    /// The text vocabulary entry `token` stores, such as `<|im_start|>` for
+    /// a control token, or `None` when it is outside the vocabulary.
+    ///
+    /// This is the raw entry, not the rendered piece
+    /// [`Self::detokenize`] produces: byte-level BPE entries keep their
+    /// byte-to-character mapping (a leading space reads `Ġ`).
+    pub fn token_text(&self, token: i32) -> Option<Vec<u8>> {
+        // SAFETY: the handle keeps the model pointer live; the shim checks
+        // the id against the vocabulary.
+        let ptr = unsafe { ffi::vocab_get_text(self.as_ptr(), token) };
+        if ptr.is_null() {
+            return None;
+        }
+        // SAFETY: ptr is a non-null, NUL-terminated C string owned by the
+        // model, valid for its lifetime; it is copied before returning.
+        Some(unsafe { CStr::from_ptr(ptr) }.to_bytes().to_vec())
+    }
+
+    /// Whether the model has an encoder (T5-style encoder-decoder models).
+    ///
+    /// llama.cpp ignores a context's output cap for these and reserves a
+    /// full batch of output rows instead.
+    pub fn has_encoder(&self) -> bool {
+        // SAFETY: the handle keeps the model pointer live.
+        unsafe { ffi::model_has_encoder(self.as_ptr()) }
+    }
+}
+
+/// The attributes llama.cpp's vocabulary records for a token: a set of the
+/// `LLAMA_TOKEN_ATTR_*` bits.
+///
+/// [`TokenAttr::CONTROL`] marks the special tokens a chat or decision
+/// template spells out (`<|im_start|>`), which special-token parsing turns
+/// back into single tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TokenAttr(u32);
+
+impl TokenAttr {
+    /// No attributes.
+    pub const UNDEFINED: Self = Self(0);
+    /// The unknown token.
+    pub const UNKNOWN: Self = Self(1 << 0);
+    /// An unused vocabulary slot.
+    pub const UNUSED: Self = Self(1 << 1);
+    /// An ordinary token.
+    pub const NORMAL: Self = Self(1 << 2);
+    /// A control (special) token.
+    pub const CONTROL: Self = Self(1 << 3);
+    /// A user-defined token, matched as text before tokenization.
+    pub const USER_DEFINED: Self = Self(1 << 4);
+    /// A byte-fallback token.
+    pub const BYTE: Self = Self(1 << 5);
+    /// A token stored normalized.
+    pub const NORMALIZED: Self = Self(1 << 6);
+    /// Strips whitespace on its left.
+    pub const LSTRIP: Self = Self(1 << 7);
+    /// Strips whitespace on its right.
+    pub const RSTRIP: Self = Self(1 << 8);
+    /// Matches only as a single word.
+    pub const SINGLE_WORD: Self = Self(1 << 9);
+
+    /// The attributes with these `LLAMA_TOKEN_ATTR_*` bits.
+    pub const fn from_bits(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    /// The `LLAMA_TOKEN_ATTR_*` bits.
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+
+    /// Whether every bit of `other` is set.
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// Whether any bit of `other` is set.
+    pub const fn intersects(self, other: Self) -> bool {
+        self.0 & other.0 != 0
+    }
 }
 
 // Send + Sync audit (epic Open decision §3 / brief Phase 2.9).
@@ -305,9 +502,16 @@ impl LlamaModel {
 //   - llama_vocab_is_eog_c          : read-only
 //   - llama_vocab_get_add_bos_c     : read-only
 //   - llama_model_chat_template_c   : read-only (returns interior C string)
+//   - llama_model_chat_template_named_c : read-only (returns interior C string)
+//   - llama_model_meta_count_c / _key_by_index_c / _val_str_by_index_c /
+//     _val_str_c                    : read-only over the loaded metadata map;
+//                                     write to caller's out-buffer
+//   - llama_vocab_get_attr_c        : read-only (range-checked by the shim)
+//   - llama_vocab_get_text_c        : read-only (returns interior C string)
 //   - llama_n_vocab_c               : read-only
 //   - llama_model_is_recurrent_c    : read-only
 //   - llama_model_has_recurrent_state_c : read-only
+//   - llama_model_has_encoder_c     : read-only
 //   - llama_format_chat_with_model_c    : read-only over model template;
 //                                         writes to caller's out-buffer
 //

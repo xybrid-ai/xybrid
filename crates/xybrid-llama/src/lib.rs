@@ -17,6 +17,13 @@
 //! - [`LlamaModel`] — owning handle to a loaded GGUF model
 //! - [`LlamaContext`] — owning handle to a llama context, with KV-cache
 //!   manipulation and per-sequence state snapshot methods
+//! - [`MemorylessContext`] / [`MemorylessParams`] — a context without memory
+//!   for one-shot readouts of decision models (LFM3 d1): one sequence, one
+//!   output row, an explicit token budget
+//! - [`ContextFacts`] — the sizes, memory and attention llama.cpp actually
+//!   gave a context
+//! - [`TokenAttr`] — a vocabulary entry's attributes, from
+//!   [`LlamaModel::token_attr`]
 //! - [`LlamaSeqSnapshot`] — a saved sequence state, restorable into the
 //!   context that saved it
 //! - [`FinalLogits`] — a prompt's final-position label logits and
@@ -69,6 +76,8 @@ mod generation;
 #[cfg(feature = "bindings")]
 mod log_control;
 #[cfg(feature = "bindings")]
+mod memoryless;
+#[cfg(feature = "bindings")]
 mod model;
 #[cfg(feature = "bindings")]
 mod scoring;
@@ -76,7 +85,7 @@ mod scoring;
 mod vision;
 
 #[cfg(feature = "bindings")]
-pub use context::{LlamaContext, LlamaSeqSnapshot};
+pub use context::{ContextFacts, LlamaContext, LlamaSeqSnapshot};
 #[cfg(all(feature = "bindings", feature = "vision"))]
 pub use generation::generate_from_current_logits_streaming;
 #[cfg(feature = "bindings")]
@@ -84,7 +93,9 @@ pub use generation::{format_chat, generate_streaming, generate_with_stops, Strea
 #[cfg(feature = "bindings")]
 pub use log_control::{get_verbosity, set_verbosity};
 #[cfg(feature = "bindings")]
-pub use model::LlamaModel;
+pub use memoryless::{MemorylessContext, MemorylessParams};
+#[cfg(feature = "bindings")]
+pub use model::{LlamaModel, TokenAttr};
 #[cfg(feature = "bindings")]
 pub use scoring::FinalLogits;
 #[cfg(all(feature = "bindings", feature = "vision"))]
@@ -111,6 +122,10 @@ pub struct LlamaContext;
 /// Stub returned when the `bindings` feature is disabled.
 #[cfg(not(feature = "bindings"))]
 pub struct LlamaSeqSnapshot;
+
+/// Stub returned when the `bindings` feature is disabled.
+#[cfg(not(feature = "bindings"))]
+pub struct MemorylessContext;
 
 #[cfg(not(feature = "bindings"))]
 pub fn set_verbosity(_level: i32) {}

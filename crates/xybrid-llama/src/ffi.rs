@@ -15,9 +15,9 @@ use llama_cpp_sys::bindings as sys;
 
 use crate::error::LlamaError;
 
-// Counts this thread's calls into the wrappers that the generation and mtmd
-// evaluation entry points use, so tests can prove their input checks run
-// before any native call.
+// Counts this thread's calls into the wrappers that the generation, mtmd
+// evaluation and readout entry points use, so tests can prove their input
+// checks run before any native call.
 #[cfg(test)]
 thread_local! {
     static NATIVE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -94,12 +94,92 @@ pub(crate) unsafe fn new_context_with_model(
     sys::llama_new_context_with_model_c(model, n_ctx, n_threads, n_batch, flash_attn)
 }
 
+/// Create a one-shot readout context bound to `model`: one sequence, these
+/// sizes, at most `n_outputs_max` outputs (`0` = `n_batch`), no embeddings,
+/// and the model's own attention type.
+///
+/// # Safety
+///
+/// `model` must be a live, non-null pointer returned by
+/// [`load_model_from_file`], and must stay live until the returned context
+/// is freed with [`free_context`]. Returns null on failure.
+pub(crate) unsafe fn new_readout_context(
+    model: *mut c_void,
+    sizes: ReadoutSizes,
+    n_threads: c_int,
+    flash_attn: bool,
+) -> *mut c_void {
+    #[cfg(test)]
+    record_native_call();
+    sys::llama_new_readout_context_c(
+        model,
+        sizes.n_ctx,
+        sizes.n_batch,
+        sizes.n_ubatch,
+        sizes.n_outputs_max,
+        n_threads,
+        flash_attn,
+    )
+}
+
+/// The sizes [`new_readout_context`] asks llama.cpp for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReadoutSizes {
+    pub(crate) n_ctx: u32,
+    pub(crate) n_batch: u32,
+    pub(crate) n_ubatch: u32,
+    /// `0` lets llama.cpp reserve `n_batch` output rows.
+    pub(crate) n_outputs_max: u32,
+}
+
+/// # Safety: `ctx` must be a live context pointer or null (0).
+pub(crate) unsafe fn n_batch(ctx: *const c_void) -> u32 {
+    sys::llama_n_batch_c(ctx)
+}
+
+/// # Safety: `ctx` must be a live context pointer or null (0).
+pub(crate) unsafe fn n_ubatch(ctx: *const c_void) -> u32 {
+    sys::llama_n_ubatch_c(ctx)
+}
+
+/// # Safety: `ctx` must be a live context pointer or null (0).
+pub(crate) unsafe fn n_seq_max(ctx: *const c_void) -> u32 {
+    sys::llama_n_seq_max_c(ctx)
+}
+
+/// Whether llama.cpp gave the context memory (a KV cache or recurrent
+/// state). Without it, a decode runs the encoder.
+///
+/// # Safety: `ctx` must be a live context pointer or null (`false`).
+pub(crate) unsafe fn context_has_memory(ctx: *const c_void) -> bool {
+    sys::llama_context_has_memory_c(ctx)
+}
+
+/// # Safety: `ctx` must be a live context pointer or null (`false`).
+pub(crate) unsafe fn causal_attn(ctx: *const c_void) -> bool {
+    sys::llama_get_causal_attn_c(ctx)
+}
+
+/// The logits row of batch entry `i` from the last decode.
+///
+/// # Safety
+///
+/// `ctx` must be a live context whose last decode succeeded and flagged
+/// entry `i` for output: llama.cpp aborts the process on any other entry
+/// when built without `NDEBUG`. The row holds `n_vocab` floats and stays
+/// valid until the next decode or the context's destruction.
+pub(crate) unsafe fn logits_ith(ctx: *mut c_void, i: i32) -> *const f32 {
+    #[cfg(test)]
+    record_native_call();
+    sys::llama_get_logits_ith_c(ctx, i)
+}
+
 /// Free a context handle.
 ///
 /// # Safety
 ///
-/// `ptr` must have come from [`new_context_with_model`] and not yet been
-/// freed. Null is tolerated.
+/// `ptr` must have come from [`new_context_with_model`] or
+/// [`new_readout_context`] and not yet been freed. Null is tolerated.
 pub(crate) unsafe fn free_context(ptr: *mut c_void) {
     if !ptr.is_null() {
         sys::llama_free_c(ptr);
@@ -303,6 +383,114 @@ pub(crate) unsafe fn model_has_recurrent_state(model: *const c_void) -> bool {
     sys::llama_model_has_recurrent_state_c(model)
 }
 
+/// # Safety: `model` must be a live model pointer or null (`false`).
+pub(crate) unsafe fn model_has_encoder(model: *const c_void) -> bool {
+    sys::llama_model_has_encoder_c(model)
+}
+
+/// Number of scalar metadata keys llama.cpp loaded with the model; negative
+/// for a null model.
+///
+/// # Safety: `model` must be a live model pointer or null.
+pub(crate) unsafe fn model_meta_count(model: *const c_void) -> i32 {
+    sys::llama_model_meta_count_c(model)
+}
+
+/// Writes metadata key `i` into `buf` (NUL-terminated, truncated to fit) and
+/// returns its whole length, or -1 when `i` is not an entry.
+///
+/// # Safety
+///
+/// `model` must be a live model pointer or null. `buf` must be writable for
+/// `buf_len` bytes, or null with `buf_len == 0` to probe the length.
+pub(crate) unsafe fn model_meta_key_by_index(
+    model: *const c_void,
+    i: i32,
+    buf: *mut c_char,
+    buf_len: usize,
+) -> i32 {
+    sys::llama_model_meta_key_by_index_c(model, i, buf, buf_len)
+}
+
+/// Like [`model_meta_key_by_index`], for the entry's value.
+///
+/// # Safety: as [`model_meta_key_by_index`].
+pub(crate) unsafe fn model_meta_val_by_index(
+    model: *const c_void,
+    i: i32,
+    buf: *mut c_char,
+    buf_len: usize,
+) -> i32 {
+    sys::llama_model_meta_val_str_by_index_c(model, i, buf, buf_len)
+}
+
+/// Like [`model_meta_key_by_index`], for the value of `key`; -1 when the
+/// model has no such scalar key.
+///
+/// # Safety: as [`model_meta_key_by_index`], and `key` outlives the call.
+pub(crate) unsafe fn model_meta_val(
+    model: *const c_void,
+    key: &CString,
+    buf: *mut c_char,
+    buf_len: usize,
+) -> i32 {
+    sys::llama_model_meta_val_str_c(model, key.as_ptr(), buf, buf_len)
+}
+
+/// Reads a string from one of the `llama_model_meta_*` accessors, which
+/// return the string's whole length like `snprintf`: a probe with no buffer
+/// sizes it, a second call copies it. `None` when the accessor reports no
+/// such entry.
+///
+/// `write(buf, len)` performs one accessor call.
+pub(crate) fn read_meta_string(
+    mut write: impl FnMut(*mut c_char, usize) -> i32,
+) -> Result<Option<Vec<u8>>, LlamaError> {
+    let Ok(len) = usize::try_from(write(std::ptr::null_mut(), 0)) else {
+        return Ok(None);
+    };
+    let mut buf = vec![0u8; len + 1];
+    let written = write(buf.as_mut_ptr().cast::<c_char>(), buf.len());
+    if usize::try_from(written).ok() != Some(len) || buf[len] != 0 {
+        return Err(LlamaError::Internal(format!(
+            "a metadata string changed length between reads ({len}, then {written})"
+        )));
+    }
+    buf.truncate(len);
+    Ok(Some(buf))
+}
+
+/// The chat template named `name`, or null when the model has none.
+///
+/// # Safety
+///
+/// `model` must be a live model pointer or null. The returned string is
+/// owned by the model and valid for its lifetime; the caller must not free it.
+pub(crate) unsafe fn model_chat_template_named(
+    model: *const c_void,
+    name: &CString,
+) -> *const c_char {
+    sys::llama_model_chat_template_named_c(model, name.as_ptr())
+}
+
+/// The attribute bits of `token`, or -1 when it is outside the vocabulary
+/// (the shim checks the range).
+///
+/// # Safety: `model` must be a live model pointer or null (-1).
+pub(crate) unsafe fn vocab_get_attr(model: *const c_void, token: i32) -> i32 {
+    sys::llama_vocab_get_attr_c(model, token)
+}
+
+/// The stored text of `token`, or null when it is outside the vocabulary.
+///
+/// # Safety
+///
+/// `model` must be a live model pointer or null. The returned string is
+/// owned by the model and valid for its lifetime.
+pub(crate) unsafe fn vocab_get_text(model: *const c_void, token: i32) -> *const c_char {
+    sys::llama_vocab_get_text_c(model, token)
+}
+
 /// Render a chat conversation through the model's built-in template into
 /// `buf`.
 ///
@@ -499,6 +687,8 @@ pub(crate) unsafe fn generate_from_current_logits(
 /// must not be longer than the context's native batch size (its
 /// `decode_limit`): llama.cpp aborts the process on a longer batch.
 pub(crate) unsafe fn decode(ctx: *mut c_void, batch: &mut TokenBatch) -> c_int {
+    #[cfg(test)]
+    record_native_call();
     // The view points into `batch`, which stays borrowed for the call;
     // llama.cpp reads the arrays during the call and keeps no pointer to them.
     let view = batch.view();
@@ -867,4 +1057,60 @@ pub(crate) unsafe fn mtmd_helper_eval_chunks(
         logits_last,
         new_n_past,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One call of an accessor that behaves like `llama_model_meta_*`:
+    /// `snprintf` of `value` into the buffer, -1 for a missing entry.
+    fn accessor_call(value: Option<&[u8]>, buf: *mut c_char, len: usize) -> i32 {
+        let Some(value) = value else { return -1 };
+        if len > 0 {
+            let n = value.len().min(len - 1);
+            // SAFETY: the reader passes a buffer writable for `len` bytes.
+            unsafe {
+                std::ptr::copy_nonoverlapping(value.as_ptr(), buf.cast::<u8>(), n);
+                *buf.add(n) = 0;
+            }
+        }
+        i32::try_from(value.len()).unwrap()
+    }
+
+    #[test]
+    fn a_metadata_string_is_sized_then_copied_whole() {
+        let read = |value: Option<&[u8]>| {
+            read_meta_string(|buf, len| accessor_call(value, buf, len)).unwrap()
+        };
+        assert_eq!(read(None), None);
+        assert_eq!(read(Some(b"1.337398")), Some(b"1.337398".to_vec()));
+        assert_eq!(read(Some(b"")), Some(Vec::new()));
+    }
+
+    #[test]
+    fn a_metadata_string_that_changes_between_reads_is_an_error() {
+        let changing = |second: Option<&'static [u8]>| {
+            let mut calls = 0;
+            read_meta_string(move |buf, len| {
+                calls += 1;
+                let value = if calls == 1 {
+                    Some(&b"abc"[..])
+                } else {
+                    second
+                };
+                accessor_call(value, buf, len)
+            })
+        };
+        assert!(matches!(
+            changing(Some(b"abcd")),
+            Err(LlamaError::Internal(_))
+        ));
+        assert!(matches!(
+            changing(Some(b"ab")),
+            Err(LlamaError::Internal(_))
+        ));
+        assert!(matches!(changing(None), Err(LlamaError::Internal(_))));
+        assert_eq!(changing(Some(b"abc")).unwrap(), Some(b"abc".to_vec()));
+    }
 }
