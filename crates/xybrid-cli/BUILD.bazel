@@ -28,6 +28,22 @@ rust_test(
     crate = ":xybrid-cli",
 )
 
+# The library against every decision fixture case: the parse census and the
+# SystemOne responses, value for value. It calls the library and spawns
+# nothing, so it is not one of the CLI tests below. It finds the cases
+# through the runtime CARGO_MANIFEST_DIR, as choice_cli_test does.
+rust_test(
+    name = "systemone_conformance_test",
+    version = XYBRID_VERSION,
+    srcs = ["tests/systemone_conformance_test.rs"],
+    data = ["//integration-tests:decision_fixtures"],
+    edition = "2021",
+    deps = [
+        ":xybrid-cli",
+        "//crates/xybrid-core:xybrid-core",
+    ],
+)
+
 # crate_features mirrors the LLM half of cargo's `platform-desktop`
 # (= ort-download + llm-llamacpp-vision + huggingface), which is what the shipped
 # cargo CLI is built with. Only two of those names are gated in this crate's own
