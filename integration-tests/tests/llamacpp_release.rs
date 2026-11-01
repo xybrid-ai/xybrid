@@ -225,3 +225,36 @@ fn a_fully_suppressed_stream_still_sends_its_terminal_token() {
     assert_eq!(chunks[0].token, "");
     assert_eq!(chunks[0].finish_reason.as_deref(), Some("length"));
 }
+
+/// A grammar-constrained chat answer that the model ends itself comes back
+/// whole. The final cleanup used to trim its last `e` as the start of the
+/// `end_of_turn>` marker, so "true" came back as "tru" after the stream had
+/// shown "true".
+#[test]
+fn chat_answers_keep_a_final_e() {
+    let Some(model_dir) = functiongemma_dir() else {
+        return;
+    };
+    let messages = [ChatMessage::user("Is the sky blue? Answer true or false.")];
+    let config = constrained(r#"root ::= "true""#, 4, &[]);
+
+    let output = functiongemma(&model_dir, false)
+        .generate(&messages, &config)
+        .expect("chat generation succeeds");
+    assert_eq!(
+        (output.text.as_str(), output.finish_reason.as_str()),
+        ("true", "stop")
+    );
+
+    let mut chunks: Vec<PartialToken> = Vec::new();
+    let output = functiongemma(&model_dir, false)
+        .generate_streaming(&messages, &config, collect_into(&mut chunks))
+        .expect("streaming chat generation succeeds");
+    let streamed: String = chunks.iter().map(|chunk| chunk.token.as_str()).collect();
+    assert_eq!(streamed, "true");
+    assert_eq!(output.text, "true");
+    let terminal = chunks
+        .last()
+        .expect("the stream ends with a terminal token");
+    assert_eq!(terminal.cumulative_text, "true");
+}

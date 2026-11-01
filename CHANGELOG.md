@@ -62,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `finish_reason` once any token was generated. When the text filter suppressed
   every delta, as for a reasoning model whose budget ran out mid-thought, the
   callback never received it.
+- llama.cpp chat answers keep a final `e`. The cleanup that trims a partial
+  chat-template marker off the end matched the start of `end_of_turn>`, so a
+  grammar-constrained `true` came back as `tru` after the stream had shown
+  `true`.
 - Registry resolution sends the runtime Android API, Apple OS or GNU libc
   version and retains backend/OS compatibility refusal reasons. Rust registry
   responses expose the artifact's `min_os` floors; older registry responses

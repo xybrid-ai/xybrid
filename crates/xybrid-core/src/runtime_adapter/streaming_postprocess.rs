@@ -55,6 +55,9 @@ pub(crate) const CHAT_STOP_PATTERNS: &[&str] = &[
 /// Only safe to use in **final-text cleanup** — during streaming
 /// these would false-positive on legitimate text that happens to
 /// start with `|`. [`StreamingTextFilter`] does NOT include them.
+/// Only a complete match counts: [`trim_partial_stop_suffix`] skips
+/// them, because without the `<` their prefixes are ordinary text
+/// (`end_of_turn>` starts with `e`).
 ///
 /// NOTE: deliberately omits a `turn|>` entry. The marker body starts
 /// with the very common letter `t`, and `trim_partial_stop_suffix`
@@ -249,11 +252,18 @@ pub(crate) fn truncate_at_first_stop<S: AsRef<str>>(text: &mut String, patterns:
 /// prefixes (length `1..pattern.len()`) are trimmed; complete
 /// matches are the job of [`truncate_at_first_stop`].
 ///
+/// [`CHAT_STOP_PATTERNS_BROKEN`] entries are skipped: their prefixes are
+/// ordinary text, and `end_of_turn>` trimmed the `e` off every answer
+/// ending in one (`"true"` came back as `"tru"`).
+///
 /// Returns `true` on first trim and stops (matches the prior
 /// llama_cpp behavior).
 pub(crate) fn trim_partial_stop_suffix<S: AsRef<str>>(text: &mut String, patterns: &[S]) -> bool {
     for pattern in patterns {
         let p = pattern.as_ref();
+        if CHAT_STOP_PATTERNS_BROKEN.contains(&p) {
+            continue;
+        }
         for prefix_len in 1..p.len() {
             let prefix = &p[..prefix_len];
             if text.ends_with(prefix) {
@@ -1217,6 +1227,28 @@ mod tests {
             );
             assert_eq!(f.cumulative_emitted(), "A concise image description.");
         }
+    }
+
+    /// The chat paths clean their final text with every pattern, the broken
+    /// variants included. `end_of_turn>` is one, so a partial match on its
+    /// `e` cut the last letter off any answer ending in `e`, even one the
+    /// model ended itself. The real markers' prefixes are still trimmed.
+    #[test]
+    fn trim_partial_stop_suffix_keeps_words_ending_in_broken_marker_prefixes() {
+        let mut patterns: Vec<&str> = CHAT_STOP_PATTERNS.to_vec();
+        patterns.extend_from_slice(CHAT_STOP_PATTERNS_BROKEN);
+        for answer in ["true", "The", "the end", "Ready to send", "| a | b |"] {
+            let mut text = answer.to_string();
+            assert!(
+                !trim_partial_stop_suffix(&mut text, &patterns),
+                "{answer:?} was trimmed to {text:?}"
+            );
+            assert_eq!(text, answer);
+        }
+
+        let mut text = String::from("done <|im_");
+        assert!(trim_partial_stop_suffix(&mut text, &patterns));
+        assert_eq!(text, "done ");
     }
 
     /// Regression guard: `CHAT_STOP_PATTERNS_BROKEN` must NOT contain
