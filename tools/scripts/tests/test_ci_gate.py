@@ -1,5 +1,6 @@
 """Regression tests for docs-only selection and the required CI gate."""
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -98,6 +99,23 @@ class RequiredGateTests(unittest.TestCase):
             needs["clippy"]["result"] = result
             with self.subTest(result=result), self.assertRaises(ValueError):
                 check_jobs(needs)
+
+    def test_docs_only_runs_and_cannot_mask_the_always_on_jobs(self):
+        # Docs-only PRs skip every gated job, and they are where the docs'
+        # install pins get edited, so Version sync (like Workflow index) has no
+        # path gate: it must stay ungated, required, and fail the gate.
+        workflow = (Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        required = re.search(r"^  ci-success:\n(?:    .*\n)*?    needs: \[([^\]]*)\]", workflow, re.M)[1]
+        for job in ("workflow-index", "version-sync"):
+            block = re.search(rf"^  {job}:\n((?:    .*\n|\n)*)", workflow, re.M)[1]
+            with self.subTest(job=job):
+                self.assertNotRegex(block, r"(?m)^    (if|needs):", "an always-on job has no path gate")
+                self.assertIn(job, [name.strip() for name in required.split(",")])
+                for result in ("failure", "cancelled"):
+                    needs = self.needs("README.md", "docs/content/docs/quickstart.mdx")
+                    needs[job] = {"result": result}
+                    with self.assertRaises(ValueError):
+                        check_jobs(needs)
 
     def test_relevant_tooling_cannot_be_skipped(self):
         with self.assertRaises(ValueError):

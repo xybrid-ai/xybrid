@@ -144,7 +144,9 @@ not a repository write, and `star-history.yml` writes to the unprotected
 **Docs-only changes.** `ci.yml` runs on every change. Its first job classifies
 the changed paths with `tools/scripts/ci_gate.py`. When every path is
 documentation, the build matrix is skipped. `CI Success` still reports, and it
-checks that each skipped job had a recorded reason.
+checks that each skipped job had a recorded reason. `Workflow index` and
+`Version sync` have no path gate and run on every change: the docs carry the
+install snippets `version-sync.sh` keeps on the current release.
 
 **Natives.** `build-natives.yml` compiles the llama.cpp static slices once per
 target and feature set and pushes them to `ghcr.io/xybrid-ai/llama-natives`. It
