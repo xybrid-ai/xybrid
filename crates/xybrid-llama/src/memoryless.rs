@@ -233,58 +233,57 @@ impl MemorylessContext {
     /// only ever read from the evaluation this call made, so a failure
     /// never returns an earlier row.
     ///
-    /// A [`ReadoutCancel`] (see [`Self::cancel_handle`]) stops it: before
-    /// it starts, or between two of llama.cpp's graph nodes on the CPU
-    /// backend (other backends finish the pass first).
+    /// A [`ReadoutCancel`] (see [`Self::cancel_handle`]) stops it. Once the
+    /// arguments are checked, a readout ends at the first of:
+    ///
+    /// - a failure, returned as its own error, even when a cancel was
+    ///   requested meanwhile;
+    /// - a cancel request seen at a checkpoint: before the pass starts, when
+    ///   llama.cpp returns from it, and after the result is copied, the
+    ///   readout's completion point. During the pass, llama.cpp's CPU
+    ///   backend also checks between two graph nodes and stops (other
+    ///   backends finish the pass first; its result is still not returned).
+    ///
+    /// A cancel requested after the completion point leaves the result as
+    /// it is.
     ///
     /// # Errors
     ///
     /// [`LlamaError::InvalidInput`], before any native call, when `tokens`
     /// is empty or longer than the budget, `select` is empty, or an id in
     /// either is outside the vocabulary. [`LlamaError::Cancelled`] when the
-    /// context's cancel handle was used (before any native call when it was
-    /// used before this call started). [`LlamaError::DecodeFailed`] when
-    /// llama.cpp fails to evaluate the prompt, and [`LlamaError::Internal`]
-    /// when it returns no logits for the last token.
+    /// context's cancel handle was used before the readout completed (before
+    /// any native call when it was used before this call started).
+    /// [`LlamaError::DecodeFailed`] when llama.cpp fails to evaluate the
+    /// prompt, and [`LlamaError::Internal`] when it returns no logits for
+    /// the last token.
     pub fn read_last(&mut self, tokens: &[i32], select: &[i32]) -> LlamaResult<Vec<f32>> {
         check_readout(tokens, select, self.budget, self.n_vocab)?;
-        if self.cancel.load(Ordering::Relaxed) {
-            return Err(LlamaError::Cancelled);
-        }
-        let mut batch = TokenBatch::new(tokens.len());
-        batch.set(tokens, 0, true);
-        // SAFETY: the context is live. The batch holds at most the budget of
-        // tokens, which the microbatch fits (checked at creation), ids inside
-        // the vocabulary, positions from 0, and exactly one output, which
-        // the context's cap allows.
-        let code = unsafe { ffi::decode(self.ptr, &mut batch) };
-        // llama.cpp reports an evaluation its abort callback stopped as 2.
-        if code == 2 && self.cancel.load(Ordering::Relaxed) {
-            return Err(LlamaError::Cancelled);
-        }
-        if code != 0 {
-            return Err(LlamaError::DecodeFailed {
-                code,
-                n_past_in: 0,
-                detail: format!(
-                    "{} on a {}-token readout",
-                    ffi::decode_failure(code),
-                    tokens.len()
-                ),
-            });
-        }
+        let (ptr, n_vocab) = (self.ptr, self.n_vocab);
         let last = i32::try_from(tokens.len() - 1).expect("the budget fits an i32");
-        // SAFETY: the decode above succeeded and flagged entry `last`, the
-        // prompt's last token, for output.
-        let row = unsafe { ffi::logits_ith(self.ptr, last) };
-        if row.is_null() {
-            return Err(ffi::native_failure("reading the last token's logits"));
-        }
-        // SAFETY: the row holds n_vocab floats, the vocabulary of the model
-        // this context reads, and stays valid until the next decode; the
-        // slice does not outlive this call.
-        let row = unsafe { std::slice::from_raw_parts(row, self.n_vocab) };
-        Ok(select_logits(row, select))
+        readout(
+            || self.cancel.load(Ordering::Relaxed),
+            tokens.len(),
+            select,
+            || {
+                let mut batch = TokenBatch::new(tokens.len());
+                batch.set(tokens, 0, true);
+                // SAFETY: the context is live. The batch holds at most the
+                // budget of tokens, which the microbatch fits (checked at
+                // creation), ids inside the vocabulary, positions from 0, and
+                // exactly one output, which the context's cap allows.
+                unsafe { ffi::decode(ptr, &mut batch) }
+            },
+            || {
+                // SAFETY: the pass succeeded and flagged entry `last`, the
+                // prompt's last token, for output.
+                let row = unsafe { ffi::logits_ith(ptr, last) };
+                // SAFETY: a row holds n_vocab floats, the vocabulary of the
+                // model this context reads, and stays valid until the next
+                // decode; `readout` copies from it before returning.
+                (!row.is_null()).then(|| unsafe { std::slice::from_raw_parts(row, n_vocab) })
+            },
+        )
     }
 
     /// The most tokens one readout may evaluate.
@@ -341,6 +340,50 @@ impl ReadoutCancel {
     }
 }
 
+/// One readout's control flow around its two native steps: `pass` evaluates
+/// the prompt and returns llama.cpp's status, `row` reads the last token's
+/// logits. A failure ends it as it happens; `cancelled` is checked before the
+/// pass, when it returns, and after the result is copied (the completion
+/// point). See [`MemorylessContext::read_last`].
+fn readout<'row>(
+    cancelled: impl Fn() -> bool,
+    n_tokens: usize,
+    select: &[i32],
+    pass: impl FnOnce() -> c_int,
+    row: impl FnOnce() -> Option<&'row [f32]>,
+) -> LlamaResult<Vec<f32>> {
+    if cancelled() {
+        return Err(LlamaError::Cancelled);
+    }
+    let code = pass();
+    // llama.cpp reports a pass its abort callback stopped as 2: the cancel
+    // itself, not a failure.
+    if code == 2 && cancelled() {
+        return Err(LlamaError::Cancelled);
+    }
+    if code != 0 {
+        return Err(LlamaError::DecodeFailed {
+            code,
+            n_past_in: 0,
+            detail: format!(
+                "{} on a {n_tokens}-token readout",
+                ffi::decode_failure(code)
+            ),
+        });
+    }
+    // A backend that does not check for a cancel during the pass finishes
+    // it; a cancel requested meanwhile still wins.
+    if cancelled() {
+        return Err(LlamaError::Cancelled);
+    }
+    let row = row().ok_or_else(|| ffi::native_failure("reading the last token's logits"))?;
+    let logits = select_logits(row, select);
+    if cancelled() {
+        return Err(LlamaError::Cancelled);
+    }
+    Ok(logits)
+}
+
 /// llama.cpp's abort callback: whether the readout's cancel flag is set.
 ///
 /// # Safety
@@ -348,6 +391,28 @@ impl ReadoutCancel {
 /// `data` must point at the context's live `AtomicBool`.
 unsafe extern "C" fn cancel_requested(data: *mut c_void) -> bool {
     (*data.cast::<AtomicBool>()).load(Ordering::Relaxed)
+}
+
+/// For tests, an abort callback that requests a cancel whenever llama.cpp
+/// calls it and never stops the pass: a backend that does not stop.
+///
+/// # Safety
+///
+/// As [`cancel_requested`].
+#[cfg(test)]
+unsafe extern "C" fn cancel_without_stopping(data: *mut c_void) -> bool {
+    (*data.cast::<AtomicBool>()).store(true, Ordering::Relaxed);
+    false
+}
+
+#[cfg(test)]
+impl MemorylessContext {
+    /// Registers [`cancel_without_stopping`] in place of the real check.
+    fn cancel_during_the_pass_without_stopping(&mut self) {
+        let flag = Arc::as_ptr(&self.cancel).cast_mut().cast::<c_void>();
+        // SAFETY: as for the real callback in `create`.
+        assert!(unsafe { ffi::set_abort_callback(self.ptr, cancel_without_stopping, flag) });
+    }
 }
 
 impl Drop for MemorylessContext {
@@ -494,6 +559,121 @@ mod measure;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_models::staged_d1;
+    use std::cell::Cell;
+
+    const ROW: [f32; 4] = [0.5, -1.0, 2.0, 0.0];
+
+    /// Runs the readout's control flow with its native steps injected, no
+    /// model needed: `pass` gets the cancel flag and returns llama.cpp's
+    /// status, and the row step requests a cancel when `cancel_in_row`.
+    /// Returns the result and whether the row was read.
+    fn injected(
+        cancelled_first: bool,
+        pass: impl FnOnce(&AtomicBool) -> c_int,
+        cancel_in_row: bool,
+    ) -> (LlamaResult<Vec<f32>>, bool) {
+        let cancel = AtomicBool::new(cancelled_first);
+        let row_read = Cell::new(false);
+        let result = readout(
+            || cancel.load(Ordering::Relaxed),
+            3,
+            &[2, 0],
+            || pass(&cancel),
+            || {
+                row_read.set(true);
+                if cancel_in_row {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                Some(&ROW[..])
+            },
+        );
+        (result, row_read.get())
+    }
+
+    fn cancel_then(status: c_int) -> impl FnOnce(&AtomicBool) -> c_int {
+        move |cancel| {
+            cancel.store(true, Ordering::Relaxed);
+            status
+        }
+    }
+
+    #[test]
+    fn an_uncancelled_readout_returns_the_selection() {
+        let (result, row_read) = injected(false, |_| 0, false);
+        assert_eq!(result.unwrap(), [2.0, 0.5]);
+        assert!(row_read);
+    }
+
+    #[test]
+    fn a_cancel_before_the_pass_skips_it() {
+        let (result, row_read) = injected(true, |_| panic!("the pass must not run"), false);
+        assert!(matches!(result, Err(LlamaError::Cancelled)));
+        assert!(!row_read);
+    }
+
+    /// A backend that does not stop between nodes finishes the pass; its
+    /// result is not returned.
+    #[test]
+    fn a_pass_finished_after_a_cancel_returns_no_result() {
+        let (result, row_read) = injected(false, cancel_then(0), false);
+        assert!(matches!(result, Err(LlamaError::Cancelled)));
+        assert!(!row_read, "nothing is read after the cancel");
+    }
+
+    #[test]
+    fn a_pass_llama_cpp_stopped_for_a_cancel_is_cancelled() {
+        let (result, _) = injected(false, cancel_then(2), false);
+        assert!(matches!(result, Err(LlamaError::Cancelled)));
+        let (result, _) = injected(false, |_| 2, false);
+        assert!(
+            matches!(result, Err(LlamaError::DecodeFailed { code: 2, .. })),
+            "a stop nobody requested is a failure"
+        );
+    }
+
+    #[test]
+    fn a_failure_during_a_cancel_is_still_the_failure() {
+        let (result, _) = injected(false, cancel_then(-3), false);
+        assert!(matches!(
+            result,
+            Err(LlamaError::DecodeFailed { code: -3, .. })
+        ));
+    }
+
+    #[test]
+    fn a_cancel_while_the_output_is_read_returns_no_result() {
+        let (result, row_read) = injected(false, |_| 0, true);
+        assert!(matches!(result, Err(LlamaError::Cancelled)));
+        assert!(row_read);
+    }
+
+    #[test]
+    fn a_missing_row_is_an_error() {
+        let result = readout(|| false, 3, &[0], || 0, || None);
+        assert!(matches!(result, Err(LlamaError::Internal(_))));
+    }
+
+    /// On the real model with a backend that requests a cancel during the
+    /// pass and never stops it: llama.cpp finishes (status 0), and the
+    /// readout still returns no result.
+    #[test]
+    fn a_real_pass_that_does_not_stop_for_a_cancel_returns_no_result() {
+        let Some(path) = staged_d1() else { return };
+        crate::backend_init();
+        let model = LlamaModel::load(path.to_str().unwrap(), 0).expect("load d1-2B");
+        let mut ctx = MemorylessContext::new(&model, MemorylessParams::new(256, 4, false))
+            .expect("a context");
+        let prompt = model
+            .tokenize_special("<|startoftext|><|im_start|>user\nHello", false)
+            .expect("tokenize");
+        assert!(ctx.read_last(&prompt, &[0]).is_ok());
+        ctx.cancel_during_the_pass_without_stopping();
+        assert!(matches!(
+            ctx.read_last(&prompt, &[0]),
+            Err(LlamaError::Cancelled)
+        ));
+    }
 
     fn facts(n: u32) -> ContextFacts {
         ContextFacts {
