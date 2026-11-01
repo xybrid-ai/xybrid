@@ -305,7 +305,9 @@ pub enum DecisionRefusalKind {
     /// NaN or `+inf` among a question's scores, or no finite score.
     NonFiniteScores,
     /// Decision metadata, a template or a vocabulary this build does not
-    /// implement.
+    /// implement. One refusal of this kind also depends on the request:
+    /// escaping that would take too much work
+    /// ([`DecisionError::EscapeWorkExceeded`]).
     UnsupportedMetadata,
     /// Decision metadata no model may carry.
     InvalidMetadata,
@@ -670,6 +672,14 @@ pub enum DecisionError {
     /// Escaping a string's special-token spellings would take more work than
     /// the protocol allows (an unfamiliar vocabulary of long spellings
     /// sharing a prefix, against text that keeps matching it).
+    ///
+    /// Unlike the other refusals of its kind, it depends on the request's
+    /// text as well as on the admitted vocabulary: one vocabulary can escape
+    /// a short state and refuse a long one that keeps walking its spellings'
+    /// shared prefix, so a snapshot of the model's capabilities cannot
+    /// predict it. It cannot happen on d1-2B or d1-omni-2B, whose spellings
+    /// each start with `<` and hold no other, so escaping takes a few steps
+    /// per byte, far below the ceiling.
     #[error("escaping special-token spellings would take more work than this model's vocabulary is allowed")]
     EscapeWorkExceeded,
     /// A question's prompt renders to more bytes than its pass can hold: the
@@ -760,7 +770,10 @@ impl DecisionError {
     ///
     /// - A model the protocol does not implement (unsupported metadata,
     ///   template, profile or vocabulary) is
-    ///   [`AdapterError::UnsupportedModelCapability`].
+    ///   [`AdapterError::UnsupportedModelCapability`]. So is escaping that
+    ///   would take too much work ([`Self::EscapeWorkExceeded`]), which
+    ///   depends on the request's text as well as on the vocabulary: a
+    ///   capability snapshot of the model cannot predict it.
     /// - Invalid decision metadata is [`AdapterError::RuntimeError`], the
     ///   category of a model that fails to load.
     /// - An answer the model's output cannot make, non-finite scores, a

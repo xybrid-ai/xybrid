@@ -32,16 +32,18 @@ use crate::ir::decision::{
 /// U+200B ZERO WIDTH SPACE, what `d1_break` inserts.
 const ZWSP: &str = "\u{200b}";
 
-/// Most CONTROL spellings of 2 bytes or more a vocabulary may have: d1-2B
-/// has 124 and d1-omni-2B 126; 4,096 leaves room for image grids of up to
-/// 64 × 64 tile tokens in a related vocabulary.
+/// Most CONTROL spellings of 2 bytes or more a vocabulary may have: a round
+/// ceiling well above d1-2B's 124 and d1-omni-2B's 126, to be raised with
+/// evidence when a profile needs more.
 pub(super) const MAX_SPELLINGS: usize = 4096;
 
-/// Longest CONTROL spelling, in bytes: d1-2B's longest
-/// (`<|img_row_10_col_10|>`) is 21.
+/// Longest CONTROL spelling, in bytes: a round ceiling well above d1-2B's
+/// longest (`<|img_row_10_col_10|>`, 21 bytes).
 pub(super) const MAX_SPELLING_BYTES: usize = 256;
 
-/// All CONTROL spellings together, in bytes: d1-2B's 124 take 2,238.
+/// All CONTROL spellings together, in bytes: a round ceiling well above
+/// d1-2B's 2,238 (its 124 spellings), to be raised with evidence when a
+/// profile needs more.
 pub(super) const MAX_SPELLINGS_BYTES: usize = 64 << 10;
 
 /// Trie steps escaping may take per byte of a string, all passes together.

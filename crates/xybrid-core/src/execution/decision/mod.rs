@@ -67,8 +67,9 @@
 //!   one past 4,096 spellings, 256 bytes each or 64 KiB in all (d1-2B has
 //!   124, at most 21 bytes, 2,238 in all), and escaping that would take more
 //!   than 64 trie steps per byte of a string plus 1,024
-//!   ([`DecisionError::EscapeWorkExceeded`]): upstream compares every
-//!   spelling at every candidate position, with no bound.
+//!   ([`DecisionError::EscapeWorkExceeded`], which depends on the request's
+//!   text as well as on the vocabulary): upstream compares every spelling at
+//!   every candidate position, with no bound.
 //!
 //! As upstream, only CONTROL spellings are broken: USER_DEFINED ones in the
 //! caller's text (`<think>`, `</think>`, `<tool_call>`, …) still tokenize as
