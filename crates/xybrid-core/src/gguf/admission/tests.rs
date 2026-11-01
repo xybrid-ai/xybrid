@@ -401,8 +401,8 @@ fn matrix() -> Vec<Row> {
             untyped(),
             Malformed,
         ),
-        // Foreign-prefix decision types (other foreign decision keys are in
-        // `the_admission_matrix_foreign_decision_keys`).
+        // Decision keys under a prefix other than the architecture's: any
+        // `<other>.decision.*` or bare `decision.*` key is an error (C12).
         row(
             "a decision type under another architecture's prefix",
             d1_builder().str("lfm2.decision.type", "lfm2-d1"),
@@ -416,6 +416,26 @@ fn matrix() -> Vec<Row> {
         row(
             "an ordinary model tagged for another architecture",
             llama().str("lfm3.decision.type", "lfm3-d1"),
+            Malformed,
+        ),
+        row(
+            "a temperature under another architecture's prefix",
+            d1_builder().f32("lfm2.decision.temperature.choice", 1.0),
+            Malformed,
+        ),
+        row(
+            "an ordinary model with another architecture's temperature",
+            llama().f32("lfm3.decision.temperature.choice", 1.0),
+            Malformed,
+        ),
+        row(
+            "an ordinary model with another architecture's score_bias",
+            llama().f32("lfm3.decision.score_bias.5.0", 0.5),
+            Malformed,
+        ),
+        row(
+            "a bare decision key",
+            llama().str("decision.type", "lfm3-d1"),
             Malformed,
         ),
         // Ordinary models.
@@ -461,40 +481,24 @@ fn matrix() -> Vec<Row> {
         gguf: huge_key,
         class: Class::Malformed,
     });
+    rows.push(row(
+        "an ordinary model over the key ceiling",
+        with_keys(llama(), 4097),
+        Class::Malformed,
+    ));
     rows
+}
+
+/// `builder` with filler keys added until it has `keys` metadata keys.
+fn with_keys(builder: GgufBuilder, keys: u32) -> GgufBuilder {
+    let header = GgufHeader::read(&builder.build()[..], &GgufLimits::default()).unwrap();
+    let has = u32::try_from(header.metadata().len()).unwrap();
+    (has..keys).fold(builder, |builder, i| builder.u32(&format!("filler.{i}"), i))
 }
 
 #[test]
 fn the_admission_matrix() {
     for row in matrix() {
-        check_row(&row);
-    }
-}
-
-/// Decision keys other than `*.decision.type` under a prefix that is not
-/// the architecture's (C12: any `<other_arch>.decision.*` key is an error).
-/// The classifier on this base checks only a foreign `*.decision.type`; P2
-/// fixes the rule in `classify.rs` on its own branch.
-#[test]
-#[ignore = "needs P2's classify fix"]
-fn the_admission_matrix_foreign_decision_keys() {
-    for row in [
-        row(
-            "a temperature under another architecture's prefix",
-            d1_builder().f32("lfm2.decision.temperature.choice", 1.0),
-            Class::Malformed,
-        ),
-        row(
-            "an ordinary model with another architecture's temperature",
-            llama().f32("lfm3.decision.temperature.choice", 1.0),
-            Class::Malformed,
-        ),
-        row(
-            "an ordinary model with another architecture's score_bias",
-            llama().f32("lfm3.decision.score_bias.5.0", 0.5),
-            Class::Malformed,
-        ),
-    ] {
         check_row(&row);
     }
 }
@@ -612,26 +616,27 @@ fn an_admitted_model_carries_what_its_load_needs() {
     assert_eq!(model.spec(), spec);
     assert_eq!(model.profile(), DecisionProfileId::Lfm3D1Text);
     assert_eq!(model.path(), dir.path().join(MODEL_FILE));
+
+    // The scanned header, stamped with the file it came from: the one
+    // identity a load checks the file against.
     assert_eq!(
         model.header(),
-        &GgufHeader::read(&d1[..], &GgufLimits::default()).unwrap()
+        &GgufHeader::read_file(model.path()).unwrap(),
+        "the same file, read again"
     );
-    assert_eq!(model.file_len(), d1.len() as u64);
-    let on_disk = std::fs::metadata(dir.path().join(MODEL_FILE)).unwrap();
-    assert_eq!(model.modified(), on_disk.modified().unwrap());
+    let stamp = model.header().file_stamp().expect("read from its file");
+    assert_eq!(stamp.len(), d1.len() as u64);
+    let on_disk = std::fs::metadata(model.path()).unwrap();
+    assert_eq!(stamp.modified(), on_disk.modified().ok());
+    model
+        .header()
+        .verify_file_unchanged(model.path())
+        .expect("the file is as admitted");
 
-    model.verify_unchanged().expect("the file is as admitted");
-    std::fs::write(dir.path().join(MODEL_FILE), llama().build()).unwrap();
-    match model.verify_unchanged() {
-        Err(AdapterError::IOError(error)) => {
-            assert!(error.to_string().contains("changed since it was admitted"))
-        }
-        other => panic!("a replaced file passed: {other:?}"),
-    }
-    std::fs::remove_file(dir.path().join(MODEL_FILE)).unwrap();
+    std::fs::write(model.path(), llama().build()).unwrap();
     assert!(matches!(
-        model.verify_unchanged(),
-        Err(AdapterError::IOError(error)) if error.kind() == std::io::ErrorKind::NotFound
+        model.header().verify_file_unchanged(model.path()),
+        Err(GgufError::FileChanged { .. })
     ));
 }
 
@@ -654,6 +659,25 @@ fn an_invalid_spec_is_refused_before_the_gguf_is_read() {
             message.starts_with("invalid choice scorer spec:"),
             "{fields}: {message}"
         );
+    }
+}
+
+/// The key ceiling applies to every GGUF admission reads: an ordinary chat
+/// model over it is refused, not truncated, with a message that gives the
+/// counts and nothing from the file. One at the ceiling is admitted.
+#[test]
+fn a_chat_model_over_the_key_ceiling_is_refused_with_its_counts() {
+    assert_eq!(GgufLimits::DEFAULT_MAX_METADATA_ENTRIES, 4096);
+    for metadata in [chat(), vision()] {
+        assert_eq!(
+            invalid_input(admit(&metadata, &with_keys(llama(), 4097).build())),
+            "model 'bundle-model': its GGUF cannot be classified, so it does not load: \
+             the GGUF header declares 4097 metadata keys; the scan allows 4096"
+        );
+        assert!(matches!(
+            admit(&metadata, &with_keys(llama(), 4096).build()),
+            Ok(GgufAdmission::NotDecision)
+        ));
     }
 }
 
@@ -814,11 +838,12 @@ mod published {
         let model = admitted(admit_gguf(&named(decision()), &dir).expect("d1-2B is admitted"));
         assert_eq!(model.profile(), DecisionProfileId::Lfm3D1Text);
         assert_eq!(model.path(), dir.join(D1_FILE));
-        assert_eq!(model.file_len(), 1_099_629_888);
+        let stamp = model.header().file_stamp().expect("read from its file");
+        assert_eq!(stamp.len(), 1_099_629_888);
         // Nothing but the decision type tells it apart from a chat model: it
         // carries an ordinary chat template too.
         assert!(model.header().get("tokenizer.chat_template").is_some());
-        model.verify_unchanged().unwrap();
+        model.header().verify_file_unchanged(model.path()).unwrap();
 
         for (label, metadata) in [("Gguf", chat()), ("VisionLanguage", vision())] {
             let (capability, _) = capability_refusal(admit_gguf(&named(metadata), &dir));
@@ -826,9 +851,8 @@ mod published {
         }
     }
 
-    /// The sequence a load follows: admit, load natively, then check the
-    /// file is still the one admitted and llama.cpp read the metadata the
-    /// admitted header holds.
+    /// The sequence a load follows: admit, load natively, then check that
+    /// llama.cpp loaded the admitted file, as its header predicts.
     #[cfg(feature = "llm-llamacpp")]
     #[test]
     fn an_admitted_d1_2b_loads_and_matches_its_admission() {
@@ -838,8 +862,7 @@ mod published {
         let native =
             xybrid_llama::LlamaModel::load(model.path().to_str().expect("a UTF-8 path"), 0)
                 .expect("load d1-2B");
-        model.verify_unchanged().expect("the admitted file");
-        crate::gguf::verify_native_metadata(model.header(), &native)
-            .expect("llama.cpp read the admitted header");
+        crate::gguf::verify_native_load(model.path(), model.header(), &native)
+            .expect("llama.cpp loaded the admitted file");
     }
 }

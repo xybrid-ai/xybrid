@@ -3981,6 +3981,14 @@ mod tests {
                 Gguf::new().u32("x", 1).bytes(),
                 "GGUF key \"general.architecture\" is missing",
             ),
+            // An ordinary chat model over the key ceiling: refused, with its
+            // counts, not truncated.
+            (
+                (1..4097)
+                    .fold(lfm3_chat(), |gguf, i| gguf.u32(&format!("filler.{i}"), i))
+                    .bytes(),
+                "the GGUF header declares 4100 metadata keys; the scan allows 4096",
+            ),
         ] {
             let dir = TempDir::new().unwrap();
             let path = dir.path().join("model.gguf");

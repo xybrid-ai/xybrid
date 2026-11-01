@@ -39,21 +39,23 @@
 //!
 //! A consistency check between metadata and file, not a cryptographic
 //! identity: registry downloads are sha256-verified when they are fetched.
-//! Admission records the file's length and modification time when it reads
-//! the header; after the native load, the caller checks the file is still
-//! the one admitted ([`AdmittedDecisionModel::verify_unchanged`]) and that
-//! llama.cpp loaded the metadata the header holds (`verify_native_metadata`,
-//! feature `llm-llamacpp`). The latter compares llama.cpp's string view of
-//! every scalar key with the header: a scalar consistency check, not a file
-//! identity (arrays, such as the vocabulary, and tensor data are not
-//! compared).
+//! The header admission reads records the file it came from
+//! ([`GgufHeader::file_stamp`]: size, modification time, device and inode
+//! on Unix, and the SHA-256 of the header bytes), and a decision model's
+//! load goes:
+//!
+//! 1. `admit_gguf(&metadata, model_dir)`, before any context exists;
+//! 2. `xybrid_llama::LlamaModel::load` of [`AdmittedDecisionModel::path`];
+//! 3. `verify_native_load(admitted.path(), admitted.header(), &model)`
+//!    (feature `llm-llamacpp`), before the model is used: the file is still
+//!    the one admitted, and llama.cpp holds the scalar metadata its header
+//!    predicts.
 //!
 //! It checks decision identity only: whether the declared runtime can load
 //! the file is still for that runtime to find out.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use super::classify::{classify, DecisionClassification, DecisionProfileId};
 use super::error::GgufError;
@@ -86,14 +88,15 @@ pub enum GgufAdmission {
 }
 
 /// A decision GGUF admitted for a `GgufDecision` scorer: everything a load
-/// needs from the admission, as it was when the header was read.
+/// needs from the admission. The file's identity when it was read is its
+/// header's [`file_stamp`](GgufHeader::file_stamp).
 pub struct AdmittedDecisionModel {
     spec: GgufDecisionSpec,
     profile: DecisionProfileId,
     path: PathBuf,
-    header: GgufHeader,
-    file_len: u64,
-    modified: SystemTime,
+    // Boxed: with its file stamp a header is larger than the rest of the
+    // admission, and `GgufAdmission`'s other variant is empty.
+    header: Box<GgufHeader>,
 }
 
 impl AdmittedDecisionModel {
@@ -114,47 +117,12 @@ impl AdmittedDecisionModel {
         &self.path
     }
 
-    /// The header admission read and classified: the single source of the
-    /// model's template and temperatures (read through
-    /// [`effective_f32`](super::effective_f32)), and what the loaded model
-    /// is verified against.
+    /// The header admission read and classified, with its file stamp: the
+    /// single source of the model's template and temperatures (read through
+    /// [`effective_f32`](super::effective_f32)), and what `verify_native_load`
+    /// checks the file and the loaded model against.
     pub fn header(&self) -> &GgufHeader {
         &self.header
-    }
-
-    /// The file's length in bytes when its header was read.
-    pub fn file_len(&self) -> u64 {
-        self.file_len
-    }
-
-    /// The file's modification time when its header was read.
-    pub fn modified(&self) -> SystemTime {
-        self.modified
-    }
-
-    /// Checks the file at [`Self::path`] still has the length and
-    /// modification time it had when it was admitted. Call it after the
-    /// native load: a file replaced in between fails here (unless the
-    /// replacement keeps both, which `verify_native_metadata` then has to
-    /// catch).
-    ///
-    /// # Errors
-    ///
-    /// [`AdapterError::IOError`] when the file cannot be read or has
-    /// changed.
-    pub fn verify_unchanged(&self) -> Result<(), AdapterError> {
-        let now = file_identity(&self.path).map_err(|error| {
-            AdapterError::IOError(std::io::Error::new(
-                error.kind(),
-                format!("cannot read the admitted GGUF: {error}"),
-            ))
-        })?;
-        if now != (self.file_len, self.modified) {
-            return Err(AdapterError::IOError(std::io::Error::other(
-                "the admitted GGUF has changed since it was admitted",
-            )));
-        }
-        Ok(())
     }
 }
 
@@ -168,7 +136,6 @@ impl fmt::Debug for AdmittedDecisionModel {
             .field("metadata_keys", &self.header.metadata().len())
             .field("tensors", &self.header.tensors().len())
             .field("header_bytes", &self.header.header_bytes())
-            .field("file_len", &self.file_len)
             .finish_non_exhaustive()
     }
 }
@@ -182,18 +149,18 @@ impl fmt::Debug for AdmittedDecisionModel {
 /// standalone files, Hugging Face downloads with generated metadata) before
 /// any context is allocated. A `GgufDecision` spec and its metadata
 /// ([`ModelMetadata::validate`]) are validated first, without reading
-/// anything. Reading the header reads only the header (8 MB
-/// for d1-2B's 128,000-token vocabulary), within
-/// [`GgufLimits`](super::GgufLimits)' default ceiling.
+/// anything. Reading the header reads and hashes only the header (8 MB for
+/// d1-2B's 128,000-token vocabulary), within [`GgufLimits`](super::GgufLimits)'
+/// defaults: 128 MiB and 4,096 metadata keys, for every GGUF it reads.
 ///
 /// # Errors
 ///
-/// - [`AdapterError::IOError`] when the file cannot be read, or changes
-///   while its header is read;
+/// - [`AdapterError::IOError`] when the file cannot be read;
 /// - [`AdapterError::InvalidInput`] for an invalid `GgufDecision` spec or
 ///   metadata (a `vision_encoder` block included), a header that does not
-///   read or classify completely, and a `GgufDecision` scorer whose protocol
-///   differs from the GGUF's decision type;
+///   read or classify completely (one over the key ceiling included), and a
+///   `GgufDecision` scorer whose protocol differs from the GGUF's decision
+///   type;
 /// - [`AdapterError::UnsupportedModelCapability`] for a decision GGUF
 ///   declared as anything but a `GgufDecision` scorer, and for a
 ///   `GgufDecision` scorer on a GGUF that is not a decision model or whose
@@ -226,15 +193,7 @@ pub fn admit_gguf(
     };
 
     let path = model_dir.join(model_file);
-    let (file_len, modified) = file_identity(&path).map_err(|error| unreadable(model_id, error))?;
     let header = GgufHeader::read_file(&path).map_err(|error| unclassifiable(model_id, error))?;
-    let after = file_identity(&path).map_err(|error| unreadable(model_id, error))?;
-    if after != (file_len, modified) {
-        return Err(AdapterError::IOError(std::io::Error::other(format!(
-            "model '{model_id}': its GGUF changed while its header was read"
-        ))));
-    }
-
     let classification = classify(&header).map_err(|error| unclassifiable(model_id, error))?;
     let profile = check_declaration(metadata, declared, &classification)?;
     Ok(match (declared, profile) {
@@ -242,9 +201,7 @@ pub fn admit_gguf(
             spec: spec.clone(),
             profile,
             path,
-            header,
-            file_len,
-            modified,
+            header: Box::new(header),
         }),
         _ => GgufAdmission::NotDecision,
     })
@@ -328,24 +285,14 @@ fn check_declaration(
     }
 }
 
-/// The file's length and modification time.
-fn file_identity(path: &Path) -> std::io::Result<(u64, SystemTime)> {
-    let metadata = std::fs::metadata(path)?;
-    Ok((metadata.len(), metadata.modified()?))
-}
-
-/// An I/O failure on the model's GGUF, with its kind.
-fn unreadable(model_id: &str, error: std::io::Error) -> AdapterError {
-    AdapterError::IOError(std::io::Error::new(
-        error.kind(),
-        format!("model '{model_id}': cannot read its GGUF: {error}"),
-    ))
-}
-
-/// A header that does not read or classify completely.
+/// A header that does not read or classify completely. An I/O failure stays
+/// one, with its kind.
 fn unclassifiable(model_id: &str, error: GgufError) -> AdapterError {
     match error {
-        GgufError::Io(error) => unreadable(model_id, error),
+        GgufError::Io(error) => AdapterError::IOError(std::io::Error::new(
+            error.kind(),
+            format!("model '{model_id}': cannot read its GGUF: {error}"),
+        )),
         other => AdapterError::InvalidInput(format!(
             "model '{model_id}': its GGUF cannot be classified, so it does not load: {}",
             bounded(&other.to_string())
