@@ -752,48 +752,61 @@ struct DecisionGguf {
 ///
 /// # Errors
 ///
-/// [`SdkError::LoadError`] for a decision model this build does not run,
-/// and for a header that does not read or classify completely: a damaged
-/// file is not evidence that a model is ordinary.
-/// [`SdkError::UnsupportedModelCapability`] for `model_id`'s GGUF when it
-/// declares more metadata keys than this build reads: a resource limit,
-/// reported with both counts, not a fault of the file.
+/// By category, so that callers can tell a refusal from a failure:
+///
+/// - [`SdkError::UnsupportedModelCapability`] for a decision model this
+///   build does not run, and for a GGUF that declares more metadata keys
+///   than this build reads (a resource limit, reported with both counts);
+/// - [`SdkError::IoError`] when the header cannot be read, with the I/O
+///   error's kind;
+/// - [`SdkError::LoadError`] for a header that does not read or classify
+///   completely: a damaged file is not evidence that a model is ordinary.
+///
+/// The model id and file name appear escaped and cut short, and strings
+/// from the file quoted and cut short; never request content.
 fn classify_gguf(path: &Path, filename: &str, model_id: &str) -> SdkResult<Option<DecisionGguf>> {
-    let unclassifiable = |error: xybrid_core::gguf::GgufError| match error {
-        xybrid_core::gguf::GgufError::TooManyEntries { count, limit } => {
-            SdkError::UnsupportedModelCapability {
-                model_id: model_id.to_string(),
-                capability: "loading in this build".to_string(),
-                hint: format!(
-                    "the GGUF declares {count} metadata keys, above this build's limit of {limit}"
-                ),
-            }
-        }
+    let not_run_here = |hint: String| SdkError::UnsupportedModelCapability {
+        model_id: label(model_id),
+        capability: "loading in this build".to_string(),
+        hint,
+    };
+    let refused = |error: xybrid_core::gguf::GgufError| match error {
+        xybrid_core::gguf::GgufError::Io(error) => SdkError::IoError(std::io::Error::new(
+            error.kind(),
+            format!(
+                "cannot read the GGUF header of '{}': {error}",
+                label(filename)
+            ),
+        )),
+        xybrid_core::gguf::GgufError::TooManyEntries { count, limit } => not_run_here(format!(
+            "the GGUF declares {count} metadata keys, above this build's limit of {limit}"
+        )),
         other => SdkError::load(format!(
-            "'{filename}' cannot be classified: {}. A GGUF that cannot be classified from its \
+            "'{}' cannot be classified: {}. A GGUF that cannot be classified from its \
              complete header is refused, not assumed to be an ordinary model",
+            label(filename),
             bounded(&other.to_string())
         )),
     };
-    let header = GgufHeader::read_file(path).map_err(unclassifiable)?;
-    let profile = match classify(&header).map_err(unclassifiable)? {
+    let header = GgufHeader::read_file(path).map_err(refused)?;
+    let profile = match classify(&header).map_err(refused)? {
         DecisionClassification::NotDecision => return Ok(None),
         DecisionClassification::Supported(profile) => profile,
         DecisionClassification::Unsupported {
             decision_type,
             reason,
         } => {
-            return Err(SdkError::load(format!(
-                "'{filename}' is a decision model (decision type {}) that this build does not \
-                 run: {}",
+            return Err(not_run_here(format!(
+                "its GGUF is a decision model (decision type {}) that this build does not run: \
+                 {}",
                 quoted(&decision_type),
                 bounded(&reason.to_string())
             )))
         }
         _ => {
-            return Err(SdkError::load(format!(
-                "'{filename}' is a decision model this build does not run"
-            )))
+            return Err(not_run_here(
+                "its GGUF is a decision model that this build does not run".to_string(),
+            ))
         }
     };
     let text = |key: &str| {
@@ -904,6 +917,18 @@ fn bounded(text: &str) -> String {
         None => text.to_string(),
         Some((end, _)) => format!("{}…", &text[..end]),
     }
+}
+
+/// A model id or file name as an error repeats it: control characters,
+/// quotes and backslashes escaped, cut to 128 characters. Neither is
+/// trusted to be short or printable.
+fn label(text: &str) -> String {
+    let mut escaped = text.escape_debug();
+    let mut out: String = escaped.by_ref().take(128).collect();
+    if escaped.next().is_some() {
+        out.push('…');
+    }
+    out
 }
 
 // ============================================================================
@@ -3959,16 +3984,138 @@ mod tests {
             let path = dir.path().join("model-Q4_K_M.gguf");
             gguf.write(&path);
             let expected = format!(
-                "'model-Q4_K_M.gguf' is a decision model (decision type {decision_type:?}) that \
-                 this build does not run: {why}"
+                "its GGUF is a decision model (decision type {decision_type:?}) that this build \
+                 does not run: {why}"
             );
-            assert_eq!(load_error(generate_metadata_for_gguf_file(&path)), expected);
-            assert_eq!(
-                load_error(generate_metadata(dir.path(), "org/model").map(|(m, _)| m)),
-                expected
-            );
+            // A refusal, not a load failure: both routes say what is
+            // unsupported, for the model id each derives.
+            for (result, model) in [
+                (generate_metadata_for_gguf_file(&path), "model-q4_k_m"),
+                (
+                    generate_metadata(dir.path(), "org/model").map(|(m, _)| m),
+                    "model",
+                ),
+            ] {
+                match result {
+                    Err(SdkError::UnsupportedModelCapability {
+                        model_id,
+                        capability,
+                        hint,
+                    }) => {
+                        assert_eq!(model_id, model);
+                        assert_eq!(capability, "loading in this build");
+                        assert_eq!(hint, expected);
+                    }
+                    other => {
+                        panic!("{decision_type:?}: expected a capability refusal, got {other:?}")
+                    }
+                }
+            }
             assert!(!dir.path().join("model_metadata.json").exists());
         }
+    }
+
+    /// A header that cannot be read is an I/O failure, with its kind, on
+    /// both routes: neither a refusal nor a damaged file.
+    #[test]
+    fn a_header_that_cannot_be_read_is_an_io_error() {
+        // A directory where the GGUF should be: opening or reading it fails
+        // on every platform. Entries keep its size nonzero everywhere.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("weights-Q4_K_M.gguf");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("entry"), b"x").unwrap();
+        match generate_metadata_for_gguf_file(&path) {
+            Err(SdkError::IoError(error)) => assert!(
+                error
+                    .to_string()
+                    .starts_with("cannot read the GGUF header of 'weights-Q4_K_M.gguf': "),
+                "{error}"
+            ),
+            other => panic!("expected an I/O error, got {other:?}"),
+        }
+
+        // The Hugging Face route lists only files: an unreadable one.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("model-Q4_K_M.gguf");
+            lfm3_chat().write(&path);
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+            if std::fs::File::open(&path).is_ok() {
+                eprintln!("Skipping the unreadable-file case: this process reads it anyway");
+            } else {
+                match generate_metadata(dir.path(), "org/model") {
+                    Err(SdkError::IoError(error)) => {
+                        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+                        assert!(error
+                            .to_string()
+                            .starts_with("cannot read the GGUF header of 'model-Q4_K_M.gguf': "));
+                    }
+                    other => panic!("expected an I/O error, got {other:?}"),
+                }
+                assert!(!dir.path().join("model_metadata.json").exists());
+            }
+        }
+    }
+
+    /// Model ids and file names are not trusted to be short or printable:
+    /// every refusal repeats them escaped and cut short, in its Display, its
+    /// Debug, its fields and its source chain.
+    #[test]
+    fn refusals_repeat_ids_and_file_names_escaped_and_cut_short() {
+        fn check(error: &SdkError) {
+            let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error);
+            let mut texts = vec![format!("{error:?}")];
+            while let Some(error) = current {
+                texts.push(error.to_string());
+                current = error.source();
+            }
+            for text in texts {
+                let start: String = text.chars().take(200).collect();
+                assert!(text.len() < 1024, "{} bytes: {start}", text.len());
+                assert!(
+                    !text.contains(['\n', '\r', '\t', '\u{1b}', '\u{7}']),
+                    "a raw control character in {text:?}"
+                );
+            }
+        }
+        let omni = d1()
+            .without("lfm3.decision.type")
+            .str("lfm3.decision.type", "lfm3-d1-omni");
+        let crowded = (4..4100).fold(lfm3_chat(), |gguf, i| gguf.u32(&format!("filler.{i}"), i));
+        let long_id = format!("{}\n\u{1b}[31mtail", "x".repeat(131_072));
+        for id in [long_id.as_str(), "bad\nid\u{1b}[0m\t'quoted'\\\u{7}"] {
+            for gguf in [&omni, &crowded] {
+                let dir = TempDir::new().unwrap();
+                gguf.write(&dir.path().join("model.gguf"));
+                let error = inspect_and_generate(dir.path(), "", Some(id)).unwrap_err();
+                if let SdkError::UnsupportedModelCapability { model_id, .. } = &error {
+                    assert!(model_id.chars().count() <= 129, "{model_id}");
+                } else {
+                    panic!("expected a capability refusal, got {error:?}");
+                }
+                check(&error);
+            }
+        }
+
+        // File names reach the messages of the other categories.
+        #[cfg(unix)]
+        for name in ["bad\nname\u{1b}[31m.gguf", "bad\tname.gguf"] {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join(name);
+            std::fs::write(&path, b"not a GGUF at all").unwrap();
+            check(&generate_metadata_for_gguf_file(&path).unwrap_err());
+            check(&inspect_and_generate(dir.path(), "", None).unwrap_err());
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(&path).unwrap();
+            std::fs::write(path.join("entry"), b"x").unwrap();
+            check(&generate_metadata_for_gguf_file(&path).unwrap_err());
+        }
+        assert_eq!(label("plain-id_1.0"), "plain-id_1.0");
+        assert_eq!(label("a\nb'c"), "a\\nb\\'c");
+        assert_eq!(label(&"é".repeat(200)), format!("{}…", "é".repeat(128)));
     }
 
     #[test]
@@ -4056,13 +4203,17 @@ mod tests {
         d1().without("lfm3.decision.type")
             .str("lfm3.decision.type", &"x".repeat(10_000))
             .write(&path);
-        let message = load_error(generate_metadata_for_gguf_file(&path));
-        assert!(message.len() < 300, "{} bytes", message.len());
+        let message = generate_metadata_for_gguf_file(&path)
+            .unwrap_err()
+            .to_string();
+        assert!(message.len() < 400, "{} bytes", message.len());
 
         d1().f32(&format!("lfm3.decision.{}", "k".repeat(10_000)), 1.0)
             .write(&path);
-        let message = load_error(generate_metadata_for_gguf_file(&path));
-        assert!(message.len() < 500, "{} bytes", message.len());
+        let message = generate_metadata_for_gguf_file(&path)
+            .unwrap_err()
+            .to_string();
+        assert!(message.len() < 600, "{} bytes", message.len());
     }
 
     /// Joint regression: classification first keeps the text-context cap,
