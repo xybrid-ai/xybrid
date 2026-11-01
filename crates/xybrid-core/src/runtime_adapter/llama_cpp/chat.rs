@@ -17,6 +17,7 @@ mod functiongemma;
 use super::jinja_template::{JinjaChatTemplate, JinjaTemplateError, RenderOptions};
 use crate::gateway::Tool;
 use crate::runtime_adapter::llm::LlmResult;
+use crate::runtime_adapter::streaming_postprocess::is_reasoning_primed;
 use crate::runtime_adapter::tool_call::{is_lfm3_template, ToolCallProtocol};
 use crate::runtime_adapter::{AdapterError, ChatMessage};
 use xybrid_llama::LlamaError;
@@ -75,7 +76,7 @@ pub(super) fn format_chat_prompt(
     // Guard against a doubled tag: a minijinja render with thinking on already
     // ends in an opening `<think>` for templates that open the channel
     // themselves (LFM3, Qwen3.5), so don't prime a second one.
-    if reasoning && !prompt.trim_end().ends_with("<think>") {
+    if reasoning && !is_reasoning_primed(&prompt) {
         prompt.push_str(THINK_PRIME);
     }
 

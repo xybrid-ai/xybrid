@@ -193,6 +193,19 @@ pub(crate) fn strip_and_capture_thinking_tags(text: &str) -> (String, Option<Str
     (clean, reasoning)
 }
 
+/// Whether output generated after `prompt` starts inside a reasoning block:
+/// the prompt ends in the `<think>` opener, primed by the llama.cpp adapter
+/// (`THINK_PRIME`) or written by the chat template itself (LFM3 with thinking
+/// on, including its tool continuations). The model's reasoning then carries
+/// no opener of its own.
+///
+/// The chat paths' double-prime guard applies the same test before appending
+/// `THINK_PRIME`. LFM3's thinking-off state (`<think></think>`) is closed, and
+/// raw codec-TTS prompts never end in `<think>`.
+pub(crate) fn is_reasoning_primed(prompt: &str) -> bool {
+    prompt.trim_end().ends_with(PRIMED_OPEN)
+}
+
 /// Like [`strip_and_capture_thinking_tags`], for output generated from a
 /// reasoning-primed prompt (the llama.cpp adapter's `THINK_PRIME`). The opener
 /// lives in the prompt, so output whose budget ran out before `</think>` is
@@ -621,6 +634,35 @@ mod tests {
         let (clean, reasoning) = strip_and_capture_thinking_tags_primed("   \n ", true, true);
         assert_eq!(clean, "");
         assert_eq!(reasoning, None);
+    }
+
+    #[test]
+    fn prompt_ending_in_an_open_think_is_reasoning_primed() {
+        // xybrid's own prime, and the channel an LFM3 continuation with
+        // thinking on reopens.
+        assert!(is_reasoning_primed(
+            "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n<think>\n"
+        ));
+        assert!(is_reasoning_primed(
+            "</tool_response><|im_end|>\n<|im_start|>assistant\n<think>"
+        ));
+    }
+
+    #[test]
+    fn prompt_without_an_open_think_is_not_reasoning_primed() {
+        for prompt in [
+            // LFM3 with thinking off pre-fills a closed channel.
+            "<|im_start|>assistant\n<think></think>",
+            // A ChatML continuation opens a fresh turn.
+            "<|im_start|>tool\n<|tool_response_start|>{}<|tool_response_end|><|im_end|>\n<|im_start|>assistant\n",
+            // A replayed thought earlier in the prompt does not count.
+            "<|im_start|>assistant\n<think>plan</think>answer<|im_end|>\n<|im_start|>user\n",
+            // A codec-TTS raw prompt.
+            "user: Convert the text to speech:<|TEXT_PROMPT_START|>hi<|TEXT_PROMPT_END|>\nassistant:<|SPEECH_GENERATION_START|>",
+            "",
+        ] {
+            assert!(!is_reasoning_primed(prompt), "{prompt:?}");
+        }
     }
 
     #[test]

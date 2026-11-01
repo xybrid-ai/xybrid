@@ -23,10 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameter keeps `75001` as text, an `integer` one gets `75001`.
   `Envelope::tool_results` continuations replay the call and each result as
   LFM3's own `tool` turn, and streaming suppresses LFM3 call blocks like the
-  other families'. Qwen 3.5 writes the same notation, so its calls parse too,
-  but its continuations are rejected: xybrid implements LFM3's tool-result
-  framing, not Qwen 3.5's. Rust callers can type the arguments with
-  `tool_call::parse_tool_calls_with_tools`.
+  other families'. With thinking on, a continuation's reasoning goes to
+  `reasoning_content`, never to the stream or to `text`, even when the token
+  budget runs out mid-thought. Qwen 3.5 writes the same notation, so its calls
+  parse too, but its continuations are rejected: xybrid implements LFM3's
+  tool-result framing, not Qwen 3.5's. Rust callers can type the arguments
+  with `tool_call::parse_tool_calls_with_tools`.
 - **Vision (llama.cpp):** `vision_encoder.max_image_tokens` in
   `model_metadata.json` caps how many tokens one image becomes; the vision
   encoder scales larger images down to fit. Native-resolution encoders need it:

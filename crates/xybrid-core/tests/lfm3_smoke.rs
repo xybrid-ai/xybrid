@@ -9,7 +9,7 @@ use xybrid_core::{
     execution::{ExecutionTemplate, ModelMetadata, TemplateExecutor},
     gateway::{Tool, ToolCall},
     ir::{Envelope, EnvelopeKind, ToolCallResult},
-    runtime_adapter::GenerationConfig,
+    runtime_adapter::{GenerationConfig, PartialToken},
     testing::model_fixtures,
 };
 
@@ -270,6 +270,164 @@ fn lfm3_calls_a_tool_with_thinking_on() {
     assert!(tool_calls(&answer).is_empty(), "{:?}", text(&answer));
     assert!(text(&answer).contains("21"), "{:?}", text(&answer));
     assert!(!text(&answer).contains("think>"), "{:?}", text(&answer));
+}
+
+/// Runs the weather call turn with thinking on and returns the continuation
+/// that answers it with a sunny 21 °C.
+fn weather_continuation_with_thinking_on(
+    executor: &mut TemplateExecutor,
+    metadata: &ModelMetadata,
+    config: &GenerationConfig,
+) -> Envelope {
+    let question = "What's the weather in Paris?";
+    let first = executor
+        .execute(
+            metadata,
+            &Envelope::new(EnvelopeKind::Text(question.to_string())),
+            Some(config),
+        )
+        .expect("tool-bearing LFM3 turn succeeds");
+    let calls = tool_calls(&first);
+    assert_eq!(calls.len(), 1, "{:?}", text(&first));
+    assert_eq!(calls[0].function.name, "get_weather");
+
+    Envelope::tool_results(
+        question,
+        text(&first),
+        &[ToolCallResult {
+            call_id: calls[0].id.clone(),
+            name: calls[0].function.name.clone(),
+            content: serde_json::json!({"temperature_c": 21, "condition": "sunny"}),
+        }],
+    )
+}
+
+/// The thinking-on tool turn with a streamed continuation. Its prompt reopens
+/// `<think>`, so the model reasons with no opener of its own: the stream must
+/// show only the answer.
+#[test]
+fn lfm3_streams_a_tool_continuation_with_thinking_on() {
+    let Some(model_dir) = model_fixtures::model_or_skip(TEXT_MODEL_ID) else {
+        return;
+    };
+    let mut metadata = load_metadata(&model_dir);
+    metadata
+        .metadata
+        .insert("reasoning".to_string(), serde_json::Value::Bool(true));
+    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
+    let config = GenerationConfig::greedy()
+        .with_max_tokens(1024)
+        .with_tools([weather_tool()]);
+    let continuation = weather_continuation_with_thinking_on(&mut executor, &metadata, &config);
+
+    let mut tokens: Vec<PartialToken> = Vec::new();
+    let answer = executor
+        .execute_streaming(
+            &metadata,
+            &continuation,
+            Box::new(|token| {
+                tokens.push(token);
+                Ok(())
+            }),
+            Some(&config),
+        )
+        .expect("streamed LFM3 tool continuation succeeds");
+    let streamed: String = tokens.iter().map(|token| token.token.as_str()).collect();
+    let reasoning = answer
+        .metadata
+        .get("reasoning_content")
+        .map(String::as_str)
+        .unwrap_or_default();
+    eprintln!(
+        "streamed continuation: {streamed:?}\nanswer: {:?}\nreasoning: {reasoning:?}\nfinish_reason: {:?}",
+        text(&answer),
+        answer.metadata.get("finish_reason")
+    );
+
+    assert!(!streamed.contains("think>"), "{streamed:?}");
+    assert!(!reasoning.trim().is_empty(), "the reasoning is captured");
+    assert!(
+        !streamed.contains(reasoning.trim()),
+        "the reasoning reached the stream: {streamed:?}"
+    );
+    assert_eq!(
+        streamed.trim(),
+        text(&answer),
+        "the stream spells the answer"
+    );
+    assert!(text(&answer).contains("21"), "{:?}", text(&answer));
+    assert_eq!(
+        tokens
+            .last()
+            .and_then(|token| token.finish_reason.as_deref()),
+        Some("stop")
+    );
+}
+
+/// A continuation whose budget runs out mid-thought has no answer yet: the
+/// partial reasoning is reasoning, batch or streamed, never `text`.
+#[test]
+fn lfm3_tool_continuation_out_of_budget_mid_thought_has_no_answer() {
+    let Some(model_dir) = model_fixtures::model_or_skip(TEXT_MODEL_ID) else {
+        return;
+    };
+    let mut metadata = load_metadata(&model_dir);
+    metadata
+        .metadata
+        .insert("reasoning".to_string(), serde_json::Value::Bool(true));
+    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
+    let config = GenerationConfig::greedy()
+        .with_max_tokens(1024)
+        .with_tools([weather_tool()]);
+    let continuation = weather_continuation_with_thinking_on(&mut executor, &metadata, &config);
+    // Far shorter than the thought before the answer.
+    let short = config.clone().with_max_tokens(16);
+
+    let batch = executor
+        .execute(&metadata, &continuation, Some(&short))
+        .expect("LFM3 tool continuation succeeds");
+    eprintln!(
+        "batch: {:?}\nreasoning: {:?}\nfinish_reason: {:?}",
+        text(&batch),
+        batch.metadata.get("reasoning_content"),
+        batch.metadata.get("finish_reason")
+    );
+
+    let mut tokens: Vec<PartialToken> = Vec::new();
+    let streamed_answer = executor
+        .execute_streaming(
+            &metadata,
+            &continuation,
+            Box::new(|token| {
+                tokens.push(token);
+                Ok(())
+            }),
+            Some(&short),
+        )
+        .expect("streamed LFM3 tool continuation succeeds");
+    let streamed: String = tokens.iter().map(|token| token.token.as_str()).collect();
+    eprintln!(
+        "streamed: {streamed:?}\nanswer: {:?}\nreasoning: {:?}\nfinish_reason: {:?}",
+        text(&streamed_answer),
+        streamed_answer.metadata.get("reasoning_content"),
+        streamed_answer.metadata.get("finish_reason")
+    );
+
+    for output in [&batch, &streamed_answer] {
+        assert_eq!(text(output), "", "the partial thought is not an answer");
+        assert!(
+            output
+                .metadata
+                .get("reasoning_content")
+                .is_some_and(|reasoning| !reasoning.trim().is_empty()),
+            "the partial thought is captured as reasoning"
+        );
+        assert_eq!(
+            output.metadata.get("finish_reason").map(String::as_str),
+            Some("length")
+        );
+    }
+    assert!(streamed.trim().is_empty(), "{streamed:?}");
 }
 
 /// LFM3 writes argument values as text; the schema types them.

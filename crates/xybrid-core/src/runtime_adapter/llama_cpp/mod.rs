@@ -39,8 +39,9 @@ use crate::runtime_adapter::llm::{
 };
 use crate::runtime_adapter::llm_telemetry::{StreamingTelemetry, StreamingTelemetryFields};
 use crate::runtime_adapter::streaming_postprocess::{
-    merge_stop_patterns, strip_and_capture_thinking_tags_primed, trim_partial_stop_suffix,
-    truncate_at_first_stop, StreamingTextFilter, CHAT_STOP_PATTERNS, CHAT_STOP_PATTERNS_BROKEN,
+    is_reasoning_primed, merge_stop_patterns, strip_and_capture_thinking_tags_primed,
+    trim_partial_stop_suffix, truncate_at_first_stop, StreamingTextFilter, CHAT_STOP_PATTERNS,
+    CHAT_STOP_PATTERNS_BROKEN,
 };
 use crate::runtime_adapter::AdapterError;
 #[cfg(feature = "llm-llamacpp-vision")]
@@ -1105,7 +1106,8 @@ impl LlmBackend for LlamaCppBackend {
     /// stream still runs through `StreamingTextFilter`, because a
     /// continuation IS a chat turn: it can deliberate in a reasoning block
     /// and it can call another tool, and neither belongs in the caller's
-    /// visible text.
+    /// visible text. The returned text has its reasoning split off the same
+    /// way, primed when the prompt ends inside `<think>`.
     fn generate_raw_streaming(
         &self,
         prompt: &str,
@@ -1121,21 +1123,30 @@ impl LlmBackend for LlamaCppBackend {
 
             let stop_patterns = config.stop_sequences.clone();
             let suppress_tools = !config.tools.is_empty();
-            // Deliberately NOT `new_reasoning_primed`. A continuation prompt
-            // appends a fresh, *unprimed* assistant turn after the replayed
-            // one (see `tool_call::compose_tool_continuation`), so the model
-            // self-opens `<think>` if it reasons — which this filter catches.
-            // Starting primed would instead swallow a plain answer whole.
+            // Primed only when the prompt itself ends inside `<think>`: an LFM3
+            // continuation with thinking on reopens the channel on its fresh
+            // assistant turn, so the model reasons with no opener of its own.
+            // Every other continuation appends a fresh, *unprimed* turn after
+            // the replayed one (see `tool_call::compose_tool_continuation`),
+            // so the model self-opens `<think>` if it reasons, which the
+            // unprimed filter catches; starting primed there would swallow a
+            // plain answer whole. Raw TTS prompts never end in `<think>`.
             //
-            // Residual, shared with the batch path: a model that saw `<think>`
-            // primed on the *prior* turn may open its reasoning markerless. The
-            // batch path's dangling-close handling recovers the final text, and
-            // so does `finish_continuation_output` here — but the streaming
-            // filter has no dangling-close rule, so that reasoning would flash
-            // in the token feed before the clean text lands. Same known v1
-            // limitation `run_tool_continuation` documents; the models tested
-            // self-open the tag.
-            let mut filter = StreamingTextFilter::new(stop_patterns.clone());
+            // Residual, shared with the batch path: after an unprimed
+            // continuation, a model that saw `<think>` primed on the *prior*
+            // turn may open its reasoning markerless. The batch path's
+            // dangling-close handling recovers the final text, and so does the
+            // final cleanup below — but the unprimed streaming filter has no
+            // dangling-close rule, so that reasoning would flash in the token
+            // feed before the clean text lands. Same known v1 limitation
+            // `run_tool_continuation` documents; the models tested self-open
+            // the tag.
+            let primed = is_reasoning_primed(prompt);
+            let mut filter = if primed {
+                StreamingTextFilter::new_reasoning_primed(stop_patterns.clone())
+            } else {
+                StreamingTextFilter::new(stop_patterns.clone())
+            };
             if suppress_tools {
                 filter = filter.with_tool_call_suppression();
             }
@@ -1175,9 +1186,8 @@ impl LlmBackend for LlamaCppBackend {
             trim_partial_stop_suffix(&mut text, &stop_patterns);
             let truncated_by_budget =
                 generation_truncated_by_budget(filter.is_stopped() || stopped_in_text, end);
-            // `primed = false` for the same reason the filter is unprimed.
             let (clean, reasoning_content) =
-                strip_and_capture_thinking_tags_primed(&text, false, truncated_by_budget);
+                strip_and_capture_thinking_tags_primed(&text, primed, truncated_by_budget);
             let text = clean.trim().to_string();
 
             let parsed_tool_calls = if suppress_tools {
@@ -1196,12 +1206,17 @@ impl LlmBackend for LlamaCppBackend {
             .to_string();
 
             let tool_block_suppressed = suppress_tools && filter.saw_tool_call_block();
-            // No `should_emit_recovered_answer` here, unlike the chat paths:
-            // that recovery only fires for a *primed* stream that suppressed
-            // its whole output, and this path is never primed (see the filter
-            // construction above). An unprimed stream that emitted nothing has
-            // nothing to recover — the text was either a suppressed tool block
-            // (signalled by the terminal token) or empty after cleanup.
+            if should_emit_recovered_answer(
+                token_index,
+                truncated_by_budget,
+                tool_block_suppressed,
+                primed,
+                &text,
+            ) {
+                let recovered_partial = PartialToken::new(text.clone(), token_index, text.clone());
+                token_index += 1;
+                on_token(recovered_partial).map_err(AdapterError::from_streaming_callback_error)?;
+            }
 
             if should_emit_terminal_token(&output_tokens, end) {
                 let final_cumulative = if tool_block_suppressed {
