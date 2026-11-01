@@ -98,14 +98,14 @@
 //! - **JSON.** Every struct refuses unknown fields, so a decoder built
 //!   before a field was added rejects data that has it: deliberate, so that
 //!   nothing is silently dropped. Enums use serde's default external
-//!   tagging, and an old decoder refuses a new variant. The `f64` fields of
-//!   an answer (probabilities, `p_yes`, score values, confidences) are
-//!   decimal strings with the shortest digits that read back as the same
-//!   `f64`, read back with a correctly rounded parser, so they round-trip
-//!   bit for bit even through serde_json, whose own float parsing is
-//!   best-effort without its `float_roundtrip` feature (off in this
-//!   workspace). Decoding, in every format, checks exactly what
-//!   [`DecisionAnswer::new`] checks.
+//!   tagging, and an old decoder refuses a new variant. Floats are JSON
+//!   numbers, written with the shortest digits that read back as the same
+//!   `f64`. xybrid-core turns on serde_json's `float_roundtrip` feature, so
+//!   serde_json reads each one back as exactly that `f64` (its default
+//!   parsing is best-effort and can be an ulp off, enough to move a median
+//!   across its one-half boundary). Decoding, in every format, checks
+//!   exactly what [`DecisionAnswer::new`] checks; there is no tolerance and
+//!   no exception.
 //! - **`OrderedJson` in serde.** In every format it is one string holding
 //!   its compact JSON text, which keeps key order and number identity
 //!   exactly and works in formats that cannot carry an ordered map
