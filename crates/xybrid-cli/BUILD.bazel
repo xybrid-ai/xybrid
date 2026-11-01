@@ -2,9 +2,31 @@
 # name `xybrid` per the resolved DEP_DATA). Deps = core + sdk + clap/console/etc,
 # all auto-resolved. Compiles once the xybrid-core ort ceiling is addressed.
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
+
+# The library half of the package (crate `xybrid_cli`, src/lib.rs): the
+# SystemOne decision transport, which the binary links and the tests call.
+# Pure Rust over xybrid-core; no features.
+_LIB_SRCS = ["src/lib.rs"] + glob(["src/systemone/**/*.rs"])
+
+rust_library(
+    name = "xybrid-cli",
+    version = XYBRID_VERSION,
+    srcs = _LIB_SRCS,
+    edition = "2021",
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)
+
+# The library's inline tests, recompiled with `--test` (`crate = `).
+rust_test(
+    name = "xybrid-cli_test",
+    version = XYBRID_VERSION,
+    crate = ":xybrid-cli",
+)
 
 # crate_features mirrors the LLM half of cargo's `platform-desktop`
 # (= ort-download + llm-llamacpp-vision + huggingface), which is what the shipped
@@ -23,7 +45,10 @@ load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 rust_binary(
     name = "xybrid",
     version = XYBRID_VERSION,
-    srcs = glob(["src/**/*.rs"]),
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = _LIB_SRCS,
+    ),
     edition = "2021",
     # Listed flat, not as the preset: Bazel does not expand transitive features
     # the way Cargo does, so "llm-llamacpp-vision" alone would NOT imply
@@ -34,7 +59,7 @@ rust_binary(
         "llm-llamacpp",
         "llm-llamacpp-vision",
     ],
-    deps = all_crate_deps(normal = True),
+    deps = all_crate_deps(normal = True) + [":xybrid-cli"],
     visibility = ["//visibility:public"],
 )
 
@@ -54,6 +79,10 @@ _CLI_INTEGRATION_TESTS = {
         "//crates/xybrid-core:xybrid-core",
         "//crates/xybrid-sdk:xybrid-sdk",
         "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
+    # `run --decision` refusing before any model opens; spawns the CLI only.
+    "decision_cli_test": [
         "@crates//:tempfile",
     ],
     "init_json_test": [

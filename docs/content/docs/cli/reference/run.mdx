@@ -12,6 +12,7 @@ xybrid run --config <path>
 xybrid run --pipeline <name>
 xybrid run --pipeline <name> --dry-run
 xybrid run --directory <dir> --input-text <context> --choice <id>=<text>
+xybrid run --model-file <gguf> --decision <request.json>
 ```
 
 ## Options
@@ -24,7 +25,8 @@ xybrid run --directory <dir> --input-text <context> --choice <id>=<text>
 | `--input-text` | | Text input for text-based models (LLM, TTS) |
 | `--input-audio` | | Path to an audio file for audio-based models (ASR) — WAV, MP3, OGG, or FLAC |
 | `--choice` | | A candidate for a choice-scoring model, as `ID=TEXT`; repeatable. See [Choice scoring](#choice-scoring) |
-| `--output` | `-o` | Save the result: audio as `.wav`, text as `.txt`, choice scores as JSON |
+| `--decision` | | A decision request in SystemOne JSON, from a file or `-` for stdin. See [Decision requests](#decision-requests) |
+| `--output` | `-o` | Save the result: audio as `.wav`, text as `.txt`, choice scores and decision responses as JSON |
 | `--target` | | Force model format (`onnx`, `coreml`, `tflite`); auto-detected if omitted |
 | `--dry-run` | | Simulate routing without execution |
 | `--policy` | | Load a policy bundle (YAML/JSON) that constrains routing — see [Hybrid Execution › Policies](/docs/concepts/hybrid-execution#policies) |
@@ -196,6 +198,164 @@ choice scorer refuses `--choice`.
 `--input-image`, `--voice` and `--max-tokens` without `--choice` too.
 `xybrid repl` refuses a choice scorer, also as a pipeline stage, and so does
 `--speculative-cloud`, also with `--dry-run`.
+
+## Decision requests
+
+A decision model reads a state (text, JSON, or nothing) and answers typed
+questions about it: pick an option, yes or no, or a level on a scale. It reads
+each answer from the model without generating text. `--decision` takes such a
+request in the JSON shape that llama.cpp's server answers at `/v1/systemone`
+(SystemOne, subset v1: the text profile of LiquidAI's LFM3 d1), from a file or
+from stdin with `-`. It needs a model (`--model-file`, `--model`,
+`--directory`, `--huggingface` or `--bundle`) and takes no input flag: the
+request holds the input.
+
+<Callout type="warn">
+This build checks decision requests but cannot run them yet. A valid request
+ends with `decision models are not supported by this build yet`, before any
+model is opened. `--dry-run` checks the request alone and succeeds when it is
+valid; the model is not checked.
+</Callout>
+
+```bash
+xybrid run --model-file d1-2B-Q4_K_M.gguf --decision request.json --output response.json
+cat request.json | xybrid run --model-file d1-2B-Q4_K_M.gguf --decision - --dry-run
+```
+
+### Request
+
+```json
+{
+  "state": "I was charged twice this month, please refund one of them.",
+  "questions": {
+    "refund": {"type": "noul", "instructions": "Is the customer asking for a refund?"},
+    "team": {
+      "type": "choice",
+      "instructions": "Which team should handle this?",
+      "criteria": {"billing": "Charges, refunds, invoices", "technical": "App or site faults", "fraud": "Suspected unauthorised use"}
+    },
+    "urgency": {
+      "type": "score",
+      "instructions": "How urgent is this?",
+      "criteria": ["Can wait", "Today", "Blocking the customer now"]
+    }
+  }
+}
+```
+
+- `state` is required: text, JSON, or `null` for no state (`""` is an empty
+  state, not a missing one).
+- `questions` is a non-empty object of question id to question; the answers
+  come back in its order.
+- `type` is `choice` (pick one option), `noul` (yes or no) or `score` (a level).
+- `instructions` are required: text or JSON.
+- `criteria`: a choice takes an object of option key to description, in order
+  (1 to 255 options); a score takes an array of 2 to 10 level descriptions,
+  lowest first; a noul may describe `"true"`, `"false"` or both, or have no
+  criteria. A description is text, JSON, or `null` for none. An option key can
+  change the answer: LFM3 d1 shows the model single-letter keys as labels, and
+  the key itself (`_` read as a space) in place of a missing or empty
+  description.
+- `model` is accepted and ignored.
+
+Text and JSON reach the model as written: object keys in their order, and
+numbers as spelled (`1` and `1.0` differ).
+
+### Refusals
+
+A request is refused before any model is opened, and by `--dry-run` too. The
+error names its kind and positions (counting from 0), never the request's
+content:
+
+| Kind | When |
+|------|------|
+| `invalid_json` | The request is not one JSON value |
+| `invalid_request` | It is JSON, but not an object |
+| `duplicate_key` | An object repeats a key, anywhere in the request |
+| `missing_state` | No `state` |
+| `invalid_questions` | `questions` missing, not an object, or empty |
+| `invalid_question` | A question that is not an object |
+| `missing_instructions` | `instructions` missing or `null` |
+| `spoken_instructions` | Instructions that are an `input_audio` part |
+| `invalid_question_type` | `type` missing, not a string, or not one of the three |
+| `invalid_criteria` | Criteria of the wrong shape for the type |
+| `level_count` | A score with fewer than 2 or more than 10 levels |
+| `too_many_options` | A choice with more than 255 options |
+| `media_unsupported` | A `files`, `images` or `videos` field (even empty or `null`), or an image, audio or video part in the state's chat messages |
+| `unknown_field` | Any other field at the top level, in a question (`multiple`, say) or in noul criteria (`yes` and `no` included) |
+| `empty_question_id`, `empty_option_key` | An id or option key that is the empty string |
+| `json_too_deep` | JSON content (state, instructions, a description) nested more than 128 levels deep |
+| `number_out_of_range` | A number beyond the 64-bit float range (`1e400`), or an integer from 9223372036854775808 to 18446744073709551615, which the model would read wrapped to a negative number (larger integers are read as floats, as llama.cpp reads them) |
+| `request_too_large` | A request larger than 8 MiB, with more than 131,072 JSON values, or with more than 65,536 in one piece of content |
+
+llama.cpp's server ignores unknown fields and keeps the last of repeated keys;
+`xybrid` refuses both, so nothing in a request is silently dropped. A request
+that asks more than 16 questions is refused too. LFM3 d1 has lower limits of
+its own (nesting, a token budget per question), checked when it prepares the
+request.
+
+### Response
+
+The response follows llama.cpp's, member by member; `--output` saves it:
+
+```json
+{
+  "model": "d1-2B-Q4_K_M.gguf",
+  "answers": {
+    "refund": {
+      "type": "noul",
+      "noul": 0.9973703517289787
+    },
+    "team": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+        "billing": 0.9653423092419502,
+        "technical": 0.016056498667205623,
+        "fraud": 0.018601192090844064
+      },
+      "confidence": 0.9653423092419502
+    },
+    "urgency": {
+      "type": "score",
+      "score": 0.0,
+      "legend": {
+        "0": "Can wait",
+        "1": "Today",
+        "2": "Blocking the customer now"
+      },
+      "probabilities": {
+        "0": 0.7813993464828815,
+        "1": 0.19769099249323435,
+        "2": 0.02090966102388407
+      },
+      "confidence": 0.7813993464828815
+    }
+  },
+  "usage": {
+    "input_tokens": 160,
+    "output_tokens": 0
+  }
+}
+```
+
+These are llama.cpp's own answers to the request above on d1-2B (Q4_K_M, CPU);
+other builds and settings move the last digits.
+
+- `noul` is the probability of yes; `choice` the most probable option (the
+  first on a tie); `score` LFM3 d1's median level, the first whose cumulative
+  probability reaches one half.
+- `probabilities` come in option or level order; `legend` gives each level's
+  description back as the request had it (`null` for none).
+- `confidence` is LFM3 d1's highest probability.
+- The probabilities follow the temperature the model's publisher set: they
+  rank the answers the model weighed, and are not calibrated chances of being
+  right.
+- `input_tokens` counts the tokens of every model pass (one per question for
+  LFM3 d1).
+- Every computed number is a 64-bit float written with the fewest digits that
+  read back as the same value, so a correctly rounded JSON parser gets it back
+  exactly.
 
 ## Pipeline Format
 
