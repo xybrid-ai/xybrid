@@ -113,6 +113,8 @@ jobs:
       dry_run: ${{ steps.meta.outputs.dry_run }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0   # the Flutter precompile check reads the full history
 
       - name: Parse branch / version
         id: meta
@@ -187,6 +189,21 @@ jobs:
             FAILED=0
           fi
           [ "$FAILED" -eq 0 ] || exit 1
+
+      # cargokit names the Flutter precompiled release after a hash of
+      # bindings/flutter/rust alone, and the precompile jobs skip every target
+      # that release already holds. A native change that lands after the bump
+      # (v0.16.0: llama.cpp v0.8.0, via a master merge) leaves the hash alone,
+      # so those jobs would ship libraries built without it. Fail before any
+      # build starts; the log names the files and the one-line fix. The
+      # release lookup (read-only) catches a rebased or re-cut branch, whose
+      # history no longer shows what the release was built from. Skipped in a
+      # rehearsal, which builds no Flutter libraries.
+      - name: Check Flutter precompiled libraries are current
+        if: steps.meta.outputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 tools/scripts/check_flutter_precompiled_inputs.py --github-repo "$GITHUB_REPOSITORY"
 
   # =========================================================================
   # Build the web package at the release version, including both Rust runtimes.
