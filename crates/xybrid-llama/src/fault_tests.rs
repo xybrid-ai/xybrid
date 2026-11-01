@@ -32,6 +32,11 @@ const NO_FILE: &str = "/nonexistent/xybrid-fault-test.gguf";
 /// hook fails, the start of the error the call must return).
 const STUB_CASES: &[(&str, &str, &str)] = &[
     ("load", "llama_load_model_from_file_c", "Err(Internal("),
+    (
+        "load_vocab_only",
+        "llama_load_model_vocab_only_c",
+        "Err(Internal(",
+    ),
     ("meta_str", "llama_model_meta_val_str_c", "Err(Internal("),
     ("meta_count", "llama_model_meta_count_c", "Err(Internal("),
     ("meta_values", "llama_model_meta_lookup_c", "Err(Internal("),
@@ -78,7 +83,10 @@ const UNUSABLE_AFTER: &[&str] = &["kv_cache_clear", "kv_cache_seq_rm", "score_fi
 /// Real allocation failures that need no model: (case, the start of the
 /// error the call must return).
 #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
-const MEMORY_CASES: &[(&str, &str)] = &[("load_out_of_memory", "Err(Internal(")];
+const MEMORY_CASES: &[(&str, &str)] = &[
+    ("load_out_of_memory", "Err(Internal("),
+    ("load_vocab_only_out_of_memory", "Err(Internal("),
+];
 
 /// The scorer's opening and closing clears failing, on a causal model with
 /// memory (`XYBRID_OTHER_GGUF`).
@@ -209,6 +217,10 @@ fn memory_case(case: &str) -> String {
             let path = format!("/nonexistent/{}", "p".repeat(LARGE));
             out_of_address_space(|| format!("{:?}", LlamaModel::load(&path, 0).map(|_| ())))
         }
+        "load_vocab_only_out_of_memory" => {
+            let path = format!("/nonexistent/{}", "p".repeat(LARGE));
+            out_of_address_space(|| format!("{:?}", LlamaModel::load_vocab_only(&path).map(|_| ())))
+        }
         other => panic!("unknown case {other}"),
     }
 }
@@ -218,6 +230,7 @@ fn stub_case(case: &str, shim: &str) -> String {
     ffi::fail_next_native_call(shim);
     match case {
         "load" => format!("{:?}", LlamaModel::load(NO_FILE, 0).map(|_| ())),
+        "load_vocab_only" => format!("{:?}", LlamaModel::load_vocab_only(NO_FILE).map(|_| ())),
         "meta_str" => format!("{:?}", model.meta_str("lfm3.decision.type")),
         "meta_count" => format!("{:?}", model.meta_count()),
         "meta_values" => format!("{:?}", model.meta_values(&["general.architecture"])),

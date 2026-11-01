@@ -91,6 +91,11 @@ int  llama_log_get_verbosity_c(void);
    was NULL. Free the model with llama_free_model_c. */
 int32_t llama_load_model_from_file_c(
     const char* path_model, int n_gpu_layers, XYBRID_LLAMA_MODEL** out_model);
+/* Loads only the vocabulary and the metadata of the GGUF at path_model, on
+   the CPU: no tensor is read, no device is used, and the file may have no
+   tensors at all. The model tokenizes but no context can run it. Guarded,
+   with llama_load_model_from_file_c's statuses. */
+int32_t llama_load_model_vocab_only_c(const char* path_model, XYBRID_LLAMA_MODEL** out_model);
 void  llama_free_model_c(XYBRID_LLAMA_MODEL* model);
 
 /* Context lifecycle */

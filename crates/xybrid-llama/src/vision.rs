@@ -47,6 +47,13 @@ impl MtmdContext {
     /// projector scales larger images down to fit. `None` keeps the
     /// projector's own limit, which for native-resolution encoders such as
     /// LFM3-VL's is thousands of tokens.
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::VocabOnly`], before any native call, for a model from
+    /// [`LlamaModel::load_vocab_only`]; [`LlamaError::InvalidInput`] when
+    /// `path` contains a NUL byte, and [`LlamaError::Internal`] when mtmd
+    /// cannot load the projector.
     pub fn from_file(
         path: &str,
         model: &LlamaModel,
@@ -56,6 +63,7 @@ impl MtmdContext {
         flash_attn: bool,
         max_image_tokens: Option<usize>,
     ) -> LlamaResult<Self> {
+        model.ensure_runnable()?;
         let c_path = ffi::cstring(path, "mtmd projector path")?;
         // SAFETY: c_path lives for the call; model.as_ptr() is a live
         // llama_model handle. Null return is mapped below.

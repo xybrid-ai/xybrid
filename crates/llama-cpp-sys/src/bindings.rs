@@ -978,6 +978,12 @@ unsafe extern "C" {
     ) -> i32;
 }
 unsafe extern "C" {
+    pub fn llama_load_model_vocab_only_c(
+        path_model: *const ::std::os::raw::c_char,
+        out_model: *mut *mut ::std::os::raw::c_void,
+    ) -> i32;
+}
+unsafe extern "C" {
     pub fn llama_free_model_c(model: *mut ::std::os::raw::c_void);
 }
 unsafe extern "C" {

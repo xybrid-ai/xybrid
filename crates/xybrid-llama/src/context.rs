@@ -85,6 +85,13 @@ impl LlamaContext {
     /// `n_threads = 0` means "auto-detect"; `n_batch = 0` means "use the
     /// 512-token llama.cpp default". `flash_attn` enables Flash Attention
     /// (2-4× speedup on longer contexts) where supported.
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::VocabOnly`], before any native call, for a model from
+    /// [`LlamaModel::load_vocab_only`], and
+    /// [`LlamaError::ContextCreationFailed`] when llama.cpp cannot create
+    /// the context.
     pub fn new(
         model: &LlamaModel,
         n_ctx: usize,
@@ -92,6 +99,7 @@ impl LlamaContext {
         n_batch: usize,
         flash_attn: bool,
     ) -> LlamaResult<Self> {
+        model.ensure_runnable()?;
         // llama.cpp receives the sizes as C ints; the decode limit below is
         // derived from these same values.
         let (n_ctx_c, n_batch_c) = (n_ctx as c_int, n_batch as c_int);

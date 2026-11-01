@@ -72,12 +72,30 @@ pub(crate) unsafe fn load_model_from_file(
     }
 }
 
-/// Free a model handle previously returned by [`load_model_from_file`].
+/// Load only the vocabulary and metadata of the GGUF at `path`, on the CPU.
+/// A null pointer when llama.cpp could not load the file, an error when an
+/// exception escaped it.
 ///
 /// # Safety
 ///
-/// `ptr` must have come from [`load_model_from_file`] and not yet been
-/// freed. Null is tolerated (no-op).
+/// As [`load_model_from_file`]: the caller owns a non-null result and frees
+/// it via [`free_model`] exactly once.
+pub(crate) unsafe fn load_model_vocab_only(path: &CString) -> Result<*mut c_void, LlamaError> {
+    let mut model = std::ptr::null_mut();
+    match sys::llama_load_model_vocab_only_c(path.as_ptr(), &mut model) {
+        0 => Ok(model),
+        _ => Err(native_failure("loading a model's vocabulary")),
+    }
+}
+
+/// Free a model handle previously returned by [`load_model_from_file`] or
+/// [`load_model_vocab_only`].
+///
+/// # Safety
+///
+/// `ptr` must have come from [`load_model_from_file`] or
+/// [`load_model_vocab_only`] and not yet been freed. Null is tolerated
+/// (no-op).
 pub(crate) unsafe fn free_model(ptr: *mut c_void) {
     if !ptr.is_null() {
         sys::llama_free_model_c(ptr);

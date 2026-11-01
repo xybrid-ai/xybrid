@@ -14,7 +14,9 @@
 //!
 //! # Public surface
 //!
-//! - [`LlamaModel`] — owning handle to a loaded GGUF model
+//! - [`LlamaModel`] — owning handle to a loaded GGUF model, or to only its
+//!   vocabulary and metadata ([`LlamaModel::load_vocab_only`]), which no
+//!   context runs
 //! - [`LlamaContext`] — owning handle to a llama context, with KV-cache
 //!   manipulation and per-sequence state snapshot methods
 //! - [`MemorylessContext`] / [`MemorylessParams`] — a context without memory

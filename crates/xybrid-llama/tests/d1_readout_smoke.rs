@@ -1,6 +1,7 @@
 //! LiquidAI's d1-2B (artifact `d1-2b-q4km`): the GGUF facts llama.cpp
-//! loads, and memory-less readouts on settings `cpu-t4-fa-off` (CPU, four
-//! threads, Flash Attention off, a 4,096-token budget).
+//! loads, in full and vocabulary-only, and memory-less readouts on settings
+//! `cpu-t4-fa-off` (CPU, four threads, Flash Attention off, a 4,096-token
+//! budget).
 //!
 //! Stage the pinned file (LiquidAI/d1-2B-GGUF at
 //! e968f6575f0d4fad928312d7af15cad90fd365c0, sha256
@@ -104,6 +105,20 @@ fn model() -> Option<&'static LlamaModel> {
             let path = staged_model_path()?;
             backend_init();
             Some(LlamaModel::load(path.to_str().expect("a UTF-8 path"), 0).expect("load the GGUF"))
+        })
+        .as_ref()
+}
+
+/// The same file loaded vocabulary-only, shared by every test.
+fn vocab_model() -> Option<&'static LlamaModel> {
+    static MODEL: OnceLock<Option<LlamaModel>> = OnceLock::new();
+    MODEL
+        .get_or_init(|| {
+            let path = staged_model_path()?;
+            Some(
+                LlamaModel::load_vocab_only(path.to_str().expect("a UTF-8 path"))
+                    .expect("load the vocabulary"),
+            )
         })
         .as_ref()
 }
@@ -418,4 +433,116 @@ fn a_model_outside_the_profile_is_refused() {
 
 fn bits(values: &[f32]) -> Vec<u32> {
     values.iter().map(|value| value.to_bits()).collect()
+}
+
+/// The vocabulary-only load is what a decision vocabulary reads: the same
+/// entries, tokenization, metadata and templates as the full load.
+#[test]
+fn a_vocab_only_load_reads_as_the_full_load() {
+    let (Some(full), Some(vocab)) = (model(), vocab_model()) else {
+        return;
+    };
+    assert!(vocab.is_vocab_only() && !full.is_vocab_only());
+    assert_eq!(vocab.n_vocab(), full.n_vocab());
+    assert_eq!(
+        (vocab.token_bos(), vocab.token_eos(), vocab.adds_bos()),
+        (full.token_bos(), full.token_eos(), full.adds_bos())
+    );
+    assert_eq!(vocab.has_encoder().unwrap(), full.has_encoder().unwrap());
+    assert_eq!(
+        (vocab.is_recurrent(), vocab.has_recurrent_state()),
+        (full.is_recurrent(), full.has_recurrent_state())
+    );
+
+    let n_vocab = i32::try_from(full.n_vocab()).unwrap();
+    let entry = |model: &LlamaModel, t: i32| {
+        (
+            model.token_attr(t).expect("readable"),
+            model.token_text(t).expect("readable"),
+        )
+    };
+    let mut spellings = Vec::new();
+    for t in -1..=n_vocab {
+        let (attr, text) = entry(vocab, t);
+        assert_eq!((attr, text.clone()), entry(full, t), "token {t}");
+        if attr.is_some_and(|attr| attr.contains(TokenAttr::CONTROL)) {
+            spellings.push(String::from_utf8(text.unwrap()).expect("a UTF-8 spelling"));
+        }
+    }
+    assert_eq!(spellings.len(), 124, "d1-2B's CONTROL spellings");
+
+    let template = full
+        .named_chat_template("systemone")
+        .unwrap()
+        .expect("the systemone template");
+    let corpus = [
+        CHOICE_PROMPT.to_string(),
+        template.clone(),
+        spellings.concat(),
+        spellings.join(" text between "),
+        "<|im_sta <|im_end|>x<|im_end|><|im_start|>".to_string(),
+        "  spaces,\ttabs\t\tand\nnew\n\nlines\r\n".to_string(),
+        "Ünïcödé — 日本語 🙂 1234567 3.14 it's don't".to_string(),
+        String::new(),
+    ];
+    for text in &corpus {
+        for add_special in [false, true] {
+            assert_eq!(
+                vocab.tokenize(text, add_special).unwrap(),
+                full.tokenize(text, add_special).unwrap(),
+                "tokenize({text:?}, {add_special})"
+            );
+            let special = vocab.tokenize_special(text, add_special).unwrap();
+            assert_eq!(
+                special,
+                full.tokenize_special(text, add_special).unwrap(),
+                "tokenize_special({text:?}, {add_special})"
+            );
+            assert_eq!(
+                vocab.detokenize(&special).unwrap(),
+                full.detokenize(&special).unwrap()
+            );
+        }
+    }
+
+    assert_eq!(vocab.meta_count().unwrap(), full.meta_count().unwrap());
+    let keys = [
+        "general.architecture",
+        "general.name",
+        "lfm3.block_count",
+        "lfm3.attention.causal",
+        "lfm3.decision.type",
+        "lfm3.decision.temperature.noul",
+        "lfm3.decision.temperature.choice",
+        "lfm3.decision.temperature.score",
+        "tokenizer.ggml.pre",
+        "tokenizer.ggml.bos_token_id",
+        "tokenizer.chat_template.systemone",
+        "tokenizer.ggml.tokens",
+        "no.such.key",
+    ];
+    assert_eq!(
+        vocab.meta_values(&keys).unwrap(),
+        full.meta_values(&keys).unwrap()
+    );
+    assert_eq!(
+        vocab.named_chat_template("systemone").unwrap(),
+        Some(template)
+    );
+    assert_eq!(vocab.chat_template(), full.chat_template());
+}
+
+/// Every context constructor refuses a vocabulary-only model, before any
+/// native call.
+#[test]
+fn no_context_runs_a_vocab_only_model() {
+    let Some(vocab) = vocab_model() else { return };
+    assert!(matches!(
+        LlamaContext::new(vocab, 512, THREADS as usize, 512, false),
+        Err(LlamaError::VocabOnly)
+    ));
+    assert!(matches!(
+        MemorylessContext::new(vocab, MemorylessParams::new(BUDGET, THREADS, false)),
+        Err(LlamaError::VocabOnly)
+    ));
 }

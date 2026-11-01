@@ -152,6 +152,8 @@ impl MemorylessContext {
     ///
     /// # Errors
     ///
+    /// [`LlamaError::VocabOnly`], before anything else, for a model from
+    /// [`LlamaModel::load_vocab_only`];
     /// [`LlamaError::InvalidInput`] for a budget of zero or above
     /// [`MemorylessParams::MAX_TOKEN_BUDGET`], a thread count beyond a C
     /// `int`, a model outside the profile, or a context without the
@@ -170,6 +172,7 @@ impl MemorylessContext {
         params: MemorylessParams,
         n_outputs_max: u32,
     ) -> LlamaResult<Self> {
+        model.ensure_runnable()?;
         let (sizes, n_threads) = readout_sizes(params, n_outputs_max)?;
         ensure_profile(model)?;
         let n_vocab = model.n_vocab();
