@@ -18,10 +18,10 @@ use std::sync::OnceLock;
 
 use xybrid_llama::LlamaModel;
 
-use super::cases::{self, f32_of, int, items, Case};
+use super::cases::{self, f32_of, int, items, Case, Fixture};
 use super::conformance::{
-    assert_upstream_answers, case_facts, case_limits, d1_control_spellings, first_difference,
-    tail_from, upstream_codes, upstream_readouts, PROTOCOL_KINDS_AT_PARSE,
+    assert_upstream_answers, case_facts, case_limits, d1_control_spellings, expected,
+    first_difference, tail_from, upstream_codes, upstream_readouts, PROTOCOL_KINDS_AT_PARSE,
 };
 use super::fake::d1_facts;
 use crate::execution::decision::facts::sha256_hex;
@@ -32,7 +32,7 @@ use crate::execution::decision::{
     SYSTEMONE_TEMPLATE_SHA256,
 };
 use crate::gguf::{DecisionProfileId, GgufArray, GgufHeader, GgufValue};
-use crate::ir::decision::{DecisionError, OrderedJson};
+use crate::ir::decision::DecisionError;
 use crate::testing::model_fixtures;
 
 const MODEL_ID: &str = "d1-2b-q4km";
@@ -99,7 +99,7 @@ fn header_control_spellings(header: &GgufHeader) -> Vec<Vec<u8>> {
 fn edited_spellings(case: &Case, model: &LlamaModel, vocab: &LlamaVocab<'_>) -> Vec<Vec<u8>> {
     let Some(edits) = case
         .at(&["metadata", "token_types"])
-        .and_then(OrderedJson::as_object)
+        .and_then(Fixture::as_object)
     else {
         return vocab.control_spellings().to_vec();
     };
@@ -200,10 +200,7 @@ fn assert_upstream_plan(case: &Case, plan: &DecisionPlan, prompts: &[String]) {
     for (index, ((pass, prompt), expected)) in
         plan.passes().iter().zip(prompts).zip(passes).enumerate()
     {
-        let expected_prompt = expected
-            .get("prompt")
-            .and_then(OrderedJson::as_str)
-            .unwrap();
+        let expected_prompt = expected.get("prompt").and_then(Fixture::as_str).unwrap();
         let at = first_difference(prompt, expected_prompt);
         assert!(
             prompt == expected_prompt,
@@ -240,12 +237,12 @@ fn assert_upstream_plan(case: &Case, plan: &DecisionPlan, prompts: &[String]) {
         for (group, expected) in answer.groups.iter().zip(groups) {
             assert_eq!(
                 Some(group.key.as_str()),
-                expected.get("key").and_then(OrderedJson::as_str),
+                expected.get("key").and_then(Fixture::as_str),
                 "{id}"
             );
             assert_eq!(
                 Some(group.code.as_str()),
-                expected.get("code").and_then(OrderedJson::as_str),
+                expected.get("code").and_then(Fixture::as_str),
                 "{id}"
             );
             let range = items(expected.get("range").unwrap());
@@ -257,7 +254,7 @@ fn assert_upstream_plan(case: &Case, plan: &DecisionPlan, prompts: &[String]) {
         }
         assert_eq!(
             answer.temperature.source.as_deref(),
-            expected.get("temperature").and_then(OrderedJson::as_str),
+            expected.get("temperature").and_then(Fixture::as_str),
             "{id}"
         );
         assert_eq!(
@@ -368,8 +365,17 @@ fn every_case_prepares_as_upstream_on_d1_2b() {
         *checked.entry(outcome).or_default() += 1;
     }
     eprintln!("every_case_prepares_as_upstream_on_d1_2b: {checked:?}");
-    assert_eq!(checked.get("prepared"), Some(&83), "{checked:?}");
-    assert_eq!(checked.get("prepare refusal"), Some(&7), "{checked:?}");
+    let cases = cases::all();
+    assert_eq!(
+        checked.get("prepared").copied(),
+        Some(expected(&cases, "prepare", "match")),
+        "{checked:?}"
+    );
+    assert_eq!(
+        checked.get("prepare refusal").copied(),
+        Some(expected(&cases, "prepare", "refuse")),
+        "{checked:?}"
+    );
     assert_eq!(checked.get("parse refusal"), Some(&7), "{checked:?}");
 }
 
@@ -404,7 +410,7 @@ fn build_variant(oracle: &Path, base: &Path, case: &Case, dir: &Path) -> PathBuf
     let metadata = case.at(&["metadata"]).expect("edits");
     let mut sets: Vec<(&str, &str)> = metadata
         .get("set")
-        .and_then(OrderedJson::as_object)
+        .and_then(Fixture::as_object)
         .map(|set| {
             set.iter()
                 .map(|(k, v)| (k.as_str(), v.as_str().unwrap()))
@@ -417,14 +423,14 @@ fn build_variant(oracle: &Path, base: &Path, case: &Case, dir: &Path) -> PathBuf
     }
     for key in metadata
         .get("remove")
-        .and_then(OrderedJson::as_array)
+        .and_then(Fixture::as_array)
         .unwrap_or(&[])
     {
         command.arg("--remove").arg(key.as_str().unwrap());
     }
     let mut types: Vec<(&str, i64)> = metadata
         .get("token_types")
-        .and_then(OrderedJson::as_object)
+        .and_then(Fixture::as_object)
         .map(|types| types.iter().map(|(k, v)| (k.as_str(), int(v))).collect())
         .unwrap_or_default();
     types.sort();

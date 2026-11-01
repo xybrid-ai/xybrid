@@ -279,7 +279,7 @@ fn the_pinned_template_is_the_one_embedded() {
     let oracle = super::cases::fixture_file("oracle.json");
     assert_eq!(
         super::cases::at(&oracle, &["artifacts", "d1-2b-q4km", "template"])
-            .and_then(OrderedJson::as_str),
+            .and_then(super::cases::Fixture::as_str),
         Some(SYSTEMONE_TEMPLATE)
     );
 }

@@ -21,7 +21,7 @@
 
 use std::collections::BTreeMap;
 
-use super::cases::{self, f32_of, f64_of, int, items, Case};
+use super::cases::{self, f32_of, f64_of, int, items, Case, Fixture};
 use super::fake::{d1_header, GgufWriter};
 use crate::execution::decision::facts::Temperature;
 use crate::execution::decision::plan::{AnswerPlan, FinalizeRule, LabelGroup};
@@ -30,7 +30,7 @@ use crate::execution::decision::{
 };
 use crate::gguf::DecisionProfileId;
 use crate::ir::decision::{
-    DecisionAnswer, DecisionError, DecisionOrigin, DecisionRequest, Decisions, OrderedJson,
+    DecisionAnswer, DecisionError, DecisionOrigin, DecisionRequest, Decisions,
 };
 
 /// Whether `f64` results must equal the fixtures bit for bit here.
@@ -59,11 +59,24 @@ pub(super) fn assert_f64(expected: f64, actual: f64, what: &str) {
     }
 }
 
+/// How many cases expect `outcome` (`"match"`, `"refuse"` for any refusal,
+/// `"not_reached"`, …) at `stage`.
+pub(super) fn expected(cases: &[Case], stage: &str, outcome: &str) -> usize {
+    cases
+        .iter()
+        .filter(|case| {
+            case.expect(stage).is_some_and(|expectation| {
+                expectation == outcome
+                    || (outcome == "refuse" && expectation.starts_with("refuse:"))
+            })
+        })
+        .count()
+}
+
 #[test]
 fn the_case_census_is_the_one_expected() {
     let cases = cases::all();
-    assert_eq!(cases.len(), 133);
-    let mut census: BTreeMap<(&str, String), usize> = BTreeMap::new();
+    assert_eq!(cases.len(), 143);
     for case in &cases {
         assert_eq!(
             case.str_at(&["profile"]),
@@ -78,32 +91,25 @@ fn the_case_census_is_the_one_expected() {
             case.id
         );
         for stage in ["parse", "prepare", "evaluate", "finalize"] {
-            let expectation = case
-                .expect(stage)
-                .unwrap_or_else(|| panic!("{}: no {stage} expectation", case.id));
-            let outcome = if expectation.starts_with("refuse:") {
-                "refuse".to_string()
-            } else {
-                expectation
-            };
-            *census.entry((stage, outcome)).or_default() += 1;
+            assert!(
+                case.expect(stage).is_some(),
+                "{}: no {stage} expectation",
+                case.id
+            );
         }
     }
-    let count = |stage: &str, outcome: &str| {
-        census
-            .get(&(stage, outcome.to_string()))
-            .copied()
-            .unwrap_or(0)
-    };
-    // The contract's census (C14): every case of these stages either passes,
-    // refuses as intended, or is legitimately out of scope.
-    assert_eq!(count("prepare", "match"), 83, "{census:?}");
-    assert_eq!(count("prepare", "refuse"), 7, "{census:?}");
-    assert_eq!(count("prepare", "not_reached"), 43, "{census:?}");
-    assert_eq!(count("finalize", "match"), 76, "{census:?}");
-    assert_eq!(count("finalize", "refuse"), 6, "{census:?}");
-    assert_eq!(count("finalize", "out_of_scope"), 1, "{census:?}");
-    assert_eq!(count("finalize", "not_reached"), 50, "{census:?}");
+    // The contract's census (C14, with P3a's 143 cases): every case of these
+    // stages either passes, refuses as intended, or is legitimately out of
+    // scope. The stage tests check each of them; these numbers notice a
+    // fixture set that changed under them.
+    let count = |stage, outcome| expected(&cases, stage, outcome);
+    assert_eq!(count("prepare", "match"), 89);
+    assert_eq!(count("prepare", "refuse"), 9);
+    assert_eq!(count("prepare", "not_reached"), 45);
+    assert_eq!(count("finalize", "match"), 82);
+    assert_eq!(count("finalize", "refuse"), 6);
+    assert_eq!(count("finalize", "out_of_scope"), 1);
+    assert_eq!(count("finalize", "not_reached"), 54);
 }
 
 #[test]
@@ -121,12 +127,25 @@ fn the_refusal_kinds_are_the_readmes() {
         .filter_map(|line| line.strip_prefix("| `"))
         .filter_map(|line| line.split('`').next())
         .collect();
-    assert_eq!(kinds.len(), 24, "{kinds:?}");
     let ours: Vec<&str> = DecisionRefusalKind::ALL
         .iter()
         .map(|kind| kind.as_str())
         .collect();
-    assert_eq!(ours[..kinds.len()], kinds[..]);
+    // The README's kinds are ours: all of them but `request_too_large`,
+    // which the table may list too.
+    for kind in &kinds {
+        assert!(ours.contains(kind), "{kind} is not a DecisionRefusalKind");
+    }
+    for kind in &ours {
+        assert!(
+            kinds.contains(kind) || *kind == "request_too_large",
+            "{kind} is not in the README's table"
+        );
+    }
+    let mut unique = kinds.clone();
+    unique.dedup();
+    assert_eq!(unique.len(), kinds.len(), "{kinds:?}");
+    assert!(kinds.len() >= 24, "{kinds:?}");
     // Every refusal a case expects is a kind.
     for case in cases::all() {
         for stage in ["load", "parse", "prepare", "evaluate", "finalize"] {
@@ -166,12 +185,12 @@ pub(super) fn upstream_plan(case: &Case, request: &DecisionRequest) -> DecisionP
         .enumerate()
         .map(|(index, answer)| {
             assert_eq!(
-                answer.get("question").and_then(OrderedJson::as_str),
+                answer.get("question").and_then(Fixture::as_str),
                 Some(request.questions()[index].id()),
                 "{}: answers in request order",
                 case.id
             );
-            let rule = match answer.get("type").and_then(OrderedJson::as_str) {
+            let rule = match answer.get("type").and_then(Fixture::as_str) {
                 Some("choice") => FinalizeRule::Choice,
                 Some("noul") => FinalizeRule::YesNo,
                 Some("score") => FinalizeRule::Score,
@@ -184,12 +203,12 @@ pub(super) fn upstream_plan(case: &Case, request: &DecisionRequest) -> DecisionP
                     LabelGroup {
                         key: group
                             .get("key")
-                            .and_then(OrderedJson::as_str)
+                            .and_then(Fixture::as_str)
                             .unwrap()
                             .to_string(),
                         code: group
                             .get("code")
-                            .and_then(OrderedJson::as_str)
+                            .and_then(Fixture::as_str)
                             .unwrap()
                             .to_string(),
                         select: int(&range[0]) as usize..int(&range[1]) as usize,
@@ -205,7 +224,7 @@ pub(super) fn upstream_plan(case: &Case, request: &DecisionRequest) -> DecisionP
                 temperature: Temperature {
                     source: answer
                         .get("temperature")
-                        .and_then(OrderedJson::as_str)
+                        .and_then(Fixture::as_str)
                         .map(str::to_string),
                     value: f32_of(answer.get("temperature_f32").unwrap()),
                 },
@@ -234,7 +253,7 @@ pub(super) fn assert_upstream_answers(case: &Case, plan: &DecisionPlan, decision
     let id = &case.id;
     let expected = case
         .at(&["upstream", "finalize", "answers"])
-        .and_then(OrderedJson::as_object)
+        .and_then(Fixture::as_object)
         .expect("upstream answers");
     assert_eq!(decisions.answers().len(), expected.len(), "{id}");
     let scores = items(
@@ -278,12 +297,12 @@ pub(super) fn assert_upstream_answers(case: &Case, plan: &DecisionPlan, decision
 /// One SystemOne answer against a [`DecisionAnswer`]: compared through
 /// independently parsed `f64`s and discrete values, never through
 /// `DecisionAnswer` deserialization.
-fn assert_answer(what: &str, expected: &OrderedJson, answer: &DecisionAnswer) {
-    let kind = expected.get("type").and_then(OrderedJson::as_str);
-    let probabilities = |expected: &OrderedJson| {
+fn assert_answer(what: &str, expected: &Fixture, answer: &DecisionAnswer) {
+    let kind = expected.get("type").and_then(Fixture::as_str);
+    let probabilities = |expected: &Fixture| {
         let listed = expected
             .get("probabilities")
-            .and_then(OrderedJson::as_object)
+            .and_then(Fixture::as_object)
             .expect("probabilities");
         assert_eq!(listed.len(), answer.distribution().len(), "{what}");
         for ((key, p), entry) in listed.iter().zip(answer.distribution()) {
@@ -291,7 +310,7 @@ fn assert_answer(what: &str, expected: &OrderedJson, answer: &DecisionAnswer) {
             assert_f64(f64_of(p), entry.probability(), &format!("{what}: p({key})"));
         }
     };
-    let confidence = |expected: &OrderedJson| {
+    let confidence = |expected: &Fixture| {
         let value = f64_of(expected.get("confidence").expect("confidence"));
         assert_f64(
             value,
@@ -303,7 +322,7 @@ fn assert_answer(what: &str, expected: &OrderedJson, answer: &DecisionAnswer) {
         Some("choice") => {
             assert_eq!(
                 answer.value().as_choice(),
-                expected.get("choice").and_then(OrderedJson::as_str),
+                expected.get("choice").and_then(Fixture::as_str),
                 "{what}: choice"
             );
             probabilities(expected);
@@ -379,9 +398,14 @@ fn every_case_finalizes_as_upstream() {
             }
         }
     }
-    assert_eq!(checked.get("match"), Some(&76), "{checked:?}");
-    assert_eq!(checked.get("refuse"), Some(&6), "{checked:?}");
-    assert_eq!(checked.get("out_of_scope"), Some(&1), "{checked:?}");
+    let cases = cases::all();
+    for outcome in ["match", "refuse", "out_of_scope"] {
+        assert_eq!(
+            checked.get(outcome).copied().unwrap_or(0),
+            expected(&cases, "finalize", outcome),
+            "{outcome}: {checked:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -394,7 +418,7 @@ pub(super) fn edited_header(case: &Case) -> GgufWriter {
     let Some(metadata) = case.at(&["metadata"]) else {
         return header;
     };
-    if let Some(set) = metadata.get("set").and_then(OrderedJson::as_object) {
+    if let Some(set) = metadata.get("set").and_then(Fixture::as_object) {
         for (key, value) in set {
             let value = value.as_str().expect("an edit is a string");
             if let Some(number) = value.strip_prefix("f32:") {
@@ -408,7 +432,7 @@ pub(super) fn edited_header(case: &Case) -> GgufWriter {
             }
         }
     }
-    if let Some(remove) = metadata.get("remove").and_then(OrderedJson::as_array) {
+    if let Some(remove) = metadata.get("remove").and_then(Fixture::as_array) {
         for key in remove {
             header = header.without(key.as_str().expect("a key"));
         }
@@ -488,7 +512,7 @@ fn every_load_stage_is_upstreams() {
                     let temperature = facts.temperatures.lookup(type_name, count);
                     assert_eq!(
                         temperature.source.as_deref(),
-                        answer.get("temperature").and_then(OrderedJson::as_str),
+                        answer.get("temperature").and_then(Fixture::as_str),
                         "{}: question {index}",
                         case.id
                     );
@@ -515,7 +539,7 @@ pub(super) fn upstream_prompts(case: &Case) -> Vec<String> {
         .iter()
         .map(|pass| {
             pass.get("prompt")
-                .and_then(OrderedJson::as_str)
+                .and_then(Fixture::as_str)
                 .unwrap()
                 .to_string()
         })
@@ -531,7 +555,7 @@ pub(super) fn upstream_codes(case: &Case) -> Vec<Vec<String>> {
                 .map(|group| {
                     group
                         .get("code")
-                        .and_then(OrderedJson::as_str)
+                        .and_then(Fixture::as_str)
                         .unwrap()
                         .to_string()
                 })
@@ -667,12 +691,26 @@ fn prompts_render_as_upstream() {
         }
     }
     eprintln!("prompts_render_as_upstream: {checked:?}; left to the model tests: {skipped:?}");
-    // 83 prepared cases but the overlap variant; 7 refusals but the 2
-    // budget ones; the 7 parse-stage refusals a request built as data can
-    // carry (256 options, 1 and 11 levels, missing and null instructions,
-    // an integer above i64::MAX, no options).
-    assert_eq!(checked.get("prompts"), Some(&82), "{checked:?}");
-    assert_eq!(checked.get("prepare refusals"), Some(&5), "{checked:?}");
+    // Every prepared case but the token-type variant; every prepare-stage
+    // refusal but the budget ones (both need the real tokenizer); and the 7
+    // parse-stage refusals a request built as data can carry (256 options,
+    // 1 and 11 levels, missing and null instructions, an integer above
+    // i64::MAX, no options).
+    let cases = cases::all();
+    let budget = cases
+        .iter()
+        .filter(|case| case.expect("prepare").as_deref() == Some("refuse:budget_exceeded"))
+        .count();
+    assert_eq!(
+        checked.get("prompts").copied(),
+        Some(expected(&cases, "prepare", "match") - 1),
+        "{checked:?}"
+    );
+    assert_eq!(
+        checked.get("prepare refusals").copied(),
+        Some(expected(&cases, "prepare", "refuse") - budget),
+        "{checked:?}"
+    );
     assert_eq!(checked.get("parse refusals"), Some(&7), "{checked:?}");
 }
 

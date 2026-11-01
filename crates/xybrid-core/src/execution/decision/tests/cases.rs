@@ -1,11 +1,15 @@
 //! The conformance cases of `integration-tests/fixtures/decision/`, read
 //! for the tests.
 //!
-//! Case files are read with [`OrderedJson`]: object members keep their
-//! order (the answers of a case are in request order, its probabilities in
-//! option order), and every float is `str::parse::<f64>` of its literal, so
-//! the 17-digit expectations come back exactly (the fixture README's
-//! comparison rule). serde_json is not used.
+//! Fixture files are read into [`Fixture`], a JSON tree of their own:
+//! object members keep their order (the answers of a case are in request
+//! order, its probabilities in option order), numbers keep their literal
+//! text, and an expected `f64` is `str::parse::<f64>` of that text, so the
+//! 17-digit values come back exactly (the fixture README's comparison rule).
+//! It has no depth ceiling: a case's own nesting adds to the content's (the
+//! legend of `depth-score-level-at-limit` sits 131 levels down), which the
+//! request types' 128-level ceiling would refuse. String literals are
+//! unescaped by [`OrderedJson::parse`]. serde_json is not used.
 //!
 //! [`request`] turns a case's `request_text` into a [`DecisionRequest`] for
 //! the requests this crate's protocol is meant to see. It is a test
@@ -19,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use crate::ir::decision::{
     DecisionContent, DecisionLevel, DecisionOption, DecisionQuestion, DecisionQuestionKind,
-    DecisionRequest, DecisionState, JsonLimits, JsonNumber, JsonView, OrderedJson,
+    DecisionRequest, DecisionState, OrderedJson,
 };
 
 /// The fixture directory, `integration-tests/fixtures/decision`.
@@ -27,32 +31,84 @@ pub(super) fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../integration-tests/fixtures/decision")
 }
 
+/// A value of a fixture file.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum Fixture {
+    Null,
+    Bool(bool),
+    /// A number, as its literal.
+    Number(String),
+    String(String),
+    Array(Vec<Fixture>),
+    /// Members in file order.
+    Object(Vec<(String, Fixture)>),
+}
+
+impl Fixture {
+    /// Parses a fixture file's text.
+    pub(super) fn parse(text: &str) -> Result<Self, String> {
+        let mut scanner = Scanner::new(text);
+        let value = scanner.fixture()?;
+        scanner.end()?;
+        Ok(value)
+    }
+
+    /// The member `key` of an object.
+    pub(super) fn get(&self, key: &str) -> Option<&Fixture> {
+        self.as_object()?
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value)
+    }
+
+    pub(super) fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::String(text) => Some(text),
+            _ => None,
+        }
+    }
+
+    pub(super) fn as_array(&self) -> Option<&[Fixture]> {
+        match self {
+            Self::Array(items) => Some(items),
+            _ => None,
+        }
+    }
+
+    pub(super) fn as_object(&self) -> Option<&[(String, Fixture)]> {
+        match self {
+            Self::Object(members) => Some(members),
+            _ => None,
+        }
+    }
+}
+
 /// One case file.
 pub(super) struct Case {
     pub(super) id: String,
-    pub(super) json: OrderedJson,
+    pub(super) json: Fixture,
 }
 
 impl Case {
     /// The value at `path` (object keys, or array indexes as decimal
     /// strings), if any.
-    pub(super) fn at(&self, path: &[&str]) -> Option<&OrderedJson> {
+    pub(super) fn at(&self, path: &[&str]) -> Option<&Fixture> {
         at(&self.json, path)
     }
 
     /// The string at `path`.
     pub(super) fn str_at(&self, path: &[&str]) -> Option<&str> {
-        self.at(path).and_then(OrderedJson::as_str)
+        self.at(path).and_then(Fixture::as_str)
     }
 
     /// The case's expectation for `stage`: `"match"`, …, or `refuse:<kind>`.
     pub(super) fn expect(&self, stage: &str) -> Option<String> {
         let value = self.at(&["xybrid", stage])?;
-        match value.view() {
-            JsonView::String(text) => Some(text.to_string()),
-            JsonView::Object(_) => value
+        match value {
+            Fixture::String(text) => Some(text.to_string()),
+            Fixture::Object(_) => value
                 .get("refuse")
-                .and_then(OrderedJson::as_str)
+                .and_then(Fixture::as_str)
                 .map(|kind| format!("refuse:{kind}")),
             _ => None,
         }
@@ -65,13 +121,12 @@ impl Case {
 }
 
 /// The value at `path` below `value`.
-pub(super) fn at<'a>(value: &'a OrderedJson, path: &[&str]) -> Option<&'a OrderedJson> {
-    path.iter()
-        .try_fold(value, |value, step| match value.view() {
-            JsonView::Object(_) => value.get(step),
-            JsonView::Array(items) => items.get(step.parse::<usize>().ok()?),
-            _ => None,
-        })
+pub(super) fn at<'a>(value: &'a Fixture, path: &[&str]) -> Option<&'a Fixture> {
+    path.iter().try_fold(value, |value, step| match value {
+        Fixture::Object(_) => value.get(step),
+        Fixture::Array(items) => items.get(step.parse::<usize>().ok()?),
+        _ => None,
+    })
 }
 
 /// Every case, sorted by id.
@@ -86,16 +141,10 @@ pub(super) fn all() -> Vec<Case> {
     paths
         .iter()
         .map(|path| {
-            let text = std::fs::read_to_string(path)
-                .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
-            let json = OrderedJson::parse_with_limits(
-                &text,
-                &JsonLimits::default().with_max_bytes(8 << 20),
-            )
-            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+            let json = read(path);
             let id = path.file_stem().unwrap().to_string_lossy().to_string();
             assert_eq!(
-                at(&json, &["id"]).and_then(OrderedJson::as_str),
+                at(&json, &["id"]).and_then(Fixture::as_str),
                 Some(id.as_str())
             );
             Case { id, json }
@@ -103,44 +152,50 @@ pub(super) fn all() -> Vec<Case> {
         .collect()
 }
 
-/// A JSON file of the fixture directory (`oracle.json`, `artifacts.json`).
-pub(super) fn fixture_file(name: &str) -> OrderedJson {
-    let path = fixtures_dir().join(name);
-    let text = std::fs::read_to_string(&path)
+fn read(path: &Path) -> Fixture {
+    let text = std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
-    OrderedJson::parse_with_limits(&text, &JsonLimits::default().with_max_bytes(8 << 20))
-        .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+    Fixture::parse(&text).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+}
+
+/// A JSON file of the fixture directory (`oracle.json`, `artifacts.json`).
+pub(super) fn fixture_file(name: &str) -> Fixture {
+    read(&fixtures_dir().join(name))
 }
 
 /// An integer of a case.
-pub(super) fn int(value: &OrderedJson) -> i64 {
-    match value.as_number() {
-        Some(JsonNumber::I64(value)) => value,
+pub(super) fn int(value: &Fixture) -> i64 {
+    match value {
+        Fixture::Number(text) => text
+            .parse()
+            .unwrap_or_else(|_| panic!("not an integer: {text}")),
         _ => panic!("not an integer: {value:?}"),
     }
 }
 
-/// An f64 of a case: a number, or `"NaN"`, `"Infinity"`, `"-Infinity"`.
-pub(super) fn f64_of(value: &OrderedJson) -> f64 {
-    match value.view() {
-        JsonView::Number(JsonNumber::F64(value)) => value,
-        JsonView::Number(JsonNumber::I64(value)) => value as f64,
-        JsonView::String("NaN") => f64::NAN,
-        JsonView::String("Infinity") => f64::INFINITY,
-        JsonView::String("-Infinity") => f64::NEG_INFINITY,
+/// An f64 of a case: `str::parse::<f64>` of a number's literal, or `"NaN"`,
+/// `"Infinity"`, `"-Infinity"`.
+pub(super) fn f64_of(value: &Fixture) -> f64 {
+    match value {
+        Fixture::Number(text) => text
+            .parse()
+            .unwrap_or_else(|_| panic!("not an f64: {text}")),
+        Fixture::String(text) if text == "NaN" => f64::NAN,
+        Fixture::String(text) if text == "Infinity" => f64::INFINITY,
+        Fixture::String(text) if text == "-Infinity" => f64::NEG_INFINITY,
         _ => panic!("not an f64: {value:?}"),
     }
 }
 
 /// An f32 of a case: its bit pattern, `"0x3fab2fdc"`.
-pub(super) fn f32_of(value: &OrderedJson) -> f32 {
+pub(super) fn f32_of(value: &Fixture) -> f32 {
     let text = value.as_str().expect("an f32 is a hex string");
     let hex = text.strip_prefix("0x").expect("an f32 starts with 0x");
     f32::from_bits(u32::from_str_radix(hex, 16).expect("hex bits"))
 }
 
 /// The items of an array of a case.
-pub(super) fn items(value: &OrderedJson) -> &[OrderedJson] {
+pub(super) fn items(value: &Fixture) -> &[Fixture] {
     value.as_array().expect("an array")
 }
 
@@ -257,14 +312,16 @@ fn members(text: &str) -> Result<Vec<(String, &str)>, String> {
     scanner.end()?;
     members
         .into_iter()
-        .map(|(key, value)| {
-            let key = OrderedJson::parse(key)
-                .ok()
-                .and_then(|key| key.into_string().ok())
-                .ok_or("transport: a bad key")?;
-            Ok((key, value))
-        })
+        .map(|(key, value)| Ok((unescape(key)?, value)))
         .collect()
+}
+
+/// The text of a JSON string literal, quotes included.
+fn unescape(literal: &str) -> Result<String, String> {
+    OrderedJson::parse(literal)
+        .ok()
+        .and_then(|value| value.into_string().ok())
+        .ok_or_else(|| "fixture: a bad string".to_string())
 }
 
 /// The raw items of the array `text` holds.
@@ -383,6 +440,61 @@ impl<'a> Scanner<'a> {
             }
         }
         Err("transport: unterminated string".into())
+    }
+
+    /// A fixture value, numbers as their literal text.
+    fn fixture(&mut self) -> Result<Fixture, String> {
+        self.space();
+        Ok(match self.bytes().get(self.pos) {
+            Some(b'"') => Fixture::String(unescape(self.string()?)?),
+            Some(b'{') => {
+                self.pos += 1;
+                let mut members = Vec::new();
+                if !self.eat(b'}') {
+                    loop {
+                        self.space();
+                        let key = unescape(self.string()?)?;
+                        if !self.eat(b':') {
+                            return Err("fixture: no colon".into());
+                        }
+                        members.push((key, self.fixture()?));
+                        if self.eat(b',') {
+                            continue;
+                        }
+                        if self.eat(b'}') {
+                            break;
+                        }
+                        return Err("fixture: bad object".into());
+                    }
+                }
+                Fixture::Object(members)
+            }
+            Some(b'[') => {
+                self.pos += 1;
+                let mut items = Vec::new();
+                if !self.eat(b']') {
+                    loop {
+                        items.push(self.fixture()?);
+                        if self.eat(b',') {
+                            continue;
+                        }
+                        if self.eat(b']') {
+                            break;
+                        }
+                        return Err("fixture: bad array".into());
+                    }
+                }
+                Fixture::Array(items)
+            }
+            Some(_) => match self.value()? {
+                "null" => Fixture::Null,
+                "true" => Fixture::Bool(true),
+                "false" => Fixture::Bool(false),
+                number if number.parse::<f64>().is_ok() => Fixture::Number(number.to_string()),
+                other => return Err(format!("fixture: bad literal {other:?}")),
+            },
+            None => return Err("fixture: no value".into()),
+        })
     }
 
     /// Any value's raw text.
