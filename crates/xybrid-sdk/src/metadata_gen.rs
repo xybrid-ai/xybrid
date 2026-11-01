@@ -200,6 +200,8 @@ fn list_model_files(dir: &Path) -> Vec<String> {
 ///
 /// Reads the GGUF binary header to extract architecture and context length,
 /// then returns a ready-to-use `ModelMetadata` without writing anything to disk.
+/// The context window is the model's native context capped at 4,096 tokens;
+/// the native value is kept as `metadata.max_context_length`.
 /// This enables `--model-file ./path/to/model.gguf` workflows.
 pub fn generate_metadata_for_gguf_file(gguf_path: &Path) -> SdkResult<ModelMetadata> {
     if !gguf_path.exists() {
@@ -503,6 +505,7 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
 
     // Limit to prevent runaway reads on corrupted files
     let kv_limit = metadata_kv_count.min(1000);
+    let mut vision_projector_type = None;
 
     // Read metadata key-value pairs
     for _ in 0..kv_limit {
@@ -538,6 +541,16 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
                     skip_gguf_value(&mut reader, value_type);
                 }
             }
+            // Projectors converted for mixed modalities (LiquidAI's LFM3-VL
+            // mmproj among them) name the vision projector here instead.
+            // llama.cpp reads it only when the default key is absent.
+            "clip.vision.projector_type" => {
+                if value_type == GGUF_TYPE_STRING {
+                    vision_projector_type = read_gguf_string(&mut reader);
+                } else {
+                    skip_gguf_value(&mut reader, value_type);
+                }
+            }
             "clip.vision.image_size" => {
                 info.image_size = read_gguf_uint_value(&mut reader, value_type);
             }
@@ -559,6 +572,10 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
         if info.architecture.is_some() && info.context_length.is_some() {
             break;
         }
+    }
+
+    if info.projector_type.is_none() {
+        info.projector_type = vision_projector_type;
     }
 
     // Infer quantization from filename
@@ -1073,6 +1090,13 @@ fn build_uninspected_metadata(
     }
 }
 
+/// Metadata for a GGUF language model without a vision projector.
+///
+/// llama.cpp allocates the KV cache for the whole context window at load, so
+/// the window is the GGUF's native context capped at 4,096 tokens, the size
+/// the vision builders use. Uncapped, LFM3 1.7B (262,144 tokens) would
+/// reserve about 5.9 GB of f16 KV cache. The native value is kept as
+/// `max_context_length`.
 fn build_gguf_metadata(
     model_id: &str,
     repo: &str,
@@ -1083,7 +1107,17 @@ fn build_gguf_metadata(
 ) -> ModelMetadata {
     use xybrid_core::execution::ExecutionTemplate;
 
-    let context_length = gguf_info.and_then(|g| g.context_length).unwrap_or(4096) as usize;
+    const DEFAULT_CONTEXT_LENGTH: usize = 4096;
+
+    // A declared 0 counts as unknown: llama.cpp reads `n_ctx = 0` as "use the
+    // training context", the allocation this cap exists to avoid.
+    let max_context_length = gguf_info
+        .and_then(|g| g.context_length)
+        .filter(|&tokens| tokens > 0)
+        .and_then(|tokens| usize::try_from(tokens).ok());
+    let context_length = max_context_length.map_or(DEFAULT_CONTEXT_LENGTH, |native| {
+        native.min(DEFAULT_CONTEXT_LENGTH)
+    });
 
     let architecture = gguf_info
         .and_then(|g| g.architecture.clone())
@@ -1104,10 +1138,14 @@ fn build_gguf_metadata(
     );
     metadata_map.insert(
         "context_length".to_string(),
-        serde_json::json!(gguf_info
-            .and_then(|g| g.context_length)
-            .unwrap_or(context_length as u64)),
+        serde_json::json!(context_length),
     );
+    if let Some(max_context_length) = max_context_length {
+        metadata_map.insert(
+            "max_context_length".to_string(),
+            serde_json::json!(max_context_length),
+        );
+    }
     metadata_map.insert(
         "source_repo".to_string(),
         serde_json::Value::String(repo.to_string()),
@@ -2316,6 +2354,45 @@ mod tests {
         assert_eq!(info.context_length, Some(8192));
     }
 
+    /// The projector type comes from `clip.projector_type`, then from
+    /// `clip.vision.projector_type`, whichever order the header lists them in.
+    #[test]
+    fn test_read_gguf_metadata_projector_type_falls_back_to_the_vision_key() {
+        fn projector(keys: &[(&str, &str)]) -> Option<String> {
+            let dir = TempDir::new().unwrap();
+            let gguf_path = dir.path().join("mmproj.gguf");
+            let mut f = std::fs::File::create(&gguf_path).unwrap();
+            f.write_all(b"GGUF").unwrap();
+            f.write_all(&3u32.to_le_bytes()).unwrap();
+            f.write_all(&0u64.to_le_bytes()).unwrap();
+            f.write_all(&(keys.len() as u64).to_le_bytes()).unwrap();
+            for (key, value) in keys {
+                write_gguf_test_string(&mut f, key);
+                f.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+                write_gguf_test_string(&mut f, value);
+            }
+            drop(f);
+            read_gguf_metadata(&gguf_path).unwrap().projector_type
+        }
+
+        assert_eq!(
+            projector(&[("clip.vision.projector_type", "lfm3vl")]).as_deref(),
+            Some("lfm3vl")
+        );
+        for keys in [
+            [
+                ("clip.vision.projector_type", "lfm3vl"),
+                ("clip.projector_type", "qwen3vl_merger"),
+            ],
+            [
+                ("clip.projector_type", "qwen3vl_merger"),
+                ("clip.vision.projector_type", "lfm3vl"),
+            ],
+        ] {
+            assert_eq!(projector(&keys).as_deref(), Some("qwen3vl_merger"));
+        }
+    }
+
     #[test]
     fn test_read_gguf_metadata_invalid_magic() {
         let dir = TempDir::new().unwrap();
@@ -2391,6 +2468,97 @@ mod tests {
         let json = std::fs::read_to_string(&metadata_path).unwrap();
         let parsed: ModelMetadata = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.model_id, "test-model");
+    }
+
+    /// A text GGUF runs at its native context capped at 4,096 tokens, like the
+    /// vision builders: llama.cpp reserves the KV cache for the whole window
+    /// at load. The native value is kept as `max_context_length`.
+    #[test]
+    fn build_gguf_metadata_caps_context_and_keeps_native_value() {
+        let primary = ModelFileInfo {
+            filename: "model-Q4_K_M.gguf".to_string(),
+            format: ModelFormat::Gguf,
+            size_bytes: 0,
+        };
+        // (declared context, context_length, max_context_length)
+        let cases: [(Option<u64>, u64, Option<u64>); 5] = [
+            (Some(262_144), 4096, Some(262_144)),
+            (Some(4096), 4096, Some(4096)),
+            (Some(2048), 2048, Some(2048)),
+            (None, 4096, None),
+            (Some(0), 4096, None),
+        ];
+
+        for (declared, expected, expected_max) in cases {
+            let info = GgufInfo {
+                architecture: Some("lfm3".to_string()),
+                context_length: declared,
+                ..Default::default()
+            };
+            let metadata = build_gguf_metadata(
+                "model",
+                "org/model",
+                &primary,
+                "text-generation",
+                None,
+                Some(&info),
+            );
+
+            // The serialized form is what lands in `model_metadata.json`.
+            let json = serde_json::to_value(&metadata).unwrap();
+            assert_eq!(
+                json["execution_template"]["context_length"], expected,
+                "declared {declared:?}"
+            );
+            assert_eq!(
+                json["metadata"]["context_length"], expected,
+                "declared {declared:?}"
+            );
+            assert_eq!(
+                json["metadata"]["max_context_length"],
+                serde_json::json!(expected_max),
+                "declared {declared:?}"
+            );
+        }
+    }
+
+    /// `--model-file` and `fromModelFile` take the window from the GGUF
+    /// header, so LFM3 1.7B's declared 262,144 tokens must not become it.
+    #[test]
+    fn generate_metadata_for_gguf_file_caps_long_native_context() {
+        let dir = TempDir::new().unwrap();
+        let gguf_path = dir.path().join("LFM3-1.7B-QAD-Q4_0.gguf");
+        let mut f = std::fs::File::create(&gguf_path).unwrap();
+        f.write_all(b"GGUF").unwrap();
+        f.write_all(&3u32.to_le_bytes()).unwrap();
+        f.write_all(&0u64.to_le_bytes()).unwrap();
+        f.write_all(&2u64.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut f, "general.architecture");
+        f.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut f, "lfm3");
+        write_gguf_test_string(&mut f, "lfm3.context_length");
+        f.write_all(&GGUF_TYPE_UINT32.to_le_bytes()).unwrap();
+        f.write_all(&262_144u32.to_le_bytes()).unwrap();
+        drop(f);
+
+        let metadata = generate_metadata_for_gguf_file(&gguf_path).unwrap();
+
+        metadata.validate().unwrap();
+        assert!(matches!(
+            metadata.execution_template,
+            xybrid_core::execution::ExecutionTemplate::Gguf {
+                ref model_file,
+                context_length: 4096,
+                ..
+            } if model_file == "LFM3-1.7B-QAD-Q4_0.gguf"
+        ));
+        assert_eq!(
+            metadata
+                .metadata
+                .get("max_context_length")
+                .and_then(|value| value.as_u64()),
+            Some(262_144)
+        );
     }
 
     #[test]
@@ -2532,13 +2700,14 @@ mod tests {
         language.write_all(&128_000u32.to_le_bytes()).unwrap();
         drop(language);
 
+        // LiquidAI's mmproj names its projector under the vision key only.
         let projector_path = dir.path().join("mmproj-LFM3-VL-2B-Q8_0.gguf");
         let mut projector = std::fs::File::create(projector_path).unwrap();
         projector.write_all(b"GGUF").unwrap();
         projector.write_all(&3u32.to_le_bytes()).unwrap();
         projector.write_all(&0u64.to_le_bytes()).unwrap();
         projector.write_all(&3u64.to_le_bytes()).unwrap();
-        write_gguf_test_string(&mut projector, "clip.projector_type");
+        write_gguf_test_string(&mut projector, "clip.vision.projector_type");
         projector
             .write_all(&GGUF_TYPE_STRING.to_le_bytes())
             .unwrap();
