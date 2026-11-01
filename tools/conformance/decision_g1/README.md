@@ -76,10 +76,11 @@ revalidated, never refitted. Changing the cap or the rule is a new experiment.
 ## Running it
 
 ```bash
-# Representative oracle observations (P3a's collection path), per artifact and settings:
+# Representative oracle observations (P3a's collection path), per artifact and settings. The collector writes
+# outside the committed fixtures; its directory is then copied in byte for byte (the receipt binds every file).
 python3 tools/conformance/decision/oracle.py --collect integration-tests/fixtures/decision/hf/cases \
-    --artifact d1-2b-f16 --settings cpu-t4-fa-off \
-    --out integration-tests/fixtures/decision/g1/oracle/d1-2b-f16/cpu-t4-fa-off
+    --expect-cases 46 --artifact d1-2b-f16 --settings cpu-t4-fa-off --out /tmp/g1/d1-2b-f16/cpu-t4-fa-off
+cp -r /tmp/g1/d1-2b-f16/cpu-t4-fa-off integration-tests/fixtures/decision/g1/oracle/d1-2b-f16/
 python3 tools/conformance/decision_g1/compare.py freeze   # once, before any held-out request exists
 python3 tools/conformance/decision_g1/compare.py gate     # exit 1 on any failure; out/report.json
 python3 tools/conformance/decision_g1/compare.py drift    # G3 report: Q4 vs F16, FA on vs off
@@ -97,7 +98,8 @@ python3 tools/conformance/decision_g1/make_heldout.py \
 tools/conformance/decision_hf/run.sh --check-f32-parity \
     --run-log integration-tests/fixtures/decision/g1/heldout/hf/run.json \
     --out integration-tests/fixtures/decision/g1/heldout/hf integration-tests/fixtures/decision/g1/heldout/cases
-# then oracle.py --collect on g1/heldout/cases for each artifact and settings, into g1/heldout/oracle/...
+# then oracle.py --collect on g1/heldout/cases (--expect-cases 40) for each artifact and settings, copied into
+# g1/heldout/oracle/<artifact>/<settings>/
 ```
 
 Every heavy step runs alone on an 8 GB machine: the HF forward peaks near
