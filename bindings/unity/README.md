@@ -149,9 +149,42 @@ using var model = XybridClient.LoadModel("kokoro-82m");
 using var result = model.Run(Envelope.Text("Welcome, traveler. The road ahead is dangerous."));
 result.ThrowIfFailed();
 
-// result.Text contains the audio output
+// result.AudioBytes holds raw PCM: 16-bit signed little-endian, 24 kHz mono for Kokoro
 Debug.Log($"Inference completed in {result.LatencyMs}ms");
 ```
+
+### Phoneme Timings for Lip Sync
+
+A TTS model with a per-token duration output also reports when each phoneme is
+spoken. KittenTTS 0.8 has one; for Kokoro-82M, add it with
+`tools/conformance/expose_tts_duration.py` (see
+[`TTSAudioEncode`](../../docs/sdk/MODEL_METADATA.md#ttsaudioencode)). Times are
+seconds from the first sample of `AudioBytes`, so you can match them against
+`AudioSource.time` while the clip plays.
+
+```csharp
+using System.IO;
+using UnityEngine;
+using Xybrid;
+
+using var model = ModelLoader.FromDirectory(
+    Path.Combine(Application.streamingAssetsPath, "kokoro-82m-timed")).Load();
+
+using var r = model.Run(Envelope.Text(text, voiceId, speed));
+r.ThrowIfFailed();
+var pcm = r.AudioBytes;
+
+// Empty (never null) when the model has no duration output.
+foreach (var t in r.PhonemeTimings)
+    Debug.Log($"{t.Phoneme}: {t.Start:F3}-{t.End:F3} s");
+```
+
+Spaces, punctuation and stress marks (`ˈ`, `ˌ`) get their own entries; pads
+and silence tokens do not, so there can be gaps between entries. On KittenTTS
+0.8 the clip can also run on up to about 0.1 s after the last entry, where its
+audible end pad was kept; Kokoro's last entry ends with the clip. Streaming TTS
+(`RunTtsStreaming`) reports no timings, and Kitten TTS 2 and Phonon models and
+cloud results return an empty list.
 
 ### Speech Recognition
 
