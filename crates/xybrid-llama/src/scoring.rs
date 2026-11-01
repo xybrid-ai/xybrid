@@ -44,18 +44,22 @@ impl LlamaContext {
     /// logits slightly.
     ///
     /// Needs a decoder-only language model with causal attention. A context
-    /// without memory, which is how llama.cpp runs encoder-only and diffusion
-    /// models, is refused. Encoder-decoder models such as T5, and decoders
-    /// without causal attention, can't be detected with the functions this
-    /// crate binds: don't score with them (llama.cpp aborts on T5, as it does
-    /// when generating).
+    /// without memory, which is how llama.cpp runs encoder-only, diffusion
+    /// and memory-less decision models, is refused, and so is one with
+    /// non-causal attention, which llama.cpp cannot prefill in chunks.
+    /// Decision models that run without memory are read with
+    /// [`MemorylessContext::read_last`](crate::MemorylessContext::read_last)
+    /// instead. Encoder-decoder models such as T5 can't be told apart here:
+    /// don't score with them (llama.cpp aborts on T5, as it does when
+    /// generating).
     ///
     /// # Errors
     ///
     /// [`LlamaError::InvalidInput`], before any decode, when the context has
-    /// no memory, `tokens` or `label_ids` is empty, the prompt leaves no free
-    /// position in the context window, or an id is outside the model's
-    /// vocabulary. [`LlamaError::DecodeFailed`] when llama.cpp fails to
+    /// no memory or non-causal attention, `tokens` or `label_ids` is empty,
+    /// the prompt leaves no free position in the context window, or an id is
+    /// outside the model's vocabulary. [`LlamaError::DecodeFailed`] when
+    /// llama.cpp fails to
     /// decode a chunk, and [`LlamaError::Internal`] when it returns no
     /// logits, a row without a finite log-sum-exp, or a non-finite logit for
     /// a requested label.
@@ -73,6 +77,14 @@ impl LlamaContext {
             ));
         }
         let _clear_on_exit = ClearOnDrop(self);
+        // SAFETY: the context is live.
+        if !unsafe { ffi::causal_attn(self.as_ptr()) } {
+            return Err(LlamaError::InvalidInput(
+                "the context uses non-causal attention, which needs the whole prompt in one \
+                 microbatch: this causal scorer cannot read it"
+                    .to_string(),
+            ));
+        }
         let n_vocab = self.n_vocab();
         validate(tokens, label_ids, self.n_ctx(), n_vocab)?;
 
