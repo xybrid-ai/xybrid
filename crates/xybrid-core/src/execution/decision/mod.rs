@@ -53,7 +53,10 @@
 //!   ([`DecisionError::NumberOutOfRange`]); upstream's template engine
 //!   wraps it to a negative number.
 //! - A pass over the token budget, or passes over the request's total, are
-//!   refused before any pass runs; upstream fails mid-request.
+//!   refused before any pass runs; upstream fails mid-request. A prompt is
+//!   also bounded while it renders: no longer than the budget times the
+//!   vocabulary's longest token, which no prompt that fits the budget
+//!   exceeds ([`DecisionError::RenderedTooLong`]).
 //! - NaN anywhere among a pass's label logits is refused
 //!   ([`DecisionError::NonFiniteScores`]); upstream's answer then depends on
 //!   label order.
@@ -130,6 +133,18 @@ pub trait DecisionVocab: Send + Sync {
     /// longer, in token-id order (llama.cpp's `llama_vocab_get_text` of
     /// every token whose attributes include `LLAMA_TOKEN_ATTR_CONTROL`).
     fn control_spellings(&self) -> &[Vec<u8>];
+
+    /// The most bytes of text one token covers: the longest token text of
+    /// the vocabulary (at least 1).
+    ///
+    /// A token's text is at least as long as the bytes it covers (a
+    /// byte-level BPE writes a byte as one or two, SentencePiece a space as
+    /// three, a byte-fallback token one byte as six), so a text of `n`
+    /// bytes takes at least `n / max_token_bytes` tokens, given a tokenizer
+    /// that covers every byte of its text (no normalization that drops
+    /// bytes; d1-2B's byte-level BPE covers them all). `prepare` refuses a
+    /// prompt longer than the token budget times this while it renders.
+    fn max_token_bytes(&self) -> usize;
 }
 
 /// Default [`DecisionLimits::token_budget`]: 4,096 tokens.
@@ -376,6 +391,19 @@ impl fmt::Debug for DecisionPlan {
 /// Nothing is evaluated: the whole request is checked and prepared first, so
 /// a refusal costs no inference. Only `vocab` is called (to tokenize).
 ///
+/// # Ceilings
+///
+/// A pass's prompt renders to at most `token_budget ×`
+/// [`DecisionVocab::max_token_bytes`] bytes: no prompt that fits the budget
+/// is longer, since no token covers more bytes than the vocabulary's
+/// longest token text. Rendering writes into a buffer that refuses to grow
+/// past it, `tojson`'s own text included, and a longer prompt is refused
+/// as [`DecisionError::RenderedTooLong`] (kind `budget_exceeded`) before it
+/// is tokenized; only its label forms (one short code each) are tokenized
+/// before that, because the prompt shows the codes. That is the effective
+/// per-pass ceiling (d1-2B: 4,096 × 386 = 1,581,056 bytes), and a request
+/// renders at most `max_questions` (16 by default) of them.
+///
 /// # Errors
 ///
 /// The first problem found, as a content-free [`DecisionError`] whose
@@ -385,7 +413,9 @@ impl fmt::Debug for DecisionPlan {
 /// levels, more than 255 options, media, JSON deeper than LFM3 d1 reads
 /// (127 levels for the state and instructions, 125 for descriptions), an
 /// integer above `i64::MAX`, an escaped-key collision, no single-token label
-/// left, a pass over the token budget or passes over the request's total;
+/// left, a prompt longer than the token budget can hold (refused while it
+/// renders, at the budget times [`DecisionVocab::max_token_bytes`]), a pass
+/// over the token budget or passes over the request's total;
 /// [`DecisionError::UnsupportedVocabulary`] for control spellings `d1_break`
 /// cannot handle, and [`DecisionError::RenderFailed`] or
 /// [`DecisionError::TokenizationFailed`] when a step fails.

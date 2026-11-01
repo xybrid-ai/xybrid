@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::escape::{Escaped, Spellings};
 use super::labels::{self, Label, LabelTokens};
 use super::plan::{AnswerPlan, FinalizeRule, LabelGroup};
-use super::render::Renderer;
+use super::render::{RenderError, Renderer};
 use super::{protocol, DecisionModelFacts, DecisionPass, DecisionPlan, DecisionVocab, Token};
 use crate::ir::decision::{
     ContentPart, DecisionContent, DecisionError, DecisionInstructions, DecisionOrigin,
@@ -30,7 +30,10 @@ pub(super) fn prepare(
         request.state().body(),
         ContentPart::State,
     )?);
-    let renderer = Renderer::new()?;
+    // No prompt that fits the budget is longer than this: every token covers
+    // at most `max_token_bytes` bytes of it (`DecisionVocab::max_token_bytes`).
+    let max_bytes = (limits.token_budget as usize).saturating_mul(vocab.max_token_bytes().max(1));
+    let renderer = Renderer::new(max_bytes).map_err(|_| DecisionError::RenderFailed)?;
     let mut label_tokens = LabelTokens::new(vocab);
 
     let count = request.questions().len();
@@ -45,7 +48,15 @@ pub(super) fn prepare(
             labels,
         } = labels_of(index, question, &mut label_tokens)?;
         let input = template_input(index, question, type_name, &labels, &state, &spellings)?;
-        let prompt = renderer.render(Arc::new(input))?;
+        let prompt = renderer
+            .render(Arc::new(input))
+            .map_err(|error| match error {
+                RenderError::TooLong => DecisionError::RenderedTooLong {
+                    question: index,
+                    max_bytes,
+                },
+                RenderError::Failed => DecisionError::RenderFailed,
+            })?;
 
         // The rendered text spells its special tokens; the caller's text no
         // longer spells CONTROL ones (`server-decision.cpp:1250`).

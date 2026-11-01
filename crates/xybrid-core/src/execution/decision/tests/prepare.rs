@@ -346,7 +346,12 @@ fn tojson_takes_the_templates_arguments_and_refuses_the_rest() {
 
     let mut env = minijinja::Environment::new();
     env.set_auto_escape_callback(|_| minijinja::AutoEscape::None);
-    env.add_filter("tojson", tojson);
+    env.add_filter(
+        "tojson",
+        |value: &minijinja::Value, kwargs: minijinja::value::Kwargs| {
+            tojson(value, kwargs, usize::MAX).map(|text| text.expect("no cap"))
+        },
+    );
     let value = to_value(&Arc::new(Escaped::Object(vec![
         ("b".into(), Arc::new(Escaped::Float(1.0))),
         (
@@ -389,4 +394,121 @@ fn tojson_takes_the_templates_arguments_and_refuses_the_rest() {
     ] {
         assert!(render(refused).is_err(), "{refused}");
     }
+}
+
+/// A vocabulary that counts the prompts it tokenizes.
+struct Counting<'a> {
+    inner: &'a FakeVocab,
+    prompts: std::sync::atomic::AtomicUsize,
+}
+
+impl DecisionVocab for Counting<'_> {
+    fn tokenize(
+        &self,
+        text: &str,
+        add_special: bool,
+        parse_special: bool,
+    ) -> Result<Vec<crate::execution::decision::Token>, DecisionError> {
+        if parse_special {
+            self.prompts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.inner.tokenize(text, add_special, parse_special)
+    }
+
+    fn control_spellings(&self) -> &[Vec<u8>] {
+        self.inner.control_spellings()
+    }
+
+    fn max_token_bytes(&self) -> usize {
+        self.inner.max_token_bytes()
+    }
+}
+
+#[test]
+fn a_prompt_longer_than_its_budget_can_hold_is_refused_while_it_renders() {
+    // Every token of this vocabulary covers one byte (no control spelling, no
+    // longer single form), so a prompt of n bytes is n tokens and the cap is
+    // the budget itself.
+    let fake = FakeVocab::new();
+    assert_eq!(fake.max_token_bytes(), 1);
+    let vocab = Counting {
+        inner: &fake,
+        prompts: Default::default(),
+    };
+    let request = DecisionRequest::new(
+        DecisionState::text("a state"),
+        vec![DecisionQuestion::new(
+            "q",
+            Some(DecisionContent::text("How much?").into()),
+            DecisionQuestionKind::score(vec![DecisionLevel::new(None); 2]),
+        )],
+    );
+    let [prompt] = &prompts(&request, DecisionLimits::default(), &vocab).unwrap()[..] else {
+        panic!("one pass")
+    };
+    let bytes = prompt.len();
+
+    // A budget of exactly the prompt's tokens: rendered, tokenized, accepted.
+    let limits = DecisionLimits::default().with_token_budget(bytes as u32);
+    let plan = prepare(&request, &d1_facts(limits), &vocab, None).unwrap();
+    assert_eq!(plan.passes()[0].tokens().len(), bytes);
+
+    // One token less: refused while rendering, before any prompt is
+    // tokenized.
+    let before = vocab.prompts.load(std::sync::atomic::Ordering::Relaxed);
+    let limits = DecisionLimits::default().with_token_budget(bytes as u32 - 1);
+    let error = prepare(&request, &d1_facts(limits), &vocab, None).unwrap_err();
+    assert!(
+        matches!(error, DecisionError::RenderedTooLong { question: 0, max_bytes } if max_bytes == bytes - 1),
+        "{error:?}"
+    );
+    assert_eq!(
+        vocab.prompts.load(std::sync::atomic::Ordering::Relaxed),
+        before
+    );
+    assert_eq!(error.kind().map(|k| k.as_str()), Some("budget_exceeded"));
+    assert!(matches!(
+        AdapterError::from(error),
+        AdapterError::InvalidInput(_)
+    ));
+
+    // The cap is the budget times the longest token: with tokens of up to 3
+    // bytes the same budget renders it again (and the tokenizer has the last
+    // word).
+    let wider = FakeVocab::new().single("abc", 7);
+    assert_eq!(wider.max_token_bytes(), 3);
+    let error = prepare(&request, &d1_facts(limits), &wider, None).unwrap_err();
+    assert!(
+        matches!(error, DecisionError::BudgetExceeded { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn json_content_too_long_for_the_prompt_is_refused_while_it_is_written() {
+    // tojson's own text is capped too: a JSON state whose indentation alone
+    // passes the cap stops being written there.
+    let deep = format!("{}0{}", "[".repeat(100), "]".repeat(100));
+    let request = DecisionRequest::new(
+        DecisionState::from_json(OrderedJson::parse(&deep).unwrap()),
+        vec![DecisionQuestion::new(
+            "q",
+            Some(DecisionContent::text("x").into()),
+            DecisionQuestionKind::score(vec![DecisionLevel::new(None); 2]),
+        )],
+    );
+    let vocab = FakeVocab::new();
+    let limits = DecisionLimits::default().with_token_budget(1000);
+    let error = prepare(&request, &d1_facts(limits), &vocab, None).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            DecisionError::RenderedTooLong {
+                max_bytes: 1000,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
 }

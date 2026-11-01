@@ -667,6 +667,16 @@ pub enum DecisionError {
     /// Reading the model's vocabulary (a token's attributes or text) failed.
     #[error("reading the model's vocabulary failed")]
     VocabularyFailed,
+    /// A question's prompt renders to more bytes than its pass can hold: the
+    /// token budget times the most bytes one token of the vocabulary covers.
+    /// Found while rendering, before anything is tokenized.
+    #[error("question {question} renders to more than {max_bytes} bytes, more than its token budget holds")]
+    RenderedTooLong {
+        /// Position of the question.
+        question: usize,
+        /// The most bytes a prompt may render to.
+        max_bytes: usize,
+    },
 }
 
 /// The model id an [`AdapterError::UnsupportedModelCapability`] names when
@@ -721,7 +731,9 @@ impl DecisionError {
             Self::NumberOutOfRange { .. } => Kind::NumberOutOfRange,
             Self::EscapedKeyCollision { .. } => Kind::EscapedKeyCollision,
             Self::NoSingleTokenLabel { .. } => Kind::NoSingleTokenLabel,
-            Self::BudgetExceeded { .. } | Self::TotalBudgetExceeded { .. } => Kind::BudgetExceeded,
+            Self::BudgetExceeded { .. }
+            | Self::TotalBudgetExceeded { .. }
+            | Self::RenderedTooLong { .. } => Kind::BudgetExceeded,
             Self::NonFiniteScores { .. } => Kind::NonFiniteScores,
             Self::UnsupportedMetadata
             | Self::UnsupportedTemplate
@@ -1034,6 +1046,10 @@ mod tests {
             },
             DecisionError::NonFiniteScores { question: 3 },
             DecisionError::VocabularyFailed,
+            DecisionError::RenderedTooLong {
+                question: 1,
+                max_bytes: 4096,
+            },
         ]);
         refusals
     }
@@ -1120,6 +1136,7 @@ mod tests {
             DecisionError::ReadoutLength { .. } => "ReadoutLength",
             DecisionError::NonFiniteScores { .. } => "NonFiniteScores",
             DecisionError::VocabularyFailed => "VocabularyFailed",
+            DecisionError::RenderedTooLong { .. } => "RenderedTooLong",
         };
         name.to_string()
     }
@@ -1144,9 +1161,9 @@ mod tests {
         let refusals = every_refusal();
         let names: std::collections::BTreeSet<String> = refusals.iter().map(variant).collect();
         // 13 JSON syntax kinds, 3 JSON ceilings, 12 request refusals, 15
-        // answer invariants and 20 protocol refusals and failures: every one,
+        // answer invariants and 21 protocol refusals and failures: every one,
         // each once.
-        assert_eq!(names.len(), 63, "{names:#?}");
+        assert_eq!(names.len(), 64, "{names:#?}");
         assert_eq!(refusals.len(), names.len());
 
         for error in refusals {
@@ -1511,6 +1528,14 @@ mod tests {
                 "InferenceFailed",
             ),
             (DecisionError::VocabularyFailed, None, "InferenceFailed"),
+            (
+                DecisionError::RenderedTooLong {
+                    question: 0,
+                    max_bytes: 4096,
+                },
+                Some("budget_exceeded"),
+                "InvalidInput",
+            ),
         ]
     }
 

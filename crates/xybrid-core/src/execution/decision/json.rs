@@ -36,15 +36,79 @@ impl JsonStyle {
     }
 }
 
-/// `value` as llama.cpp's `tojson` writes it, with `ensure_ascii` false.
-pub(super) fn to_json(value: &Escaped, style: JsonStyle) -> String {
-    let mut out = String::new();
+/// `value` as llama.cpp's `tojson` writes it, with `ensure_ascii` false, or
+/// `None` when that is longer than `cap` bytes. The text never grows past
+/// `cap`: writing stops where it would.
+pub(super) fn to_json(value: &Escaped, style: JsonStyle, cap: usize) -> Option<String> {
+    let mut out = Sink::new(cap);
     write_value(value, 0, style, &mut out);
-    out
+    out.finish()
+}
+
+/// Text that refuses to grow past a cap: once a write would pass it, the
+/// sink keeps what it has, ignores every later write, and is full.
+pub(super) struct Sink {
+    text: String,
+    cap: usize,
+    full: bool,
+}
+
+impl Sink {
+    pub(super) fn new(cap: usize) -> Self {
+        Self {
+            text: String::new(),
+            cap,
+            full: false,
+        }
+    }
+
+    pub(super) fn push_str(&mut self, text: &str) {
+        if self.full || self.text.len() + text.len() > self.cap {
+            self.full = true;
+            return;
+        }
+        self.text.push_str(text);
+    }
+
+    fn push(&mut self, c: char) {
+        self.push_str(c.encode_utf8(&mut [0; 4]));
+    }
+
+    fn push_spaces(&mut self, count: usize) {
+        if self.full || self.text.len() + count > self.cap {
+            self.full = true;
+            return;
+        }
+        self.text.extend(std::iter::repeat_n(' ', count));
+    }
+
+    /// Whether a write was refused.
+    pub(super) fn is_full(&self) -> bool {
+        self.full
+    }
+
+    /// The text, or `None` when a write was refused.
+    pub(super) fn finish(self) -> Option<String> {
+        (!self.full).then_some(self.text)
+    }
+}
+
+impl std::fmt::Write for Sink {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        self.push_str(text);
+        if self.full {
+            Err(std::fmt::Error)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// `value_to_json_internal`: `level` is the depth of `value`.
-fn write_value(value: &Escaped, level: usize, style: JsonStyle, out: &mut String) {
+fn write_value(value: &Escaped, level: usize, style: JsonStyle, out: &mut Sink) {
+    if out.is_full() {
+        return;
+    }
     match value {
         Escaped::Null => out.push_str("null"),
         Escaped::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
@@ -79,25 +143,28 @@ fn write_items<T>(
     items: impl ExactSizeIterator<Item = T>,
     level: usize,
     style: JsonStyle,
-    out: &mut String,
-    mut write_item: impl FnMut(T, &mut String),
+    out: &mut Sink,
+    mut write_item: impl FnMut(T, &mut Sink),
 ) {
     let count = items.len();
     if count == 0 {
         return;
     }
-    let newline = |out: &mut String| {
+    let newline = |out: &mut Sink| {
         if style.indent.is_some() {
             out.push('\n');
         }
     };
-    let pad = |out: &mut String, level: usize| {
+    let pad = |out: &mut Sink, level: usize| {
         if let Some(indent) = style.indent {
-            out.push_str(&" ".repeat(indent * level));
+            out.push_spaces(indent * level);
         }
     };
     newline(out);
     for (index, item) in items.enumerate() {
+        if out.is_full() {
+            return;
+        }
         pad(out, level + 1);
         write_item(item, out);
         if index + 1 < count {
@@ -111,7 +178,7 @@ fn write_items<T>(
 /// A JSON string: `"` and `\` escaped, the short escapes for backspace,
 /// form feed, newline, carriage return and tab, `\u00XX` (lowercase) for
 /// the other control characters, everything else raw UTF-8.
-fn write_string(text: &str, out: &mut String) {
+fn write_string(text: &str, out: &mut Sink) {
     out.push('"');
     for c in text.chars() {
         match c {
@@ -126,6 +193,9 @@ fn write_string(text: &str, out: &mut String) {
                 let _ = write!(out, "\\u{:04x}", u32::from(c));
             }
             c => out.push(c),
+        }
+        if out.is_full() {
+            return;
         }
     }
     out.push('"');

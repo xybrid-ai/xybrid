@@ -1,6 +1,7 @@
 //! [`DecisionVocab`] over a loaded llama.cpp model.
 
 use std::fmt;
+use std::sync::Arc;
 
 use xybrid_llama::{LlamaModel, TokenAttr};
 
@@ -9,26 +10,29 @@ use crate::ir::decision::DecisionError;
 
 /// A llama.cpp model's vocabulary, as the decision protocol reads it.
 ///
-/// Construction walks the whole vocabulary once for its CONTROL spellings
-/// (128,000 entries on d1-2B, a few milliseconds), so build it once per
-/// loaded model.
-pub struct LlamaVocab<'m> {
-    model: &'m LlamaModel,
+/// It owns a share of the model, so it can be kept with the model and built
+/// once: construction walks the whole vocabulary (128,000 entries on d1-2B,
+/// a few milliseconds) for its CONTROL spellings and its longest token.
+pub struct LlamaVocab {
+    model: Arc<LlamaModel>,
     control: Vec<Vec<u8>>,
+    max_token_bytes: usize,
 }
 
-impl<'m> LlamaVocab<'m> {
+impl LlamaVocab {
     /// The vocabulary of `model`: the texts of its CONTROL tokens of 2 bytes
     /// or more, in token-id order, as `init_quoted_spellings(CONTROL, 2)`
-    /// collects them (`tools/server/server-decision.cpp:213-221`).
+    /// collects them (`tools/server/server-decision.cpp:213-221`), and the
+    /// length of its longest token text.
     ///
     /// # Errors
     ///
     /// [`DecisionError::VocabularyFailed`] when llama.cpp cannot report a
     /// token's attributes or text: a failure is never read as "not a
     /// CONTROL token".
-    pub fn new(model: &'m LlamaModel) -> Result<Self, DecisionError> {
+    pub fn new(model: Arc<LlamaModel>) -> Result<Self, DecisionError> {
         let mut control = Vec::new();
+        let mut max_token_bytes = 1;
         for id in 0..model.n_vocab() {
             let id = Token::try_from(id).map_err(|_| DecisionError::VocabularyFailed)?;
             let attr = model
@@ -36,23 +40,30 @@ impl<'m> LlamaVocab<'m> {
                 .ok()
                 .flatten()
                 .ok_or(DecisionError::VocabularyFailed)?;
-            if !attr.intersects(TokenAttr::CONTROL) {
-                continue;
-            }
             let text = model
                 .token_text(id)
                 .ok()
                 .flatten()
                 .ok_or(DecisionError::VocabularyFailed)?;
-            if text.len() >= 2 {
+            max_token_bytes = max_token_bytes.max(text.len());
+            if attr.intersects(TokenAttr::CONTROL) && text.len() >= 2 {
                 control.push(text);
             }
         }
-        Ok(Self { model, control })
+        Ok(Self {
+            model,
+            control,
+            max_token_bytes,
+        })
+    }
+
+    /// The model the vocabulary belongs to.
+    pub fn model(&self) -> &Arc<LlamaModel> {
+        &self.model
     }
 }
 
-impl DecisionVocab for LlamaVocab<'_> {
+impl DecisionVocab for LlamaVocab {
     fn tokenize(
         &self,
         text: &str,
@@ -67,13 +78,18 @@ impl DecisionVocab for LlamaVocab<'_> {
     fn control_spellings(&self) -> &[Vec<u8>] {
         &self.control
     }
+
+    fn max_token_bytes(&self) -> usize {
+        self.max_token_bytes
+    }
 }
 
 /// Counts only.
-impl fmt::Debug for LlamaVocab<'_> {
+impl fmt::Debug for LlamaVocab {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LlamaVocab")
             .field("control_spellings", &self.control.len())
+            .field("max_token_bytes", &self.max_token_bytes)
             .finish()
     }
 }

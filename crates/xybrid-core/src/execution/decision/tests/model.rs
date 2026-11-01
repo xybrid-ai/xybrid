@@ -14,7 +14,7 @@
 //! `XYBRID_DECISION_ORACLE=<path to decision-oracle>`.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use xybrid_llama::LlamaModel;
 
@@ -40,14 +40,14 @@ const MODEL_FILE: &str = "d1-2B-Q4_K_M.gguf";
 
 /// The staged model, loaded once (`None`, after a skip notice, when it is
 /// not staged).
-fn d1_2b() -> Option<&'static (PathBuf, LlamaModel)> {
-    static MODEL: OnceLock<Option<(PathBuf, LlamaModel)>> = OnceLock::new();
+fn d1_2b() -> Option<&'static (PathBuf, Arc<LlamaModel>)> {
+    static MODEL: OnceLock<Option<(PathBuf, Arc<LlamaModel>)>> = OnceLock::new();
     MODEL
         .get_or_init(|| {
             let path = model_fixtures::staged_artifact(MODEL_ID, MODEL_FILE)?;
             let model =
                 LlamaModel::load(path.to_str().expect("a UTF-8 path"), 0).expect("load d1-2B");
-            Some((path, model))
+            Some((path, Arc::new(model)))
         })
         .as_ref()
 }
@@ -55,7 +55,7 @@ fn d1_2b() -> Option<&'static (PathBuf, LlamaModel)> {
 /// A vocabulary with another vocabulary's tokenizer and its own CONTROL
 /// spellings: a metadata variant that changes token types only.
 struct SpellingsOf<'a> {
-    tokenizer: &'a LlamaVocab<'a>,
+    tokenizer: &'a LlamaVocab,
     control: Vec<Vec<u8>>,
 }
 
@@ -71,6 +71,10 @@ impl DecisionVocab for SpellingsOf<'_> {
 
     fn control_spellings(&self) -> &[Vec<u8>] {
         &self.control
+    }
+
+    fn max_token_bytes(&self) -> usize {
+        self.tokenizer.max_token_bytes()
     }
 }
 
@@ -96,7 +100,7 @@ fn header_control_spellings(header: &GgufHeader) -> Vec<Vec<u8>> {
 }
 
 /// `case`'s token-type edits applied to d1-2B's CONTROL spellings.
-fn edited_spellings(case: &Case, model: &LlamaModel, vocab: &LlamaVocab<'_>) -> Vec<Vec<u8>> {
+fn edited_spellings(case: &Case, model: &LlamaModel, vocab: &LlamaVocab) -> Vec<Vec<u8>> {
     let Some(edits) = case
         .at(&["metadata", "token_types"])
         .and_then(Fixture::as_object)
@@ -155,9 +159,17 @@ fn d1_2b_facts_and_vocabulary_are_the_oracles() {
 
     // The vocabulary's CONTROL spellings are the oracle's, and the ones the
     // header's arrays give (which the variant test reads).
-    let vocab = LlamaVocab::new(model).expect("d1-2B's vocabulary");
+    let vocab = LlamaVocab::new(Arc::clone(model)).expect("d1-2B's vocabulary");
     let spellings = vocab.control_spellings();
     assert_eq!(spellings.len(), 124);
+    // The longest token text, which bounds a prompt's bytes per token: so
+    // a 4,096-token pass renders to at most 4,096 times this.
+    let longest = (0..model.n_vocab() as Token)
+        .map(|id| model.token_text(id).unwrap().unwrap().len())
+        .max()
+        .unwrap();
+    assert_eq!(vocab.max_token_bytes(), longest);
+    eprintln!("d1-2B's longest token text: {longest} bytes");
     assert_eq!(header_control_spellings(&header), spellings);
     let mut longest_first: Vec<String> = spellings
         .iter()
@@ -307,6 +319,17 @@ fn check_case(case: &Case, facts: &DecisionModelFacts, vocab: &dyn DecisionVocab
     assert_eq!(expectation, "match", "{}", case.id);
     let plan = result.unwrap_or_else(|error| panic!("{}: {error}", case.id));
     assert_upstream_plan(case, &plan, &prompts);
+    // The rendered-bytes cap is sound here: no token covers more bytes than
+    // the vocabulary's longest token text.
+    for (pass, prompt) in plan.passes().iter().zip(&prompts) {
+        assert!(
+            prompt.len() <= pass.tokens().len() * vocab.max_token_bytes(),
+            "{}: {} bytes in {} tokens",
+            case.id,
+            prompt.len(),
+            pass.tokens().len()
+        );
+    }
     let codes: Vec<Vec<String>> = plan
         .answers
         .iter()
@@ -340,7 +363,7 @@ fn check_case(case: &Case, facts: &DecisionModelFacts, vocab: &dyn DecisionVocab
 #[test]
 fn every_case_prepares_as_upstream_on_d1_2b() {
     let Some((_, model)) = d1_2b() else { return };
-    let vocab = LlamaVocab::new(model).expect("d1-2B's vocabulary");
+    let vocab = LlamaVocab::new(Arc::clone(model)).expect("d1-2B's vocabulary");
     let mut checked = std::collections::BTreeMap::<&str, usize>::new();
     for case in cases::all() {
         if case.expect("prepare").as_deref() == Some("not_reached")
@@ -451,7 +474,7 @@ fn metadata_variants_built_by_the_oracle() {
     let Some((base, model)) = d1_2b() else { return };
     let Some(oracle) = oracle() else { return };
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let vocab = LlamaVocab::new(model).expect("d1-2B's vocabulary");
+    let vocab = LlamaVocab::new(Arc::clone(model)).expect("d1-2B's vocabulary");
     let mut checked = std::collections::BTreeMap::<&str, usize>::new();
     for case in cases::all() {
         if case.at(&["metadata"]).is_none() {

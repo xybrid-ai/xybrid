@@ -149,6 +149,16 @@ impl DecisionVocab for FakeVocab {
     fn control_spellings(&self) -> &[Vec<u8>] {
         &self.control
     }
+
+    /// One byte, a single-token form, or a control spelling: the most one
+    /// of its tokens covers.
+    fn max_token_bytes(&self) -> usize {
+        self.singles
+            .keys()
+            .map(String::len)
+            .chain(self.control.iter().map(Vec::len))
+            .fold(1, usize::max)
+    }
 }
 
 /// A GGUF header with exactly the given metadata, written and read back.

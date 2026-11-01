@@ -94,19 +94,24 @@ fn sample() -> Escaped {
 #[test]
 fn compact_json_has_pythons_separators_and_keeps_order() {
     assert_eq!(
-        to_json(&sample(), JsonStyle { indent: None }),
+        to_json(&sample(), JsonStyle { indent: None }, usize::MAX).unwrap(),
         r#"{"z": 1, "a": [1.0, null, false, [], {}], "nested": {"k": "v"}}"#
     );
     assert_eq!(
-        to_json(&Escaped::Int(-42), JsonStyle { indent: None }),
+        to_json(&Escaped::Int(-42), JsonStyle { indent: None }, usize::MAX).unwrap(),
         "-42"
     );
     assert_eq!(
-        to_json(&Escaped::Bool(true), JsonStyle { indent: None }),
+        to_json(&Escaped::Bool(true), JsonStyle { indent: None }, usize::MAX).unwrap(),
         "true"
     );
     assert_eq!(
-        to_json(&Escaped::Float(-0.0), JsonStyle { indent: None }),
+        to_json(
+            &Escaped::Float(-0.0),
+            JsonStyle { indent: None },
+            usize::MAX
+        )
+        .unwrap(),
         "-0.0"
     );
 }
@@ -114,16 +119,26 @@ fn compact_json_has_pythons_separators_and_keeps_order() {
 #[test]
 fn indented_json_puts_each_item_on_its_line() {
     let expected = "{\n  \"z\": 1,\n  \"a\": [\n    1.0,\n    null,\n    false,\n    [],\n    {}\n  ],\n  \"nested\": {\n    \"k\": \"v\"\n  }\n}";
-    assert_eq!(to_json(&sample(), JsonStyle { indent: Some(2) }), expected);
+    assert_eq!(
+        to_json(&sample(), JsonStyle { indent: Some(2) }, usize::MAX).unwrap(),
+        expected
+    );
     // Indent 0: newlines without spaces, as Python's json.dumps(indent=0).
     let flat = to_json(
         &Escaped::Array(vec![arc(Escaped::Int(1)), arc(Escaped::Int(2))]),
         JsonStyle { indent: Some(0) },
-    );
+        usize::MAX,
+    )
+    .unwrap();
     assert_eq!(flat, "[\n1,\n2\n]");
     // A scalar has no layout.
     assert_eq!(
-        to_json(&Escaped::Str("x".into()), JsonStyle { indent: Some(2) }),
+        to_json(
+            &Escaped::Str("x".into()),
+            JsonStyle { indent: Some(2) },
+            usize::MAX
+        )
+        .unwrap(),
         "\"x\""
     );
 }
@@ -132,7 +147,33 @@ fn indented_json_puts_each_item_on_its_line() {
 fn strings_escape_quotes_backslashes_and_control_characters_only() {
     let text = "q\" b\\ \u{8}\u{c}\n\r\t \u{1}\u{1f} \u{7f} é 中 😀 \u{2028} \u{200b} </script>";
     assert_eq!(
-        to_json(&Escaped::Str(text.into()), JsonStyle { indent: None }),
+        to_json(
+            &Escaped::Str(text.into()),
+            JsonStyle { indent: None },
+            usize::MAX
+        )
+        .unwrap(),
         "\"q\\\" b\\\\ \\b\\f\\n\\r\\t \\u0001\\u001f \u{7f} é 中 😀 \u{2028} \u{200b} </script>\""
     );
+}
+
+#[test]
+fn json_text_never_grows_past_its_cap() {
+    let style = JsonStyle { indent: Some(2) };
+    let full = to_json(&sample(), style, usize::MAX).unwrap();
+    // Exactly at the cap it is written; one byte less and it is not.
+    assert_eq!(
+        to_json(&sample(), style, full.len()).as_deref(),
+        Some(full.as_str())
+    );
+    assert_eq!(to_json(&sample(), style, full.len() - 1), None);
+    assert_eq!(to_json(&Escaped::Null, style, 3), None);
+    // A deep value whose indentation alone would pass the cap stops early.
+    let mut deep = Escaped::Int(0);
+    for _ in 0..100 {
+        deep = Escaped::Array(vec![arc(deep)]);
+    }
+    let text = to_json(&deep, JsonStyle { indent: Some(16) }, usize::MAX).unwrap();
+    assert!(text.len() > 80_000);
+    assert_eq!(to_json(&deep, JsonStyle { indent: Some(16) }, 1000), None);
 }
