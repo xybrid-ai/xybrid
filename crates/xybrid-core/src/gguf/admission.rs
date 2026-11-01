@@ -78,6 +78,9 @@ const MAX_QUOTED_CHARS: usize = 64;
 /// an error includes.
 const MAX_DETAIL_CHARS: usize = 256;
 
+/// Characters of a model id an error repeats, once escaped.
+const MAX_LABEL_CHARS: usize = 128;
+
 /// What [`admit_gguf`] admitted.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -171,21 +174,21 @@ impl fmt::Debug for AdmittedDecisionModel {
 ///   metadata keys than this build's limit (a resource limit, reported with
 ///   both counts).
 ///
-/// Messages name the model id, the declared template and the file's
-/// decision facts (types, keys, counts), quoted and cut short; never
-/// request content.
+/// Messages name the model id (escaped and cut short, in the `model_id`
+/// fields too), the declared template and the file's decision facts (types,
+/// keys, counts), quoted and cut short; never request content.
 pub fn admit_gguf(
     metadata: &ModelMetadata,
     model_dir: &Path,
 ) -> Result<GgufAdmission, AdapterError> {
-    let model_id = metadata.model_id.as_str();
+    let model_id = label(&metadata.model_id);
     let (model_file, declared) = match &metadata.execution_template {
         ExecutionTemplate::ChoiceScorer { scorer } => match scorer {
             ChoiceScorerSpec::GgufDecision(spec) => {
                 validate_scorer_spec(scorer)?;
                 // Cross-field rules, a media companion's refusal among them.
                 metadata.validate().map_err(|reason| {
-                    AdapterError::InvalidInput(format!("model '{model_id}': {reason}"))
+                    AdapterError::InvalidInput(format!("model '{model_id}': {}", bounded(&reason)))
                 })?;
                 (spec.model_file.as_str(), Some(spec))
             }
@@ -198,8 +201,8 @@ pub fn admit_gguf(
     };
 
     let path = model_dir.join(model_file);
-    let header = GgufHeader::read_file(&path).map_err(|error| unclassifiable(model_id, error))?;
-    let classification = classify(&header).map_err(|error| unclassifiable(model_id, error))?;
+    let header = GgufHeader::read_file(&path).map_err(|error| unclassifiable(&model_id, error))?;
+    let classification = classify(&header).map_err(|error| unclassifiable(&model_id, error))?;
     let profile = check_declaration(metadata, declared, &classification)?;
     Ok(match (declared, profile) {
         (Some(spec), Some(profile)) => GgufAdmission::Decision(AdmittedDecisionModel {
@@ -220,7 +223,7 @@ fn check_declaration(
     declared: Option<&GgufDecisionSpec>,
     classification: &DecisionClassification,
 ) -> Result<Option<DecisionProfileId>, AdapterError> {
-    let model_id = &metadata.model_id;
+    let model_id = label(&metadata.model_id);
 
     // The GGUF's decision type, and the profile that admits it or why none
     // does.
@@ -338,6 +341,19 @@ fn bounded(text: &str) -> String {
         None => text.to_string(),
         Some((end, _)) => format!("{}…", &text[..end]),
     }
+}
+
+/// The model id as an error repeats it, in its message and in its
+/// `model_id` field: control characters, quotes and backslashes escaped,
+/// cut to [`MAX_LABEL_CHARS`]. Metadata is not trusted to be short or
+/// printable.
+fn label(text: &str) -> String {
+    let mut escaped = text.escape_debug();
+    let mut out: String = escaped.by_ref().take(MAX_LABEL_CHARS).collect();
+    if escaped.next().is_some() {
+        out.push('…');
+    }
+    out
 }
 
 #[cfg(test)]

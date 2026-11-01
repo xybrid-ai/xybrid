@@ -790,6 +790,72 @@ fn messages_quote_the_file_s_facts_cut_short() {
     assert_eq!(quoted("lfm3-d1"), "\"lfm3-d1\"");
 }
 
+/// A model id is metadata, not trusted to be short or printable: every
+/// refusal repeats it escaped and cut short, in its Display, its Debug, its
+/// `model_id` field and its source chain.
+#[test]
+fn refusals_repeat_the_model_id_escaped_and_cut_short() {
+    fn check(error: &AdapterError) {
+        if let AdapterError::UnsupportedModelCapability { model_id, .. } = error {
+            assert!(
+                model_id.chars().count() <= MAX_LABEL_CHARS + 1,
+                "{model_id}"
+            );
+        }
+        let mut texts = vec![format!("{error:?}")];
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error);
+        while let Some(error) = current {
+            texts.push(error.to_string());
+            current = error.source();
+        }
+        for text in texts {
+            let start: String = text.chars().take(200).collect();
+            assert!(text.len() < 1024, "{} bytes: {start}", text.len());
+            assert!(
+                !text.contains(['\n', '\r', '\t', '\u{1b}', '\u{7}']),
+                "a raw control character in {text:?}"
+            );
+        }
+    }
+
+    let long_id = format!("{}\n\u{1b}[31mtail", "x".repeat(131_072));
+    let empty = tempfile::tempdir().unwrap();
+    let mut media = decision();
+    media.files.push("mmproj.gguf".to_string());
+    media.vision_encoder = serde_json::from_value(serde_json::json!({
+        "file": "mmproj.gguf", "preprocessing_preset": "siglip", "image_size": 512,
+    }))
+    .unwrap();
+    for id in [long_id.as_str(), "bad\nid\u{1b}[0m\t'quoted'\\\u{7}"] {
+        let named = |mut metadata: ModelMetadata| {
+            metadata.model_id = id.to_string();
+            metadata
+        };
+        let refusals = [
+            admit(&named(chat()), &d1_builder().build()),
+            admit(&named(decision()), &llama().build()),
+            admit(&named(decision()), &typed("laya").build()),
+            admit(
+                &named(decision()),
+                &d1_builder()
+                    .without("tokenizer.chat_template.systemone")
+                    .build(),
+            ),
+            admit(&named(chat()), b"not a GGUF at all"),
+            admit(&named(chat()), &with_keys(llama(), 4097).build()),
+            admit_gguf(&named(chat()), empty.path()),
+            admit_gguf(&named(media.clone()), empty.path()),
+        ];
+        for refusal in refusals {
+            check(&refusal.unwrap_err());
+        }
+    }
+
+    assert_eq!(label("plain-id_1.0"), "plain-id_1.0");
+    assert_eq!(label("a\nb'c"), "a\\nb\\'c");
+    assert_eq!(label(&"é".repeat(200)), format!("{}…", "é".repeat(128)));
+}
+
 #[test]
 fn an_admitted_model_prints_a_summary_not_its_header() {
     let model = admitted(admit(&decision(), &d1_builder().build()).unwrap());
