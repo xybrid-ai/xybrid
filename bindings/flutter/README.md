@@ -15,7 +15,7 @@ Or add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.6.0
+  xybrid_flutter: ^0.16.0
 ```
 
 <details>
@@ -28,7 +28,7 @@ dependencies:
   xybrid_flutter:
     git:
       url: https://github.com/xybrid-ai/xybrid.git
-      ref: main
+      ref: master
       path: bindings/flutter
 ```
 
@@ -316,8 +316,9 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 ### Platform Requirements
 
 - **macOS**: 13.3+, Xcode 15+, Apple Silicon
-- **iOS**: 13.0+, Xcode 15+
-- **Android**: minSdk 21, NDK r25+, 64-bit only
+- **iOS**: 16.0+, Xcode 15+ (the precompiled library targets iOS 16)
+- **Android**: Android 9 (API 28)+, NDK r25+, 64-bit only. The precompiled
+  libraries need API 28 even though the plugin declares minSdk 21.
 - **Linux/Windows**: x86_64
 
 ## Native Libraries
@@ -381,7 +382,7 @@ use_precompiled_binaries: false
 A full example app with 8 demo screens (TTS, ASR, LLM chat, pipelines, device info) is available:
 
 ```sh
-https://github.com/xybrid-ai/xybrid/tree/main/examples/flutter
+https://github.com/xybrid-ai/xybrid/tree/master/examples/flutter
 ```
 
 ## API Reference

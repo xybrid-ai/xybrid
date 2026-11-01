@@ -137,7 +137,7 @@ xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.6.0
+  xybrid_flutter: ^0.16.0
 ```
 
 **モデルを実行:**
@@ -154,9 +154,13 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.6.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.16.0")
 }
 ```
+
+0.16.0 以降は Android 10（API 29）が必要です。アプリの `defaultConfig` で `minSdk` を 29 以上に設定してください。設定しないとマニフェストのマージでビルドが失敗します。
+
+レジストリからモデルをダウンロードするにはネットワークアクセスが必要ですが、SDK は権限を宣言しません。アプリの `AndroidManifest.xml` に `<uses-permission android:name="android.permission.INTERNET" />` を追加してください。
 
 **モデルを実行:**
 
@@ -172,7 +176,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.6.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.16.0")
 ]
 ```
 
@@ -221,7 +225,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.6.0"
+xybrid = "0.16.0"
 ```
 
 **モデルを実行:**
