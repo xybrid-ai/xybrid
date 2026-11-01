@@ -3,8 +3,11 @@ name = "xybrid_flutter"
 version = "0.16.0"  # Hardcoded (not workspace) — cargokit hashes this file to detect changes
 # That hash covers only this directory, not the workspace crates or the
 # vendored llama.cpp this library links. If native code changes on a release
-# branch after the version bump, change this file too, or release-prep reuses
-# precompiled binaries built before the change.
+# branch after the version bump, or the branch is rebased or re-cut after
+# release-prep ran, change a line of this file too (blank lines do not count),
+# or release-prep reuses precompiled binaries built before the change.
+# tools/scripts/check_flutter_precompiled_inputs.py fails release-prep when
+# it can tell; its docstring says when it cannot.
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
