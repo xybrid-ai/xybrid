@@ -194,12 +194,15 @@ Determinism:
   0.010 on the shared-domain cases, with no answer changes.
 
 Settings ids name these runs (the coordinator's `cpu-t4-fa-off` and
-`cpu-t4-fa-on` name llama.cpp contexts):
+`cpu-t4-fa-on` name llama.cpp contexts). An id stands for every value a run
+log records under `numerics`, and `provenance.py` holds each run to all of
+them, not to the id alone (`SETTINGS` and `VERIFICATION_SETTINGS` there):
 
 | id | Meaning |
 |---|---|
 | `hf-cpu-f32-t1` | CPU, 1 thread, float32 forward as above, `set_size = 1`, batch 1, no padding, deterministic algorithms, eval and inference mode |
 | `hf-cpu-f32-t1-packed` | the same at the checkpoint's own set size (16): a request's questions packed after one state |
+| `hf-cpu-f32-t4`, `hf-cpu-bf16-t1` | verification runs only: 4 threads, or the bfloat16 forward |
 
 ## Regenerate the committed fixtures
 
@@ -250,17 +253,26 @@ Every committed file records, or is bound to, what made it:
 
 - **Run logs.** Each producer records its inputs when it starts. A
   `run_reference.py` run log has the pins, the snapshot files it verified, the
-  lock, the settings, its recipe (`run_reference.py`, `run.sh`), the digest of
-  each request it read, and the digest of each observation it wrote.
-  `synthetic_median.py --run-log` records the same over its weight-free subset.
+  lock, its recipe (`run_reference.py`, `run.sh`), the digest of each request
+  it read, the digest of each observation it wrote, its complete numerics (the
+  settings id, precision, threads, set size, deterministic algorithms, mode and
+  the parity gate) and the package versions, CPU capability and hardware it
+  ran on. `synthetic_median.py --run-log` records the same inputs and versions
+  over its weight-free subset.
 - **Outputs.** `crosscheck_server.py` and `compare_observations.py --json` write
   their own sha256 and the digests of the observations they compared into
   their output.
 - **`provenance.py --update`** carries those identities into `provenance.json`
   and never substitutes what is on disk for what a run recorded. It refuses
   (exit 1, nothing written) if:
-  - any recorded pin, snapshot file, lock, setting or recipe source differs
-    from the current one;
+  - any recorded pin, snapshot file, lock or recipe source differs from the
+    current one;
+  - a run's numerics are not its role's complete settings: a log labelled
+    `hf-cpu-f32-t1` that ran in bfloat16, at 4 threads, packed or without the
+    gate is refused, as is an observation or packed run without the gate;
+  - a run imported other package versions than the lock pins, or another
+    Python than `run.sh`'s, or ran with other versions, CPU capability or
+    hardware than the observation run;
   - a committed observation is not the bytes its run wrote, or came from
     another request than its case's;
   - an observation or packed run has no passing parity proof;
@@ -272,10 +284,12 @@ Every committed file records, or is bound to, what made it:
 - **`provenance.py --check`** needs no run logs. It recomputes every file
   digest and the pins, lock and recipe digests, including `make_cases.py` and
   `provenance.py` itself (recorded at `--update`, as the writer). It also
-  re-binds observations to requests and cross-checks to observations, checks
-  the recorded parity proofs, and reruns `make_cases.py --check`. A change to
-  any recipe source, such as the float32 hooks, fails it until the fixtures are
-  regenerated.
+  re-binds observations to their cases' requests and settings and cross-checks
+  to observations, checks the recorded parity proofs, holds the published
+  settings to `SETTINGS`, every published run's numerics to its role's and the
+  published versions to the lock, and reruns `make_cases.py --check`. A change
+  to any recipe source, such as the float32 hooks, fails it until the fixtures
+  are regenerated.
 - **Tests.** `tests/test_provenance.py` holds these refusals (standard library:
   `python3 -B -m unittest discover -s tools/conformance/decision_hf/tests -p test_provenance.py`).
 

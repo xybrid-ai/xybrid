@@ -23,7 +23,7 @@ observed; the upstream oracle's answer-math cases confirm it. Writes one JSON do
 It needs the snapshot's code, tokenizer and calibration but not its weights, and verifies exactly that: every pinned
 file but model.safetensors (33 files, about 18 MB; `download.sh --no-weights` fetches them). `--run-log` records
 what the document was made from, as it stood when the run started (the pins, the verified files, the lock, the recipe
-sources `RECIPE`) and the document's sha256, for provenance.py.
+sources `RECIPE`), the package versions it ran on and the document's sha256, for provenance.py.
 """
 
 from __future__ import annotations
@@ -54,6 +54,7 @@ from run_reference import (  # noqa: E402
     sha256_bytes,
     sha256_file,
     verify_snapshot,
+    versions,
 )
 
 # The sources whose bytes decide the document's bytes besides the pins and the lock.
@@ -219,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
             "reference": {"artifact": pins["artifact"], "repo": pins["repo"], "revision": pins["revision"]},
             "inputs": inputs,
             "code_imported": code,
+            "environment": {"requirements_sha256": inputs["requirements_sha256"], "versions": versions()},
             "outputs": {"synthetic/median.json": sha256_bytes(text.encode("utf-8"))},
         }
         args.run_log.parent.mkdir(parents=True, exist_ok=True)

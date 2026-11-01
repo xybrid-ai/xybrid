@@ -43,7 +43,8 @@ state), the reference's default serving mode, for the packing row of DIFFERENCES
 
 A run writes its observations only once every case has run and the proof (if asked for) holds; any broken invariant
 exits 1 with nothing written. `--run-log` records what the observations were made from, as it stood when the run
-started (the pins, the verified snapshot files, the lock, the recipe sources `RECIPE`, the request digests) and the
+started (the pins, the verified snapshot files, the lock, the recipe sources `RECIPE`, the request digests), the
+run's complete numerics (its settings id and every value the id stands for), the package versions it ran on, and the
 digest of every observation written; provenance.py carries those identities and refuses any that no longer hold.
 
 Usage: README.md. Run it through run.sh, which supplies the pinned environment.
@@ -1101,7 +1102,7 @@ def main(argv: list[str] | None = None) -> int:
                 "settings": settings,
                 "precision": args.precision,
                 "threads": args.threads,
-                "set_size": "default (the checkpoint's d1_set_size)" if packed else 1,
+                "set_size": reference.engine.set_size if packed else 1,  # packed: the checkpoint's d1_set_size
                 "deterministic_algorithms": True,
                 "mode": "eval, inference_mode",
                 "float32_parity_gate": parity is not None,

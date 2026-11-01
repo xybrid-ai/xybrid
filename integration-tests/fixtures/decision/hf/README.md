@@ -13,7 +13,7 @@ wrote everything here; its README says how, and how to rebuild it.
 | `packed/<id>.json` | The two multi-question cases at the checkpoint's own set size (16), the reference's default serving mode, for `DIFFERENCES.md` 1.1 |
 | `synthetic/median.json` | Synthetic scores where the two references' score medians disagree (`DIFFERENCES.md` 1.3, 1.5) |
 | `crosscheck/<artifact>.<settings>.json` | The stock `llama-server` (v0.8.0) answering the same requests, compared with the observations: a black-box check, not the upstream oracle. `d1-2b-f16` is the G1 counterpart; the BF16 and Q4_K_M files are reports. Each records the script and the observations it compared |
-| `provenance.json` | What every file here was made from, as its run recorded it (pins, snapshot files, lock, settings, recipe sources, requests), the parity proofs, hardware, timings and memory, verification runs (threads, bf16, packing), and the sha256 of every other file here; `provenance.py --check` verifies it all against the current inputs |
+| `provenance.json` | What every file here was made from, as its run recorded it (pins, snapshot files, lock, recipe sources, requests, each run's complete numerics, and the package versions, CPU capability and hardware every run shared), the parity proofs, timings and memory, verification runs (threads, bf16, packing), and the sha256 of every other file here; `provenance.py --check` verifies it all against the current inputs, the settings definitions and the lock |
 
 The reference matches upstream only on the shared domain, so compare numbers
 there alone. The differences, with their cases, are in
