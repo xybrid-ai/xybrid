@@ -485,7 +485,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .context/bazel-disk-cache
-          key: web-wasm-${{ runner.os }}-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'emsdk.patch', 'rules_rs.patch', 'BUILD.bazel', 'bindings/web/runtime/**', 'crates/xybrid-llama/**', 'crates/llama-cpp-sys/**') }}
+          key: web-wasm-${{ runner.os }}-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'emsdk.patch', 'rules_rust.patch', 'BUILD.bazel', 'bindings/web/runtime/**', 'crates/xybrid-llama/**', 'crates/llama-cpp-sys/**') }}
           restore-keys: web-wasm-${{ runner.os }}-
 
       - name: Bound the browser build cache

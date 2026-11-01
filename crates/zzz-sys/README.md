@@ -82,7 +82,7 @@ receipts must preserve that CPU, minimum, system-library list and device or
 simulator ABI. Bazel uses the existing iOS 16 configurations and pinned Apple
 toolchains: its two ARM64 selects distinguish apple_support's
 [`device` and `simulator` constraints](https://github.com/bazelbuild/apple_support/blob/2.2.0/constraints/BUILD),
-as emitted by [rules_rs 0.0.95's pinned rules_rust mapping](https://github.com/hermeticbuild/rules_rust/blob/f19661ba71f77c993ce1eb082053692610fe4313/rust/platform/triple_mappings.bzl).
+as emitted by [rules_rs 0.2.0's pinned rules_rust mapping](https://github.com/hermeticbuild/rules_rust/blob/2ab43f0bbaa406ffb1a0dd64ae2ecb8f7734f733/rust/platform/triple_mappings.bzl).
 Linux ARM64 additionally requires the GNU libc constraint.
 
 Bazel loads packages from unselected `select` arms. For only these three new

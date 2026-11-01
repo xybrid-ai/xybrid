@@ -9,22 +9,9 @@
 
 module(name = "xybrid", version = "0.0.0")
 
-# --- hermeticbuild stack, pinned from the Bazel Central Registry (replaces the
-# earlier git_override commit pins; re-validated on RBE at these versions).
-bazel_dep(name = "rules_rs", version = "0.0.95")
-
-# rules_rs resolver fix (report upstream): 3-part android triples fold the abi
-# into the os token (armv7-linux-androideabi), so _normalize_os must map
-# "androideabi" -> "android" — otherwise the triple is not unix and every
-# cfg(unix) / cfg(target_os="android") dep is silently dropped for armv7
-# (libloading lost cfg-if, dirs-sys lost libc, ...).
-single_version_override(
-    module_name = "rules_rs",
-    patch_strip = 1,
-    patches = ["//:rules_rs.patch"],
-    version = "0.0.95",
-)
-bazel_dep(name = "llvm", version = "0.8.11")
+# --- hermeticbuild stack, pinned from the Bazel Central Registry. ------------
+bazel_dep(name = "rules_rs", version = "0.2.0")
+bazel_dep(name = "llvm", version = "0.8.18")
 
 # hermetic-llvm fix (report upstream): toolchain/features/legacy adds
 # -fstack-protector unconditionally, but the module ships NO libssp — so clang's
@@ -79,7 +66,7 @@ windows_sdk.configure(
 use_repo(windows_sdk, "windows_sdk")
 
 # rules_cc must be a direct dep so the `@rules_cc//...` flag in .bazelrc resolves.
-bazel_dep(name = "rules_cc", version = "0.2.20")
+bazel_dep(name = "rules_cc", version = "0.2.22")
 
 # Browser runtime experiment. Emscripten supplies the C++/WebGPU glue; the
 # existing rules_rs toolchains already include wasm32-unknown-emscripten.
@@ -140,7 +127,7 @@ bazel_dep(name = "rules_apple", version = "4.5.3", repo_name = "build_bazel_rule
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 # platforms must be a direct dep so the `@platforms//...` constraints in the root
 # BUILD file resolve (//:host_linux_gnu's parent, //:llama_metal's exec platform).
-bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "platforms", version = "1.1.0")
 
 # --- Option B: rules_foreign_cc drives llama.cpp's own CMakeLists with the
 # hermetic-llvm compiler. Pinned + patched to the hermetic-llvm-compatible combo
@@ -174,7 +161,7 @@ single_version_override(
 # no python — the HERMETIC rules_python toolchain ships its interpreter to the
 # workers as an action input (same mechanism as the bazelified NDK).
 bazel_dep(name = "rules_pkg", version = "1.0.1")
-bazel_dep(name = "rules_python", version = "1.7.0")
+bazel_dep(name = "rules_python", version = "1.8.4")
 # platform_transition_filegroup: build the SAME cdylib target for each Android
 # ABI inside one graph (the AAR packages all ABIs in a single zip).
 bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
@@ -192,7 +179,7 @@ bazel_dep(name = "rules_kotlin", version = "2.4.0")  # >=2.2 needed for Bazel 9 
 register_toolchains("//bindings/kotlin:kotlin_toolchain_consumer_compat")
 # Direct dep so http_jar's generated repo (loads @rules_java//java:java_import.bzl)
 # resolves; Bazel 9 removed native java_import. MVS bumps to whatever kotlin needs.
-bazel_dep(name = "rules_java", version = "8.11.0")
+bazel_dep(name = "rules_java", version = "9.3.0")
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
@@ -358,6 +345,8 @@ rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
 # not created". The patch gates that output on target_abi == "msvc" (the same
 # check the rule already uses elsewhere). Needed for the bolt windows-gnu cdylib
 # (Unity), which is loaded via P/Invoke and needs no import library at all.
+# Emscripten static libraries also need an .a name: rules_rs's toolchain
+# currently uses the .js extension for both binaries and static libraries.
 rules_rust.patch(
     patches = ["//:rules_rust.patch"],
     strip = 1,
@@ -381,7 +370,7 @@ toolchains.toolchain(
         # unstageable build-script-link-search shape as winapi's). Its own
         # windows_raw_dylib cfg switches the link! macro to raw-dylib —
         # the path the 0.61 family already uses, served by the dlltool
-        # staging fix (hermetic_llvm.patch + rules_rs.patch). check-cfg
+        # support in rules_rs's Rust toolchain. check-cfg
         # declares the custom cfg so crates that don't know it stay free
         # of unexpected_cfgs warnings.
         "x86_64-pc-windows-gnu": [
@@ -393,7 +382,7 @@ toolchains.toolchain(
 )
 use_repo(toolchains, "default_rust_toolchains")
 
-register_toolchains("@default_rust_toolchains//:all")
+register_toolchains("@default_rust_toolchains//...")
 
 # --- GATE 2: crates from the REAL Cargo.lock ----------------------------------
 # Validates rules_rs dependency resolution over xybrid's actual workspace lock.
@@ -424,50 +413,17 @@ crate.from_cargo(
         "x86_64-linux-android",
     ],
 )
+# Apple builds use the vendored ONNX Runtime archives. Stage them for rustc
+# too, which bundles the static library into the rlib.
 crate.annotation(
     crate = "ort-sys",
+    # Build scripts compile for the executor. Keep their optional download
+    # helpers enabled for every triple so an Apple target on a Linux executor
+    # retains the dependencies its build-script features require. Non-Apple
+    # builds still use load-dynamic; Apple builds use ORT_LIB_LOCATION below.
+    crate_features = ["download-binaries", "tls-rustls"],
     build_script_env = {
         "ORT_CACHE_DIR": "/tmp",
-    },
-    # darwin: hand ort-sys the vendored static onnxruntime instead of letting
-    # its build script download one — a build-time download is incompatible
-    # with RBE (the file isn't a tracked output, so it never reaches the
-    # rlib-compile action). ${pwd} = the action's execroot at runtime.
-    # `data` stages the .a for the rlib compile itself (rustc bundles static
-    # libs into the rlib); no per-triple data attr exists, so it's staged for
-    # all platforms — input-only, outputs unchanged.
-    build_script_data_select = {
-        "aarch64-apple-darwin": ["@@//:ort_macos_arm64"],
-        "aarch64-apple-ios": ["@@//:ort_ios_arm64"],
-        "aarch64-apple-ios-sim": ["@ort_ios_arm64_sim//:lib"],
-    },
-    # CC=/usr/bin/false: ort-sys's bs probes `$CC --print-search-dirs` to find
-    # Xcode's clang_rt dir and, on success, emits -lclang_rt.osx — which only
-    # Xcode's clang ships (under the hermetic toolchain the probe "succeeds"
-    # with a mangled linux path and the link dies on the missing lib). A failed
-    # probe takes the graceful None branch: no bogus -L, no -lclang_rt.osx.
-    # Correct here: hermetic-llvm links its own compiler-rt builtins explicitly.
-    # CC is otherwise unused by this bs (no C compiled on the LIB_LOCATION path).
-    build_script_env_select = {
-        "aarch64-apple-darwin": "{\"ORT_LIB_LOCATION\": \"$${pwd}/vendor/ort-macos/aarch64-apple-darwin\", \"CC\": \"/usr/bin/false\"}",
-        # iOS: the vendored slice lives inside the committed xcframework
-        # (vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a).
-        "aarch64-apple-ios": "{\"ORT_LIB_LOCATION\": \"$${pwd}/vendor/ort-ios/onnxruntime.xcframework/ios-arm64\", \"CC\": \"/usr/bin/false\"}",
-        # iOS simulator: the slice is FETCHED (@ort_ios_arm64_sim), so it stages
-        # in the execroot under external/<canonical>/ (default repo layout),
-        # not vendor/. ORT_LIB_LOCATION wants the DIRECTORY holding
-        # libonnxruntime.a; $${pwd} = execroot.
-        #
-        # NOTE: the `+ort_ios_sim_repository+ort_ios_arm64_sim` segment is the
-        # Bzlmod CANONICAL repo name (`+<repo-rule-symbol>+<repo-name>`), a Bazel
-        # implementation detail. It is stable for xybrid (pinned Bazel in
-        # .bazelversion; xybrid is the ROOT module, so no parent-module prefix),
-        # but a Bazel major bump or importing this module as a dependency could
-        # change it. If the sim build then fails to find libonnxruntime.a,
-        # re-derive with:
-        #   bazel cquery @ort_ios_arm64_sim//:lib --output=starlark \
-        #     --starlark:expr='[f.dirname for f in target.files.to_list()]'
-        "aarch64-apple-ios-sim": "{\"ORT_LIB_LOCATION\": \"$${pwd}/external/+ort_ios_sim_repository+ort_ios_arm64_sim\", \"CC\": \"/usr/bin/false\"}",
     },
     data = [
         "@@//:ort_macos_arm64",
@@ -477,14 +433,45 @@ crate.annotation(
     allow_build_script_to_detect_nonhermetic_paths = True,
 )
 
+# CC=/usr/bin/false disables ort-sys's probe for Xcode's clang_rt directory.
+# The hermetic LLVM toolchain provides compiler-rt itself.
+crate.annotation_select(
+    crate = "ort-sys",
+    triples = ["aarch64-apple-darwin"],
+    build_script_data = ["@@//:ort_macos_arm64"],
+    build_script_env = {
+        "CC": "/usr/bin/false",
+        "ORT_LIB_LOCATION": "$${pwd}/vendor/ort-macos/aarch64-apple-darwin",
+    },
+)
+crate.annotation_select(
+    crate = "ort-sys",
+    triples = ["aarch64-apple-ios"],
+    build_script_data = ["@@//:ort_ios_arm64"],
+    build_script_env = {
+        "CC": "/usr/bin/false",
+        "ORT_LIB_LOCATION": "$${pwd}/vendor/ort-ios/onnxruntime.xcframework/ios-arm64",
+    },
+)
+# The simulator archive is fetched, so ORT_LIB_LOCATION uses its canonical
+# Bzlmod repository name rather than a path under vendor/.
+crate.annotation_select(
+    crate = "ort-sys",
+    triples = ["aarch64-apple-ios-sim"],
+    build_script_data = ["@ort_ios_arm64_sim//:lib"],
+    build_script_env = {
+        "CC": "/usr/bin/false",
+        "ORT_LIB_LOCATION": "$${pwd}/external/+ort_ios_sim_repository+ort_ios_arm64_sim",
+    },
+)
+
 # ort-sys's darwin build script pulls these two helper crates, whose features
 # the hub keys on aarch64-apple-darwin (conditional_crate_features). Build-
 # script deps compile in the EXEC config, where that config_setting doesn't
 # match (linux RBE worker) -> the crates lose std/default and the bs fails
 # trait resolution. Features are ADD-ONLY here, and neither crate has any
 # other consumer in the lock, so hoisting the darwin features to the base is
-# a no-op everywhere else. (Same exec-vs-target class as the bs-deps fix in
-# rules_rs.patch, one level down the dep tree.)
+# a no-op everywhere else.
 crate.annotation(
     crate = "lzma-rust2",
     crate_features = [
@@ -524,12 +511,8 @@ crate.annotation(
 # NOTE: Windows Rust CLI (raw-dylib -> dlltool) is RESOLVED at the toolchain
 # layer, not here. The windows/windows-sys families emit #[link(kind =
 # "raw-dylib")] on windows-gnu, so rustc shells out to `dlltool` at compile
-# time — a tool that is a symlink into the ~100MB multicall `llvm` binary and
-# can only be staged by the toolchain machinery. hermetic_llvm.patch ships
-# dlltool (+ the multicall binary) in the windows tool_map's linker_files and
-# exposes llvm_tool_execroot_path(); rules_rs.patch injects the matching
-# -Cdlltool=<exec-correct path> into every windows-gnu rust toolchain. See
-# .context/bazel-windows-cli-progress.md for the full history.
+# time. rules_rs 0.2.0 supplies @llvm//tools:llvm-dlltool through rules_rust's
+# dlltool attribute, which stages the tool and passes its path to rustc.
 use_repo(crate, "crates")
 
 # Lazy repositories: ordinary builds never fetch private Kitten inputs.

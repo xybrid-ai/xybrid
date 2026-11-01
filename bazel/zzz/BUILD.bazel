@@ -19,7 +19,7 @@ config_setting(
     flag_values = {"//:tts_zzz": "true"},
     visibility = ["//visibility:public"],
 )
-# rules_rs 0.0.95 delegates Apple ABI constraints to its pinned rules_rust;
+# rules_rs delegates Apple ABI constraints to its pinned rules_rust;
 # apple_support 2.2.0 distinguishes these otherwise identical ARM64 platforms.
 config_setting(
     name = "ios_enabled",

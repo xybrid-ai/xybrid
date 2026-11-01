@@ -71,7 +71,7 @@ SITES = [
 _OS, _CPU = "@platforms//os:", "@platforms//cpu:"
 _RS = "@rules_rs//rs/platforms/constraints:"
 _LIBC = "@llvm//constraints/libc:"
-# Constraint values of the rules_rs platforms (rules_rs 0.0.95 and its pinned
+# Constraint values of the rules_rs platforms (rules_rs 0.2.0 and its pinned
 # rules_rust triple mapping), as printed by
 # `bazel query --output=build @rules_rs//rs/platforms:<triple>`.
 RULES_RS_PLATFORMS = {
