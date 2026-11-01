@@ -84,6 +84,11 @@ mod scoring;
 #[cfg(all(feature = "bindings", feature = "vision"))]
 mod vision;
 
+#[cfg(all(test, feature = "bindings"))]
+mod fault_tests;
+#[cfg(all(test, feature = "bindings"))]
+mod test_models;
+
 #[cfg(feature = "bindings")]
 pub use context::{ContextFacts, LlamaContext, LlamaSeqSnapshot};
 #[cfg(all(feature = "bindings", feature = "vision"))]

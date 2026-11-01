@@ -49,7 +49,25 @@ extern "C" {
  * API (which moves/breaks across versions) to a stable C ABI consumed by
  * xybrid-llama. Bindgen processes these declarations alongside the
  * llama.cpp public symbols pulled in via <llama.h>.
+ *
+ * A C++ exception must not cross into the caller: the Rust side cannot catch
+ * it and aborts. The shims documented as "guarded" catch every exception
+ * llama.cpp raises (in practice std::bad_alloc) and report it as a status.
  * ---------------------------------------------------------------------- */
+
+/* Statuses of the guarded shims that return a result >= 0 (a length, a
+   count, attribute bits). A failure is never reported as an absence. */
+#define LLAMA_XYBRID_ABSENT (-1) /* no such key, template or token */
+#define LLAMA_XYBRID_FAILED (-2) /* llama.cpp raised an exception, or an argument was NULL */
+/* llama_decode_c's status when llama.cpp raised an exception; none of
+   llama_decode's own statuses. */
+#define LLAMA_XYBRID_DECODE_EXCEPTION (-1000)
+
+/* Fault injection for tests: the next call of the guarded shim named
+   `shim_name` (e.g. "llama_decode_c") throws std::bad_alloc inside its
+   exception boundary, as an allocation failure inside llama.cpp would. NULL
+   disarms. Nothing calls this outside tests. */
+void llama_xybrid_fail_next_c(const char* shim_name);
 
 /* Backend lifecycle */
 void llama_backend_init_c(void);
@@ -72,7 +90,9 @@ XYBRID_LLAMA_CONTEXT* llama_new_context_with_model_c(
     int n_batch,
     bool flash_attn);
 void  llama_free_c(XYBRID_LLAMA_CONTEXT* ctx);
+/* Guarded; an exception leaves the memory as llama.cpp left it. */
 void  llama_kv_cache_clear_c(XYBRID_LLAMA_CONTEXT* ctx);
+/* Guarded: 0, -1 when the context has no memory, LLAMA_XYBRID_FAILED. */
 int   llama_kv_cache_seq_rm_c(XYBRID_LLAMA_CONTEXT* ctx, int seq_id, int p_keep);
 
 /* Per-sequence state snapshots (KV cache plus recurrent state). Each returns
@@ -83,7 +103,8 @@ size_t llama_state_seq_get_size_c(XYBRID_LLAMA_CONTEXT* ctx, int seq_id);
 size_t llama_state_seq_get_data_c(XYBRID_LLAMA_CONTEXT* ctx, uint8_t* dst, size_t size, int seq_id);
 size_t llama_state_seq_set_data_c(XYBRID_LLAMA_CONTEXT* ctx, const uint8_t* src, size_t size, int seq_id);
 
-/* Tokenization */
+/* Tokenization. Guarded: an exception returns INT32_MIN, which llama.cpp
+   itself returns when the result does not fit an int32_t. */
 int  llama_tokenize_c(
     const XYBRID_LLAMA_MODEL* model,
     const char* text,
@@ -114,14 +135,16 @@ int  llama_n_vocab_c(const XYBRID_LLAMA_MODEL* model);
 int  llama_n_ctx_c(const XYBRID_LLAMA_CONTEXT* ctx);
 bool llama_model_is_recurrent_c(const XYBRID_LLAMA_MODEL* model);
 bool llama_model_has_recurrent_state_c(const XYBRID_LLAMA_MODEL* model);
-bool llama_model_has_encoder_c(const XYBRID_LLAMA_MODEL* model);
+/* Guarded: 1 for an encoder-decoder model, 0 otherwise, LLAMA_XYBRID_FAILED. */
+int32_t llama_model_has_encoder_c(const XYBRID_LLAMA_MODEL* model);
 
 /* The GGUF metadata llama.cpp loaded with the model: every scalar key, its
    value written as a string (floats through std::to_string, so with six
-   decimals). Array-valued keys are not visible. The accessors return the
-   length of the whole value or key, excluding the terminating NUL, and write
-   at most buf_size - 1 bytes of it plus a NUL; -1 when the key or index does
-   not exist. buf may be NULL when buf_size is 0, to probe the length. */
+   decimals). Array-valued keys are not visible. Guarded. The accessors
+   return the length of the whole value or key, excluding the terminating
+   NUL, and write at most buf_size - 1 bytes of it plus a NUL;
+   LLAMA_XYBRID_ABSENT when the key or index does not exist. buf may be NULL
+   when buf_size is 0, to probe the length. */
 int32_t llama_model_meta_count_c(const XYBRID_LLAMA_MODEL* model);
 int32_t llama_model_meta_key_by_index_c(
     const XYBRID_LLAMA_MODEL* model, int32_t i, char* buf, size_t buf_size);
@@ -130,20 +153,23 @@ int32_t llama_model_meta_val_str_by_index_c(
 int32_t llama_model_meta_val_str_c(
     const XYBRID_LLAMA_MODEL* model, const char* key, char* buf, size_t buf_size);
 
-/* The chat template stored as `tokenizer.chat_template.<name>`, or NULL when
-   the model has none by that name. Owned by the model. */
-const char* llama_model_chat_template_named_c(const XYBRID_LLAMA_MODEL* model, const char* name);
+/* The chat template stored as `tokenizer.chat_template.<name>`. Guarded:
+   returns its length and points *out at it (owned by the model), or
+   LLAMA_XYBRID_ABSENT when the model has none by that name. */
+int32_t llama_model_chat_template_named_c(
+    const XYBRID_LLAMA_MODEL* model, const char* name, const char** out);
 
-/* A vocabulary entry's attributes (a LLAMA_TOKEN_ATTR_* bit set) and stored
-   text, owned by the model. An id outside the vocabulary gets -1 and NULL. */
+/* A vocabulary entry's attributes (a LLAMA_TOKEN_ATTR_* bit set) and its
+   stored text (length returned, *out pointed at it, owned by the model).
+   Guarded; LLAMA_XYBRID_ABSENT for an id outside the vocabulary. */
 int32_t llama_vocab_get_attr_c(const XYBRID_LLAMA_MODEL* model, int32_t token);
-const char* llama_vocab_get_text_c(const XYBRID_LLAMA_MODEL* model, int32_t token);
+int32_t llama_vocab_get_text_c(const XYBRID_LLAMA_MODEL* model, int32_t token, const char** out);
 
 /* A context for one-shot readouts: one sequence, the given context, batch and
    microbatch sizes, at most n_outputs_max outputs (0 = n_batch, llama.cpp's
    default) and one per sequence, no embeddings, and the model's own attention
-   type. Returns NULL on failure. Whether it has memory is the model's choice:
-   check it. */
+   type. Guarded; returns NULL on failure. Whether it has memory is the
+   model's choice: check it. */
 XYBRID_LLAMA_CONTEXT* llama_new_readout_context_c(
     XYBRID_LLAMA_MODEL* model,
     uint32_t n_ctx,
@@ -156,22 +182,32 @@ XYBRID_LLAMA_CONTEXT* llama_new_readout_context_c(
 /* The sizes and attention a context actually got, which can differ from the
    ones requested. has_memory is false when llama.cpp runs the model without
    a KV cache or recurrent state (it then decodes with the encoder). */
-uint32_t llama_n_batch_c(const XYBRID_LLAMA_CONTEXT* ctx);
-uint32_t llama_n_ubatch_c(const XYBRID_LLAMA_CONTEXT* ctx);
-uint32_t llama_n_seq_max_c(const XYBRID_LLAMA_CONTEXT* ctx);
-bool llama_context_has_memory_c(const XYBRID_LLAMA_CONTEXT* ctx);
-bool llama_get_causal_attn_c(const XYBRID_LLAMA_CONTEXT* ctx);
+struct llama_xybrid_context_facts {
+    uint32_t n_ctx;
+    uint32_t n_batch;
+    uint32_t n_ubatch;
+    uint32_t n_seq_max;
+    bool has_memory;
+    bool causal_attn;
+};
+/* Guarded: 0 and *out filled, or LLAMA_XYBRID_FAILED. */
+int32_t llama_context_facts_c(
+    const XYBRID_LLAMA_CONTEXT* ctx, struct llama_xybrid_context_facts* out);
 
 /* The logits row of batch entry i from the last decode, owned by the context
-   until its next decode. Only pass an entry the last successful decode
-   flagged for output: for any other, llama.cpp returns NULL when built with
-   NDEBUG and aborts the process when built without it. */
+   until its next decode. Guarded; NULL on failure. Only pass an entry the
+   last successful decode flagged for output: for any other, llama.cpp
+   returns NULL when built with NDEBUG and aborts the process when built
+   without it. */
 float* llama_get_logits_ith_c(XYBRID_LLAMA_CONTEXT* ctx, int32_t i);
 
 /* Low-level generation primitives (carried in wrapper.cpp's exports
    even though xybrid-llama drives generation via the higher-level
-   `llama_generate*_c` entry points below). */
+   `llama_generate*_c` entry points below). Guarded: llama_decode's status,
+   -1 for a NULL argument, LLAMA_XYBRID_DECODE_EXCEPTION for an exception
+   (the context's state is then whatever llama.cpp left). */
 int   llama_decode_c(XYBRID_LLAMA_CONTEXT* ctx, const llama_batch* batch);
+/* Guarded; NULL on failure. */
 float* llama_get_logits_c(XYBRID_LLAMA_CONTEXT* ctx);
 
 /* Chat template formatting */

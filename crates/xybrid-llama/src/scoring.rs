@@ -69,7 +69,7 @@ impl LlamaContext {
         label_ids: &[i32],
     ) -> LlamaResult<FinalLogits> {
         // SAFETY: the context is live.
-        if !unsafe { ffi::clear_memory(self.as_ptr()) } {
+        if !unsafe { ffi::clear_memory(self.as_ptr()) }? {
             return Err(LlamaError::InvalidInput(
                 "the context has no memory: llama.cpp runs this model as an encoder, \
                  which has no next-token row to score"
@@ -77,8 +77,7 @@ impl LlamaContext {
             ));
         }
         let _clear_on_exit = ClearOnDrop(self);
-        // SAFETY: the context is live.
-        if !unsafe { ffi::causal_attn(self.as_ptr()) } {
+        if !self.facts()?.causal_attn {
             return Err(LlamaError::InvalidInput(
                 "the context uses non-causal attention, which needs the whole prompt in one \
                  microbatch: this causal scorer cannot read it"
@@ -171,7 +170,8 @@ fn prefill(
                 code,
                 n_past_in: start,
                 detail: format!(
-                    "llama_decode failed on scoring chunk [{start}, {end}) of {}",
+                    "{} on scoring chunk [{start}, {end}) of {}",
+                    ffi::decode_failure(code),
                     tokens.len()
                 ),
             });

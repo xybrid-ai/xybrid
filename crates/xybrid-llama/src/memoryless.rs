@@ -43,6 +43,16 @@ use crate::model::{LlamaModel, ModelHandle};
 /// The output rows a readout context allows. One readout needs one row.
 const OUTPUT_CAP: u32 = 1;
 
+/// Facts before llama.cpp has reported any.
+const EMPTY_FACTS: ContextFacts = ContextFacts {
+    n_ctx: 0,
+    n_batch: 0,
+    n_ubatch: 0,
+    n_seq_max: 0,
+    has_memory: false,
+    causal_attn: false,
+};
+
 /// The profile a model must assert before a context is created for it.
 const ARCHITECTURE: &str = "lfm3";
 const DECISION_TYPE_KEY: &str = "lfm3.decision.type";
@@ -167,17 +177,17 @@ impl MemorylessContext {
                 params.token_budget
             )));
         }
-        // SAFETY: ptr is the live context created above.
-        let facts = unsafe { ContextFacts::read(ptr) };
         // Owned from here, so an error below frees the context.
-        let context = Self {
+        let mut context = Self {
             ptr,
             budget: usize::try_from(params.token_budget).expect("a u32 fits usize"),
             n_vocab,
-            facts,
+            facts: EMPTY_FACTS,
             _model: Arc::clone(model.handle()),
         };
-        check_facts(&facts, params.token_budget)?;
+        // SAFETY: ptr is the live context created above.
+        context.facts = unsafe { ContextFacts::read(ptr) }?;
+        check_facts(&context.facts, params.token_budget)?;
         Ok(context)
     }
 
@@ -189,14 +199,7 @@ impl MemorylessContext {
             ptr: std::ptr::null_mut(),
             budget,
             n_vocab,
-            facts: ContextFacts {
-                n_ctx: 0,
-                n_batch: 0,
-                n_ubatch: 0,
-                n_seq_max: 0,
-                has_memory: false,
-                causal_attn: false,
-            },
+            facts: EMPTY_FACTS,
             _model: Arc::clone(model.handle()),
         }
     }
@@ -235,7 +238,11 @@ impl MemorylessContext {
             return Err(LlamaError::DecodeFailed {
                 code,
                 n_past_in: 0,
-                detail: format!("llama_decode failed on a {}-token readout", tokens.len()),
+                detail: format!(
+                    "{} on a {}-token readout",
+                    ffi::decode_failure(code),
+                    tokens.len()
+                ),
             });
         }
         let last = i32::try_from(tokens.len() - 1).expect("the budget fits an i32");
@@ -243,9 +250,7 @@ impl MemorylessContext {
         // prompt's last token, for output.
         let row = unsafe { ffi::logits_ith(self.ptr, last) };
         if row.is_null() {
-            return Err(LlamaError::Internal(
-                "llama.cpp returned no logits for the last token".to_string(),
-            ));
+            return Err(ffi::native_failure("reading the last token's logits"));
         }
         // SAFETY: the row holds n_vocab floats, the vocabulary of the model
         // this context reads, and stays valid until the next decode; the
@@ -314,7 +319,7 @@ fn readout_sizes(
 /// Asserts, through llama.cpp's view of the loaded model, the profile a
 /// readout context serves.
 fn ensure_profile(model: &LlamaModel) -> LlamaResult<()> {
-    if model.has_encoder() {
+    if model.has_encoder()? {
         return Err(LlamaError::InvalidInput(
             "the model has an encoder, for which llama.cpp ignores the output cap".to_string(),
         ));

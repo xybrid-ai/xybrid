@@ -133,8 +133,13 @@ impl LlamaModel {
                 parse_special,
             )
         };
-        let required = if probe < 0 { -probe } else { probe };
-        if required <= 0 {
+        // i32::MIN is a failure: a result too large for llama.cpp, or an
+        // exception the shim caught. Any other negative probe is the size.
+        if probe == i32::MIN {
+            return Err(LlamaError::TokenizationFailed);
+        }
+        let required = probe.unsigned_abs();
+        if required == 0 {
             return Ok(Vec::new());
         }
         let capacity = required as usize + 16; // padding for safety
@@ -297,21 +302,20 @@ impl LlamaModel {
     /// # Errors
     ///
     /// [`LlamaError::InvalidInput`] when `name` contains a NUL byte, and
-    /// [`LlamaError::Internal`] when the template is not UTF-8.
+    /// [`LlamaError::Internal`] when the template is not UTF-8 or llama.cpp
+    /// failed while looking it up (never reported as a missing template).
     pub fn named_chat_template(&self, name: &str) -> LlamaResult<Option<String>> {
         let c_name = ffi::cstring(name, "chat template name")?;
         // SAFETY: the handle keeps the model pointer live and `c_name`
-        // outlives the call.
-        let ptr = unsafe { ffi::model_chat_template_named(self.as_ptr(), &c_name) };
-        if ptr.is_null() {
-            return Ok(None);
-        }
-        // SAFETY: ptr is a non-null, NUL-terminated C string owned by the
-        // model, valid for its lifetime; it is copied before returning.
-        let bytes = unsafe { CStr::from_ptr(ptr) }.to_bytes().to_vec();
-        String::from_utf8(bytes)
-            .map(Some)
-            .map_err(|_| LlamaError::Internal(format!("the {name:?} chat template is not UTF-8")))
+        // outlives the call; the bytes are copied before it returns.
+        let bytes = unsafe { ffi::model_chat_template_named(self.as_ptr(), &c_name) }?;
+        bytes
+            .map(|bytes| {
+                String::from_utf8(bytes).map_err(|_| {
+                    LlamaError::Internal(format!("the {name:?} chat template is not UTF-8"))
+                })
+            })
+            .transpose()
     }
 
     /// Every scalar GGUF metadata key llama.cpp loaded with the model, with
@@ -327,14 +331,14 @@ impl LlamaModel {
     ///
     /// # Errors
     ///
-    /// [`LlamaError::Internal`] when llama.cpp cannot report an entry or a
-    /// key or value is not UTF-8: the scan is complete or it fails.
+    /// [`LlamaError::Internal`] when llama.cpp cannot report an entry or
+    /// fails while reading one, or a key or value is not UTF-8: the scan is
+    /// complete or it fails.
     pub fn meta(&self) -> LlamaResult<Vec<(String, String)>> {
         // SAFETY: the handle keeps the model pointer live.
         let count = unsafe { ffi::model_meta_count(self.as_ptr()) };
-        let count = usize::try_from(count).map_err(|_| {
-            LlamaError::Internal("llama.cpp reported no metadata count".to_string())
-        })?;
+        let count =
+            usize::try_from(count).map_err(|_| ffi::native_failure("counting model metadata"))?;
         let mut entries = Vec::with_capacity(count);
         for i in 0..count {
             let index = i32::try_from(i).expect("the count came from an i32");
@@ -376,7 +380,8 @@ impl LlamaModel {
     /// # Errors
     ///
     /// [`LlamaError::InvalidInput`] when `key` contains a NUL byte, and
-    /// [`LlamaError::Internal`] when the value is not UTF-8.
+    /// [`LlamaError::Internal`] when the value is not UTF-8 or llama.cpp
+    /// failed while looking it up (never reported as a missing key).
     pub fn meta_str(&self, key: &str) -> LlamaResult<Option<String>> {
         let c_key = ffi::cstring(key, "metadata key")?;
         let value = ffi::read_meta_string(|buf, len| {
@@ -396,11 +401,16 @@ impl LlamaModel {
 
     /// The attributes of vocabulary entry `token`, or `None` when it is
     /// outside the vocabulary.
-    pub fn token_attr(&self, token: i32) -> Option<TokenAttr> {
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::Internal`] when llama.cpp failed while reading the
+    /// entry (never reported as an id outside the vocabulary).
+    pub fn token_attr(&self, token: i32) -> LlamaResult<Option<TokenAttr>> {
         // SAFETY: the handle keeps the model pointer live; the shim checks
         // the id against the vocabulary.
-        let bits = unsafe { ffi::vocab_get_attr(self.as_ptr(), token) };
-        u32::try_from(bits).ok().map(TokenAttr::from_bits)
+        let bits = unsafe { ffi::vocab_get_attr(self.as_ptr(), token) }?;
+        Ok(bits.map(TokenAttr::from_bits))
     }
 
     /// The text vocabulary entry `token` stores, such as `<|im_start|>` for
@@ -409,25 +419,28 @@ impl LlamaModel {
     /// This is the raw entry, not the rendered piece
     /// [`Self::detokenize`] produces: byte-level BPE entries keep their
     /// byte-to-character mapping (a leading space reads `Ġ`).
-    pub fn token_text(&self, token: i32) -> Option<Vec<u8>> {
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::token_attr`].
+    pub fn token_text(&self, token: i32) -> LlamaResult<Option<Vec<u8>>> {
         // SAFETY: the handle keeps the model pointer live; the shim checks
-        // the id against the vocabulary.
-        let ptr = unsafe { ffi::vocab_get_text(self.as_ptr(), token) };
-        if ptr.is_null() {
-            return None;
-        }
-        // SAFETY: ptr is a non-null, NUL-terminated C string owned by the
-        // model, valid for its lifetime; it is copied before returning.
-        Some(unsafe { CStr::from_ptr(ptr) }.to_bytes().to_vec())
+        // the id against the vocabulary and the bytes are copied.
+        unsafe { ffi::vocab_get_text(self.as_ptr(), token) }
     }
 
     /// Whether the model has an encoder (T5-style encoder-decoder models).
     ///
     /// llama.cpp ignores a context's output cap for these and reserves a
     /// full batch of output rows instead.
-    pub fn has_encoder(&self) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::Internal`] when llama.cpp failed to answer.
+    pub fn has_encoder(&self) -> LlamaResult<bool> {
         // SAFETY: the handle keeps the model pointer live.
         unsafe { ffi::model_has_encoder(self.as_ptr()) }
+            .ok_or_else(|| ffi::native_failure("checking the model for an encoder"))
     }
 }
 

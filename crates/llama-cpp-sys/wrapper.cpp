@@ -42,9 +42,61 @@
 #endif
 #include <stdlib.h>
 #include <string.h>
+#include <climits>
+#include <new>
 #include <thread>
 #include <vector>
 #include <atomic>
+
+// =============================================================================
+// Exception Boundary
+// =============================================================================
+
+// A C++ exception must not unwind into Rust, which cannot catch it and aborts
+// the process. llama.cpp raises them where it allocates (std::bad_alloc from a
+// temporary std::string, a batch, a vector), so every guarded shim runs its
+// body through `guarded`, which turns any exception into the shim's failure
+// status. GGML_ASSERT and GGML_ABORT stop the process without an exception;
+// callers prevent those by validating arguments first.
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+#define XYBRID_HAS_EXCEPTIONS 1
+#else
+#define XYBRID_HAS_EXCEPTIONS 0
+#endif
+
+// Fault injection for the Rust tests, armed with llama_xybrid_fail_next_c:
+// the next call of the named shim throws std::bad_alloc inside its boundary.
+static std::atomic<bool> g_fail_armed{false};
+static char g_fail_shim[64];
+
+static void xybrid_failpoint(const char* shim) {
+#if XYBRID_HAS_EXCEPTIONS
+    if (g_fail_armed.load(std::memory_order_acquire) && strcmp(g_fail_shim, shim) == 0) {
+        g_fail_armed.store(false, std::memory_order_relaxed);
+        throw std::bad_alloc();
+    }
+#else
+    (void)shim;
+#endif
+}
+
+// Runs `body` and returns its result, or `on_exception` when it (or llama.cpp
+// under it) throws.
+template <typename T, typename F>
+static T guarded(const char* shim, T on_exception, F&& body) noexcept {
+#if XYBRID_HAS_EXCEPTIONS
+    try {
+        xybrid_failpoint(shim);
+        return body();
+    } catch (...) {
+        return on_exception;
+    }
+#else
+    (void)shim;
+    (void)on_exception;
+    return body();
+#endif
+}
 
 // =============================================================================
 // Log Verbosity Control
@@ -86,6 +138,15 @@ static void xybrid_log_callback(enum ggml_log_level level, const char* text, voi
 }
 
 extern "C" {
+
+void llama_xybrid_fail_next_c(const char* shim_name) {
+    g_fail_armed.store(false, std::memory_order_relaxed);
+    if (shim_name) {
+        strncpy(g_fail_shim, shim_name, sizeof(g_fail_shim) - 1);
+        g_fail_shim[sizeof(g_fail_shim) - 1] = '\0';
+        g_fail_armed.store(true, std::memory_order_release);
+    }
+}
 
 // =============================================================================
 // Log Control
@@ -400,45 +461,42 @@ llama_context* llama_new_readout_context_c(
     int n_threads,
     bool flash_attn
 ) {
-    if (!model || n_ctx == 0 || n_batch == 0 || n_ubatch == 0) {
-        return nullptr;
-    }
-    llama_context_params params = llama_context_default_params();
-    params.n_ctx = n_ctx;
-    params.n_batch = n_batch;
-    params.n_ubatch = n_ubatch;
-    params.n_seq_max = 1;
-    params.n_outputs_max = n_outputs_max;
-    params.n_outputs_max_per_seq = 1;
-    params.embeddings = false;
-    params.attention_type = LLAMA_ATTENTION_TYPE_UNSPECIFIED;
-    params.flash_attn_type = flash_attn ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
-    int actual_threads = n_threads > 0 ? n_threads : std::thread::hardware_concurrency();
-    if (actual_threads == 0) actual_threads = 4;  // Fallback if detection fails
-    params.n_threads = static_cast<int32_t>(actual_threads);
-    params.n_threads_batch = static_cast<int32_t>(actual_threads);
+    return guarded<llama_context*>(__func__, nullptr, [&]() -> llama_context* {
+        if (!model || n_ctx == 0 || n_batch == 0 || n_ubatch == 0) {
+            return nullptr;
+        }
+        llama_context_params params = llama_context_default_params();
+        params.n_ctx = n_ctx;
+        params.n_batch = n_batch;
+        params.n_ubatch = n_ubatch;
+        params.n_seq_max = 1;
+        params.n_outputs_max = n_outputs_max;
+        params.n_outputs_max_per_seq = 1;
+        params.embeddings = false;
+        params.attention_type = LLAMA_ATTENTION_TYPE_UNSPECIFIED;
+        params.flash_attn_type = flash_attn ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
+        int actual_threads = n_threads > 0 ? n_threads : std::thread::hardware_concurrency();
+        if (actual_threads == 0) actual_threads = 4;  // Fallback if detection fails
+        params.n_threads = static_cast<int32_t>(actual_threads);
+        params.n_threads_batch = static_cast<int32_t>(actual_threads);
 
-    return llama_init_from_model(model, params);
+        return llama_init_from_model(model, params);
+    });
 }
 
-uint32_t llama_n_batch_c(const llama_context* ctx) {
-    return ctx ? llama_n_batch(ctx) : 0;
-}
-
-uint32_t llama_n_ubatch_c(const llama_context* ctx) {
-    return ctx ? llama_n_ubatch(ctx) : 0;
-}
-
-uint32_t llama_n_seq_max_c(const llama_context* ctx) {
-    return ctx ? llama_n_seq_max(ctx) : 0;
-}
-
-bool llama_context_has_memory_c(const llama_context* ctx) {
-    return ctx && llama_get_memory(ctx) != nullptr;
-}
-
-bool llama_get_causal_attn_c(const llama_context* ctx) {
-    return ctx && llama_get_causal_attn(ctx);
+int32_t llama_context_facts_c(const llama_context* ctx, llama_xybrid_context_facts* out) {
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (!ctx || !out) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        out->n_ctx = llama_n_ctx(ctx);
+        out->n_batch = llama_n_batch(ctx);
+        out->n_ubatch = llama_n_ubatch(ctx);
+        out->n_seq_max = llama_n_seq_max(ctx);
+        out->has_memory = llama_get_memory(ctx) != nullptr;
+        out->causal_attn = llama_get_causal_attn(ctx);
+        return 0;
+    });
 }
 
 void llama_free_c(llama_context* ctx) {
@@ -448,13 +506,16 @@ void llama_free_c(llama_context* ctx) {
 }
 
 void llama_kv_cache_clear_c(llama_context* ctx) {
-    if (ctx) {
-        // Use the new memory API: get memory and clear it
-        llama_memory_t mem = llama_get_memory(ctx);
-        if (mem) {
-            llama_memory_clear(mem, true);  // Clear data buffers too
+    guarded<int>(__func__, 0, [&]() -> int {
+        if (ctx) {
+            // Use the new memory API: get memory and clear it
+            llama_memory_t mem = llama_get_memory(ctx);
+            if (mem) {
+                llama_memory_clear(mem, true);  // Clear data buffers too
+            }
         }
-    }
+        return 0;
+    });
 }
 
 // Truncate the KV cache for a single sequence to a prefix length, keeping
@@ -465,20 +526,23 @@ void llama_kv_cache_clear_c(llama_context* ctx) {
 // at position p_keep. Pairs with the n_past_in parameter on
 // llama_generate_streaming_c.
 //
-// Returns 0 on success, -1 on null context / no memory available.
+// Returns 0 on success, -1 on null context / no memory available, and
+// LLAMA_XYBRID_FAILED when llama.cpp raised an exception.
 int llama_kv_cache_seq_rm_c(llama_context* ctx, int seq_id, int p_keep) {
-    if (!ctx) {
-        return -1;
-    }
-    llama_memory_t mem = llama_get_memory(ctx);
-    if (!mem) {
-        return -1;
-    }
-    // llama.cpp's seq_rm semantics: remove tokens in the half-open range
-    // [p0, p1). p1 = -1 means "to the end". We keep [0, p_keep) and drop
-    // everything from p_keep onward.
-    llama_memory_seq_rm(mem, (llama_seq_id) seq_id, (llama_pos) p_keep, -1);
-    return 0;
+    return guarded<int>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int {
+        if (!ctx) {
+            return -1;
+        }
+        llama_memory_t mem = llama_get_memory(ctx);
+        if (!mem) {
+            return -1;
+        }
+        // llama.cpp's seq_rm semantics: remove tokens in the half-open range
+        // [p0, p1). p1 = -1 means "to the end". We keep [0, p_keep) and drop
+        // everything from p_keep onward.
+        llama_memory_seq_rm(mem, (llama_seq_id) seq_id, (llama_pos) p_keep, -1);
+        return 0;
+    });
 }
 
 // Per-sequence state snapshots: the sequence's KV cache cells plus, on
@@ -548,16 +612,23 @@ int llama_tokenize_c(
     bool add_special,
     bool parse_special
 ) {
-    const llama_vocab* vocab = llama_model_get_vocab(model);
-    return llama_tokenize(
-        vocab,
-        text,
-        text_len,
-        tokens,
-        n_tokens_max,
-        add_special,
-        parse_special
-    );
+    // INT32_MIN is llama.cpp's own failure value (a result too large for an
+    // int32_t), so callers already treat it as an error.
+    return guarded<int>(__func__, INT32_MIN, [&]() -> int {
+        if (!model) {
+            return INT32_MIN;
+        }
+        const llama_vocab* vocab = llama_model_get_vocab(model);
+        return llama_tokenize(
+            vocab,
+            text,
+            text_len,
+            tokens,
+            n_tokens_max,
+            add_special,
+            parse_special
+        );
+    });
 }
 
 int llama_token_to_piece_c(
@@ -664,11 +735,13 @@ bool llama_model_has_recurrent_state_c(const llama_model* model) {
 
 // Encoder-decoder models (T5). llama.cpp ignores a context's n_outputs_max
 // for them and reserves n_batch outputs instead.
-bool llama_model_has_encoder_c(const llama_model* model) {
-    if (!model) {
-        return false;
-    }
-    return llama_model_has_encoder(model);
+int32_t llama_model_has_encoder_c(const llama_model* model) {
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (!model) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        return llama_model_has_encoder(model) ? 1 : 0;
+    });
 }
 
 // =============================================================================
@@ -678,43 +751,70 @@ bool llama_model_has_encoder_c(const llama_model* model) {
 // llama.cpp keeps every scalar GGUF key of the model as a string (arrays are
 // skipped at load) and these read that map. Each returns the length of the
 // whole string, like snprintf, so a call with buf_size 0 probes the length.
+// The lookup by key builds a temporary std::string, which can throw.
+
+// A metadata length, or LLAMA_XYBRID_FAILED when snprintf reported an error
+// (llama.cpp's own -1 means a missing key or index).
+static int32_t meta_status(int32_t n) {
+    return n >= -1 ? n : LLAMA_XYBRID_FAILED;
+}
 
 int32_t llama_model_meta_count_c(const llama_model* model) {
-    if (!model) {
-        return -1;
-    }
-    return llama_model_meta_count(model);
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (!model) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        return llama_model_meta_count(model);
+    });
 }
 
 int32_t llama_model_meta_key_by_index_c(const llama_model* model, int32_t i, char* buf, size_t buf_size) {
-    if (!model || (!buf && buf_size > 0)) {
-        return -1;
-    }
-    return llama_model_meta_key_by_index(model, i, buf, buf_size);
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (!model || (!buf && buf_size > 0)) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        return meta_status(llama_model_meta_key_by_index(model, i, buf, buf_size));
+    });
 }
 
 int32_t llama_model_meta_val_str_by_index_c(const llama_model* model, int32_t i, char* buf, size_t buf_size) {
-    if (!model || (!buf && buf_size > 0)) {
-        return -1;
-    }
-    return llama_model_meta_val_str_by_index(model, i, buf, buf_size);
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (!model || (!buf && buf_size > 0)) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        return meta_status(llama_model_meta_val_str_by_index(model, i, buf, buf_size));
+    });
 }
 
 int32_t llama_model_meta_val_str_c(const llama_model* model, const char* key, char* buf, size_t buf_size) {
-    if (!model || !key || (!buf && buf_size > 0)) {
-        return -1;
-    }
-    return llama_model_meta_val_str(model, key, buf, buf_size);
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (!model || !key || (!buf && buf_size > 0)) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        return meta_status(llama_model_meta_val_str(model, key, buf, buf_size));
+    });
 }
 
 // A named template such as "systemone", stored as
 // `tokenizer.chat_template.<name>`. Unlike the default template, a named one
-// gets no built-in fallback from llama.cpp.
-const char* llama_model_chat_template_named_c(const llama_model* model, const char* name) {
-    if (!model || !name) {
-        return nullptr;
-    }
-    return llama_model_chat_template(model, name);
+// gets no built-in fallback from llama.cpp. Building the key can throw.
+int32_t llama_model_chat_template_named_c(const llama_model* model, const char* name, const char** out) {
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (!model || !name || !out) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        *out = nullptr;
+        const char* tmpl = llama_model_chat_template(model, name);
+        if (!tmpl) {
+            return LLAMA_XYBRID_ABSENT;
+        }
+        const size_t len = strlen(tmpl);
+        if (len > INT32_MAX) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        *out = tmpl;
+        return static_cast<int32_t>(len);
+    });
 }
 
 // =============================================================================
@@ -728,46 +828,75 @@ static bool vocab_has_token(const llama_vocab* vocab, int32_t token) {
 }
 
 int32_t llama_vocab_get_attr_c(const llama_model* model, int32_t token) {
-    if (!model) {
-        return -1;
-    }
-    const llama_vocab* vocab = llama_model_get_vocab(model);
-    if (!vocab_has_token(vocab, token)) {
-        return -1;
-    }
-    return static_cast<int32_t>(llama_vocab_get_attr(vocab, token));
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (!model) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        const llama_vocab* vocab = llama_model_get_vocab(model);
+        if (!vocab_has_token(vocab, token)) {
+            return LLAMA_XYBRID_ABSENT;
+        }
+        // The attribute bits fit in the low ten bits.
+        return static_cast<int32_t>(llama_vocab_get_attr(vocab, token) & INT32_MAX);
+    });
 }
 
-const char* llama_vocab_get_text_c(const llama_model* model, int32_t token) {
-    if (!model) {
-        return nullptr;
-    }
-    const llama_vocab* vocab = llama_model_get_vocab(model);
-    if (!vocab_has_token(vocab, token)) {
-        return nullptr;
-    }
-    return llama_vocab_get_text(vocab, token);
+int32_t llama_vocab_get_text_c(const llama_model* model, int32_t token, const char** out) {
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (!model || !out) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        *out = nullptr;
+        const llama_vocab* vocab = llama_model_get_vocab(model);
+        if (!vocab_has_token(vocab, token)) {
+            return LLAMA_XYBRID_ABSENT;
+        }
+        const char* text = llama_vocab_get_text(vocab, token);
+        if (!text) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        const size_t len = strlen(text);
+        if (len > INT32_MAX) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        *out = text;
+        return static_cast<int32_t>(len);
+    });
 }
 
 // =============================================================================
 // Generation (low-level)
 // =============================================================================
 
+// llama_decode converts the batch (allocating) before it reports a status,
+// and an encoder pass allocates more, so both can throw.
 int llama_decode_c(llama_context* ctx, const llama_batch* batch) {
-    return llama_decode(ctx, *batch);
+    return guarded<int>(__func__, LLAMA_XYBRID_DECODE_EXCEPTION, [&]() -> int {
+        if (!ctx || !batch) {
+            return -1;
+        }
+        return llama_decode(ctx, *batch);
+    });
 }
 
 float* llama_get_logits_c(llama_context* ctx) {
-    return llama_get_logits(ctx);
+    return guarded<float*>(__func__, nullptr, [&]() -> float* {
+        if (!ctx) {
+            return nullptr;
+        }
+        return llama_get_logits(ctx);
+    });
 }
 
 // The caller passes only an entry its last successful decode flagged for
 // output: llama.cpp aborts on any other one in builds without NDEBUG.
 float* llama_get_logits_ith_c(llama_context* ctx, int32_t i) {
-    if (!ctx) {
-        return nullptr;
-    }
-    return llama_get_logits_ith(ctx, i);
+    return guarded<float*>(__func__, nullptr, [&]() -> float* {
+        if (!ctx) {
+            return nullptr;
+        }
+        return llama_get_logits_ith(ctx, i);
+    });
 }
 
 // =============================================================================

@@ -127,7 +127,7 @@ fn the_gguf_carries_the_lfm3_d1_profile() {
         None,
         "llama.cpp keeps no array-valued key"
     );
-    assert!(!model.has_encoder());
+    assert!(!model.has_encoder().unwrap());
 
     let template = model
         .named_chat_template("systemone")
@@ -167,23 +167,35 @@ fn control_spellings_are_the_vocabularys_control_tokens() {
     let Some(model) = model() else { return };
     let n_vocab = i32::try_from(model.n_vocab()).unwrap();
     assert_eq!(n_vocab, 128_000);
+    let attr = |t: i32| {
+        model
+            .token_attr(t)
+            .expect("readable")
+            .expect("in the vocabulary")
+    };
+    let text = |t: i32| {
+        model
+            .token_text(t)
+            .expect("readable")
+            .expect("in the vocabulary")
+    };
     let spellings: Vec<Vec<u8>> = (0..n_vocab)
-        .filter(|&t| model.token_attr(t).unwrap().contains(TokenAttr::CONTROL))
-        .map(|t| model.token_text(t).unwrap())
+        .filter(|&t| attr(t).contains(TokenAttr::CONTROL))
+        .map(text)
         .filter(|text| text.len() >= 2)
         .collect();
     assert_eq!(spellings.len(), 124, "d1-2B's CONTROL spellings");
 
     let bos = model.token_bos();
     assert_eq!(bos, 124_894);
-    assert_eq!(model.token_text(bos).unwrap(), b"<|startoftext|>");
-    assert!(model.token_attr(bos).unwrap().contains(TokenAttr::CONTROL));
-    assert_eq!(model.token_attr(n_vocab), None);
-    assert_eq!(model.token_attr(-1), None);
-    assert_eq!(model.token_text(n_vocab), None);
+    assert_eq!(text(bos), b"<|startoftext|>");
+    assert!(attr(bos).contains(TokenAttr::CONTROL));
+    assert_eq!(model.token_attr(n_vocab).unwrap(), None);
+    assert_eq!(model.token_attr(-1).unwrap(), None);
+    assert_eq!(model.token_text(n_vocab).unwrap(), None);
     let a = label_token(model, "A");
-    assert_eq!(model.token_text(a).unwrap(), b"A");
-    assert!(model.token_attr(a).unwrap().contains(TokenAttr::NORMAL));
+    assert_eq!(text(a), b"A");
+    assert!(attr(a).contains(TokenAttr::NORMAL));
 }
 
 #[test]
@@ -294,7 +306,10 @@ fn the_budget_is_an_exact_boundary() {
 fn score_final_position_refuses_the_d1_model() {
     let Some(model) = model() else { return };
     let ctx = LlamaContext::new(model, 512, THREADS as usize, 512, false).expect("a context");
-    assert!(!ctx.facts().has_memory, "llama.cpp gives d1 no memory");
+    assert!(
+        !ctx.facts().unwrap().has_memory,
+        "llama.cpp gives d1 no memory"
+    );
     let refused = ctx
         .score_final_position(&prompt_tokens(model), &[label_token(model, "A")])
         .expect_err("no memory, no causal scoring");
