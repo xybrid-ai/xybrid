@@ -5,7 +5,11 @@
 //!
 //! 1. Parsing the HF model card (README.md YAML frontmatter) for task type and library info
 //! 2. Scanning the directory for model files (.onnx, .gguf, .safetensors, .tflite, .litertlm)
-//! 3. For GGUF models: reading binary metadata (architecture, context_length)
+//! 3. For GGUF models: classifying the model's GGUF first (`xybrid_core::gguf::classify`). A
+//!    decision model gets a `ChoiceScorer` with a `GgufDecision` scorer, whatever projector sits
+//!    beside it; one this build does not run, or one that cannot be classified from its
+//!    complete header, is refused rather than guessed to be a chat model. Any other GGUF:
+//!    reading binary metadata (architecture, context_length)
 //! 4. For ONNX models: inspecting input/output tensor names and shapes via ort
 //! 5. Falling back to a generic template if auto-detection fails
 
@@ -14,10 +18,12 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use xybrid_core::execution::template::{ChoiceScorerSpec, DecisionProtocol, GgufDecisionSpec};
 use xybrid_core::execution::{
     template::GenerationParams, ExecutionTemplate, ModelMetadata, VisionEncoderConfig,
     VisionPreprocessingPreset,
 };
+use xybrid_core::gguf::{classify, DecisionClassification, DecisionProfileId, GgufHeader};
 
 // ============================================================================
 // Public API
@@ -65,6 +71,24 @@ pub fn inspect_and_generate(
         )));
     }
 
+    // A GGUF model is classified before anything reads it as a chat or vision
+    // model: a decision model's metadata never comes from the paths below, and
+    // only a complete header without decision keys continues on them.
+    let primary = primary_model_file(&model_files);
+    if primary.format == ModelFormat::Gguf {
+        if let Some(decision) = classify_gguf(&dir.join(&primary.filename), &primary.filename)? {
+            let model_id = model_id_for(dir, repo, model_id_override);
+            let metadata = build_decision_metadata(
+                &model_id,
+                &model_id,
+                &primary.filename,
+                model_card.as_ref(),
+                &decision,
+            );
+            return Ok((metadata, None));
+        }
+    }
+
     // 3. Inspect supporting files (tokenizer.json, config.json, preprocessor_config.json)
     let supporting_files = inspect_supporting_files(dir);
 
@@ -85,18 +109,7 @@ pub fn inspect_and_generate(
         .map(|onnx| infer_task_from_tensors(onnx, &supporting_files, model_card.as_ref()));
 
     // 6. Derive model_id: use override, prefer repo name (HF case), fall back to directory name
-    let model_id = if let Some(id) = model_id_override {
-        id.to_string()
-    } else {
-        let raw_name = if repo.is_empty() {
-            dir.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown-model")
-        } else {
-            repo.rsplit('/').next().unwrap_or(repo)
-        };
-        sanitize_model_id(raw_name)
-    };
+    let model_id = model_id_for(dir, repo, model_id_override);
 
     // 7. List all non-hidden files in directory (excluding README.md, model_metadata.json)
     let all_files = list_model_files(dir);
@@ -146,6 +159,22 @@ pub fn write_metadata(dir: &Path, metadata: &ModelMetadata) -> SdkResult<()> {
         metadata_path.display()
     );
     Ok(())
+}
+
+/// The model id: the override, else the repo name (HF case), else the
+/// directory name, sanitized.
+fn model_id_for(dir: &Path, repo: &str, model_id_override: Option<&str>) -> String {
+    if let Some(id) = model_id_override {
+        return id.to_string();
+    }
+    let raw_name = if repo.is_empty() {
+        dir.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown-model")
+    } else {
+        repo.rsplit('/').next().unwrap_or(repo)
+    };
+    sanitize_model_id(raw_name)
 }
 
 /// Sanitize a name to lowercase kebab-case for use as a model_id.
@@ -200,6 +229,8 @@ fn list_model_files(dir: &Path) -> Vec<String> {
 ///
 /// Reads the GGUF binary header to extract architecture and context length,
 /// then returns a ready-to-use `ModelMetadata` without writing anything to disk.
+/// The context window is the model's native context capped at 4,096 tokens;
+/// the native value is kept as `metadata.max_context_length`.
 /// This enables `--model-file ./path/to/model.gguf` workflows.
 pub fn generate_metadata_for_gguf_file(gguf_path: &Path) -> SdkResult<ModelMetadata> {
     if !gguf_path.exists() {
@@ -219,6 +250,14 @@ pub fn generate_metadata_for_gguf_file(gguf_path: &Path) -> SdkResult<ModelMetad
         .trim_end_matches(".gguf")
         .to_lowercase()
         .replace(' ', "-");
+
+    // Classified first: a decision model never gets chat metadata, and a header
+    // that does not read completely is refused.
+    if let Some(decision) = classify_gguf(gguf_path, &filename)? {
+        return Ok(build_decision_metadata(
+            &model_id, &filename, &filename, None, &decision,
+        ));
+    }
 
     let gguf_info = read_gguf_metadata(gguf_path);
 
@@ -503,6 +542,7 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
 
     // Limit to prevent runaway reads on corrupted files
     let kv_limit = metadata_kv_count.min(1000);
+    let mut vision_projector_type = None;
 
     // Read metadata key-value pairs
     for _ in 0..kv_limit {
@@ -538,6 +578,16 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
                     skip_gguf_value(&mut reader, value_type);
                 }
             }
+            // Projectors converted for mixed modalities (LiquidAI's LFM3-VL
+            // mmproj among them) name the vision projector here instead.
+            // llama.cpp reads it only when the default key is absent.
+            "clip.vision.projector_type" => {
+                if value_type == GGUF_TYPE_STRING {
+                    vision_projector_type = read_gguf_string(&mut reader);
+                } else {
+                    skip_gguf_value(&mut reader, value_type);
+                }
+            }
             "clip.vision.image_size" => {
                 info.image_size = read_gguf_uint_value(&mut reader, value_type);
             }
@@ -559,6 +609,10 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
         if info.architecture.is_some() && info.context_length.is_some() {
             break;
         }
+    }
+
+    if info.projector_type.is_none() {
+        info.projector_type = vision_projector_type;
     }
 
     // Infer quantization from filename
@@ -662,6 +716,181 @@ fn skip_gguf_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> bool {
         _ => return false,
     };
     reader.seek(SeekFrom::Current(skip_bytes)).is_ok()
+}
+
+// ============================================================================
+// Decision Models (classified first)
+// ============================================================================
+
+/// The file a directory's metadata names as its model: the first model file
+/// that is not a GGUF companion (projector, drafter), else the first file.
+fn primary_model_file(model_files: &[ModelFileInfo]) -> &ModelFileInfo {
+    model_files
+        .iter()
+        .find(|file| {
+            file.format != ModelFormat::Gguf || !is_gguf_companion_filename(&file.filename)
+        })
+        .unwrap_or(&model_files[0])
+}
+
+/// A GGUF that classified as a decision model of an implemented profile,
+/// with the descriptive facts its metadata reports.
+struct DecisionGguf {
+    profile: DecisionProfileId,
+    architecture: Option<String>,
+    name: Option<String>,
+}
+
+/// Classifies the GGUF at `path` (named `filename` in errors) from its
+/// complete header: `Some` for a decision model of an implemented profile,
+/// `None` for an ordinary model.
+///
+/// Every route that generates metadata for a GGUF calls this before reading
+/// it any other way: llama.cpp would load a decision model as a chat model,
+/// and LiquidAI's d1 GGUFs carry an ordinary chat template too.
+///
+/// # Errors
+///
+/// [`SdkError::LoadError`] for a decision model this build does not run,
+/// and for a header that does not read or classify completely: a damaged
+/// file is not evidence that a model is ordinary.
+fn classify_gguf(path: &Path, filename: &str) -> SdkResult<Option<DecisionGguf>> {
+    let unclassifiable = |error: xybrid_core::gguf::GgufError| {
+        SdkError::load(format!(
+            "'{filename}' cannot be classified: {}. A GGUF that cannot be classified from its \
+             complete header is refused, not assumed to be an ordinary model",
+            bounded(&error.to_string())
+        ))
+    };
+    let header = GgufHeader::read_file(path).map_err(unclassifiable)?;
+    let profile = match classify(&header).map_err(unclassifiable)? {
+        DecisionClassification::NotDecision => return Ok(None),
+        DecisionClassification::Supported(profile) => profile,
+        DecisionClassification::Unsupported {
+            decision_type,
+            reason,
+        } => {
+            return Err(SdkError::load(format!(
+                "'{filename}' is a decision model (decision type {}) that this build does not \
+                 run: {}",
+                quoted(&decision_type),
+                bounded(&reason.to_string())
+            )))
+        }
+        _ => {
+            return Err(SdkError::load(format!(
+                "'{filename}' is a decision model this build does not run"
+            )))
+        }
+    };
+    let text = |key: &str| {
+        header
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+    };
+    Ok(Some(DecisionGguf {
+        profile,
+        architecture: text("general.architecture"),
+        name: text("general.name"),
+    }))
+}
+
+/// Metadata for a decision GGUF: a `ChoiceScorer` with a `GgufDecision`
+/// scorer at its default (provisional) limits, asserting the protocol the
+/// file classified as.
+///
+/// The model's behaviour (template, temperatures, attention) is read from
+/// the GGUF at every load, so none of it is copied here; nor are generation
+/// parameters or a context length, which a decision model does not use. A
+/// projector beside the model is left out: the text profile reads no media.
+fn build_decision_metadata(
+    model_id: &str,
+    repo: &str,
+    model_file: &str,
+    card: Option<&HfModelCard>,
+    decision: &DecisionGguf,
+) -> ModelMetadata {
+    let mut metadata_map = HashMap::new();
+    metadata_map.insert(
+        "task".to_string(),
+        serde_json::Value::String("decision".to_string()),
+    );
+    if let Some(architecture) = &decision.architecture {
+        metadata_map.insert(
+            "architecture".to_string(),
+            serde_json::Value::String(architecture.clone()),
+        );
+    }
+    metadata_map.insert(
+        "backend".to_string(),
+        serde_json::Value::String("llamacpp".to_string()),
+    );
+    metadata_map.insert(
+        "source_repo".to_string(),
+        serde_json::Value::String(repo.to_string()),
+    );
+    metadata_map.insert("auto_generated".to_string(), serde_json::Value::Bool(true));
+    if let Some(quantization) = infer_quantization_from_filename(model_file) {
+        metadata_map.insert(
+            "quantization".to_string(),
+            serde_json::Value::String(quantization),
+        );
+    }
+    if let Some(card) = card {
+        if !card.languages.is_empty() {
+            metadata_map.insert("languages".to_string(), serde_json::json!(card.languages));
+        }
+        if let Some(license) = &card.license {
+            metadata_map.insert(
+                "license".to_string(),
+                serde_json::Value::String(license.clone()),
+            );
+        }
+    }
+
+    let description = decision
+        .name
+        .clone()
+        .or_else(|| card.and_then(|c| c.model_name.clone()))
+        .unwrap_or_else(|| format!("{model_id} (auto-generated decision model)"));
+
+    ModelMetadata {
+        model_id: model_id.to_string(),
+        version: "1.0".to_string(),
+        execution_template: ExecutionTemplate::ChoiceScorer {
+            scorer: ChoiceScorerSpec::GgufDecision(GgufDecisionSpec::new(
+                model_file,
+                DecisionProtocol::from(decision.profile),
+            )),
+        },
+        preprocessing: Vec::new(),
+        postprocessing: Vec::new(),
+        files: vec![model_file.to_string()],
+        vision_encoder: None,
+        description: Some(description),
+        metadata: metadata_map,
+        voices: None,
+        max_chunk_chars: None,
+        trim_trailing_samples: None,
+    }
+}
+
+/// A string from a model file, quoted and cut to 64 characters for an error.
+fn quoted(text: &str) -> String {
+    match text.char_indices().nth(64) {
+        None => format!("{text:?}"),
+        Some((end, _)) => format!("{:?}…", &text[..end]),
+    }
+}
+
+/// A classification detail, which can quote the file's keys, cut to 256
+/// characters for an error.
+fn bounded(text: &str) -> String {
+    match text.char_indices().nth(256) {
+        None => text.to_string(),
+        Some((end, _)) => format!("{}…", &text[..end]),
+    }
 }
 
 // ============================================================================
@@ -949,12 +1178,7 @@ fn build_metadata(
     all_files: &[String],
     cache_dir: &Path,
 ) -> ModelMetadata {
-    let primary = model_files
-        .iter()
-        .find(|file| {
-            file.format != ModelFormat::Gguf || !is_gguf_companion_filename(&file.filename)
-        })
-        .unwrap_or(&model_files[0]);
+    let primary = primary_model_file(model_files);
 
     // Determine task: prefer task inference, then model card, then tags
     let task = task_inference
@@ -1073,6 +1297,13 @@ fn build_uninspected_metadata(
     }
 }
 
+/// Metadata for a GGUF language model without a vision projector.
+///
+/// llama.cpp allocates the KV cache for the whole context window at load, so
+/// the window is the GGUF's native context capped at 4,096 tokens, the size
+/// the vision builders use. Uncapped, LFM3 1.7B (262,144 tokens) would
+/// reserve about 5.9 GB of f16 KV cache. The native value is kept as
+/// `max_context_length`.
 fn build_gguf_metadata(
     model_id: &str,
     repo: &str,
@@ -1083,7 +1314,17 @@ fn build_gguf_metadata(
 ) -> ModelMetadata {
     use xybrid_core::execution::ExecutionTemplate;
 
-    let context_length = gguf_info.and_then(|g| g.context_length).unwrap_or(4096) as usize;
+    const DEFAULT_CONTEXT_LENGTH: usize = 4096;
+
+    // A declared 0 counts as unknown: llama.cpp reads `n_ctx = 0` as "use the
+    // training context", the allocation this cap exists to avoid.
+    let max_context_length = gguf_info
+        .and_then(|g| g.context_length)
+        .filter(|&tokens| tokens > 0)
+        .and_then(|tokens| usize::try_from(tokens).ok());
+    let context_length = max_context_length.map_or(DEFAULT_CONTEXT_LENGTH, |native| {
+        native.min(DEFAULT_CONTEXT_LENGTH)
+    });
 
     let architecture = gguf_info
         .and_then(|g| g.architecture.clone())
@@ -1104,10 +1345,14 @@ fn build_gguf_metadata(
     );
     metadata_map.insert(
         "context_length".to_string(),
-        serde_json::json!(gguf_info
-            .and_then(|g| g.context_length)
-            .unwrap_or(context_length as u64)),
+        serde_json::json!(context_length),
     );
+    if let Some(max_context_length) = max_context_length {
+        metadata_map.insert(
+            "max_context_length".to_string(),
+            serde_json::json!(max_context_length),
+        );
+    }
     metadata_map.insert(
         "source_repo".to_string(),
         serde_json::Value::String(repo.to_string()),
@@ -2253,7 +2498,10 @@ mod tests {
     #[test]
     fn test_generate_metadata_prefers_existing_gguf_behavior() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("model.gguf"), b"larger dummy gguf").unwrap();
+        // A real header: a GGUF that cannot be classified is refused.
+        Gguf::new()
+            .str("general.architecture", "llama")
+            .write(&dir.path().join("model.gguf"));
         std::fs::write(dir.path().join("model.tflite"), b"tflite").unwrap();
 
         let (metadata, _) = generate_metadata(dir.path(), "test/mixed").unwrap();
@@ -2314,6 +2562,45 @@ mod tests {
         let info = read_gguf_metadata(&gguf_path).unwrap();
         assert_eq!(info.architecture.as_deref(), Some("llama"));
         assert_eq!(info.context_length, Some(8192));
+    }
+
+    /// The projector type comes from `clip.projector_type`, then from
+    /// `clip.vision.projector_type`, whichever order the header lists them in.
+    #[test]
+    fn test_read_gguf_metadata_projector_type_falls_back_to_the_vision_key() {
+        fn projector(keys: &[(&str, &str)]) -> Option<String> {
+            let dir = TempDir::new().unwrap();
+            let gguf_path = dir.path().join("mmproj.gguf");
+            let mut f = std::fs::File::create(&gguf_path).unwrap();
+            f.write_all(b"GGUF").unwrap();
+            f.write_all(&3u32.to_le_bytes()).unwrap();
+            f.write_all(&0u64.to_le_bytes()).unwrap();
+            f.write_all(&(keys.len() as u64).to_le_bytes()).unwrap();
+            for (key, value) in keys {
+                write_gguf_test_string(&mut f, key);
+                f.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+                write_gguf_test_string(&mut f, value);
+            }
+            drop(f);
+            read_gguf_metadata(&gguf_path).unwrap().projector_type
+        }
+
+        assert_eq!(
+            projector(&[("clip.vision.projector_type", "lfm3vl")]).as_deref(),
+            Some("lfm3vl")
+        );
+        for keys in [
+            [
+                ("clip.vision.projector_type", "lfm3vl"),
+                ("clip.projector_type", "qwen3vl_merger"),
+            ],
+            [
+                ("clip.projector_type", "qwen3vl_merger"),
+                ("clip.vision.projector_type", "lfm3vl"),
+            ],
+        ] {
+            assert_eq!(projector(&keys).as_deref(), Some("qwen3vl_merger"));
+        }
     }
 
     #[test]
@@ -2391,6 +2678,97 @@ mod tests {
         let json = std::fs::read_to_string(&metadata_path).unwrap();
         let parsed: ModelMetadata = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.model_id, "test-model");
+    }
+
+    /// A text GGUF runs at its native context capped at 4,096 tokens, like the
+    /// vision builders: llama.cpp reserves the KV cache for the whole window
+    /// at load. The native value is kept as `max_context_length`.
+    #[test]
+    fn build_gguf_metadata_caps_context_and_keeps_native_value() {
+        let primary = ModelFileInfo {
+            filename: "model-Q4_K_M.gguf".to_string(),
+            format: ModelFormat::Gguf,
+            size_bytes: 0,
+        };
+        // (declared context, context_length, max_context_length)
+        let cases: [(Option<u64>, u64, Option<u64>); 5] = [
+            (Some(262_144), 4096, Some(262_144)),
+            (Some(4096), 4096, Some(4096)),
+            (Some(2048), 2048, Some(2048)),
+            (None, 4096, None),
+            (Some(0), 4096, None),
+        ];
+
+        for (declared, expected, expected_max) in cases {
+            let info = GgufInfo {
+                architecture: Some("lfm3".to_string()),
+                context_length: declared,
+                ..Default::default()
+            };
+            let metadata = build_gguf_metadata(
+                "model",
+                "org/model",
+                &primary,
+                "text-generation",
+                None,
+                Some(&info),
+            );
+
+            // The serialized form is what lands in `model_metadata.json`.
+            let json = serde_json::to_value(&metadata).unwrap();
+            assert_eq!(
+                json["execution_template"]["context_length"], expected,
+                "declared {declared:?}"
+            );
+            assert_eq!(
+                json["metadata"]["context_length"], expected,
+                "declared {declared:?}"
+            );
+            assert_eq!(
+                json["metadata"]["max_context_length"],
+                serde_json::json!(expected_max),
+                "declared {declared:?}"
+            );
+        }
+    }
+
+    /// `--model-file` and `fromModelFile` take the window from the GGUF
+    /// header, so LFM3 1.7B's declared 262,144 tokens must not become it.
+    #[test]
+    fn generate_metadata_for_gguf_file_caps_long_native_context() {
+        let dir = TempDir::new().unwrap();
+        let gguf_path = dir.path().join("LFM3-1.7B-QAD-Q4_0.gguf");
+        let mut f = std::fs::File::create(&gguf_path).unwrap();
+        f.write_all(b"GGUF").unwrap();
+        f.write_all(&3u32.to_le_bytes()).unwrap();
+        f.write_all(&0u64.to_le_bytes()).unwrap();
+        f.write_all(&2u64.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut f, "general.architecture");
+        f.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut f, "lfm3");
+        write_gguf_test_string(&mut f, "lfm3.context_length");
+        f.write_all(&GGUF_TYPE_UINT32.to_le_bytes()).unwrap();
+        f.write_all(&262_144u32.to_le_bytes()).unwrap();
+        drop(f);
+
+        let metadata = generate_metadata_for_gguf_file(&gguf_path).unwrap();
+
+        metadata.validate().unwrap();
+        assert!(matches!(
+            metadata.execution_template,
+            xybrid_core::execution::ExecutionTemplate::Gguf {
+                ref model_file,
+                context_length: 4096,
+                ..
+            } if model_file == "LFM3-1.7B-QAD-Q4_0.gguf"
+        ));
+        assert_eq!(
+            metadata
+                .metadata
+                .get("max_context_length")
+                .and_then(|value| value.as_u64()),
+            Some(262_144)
+        );
     }
 
     #[test]
@@ -2532,13 +2910,14 @@ mod tests {
         language.write_all(&128_000u32.to_le_bytes()).unwrap();
         drop(language);
 
+        // LiquidAI's mmproj names its projector under the vision key only.
         let projector_path = dir.path().join("mmproj-LFM3-VL-2B-Q8_0.gguf");
         let mut projector = std::fs::File::create(projector_path).unwrap();
         projector.write_all(b"GGUF").unwrap();
         projector.write_all(&3u32.to_le_bytes()).unwrap();
         projector.write_all(&0u64.to_le_bytes()).unwrap();
         projector.write_all(&3u64.to_le_bytes()).unwrap();
-        write_gguf_test_string(&mut projector, "clip.projector_type");
+        write_gguf_test_string(&mut projector, "clip.vision.projector_type");
         projector
             .write_all(&GGUF_TYPE_STRING.to_le_bytes())
             .unwrap();
@@ -3281,5 +3660,493 @@ mod tests {
 
         // Files should include model.onnx
         assert!(metadata.files.contains(&"model.onnx".to_string()));
+    }
+
+    // ------------------------------------------------------------------
+    // Decision models, classified first
+    // ------------------------------------------------------------------
+
+    /// GGUF v3 header bytes with keys in the order added, and no tensors.
+    #[derive(Clone)]
+    struct Gguf {
+        kv: Vec<(String, u32, Vec<u8>)>,
+    }
+
+    fn gguf_string(s: &str) -> Vec<u8> {
+        let mut out = (s.len() as u64).to_le_bytes().to_vec();
+        out.extend_from_slice(s.as_bytes());
+        out
+    }
+
+    impl Gguf {
+        fn new() -> Self {
+            Self { kv: Vec::new() }
+        }
+
+        fn raw(mut self, key: &str, type_code: u32, payload: Vec<u8>) -> Self {
+            self.kv.push((key.to_string(), type_code, payload));
+            self
+        }
+
+        fn str(self, key: &str, value: &str) -> Self {
+            self.raw(key, GGUF_TYPE_STRING, gguf_string(value))
+        }
+
+        fn u32(self, key: &str, value: u32) -> Self {
+            self.raw(key, GGUF_TYPE_UINT32, value.to_le_bytes().to_vec())
+        }
+
+        fn f32(self, key: &str, value: f32) -> Self {
+            self.raw(key, GGUF_TYPE_FLOAT32, value.to_le_bytes().to_vec())
+        }
+
+        fn bool(self, key: &str, value: bool) -> Self {
+            self.raw(key, GGUF_TYPE_BOOL, vec![u8::from(value)])
+        }
+
+        fn str_array(self, key: &str, items: &[&str]) -> Self {
+            let mut payload = GGUF_TYPE_STRING.to_le_bytes().to_vec();
+            payload.extend((items.len() as u64).to_le_bytes());
+            for item in items {
+                payload.extend(gguf_string(item));
+            }
+            self.raw(key, GGUF_TYPE_ARRAY, payload)
+        }
+
+        fn without(mut self, key: &str) -> Self {
+            self.kv.retain(|(k, _, _)| k != key);
+            self
+        }
+
+        fn bytes(&self) -> Vec<u8> {
+            let mut out = b"GGUF".to_vec();
+            out.extend(3u32.to_le_bytes());
+            out.extend(0u64.to_le_bytes());
+            out.extend((self.kv.len() as u64).to_le_bytes());
+            for (key, type_code, payload) in &self.kv {
+                out.extend(gguf_string(key));
+                out.extend(type_code.to_le_bytes());
+                out.extend_from_slice(payload);
+            }
+            out
+        }
+
+        fn write(&self, path: &Path) {
+            std::fs::write(path, self.bytes()).unwrap();
+        }
+    }
+
+    const D1_FILE: &str = "d1-2B-Q4_K_M.gguf";
+
+    /// An LFM3 d1 GGUF shaped like LiquidAI's d1-2B: the context length
+    /// comes before the decision keys, and an ordinary chat template sits
+    /// beside the `systemone` one.
+    fn d1() -> Gguf {
+        d1_after(0)
+    }
+
+    /// [`d1`] with `filler` other keys between the context length and the
+    /// decision keys.
+    fn d1_after(filler: u32) -> Gguf {
+        let mut gguf = Gguf::new()
+            .str("general.architecture", "lfm3")
+            .str("general.name", "D1 2B")
+            .u32("lfm3.context_length", 128_000);
+        for i in 0..filler {
+            gguf = gguf.u32(&format!("filler.{i}"), i);
+        }
+        gguf.bool("lfm3.attention.causal", false)
+            .str("lfm3.decision.type", "lfm3-d1")
+            .f32("lfm3.decision.temperature.choice", 1.337_398_4)
+            .f32("lfm3.decision.temperature.noul", 1.337_398_4)
+            .f32("lfm3.decision.temperature.score", 1.337_398_4)
+            .str("tokenizer.chat_template", "{{ messages }}")
+            .str("tokenizer.chat_template.systemone", "{{ state }}")
+            .str_array("tokenizer.chat_templates", &["systemone"])
+    }
+
+    /// A vision projector carrying `keys`.
+    fn mmproj(keys: &[(&str, &str)]) -> Gguf {
+        let mut gguf = Gguf::new().str("general.architecture", "clip");
+        for (key, value) in keys {
+            gguf = gguf.str(key, value);
+        }
+        gguf.u32("clip.vision.image_size", 512)
+            .u32("clip.vision.patch_size", 16)
+    }
+
+    /// An LFM3 chat GGUF with a long native context.
+    fn lfm3_chat() -> Gguf {
+        Gguf::new()
+            .str("general.architecture", "lfm3")
+            .u32("lfm3.context_length", 262_144)
+            .bool("lfm3.attention.causal", true)
+            .str("tokenizer.chat_template", "{{ messages }}")
+    }
+
+    fn assert_decision_metadata(metadata: &ModelMetadata, model_id: &str, model_file: &str) {
+        assert_eq!(metadata.model_id, model_id);
+        assert_eq!(
+            metadata.execution_template,
+            ExecutionTemplate::ChoiceScorer {
+                scorer: ChoiceScorerSpec::GgufDecision(GgufDecisionSpec::new(
+                    model_file,
+                    DecisionProtocol::Lfm3D1
+                )),
+            }
+        );
+        let ExecutionTemplate::ChoiceScorer { scorer } = &metadata.execution_template else {
+            unreachable!("a decision template");
+        };
+        xybrid_core::execution::choice::validate_scorer_spec(scorer).unwrap();
+        metadata.validate().unwrap();
+        assert_eq!(metadata.files, [model_file]);
+        assert!(metadata.vision_encoder.is_none(), "no projector");
+        assert!(metadata.preprocessing.is_empty() && metadata.postprocessing.is_empty());
+        assert_eq!(metadata.metadata["task"], "decision");
+        assert_eq!(metadata.metadata["architecture"], "lfm3");
+        assert_eq!(metadata.metadata["backend"], "llamacpp");
+        assert_eq!(metadata.metadata["auto_generated"], true);
+        assert_eq!(metadata.description.as_deref(), Some("D1 2B"));
+        // Behaviour is read from the GGUF at load; a decision model generates
+        // nothing and has no chat window.
+        for key in ["context_length", "max_context_length", "temperature"] {
+            assert!(!metadata.metadata.contains_key(key), "{key} was copied");
+        }
+    }
+
+    fn load_error(result: SdkResult<ModelMetadata>) -> String {
+        match result {
+            Err(SdkError::LoadError { message, .. }) => message,
+            other => panic!("expected a load error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_decision_gguf_gets_decision_metadata_on_every_route() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("README.md"),
+            "---\nlanguage: en\nlicense: other\n---\n# d1\n",
+        )
+        .unwrap();
+        d1().write(&dir.path().join(D1_FILE));
+
+        // A Hugging Face repo without model_metadata.json.
+        let (hf, task_inference) = generate_metadata(dir.path(), "LiquidAI/d1-2B-GGUF").unwrap();
+        assert!(task_inference.is_none());
+        assert_decision_metadata(&hf, "d1-2b-gguf", D1_FILE);
+        assert_eq!(hf.metadata["quantization"], "Q4_K_M");
+        assert_eq!(hf.metadata["languages"], serde_json::json!(["en"]));
+        assert_eq!(hf.metadata["license"], "other");
+        let written: ModelMetadata = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("model_metadata.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(written.execution_template, hf.execution_template);
+
+        // `--model-file` and `fromModelFile`.
+        let file = generate_metadata_for_gguf_file(&dir.path().join(D1_FILE)).unwrap();
+        assert_decision_metadata(&file, "d1-2b-q4_k_m", D1_FILE);
+        assert_eq!(file.metadata["source_repo"], D1_FILE);
+
+        // `xybrid init`, with an id override.
+        let (init, _) = inspect_and_generate(dir.path(), "", Some("my-d1")).unwrap();
+        assert_decision_metadata(&init, "my-d1", D1_FILE);
+    }
+
+    /// The old reader stopped once it had the architecture and the context
+    /// length, and after 1,000 keys; d1-2B's decision type is key 26, after
+    /// its context length (key 11).
+    #[test]
+    fn a_decision_type_beyond_the_old_readers_reach_is_found() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("late-Q8_0.gguf");
+        d1_after(1200).write(&path);
+
+        let file = generate_metadata_for_gguf_file(&path).unwrap();
+        assert_decision_metadata(&file, "late-q8_0", "late-Q8_0.gguf");
+        let (hf, _) = generate_metadata(dir.path(), "org/late").unwrap();
+        assert_decision_metadata(&hf, "late", "late-Q8_0.gguf");
+    }
+
+    /// LiquidAI's d1 repo ships an `lfm3vl` projector beside the model, and
+    /// the Hugging Face loader downloads it: the decision path still wins,
+    /// whichever key names the projector, and the projector is left out.
+    #[test]
+    fn a_decision_gguf_next_to_an_mmproj_takes_the_decision_path() {
+        for keys in [
+            &[("clip.projector_type", "lfm3vl")][..],
+            &[("clip.vision.projector_type", "lfm3vl")],
+            &[
+                ("clip.vision.projector_type", "lfm3vl"),
+                ("clip.projector_type", "lfm3vl"),
+            ],
+            &[
+                ("clip.projector_type", "lfm3vl"),
+                ("clip.vision.projector_type", "lfm3vl"),
+            ],
+        ] {
+            let dir = TempDir::new().unwrap();
+            d1().write(&dir.path().join(D1_FILE));
+            mmproj(keys).write(&dir.path().join("mmproj-d1-2B-Q8_0.gguf"));
+            let (metadata, _) = generate_metadata(dir.path(), "LiquidAI/d1-2B-GGUF").unwrap();
+            assert_decision_metadata(&metadata, "d1-2b-gguf", D1_FILE);
+
+            // The same projector beside a chat model is loaded.
+            let dir = TempDir::new().unwrap();
+            lfm3_chat().write(&dir.path().join("LFM3-VL-2B-Q4_0.gguf"));
+            mmproj(keys).write(&dir.path().join("mmproj-LFM3-VL-2B-Q8_0.gguf"));
+            let (metadata, _) = generate_metadata(dir.path(), "LiquidAI/LFM3-VL-2B-GGUF").unwrap();
+            assert!(
+                matches!(
+                    metadata.execution_template,
+                    ExecutionTemplate::VisionLanguage { .. }
+                ),
+                "{keys:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn decision_ggufs_this_build_does_not_run_are_refused() {
+        let retyped = |decision_type: &str| {
+            d1().without("lfm3.decision.type")
+                .str("lfm3.decision.type", decision_type)
+        };
+        for (gguf, decision_type, why) in [
+            (
+                retyped("lfm3-d1-omni"),
+                "lfm3-d1-omni",
+                "this decision type is not admitted by any profile in this build yet",
+            ),
+            (
+                retyped("laya"),
+                "laya",
+                "no supported profile implements this decision type",
+            ),
+            (
+                d1().without("tokenizer.chat_template.systemone"),
+                "lfm3-d1",
+                "the systemone template is missing",
+            ),
+            (
+                d1().f32("lfm3.decision.score_bias.5.0", 0.5),
+                "lfm3-d1",
+                "decision key \"lfm3.decision.score_bias.5.0\" is not supported",
+            ),
+            (
+                d1().without("lfm3.attention.causal")
+                    .bool("lfm3.attention.causal", true),
+                "lfm3-d1",
+                "the model's attention is causal",
+            ),
+        ] {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("model-Q4_K_M.gguf");
+            gguf.write(&path);
+            let expected = format!(
+                "'model-Q4_K_M.gguf' is a decision model (decision type {decision_type:?}) that \
+                 this build does not run: {why}"
+            );
+            assert_eq!(load_error(generate_metadata_for_gguf_file(&path)), expected);
+            assert_eq!(
+                load_error(generate_metadata(dir.path(), "org/model").map(|(m, _)| m)),
+                expected
+            );
+            assert!(!dir.path().join("model_metadata.json").exists());
+        }
+    }
+
+    #[test]
+    fn ggufs_that_do_not_classify_are_refused_not_guessed() {
+        let d1_bytes = d1().bytes();
+        for (bytes, detail) in [
+            (
+                d1().without("lfm3.decision.type")
+                    .str_array("lfm3.decision.type", &["lfm3-d1"])
+                    .bytes(),
+                "GGUF key \"lfm3.decision.type\" is arr[str], not str",
+            ),
+            (
+                d1().without("lfm3.decision.type").bytes(),
+                "invalid decision metadata",
+            ),
+            (
+                d1_bytes[..d1_bytes.len() - 7].to_vec(),
+                "the GGUF header is truncated or damaged",
+            ),
+            (b"larger dummy gguf".to_vec(), "not a GGUF file"),
+            (
+                Gguf::new().u32("x", 1).bytes(),
+                "GGUF key \"general.architecture\" is missing",
+            ),
+            // An ordinary chat model over the key ceiling: refused, with its
+            // counts, not truncated.
+            (
+                (1..4097)
+                    .fold(lfm3_chat(), |gguf, i| gguf.u32(&format!("filler.{i}"), i))
+                    .bytes(),
+                "the GGUF header declares 4100 metadata keys; the scan allows 4096",
+            ),
+        ] {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("model.gguf");
+            std::fs::write(&path, &bytes).unwrap();
+            for message in [
+                load_error(generate_metadata_for_gguf_file(&path)),
+                load_error(generate_metadata(dir.path(), "org/model").map(|(m, _)| m)),
+            ] {
+                assert!(
+                    message.starts_with("'model.gguf' cannot be classified: ")
+                        && message.contains(detail)
+                        && message.ends_with("not assumed to be an ordinary model"),
+                    "{message}"
+                );
+            }
+            assert!(!dir.path().join("model_metadata.json").exists());
+        }
+    }
+
+    #[test]
+    fn refusals_quote_the_file_cut_short() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("model.gguf");
+        d1().without("lfm3.decision.type")
+            .str("lfm3.decision.type", &"x".repeat(10_000))
+            .write(&path);
+        let message = load_error(generate_metadata_for_gguf_file(&path));
+        assert!(message.len() < 300, "{} bytes", message.len());
+
+        d1().f32(&format!("lfm3.decision.{}", "k".repeat(10_000)), 1.0)
+            .write(&path);
+        let message = load_error(generate_metadata_for_gguf_file(&path));
+        assert!(message.len() < 500, "{} bytes", message.len());
+    }
+
+    /// Joint regression: classification first keeps the text-context cap,
+    /// on both routes.
+    #[test]
+    fn a_text_gguf_keeps_its_capped_context_after_classification() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("LFM3-1.7B-Q4_K_M.gguf");
+        lfm3_chat().write(&path);
+
+        let (hf, _) = generate_metadata(dir.path(), "LiquidAI/LFM3-1.7B-GGUF").unwrap();
+        let file = generate_metadata_for_gguf_file(&path).unwrap();
+        for metadata in [hf, file] {
+            assert!(matches!(
+                metadata.execution_template,
+                ExecutionTemplate::Gguf {
+                    context_length: 4096,
+                    ..
+                }
+            ));
+            assert_eq!(metadata.metadata["context_length"], 4096);
+            assert_eq!(metadata.metadata["max_context_length"], 262_144);
+        }
+    }
+
+    /// Joint regression: classification first keeps both projector keys and
+    /// their precedence, `clip.projector_type` before
+    /// `clip.vision.projector_type`, in either key order.
+    #[test]
+    fn projector_keys_keep_their_precedence_after_classification() {
+        for (keys, vision_architecture) in [
+            (&[("clip.projector_type", "lfm3vl")][..], "lfm3vl"),
+            (&[("clip.vision.projector_type", "lfm3vl")], "lfm3vl"),
+            (
+                &[
+                    ("clip.vision.projector_type", "lfm3vl"),
+                    ("clip.projector_type", "qwen3vl_merger"),
+                ],
+                "qwen3vl_merger",
+            ),
+            (
+                &[
+                    ("clip.projector_type", "qwen3vl_merger"),
+                    ("clip.vision.projector_type", "lfm3vl"),
+                ],
+                "qwen3vl_merger",
+            ),
+        ] {
+            let dir = TempDir::new().unwrap();
+            lfm3_chat().write(&dir.path().join("LFM3-VL-2B-Q4_0.gguf"));
+            mmproj(keys).write(&dir.path().join("mmproj-LFM3-VL-2B-Q8_0.gguf"));
+            let (metadata, _) = generate_metadata(dir.path(), "LiquidAI/LFM3-VL-2B-GGUF").unwrap();
+            assert!(
+                matches!(
+                    metadata.execution_template,
+                    ExecutionTemplate::VisionLanguage { ref model_file, .. }
+                        if model_file == "LFM3-VL-2B-Q4_0.gguf"
+                ),
+                "{keys:?}"
+            );
+            assert_eq!(
+                metadata.metadata["vision_architecture"], vision_architecture,
+                "{keys:?}"
+            );
+            assert_eq!(
+                metadata
+                    .vision_encoder
+                    .as_ref()
+                    .map(|encoder| encoder.file.as_str()),
+                Some("mmproj-LFM3-VL-2B-Q8_0.gguf")
+            );
+        }
+    }
+
+    /// The published d1-2B GGUF (artifact `d1-2b-q4km`), when staged.
+    mod published {
+        use super::*;
+        use std::path::PathBuf;
+        use xybrid_core::testing::model_fixtures;
+
+        /// The artifact id of the coordinator's pin
+        /// (`integration-tests/fixtures/decision/artifacts.json`):
+        /// LiquidAI/d1-2B-GGUF at e968f6575f0d4fad928312d7af15cad90fd365c0,
+        /// sha256 adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b.
+        const MODEL_ID: &str = "d1-2b-q4km";
+
+        /// The staged GGUF, or `None` (with a note) when it is absent.
+        ///
+        /// # Panics
+        ///
+        /// When `XYBRID_REQUIRE_MODELS` is set and the model is not staged.
+        fn staged_d1() -> Option<PathBuf> {
+            let path = model_fixtures::model_path(MODEL_ID)
+                .map(|dir| dir.join(D1_FILE))
+                .filter(|path| path.is_file());
+            if path.is_none() {
+                let reason = format!("'{MODEL_ID}/{D1_FILE}' is not staged");
+                assert!(
+                    !model_fixtures::models_required(),
+                    "{} is set but {reason}",
+                    model_fixtures::ENV_REQUIRE_MODELS
+                );
+                eprintln!("Skipping test: {reason}");
+            }
+            path
+        }
+
+        #[test]
+        fn the_published_d1_2b_gets_decision_metadata() {
+            let Some(d1) = staged_d1() else { return };
+            let metadata = generate_metadata_for_gguf_file(&d1).unwrap();
+            assert_decision_metadata(&metadata, "d1-2b-q4_k_m", D1_FILE);
+            assert_eq!(metadata.metadata["quantization"], "Q4_K_M");
+
+            // As the Hugging Face loader stages the repo: the model beside
+            // its `lfm3vl` projector.
+            #[cfg(unix)]
+            {
+                let dir = TempDir::new().unwrap();
+                std::os::unix::fs::symlink(&d1, dir.path().join(D1_FILE)).unwrap();
+                mmproj(&[("clip.vision.projector_type", "lfm3vl")])
+                    .write(&dir.path().join("mmproj-d1-2B-Q8_0.gguf"));
+                let (hf, _) = generate_metadata(dir.path(), "LiquidAI/d1-2B-GGUF").unwrap();
+                assert_decision_metadata(&hf, "d1-2b-gguf", D1_FILE);
+            }
+        }
     }
 }

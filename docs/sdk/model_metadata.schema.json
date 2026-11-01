@@ -236,6 +236,77 @@
             "logits_output",
             "max_choices"
           ]
+        },
+        {
+          "description": "A llama.cpp decision model in one GGUF, such as LiquidAI's LFM3 d1:\nit answers decision questions with one readout per question instead\nof generating text.\n\nThe GGUF must classify as a decision model of `protocol`\n([`crate::gguf::classify`]); every load checks it with\n[`crate::gguf::admit_gguf`].",
+          "type": "object",
+          "properties": {
+            "flash_attn": {
+              "description": "Whether the native context uses flash attention: on by default. Off\nis a diagnostic setting (it changes the scores slightly, and the\ncompute buffer then grows quadratically with `token_budget`), allowed\nonly up to [`Self::MAX_TOKEN_BUDGET_WITHOUT_FLASH_ATTN`] tokens.",
+              "type": "boolean",
+              "default": true
+            },
+            "max_options": {
+              "description": "Most options of one choice question, and most levels of one score\nquestion. Between 1 and [`Self::MAX_OPTIONS`].",
+              "type": "integer",
+              "format": "uint",
+              "default": 255,
+              "maximum": 255,
+              "minimum": 1
+            },
+            "max_questions": {
+              "description": "Most questions one request may ask, each one readout. Between 1 and\n[`Self::MAX_QUESTIONS`].",
+              "type": "integer",
+              "format": "uint",
+              "default": 16,
+              "maximum": 16,
+              "minimum": 1
+            },
+            "max_total_tokens": {
+              "description": "Most tokens one request may evaluate across all its readouts: a\nper-readout budget alone does not bound a request of many questions.\nAt least `token_budget` (else a readout the budget admits could never\nrun) and at most [`Self::MAX_TOTAL_TOKENS`]. Provisional.",
+              "type": "integer",
+              "format": "uint32",
+              "default": 16384,
+              "maximum": 131072,
+              "minimum": 1
+            },
+            "model_file": {
+              "description": "GGUF file, relative to the model directory.",
+              "type": "string"
+            },
+            "protocol": {
+              "description": "The decision protocol the GGUF must carry. Checked against the file's\ndecision type at every load, never applied to it.",
+              "$ref": "#/$defs/DecisionProtocol"
+            },
+            "token_budget": {
+              "description": "Most tokens one readout may evaluate: one question's whole prompt. It\nsizes the native context (context, batch and micro-batch alike), so\nmemory and latency grow with it. At least 1 and at most\n[`Self::MAX_TOKEN_BUDGET`], or\n[`Self::MAX_TOKEN_BUDGET_WITHOUT_FLASH_ATTN`] when `flash_attn` is\noff. Provisional.",
+              "type": "integer",
+              "format": "uint32",
+              "default": 4096,
+              "maximum": 8192,
+              "minimum": 1
+            },
+            "type": {
+              "type": "string",
+              "const": "GgufDecision"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "model_file",
+            "protocol"
+          ]
+        }
+      ]
+    },
+    "DecisionProtocol": {
+      "description": "A decision protocol: the `<arch>.decision.type` a decision GGUF carries,\nwhich fixes how a request is rendered, read out and turned into answers.\n\nSerialized as that decision type. Only protocols this build implements\nhave a variant, so metadata naming another one fails to parse.",
+      "oneOf": [
+        {
+          "description": "LiquidAI's LFM3 d1 (`lfm3-d1`), run by the `lfm3-d1/text/v1`\nprofile: a text, JSON or absent state, and no media.",
+          "type": "string",
+          "const": "lfm3-d1"
         }
       ]
     },
@@ -793,7 +864,7 @@
           ]
         },
         {
-          "description": "A decision model: scores one context against a closed list of\ncandidates in a single forward pass, without generating text.\n\nAccepts only an\n[`EnvelopeKind::ChoiceRequest`](crate::ir::EnvelopeKind::ChoiceRequest)\nthrough a batch run and answers with\n[`EnvelopeKind::ChoiceScores`](crate::ir::EnvelopeKind::ChoiceScores).\nThe scores are relative preferences among the offered candidates, not\ncalibrated probabilities of being correct.",
+          "description": "A decision model: scores a closed list of candidates without\ngenerating text.\n\nAn `OnnxByteOptionScorer` scores one context against its candidates\nin a single forward pass. It accepts only an\n[`EnvelopeKind::ChoiceRequest`](crate::ir::EnvelopeKind::ChoiceRequest)\nthrough a batch run and answers with\n[`EnvelopeKind::ChoiceScores`](crate::ir::EnvelopeKind::ChoiceScores).\nThe scores are relative preferences among the offered candidates, not\ncalibrated probabilities of being correct. A `GgufDecision` scorer\nanswers decision questions; this build refuses every request to it.",
           "type": "object",
           "properties": {
             "scorer": {

@@ -442,12 +442,12 @@ fn other_decision_types_are_unsupported_not_ordinary() {
             .build()
     };
     for (arch, decision_type) in [
-        ("lfm3", "lfm3-d1-omni"), // admitted by a later profile
         ("lfm2", "lfm2-d1"),
         ("lfm2", "lfm2-d1-omni"),
         ("modern-bert", "laya"),
         ("lfm3", ""),
         ("lfm3", "LFM3-D1"),
+        ("lfm3", "LFM3-D1-OMNI"),
     ] {
         assert_eq!(
             classify_bytes(&typed(arch, decision_type)).unwrap(),
@@ -455,6 +455,11 @@ fn other_decision_types_are_unsupported_not_ordinary() {
             "{arch} / {decision_type:?}"
         );
     }
+    // Admitted by a later profile, with its own pins.
+    assert_eq!(
+        classify_bytes(&typed("lfm3", "lfm3-d1-omni")).unwrap(),
+        unsupported("lfm3-d1-omni", UnsupportedReason::ProtocolNotYetAdmitted)
+    );
     assert_eq!(
         classify_bytes(&typed("lfm2", "lfm3-d1")).unwrap(),
         unsupported("lfm3-d1", UnsupportedReason::Architecture)

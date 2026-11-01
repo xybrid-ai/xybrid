@@ -49,6 +49,7 @@ fn read_json<T: for<'de> Deserialize<'de>>(relative: &str) -> T {
 fn forms_spec() -> OnnxByteOptionScorerSpec {
     match read_json("specs/cua-s1-forms.json") {
         ChoiceScorerSpec::OnnxByteOptionScorer(spec) => spec,
+        other => panic!("the FORMS spec is an ONNX byte scorer, not {other:?}"),
     }
 }
 

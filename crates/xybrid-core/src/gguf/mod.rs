@@ -17,6 +17,10 @@
 //!   `llm-llamacpp`): after a native load, that the file is still the one
 //!   scanned (identity and header digest) and that llama.cpp holds the
 //!   metadata the header predicts.
+//! - [`admit_gguf`]: the load-boundary check that a model's GGUF is what its
+//!   metadata declares: a decision model only as the `GgufDecision` scorer
+//!   of its protocol, an ordinary model only as anything else
+//!   ([`GgufAdmission`], [`AdmittedDecisionModel`]).
 //!
 //! # When to use
 //!
@@ -28,8 +32,9 @@
 //! [`Supported`] profile it implements. Then it loads the model natively
 //! and calls `verify_native_load` with the same path and header before it
 //! uses the model, so the model in memory is the file that was classified.
-//! Reading a header opens and reads the file (only the header: a few MB for
-//! a 128,000-token vocabulary) and hashes it; there are no other side
+//! [`admit_gguf`] does the first step against a model's metadata. Reading a
+//! header opens and reads the file (only the header: a few MB for a
+//! 128,000-token vocabulary) and hashes it; there are no other side
 //! effects.
 //!
 //! llama.cpp's own metadata accessors cannot replace the scan: they skip
@@ -76,9 +81,10 @@
 //!    [`NotDecision`].
 //! 5. `<arch>.decision.type` of any type but a UTF-8 string (an array, a
 //!    number) is an error, not absence.
-//! 6. A decision type other than `lfm3-d1` is
-//!    [`Unsupported`] ([`UnsupportedReason::Protocol`]). That includes
-//!    `lfm3-d1-omni`, which a later profile admits with its own pins.
+//! 6. A decision type other than `lfm3-d1` is [`Unsupported`]: for
+//!    `lfm3-d1-omni`, which a later profile admits with its own pins,
+//!    [`UnsupportedReason::ProtocolNotYetAdmitted`]; for any other,
+//!    [`UnsupportedReason::Protocol`].
 //! 7. `lfm3-d1` is the `lfm3-d1/text/v1` profile
 //!    ([`DecisionProfileId::Lfm3D1Text`]) when:
 //!    - `<arch>` is `lfm3`, else [`UnsupportedReason::Architecture`];
@@ -89,10 +95,12 @@
 //!      an error; absent is [`UnsupportedReason::MissingTemplate`]);
 //!    - every other `lfm3.decision.*` key is a temperature,
 //!      `lfm3.decision.temperature.<name>`, of type `f32` (another type is
-//!      an error) whose effective value is finite and positive (otherwise
-//!      an error: llama.cpp refuses such a model at load). Any other
-//!      decision key, such as `score_bias`, is
-//!      [`UnsupportedReason::DecisionKey`].
+//!      an error: a restriction of this profile, since llama.cpp would read
+//!      any numeric type through its string accessor) whose effective value
+//!      is finite and positive (otherwise an error: llama.cpp refuses such
+//!      a model at load). `temperature.image`, which llama.cpp uses for
+//!      requests with media, is allowed and unused. Any other decision key,
+//!      such as `score_bias`, is [`UnsupportedReason::DecisionKey`].
 //!
 //!    The architecture is checked first, since the profile's keys are named
 //!    after it; then every type and temperature error is reported before
@@ -108,6 +116,7 @@
 //! [`Supported`]: DecisionClassification::Supported
 //! [`Unsupported`]: DecisionClassification::Unsupported
 
+mod admission;
 mod classify;
 mod error;
 mod header;
@@ -118,6 +127,7 @@ mod testing;
 #[cfg(test)]
 mod tests;
 
+pub use admission::{admit_gguf, AdmittedDecisionModel, GgufAdmission};
 pub use classify::{classify, DecisionClassification, DecisionProfileId, UnsupportedReason};
 pub use error::GgufError;
 pub use header::{

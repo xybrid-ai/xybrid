@@ -644,7 +644,9 @@ impl TemplateExecutor {
         // above has already checked the request against the spec.
         if let ExecutionTemplate::ChoiceScorer { scorer } = &metadata.execution_template {
             return match &input.kind {
-                EnvelopeKind::ChoiceRequest(request) => self.execute_choice_scorer(scorer, request),
+                EnvelopeKind::ChoiceRequest(request) => {
+                    self.execute_choice_scorer(&metadata.model_id, scorer, request)
+                }
                 // Unreachable: the validator admits only a choice request.
                 _ => Err(AdapterError::InvalidInput(
                     "a choice scorer accepts only a ChoiceRequest".to_string(),
@@ -2966,10 +2968,15 @@ impl TemplateExecutor {
     /// and normalised. When ONNX Runtime fails, its message is withheld.
     fn execute_choice_scorer(
         &mut self,
+        model_id: &str,
         scorer: &ChoiceScorerSpec,
         request: &ChoiceRequest,
     ) -> ExecutorResult<Envelope> {
-        let ChoiceScorerSpec::OnnxByteOptionScorer(spec) = scorer;
+        let ChoiceScorerSpec::OnnxByteOptionScorer(spec) = scorer else {
+            // Unreachable: the validator refuses a choice request to a
+            // GgufDecision scorer, whose runtime is not wired yet.
+            return Err(super::choice::gguf_decision_unsupported(model_id));
+        };
         let EnvelopeKind::Text(context) = &request.context().kind else {
             // Unreachable: the validator admits only a text context.
             return Err(super::choice::ChoiceError::UnsupportedContext {
@@ -6411,7 +6418,9 @@ mod tests {
         let ExecutionTemplate::ChoiceScorer { scorer } = &mut metadata.execution_template else {
             unreachable!("forms_scorer_metadata builds a ChoiceScorer");
         };
-        let ChoiceScorerSpec::OnnxByteOptionScorer(spec) = scorer;
+        let ChoiceScorerSpec::OnnxByteOptionScorer(spec) = scorer else {
+            unreachable!("forms_scorer_metadata builds an ONNX byte scorer");
+        };
         spec.model_file = model_file.to_string();
         edit(spec);
         metadata

@@ -5,7 +5,7 @@
 //! | Module | Contents |
 //! |--------|----------|
 //! | [`metadata`] | `ExecutionTemplate`, `ModelMetadata`, `PipelineStage`, `ExecutionMode` |
-//! | [`choice`] | `ChoiceScorerSpec` and its byte-field encoding |
+//! | [`choice`] | `ChoiceScorerSpec`: byte-field encoding, GGUF decision models |
 //! | [`steps`] | `PreprocessingStep`, `PostprocessingStep`, helper types |
 //! | [`voice`] | `VoiceConfig`, `VoiceFormat`, `VoiceInfo`, `VoiceLoader` |
 
@@ -23,7 +23,10 @@ pub use metadata::{
 pub use metadata::{VisionEncoderConfig, VisionPreprocessingPreset};
 
 // Re-export choice-scorer spec types
-pub use choice::{ByteFieldSpec, ByteOverflow, ChoiceScorerSpec, OnnxByteOptionScorerSpec};
+pub use choice::{
+    ByteFieldSpec, ByteOverflow, ChoiceScorerSpec, DecisionProtocol, GgufDecisionSpec,
+    OnnxByteOptionScorerSpec,
+};
 
 // Re-export step types
 pub use steps::{

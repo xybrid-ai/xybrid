@@ -76,6 +76,21 @@ GGUF model execution for local LLMs via llama.cpp.
 | `chat_template` | string | no | `null` | Path to chat template JSON file |
 | `context_length` | integer | no | `4096` | Maximum context length in tokens |
 
+llama.cpp reserves the KV cache for all `context_length` tokens when the model
+loads, so memory follows this value, not the prompt length. When xybrid
+generates the file itself (a Hugging Face repo without one, `--model-file`,
+`fromModelFile`, `xybrid init`), `context_length` is the model's native context
+capped at 4,096 tokens, and the native value is recorded as
+`metadata.max_context_length`. Uncapped, LFM3 1.7B's 262,144 tokens would
+reserve about 5.9 GB of KV cache.
+
+To allow longer conversations, raise `context_length` in the generated file. It
+is written next to the GGUF for `--model-file` and `fromModelFile`, and to the
+model's cache directory for Hugging Face repos
+(`xybrid fetch --huggingface <repo>` prints it). `xybrid run --model-file`
+regenerates the metadata on every run instead of reading the file, so run the
+edited directory with `xybrid run --directory`.
+
 ### `ZzzPhonon`
 
 Phonon speech from one GGUF through the opt-in `tts-zzz` CPU backend. The
@@ -201,8 +216,8 @@ the CLI), and only through a batch run (`run`, `run_with_options`,
 `run_async`). Streaming, conversation history
 and pipelines refuse it, as does every other model, and the language bindings
 refuse to load it. `scorer` says how a request becomes
-model input, and its `"type"` names the kind of scorer. `OnnxByteOptionScorer`
-is the only kind today.
+model input, and its `"type"` names the kind of scorer: `OnnxByteOptionScorer`,
+below, or [`GgufDecision`](#ggufdecision-scorers), a llama.cpp decision model.
 
 ```json
 {
@@ -276,6 +291,76 @@ non-empty text. Scores come back in that order. Each has the raw `logit`, a
 whether it is `fixed`. Scores rank the offered candidates against each other;
 they are not calibrated probabilities that a candidate is right. Set
 `metadata.task` to `"decision"`.
+
+#### `GgufDecision` scorers
+
+A llama.cpp decision model in one GGUF, such as LiquidAI's LFM3 d1
+(`LiquidAI/d1-2B-GGUF`): it answers decision questions (choice, yes/no, score)
+with one readout per question instead of generating text.
+
+```json
+{
+  "type": "ChoiceScorer",
+  "scorer": {
+    "type": "GgufDecision",
+    "model_file": "d1-2B-Q4_K_M.gguf",
+    "protocol": "lfm3-d1",
+    "token_budget": 4096,
+    "flash_attn": true,
+    "max_questions": 16,
+    "max_options": 255,
+    "max_total_tokens": 16384
+  }
+}
+```
+
+The GGUF defines the model's behavior: its `systemone` prompt template,
+vocabulary, attention and decision temperatures are read from the file at every
+load. The spec cannot restate or override them (unknown fields, such as a
+temperature or a chat template, are rejected); it holds what the file cannot
+know:
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `model_file` | string | yes | — | Path to the `.gguf` file (relative to the model directory) |
+| `protocol` | string | yes | — | The decision protocol the GGUF must carry: `"lfm3-d1"`. Checked against the file's `<arch>.decision.type` at every load, never applied to it |
+| `token_budget` | integer | no | `4096` | Most tokens one readout (one question's whole prompt) may evaluate. It sizes the native context, so memory and latency grow with it. From 1 to 8,192, or to 4,096 with `flash_attn` off |
+| `flash_attn` | boolean | no | `true` | Flash attention. `false` is a diagnostic setting: it changes the scores slightly, and the compute buffer then grows quadratically with the budget |
+| `max_questions` | integer | no | `16` | Most questions one request may ask, each one readout; from 1 to 16 |
+| `max_options` | integer | no | `255` | Most options of a choice question, and levels of a score question; from 1 to 255, llama.cpp's ceiling for LFM3 d1 |
+| `max_total_tokens` | integer | no | `16384` | Most tokens one request may evaluate across all its readouts; from `token_budget` to 131,072 |
+
+The metadata declares no `vision_encoder` (or any other media companion): the
+`lfm3-d1/text/v1` profile reads no media, and decision media support will come
+with its own protocol. A load refuses such metadata before reading the GGUF.
+
+The budget and limits are provisional. They come from CPU measurements of d1-2B
+(Q4_K_M, four threads: 4,096 tokens take about 0.6 GiB of compute buffer and
+2.3 GiB at peak, 8,192 tokens about 3.0 GiB at peak) and will change once mobile
+and GPU devices are measured. A bundle may lower them for a platform.
+
+Every load checks the GGUF against the metadata before it allocates anything:
+the header is read in full and classified, whatever the route (a bundle, a
+sidecar next to a file, a cached model, a Hugging Face download). A decision
+GGUF loads only as a `GgufDecision` scorer of its protocol, and a `GgufDecision`
+scorer only on such a GGUF, so a stale `Gguf` or `VisionLanguage` metadata file
+next to a decision model is refused, as is a header that does not read
+completely. Decision models this build does not run are refused under every
+template: `lfm3-d1-omni` (LiquidAI's d1-omni, which needs media support), any
+other decision type, and an `lfm3-d1` model with decision keys the
+`lfm3-d1/text/v1` profile does not implement, such as a `score_bias`.
+
+When xybrid writes the metadata itself (a Hugging Face repo without
+`model_metadata.json`, `--model-file`, `fromModelFile`, `xybrid init`), it
+classifies the GGUF before anything else: a decision model gets this template
+at the defaults above, with `metadata.task` set to `"decision"`, whatever
+projector sits beside it. LiquidAI's repo ships one; the text profile reads no
+media.
+
+The text profile reads a text, JSON or absent state and answers choice, yes/no
+and score questions. The decision request API that runs it is not in this
+release yet: a `GgufDecision` model refuses every request with
+`UnsupportedModelCapability`.
 
 ---
 

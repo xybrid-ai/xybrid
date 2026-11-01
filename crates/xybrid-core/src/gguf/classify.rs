@@ -57,6 +57,10 @@ pub enum DecisionClassification {
 pub enum UnsupportedReason {
     /// The decision type names a protocol no profile here implements.
     Protocol,
+    /// The decision type names a protocol a later profile will admit, but
+    /// no profile in this build does yet: `lfm3-d1-omni` (LiquidAI's
+    /// d1-omni), which returns with its own pins alongside media support.
+    ProtocolNotYetAdmitted,
     /// The decision type is `lfm3-d1`, but the architecture is not `lfm3`.
     Architecture,
     /// Attention is causal: `lfm3.attention.causal` is `true`, or absent,
@@ -76,6 +80,9 @@ impl fmt::Display for UnsupportedReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Protocol => f.write_str("no supported profile implements this decision type"),
+            Self::ProtocolNotYetAdmitted => {
+                f.write_str("this decision type is not admitted by any profile in this build yet")
+            }
             Self::Architecture => f.write_str("the architecture is not lfm3"),
             Self::CausalAttention => f.write_str("the model's attention is causal"),
             Self::MissingTemplate => f.write_str("the systemone template is missing"),
@@ -86,6 +93,8 @@ impl fmt::Display for UnsupportedReason {
 
 const ARCHITECTURE_KEY: &str = "general.architecture";
 const LFM3_D1: &str = "lfm3-d1";
+/// Decision types a later profile admits: [`UnsupportedReason::ProtocolNotYetAdmitted`].
+const NOT_YET_ADMITTED: &[&str] = &["lfm3-d1-omni"];
 const LFM3: &str = "lfm3";
 const SYSTEMONE_TEMPLATE_KEY: &str = "tokenizer.chat_template.systemone";
 
@@ -142,6 +151,9 @@ pub fn classify(header: &GgufHeader) -> Result<DecisionClassification, GgufError
             reason,
         })
     };
+    if NOT_YET_ADMITTED.contains(&decision_type) {
+        return unsupported(UnsupportedReason::ProtocolNotYetAdmitted);
+    }
     if decision_type != LFM3_D1 {
         return unsupported(UnsupportedReason::Protocol);
     }
