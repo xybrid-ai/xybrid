@@ -19,12 +19,12 @@
 //! `XYBRID_MEASURE_BUDGETS` (comma-separated) overrides the budgets and
 //! `XYBRID_MEASURE_OUT` names a file for the table.
 
-use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
 use super::{MemorylessContext, MemorylessParams, OUTPUT_CAP};
 use crate::model::LlamaModel;
+use crate::test_models::staged_d1;
 
 const CASE_ENV: &str = "XYBRID_MEASURE_CASE";
 const THREADS: u32 = 4;
@@ -38,22 +38,6 @@ Options:\n\
 A Billing\n\
 B Shipping\n\n\
 Reply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>";
-
-fn staged_model_path() -> Option<PathBuf> {
-    let models = std::env::var_os("XYBRID_TEST_MODELS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../integration-tests/fixtures/models")
-        });
-    let path = models.join("d1-2b-q4km").join("d1-2B-Q4_K_M.gguf");
-    if path.is_file() {
-        Some(path)
-    } else {
-        eprintln!("Skipping: {} is not staged", path.display());
-        None
-    }
-}
 
 /// `/proc/self/status` fields in kB: VmPeak, VmHWM, RssAnon, RssFile.
 fn memory_kb() -> [u64; 4] {
@@ -89,7 +73,7 @@ fn readout_resources() {
         eprintln!("Skipping: set XYBRID_MEASURE=1 to run the measurements (over an hour)");
         return;
     }
-    if staged_model_path().is_none() {
+    if staged_d1().is_none() {
         return;
     }
     let budgets: Vec<u32> = std::env::var("XYBRID_MEASURE_BUDGETS")
@@ -177,7 +161,7 @@ fn readout_resources_case() {
     let budget: u32 = parts.next().unwrap().parse().unwrap();
     let capped: bool = parts.next().unwrap().parse().unwrap();
     let flash_attn: bool = parts.next().unwrap().parse().unwrap();
-    let path = staged_model_path().expect("the model is staged");
+    let path = staged_d1().expect("the model is staged");
 
     crate::backend_init();
     let model = LlamaModel::load(path.to_str().unwrap(), 0).expect("load the model");

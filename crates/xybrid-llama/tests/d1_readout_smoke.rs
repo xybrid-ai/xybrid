@@ -21,6 +21,7 @@
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use xybrid_llama::{
     backend_init, LlamaContext, LlamaError, LlamaModel, MemorylessContext, MemorylessParams,
@@ -127,7 +128,7 @@ fn the_gguf_carries_the_lfm3_d1_profile() {
         None,
         "llama.cpp keeps no array-valued key"
     );
-    assert!(!model.has_encoder());
+    assert!(!model.has_encoder().unwrap());
 
     let template = model
         .named_chat_template("systemone")
@@ -142,24 +143,36 @@ fn the_gguf_carries_the_lfm3_d1_profile() {
         Err(LlamaError::InvalidInput(_))
     ));
 
-    let entries = model.meta().expect("a complete metadata scan");
-    let keys: Vec<&str> = entries.iter().map(|(key, _)| key.as_str()).collect();
-    assert!(
-        keys.windows(2).all(|pair| pair[0] < pair[1]),
-        "sorted, unique"
-    );
-    for (key, value) in &entries {
-        assert_eq!(
-            meta(key).as_deref(),
-            Some(value.as_str()),
-            "{key}: the scan and the lookup agree"
-        );
-    }
     assert_eq!(
-        entries.len(),
+        model.meta_count().unwrap(),
         37,
         "d1-2B has 45 keys, 8 of them arrays llama.cpp does not keep"
     );
+    let keys = [
+        "general.architecture",
+        "lfm3.decision.type",
+        "lfm3.attention.causal",
+        "lfm3.decision.temperature.choice",
+        "tokenizer.ggml.tokens",
+        "no.such.key",
+    ];
+    let values = model.meta_values(&keys).expect("one bulk lookup");
+    let expected: [Option<&[u8]>; 6] = [
+        Some(b"lfm3"),
+        Some(b"lfm3-d1"),
+        Some(b"false"),
+        Some(b"1.337398"),
+        None,
+        None,
+    ];
+    for ((key, value), expected) in keys.iter().zip(&values).zip(expected) {
+        assert_eq!(value.as_deref(), expected, "{key}");
+        assert_eq!(
+            meta(key).map(String::into_bytes).as_deref(),
+            expected,
+            "{key}: the bulk and single lookups agree"
+        );
+    }
 }
 
 #[test]
@@ -167,23 +180,35 @@ fn control_spellings_are_the_vocabularys_control_tokens() {
     let Some(model) = model() else { return };
     let n_vocab = i32::try_from(model.n_vocab()).unwrap();
     assert_eq!(n_vocab, 128_000);
+    let attr = |t: i32| {
+        model
+            .token_attr(t)
+            .expect("readable")
+            .expect("in the vocabulary")
+    };
+    let text = |t: i32| {
+        model
+            .token_text(t)
+            .expect("readable")
+            .expect("in the vocabulary")
+    };
     let spellings: Vec<Vec<u8>> = (0..n_vocab)
-        .filter(|&t| model.token_attr(t).unwrap().contains(TokenAttr::CONTROL))
-        .map(|t| model.token_text(t).unwrap())
+        .filter(|&t| attr(t).contains(TokenAttr::CONTROL))
+        .map(text)
         .filter(|text| text.len() >= 2)
         .collect();
     assert_eq!(spellings.len(), 124, "d1-2B's CONTROL spellings");
 
     let bos = model.token_bos();
     assert_eq!(bos, 124_894);
-    assert_eq!(model.token_text(bos).unwrap(), b"<|startoftext|>");
-    assert!(model.token_attr(bos).unwrap().contains(TokenAttr::CONTROL));
-    assert_eq!(model.token_attr(n_vocab), None);
-    assert_eq!(model.token_attr(-1), None);
-    assert_eq!(model.token_text(n_vocab), None);
+    assert_eq!(text(bos), b"<|startoftext|>");
+    assert!(attr(bos).contains(TokenAttr::CONTROL));
+    assert_eq!(model.token_attr(n_vocab).unwrap(), None);
+    assert_eq!(model.token_attr(-1).unwrap(), None);
+    assert_eq!(model.token_text(n_vocab).unwrap(), None);
     let a = label_token(model, "A");
-    assert_eq!(model.token_text(a).unwrap(), b"A");
-    assert!(model.token_attr(a).unwrap().contains(TokenAttr::NORMAL));
+    assert_eq!(text(a), b"A");
+    assert!(attr(a).contains(TokenAttr::NORMAL));
 }
 
 #[test]
@@ -289,12 +314,59 @@ fn the_budget_is_an_exact_boundary() {
     );
 }
 
+/// A long readout stops soon after its cancel handle is used (a full
+/// 2,048-token pass takes tens of seconds on four threads), and the context
+/// reads like a fresh one once the request is cleared.
+#[test]
+fn a_long_readout_can_be_cancelled_from_another_thread() {
+    let Some(model) = model() else { return };
+    let prompt = prompt_tokens(model);
+    let long: Vec<i32> = prompt.iter().copied().cycle().take(2048).collect();
+    let a = label_token(model, "A");
+    let mut ctx = readout_context(model, 2048);
+    let cancel = ctx.cancel_handle();
+
+    let started = Instant::now();
+    let worker = std::thread::spawn(move || {
+        let result = ctx.read_last(&long, &[a]);
+        (ctx, result)
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    cancel.cancel();
+    let (mut ctx, result) = worker.join().expect("the readout thread");
+    let elapsed = started.elapsed();
+    println!("a 2048-token readout cancelled after 300 ms returned after {elapsed:?}");
+    assert!(matches!(result, Err(LlamaError::Cancelled)), "{result:?}");
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "the readout stopped after {elapsed:?}"
+    );
+
+    assert!(matches!(
+        ctx.read_last(&prompt, &[a]),
+        Err(LlamaError::Cancelled)
+    ));
+    ctx.clear_cancel();
+    assert_eq!(
+        bits(&ctx.read_last(&prompt, &[a]).unwrap()),
+        bits(
+            &readout_context(model, 2048)
+                .read_last(&prompt, &[a])
+                .unwrap()
+        ),
+        "a cancelled context reads like a fresh one"
+    );
+}
+
 /// The causal scorer keeps refusing a context without memory.
 #[test]
 fn score_final_position_refuses_the_d1_model() {
     let Some(model) = model() else { return };
     let ctx = LlamaContext::new(model, 512, THREADS as usize, 512, false).expect("a context");
-    assert!(!ctx.facts().has_memory, "llama.cpp gives d1 no memory");
+    assert!(
+        !ctx.facts().unwrap().has_memory,
+        "llama.cpp gives d1 no memory"
+    );
     let refused = ctx
         .score_final_position(&prompt_tokens(model), &[label_token(model, "A")])
         .expect_err("no memory, no causal scoring");
