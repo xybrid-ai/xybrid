@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- llama.cpp output keeps characters the vocabulary splits across tokens. Each
+  token's bytes were decoded on their own, so a character spread over several
+  tokens vanished from the stream and from the final text: qwen3-0.6b returned
+  `ok` for a grammar-constrained `🙂 ok`, and `本` for `日本語`. Text is now
+  decoded across token boundaries. Bytes that cannot be UTF-8 become U+FFFD, and
+  a character the budget cuts off midway is dropped from both.
+
 ## [0.16.0] - 2026-10-30
 
 ### Added

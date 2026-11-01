@@ -21,6 +21,7 @@ use crate::context::LlamaContext;
 use crate::error::{LlamaError, LlamaResult};
 use crate::ffi;
 use crate::model::LlamaModel;
+use crate::utf8::Utf8Decoder;
 
 /// Closure type alias for per-token callbacks. The signature deliberately
 /// boxes the error so any `Send + Sync` error (notably
@@ -41,6 +42,36 @@ where
 {
     callback: &'a mut F,
     error: Option<Box<dyn StdError + Send + Sync>>,
+    /// Decodes each token's piece after the bytes of a character an earlier
+    /// token started, so a character split across tokens is not lost.
+    text: Utf8Decoder,
+}
+
+impl<'a, F> StreamingContext<'a, F>
+where
+    F: FnMut(i32, &str) -> Result<(), Box<dyn StdError + Send + Sync>>,
+{
+    fn new(callback: &'a mut F) -> Self {
+        Self {
+            callback,
+            error: None,
+            text: Utf8Decoder::default(),
+        }
+    }
+
+    /// Drop the leading bytes of a character the generation ended inside,
+    /// as when the budget runs out between its bytes. They have no text, and
+    /// [`LlamaModel::detokenize`] drops them from the same tokens too.
+    fn drop_unfinished_character(&mut self) {
+        let bytes = self.text.discard_unfinished();
+        if bytes > 0 {
+            tracing::debug!(
+                target: "xybrid_llama",
+                unfinished_bytes = bytes,
+                "generation ended inside a multi-byte character"
+            );
+        }
+    }
 }
 
 /// C-compatible trampoline that bridges llama.cpp's token callback into
@@ -74,13 +105,18 @@ where
     // around the raw-pointer derefs.
     let ctx = &mut *(user_data as *mut StreamingContext<F>);
 
-    let text = if token_text.is_null() {
-        ""
+    // A token's piece is raw bytes: decoding it alone dropped any character
+    // a byte-level vocabulary splits across tokens. The callback gets each
+    // character once its last byte arrives, and "" for a token that only
+    // started one.
+    let piece = if token_text.is_null() {
+        &[][..]
     } else {
-        CStr::from_ptr(token_text).to_str().unwrap_or("")
+        CStr::from_ptr(token_text).to_bytes()
     };
+    let text = ctx.text.push(piece);
 
-    match (ctx.callback)(token_id, text) {
+    match (ctx.callback)(token_id, &text) {
         Ok(()) => 0,
         Err(e) => {
             ctx.error = Some(e);
@@ -340,10 +376,7 @@ where
     let grammar_cstr = grammar_cstring(grammar)?;
     let grammar_ptr = grammar_cstr.as_ref().map_or(ptr::null(), |c| c.as_ptr());
 
-    let mut streaming_ctx = StreamingContext {
-        callback: &mut on_token,
-        error: None,
-    };
+    let mut streaming_ctx = StreamingContext::new(&mut on_token);
 
     let callback: Option<TokenCallback> = Some(streaming_trampoline::<F>);
 
@@ -374,6 +407,7 @@ where
             n_past_in,
         )
     };
+    streaming_ctx.drop_unfinished_character();
 
     let (n_generated, stopped_by_callback) =
         interpret_streaming_result(result, streaming_ctx.error.take(), -4..=-1, |code| {
@@ -425,10 +459,7 @@ where
     let grammar_cstr = grammar_cstring(grammar)?;
     let grammar_ptr = grammar_cstr.as_ref().map_or(ptr::null(), |c| c.as_ptr());
 
-    let mut streaming_ctx = StreamingContext {
-        callback: &mut on_token,
-        error: None,
-    };
+    let mut streaming_ctx = StreamingContext::new(&mut on_token);
 
     let callback: Option<TokenCallback> = Some(streaming_trampoline::<F>);
 
@@ -457,6 +488,7 @@ where
             n_past,
         )
     };
+    streaming_ctx.drop_unfinished_character();
 
     let (n_generated, stopped_by_callback) =
         interpret_streaming_result(result, streaming_ctx.error.take(), -5..=-1, |code| {
@@ -713,10 +745,7 @@ mod tests {
     #[test]
     fn streaming_trampoline_preserves_boxed_error_marker() {
         let mut callback: Callback = abort_callback;
-        let mut ctx = StreamingContext {
-            callback: &mut callback,
-            error: None,
-        };
+        let mut ctx = StreamingContext::new(&mut callback);
         let token_text = CString::new("token").unwrap();
 
         let started = Instant::now();
@@ -828,5 +857,65 @@ mod tests {
             }
             other => panic!("expected ChatTemplateFailed, got {other:?}"),
         }
+    }
+
+    /// Run the trampoline the way the native loop does, one token's piece
+    /// per call, and return what the callback received.
+    fn stream_pieces(pieces: &[&[u8]]) -> Vec<(i32, String)> {
+        let mut received = Vec::new();
+        let mut callback =
+            |token_id: i32, text: &str| -> Result<(), Box<dyn Error + Send + Sync>> {
+                received.push((token_id, text.to_string()));
+                Ok(())
+            };
+        let mut ctx = StreamingContext::new(&mut callback);
+        for (token_id, piece) in (1..).zip(pieces) {
+            let piece = CString::new(*piece).expect("test pieces hold no NUL byte");
+            assert_eq!(call_trampoline(&mut ctx, token_id, &piece), 0);
+        }
+        received
+    }
+
+    fn call_trampoline<F>(
+        ctx: &mut StreamingContext<'_, F>,
+        token_id: i32,
+        piece: &CString,
+    ) -> std::os::raw::c_int
+    where
+        F: FnMut(i32, &str) -> Result<(), Box<dyn Error + Send + Sync>>,
+    {
+        // SAFETY: `ctx` is a live, exclusive `StreamingContext<F>` for the
+        // whole call, and `piece` is a live C string.
+        unsafe {
+            streaming_trampoline::<F>(
+                token_id,
+                piece.as_ptr(),
+                ctx as *mut StreamingContext<'_, F> as *mut c_void,
+            )
+        }
+    }
+
+    /// A byte-level vocabulary splits a character across tokens: qwen3
+    /// writes "🙂" as byte tokens, none of them UTF-8 alone. The callback
+    /// gets the character with the token that finishes it, and "" for the
+    /// tokens before that.
+    #[test]
+    fn streaming_trampoline_joins_a_character_split_across_tokens() {
+        assert_eq!(
+            stream_pieces(&[b"\xF0\x9F", b"\x99\x82", b" ok"]),
+            [
+                (1, String::new()),
+                (2, "🙂".to_string()),
+                (3, " ok".to_string())
+            ]
+        );
+        assert_eq!(
+            stream_pieces(&[b"\xE6", b"\x97\xA5\xE6\x9C", b"\xAC"]),
+            [
+                (1, String::new()),
+                (2, "日".to_string()),
+                (3, "本".to_string())
+            ]
+        );
     }
 }

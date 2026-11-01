@@ -72,6 +72,8 @@ mod log_control;
 mod model;
 #[cfg(feature = "bindings")]
 mod scoring;
+#[cfg(feature = "bindings")]
+mod utf8;
 #[cfg(all(feature = "bindings", feature = "vision"))]
 mod vision;
 

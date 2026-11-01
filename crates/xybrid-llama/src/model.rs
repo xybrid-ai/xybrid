@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use crate::error::{LlamaError, LlamaResult};
 use crate::ffi;
+use crate::utf8::Utf8Decoder;
 
 /// Opaque handle to a loaded llama.cpp model.
 ///
@@ -159,15 +160,44 @@ impl LlamaModel {
 
     /// Detokenize `tokens` to a UTF-8 string, rendering special tokens
     /// (e.g. `<|im_end|>`) verbatim in their text form.
+    ///
+    /// The pieces are joined as bytes and decoded once, so a character that a
+    /// byte-level vocabulary splits across tokens survives. Bytes that cannot
+    /// be UTF-8 become U+FFFD. A character the tokens leave unfinished at the
+    /// end (the budget ran out between its bytes) has no text and is dropped,
+    /// as the streaming callback never receives one either.
     pub fn detokenize(&self, tokens: &[i32]) -> LlamaResult<String> {
-        let mut result = String::new();
+        let mut bytes = Vec::new();
         let mut buf = vec![0u8; 256];
         for &token in tokens {
-            // SAFETY: `buf` writable for `buf.len()` bytes. The C wrapper
-            // returns the number of bytes written (or required); we
-            // re-allocate and retry on overflow exactly once, matching
-            // the pre-refactor behavior.
-            let len = unsafe {
+            bytes.extend_from_slice(self.piece_bytes(token, &mut buf));
+        }
+        let mut decoder = Utf8Decoder::default();
+        let text = decoder.push(&bytes).into_owned();
+        decoder.discard_unfinished();
+        Ok(text)
+    }
+
+    /// Write `token`'s piece, special tokens rendered, into `buf`, growing it
+    /// when the piece does not fit, and return the bytes written.
+    fn piece_bytes<'b>(&self, token: i32, buf: &'b mut Vec<u8>) -> &'b [u8] {
+        // SAFETY: `buf` is writable for `buf.len()` bytes.
+        let mut len = unsafe {
+            ffi::token_to_piece(
+                self.as_ptr(),
+                token,
+                buf.as_mut_ptr() as *mut std::os::raw::c_char,
+                buf.len(),
+                0,
+                true,
+            )
+        };
+        if len < 0 {
+            // llama.cpp returns the size a piece needs, negated, when `buf` is
+            // too small for it.
+            buf.resize(len.unsigned_abs() as usize, 0);
+            // SAFETY: as above, after the resize.
+            len = unsafe {
                 ffi::token_to_piece(
                     self.as_ptr(),
                     token,
@@ -177,32 +207,9 @@ impl LlamaModel {
                     true,
                 )
             };
-            if len > 0 {
-                let len_usize = len as usize;
-                if len_usize >= buf.len() {
-                    buf.resize(len_usize + 1, 0);
-                    // SAFETY: buf resized above.
-                    let retry_len = unsafe {
-                        ffi::token_to_piece(
-                            self.as_ptr(),
-                            token,
-                            buf.as_mut_ptr() as *mut std::os::raw::c_char,
-                            buf.len(),
-                            0,
-                            true,
-                        )
-                    };
-                    if retry_len > 0 {
-                        if let Ok(piece) = std::str::from_utf8(&buf[..retry_len as usize]) {
-                            result.push_str(piece);
-                        }
-                    }
-                } else if let Ok(piece) = std::str::from_utf8(&buf[..len_usize]) {
-                    result.push_str(piece);
-                }
-            }
         }
-        Ok(result)
+        let len = usize::try_from(len).unwrap_or(0).min(buf.len());
+        &buf[..len]
     }
 
     /// BOS (beginning-of-sequence) token.

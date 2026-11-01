@@ -146,6 +146,7 @@ _CORE_INTEGRATION_TESTS = {
         ":xybrid-core",
         "@crates//:walkdir",
     ],
+    "llamacpp_stream_text": [":xybrid-core"],
     "llm_context_integration": [
         ":xybrid-core",
         "@crates//:serde_json",
@@ -186,10 +187,12 @@ _CORE_INTEGRATION_TESTS = {
     ],
 }
 
-# vlm_lfm2_smoke opens with `#![cfg(feature = "llm-llamacpp")]`; without the
-# feature the file compiles to an EMPTY binary that still reports success. The
-# library target above already builds with llm-llamacpp, so this lines up.
+# vlm_lfm2_smoke and llamacpp_stream_text open with
+# `#![cfg(feature = "llm-llamacpp")]`; without the feature each file compiles to
+# an EMPTY binary that still reports success. The library target above already
+# builds with llm-llamacpp, so this lines up.
 _CORE_TEST_FEATURES = {
+    "llamacpp_stream_text": ["llm-llamacpp"],
     "vlm_lfm2_smoke": ["llm-llamacpp"],
 }
 
@@ -197,6 +200,7 @@ _CORE_TEST_FEATURES = {
 # looking for retired cache-key names, so the sources themselves are inputs.
 _CORE_TEST_DATA = {
     "legacy_cache_names": glob(["src/**/*.rs"]),
+    "llamacpp_stream_text": ["//integration-tests:model_metadata_fixtures"],
     "llm_context_integration": ["//integration-tests:model_metadata_fixtures"],
     "mobilenet_vision_parity": ["//integration-tests:model_metadata_fixtures"],
     "tts_integration": ["//integration-tests:model_metadata_fixtures"],
