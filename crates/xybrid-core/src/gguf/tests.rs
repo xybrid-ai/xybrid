@@ -1,5 +1,8 @@
 //! The scanner's and the classification rule's test vectors, then checks
-//! against LiquidAI's d1-2B GGUF when it is staged.
+//! against LiquidAI's d1-2B GGUF when it is staged, and against a second,
+//! ordinary GGUF named by `XYBRID_OTHER_GGUF` (stories260K: see
+//! `integration-tests/README.md`). Each skips without its model, unless
+//! `XYBRID_REQUIRE_MODELS` is set, which makes a missing one a failure.
 
 use super::native::{compare_native, scalar_projection};
 use super::testing::{d1_builder, gguf_string, GgufBuilder, D1_TEMPERATURE};
@@ -974,6 +977,24 @@ mod published {
         None
     }
 
+    /// The second, ordinary GGUF from `XYBRID_OTHER_GGUF`, or `None` (with a
+    /// note) when it is not set.
+    ///
+    /// # Panics
+    ///
+    /// When `XYBRID_REQUIRE_MODELS` is set and `XYBRID_OTHER_GGUF` is not.
+    pub(super) fn other_gguf() -> Option<PathBuf> {
+        if let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") {
+            return Some(PathBuf::from(path));
+        }
+        let reason = "XYBRID_OTHER_GGUF is not set (an ordinary GGUF such as stories260K)";
+        if std::env::var_os("XYBRID_REQUIRE_MODELS").is_some() {
+            panic!("XYBRID_REQUIRE_MODELS is set but {reason}");
+        }
+        eprintln!("Skipping test: {reason}");
+        None
+    }
+
     pub(super) fn sha256_hex(bytes: &[u8]) -> String {
         Sha256::digest(bytes)
             .iter()
@@ -1028,12 +1049,7 @@ mod published {
     /// variable to check its readout context refuses it).
     #[test]
     fn an_ordinary_gguf_is_not_a_decision_model() {
-        let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") else {
-            eprintln!(
-                "Skipping test: set XYBRID_OTHER_GGUF to a GGUF that is not a decision model"
-            );
-            return;
-        };
+        let Some(path) = other_gguf() else { return };
         let header = GgufHeader::read_file(&path).expect("read the header");
         assert_eq!(
             classify(&header).unwrap(),
@@ -1086,10 +1102,7 @@ mod published {
     #[cfg(feature = "llm-llamacpp")]
     #[test]
     fn a_model_swapped_before_the_native_load_is_refused() {
-        let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") else {
-            eprintln!("Skipping test: set XYBRID_OTHER_GGUF to a small ordinary GGUF");
-            return;
-        };
+        let Some(path) = other_gguf() else { return };
         let source = std::fs::read(&path).expect("read the GGUF");
         let scanned = rewritten(&source, |b| b.f32("xybrid.test.value", 1.5));
         let retyped = rewritten(&source, |b| b.str("xybrid.test.value", "1.500000"));
@@ -1139,10 +1152,7 @@ mod published {
     #[cfg(feature = "llm-llamacpp")]
     #[test]
     fn many_metadata_keys_are_checked_in_linear_time() {
-        let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") else {
-            eprintln!("Skipping test: set XYBRID_OTHER_GGUF to a small ordinary GGUF");
-            return;
-        };
+        let Some(path) = other_gguf() else { return };
         let original = std::fs::read(&path).expect("read the GGUF");
         let dir = tempfile::tempdir().unwrap();
         xybrid_llama::backend_init();

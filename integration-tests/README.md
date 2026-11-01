@@ -194,3 +194,14 @@ The legacy `test_models/` directory is deprecated in favor of `integration-tests
 
 ### Large fixtures (gitignored)
 - `fixtures/models/*/` - Downloaded model directories
+
+### A second, ordinary GGUF (`XYBRID_OTHER_GGUF`)
+
+Some llama.cpp and GGUF tests also need a small causal GGUF that is not a
+decision model: `crates/xybrid-llama/tests/d1_readout_smoke.rs`,
+xybrid-llama's fault and context tests, and `crates/xybrid-core/src/gguf/tests.rs`.
+Point `XYBRID_OTHER_GGUF` at one. We use stories260K from `ggml-org/models` at
+`499bc8821c6b12b4e53c5bffcb21ec206f212d81` (`tinyllamas/stories260K.gguf`,
+sha256 `270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d`).
+Without it those tests skip, unless `XYBRID_REQUIRE_MODELS` is set, which makes
+every missing model a failure, this one included.

@@ -13,9 +13,13 @@
 //! cargo test --release -p xybrid-llama --features bindings --test d1_readout_smoke -- --nocapture
 //! ```
 //!
+//! One test also needs a second GGUF that is not LFM3 d1: point
+//! `XYBRID_OTHER_GGUF` at one (stories260K: see `integration-tests/README.md`).
+//!
 //! A missing model skips each test, unless `XYBRID_REQUIRE_MODELS` is set,
-//! which turns the skip into a failure. `--release` builds llama.cpp
-//! optimized; a debug build runs the same tests, slowly.
+//! which turns the skip into a failure, the second GGUF's included.
+//! `--release` builds llama.cpp optimized; a debug build runs the same tests,
+//! slowly.
 
 #![cfg(feature = "bindings")]
 
@@ -68,6 +72,23 @@ fn staged_model_path() -> Option<PathBuf> {
         "'{MODEL_ID}/{MODEL_FILE}' is not staged under {}",
         models.display()
     );
+    if std::env::var_os("XYBRID_REQUIRE_MODELS").is_some() {
+        panic!("XYBRID_REQUIRE_MODELS is set but {reason}");
+    }
+    eprintln!("Skipping test: {reason}");
+    None
+}
+
+/// The second GGUF, from `XYBRID_OTHER_GGUF`, or `None` (with a note).
+///
+/// # Panics
+///
+/// When `XYBRID_REQUIRE_MODELS` is set and `XYBRID_OTHER_GGUF` is not.
+fn other_gguf_path() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") {
+        return Some(PathBuf::from(path));
+    }
+    let reason = "XYBRID_OTHER_GGUF is not set (a GGUF that is not LFM3 d1)";
     if std::env::var_os("XYBRID_REQUIRE_MODELS").is_some() {
         panic!("XYBRID_REQUIRE_MODELS is set but {reason}");
     }
@@ -381,13 +402,12 @@ fn score_final_position_refuses_the_d1_model() {
 /// set `XYBRID_OTHER_GGUF` to one (an LFM3 chat model, say).
 #[test]
 fn a_model_outside_the_profile_is_refused() {
-    let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") else {
-        eprintln!("Skipping test: set XYBRID_OTHER_GGUF to a GGUF that is not LFM3 d1");
+    let Some(path) = other_gguf_path() else {
         return;
     };
     backend_init();
-    let other = LlamaModel::load(PathBuf::from(path).to_str().expect("a UTF-8 path"), 0)
-        .expect("load the other GGUF");
+    let other =
+        LlamaModel::load(path.to_str().expect("a UTF-8 path"), 0).expect("load the other GGUF");
     let refused = MemorylessContext::new(&other, MemorylessParams::new(BUDGET, THREADS, false));
     assert!(
         matches!(&refused, Err(LlamaError::InvalidInput(message)) if message.contains("not an lfm3-d1")),

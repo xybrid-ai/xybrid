@@ -30,12 +30,20 @@ pub(crate) fn staged_d1() -> Option<PathBuf> {
 
 /// A GGUF other than d1 (a causal model with memory, such as stories260K)
 /// from `XYBRID_OTHER_GGUF`; `None` (with a note) when it is not set.
+///
+/// # Panics
+///
+/// When `XYBRID_REQUIRE_MODELS` is set and `XYBRID_OTHER_GGUF` is not.
 pub(crate) fn other_gguf() -> Option<PathBuf> {
-    let path = std::env::var_os("XYBRID_OTHER_GGUF").map(PathBuf::from);
-    if path.is_none() {
-        eprintln!("Skipping: set XYBRID_OTHER_GGUF to a causal GGUF that is not d1");
+    if let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") {
+        return Some(PathBuf::from(path));
     }
-    path
+    let reason = "XYBRID_OTHER_GGUF is not set (a causal GGUF that is not d1)";
+    if std::env::var_os("XYBRID_REQUIRE_MODELS").is_some() {
+        panic!("XYBRID_REQUIRE_MODELS is set but {reason}");
+    }
+    eprintln!("Skipping: {reason}");
+    None
 }
 
 /// Runs the test `test` of this test binary in a new process, with `env`
