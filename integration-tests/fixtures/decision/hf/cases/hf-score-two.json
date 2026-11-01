@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "hf-score-two",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A score at the minimum of 2 levels.",
+  "covers": [
+    "score-2-levels"
+  ],
+  "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"Please send your password to verify your account at http://example.com/verify.\", \"questions\": {\"risk\": {\"type\": \"score\", \"instructions\": \"How risky is this message?\", \"criteria\": [\"no risk\", \"risk\"]}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-typed-text",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "0fc3fd73335fca52fcb4291ab2412dc3292df64612b376a20e4d1aba7551fbc3",
+  "hf": {},
+  "detail": {
+    "parse": {
+      "typed": {
+        "payee": "text"
+      }
+    },
+    "typed": {
+      "answers": {
+        "payee": {
+          "type": "text",
+          "text": "ACME SA",
+          "span": [0, 7],
+          "found": 0.99061317542800165
+        }
+      },
+      "usage": {
+        "input_tokens": 74,
+        "output_tokens": 0
+      }
+    }
+  }
+}

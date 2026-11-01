@@ -1,0 +1,335 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-packing",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "f1e1b11e7900f56d517fbd89fc75d7c252f76bdaf2896c3dc544e1a7ee1655e3",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "refund",
+          "type": "noul",
+          "keys": ["true", "false"]
+        },
+        {
+          "id": "team",
+          "type": "choice",
+          "keys": ["billing", "shipping", "technical"]
+        },
+        {
+          "id": "urgency",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        },
+        {
+          "id": "angry",
+          "type": "noul",
+          "keys": ["true", "false"]
+        },
+        {
+          "id": "language",
+          "type": "choice",
+          "keys": ["en", "fr", "de"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "refund",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nIs the customer asking for a refund?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 4439, 278, 13107, 13564, 374, 267, 52966, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 42,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        },
+        {
+          "question": "team",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nWhich team should handle this?\n\nOptions:\nA Charges, refunds, invoices\nB Delivery and parcels\nC App or site faults\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 28327, 2909, 1252, 9435, 532, 64929, 13314, 833, 41, 120315, 20, 52966, 91, 20, 60326, 1363, 207, 42, 57615, 309, 18830, 1205, 207, 43, 4634, 432, 2974, 49521, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 63,
+          "select": [41, 334, 42, 378, 43, 340]
+        },
+        {
+          "question": "urgency",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nHow urgent is this ticket?\n\n0 low\n1 medium\n2 high\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 3522, 30648, 355, 532, 29936, 64929, 24, 2419, 207, 25, 8057, 207, 26, 1068, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 53,
+          "select": [24, 25, 26]
+        },
+        {
+          "question": "angry",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nIs the customer angry?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 4439, 278, 13107, 23231, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 39,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        },
+        {
+          "question": "language",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nWhich language is the ticket in?\n\nOptions:\nA English\nB French\nC German\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 28327, 3368, 355, 278, 29936, 296, 64929, 13314, 833, 41, 3478, 207, 42, 4770, 207, 43, 4957, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 52,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "refund",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        },
+        {
+          "question": "team",
+          "type": "choice",
+          "pass": 1,
+          "groups": [
+            {
+              "key": "billing",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "shipping",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "technical",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        },
+        {
+          "question": "urgency",
+          "type": "score",
+          "pass": 2,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        },
+        {
+          "question": "angry",
+          "type": "noul",
+          "pass": 3,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        },
+        {
+          "question": "language",
+          "type": "choice",
+          "pass": 4,
+          "groups": [
+            {
+              "key": "en",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "fr",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "de",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x412c7300", "0x417a3d51", "0x403771c7", "0x40ed302d", "0x3fb3de60"],
+        ["0x412c9cf4", "0x40daf9e7", "0x411da3c2", "0x40bc3a0d", "0x40ffb140", "0x4084391d"],
+        ["0x4122e512", "0x413cbd56", "0x411de6c6"],
+        ["0x40a13b83", "0x411ec82a", "0x409e8844", "0x41234e4d", "0x405d9d6f"],
+        ["0x4153c1bb", "0x410bdc9b", "0x4102874f", "0x406d8501", "0x41019ef6", "0x4070324d"]
+      ],
+      "scores": [
+        ["0x417a3d51", "0x40ed302d"],
+        ["0x412c9cf4", "0x411da3c2", "0x40ffb140"],
+        ["0x4122e512", "0x413cbd56", "0x411de6c6"],
+        ["0x411ec82a", "0x41234e4d"],
+        ["0x4153c1bb", "0x4102874f", "0x41019ef6"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "refund": {
+          "type": "noul",
+          "noul": 0.99787556513154918
+        },
+        "team": {
+          "type": "choice",
+          "choice": "billing",
+          "confidence": 0.61722947875159517,
+          "probabilities": {
+            "billing": 0.61722947875159517,
+            "shipping": 0.30658506993120177,
+            "technical": 0.07618545131720296
+          }
+        },
+        "urgency": {
+          "type": "score",
+          "score": 1.0,
+          "confidence": 0.65124800626981461,
+          "probabilities": {
+            "0": 0.19462964150655643,
+            "1": 0.65124800626981461,
+            "2": 0.15412235222362894
+          },
+          "legend": {
+            "0": "low",
+            "1": "medium",
+            "2": "high"
+          }
+        },
+        "angry": {
+          "type": "noul",
+          "noul": 0.44734184457152021
+        },
+        "language": {
+          "type": "choice",
+          "choice": "en",
+          "confidence": 0.95786525159348646,
+          "probabilities": {
+            "en": 0.95786525159348646,
+            "fr": 0.02151409157677206,
+            "de": 0.020620656829741495
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 254,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "refund",
+        "prompt_sha256": "79a35137bea9316890873804ac794cf5e89f8e358b8f233b7447b52ac3bf12c8",
+        "state_tokens": 21,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      },
+      {
+        "question": "team",
+        "prompt_sha256": "35b055c6bd11b25b2d1d60371568ab96b178c5ce1a5a5ca290656410e6d274ae",
+        "state_tokens": 21,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC"],
+        "temperature_f64": 1.337398453966105
+      },
+      {
+        "question": "urgency",
+        "prompt_sha256": "fb897f566a6d1d5bbdd61529f915ec4531c5106d761aede9e33529912aae950d",
+        "state_tokens": 21,
+        "select_tokens": ["0", "1", "2"],
+        "temperature_f64": 1.337398453966105
+      },
+      {
+        "question": "angry",
+        "prompt_sha256": "075f78715a67967e30b71c31ac3158db4249b1e12fd8e882c0e619dfac81c2fd",
+        "state_tokens": 21,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      },
+      {
+        "question": "language",
+        "prompt_sha256": "8043b106751f5282c0193021d9abf7918bd66da9ad24fca66c9fe8f5ff14edec",
+        "state_tokens": 21,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "refund",
+        "raw_logprobs": ["0xc09c2030", "0xbc8b8e00", "0xc14ca6a6", "0xc103eb02", "0xc164074c"],
+        "logprob_scores": ["0xbc8b8e00", "0xc103eb02"],
+        "logsumexp": "0x417a8318",
+        "distribution": [0.99787556513154918, 0.0021244348684509532]
+      },
+      {
+        "question": "team",
+        "raw_logprobs": ["0xbf152b60", "0xc090e56d", "0xbfc25f40", "0xc0afa547", "0xc0585c28", "0xc0e7a637"],
+        "logprob_scores": ["0xbf152b60", "0xbfc25f40", "0xc0585c28"],
+        "logsumexp": "0x4135efaa",
+        "distribution": [0.61722947875159517, 0.30658506993120177, 0.07618545131720296]
+      },
+      {
+        "question": "urgency",
+        "raw_logprobs": ["0xbffbb7e0", "0xbeb3d700", "0xc011d520"],
+        "logprob_scores": ["0xbffbb7e0", "0xbeb3d700", "0xc011d520"],
+        "logsumexp": "0x41425c0e",
+        "distribution": [0.19462964150655643, 0.65124800626981461, 0.15412235222362894]
+      },
+      {
+        "question": "angry",
+        "raw_logprobs": ["0xc0bdb1a3", "0xbf857348", "0xc0c064e2", "0xbf428460", "0xc0f01e6e"],
+        "logprob_scores": ["0xbf857348", "0xbf428460"],
+        "logsumexp": "0x412f7693",
+        "distribution": [0.44734184457152021, 0.55265815542847985]
+      },
+      {
+        "question": "language",
+        "raw_logprobs": ["0xbd3c2100", "0xc0914282", "0xc0a3ed1a", "0xc1191c9c", "0xc0a5bdcc", "0xc1187149"],
+        "logprob_scores": ["0xbd3c2100", "0xc0a3ed1a", "0xc0a5bdcc"],
+        "logsumexp": "0x41547ddc",
+        "distribution": [0.95786525159348646, 0.02151409157677206, 0.020620656829741495]
+      }
+    ]
+  }
+}

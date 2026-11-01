@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-lone-surrogate",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A lone UTF-16 surrogate escape in a JSON string",
+  "covers": [
+    "json-escapes",
+    "refusal-parse"
+  ],
+  "notes": "A lone UTF-16 surrogate escape in the state: Python's json module reads it, the reference fails to tokenize it; llama.cpp refuses the request when parsing it. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": null,
+  "request_text": "{\"state\": \"orphan \\ud800 surrogate\", \"questions\": {\"valid\": {\"type\": \"noul\", \"instructions\": \"Is the state valid text?\"}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": {
+      "refuse": "invalid_json"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

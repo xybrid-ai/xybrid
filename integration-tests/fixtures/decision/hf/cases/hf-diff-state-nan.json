@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-state-nan",
+  "profile": "lfm3-d1/text/v1",
+  "title": "NaN and Infinity literals, which are not JSON",
+  "covers": [
+    "json-literals",
+    "refusal-parse"
+  ],
+  "notes": "NaN and Infinity in a JSON state: not JSON, but Python's json module reads them and the reference writes them back as NaN and Infinity; llama.cpp refuses the request. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": null,
+  "request_text": "{\"state\": {\"amount\": NaN, \"limit\": Infinity}, \"questions\": {\"valid\": {\"type\": \"noul\", \"instructions\": \"Is the amount a number?\"}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": {
+      "refuse": "invalid_json"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

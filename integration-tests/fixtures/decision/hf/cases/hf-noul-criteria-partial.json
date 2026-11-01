@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "hf-noul-criteria-partial",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Yes/no with only the true criterion: both print the missing one as None.",
+  "covers": [
+    "noul-partial-criteria"
+  ],
+  "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"If this is not fixed by Friday I will talk to my lawyer.\", \"questions\": {\"legal\": {\"type\": \"noul\", \"instructions\": \"Is this a legal threat?\", \"criteria\": {\"true\": \"The message threatens legal action\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

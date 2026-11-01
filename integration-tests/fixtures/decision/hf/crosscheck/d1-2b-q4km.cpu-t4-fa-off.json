@@ -1,0 +1,900 @@
+{
+  "server": "llama-server v0.8.0 (vendor/llama-cpp 8642541, CPU, GGML_NATIVE=ON) on d1-2b-q4km (d1-2B-Q4_K_M.gguf); settings cpu-t4-fa-off: -t 4 -c 4096 -b 4096 -ub 4096 -fa off -np 1",
+  "temperature": 1.3373980522155762,
+  "cases": [
+    {
+      "case": "hf-card-three",
+      "status": 200,
+      "seconds": 2.53,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "refund": {
+            "type": "noul",
+            "noul": 0.9975288740288827
+          },
+          "team": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.5871857229174025,
+              "shipping": 0.35402625017037676,
+              "technical": 0.05878802691222077
+            },
+            "confidence": 0.5871857229174025
+          },
+          "urgency": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            },
+            "probabilities": {
+              "0": 0.170432979682572,
+              "1": 0.6904054299229837,
+              "2": 0.13916159039444415
+            },
+            "confidence": 0.6904054299229837
+          }
+        },
+        "usage": {
+          "input_tokens": 161,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "refund": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.0003466911026664965,
+          "max_abs_gap": 0.20263862609870031
+        },
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.047441180239174985,
+          "max_abs_gap": 0.27996015548706055,
+          "skipped_underflow": 0
+        },
+        "urgency": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.0391574236531691,
+          "max_abs_gap": 0.25563621520996094,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-27",
+      "status": 200,
+      "seconds": 2.59,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "department": {
+            "type": "choice",
+            "choice": "phones",
+            "probabilities": {
+              "appliances": 0.0043114441210224995,
+              "automotive": 0.02307957750036742,
+              "baby": 0.0016462061260799543,
+              "beauty": 0.0015184632364167784,
+              "books": 0.001911155758492291,
+              "cameras": 0.017797702334700637,
+              "clothing": 0.01058317125307782,
+              "computers": 0.015736320811600778,
+              "crafts": 0.003074380618950746,
+              "electronics": 0.3462992728472414,
+              "furniture": 0.0017228195847986511,
+              "garden": 0.0021259013860597947,
+              "grocery": 0.0012288633148389329,
+              "hardware": 0.03233125530523397,
+              "health": 0.0018931450817684888,
+              "jewelry": 0.0016050564321492763,
+              "kitchen": 0.001238294579021559,
+              "lighting": 0.0013633989698046284,
+              "music": 0.0009185205968853871,
+              "office": 0.005082661769029771,
+              "pets": 0.003088253915252655,
+              "phones": 0.3800199020455941,
+              "shoes": 0.0069054792492472625,
+              "sports": 0.10538620784505526,
+              "toys": 0.012661451632612009,
+              "travel": 0.012556636380310066,
+              "video_games": 0.0039144573043877725
+            },
+            "confidence": 0.3800199020455941
+          }
+        },
+        "usage": {
+          "input_tokens": 168,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "department": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.02736914908592479,
+          "max_abs_gap": 0.5372095108032227,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-36",
+      "status": 200,
+      "seconds": 3.32,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "department": {
+            "type": "choice",
+            "choice": "watches",
+            "probabilities": {
+              "appliances": 0.0010413040879529189,
+              "automotive": 0.0016018897862695373,
+              "baby": 0.000655074112374885,
+              "beauty": 0.003067605205026485,
+              "books": 0.0016006571710204657,
+              "cameras": 0.0012909325011791456,
+              "clothing": 0.017290227029419455,
+              "computers": 0.001131876018821535,
+              "crafts": 0.006383331133001602,
+              "electronics": 0.008855112903299638,
+              "furniture": 0.0008833199282918887,
+              "garden": 0.0005315023045124319,
+              "grocery": 0.0008721848378912166,
+              "hardware": 0.0033274171480527624,
+              "health": 0.0014857449486044448,
+              "jewelry": 0.11243384468385498,
+              "kitchen": 0.0009912098816751392,
+              "lighting": 0.0008667698558031908,
+              "music": 0.0007521305803682401,
+              "office": 0.0012421509323801646,
+              "pets": 0.0007987405109048657,
+              "phones": 0.0026191226264088863,
+              "shoes": 0.016980921949233962,
+              "sports": 0.0014825493573065967,
+              "toys": 0.0014417108224331744,
+              "travel": 0.0011439972245775563,
+              "video_games": 0.003961742454563897,
+              "bedding": 0.000695265471084646,
+              "candy": 0.0005976748874127705,
+              "cleaning": 0.0013993174971778598,
+              "fabrics": 0.006447212805015212,
+              "luggage": 0.0007485526742442834,
+              "outdoor": 0.0032681283087728193,
+              "party": 0.0012685543175440434,
+              "pharmacy": 0.005315436972009592,
+              "watches": 0.7855267870715098
+            },
+            "confidence": 0.7855267870715098
+          }
+        },
+        "usage": {
+          "input_tokens": 205,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "department": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.024138105811467164,
+          "max_abs_gap": 0.6419639587402344,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-ambiguous",
+      "status": 200,
+      "seconds": 1.8,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "team": {
+            "type": "choice",
+            "choice": "shipping",
+            "probabilities": {
+              "billing": 0.1026521270868188,
+              "shipping": 0.6978362344201475,
+              "technical": 0.1995116384930338
+            },
+            "confidence": 0.6978362344201475
+          }
+        },
+        "usage": {
+          "input_tokens": 76,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.04554513309165226,
+          "max_abs_gap": 0.3249492645263672,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-card",
+      "status": 200,
+      "seconds": 2.82,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "team": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.5871857229174025,
+              "shipping": 0.35402625017037676,
+              "technical": 0.05878802691222077
+            },
+            "confidence": 0.5871857229174025
+          }
+        },
+        "usage": {
+          "input_tokens": 64,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.047441180239174985,
+          "max_abs_gap": 0.27996015548706055,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-key-fallback",
+      "status": 200,
+      "seconds": 1.47,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "route": {
+            "type": "choice",
+            "choice": "needs_human_review",
+            "probabilities": {
+              "needs_human_review": 0.6929529702565084,
+              "auto_close": 0.011497041770487621,
+              "escalate_to_tier_2": 0.25550870355187777,
+              "wait_for_customer": 0.04004128442112628
+            },
+            "confidence": 0.6929529702565084
+          }
+        },
+        "usage": {
+          "input_tokens": 77,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "route": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.01984590454542004,
+          "max_abs_gap": 0.19423007965087935,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-letter-keys",
+      "status": 200,
+      "seconds": 1.89,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "planet": {
+            "type": "choice",
+            "choice": "B",
+            "probabilities": {
+              "A": 0.0015536575015951486,
+              "B": 0.8852707788501957,
+              "C": 0.0015166381071020664,
+              "D": 0.11165892554110712
+            },
+            "confidence": 0.8852707788501957
+          }
+        },
+        "usage": {
+          "input_tokens": 61,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "planet": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.007328471011105564,
+          "max_abs_gap": 0.33942365646362305,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-lower-keys",
+      "status": 200,
+      "seconds": 2.7,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "category": {
+            "type": "choice",
+            "choice": "x",
+            "probabilities": {
+              "x": 0.993740194815484,
+              "y": 0.004321219406880433,
+              "z": 0.0019385857776355326
+            },
+            "confidence": 0.993740194815484
+          }
+        },
+        "usage": {
+          "input_tokens": 58,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "category": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.00015059778026382808,
+          "max_abs_gap": 0.09610199928283691,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-one",
+      "status": 200,
+      "seconds": 0.81,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "queue": {
+            "type": "choice",
+            "choice": "general",
+            "probabilities": {
+              "general": 1.0
+            },
+            "confidence": 1.0
+          }
+        },
+        "usage": {
+          "input_tokens": 44,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "queue": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0,
+          "max_abs_gap": 0.0,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-noul-card",
+      "status": 200,
+      "seconds": 1.39,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "refund": {
+            "type": "noul",
+            "noul": 0.9975288740288827
+          }
+        },
+        "usage": {
+          "input_tokens": 43,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "refund": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.0003466911026664965,
+          "max_abs_gap": 0.20263862609870031
+        }
+      }
+    },
+    {
+      "case": "hf-noul-criteria-partial",
+      "status": 200,
+      "seconds": 1.11,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "legal": {
+            "type": "noul",
+            "noul": 0.431886453464175
+          }
+        },
+        "usage": {
+          "input_tokens": 52,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "legal": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.05459164626270313,
+          "max_abs_gap": 0.29430484771728543
+        }
+      }
+    },
+    {
+      "case": "hf-noul-criteria",
+      "status": 200,
+      "seconds": 1.02,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "damaged": {
+            "type": "noul",
+            "noul": 0.08732376716451229
+          }
+        },
+        "usage": {
+          "input_tokens": 67,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "damaged": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.03981284698288433,
+          "max_abs_gap": 0.8711295127868652
+        }
+      }
+    },
+    {
+      "case": "hf-score-borderline",
+      "status": 200,
+      "seconds": 1.06,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "urgency": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            },
+            "probabilities": {
+              "0": 0.16514860344935284,
+              "1": 0.7718363861544028,
+              "2": 0.06301501039624437
+            },
+            "confidence": 0.7718363861544028
+          }
+        },
+        "usage": {
+          "input_tokens": 59,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "urgency": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.03315407063694045,
+          "max_abs_gap": 0.29886627197265625,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-score-card",
+      "status": 200,
+      "seconds": 1.05,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "urgency": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            },
+            "probabilities": {
+              "0": 0.170432979682572,
+              "1": 0.6904054299229837,
+              "2": 0.13916159039444415
+            },
+            "confidence": 0.6904054299229837
+          }
+        },
+        "usage": {
+          "input_tokens": 54,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "urgency": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.0391574236531691,
+          "max_abs_gap": 0.25563621520996094,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-score-ten",
+      "status": 200,
+      "seconds": 1.56,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "rating": {
+            "type": "score",
+            "score": 5.0,
+            "legend": {
+              "0": "terrible",
+              "1": "very bad",
+              "2": "bad",
+              "3": "poor",
+              "4": "mediocre",
+              "5": "fair",
+              "6": "good",
+              "7": "very good",
+              "8": "excellent",
+              "9": "perfect"
+            },
+            "probabilities": {
+              "0": 0.0011720107946714272,
+              "1": 0.00256614745842125,
+              "2": 0.015238983232929371,
+              "3": 0.08955893819165714,
+              "4": 0.31081672279668243,
+              "5": 0.49144987776677024,
+              "6": 0.08273223940481503,
+              "7": 0.004641495736761752,
+              "8": 0.0012729746364747612,
+              "9": 0.0005506099808166155
+            },
+            "confidence": 0.49144987776677024
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "rating": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.035575041422367004,
+          "max_abs_gap": 0.4102306365966797,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-score-two",
+      "status": 200,
+      "seconds": 0.81,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "risk": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "no risk",
+              "1": "risk"
+            },
+            "probabilities": {
+              "0": 0.0498578558145253,
+              "1": 0.9501421441854748
+            },
+            "confidence": 0.9501421441854748
+          }
+        },
+        "usage": {
+          "input_tokens": 53,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "risk": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.0165660455801403,
+          "max_abs_gap": 0.4071965217590332,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-state-empty",
+      "status": 200,
+      "seconds": 0.63,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "enough": {
+            "type": "noul",
+            "noul": 0.3192908497033836
+          }
+        },
+        "usage": {
+          "input_tokens": 29,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "enough": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.0075995397118058805,
+          "max_abs_gap": 0.04647350311279297
+        }
+      }
+    },
+    {
+      "case": "hf-state-json-array",
+      "status": 200,
+      "seconds": 1.68,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "resolved": {
+            "type": "noul",
+            "noul": 0.19332697771535484
+          }
+        },
+        "usage": {
+          "input_tokens": 105,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "resolved": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.006428883280513387,
+          "max_abs_gap": 0.05445098876953125
+        }
+      }
+    },
+    {
+      "case": "hf-state-json-object",
+      "status": 200,
+      "seconds": 3.4,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "need": {
+            "type": "choice",
+            "choice": "refund",
+            "probabilities": {
+              "refund": 0.9960441248775795,
+              "delivery": 0.0013583232699873524,
+              "account": 0.002597551852433145
+            },
+            "confidence": 0.9960441248775795
+          }
+        },
+        "usage": {
+          "input_tokens": 234,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "need": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.00047791603768576607,
+          "max_abs_gap": 0.1972951889038086,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-state-long",
+      "status": 200,
+      "seconds": 82.69,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "team": {
+            "type": "choice",
+            "choice": "shipping",
+            "probabilities": {
+              "billing": 0.2351550439391538,
+              "shipping": 0.6524890093169805,
+              "technical": 0.1123559467438658
+            },
+            "confidence": 0.6524890093169805
+          }
+        },
+        "usage": {
+          "input_tokens": 3605,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.024123765023134403,
+          "max_abs_gap": 0.1473731994628904,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-state-null",
+      "status": 200,
+      "seconds": 0.83,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "formality": {
+            "type": "score",
+            "score": 2.0,
+            "legend": {
+              "0": "casual",
+              "1": "neutral",
+              "2": "formal"
+            },
+            "probabilities": {
+              "0": 0.008167418863086572,
+              "1": 0.059685138152097174,
+              "2": 0.9321474429848163
+            },
+            "confidence": 0.9321474429848163
+          }
+        },
+        "usage": {
+          "input_tokens": 45,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "formality": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.021752313996864836,
+          "max_abs_gap": 0.6013545989990234,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-state-special-token-key",
+      "status": 200,
+      "seconds": 0.91,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "injection": {
+            "type": "noul",
+            "noul": 0.7421985307809295
+          }
+        },
+        "usage": {
+          "input_tokens": 58,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "injection": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.0973105657218063,
+          "max_abs_gap": 0.6162509918212893
+        }
+      }
+    },
+    {
+      "case": "hf-state-special-tokens",
+      "status": 200,
+      "seconds": 1.09,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "injection": {
+            "type": "noul",
+            "noul": 0.7925102171825466
+          }
+        },
+        "usage": {
+          "input_tokens": 70,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "injection": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.05419771119584893,
+          "max_abs_gap": 0.49335002899169944
+        }
+      }
+    },
+    {
+      "case": "hf-state-unicode",
+      "status": 200,
+      "seconds": 1.27,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-Q4_K_M.gguf",
+        "answers": {
+          "language": {
+            "type": "choice",
+            "choice": "mixed",
+            "probabilities": {
+              "fr": 0.20405826649542902,
+              "ja": 0.012366552795293705,
+              "es": 0.1193577415581411,
+              "mixed": 0.6642174391511362
+            },
+            "confidence": 0.6642174391511362
+          }
+        },
+        "usage": {
+          "input_tokens": 75,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "language": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.03728069299727725,
+          "max_abs_gap": 0.5362281799316411,
+          "skipped_underflow": 0
+        }
+      }
+    }
+  ]
+}

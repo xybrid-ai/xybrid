@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "case": "hf-state-json-object",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "5f350bb7170be353170bd9dca9e184e1321eb2e9b2e2c2681052604444885b07",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "need",
+          "type": "choice",
+          "keys": ["refund", "delivery", "account"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "need",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"ticket\": {\n    \"id\": 4471,\n    \"priority\": null,\n    \"tags\": [\n      \"refund\",\n      \"duplicate charge\"\n    ],\n    \"amount_eur\": 59.9,\n    \"verified\": true\n  },\n  \"customer\": {\n    \"name\": \"Zoë Ångström\",\n    \"tier\": \"gold\",\n    \"since\": 2019\n  },\n  \"messages\": [\n    {\n      \"from\": \"customer\",\n      \"text\": \"Charged twice for order 4471.\"\n    },\n    {\n      \"from\": \"agent\",\n      \"text\": \"Looking into it.\"\n    }\n  ],\n  \"meta\": {},\n  \"attachments\": [],\n  \"balance\": -0.0,\n  \"ratio\": 1e-05,\n  \"limit\": 1e+16\n}\n\n\nQUESTION:\nWhat does the customer need?\n\nOptions:\nA Money back for the duplicate charge\nB Help with a missing parcel\nC Changes to the account\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 99489, 6380, 827, 360, 496, 332, 6380, 229, 30963, 25, 920, 360, 496, 98336, 6380, 3495, 920, 360, 496, 30356, 6380, 19843, 733, 496, 1390, 855, 6107, 733, 496, 574, 19006, 7285, 1110, 360, 40439, 360, 496, 50008, 71, 4405, 6380, 229, 5098, 22, 33, 920, 360, 496, 420, 1940, 6380, 2846, 207, 229, 10016, 229, 496, 95142, 6380, 827, 360, 496, 2554, 6380, 496, 105707, 6785, 21501, 881, 36068, 6107, 360, 496, 71946, 6380, 496, 53665, 6107, 360, 496, 27649, 6380, 229, 523, 33, 207, 229, 10016, 229, 496, 97198, 6380, 19843, 360, 827, 733, 496, 5890, 6380, 496, 95142, 6107, 733, 496, 1384, 6380, 496, 1934, 960, 290, 10625, 374, 2064, 229, 30963, 25, 1917, 360, 10016, 360, 827, 733, 496, 5890, 6380, 496, 22870, 6107, 733, 496, 1384, 6380, 496, 41296, 918, 435, 1917, 360, 1130, 229, 40439, 229, 496, 18891, 6380, 66126, 229, 496, 37604, 1166, 6380, 66447, 229, 496, 28984, 6380, 640, 24, 22, 24, 920, 229, 496, 53120, 6380, 229, 25, 77, 21, 3153, 920, 229, 496, 34935, 6380, 229, 25, 77, 19, 942, 207, 64024, 63509, 833, 2992, 1676, 278, 13107, 1094, 64929, 13314, 833, 41, 28251, 1391, 374, 278, 48505, 7285, 207, 42, 18024, 415, 267, 9643, 60525, 207, 43, 33517, 310, 278, 3362, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 233,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "need",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "refund",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "delivery",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "account",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x41617120", "0x410dd573", "0x40aa985c", "0xbf2a4ff0", "0x40ca9706", "0x3f4499d1"]
+      ],
+      "scores": [
+        ["0x41617120", "0x40aa985c", "0x40ca9706"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "need": {
+          "type": "choice",
+          "choice": "refund",
+          "confidence": 0.99556620883989377,
+          "probabilities": {
+            "refund": 0.99556620883989377,
+            "delivery": 0.0014247758495911137,
+            "account": 0.0030090153105150784
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 234,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "need",
+        "prompt_sha256": "eb0379dab736ef66852dc2a9ad8e6f49be3654ccfab9b9d45c7034bf94679ddc",
+        "state_tokens": 191,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "need",
+        "raw_logprobs": ["0xbc91c800", "0xc0a7c922", "0xc10c6dd6", "0xc16c5f03", "0xc0f8dd02", "0xc1557067"],
+        "logprob_scores": ["0xbc91c800", "0xc10c6dd6", "0xc0f8dd02"],
+        "logsumexp": "0x4161ba04",
+        "distribution": [0.99556620883989377, 0.0014247758495911137, 0.0030090153105150784]
+      }
+    ]
+  }
+}

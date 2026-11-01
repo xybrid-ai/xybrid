@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-questions-empty",
+  "profile": "lfm3-d1/text/v1",
+  "title": "An empty questions object",
+  "covers": [
+    "transport",
+    "refusal-parse"
+  ],
+  "notes": "An empty questions object: the reference accepts it and answers nothing; llama.cpp refuses it. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice and my parcel never arrived. Please refund one charge.\", \"questions\": {}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": {
+      "refuse": "invalid_questions"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

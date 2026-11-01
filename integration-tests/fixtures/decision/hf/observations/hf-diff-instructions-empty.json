@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-instructions-empty",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "f45d1447619413e18a282f7b6117f76256255d5386e9461044346f5e93a2cac8",
+  "hf": {
+    "parse": {
+      "refusal": {
+        "question": "refund",
+        "exception": "ValueError",
+        "message": "\"instructions\" is the question as text (or a spoken one, {\"type\": \"audio\", \"path\": ...})"
+      }
+    }
+  },
+  "detail": {
+    "parse": {}
+  }
+}

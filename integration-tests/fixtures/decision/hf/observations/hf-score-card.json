@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "case": "hf-score-card",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "bfe4abd8c842acb8f6854d7fa34390a34bc88e16cab00a68b87aad503358d6e2",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "urgency",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "urgency",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nHow urgent is this ticket?\n\n0 low\n1 medium\n2 high\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 3522, 30648, 355, 532, 29936, 64929, 24, 2419, 207, 25, 8057, 207, 26, 1068, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 53,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "urgency",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4122e512", "0x413cbd56", "0x411de6c6"]
+      ],
+      "scores": [
+        ["0x4122e512", "0x413cbd56", "0x411de6c6"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "urgency": {
+          "type": "score",
+          "score": 1.0,
+          "confidence": 0.65124800626981461,
+          "probabilities": {
+            "0": 0.19462964150655643,
+            "1": 0.65124800626981461,
+            "2": 0.15412235222362894
+          },
+          "legend": {
+            "0": "low",
+            "1": "medium",
+            "2": "high"
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 54,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "urgency",
+        "prompt_sha256": "fb897f566a6d1d5bbdd61529f915ec4531c5106d761aede9e33529912aae950d",
+        "state_tokens": 21,
+        "select_tokens": ["0", "1", "2"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "urgency",
+        "raw_logprobs": ["0xbffbb7e0", "0xbeb3d700", "0xc011d520"],
+        "logprob_scores": ["0xbffbb7e0", "0xbeb3d700", "0xc011d520"],
+        "logsumexp": "0x41425c0e",
+        "distribution": [0.19462964150655643, 0.65124800626981461, 0.15412235222362894]
+      }
+    ]
+  }
+}

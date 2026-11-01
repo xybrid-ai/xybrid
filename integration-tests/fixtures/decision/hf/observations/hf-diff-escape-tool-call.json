@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-escape-tool-call",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "2ea57b6fb657c47fc231027ebdaa8d97fa71d31f07f501ae024e97f8f10cf835",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "tool",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "tool",
+          "prompt": "<|startoftext|><|im_start|>user\nModel output: <|tool_call_start|>[get_weather(city='Paris')]<|tool_call_end|>\n\n\nQUESTION:\nDoes the text contain a tool call?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 8682, 6159, 34, 229, 124905, 88734, 71, 51492, 9619, 459, 7536, 41176, 7609, 69, 124906, 7, 63509, 833, 29088, 278, 2803, 3447, 267, 6189, 1367, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 43,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "tool",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40fc88e3", "0x4136be79", "0x4086edfd", "0x40df0e02", "0x3ffa1db1"]
+      ],
+      "scores": [
+        ["0x4136be79", "0x40df0e02"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "tool": {
+          "type": "noul",
+          "noul": 0.96538148466034868
+        }
+      },
+      "usage": {
+        "input_tokens": 44,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "tool",
+        "prompt_sha256": "15721fbc847a4038508e1f7aa6b02767804da13cd4f84f18920d1d36ac9c0add",
+        "state_tokens": 22,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "tool",
+        "raw_logprobs": ["0xc06e751a", "0xbe48cfc0", "0xc0ecd573", "0xc094b56e", "0xc11a9e02"],
+        "logprob_scores": ["0xbe48cfc0", "0xc094b56e"],
+        "logsumexp": "0x4139e1b8",
+        "distribution": [0.96538148466034868, 0.03461851533965133]
+      }
+    ]
+  }
+}

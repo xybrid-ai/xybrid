@@ -1,0 +1,1470 @@
+{
+  "server": "llama-server v0.8.0 (vendor/llama-cpp 8642541, CPU, GGML_NATIVE=ON) on d1-2b-bf16 (d1-2B-BF16.gguf); settings cpu-t4-fa-off: -t 4 -c 4096 -b 4096 -ub 4096 -fa off -np 1",
+  "temperature": 1.3373980522155762,
+  "cases": [
+    {
+      "case": "hf-card-three",
+      "status": 200,
+      "seconds": 7.24,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "refund": {
+            "type": "noul",
+            "noul": 0.9978917006834956
+          },
+          "team": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.6145239484725794,
+              "shipping": 0.30887337209701277,
+              "technical": 0.07660267943040777
+            },
+            "confidence": 0.6145239484725794
+          },
+          "urgency": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            },
+            "probabilities": {
+              "0": 0.19338508724690703,
+              "1": 0.6533790270941497,
+              "2": 0.1532358856589432
+            },
+            "confidence": 0.6533790270941497
+          }
+        },
+        "usage": {
+          "input_tokens": 161,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "refund": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 1.6135551946461213e-05,
+          "max_abs_gap": 0.010216236114471755
+        },
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0027055302790157665,
+          "max_abs_gap": 0.01582050323486317,
+          "skipped_underflow": 0
+        },
+        "urgency": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.002131020824335139,
+          "max_abs_gap": 0.012948036193847656,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-27",
+      "status": 200,
+      "seconds": 4.94,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "department": {
+            "type": "choice",
+            "choice": "phones",
+            "probabilities": {
+              "appliances": 0.0052634483723256655,
+              "automotive": 0.02244417083888609,
+              "baby": 0.0019310175500794186,
+              "beauty": 0.001699769728633008,
+              "books": 0.0019768478157858533,
+              "cameras": 0.021621478338720745,
+              "clothing": 0.010157784947146265,
+              "computers": 0.017448428058344127,
+              "crafts": 0.0028065546744995037,
+              "electronics": 0.3454516859514352,
+              "furniture": 0.001887465435398329,
+              "garden": 0.0018397261150163483,
+              "grocery": 0.0009653268981875128,
+              "hardware": 0.04950678371185647,
+              "health": 0.001765164168495522,
+              "jewelry": 0.0014475428451318118,
+              "kitchen": 0.0012217684185400978,
+              "lighting": 0.0013348667558288792,
+              "music": 0.001349355649193693,
+              "office": 0.004379291082017671,
+              "pets": 0.0026246013282685385,
+              "phones": 0.3881593734831684,
+              "shoes": 0.005337298677918253,
+              "sports": 0.07860883657856227,
+              "toys": 0.01255175681520693,
+              "travel": 0.012531397689812158,
+              "video_games": 0.0036882580715412562
+            },
+            "confidence": 0.3881593734831684
+          }
+        },
+        "usage": {
+          "input_tokens": 168,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "department": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0008786244796401554,
+          "max_abs_gap": 0.022757530212402344,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-36",
+      "status": 200,
+      "seconds": 6.09,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "department": {
+            "type": "choice",
+            "choice": "watches",
+            "probabilities": {
+              "appliances": 0.0008802999670220267,
+              "automotive": 0.0012773485130402862,
+              "baby": 0.0005119163829900698,
+              "beauty": 0.0024863163968626124,
+              "books": 0.0010415874247864112,
+              "cameras": 0.0012977986237844694,
+              "clothing": 0.010580994613630558,
+              "computers": 0.0010464792159585925,
+              "crafts": 0.0049468915458614725,
+              "electronics": 0.006753327435932613,
+              "furniture": 0.00079371516156218,
+              "garden": 0.00045500089252574705,
+              "grocery": 0.0006303390459575022,
+              "hardware": 0.0021230469611941668,
+              "health": 0.001111353267355839,
+              "jewelry": 0.13452466198981392,
+              "kitchen": 0.0008875948562002555,
+              "lighting": 0.0006206317880924697,
+              "music": 0.0005367455766034901,
+              "office": 0.00096630046216443,
+              "pets": 0.000562864331002268,
+              "phones": 0.002347136176819361,
+              "shoes": 0.010444799084735208,
+              "sports": 0.0012135876065663053,
+              "toys": 0.0013288110504282324,
+              "travel": 0.0009014215795712987,
+              "video_games": 0.003646514548830604,
+              "bedding": 0.0006922808616834752,
+              "candy": 0.0005183407896547096,
+              "cleaning": 0.001192572086452971,
+              "fabrics": 0.004364749376005528,
+              "luggage": 0.000777463522704415,
+              "outdoor": 0.0024764853899017854,
+              "party": 0.0012705790575461265,
+              "pharmacy": 0.004602225092129922,
+              "watches": 0.7901878193246288
+            },
+            "confidence": 0.7901878193246288
+          }
+        },
+        "usage": {
+          "input_tokens": 205,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "department": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0024750281717940137,
+          "max_abs_gap": 0.02720499038696289,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-ambiguous",
+      "status": 200,
+      "seconds": 2.27,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "team": {
+            "type": "choice",
+            "choice": "shipping",
+            "probabilities": {
+              "billing": 0.0826994145769358,
+              "shipping": 0.6722023520295347,
+              "technical": 0.2450982333935294
+            },
+            "confidence": 0.6722023520295347
+          }
+        },
+        "usage": {
+          "input_tokens": 76,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 4.7611825625404336e-05,
+          "max_abs_gap": 0.00032138824462890625,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-card",
+      "status": 200,
+      "seconds": 1.89,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "team": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.6145239484725794,
+              "shipping": 0.30887337209701277,
+              "technical": 0.07660267943040777
+            },
+            "confidence": 0.6145239484725794
+          }
+        },
+        "usage": {
+          "input_tokens": 64,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0027055302790157665,
+          "max_abs_gap": 0.01582050323486317,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-key-fallback",
+      "status": 200,
+      "seconds": 2.23,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "route": {
+            "type": "choice",
+            "choice": "needs_human_review",
+            "probabilities": {
+              "needs_human_review": 0.7070929411890782,
+              "auto_close": 0.01061635284449624,
+              "escalate_to_tier_2": 0.23478640957085406,
+              "wait_for_customer": 0.04750429639557159
+            },
+            "confidence": 0.7070929411890782
+          }
+        },
+        "usage": {
+          "input_tokens": 77,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "route": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0008763894356036694,
+          "max_abs_gap": 0.007328033447265625,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-letter-keys",
+      "status": 200,
+      "seconds": 1.82,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "planet": {
+            "type": "choice",
+            "choice": "B",
+            "probabilities": {
+              "A": 0.001982517704723857,
+              "B": 0.877161414959331,
+              "C": 0.0016326165937006949,
+              "D": 0.11922345074224454
+            },
+            "confidence": 0.877161414959331
+          }
+        },
+        "usage": {
+          "input_tokens": 61,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "planet": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0007808928797591319,
+          "max_abs_gap": 0.012921333312988281,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-lower-keys",
+      "status": 200,
+      "seconds": 1.76,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "category": {
+            "type": "choice",
+            "choice": "x",
+            "probabilities": {
+              "x": 0.9935425025810104,
+              "y": 0.004377801835230785,
+              "z": 0.0020796955837587964
+            },
+            "confidence": 0.9935425025810104
+          }
+        },
+        "usage": {
+          "input_tokens": 58,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "category": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 5.0101273016911474e-05,
+          "max_abs_gap": 0.015459537506103516,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-one",
+      "status": 200,
+      "seconds": 1.32,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "queue": {
+            "type": "choice",
+            "choice": "general",
+            "probabilities": {
+              "general": 1.0
+            },
+            "confidence": 1.0
+          }
+        },
+        "usage": {
+          "input_tokens": 44,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "queue": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0,
+          "max_abs_gap": 0.0,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-diff-chat-media-part",
+      "status": 501,
+      "seconds": 0.0,
+      "body": {
+        "error": {
+          "code": 501,
+          "message": "This server does not support image input for decisions. For a model that supports it, start it with `--mmproj`",
+          "type": "not_supported_error"
+        }
+      },
+      "hf": "answered"
+    },
+    {
+      "case": "hf-diff-choice-256",
+      "status": 400,
+      "seconds": 0.0,
+      "body": {
+        "error": {
+          "code": 400,
+          "message": "questions.value: too many options (256), this model supports at most 255",
+          "type": "invalid_request_error"
+        }
+      },
+      "hf": "answered"
+    },
+    {
+      "case": "hf-diff-choice-multiple",
+      "status": 200,
+      "seconds": 1.9,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "topics": {
+            "type": "choice",
+            "choice": "delivery",
+            "probabilities": {
+              "billing": 0.3639021934454313,
+              "delivery": 0.631460047449157,
+              "login": 0.00463775910541184
+            },
+            "confidence": 0.631460047449157
+          }
+        },
+        "usage": {
+          "input_tokens": 64,
+          "output_tokens": 0
+        }
+      },
+      "hf": "typed answer"
+    },
+    {
+      "case": "hf-diff-description-nonstring",
+      "status": 200,
+      "seconds": 2.19,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "action": {
+            "type": "choice",
+            "choice": "refund",
+            "probabilities": {
+              "refund": 0.9882261832222731,
+              "ignore": 0.008728543809719942,
+              "escalate": 0.0030452729680068616
+            },
+            "confidence": 0.9882261832222731
+          }
+        },
+        "usage": {
+          "input_tokens": 68,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "action": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.005274917267935782,
+          "max_abs_gap": 0.6393260955810547,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-diff-duplicate-keys",
+      "status": 200,
+      "seconds": 1.31,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "open": {
+            "type": "noul",
+            "noul": 0.002480856660274699
+          }
+        },
+        "usage": {
+          "input_tokens": 42,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "open": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 1.9958965992279264e-05,
+          "max_abs_gap": 0.01083230972290039
+        }
+      }
+    },
+    {
+      "case": "hf-diff-escape-tool-call",
+      "status": 200,
+      "seconds": 1.69,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "tool": {
+            "type": "noul",
+            "noul": 0.9845067232263238
+          }
+        },
+        "usage": {
+          "input_tokens": 55,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": false,
+      "questions": {
+        "tool": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.019125238565975144,
+          "max_abs_gap": 1.1014795303344735
+        }
+      }
+    },
+    {
+      "case": "hf-diff-escaped-key-collision",
+      "status": 200,
+      "seconds": 1.29,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "injection": {
+            "type": "noul",
+            "noul": 0.47002948605256634
+          }
+        },
+        "usage": {
+          "input_tokens": 42,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": false,
+      "questions": {
+        "injection": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.3310574161799899,
+          "max_abs_gap": 2.2786970138549805
+        }
+      }
+    },
+    {
+      "case": "hf-diff-instructions-blank",
+      "status": 200,
+      "seconds": 1.11,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "refund": {
+            "type": "noul",
+            "noul": 0.8256562463500903
+          }
+        },
+        "usage": {
+          "input_tokens": 36,
+          "output_tokens": 0
+        }
+      },
+      "hf": "refused at parse"
+    },
+    {
+      "case": "hf-diff-instructions-empty",
+      "status": 200,
+      "seconds": 1.1,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "refund": {
+            "type": "noul",
+            "noul": 0.8368215682503334
+          }
+        },
+        "usage": {
+          "input_tokens": 35,
+          "output_tokens": 0
+        }
+      },
+      "hf": "refused at parse"
+    },
+    {
+      "case": "hf-diff-instructions-object",
+      "status": 200,
+      "seconds": 1.52,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "spam": {
+            "type": "noul",
+            "noul": 0.9733663433723585
+          }
+        },
+        "usage": {
+          "input_tokens": 51,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "spam": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.0010404289795876709,
+          "max_abs_gap": 0.05472278594970259
+        }
+      }
+    },
+    {
+      "case": "hf-diff-key-nonascii",
+      "status": 200,
+      "seconds": 1.48,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "capital": {
+            "type": "choice",
+            "choice": "é",
+            "probabilities": {
+              "é": 0.9993052070940741,
+              "ß": 0.0004386014134392562,
+              "ø": 0.000256191492486407
+            },
+            "confidence": 0.9993052070940741
+          }
+        },
+        "usage": {
+          "input_tokens": 44,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "capital": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0004766665797817371,
+          "max_abs_gap": 3.1215399503707886,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-diff-key-whitespace",
+      "status": 200,
+      "seconds": 1.59,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "capital": {
+            "type": "choice",
+            "choice": " a",
+            "probabilities": {
+              " a": 0.9993052070940741,
+              "b ": 0.0004386014134392562,
+              "c": 0.000256191492486407
+            },
+            "confidence": 0.9993052070940741
+          }
+        },
+        "usage": {
+          "input_tokens": 44,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "capital": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 5.9059820473443395e-05,
+          "max_abs_gap": 0.16899681091308594,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-diff-lone-surrogate",
+      "status": 400,
+      "seconds": 0.0,
+      "body": {
+        "error": {
+          "code": 400,
+          "message": "[json.exception.parse_error.101] parse error at line 1, column 25: syntax error while parsing value - invalid string: surrogate U+D800..U+DBFF must be followed by U+DC00..U+DFFF; last read: '\"orphan \\ud800 '",
+          "type": "invalid_request_error"
+        }
+      },
+      "hf": "refused at prepare"
+    },
+    {
+      "case": "hf-diff-noul-alias-criteria",
+      "status": 200,
+      "seconds": 1.69,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "refund": {
+            "type": "noul",
+            "noul": 0.9978917006834956
+          }
+        },
+        "usage": {
+          "input_tokens": 43,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": false,
+      "questions": {
+        "refund": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.001188735151198106,
+          "max_abs_gap": 0.5995984077453311
+        }
+      }
+    },
+    {
+      "case": "hf-diff-noul-null-criteria",
+      "status": 200,
+      "seconds": 1.39,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "refund": {
+            "type": "noul",
+            "noul": 0.9978917006834956
+          }
+        },
+        "usage": {
+          "input_tokens": 43,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": false,
+      "questions": {
+        "refund": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.001188735151198106,
+          "max_abs_gap": 0.5995984077453311
+        }
+      }
+    },
+    {
+      "case": "hf-diff-packing",
+      "status": 200,
+      "seconds": 7.94,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "refund": {
+            "type": "noul",
+            "noul": 0.9978917006834956
+          },
+          "team": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.6145239484725794,
+              "shipping": 0.30887337209701277,
+              "technical": 0.07660267943040777
+            },
+            "confidence": 0.6145239484725794
+          },
+          "urgency": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            },
+            "probabilities": {
+              "0": 0.19338508724690703,
+              "1": 0.6533790270941497,
+              "2": 0.1532358856589432
+            },
+            "confidence": 0.6533790270941497
+          },
+          "angry": {
+            "type": "noul",
+            "noul": 0.44797727512542473
+          },
+          "language": {
+            "type": "choice",
+            "choice": "en",
+            "probabilities": {
+              "en": 0.9581747261073769,
+              "fr": 0.021448904277892696,
+              "de": 0.020376369614730213
+            },
+            "confidence": 0.9581747261073769
+          }
+        },
+        "usage": {
+          "input_tokens": 254,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "refund": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 1.6135551946461213e-05,
+          "max_abs_gap": 0.010216236114471755
+        },
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0027055302790157665,
+          "max_abs_gap": 0.01582050323486317,
+          "skipped_underflow": 0
+        },
+        "urgency": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.002131020824335139,
+          "max_abs_gap": 0.012948036193847656,
+          "skipped_underflow": 0
+        },
+        "angry": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.0006354305539045257,
+          "max_abs_gap": 0.003437042236328014
+        },
+        "language": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0003094745138904065,
+          "max_abs_gap": 0.016368865966796875,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-diff-questions-empty",
+      "status": 400,
+      "seconds": 0.0,
+      "body": {
+        "error": {
+          "code": 400,
+          "message": "\"questions\" must be a non-empty object",
+          "type": "invalid_request_error"
+        }
+      },
+      "hf": "answered"
+    },
+    {
+      "case": "hf-diff-score-nonstring-levels",
+      "status": 200,
+      "seconds": 1.79,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "urgency": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "low",
+              "1": null,
+              "2": {
+                "label": "high"
+              }
+            },
+            "probabilities": {
+              "0": 0.39704601509146886,
+              "1": 0.2825220703705334,
+              "2": 0.32043191453799774
+            },
+            "confidence": 0.39704601509146886
+          }
+        },
+        "usage": {
+          "input_tokens": 59,
+          "output_tokens": 0
+        }
+      },
+      "hf": "refused at parse"
+    },
+    {
+      "case": "hf-diff-spoken-input-audio",
+      "status": 400,
+      "seconds": 0.0,
+      "body": {
+        "error": {
+          "code": 400,
+          "message": "questions.refund: spoken instructions need a model with audio input",
+          "type": "invalid_request_error"
+        }
+      },
+      "hf": "answered"
+    },
+    {
+      "case": "hf-diff-state-big-integer",
+      "status": 200,
+      "seconds": 2.16,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "valid": {
+            "type": "noul",
+            "noul": 0.3363074870289979
+          }
+        },
+        "usage": {
+          "input_tokens": 69,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": false,
+      "questions": {
+        "valid": {
+          "type": "noul",
+          "same_answer": false,
+          "max_abs_p": 0.6582466361148704,
+          "max_abs_gap": 7.873570442199707
+        }
+      }
+    },
+    {
+      "case": "hf-diff-state-nan",
+      "status": 400,
+      "seconds": 0.0,
+      "body": {
+        "error": {
+          "code": 400,
+          "message": "[json.exception.parse_error.101] parse error at line 1, column 22: syntax error while parsing value - invalid literal; last read: '\"amount\": N'",
+          "type": "invalid_request_error"
+        }
+      },
+      "hf": "answered"
+    },
+    {
+      "case": "hf-diff-typed-text",
+      "status": 400,
+      "seconds": 0.0,
+      "body": {
+        "error": {
+          "code": 400,
+          "message": "questions.payee: \"type\" must be one of: choice, score, noul",
+          "type": "invalid_request_error"
+        }
+      },
+      "hf": "typed answer"
+    },
+    {
+      "case": "hf-noul-card",
+      "status": 200,
+      "seconds": 1.31,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "refund": {
+            "type": "noul",
+            "noul": 0.9978917006834956
+          }
+        },
+        "usage": {
+          "input_tokens": 43,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "refund": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 1.6135551946461213e-05,
+          "max_abs_gap": 0.010216236114471755
+        }
+      }
+    },
+    {
+      "case": "hf-noul-criteria-partial",
+      "status": 200,
+      "seconds": 1.59,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "legal": {
+            "type": "noul",
+            "noul": 0.4906727232921712
+          }
+        },
+        "usage": {
+          "input_tokens": 52,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "legal": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.0041946235652930985,
+          "max_abs_gap": 0.022451400756836097
+        }
+      }
+    },
+    {
+      "case": "hf-noul-criteria",
+      "status": 200,
+      "seconds": 1.94,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "damaged": {
+            "type": "noul",
+            "noul": 0.04738443012948648
+          }
+        },
+        "usage": {
+          "input_tokens": 67,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "damaged": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.00012649005214147857,
+          "max_abs_gap": 0.003741741180419922
+        }
+      }
+    },
+    {
+      "case": "hf-score-borderline",
+      "status": 200,
+      "seconds": 1.8,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "urgency": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            },
+            "probabilities": {
+              "0": 0.19795688520328597,
+              "1": 0.7416556974011401,
+              "2": 0.06038741739557383
+            },
+            "confidence": 0.7416556974011401
+          }
+        },
+        "usage": {
+          "input_tokens": 59,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "urgency": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.00046898303353781756,
+          "max_abs_gap": 0.003570556640625,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-score-card",
+      "status": 200,
+      "seconds": 1.67,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "urgency": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            },
+            "probabilities": {
+              "0": 0.19338508724690703,
+              "1": 0.6533790270941497,
+              "2": 0.1532358856589432
+            },
+            "confidence": 0.6533790270941497
+          }
+        },
+        "usage": {
+          "input_tokens": 54,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "urgency": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.002131020824335139,
+          "max_abs_gap": 0.012948036193847656,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-score-ten",
+      "status": 200,
+      "seconds": 2.74,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "rating": {
+            "type": "score",
+            "score": 5.0,
+            "legend": {
+              "0": "terrible",
+              "1": "very bad",
+              "2": "bad",
+              "3": "poor",
+              "4": "mediocre",
+              "5": "fair",
+              "6": "good",
+              "7": "very good",
+              "8": "excellent",
+              "9": "perfect"
+            },
+            "probabilities": {
+              "0": 0.0013005544404649935,
+              "1": 0.002772410332332893,
+              "2": 0.017460305841334126,
+              "3": 0.10824024679426725,
+              "4": 0.34726720560414603,
+              "5": 0.4601029432470993,
+              "6": 0.057334904992200654,
+              "7": 0.003860866251761282,
+              "8": 0.0011189034106949148,
+              "9": 0.0005416590856985862
+            },
+            "confidence": 0.4601029432470993
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "rating": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.0011665721000929108,
+          "max_abs_gap": 0.015268325805664062,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-score-two",
+      "status": 200,
+      "seconds": 1.66,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "risk": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "no risk",
+              "1": "risk"
+            },
+            "probabilities": {
+              "0": 0.06655213711459412,
+              "1": 0.9334478628854059
+            },
+            "confidence": 0.9334478628854059
+          }
+        },
+        "usage": {
+          "input_tokens": 53,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "risk": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.00012823571992859328,
+          "max_abs_gap": 0.0027642250061035156,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-state-empty",
+      "status": 200,
+      "seconds": 0.91,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "enough": {
+            "type": "noul",
+            "noul": 0.32664562236288197
+          }
+        },
+        "usage": {
+          "input_tokens": 29,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "enough": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.00024476705230752627,
+          "max_abs_gap": 0.001487731933593861
+        }
+      }
+    },
+    {
+      "case": "hf-state-json-array",
+      "status": 200,
+      "seconds": 3.19,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "resolved": {
+            "type": "noul",
+            "noul": 0.20089022218724997
+          }
+        },
+        "usage": {
+          "input_tokens": 105,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "resolved": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.0011343611913817442,
+          "max_abs_gap": 0.009470939636230469
+        }
+      }
+    },
+    {
+      "case": "hf-state-json-object",
+      "status": 200,
+      "seconds": 6.85,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "need": {
+            "type": "choice",
+            "choice": "refund",
+            "probabilities": {
+              "refund": 0.9955746213682382,
+              "delivery": 0.0014191301702227081,
+              "account": 0.0030062484615391983
+            },
+            "confidence": 0.9955746213682382
+          }
+        },
+        "usage": {
+          "input_tokens": 234,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "need": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 8.412528344381442e-06,
+          "max_abs_gap": 0.005318641662597656,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-state-long",
+      "status": 200,
+      "seconds": 151.79,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "team": {
+            "type": "choice",
+            "choice": "shipping",
+            "probabilities": {
+              "billing": 0.21855488740448845,
+              "shipping": 0.6771926577239225,
+              "technical": 0.10425245487158906
+            },
+            "confidence": 0.6771926577239225
+          }
+        },
+        "usage": {
+          "input_tokens": 3605,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0007286497932108837,
+          "max_abs_gap": 0.01045989990234375,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-state-null",
+      "status": 200,
+      "seconds": 1.6,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "formality": {
+            "type": "score",
+            "score": 2.0,
+            "legend": {
+              "0": "casual",
+              "1": "neutral",
+              "2": "formal"
+            },
+            "probabilities": {
+              "0": 0.007208657367325375,
+              "1": 0.039238818262337924,
+              "2": 0.9535525243703368
+            },
+            "confidence": 0.9535525243703368
+          }
+        },
+        "usage": {
+          "input_tokens": 45,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "formality": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.00034723261134439465,
+          "max_abs_gap": 0.013030052185058594,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-state-special-token-key",
+      "status": 200,
+      "seconds": 1.96,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "injection": {
+            "type": "noul",
+            "noul": 0.6471140718876744
+          }
+        },
+        "usage": {
+          "input_tokens": 58,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "injection": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.0022261068285512886,
+          "max_abs_gap": 0.013018608093261497
+        }
+      }
+    },
+    {
+      "case": "hf-state-special-tokens",
+      "status": 200,
+      "seconds": 2.33,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "injection": {
+            "type": "noul",
+            "noul": 0.8456616366655938
+          }
+        },
+        "usage": {
+          "input_tokens": 70,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "injection": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.0010462917128016835,
+          "max_abs_gap": 0.010751724243164062
+        }
+      }
+    },
+    {
+      "case": "hf-state-unicode",
+      "status": 200,
+      "seconds": 2.56,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "language": {
+            "type": "choice",
+            "choice": "mixed",
+            "probabilities": {
+              "fr": 0.22229130611430684,
+              "ja": 0.013565677986252722,
+              "es": 0.0832406865858818,
+              "mixed": 0.6809023293135588
+            },
+            "confidence": 0.6809023293135588
+          }
+        },
+        "usage": {
+          "input_tokens": 75,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "language": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0011636380250179407,
+          "max_abs_gap": 0.022672653198242188,
+          "skipped_underflow": 0
+        }
+      }
+    }
+  ]
+}

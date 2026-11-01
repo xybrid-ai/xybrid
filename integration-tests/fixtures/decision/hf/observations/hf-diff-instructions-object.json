@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-instructions-object",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "5bdde5cbf4577b18fdfdc9046c3ffd7f50bc850a008a493b39139e75f255dadd",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "spam",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "spam",
+          "prompt": "<|startoftext|><|im_start|>user\nWIN A FREE CRUISE!!! Click now to claim your prize.\n\n\nQUESTION:\n{'task': 'Is this message spam?', 'language': 'en'}\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 63, 1786, 334, 42883, 123482, 33014, 36043, 17010, 1665, 310, 4172, 679, 26194, 64673, 63509, 833, 67035, 41799, 8091, 951, 4439, 532, 5781, 59185, 39, 2372, 951, 39658, 8091, 951, 270, 35159, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 50,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "spam",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4109c86b", "0x4133e421", "0x40808a55", "0x40cc0600", "0x3fa340be"]
+      ],
+      "scores": [
+        ["0x4133e421", "0x40cc0600"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "spam": {
+          "type": "noul",
+          "noul": 0.97440677235194617
+        }
+      },
+      "usage": {
+        "input_tokens": 51,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "spam",
+        "prompt_sha256": "7b10efe4fe82b5fc43838d5bc99d235ee5de292c83244ed75fc7f80404fd6ddd",
+        "state_tokens": 20,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "spam",
+        "raw_logprobs": ["0xc0365bf0", "0xbe5ed180", "0xc0ee3479", "0xc0a2b8ce", "0xc122f74f"],
+        "logprob_scores": ["0xbe5ed180", "0xc0a2b8ce"],
+        "logsumexp": "0x41375f67",
+        "distribution": [0.97440677235194617, 0.025593227648053878]
+      }
+    ]
+  }
+}

@@ -1,0 +1,631 @@
+{
+  "description": "Provenance of the HF reference observations in this folder: LiquidAI's own d1 code and weights (contract artifact d1-2b-hf) run by tools/conformance/decision_hf/run_reference.py, one question per sequence. Written by tools/conformance/decision_hf/provenance.py --update; checked by --check.",
+  "reference": {
+    "artifact": "d1-2b-hf",
+    "repo": "LiquidAI/d1-2B",
+    "revision": "10e7671d44e4b37700020b1eed3f594c5f2af0b4",
+    "pins": "tools/conformance/decision_hf/pins.json",
+    "pins_sha256": "ebc4406ba2e6bf092565aad46ca8d962cd233d27d2b982a443773b7fe6d3a96b",
+    "code_imported": [
+      {
+        "module": "1aee51f088393cef.api",
+        "sha256": "d57845b414b6766cd0410f0437080244320adebd4f9f031a03777acbec243d2a"
+      },
+      {
+        "module": "1aee51f088393cef.attention",
+        "sha256": "2608cc3f48bc3f906b64244322df81de5a18cd1faa8243680713289d5540fd2c"
+      },
+      {
+        "module": "1aee51f088393cef.box",
+        "sha256": "1a123160ce3c94c25074132407c41d553601a6d8cb7056c814397ad0718dd16f"
+      },
+      {
+        "module": "1aee51f088393cef.calibration",
+        "sha256": "04243c3a2c1c727440184901dd60a4b4b04f72204dc577bd9f30b0ea3373d114"
+      },
+      {
+        "module": "1aee51f088393cef.configuration_lfm3",
+        "sha256": "cd9e8499d5e764e058c7aa1bb62234a0592acdf086126bea36770eb9e45e48cf"
+      },
+      {
+        "module": "1aee51f088393cef.configuration_lfm3_vl",
+        "sha256": "d65e130693c7415a0b20b527e2c8df5322112cd8e7e4b3793348a2ddcd0343be"
+      },
+      {
+        "module": "1aee51f088393cef.depthwise",
+        "sha256": "0e55c1d97227ebdb144503f1726b93693ea1232d8e9a98e4c60c044fbfdb6ce1"
+      },
+      {
+        "module": "1aee51f088393cef.grid",
+        "sha256": "a5626b67094eda0a4a22d50e73346f3bc2f1b4b6eb6d95ba64333c6f71592eff"
+      },
+      {
+        "module": "1aee51f088393cef.image_processing_lfm3_vl",
+        "sha256": "4f319e51f80051bce417db52df568a94ff3ea9a4527e1e0844f8ed3e21934b4b"
+      },
+      {
+        "module": "1aee51f088393cef.integrations_lfm3",
+        "sha256": "4c443aab5945ef28298f7c4b58fb4c303dd9dec8fcb21adfca966b92e9caef00"
+      },
+      {
+        "module": "1aee51f088393cef.json_spans",
+        "sha256": "91c4a6d585a58dfe7e06e4430f4516956f8143523a3e2de870bc8dd92ba20375"
+      },
+      {
+        "module": "1aee51f088393cef.lfm3",
+        "sha256": "608348f7e2f963744c8b3940bcf93d29e4499643a1269a048b48bec0d6c47129"
+      },
+      {
+        "module": "1aee51f088393cef.media",
+        "sha256": "1b2c76ba9fa13e75bf8b66caa9294682e76fbf463fe56c13b4e1f47c96e81e8e"
+      },
+      {
+        "module": "1aee51f088393cef.modeling_d1",
+        "sha256": "214d3477cef38e7831f2b4fb0250ace7fb1aeac5b02066fcfd5cc030c541fd72"
+      },
+      {
+        "module": "1aee51f088393cef.modeling_d1_lfm3_vl",
+        "sha256": "68d71f38188f07d11ad8af7cb557c8edc87536eb0db20870b7c5e6ae58fe5f30"
+      },
+      {
+        "module": "1aee51f088393cef.modeling_lfm3",
+        "sha256": "1617c42a7e3ccb97c810867536a8f6bb71f3543db00cafda9b3bd7a571ec72b9"
+      },
+      {
+        "module": "1aee51f088393cef.modeling_lfm3_vl",
+        "sha256": "c61dd6d90425d126de8402a9aa0a2a9d0241910100b719b8ab2bfee65e5e974f"
+      },
+      {
+        "module": "1aee51f088393cef.native_lfm3",
+        "sha256": "8c7e7533b406315546d7a4eaceb83c8a49bed4dac7cb29328a76fa9f972e8a19"
+      },
+      {
+        "module": "1aee51f088393cef.native_lfm3_vl",
+        "sha256": "90574b978c7138f36ea9970fff4fb691ad9ccd472580ae20c4110de090ed4b94"
+      },
+      {
+        "module": "1aee51f088393cef.pointer",
+        "sha256": "53e7b403d5f9d6f24e18a3f08b4dd9e93fea6da1da7eaeea92d07a4700cfedb3"
+      },
+      {
+        "module": "1aee51f088393cef.processing_lfm3_vl",
+        "sha256": "f4198f935ff6474cb1f44d5bdf02248f800a11eb7fc782dc1a168889b0b53da8"
+      },
+      {
+        "module": "1aee51f088393cef.prompt",
+        "sha256": "e9d40f98c36ab68b8e3c33fd00a77e58218460fdc88c96b5edeef793a260d20b"
+      },
+      {
+        "module": "1aee51f088393cef.runner",
+        "sha256": "ac195b19f60f985a6081ccecc1a5c9f7c9fbe6711e8916c0e9835aaaac0bc2a2"
+      },
+      {
+        "module": "1aee51f088393cef.slots",
+        "sha256": "67adea5fb377a79832827c43054b4ce94de0fa48f5ba0a39e6f2867b7e59f373"
+      },
+      {
+        "module": "1aee51f088393cef.video_processing_lfm3_vl",
+        "sha256": "597ca93c1df97f746166b93f3431edec4da6d938a1b3a60a9bf9900e54ab4e93"
+      },
+      {
+        "module": "5846cb63172ca150.configuration_lfm3",
+        "sha256": "cd9e8499d5e764e058c7aa1bb62234a0592acdf086126bea36770eb9e45e48cf"
+      },
+      {
+        "module": "5846cb63172ca150.configuration_lfm3_vl",
+        "sha256": "d65e130693c7415a0b20b527e2c8df5322112cd8e7e4b3793348a2ddcd0343be"
+      },
+      {
+        "module": "5846cb63172ca150.image_processing_lfm3_vl",
+        "sha256": "4f319e51f80051bce417db52df568a94ff3ea9a4527e1e0844f8ed3e21934b4b"
+      },
+      {
+        "module": "5846cb63172ca150.integrations_lfm3",
+        "sha256": "4c443aab5945ef28298f7c4b58fb4c303dd9dec8fcb21adfca966b92e9caef00"
+      },
+      {
+        "module": "5846cb63172ca150.modeling_lfm3",
+        "sha256": "1617c42a7e3ccb97c810867536a8f6bb71f3543db00cafda9b3bd7a571ec72b9"
+      },
+      {
+        "module": "5846cb63172ca150.modeling_lfm3_vl",
+        "sha256": "c61dd6d90425d126de8402a9aa0a2a9d0241910100b719b8ab2bfee65e5e974f"
+      },
+      {
+        "module": "5846cb63172ca150.native_lfm3",
+        "sha256": "8c7e7533b406315546d7a4eaceb83c8a49bed4dac7cb29328a76fa9f972e8a19"
+      },
+      {
+        "module": "5846cb63172ca150.native_lfm3_vl",
+        "sha256": "90574b978c7138f36ea9970fff4fb691ad9ccd472580ae20c4110de090ed4b94"
+      },
+      {
+        "module": "5846cb63172ca150.processing_lfm3_vl",
+        "sha256": "f4198f935ff6474cb1f44d5bdf02248f800a11eb7fc782dc1a168889b0b53da8"
+      },
+      {
+        "module": "5846cb63172ca150.video_processing_lfm3_vl",
+        "sha256": "597ca93c1df97f746166b93f3431edec4da6d938a1b3a60a9bf9900e54ab4e93"
+      }
+    ]
+  },
+  "environment": {
+    "requirements": "tools/conformance/decision_hf/requirements.txt",
+    "requirements_sha256": "c65fa390e1cd435446a721ddfb3ffaf1aac6d35549d8079ee83ece1fc7d66a54",
+    "versions": {
+      "python": "3.12.16",
+      "torch": "2.14.0+cpu",
+      "transformers": "5.19.0",
+      "tokenizers": "0.23.2",
+      "numpy": "2.4.6",
+      "safetensors": "0.8.0",
+      "torchvision": "0.29.0+cpu"
+    },
+    "cpu_capability": "AVX512",
+    "blas": "Intel(R) oneAPI Math Kernel Library Version 2024.2-Product Build 20240605 for Intel(R) 64 architecture applications"
+  },
+  "settings": {
+    "hf-cpu-f32-t1": {
+      "backend": "cpu (PyTorch, MKL)",
+      "threads": 1,
+      "precision": "float32 forward over the checkpoint's bfloat16 weights: each decoder layer, the embeddings, the final norm and the LM head compute with exact float32 widenings of their own parameters (run_reference.py Float32Compute), bit-identical to a float32 load module by module (verification.float32_parity)",
+      "set_size": 1,
+      "batch": 1,
+      "padding": false,
+      "attention": "the checkpoint's d1 attention (set): full-attention layers read the whole lone prompt both ways; sliding-window (256) and short-convolution layers stay causal",
+      "deterministic_algorithms": true,
+      "mode": "eval, inference_mode"
+    },
+    "hf-cpu-f32-t1-packed": {
+      "backend": "cpu (PyTorch, MKL)",
+      "threads": 1,
+      "precision": "as hf-cpu-f32-t1",
+      "set_size": "the checkpoint's d1_set_size (16): every question of a request packed after one state",
+      "batch": 1,
+      "padding": false,
+      "deterministic_algorithms": true,
+      "mode": "eval, inference_mode"
+    }
+  },
+  "hardware": {
+    "machine": "x86_64",
+    "system": "Linux",
+    "logical_cpus": 4,
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.90GHz",
+    "simd": [
+      "avx",
+      "avx2",
+      "avx512_bitalg",
+      "avx512_vbmi2",
+      "avx512_vnni",
+      "avx512_vpopcntdq",
+      "avx512bw",
+      "avx512cd",
+      "avx512dq",
+      "avx512f",
+      "avx512ifma",
+      "avx512vbmi",
+      "avx512vl",
+      "f16c",
+      "fma"
+    ],
+    "memory_gib": 8.2
+  },
+  "runs": {
+    "observations": {
+      "settings": "hf-cpu-f32-t1",
+      "model_load_seconds": 3.36,
+      "peak_rss_gib": 6.17,
+      "peak_anon_gib_between_calls": 1.81,
+      "seconds_total": 387.0,
+      "cases": {
+        "hf-card-three": {
+          "seconds": 18.76,
+          "input_tokens": 161
+        },
+        "hf-choice-27": {
+          "seconds": 8.4,
+          "input_tokens": 168
+        },
+        "hf-choice-36": {
+          "seconds": 8.37,
+          "input_tokens": 205
+        },
+        "hf-choice-ambiguous": {
+          "seconds": 6.26,
+          "input_tokens": 76
+        },
+        "hf-choice-card": {
+          "seconds": 6.1,
+          "input_tokens": 64
+        },
+        "hf-choice-key-fallback": {
+          "seconds": 6.05,
+          "input_tokens": 77
+        },
+        "hf-choice-letter-keys": {
+          "seconds": 6.0,
+          "input_tokens": 61
+        },
+        "hf-choice-lower-keys": {
+          "seconds": 6.18,
+          "input_tokens": 58
+        },
+        "hf-choice-one": {
+          "seconds": 6.92,
+          "input_tokens": 44
+        },
+        "hf-diff-chat-media-part": {
+          "seconds": 7.17,
+          "input_tokens": 110
+        },
+        "hf-diff-choice-256": {
+          "seconds": 25.36,
+          "input_tokens": 1064
+        },
+        "hf-diff-choice-multiple": {
+          "seconds": 6.59,
+          "input_tokens": null
+        },
+        "hf-diff-description-nonstring": {
+          "seconds": 6.49,
+          "input_tokens": 68
+        },
+        "hf-diff-duplicate-keys": {
+          "seconds": 5.45,
+          "input_tokens": 42
+        },
+        "hf-diff-escape-tool-call": {
+          "seconds": 5.64,
+          "input_tokens": 44
+        },
+        "hf-diff-escaped-key-collision": {
+          "seconds": 6.23,
+          "input_tokens": 53
+        },
+        "hf-diff-instructions-blank": {
+          "seconds": 0.0,
+          "input_tokens": null
+        },
+        "hf-diff-instructions-empty": {
+          "seconds": 0.0,
+          "input_tokens": null
+        },
+        "hf-diff-instructions-object": {
+          "seconds": 6.07,
+          "input_tokens": 51
+        },
+        "hf-diff-key-nonascii": {
+          "seconds": 5.54,
+          "input_tokens": 44
+        },
+        "hf-diff-key-whitespace": {
+          "seconds": 5.26,
+          "input_tokens": 44
+        },
+        "hf-diff-lone-surrogate": {
+          "seconds": 0.0,
+          "input_tokens": null
+        },
+        "hf-diff-noul-alias-criteria": {
+          "seconds": 5.73,
+          "input_tokens": 51
+        },
+        "hf-diff-noul-null-criteria": {
+          "seconds": 5.73,
+          "input_tokens": 51
+        },
+        "hf-diff-packing": {
+          "seconds": 28.2,
+          "input_tokens": 254
+        },
+        "hf-diff-questions-empty": {
+          "seconds": 0.0,
+          "input_tokens": 0
+        },
+        "hf-diff-score-nonstring-levels": {
+          "seconds": 0.0,
+          "input_tokens": null
+        },
+        "hf-diff-spoken-input-audio": {
+          "seconds": 5.83,
+          "input_tokens": 65
+        },
+        "hf-diff-state-big-integer": {
+          "seconds": 5.98,
+          "input_tokens": 74
+        },
+        "hf-diff-state-nan": {
+          "seconds": 5.4,
+          "input_tokens": 42
+        },
+        "hf-diff-typed-text": {
+          "seconds": 6.14,
+          "input_tokens": null
+        },
+        "hf-noul-card": {
+          "seconds": 5.42,
+          "input_tokens": 43
+        },
+        "hf-noul-criteria-partial": {
+          "seconds": 5.55,
+          "input_tokens": 52
+        },
+        "hf-noul-criteria": {
+          "seconds": 6.0,
+          "input_tokens": 67
+        },
+        "hf-score-borderline": {
+          "seconds": 5.71,
+          "input_tokens": 59
+        },
+        "hf-score-card": {
+          "seconds": 5.74,
+          "input_tokens": 54
+        },
+        "hf-score-ten": {
+          "seconds": 6.42,
+          "input_tokens": 91
+        },
+        "hf-score-two": {
+          "seconds": 5.8,
+          "input_tokens": 53
+        },
+        "hf-state-empty": {
+          "seconds": 5.38,
+          "input_tokens": 29
+        },
+        "hf-state-json-array": {
+          "seconds": 6.58,
+          "input_tokens": 105
+        },
+        "hf-state-json-object": {
+          "seconds": 9.14,
+          "input_tokens": 234
+        },
+        "hf-state-long": {
+          "seconds": 85.78,
+          "input_tokens": 3605
+        },
+        "hf-state-null": {
+          "seconds": 6.01,
+          "input_tokens": 45
+        },
+        "hf-state-special-token-key": {
+          "seconds": 5.61,
+          "input_tokens": 58
+        },
+        "hf-state-special-tokens": {
+          "seconds": 5.89,
+          "input_tokens": 70
+        },
+        "hf-state-unicode": {
+          "seconds": 6.1,
+          "input_tokens": 75
+        }
+      }
+    },
+    "packed": {
+      "settings": "hf-cpu-f32-t1-packed",
+      "model_load_seconds": 2.87,
+      "peak_rss_gib": 6.6,
+      "peak_anon_gib_between_calls": 2.13,
+      "seconds_total": 15.7,
+      "cases": {
+        "hf-diff-packing": {
+          "seconds": 8.25,
+          "input_tokens": 178
+        },
+        "hf-card-three": {
+          "seconds": 7.4,
+          "input_tokens": 123
+        }
+      }
+    }
+  },
+  "verification": {
+    "float32_parity": {
+      "what": "every module call of every forward replayed on a float32 deep copy of the module, the parameters a float32 load holds: bit-identical outputs, float32 inputs throughout",
+      "cases": [
+        "hf-choice-card",
+        "hf-noul-card",
+        "hf-score-ten",
+        "hf-choice-36",
+        "hf-state-json-object",
+        "hf-state-special-tokens"
+      ],
+      "calls": 162,
+      "bit_identical": 162,
+      "max_abs_diff": 0.0,
+      "non_float32_inputs": 0
+    },
+    "repeatability": {
+      "what": "a second hf-cpu-f32-t1 run of the parity cases",
+      "questions": 6,
+      "bit_identical": 6,
+      "max_abs_logit": 0.0,
+      "max_abs_probability": 0.0,
+      "answers_changed": 0
+    },
+    "threads": {
+      "what": "the same cases at 4 threads instead of 1",
+      "questions": 9,
+      "bit_identical": 1,
+      "max_abs_logit": 5.185604095458984e-06,
+      "max_abs_probability": 7.261057770602264e-07,
+      "answers_changed": 0
+    },
+    "bf16": {
+      "what": "the shared-domain cases with the bfloat16 forward instead",
+      "questions": 25,
+      "bit_identical": 0,
+      "max_abs_logit": 0.10782527923583984,
+      "max_abs_probability": 0.01025200799750381,
+      "answers_changed": 0
+    },
+    "packed": {
+      "what": "packed at the checkpoint's set size instead of alone",
+      "questions": 8,
+      "bit_identical": 0,
+      "max_abs_logit": 1.361257553100586,
+      "max_abs_probability": 0.11265853849647511,
+      "answers_changed": 0
+    }
+  },
+  "crosscheck": {
+    "what": "the stock llama-server answering the same requests, compared with the observations: a black-box check of DIFFERENCES.md and a G1 feasibility measurement, not the upstream oracle",
+    "build": {
+      "source": "vendor/llama-cpp",
+      "build_type": "Release",
+      "ggml_native": "ON",
+      "llama_curl": "OFF",
+      "compiler": "GNU 11.5.0",
+      "target": "llama-server"
+    },
+    "artifacts": "integration-tests/fixtures/decision/artifacts.json (the coordinator's pins: d1-2b-bf16, d1-2b-f16, d1-2b-q4km, each checked against its sha256 before use)",
+    "files": {
+      "d1-2b-bf16.cpu-t4-fa-off.json": {
+        "server": "llama-server v0.8.0 (vendor/llama-cpp 8642541, CPU, GGML_NATIVE=ON) on d1-2b-bf16 (d1-2B-BF16.gguf); settings cpu-t4-fa-off: -t 4 -c 4096 -b 4096 -ub 4096 -fa off -np 1",
+        "temperature": 1.3373980522155762,
+        "shared_cases": 24,
+        "shared_questions": 26,
+        "equal_token_counts": 24,
+        "answers_that_differ": 0,
+        "max_abs_probability": 0.0041946235652930985,
+        "max_abs_logit_gap": 0.02720499038696289
+      },
+      "d1-2b-bf16.cpu-t4-fa-on.json": {
+        "server": "llama-server v0.8.0 (vendor/llama-cpp 8642541, CPU, GGML_NATIVE=ON) on d1-2b-bf16 (d1-2B-BF16.gguf); settings cpu-t4-fa-on: -t 4 -c 4096 -b 4096 -ub 4096 -fa on -np 1",
+        "temperature": 1.3373980522155762,
+        "shared_cases": 24,
+        "shared_questions": 26,
+        "equal_token_counts": 24,
+        "answers_that_differ": 0,
+        "max_abs_probability": 0.003103774446214791,
+        "max_abs_logit_gap": 0.031154632568359375
+      },
+      "d1-2b-f16.cpu-t4-fa-off.json": {
+        "server": "llama-server v0.8.0 (vendor/llama-cpp 8642541, CPU, GGML_NATIVE=ON) on d1-2b-f16 (d1-2B-F16.gguf); settings cpu-t4-fa-off: -t 4 -c 4096 -b 4096 -ub 4096 -fa off -np 1",
+        "temperature": 1.3373980522155762,
+        "shared_cases": 24,
+        "shared_questions": 26,
+        "equal_token_counts": 24,
+        "answers_that_differ": 0,
+        "max_abs_probability": 0.0004916459665614825,
+        "max_abs_logit_gap": 0.0033464431762699753
+      },
+      "d1-2b-q4km.cpu-t4-fa-off.json": {
+        "server": "llama-server v0.8.0 (vendor/llama-cpp 8642541, CPU, GGML_NATIVE=ON) on d1-2b-q4km (d1-2B-Q4_K_M.gguf); settings cpu-t4-fa-off: -t 4 -c 4096 -b 4096 -ub 4096 -fa off -np 1",
+        "temperature": 1.3373980522155762,
+        "shared_cases": 24,
+        "shared_questions": 26,
+        "equal_token_counts": 24,
+        "answers_that_differ": 0,
+        "max_abs_probability": 0.0973105657218063,
+        "max_abs_logit_gap": 0.8711295127868652
+      }
+    }
+  },
+  "files": {
+    "README.md": "8dd3ed1d525d10a4973401f941676e8c317a92fad6f57d8f16ec9f7cabe46a0a",
+    "cases/hf-card-three.json": "ad535b582c8675f42bb609acdc94bda0998c7236734af9a1a6a834d744c7f7a0",
+    "cases/hf-choice-27.json": "26efce1d97d27097f510b04c90a6fc768c3f27713adb0ab4f2e6ff19441ea5e6",
+    "cases/hf-choice-36.json": "0fb08835f2435b713a3d597a55038a276d500a0d1208ceaa1d2667381c8a40cd",
+    "cases/hf-choice-ambiguous.json": "cd801da60316c4eaf218cdb2c49f127f5c629486a41ad4eb52c59b9c14a3469d",
+    "cases/hf-choice-card.json": "a97443c7ee3bcd0aec25536eb5ed9fc15abb67e5bb344dfdb4dbf2458a9c424e",
+    "cases/hf-choice-key-fallback.json": "525cbef930b5c83af6277abd74038fbcb14b403cc3c03f05b6dca216f92a012f",
+    "cases/hf-choice-letter-keys.json": "1211eab17a006e06c21d64bed2fdd8c20697dec09b629125135691d6d566b68f",
+    "cases/hf-choice-lower-keys.json": "d77d46725438396be30c9993f882a6994459cc87446a850b3f4fb75f6d003ec7",
+    "cases/hf-choice-one.json": "c6386d4e5dcd92679cf12eb87660e4ebd19e80e4faf9382d445267d32521beac",
+    "cases/hf-diff-chat-media-part.json": "f98f76939c21abadf8cdb1270f08ea14f27e13437a18379bdfae9a4b4c139145",
+    "cases/hf-diff-choice-256.json": "cf0fc6a48e859b7db0d73ffd59e2f38cd6279fff857d1a229b858fa15e02fa17",
+    "cases/hf-diff-choice-multiple.json": "e84f9e0a5bfc860247ff78773dde19a8048e720328b03f7fe7f9ba7348700631",
+    "cases/hf-diff-description-nonstring.json": "545099ceaa321b2966d223a98d98d2089d3d4579b45acdd9b6525fd8d179448b",
+    "cases/hf-diff-duplicate-keys.json": "60c666ea870d0a6766357df7db88c3a3dc41e3af472dcc211645b7af33d91a48",
+    "cases/hf-diff-escape-tool-call.json": "d7ff74bb51204eb862af5fb18a2c693d105b9e8d098255fe0f8c3b5093ef0e64",
+    "cases/hf-diff-escaped-key-collision.json": "8e86a78a482f8d22f5fba3dc8380dfd5461b886a8fe22132b094a0accab29946",
+    "cases/hf-diff-instructions-blank.json": "7e1de3fe6d633807a402b9a48ef09b058e33cb0b7d9c98ff8b801f952dfc2eaf",
+    "cases/hf-diff-instructions-empty.json": "ae467683e0174fa92dece87ca05a5e2862d13879a3a84440efdf765e985bfd81",
+    "cases/hf-diff-instructions-object.json": "d7897b35f56e966ed800f28ad2e96fe70cddb2479c9ddc3bcc82a66c2a3ea71f",
+    "cases/hf-diff-key-nonascii.json": "8d11624d74a7c55860ff38c126579d9360c159becb13c2cf9bb180883998361f",
+    "cases/hf-diff-key-whitespace.json": "c7d729ed4d9ca981875b0e161bed84d2a1e7205261c6a20271dab5cd269dcd55",
+    "cases/hf-diff-lone-surrogate.json": "167275a4ecac90537e5f8c98a69a07c72e0ea61d5185473adc22fc8a1a75d90f",
+    "cases/hf-diff-noul-alias-criteria.json": "99914aca62108e3eb8a32b2f8d9858dd61f46c16c4658f7867001807d84b427e",
+    "cases/hf-diff-noul-null-criteria.json": "d1859ddf312e590cc4cf77eec8d4fb6fd0abff52e01e370d56f43fd818b0d04e",
+    "cases/hf-diff-packing.json": "4a2a873e6cea42b01a6f458593293b044cae708e8635aab7bfec3ffea652571d",
+    "cases/hf-diff-questions-empty.json": "36a63a5a7a99ba780926deead6033fc92855761b9574e5bc519ad5edcc6b28e3",
+    "cases/hf-diff-score-nonstring-levels.json": "8b13e94c7db2e2d2934bd85ea487461519e3fb2d20b45615ff08d14b87f80a30",
+    "cases/hf-diff-spoken-input-audio.json": "19ae9b7192c26d5a54719a2af50a8785edaafe9e2d4eed59ef9f362a3ae83dd5",
+    "cases/hf-diff-state-big-integer.json": "b06c183c7de3ee6a6cb39575cd32eeb9b5e3b4d66343cffdedbc502792af09e0",
+    "cases/hf-diff-state-nan.json": "2c1fdd04e6d0f8b647df7165f44eba03bd3eae36e809524aad57c1b915bdc111",
+    "cases/hf-diff-typed-text.json": "3d9f14f62b4d6f825228d0a19b7d4fa2c9ac64ab5894443042030703e03c3f1c",
+    "cases/hf-noul-card.json": "27e2bd22b8f26dffc535e7b8576679b19137776d66bf9ebaf3f33804d38155b8",
+    "cases/hf-noul-criteria-partial.json": "24f3f7faf74a41ce2c0e997548bad97a10d92323ced191395b1259fd9a93aa38",
+    "cases/hf-noul-criteria.json": "32441430a1543f17b0ef478115ec87cc025005d627d36afe8101a4d7d56dce8e",
+    "cases/hf-score-borderline.json": "fb646b8b39dd3a042e8a0ce83dae56558b3c62c6cd7da4c9ecf803701c1fcbcd",
+    "cases/hf-score-card.json": "29c6d1afc7a3d3b146a1eb25da596eddae71698ebdc46ded2543d3a4c6ff17cc",
+    "cases/hf-score-ten.json": "2185f813b2bc2a0259931270a68a8e4b782aba245d2ab4ea6e21b5fb70b4645d",
+    "cases/hf-score-two.json": "419f2b39dfc4480801188b310b03015118ac48d90c0ca80363da60774363c271",
+    "cases/hf-state-empty.json": "290dac6b7b0567263081817da89da656d6a6a86fabc2bd5d45bf6200de286076",
+    "cases/hf-state-json-array.json": "e713e0e632d280ef7634aa1af3125b98dfbd263748c7486d96a370efef1ee696",
+    "cases/hf-state-json-object.json": "e47343bd937173562a35c2f89055af5013a35432022b4bd0ce3fb794844f7aa3",
+    "cases/hf-state-long.json": "3eb5e4061c447c479e9b2cc4338727efa5d2967cd977153f2d93dc2d1d42ec32",
+    "cases/hf-state-null.json": "b41b8e94cbf54de6716757b8f0d2ba8fb917b556d243ff8f27a6103bbf264aab",
+    "cases/hf-state-special-token-key.json": "b5e3b66c883ce498ef9afad279c7bd32855f64be26c0ff11f988bd1cccb9e0d7",
+    "cases/hf-state-special-tokens.json": "14af3fb2fe9e80517e1261fe32e1939f3c2377f186def4879c7fb82a686cf4b1",
+    "cases/hf-state-unicode.json": "7ad725e2ad93583f9520f4ee0d3eda4858b29db6c23fd536e56ca8a65d321f57",
+    "crosscheck/d1-2b-bf16.cpu-t4-fa-off.json": "7ccfc1a96defc7f9b2098ac6f4fbdc720db3c8f85a4c1b377150f3c0159829d7",
+    "crosscheck/d1-2b-bf16.cpu-t4-fa-on.json": "24639ea16db78ca5811cb370d12c29d5b0aa522ee1d86a749b0396985aa59b3f",
+    "crosscheck/d1-2b-f16.cpu-t4-fa-off.json": "1df3a1930a61d7a5ed26d80845591e9c819a6e5dd11d0e00c9c6b310b7b97e93",
+    "crosscheck/d1-2b-q4km.cpu-t4-fa-off.json": "3f5c9291cbad5c867cfa2a2c8aa2c1441dd3243212b4f751deacdf5479d08ef6",
+    "observations/hf-card-three.json": "ba75d474e8e0b50bbbf11e6b5d1c1fb7ee388e7dc312606b60ebc87424a26d21",
+    "observations/hf-choice-27.json": "aadc4fd4d01f2336e01cffbc3c6b66033173f2c9b901189da5da94ef15079a59",
+    "observations/hf-choice-36.json": "1cf571f0f967adb798de4ac6d0990206f7442aa469a2ddaac7d803b10f0c64e2",
+    "observations/hf-choice-ambiguous.json": "b574e29e1045a6345b5ae81f8af5b3815726cfdfb0eb2552f05b8d76e2982765",
+    "observations/hf-choice-card.json": "eac17a31283489f39336629849e214b47569b60a6b9432b7c24c3e21065b3346",
+    "observations/hf-choice-key-fallback.json": "d72405699c66c37d3bc2f699c57bf68234517a77227b21049367792ea994a03b",
+    "observations/hf-choice-letter-keys.json": "7727a771d51b07e53c989993da2d4796cb33d553f2a12f749db621af7b54f617",
+    "observations/hf-choice-lower-keys.json": "741225df09eddfad9bf031219e905b041864d6bf364be22915bb55a69af8cab6",
+    "observations/hf-choice-one.json": "d941efb65c73d0866d2a70b97072ad38f8e14e04946dfc6b8103a2e8e1e118ac",
+    "observations/hf-diff-chat-media-part.json": "5f92673f8d4fca4509530e1777def1087ad1a846f89a844659932e5b34dc5250",
+    "observations/hf-diff-choice-256.json": "9657c554b97630e5cccf7c3828ffc2dedd80720001a896fbde8110872edda332",
+    "observations/hf-diff-choice-multiple.json": "d371cc4e3c83ac36f90da50f31e0a54f06687eeb3845724ed62808c8d7cc9fdd",
+    "observations/hf-diff-description-nonstring.json": "d2e8953aefa765173789af6bcc352bf21787a717e511d2028205207ca031c5cc",
+    "observations/hf-diff-duplicate-keys.json": "5d06fd3a63dd2aae61e16f455e2bf93292d84fee8e2c99dc4ad55c827a4df2ce",
+    "observations/hf-diff-escape-tool-call.json": "2d8f44ea7cd803e66465f32c31ef6c1b1552fb88595970ae193998d6e653598e",
+    "observations/hf-diff-escaped-key-collision.json": "8a4777d512d8e1820d9f6f57bfe0f36b47dce2663103c2471cf8b713ef27ba7c",
+    "observations/hf-diff-instructions-blank.json": "007aaaeb8c0d98b4f8aad29c7641beaa9b8fc56173f6eba6dcc5221f29765242",
+    "observations/hf-diff-instructions-empty.json": "00552322cd6128f345c07038c521992c816a169693126db9474a1d5886bec39a",
+    "observations/hf-diff-instructions-object.json": "797ca53677cba5bb60354bd72f70920e501d6a1ef67c38a9fb69ee2d3287ba0b",
+    "observations/hf-diff-key-nonascii.json": "8045f303f569f5ce296ae52f210b493300541163b234cb8a751abf12a3c1599d",
+    "observations/hf-diff-key-whitespace.json": "c5fccbbae72ae1ee8908c4a14e26967db684a25691959e24853b18d83bbd48b0",
+    "observations/hf-diff-lone-surrogate.json": "59989b7734f37bbe2975337f56de731a00a315b225ec5246b76fec407ba4e03e",
+    "observations/hf-diff-noul-alias-criteria.json": "656b53c00612a8ba76e9d7d69989d91175fde01ea0a7cff1c5a0277c040b5b66",
+    "observations/hf-diff-noul-null-criteria.json": "10c80ee34d08b848a25f915a149938d3270e35a6c9a69a4c2079f30c04137237",
+    "observations/hf-diff-packing.json": "d5af6ff43da04a4651cca45712194598285aba76b5bd140179044f1e1156107c",
+    "observations/hf-diff-questions-empty.json": "98c124950e1671c3042cdc1115de7c3e423af623184fc3840db167c989e1a764",
+    "observations/hf-diff-score-nonstring-levels.json": "b9c5a3d2bcfb40d912192ad96bc917a91bd214d8d36fa21433148d9da39ec91a",
+    "observations/hf-diff-spoken-input-audio.json": "7613ff3549e9c53b67f4d3f994a8807a462366687d7622753a9e9c7eb1788ed4",
+    "observations/hf-diff-state-big-integer.json": "4672e7eb9840a914e2d3fbe06a766fbd620e6c9f63c6c914829104ed97a0f287",
+    "observations/hf-diff-state-nan.json": "1394d417d8d2e1b5617e4a2942e2908c44df38a2c55c89802c0365b51331dd8b",
+    "observations/hf-diff-typed-text.json": "de4e68aa8a409e4987824af2609042e85b18d732e9de00605f2a3a3c24f9ca2b",
+    "observations/hf-noul-card.json": "743aa8ab941e95f369d7333891de7ad51990a4911858399793c65719dd87a2ed",
+    "observations/hf-noul-criteria-partial.json": "09d692ae292cc4be1d9c4501593c55e017daade3f5824ced23deda089441b5b9",
+    "observations/hf-noul-criteria.json": "058d148fad752546ca87adfd16349decd97767075ebd859a94c4ad16f7046a92",
+    "observations/hf-score-borderline.json": "8586ab304aaf0f3b49369b528e86bfcfd89b4335e508e7da945bfa699aef02d5",
+    "observations/hf-score-card.json": "4735094a793e8dcae796b2317a258b18772a30780ccac43efa7dc67d1a9c7002",
+    "observations/hf-score-ten.json": "4724af65f0aebb792e094e177e619468379979bfd9dcb35d1d45e99c80895d36",
+    "observations/hf-score-two.json": "26220db976ed3e320a9f282fc4663eaea58c82eb951e51404086bb40e54252c4",
+    "observations/hf-state-empty.json": "d2f413c660d33ea3f0ca45a75331829799e014159d49514ac689d7089a113223",
+    "observations/hf-state-json-array.json": "e3b01f50737fed3496e52eb087ad8fcbf62efaeb66bf1ca9b44c3f71c6b46edf",
+    "observations/hf-state-json-object.json": "f34055efdec8c6e3ff5a0b5237c5bd69ddbfeafbf4fcf9c82aa75454663fa4b9",
+    "observations/hf-state-long.json": "bfb716c21445ea7b0ac21979905e5fb15355ea2acdc96884a329024ab1865ea9",
+    "observations/hf-state-null.json": "7f8ffee49fbc2009d672a41518367110e2040ca21b26122bab38fa49a6eea00c",
+    "observations/hf-state-special-token-key.json": "2b041871e2f73c6512d14cf98fad157dad8848b616f675633f44f798a3c16413",
+    "observations/hf-state-special-tokens.json": "85e69f9cc8425b3eb8219e4ae8e405c4b5850508e8b8ee30c3c0c16e78dbc360",
+    "observations/hf-state-unicode.json": "2349207807a9d604c6b64b1779d431f72ec5f6f1d452395a7d6fcee4bf8370a7",
+    "packed/hf-card-three.json": "cd4cdf4b6851698155d33fc760cb8d969dc17f0ca32dffe3c773c2e0c270faea",
+    "packed/hf-diff-packing.json": "323cac3a2bc53df20806cbe9a4d4c6a9fc0945fddf969b144395f2f60e3b5e1d",
+    "synthetic/median.json": "8992047033812aa76850f38c8468ecf5806cd3addad7a14312a65e4a5c15b62c"
+  }
+}

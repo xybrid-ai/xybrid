@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "hf-state-null",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A null state: no state block, the question follows the user turn's opening.",
+  "covers": [
+    "state-null"
+  ],
+  "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": null, \"questions\": {\"formality\": {\"type\": \"score\", \"instructions\": \"How formal is the greeting 'Dear Sir or Madam'?\", \"criteria\": [\"casual\", \"neutral\", \"formal\"]}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

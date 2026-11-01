@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "hf-score-borderline",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A score whose distribution is spread over its levels.",
+  "covers": [
+    "state-string"
+  ],
+  "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"The package is a day late. Not a big deal, but I need it before the weekend.\", \"questions\": {\"urgency\": {\"type\": \"score\", \"instructions\": \"How urgent is this ticket?\", \"criteria\": [\"low\", \"medium\", \"high\"]}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

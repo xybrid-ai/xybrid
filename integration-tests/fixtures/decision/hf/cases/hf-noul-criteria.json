@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "hf-noul-criteria",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Yes/no with both criteria: Yes and No lines, Yes first.",
+  "covers": [
+    "noul-order"
+  ],
+  "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"Order 5521 arrived with the box crushed, but the vase inside is intact.\", \"questions\": {\"damaged\": {\"type\": \"noul\", \"instructions\": \"Did the item arrive damaged?\", \"criteria\": {\"true\": \"The product itself is broken or unusable\", \"false\": \"Only the packaging is damaged, or nothing is\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

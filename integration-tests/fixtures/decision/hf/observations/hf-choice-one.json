@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "case": "hf-choice-one",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "edacbba1ed969b69b0023a9d4fc9e8388b072a7d88a22c91f7d3ac743d7992a4",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "queue",
+          "type": "choice",
+          "keys": ["general"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "queue",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nWhich queue?\n\nOptions:\nA General support\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 28327, 27337, 64929, 13314, 833, 41, 5024, 1757, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 43,
+          "select": [41, 334]
+        }
+      ],
+      "answers": [
+        {
+          "question": "queue",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "general",
+              "code": "A",
+              "range": [0, 2]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x41156813", "0x40b11313"]
+      ],
+      "scores": [
+        ["0x41156813"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "queue": {
+          "type": "choice",
+          "choice": "general",
+          "confidence": 1.0,
+          "probabilities": {
+            "general": 1.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 44,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "queue",
+        "prompt_sha256": "9248c8e0e662207e33bcc26866dd3bead75f9ce4aaab0241411c68c75e8af64f",
+        "state_tokens": 21,
+        "select_tokens": ["A", "ĠA"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "queue",
+        "raw_logprobs": ["0xbf824b28", "0xc09a4fdd"],
+        "logprob_scores": ["0xbf824b28"],
+        "logsumexp": "0x4125b178",
+        "distribution": [1.0]
+      }
+    ]
+  }
+}

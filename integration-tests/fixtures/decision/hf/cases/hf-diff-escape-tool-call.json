@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-escape-tool-call",
+  "profile": "lfm3-d1/text/v1",
+  "title": "<|tool_call_start|> in the state is a CONTROL token of the GGUF, so d1_break breaks it",
+  "covers": [
+    "escape-control"
+  ],
+  "notes": "Tool-call markers in the state: <|tool_call_start|> is an added token the tokenizer does not flag special, so the reference leaves it unbroken; the GGUF marks it CONTROL, so llama.cpp breaks it. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"Model output: <|tool_call_start|>[get_weather(city='Paris')]<|tool_call_end|>\", \"questions\": {\"tool\": {\"type\": \"noul\", \"instructions\": \"Does the text contain a tool call?\"}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

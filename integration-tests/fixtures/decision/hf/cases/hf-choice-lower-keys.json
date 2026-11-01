@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "hf-choice-lower-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Single lower-case ASCII letter keys: the keys are the codes in both references.",
+  "covers": [
+    "choice-lowercase-keys"
+  ],
+  "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"Customer: the app logs me out every time I switch to another app and come back.\", \"questions\": {\"category\": {\"type\": \"choice\", \"instructions\": \"Pick the category.\", \"criteria\": {\"x\": \"Sign-in or session problems\", \"y\": \"Payments\", \"z\": \"Shipping\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

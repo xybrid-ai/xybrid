@@ -1,0 +1,194 @@
+{
+  "description": "Three-level score questions where the reference's median (api.py score_level: renormalized cumulative mass, float64 temperature from calibration.json) and llama.cpp's (server-decision.cpp format_answer: plain cumulative mass, temperature strtof of the GGUF's string) disagree. Reference columns come from the pinned snapshot's own prompt.readouts and api.score_level; llamacpp_rule columns are computed from server-decision.cpp:1675-1740 and are to be confirmed by the upstream oracle.",
+  "generator": "tools/conformance/decision_hf/synthetic_median.py",
+  "reference": {
+    "artifact": "d1-2b-hf",
+    "revision": "10e7671d44e4b37700020b1eed3f594c5f2af0b4",
+    "code": [
+      {
+        "module": "1aee51f088393cef.api",
+        "sha256": "d57845b414b6766cd0410f0437080244320adebd4f9f031a03777acbec243d2a"
+      },
+      {
+        "module": "1aee51f088393cef.attention",
+        "sha256": "2608cc3f48bc3f906b64244322df81de5a18cd1faa8243680713289d5540fd2c"
+      },
+      {
+        "module": "1aee51f088393cef.box",
+        "sha256": "1a123160ce3c94c25074132407c41d553601a6d8cb7056c814397ad0718dd16f"
+      },
+      {
+        "module": "1aee51f088393cef.calibration",
+        "sha256": "04243c3a2c1c727440184901dd60a4b4b04f72204dc577bd9f30b0ea3373d114"
+      },
+      {
+        "module": "1aee51f088393cef.configuration_lfm3",
+        "sha256": "cd9e8499d5e764e058c7aa1bb62234a0592acdf086126bea36770eb9e45e48cf"
+      },
+      {
+        "module": "1aee51f088393cef.configuration_lfm3_vl",
+        "sha256": "d65e130693c7415a0b20b527e2c8df5322112cd8e7e4b3793348a2ddcd0343be"
+      },
+      {
+        "module": "1aee51f088393cef.depthwise",
+        "sha256": "0e55c1d97227ebdb144503f1726b93693ea1232d8e9a98e4c60c044fbfdb6ce1"
+      },
+      {
+        "module": "1aee51f088393cef.grid",
+        "sha256": "a5626b67094eda0a4a22d50e73346f3bc2f1b4b6eb6d95ba64333c6f71592eff"
+      },
+      {
+        "module": "1aee51f088393cef.image_processing_lfm3_vl",
+        "sha256": "4f319e51f80051bce417db52df568a94ff3ea9a4527e1e0844f8ed3e21934b4b"
+      },
+      {
+        "module": "1aee51f088393cef.integrations_lfm3",
+        "sha256": "4c443aab5945ef28298f7c4b58fb4c303dd9dec8fcb21adfca966b92e9caef00"
+      },
+      {
+        "module": "1aee51f088393cef.json_spans",
+        "sha256": "91c4a6d585a58dfe7e06e4430f4516956f8143523a3e2de870bc8dd92ba20375"
+      },
+      {
+        "module": "1aee51f088393cef.lfm3",
+        "sha256": "608348f7e2f963744c8b3940bcf93d29e4499643a1269a048b48bec0d6c47129"
+      },
+      {
+        "module": "1aee51f088393cef.media",
+        "sha256": "1b2c76ba9fa13e75bf8b66caa9294682e76fbf463fe56c13b4e1f47c96e81e8e"
+      },
+      {
+        "module": "1aee51f088393cef.modeling_d1",
+        "sha256": "214d3477cef38e7831f2b4fb0250ace7fb1aeac5b02066fcfd5cc030c541fd72"
+      },
+      {
+        "module": "1aee51f088393cef.modeling_d1_lfm3_vl",
+        "sha256": "68d71f38188f07d11ad8af7cb557c8edc87536eb0db20870b7c5e6ae58fe5f30"
+      },
+      {
+        "module": "1aee51f088393cef.modeling_lfm3",
+        "sha256": "1617c42a7e3ccb97c810867536a8f6bb71f3543db00cafda9b3bd7a571ec72b9"
+      },
+      {
+        "module": "1aee51f088393cef.modeling_lfm3_vl",
+        "sha256": "c61dd6d90425d126de8402a9aa0a2a9d0241910100b719b8ab2bfee65e5e974f"
+      },
+      {
+        "module": "1aee51f088393cef.native_lfm3",
+        "sha256": "8c7e7533b406315546d7a4eaceb83c8a49bed4dac7cb29328a76fa9f972e8a19"
+      },
+      {
+        "module": "1aee51f088393cef.native_lfm3_vl",
+        "sha256": "90574b978c7138f36ea9970fff4fb691ad9ccd472580ae20c4110de090ed4b94"
+      },
+      {
+        "module": "1aee51f088393cef.pointer",
+        "sha256": "53e7b403d5f9d6f24e18a3f08b4dd9e93fea6da1da7eaeea92d07a4700cfedb3"
+      },
+      {
+        "module": "1aee51f088393cef.processing_lfm3_vl",
+        "sha256": "f4198f935ff6474cb1f44d5bdf02248f800a11eb7fc782dc1a168889b0b53da8"
+      },
+      {
+        "module": "1aee51f088393cef.prompt",
+        "sha256": "e9d40f98c36ab68b8e3c33fd00a77e58218460fdc88c96b5edeef793a260d20b"
+      },
+      {
+        "module": "1aee51f088393cef.runner",
+        "sha256": "ac195b19f60f985a6081ccecc1a5c9f7c9fbe6711e8916c0e9835aaaac0bc2a2"
+      },
+      {
+        "module": "1aee51f088393cef.slots",
+        "sha256": "67adea5fb377a79832827c43054b4ce94de0fa48f5ba0a39e6f2867b7e59f373"
+      },
+      {
+        "module": "1aee51f088393cef.video_processing_lfm3_vl",
+        "sha256": "597ca93c1df97f746166b93f3431edec4da6d938a1b3a60a9bf9900e54ab4e93"
+      }
+    ]
+  },
+  "temperature": {
+    "reference": 1.337398453966105,
+    "llamacpp": 1.3373980522155762,
+    "llamacpp_text": "1.337398"
+  },
+  "levels": ["low", "medium", "high"],
+  "end_to_end": {
+    "float32_triples_tried": 129,
+    "cases": [
+      {
+        "scores": ["0x00000000", "0xc0c00000", "0x3c756474"],
+        "reference": {
+          "distribution": [0.49443171926759566, 0.0055682851891283086, 0.49999999554327618],
+          "median": 1
+        },
+        "llamacpp_rule": {
+          "distribution": [0.49443172214626291, 0.0055682777172962623, 0.50000000013644086],
+          "median": 2
+        }
+      },
+      {
+        "scores": ["0x00000000", "0xc0c00000", "0x3c756475"],
+        "reference": {
+          "distribution": [0.49443171909544209, 0.0055682851871895148, 0.49999999571736825],
+          "median": 1
+        },
+        "llamacpp_rule": {
+          "distribution": [0.49443172197410939, 0.005568277715357472, 0.50000000031053304],
+          "median": 2
+        }
+      },
+      {
+        "scores": ["0x00000000", "0xc0c00000", "0x3c756476"],
+        "reference": {
+          "distribution": [0.4944317189232888, 0.005568285185250728, 0.49999999589146055],
+          "median": 1
+        },
+        "llamacpp_rule": {
+          "distribution": [0.49443172180195599, 0.0055682777134186835, 0.50000000048462534],
+          "median": 2
+        }
+      }
+    ]
+  },
+  "renormalization": {
+    "float64_triples_tried": 129,
+    "cases": [
+      {
+        "scores_f64": [0.0, -6.0, 0.014977587014241567],
+        "distribution": [0.49443171486050425, 0.0055682851394956842, 0.5],
+        "sum": 0.99999999999999989,
+        "reference_median": 1,
+        "plain_cumulative_median": 2
+      },
+      {
+        "scores_f64": [0.0, -6.0, 0.014977587014241569],
+        "distribution": [0.49443171486050425, 0.0055682851394956842, 0.5],
+        "sum": 0.99999999999999989,
+        "reference_median": 1,
+        "plain_cumulative_median": 2
+      },
+      {
+        "scores_f64": [0.0, -6.0, 0.01497758701424157],
+        "distribution": [0.49443171486050425, 0.0055682851394956842, 0.5],
+        "sum": 0.99999999999999989,
+        "reference_median": 1,
+        "plain_cumulative_median": 2
+      }
+    ],
+    "rule": [
+      {
+        "distribution": [0.25, 0.25, 0.50000000000000022],
+        "sum": 1.0000000000000002,
+        "reference_median": 2,
+        "plain_cumulative_median": 1
+      },
+      {
+        "distribution": [0.24999999999999997, 0.24999999999999997, 0.49999999999999994],
+        "sum": 0.99999999999999989,
+        "reference_median": 1,
+        "plain_cumulative_median": 2
+      }
+    ]
+  }
+}

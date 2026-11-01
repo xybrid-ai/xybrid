@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-state-big-integer",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "0d708e8faa8377adaf9136086bf59a9ea0e34f7b40064396002bdc188f464b24",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "valid",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "valid",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"order_id\": 18446744073709551615,\n  \"customer_id\": 9223372036854775808,\n  \"trace\": 123456789012345678901234567890\n}\n\n\nQUESTION:\nDoes the order have an order id?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 3166, 6089, 6380, 229, 4286, 32437, 23362, 23229, 33806, 31792, 885, 920, 229, 496, 95142, 6089, 6380, 229, 25680, 26689, 12350, 25416, 32357, 27952, 32, 920, 229, 496, 98252, 6380, 229, 9792, 25677, 23944, 19911, 24331, 24803, 22941, 20651, 32673, 24518, 207, 64024, 63509, 833, 29088, 278, 2064, 551, 401, 2064, 3446, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 73,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "valid",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x411c6bf3", "0x41636ebc", "0x4055cb78", "0x40e800f8", "0x40039a72"]
+      ],
+      "scores": [
+        ["0x41636ebc", "0x40e800f8"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "valid": {
+          "type": "noul",
+          "noul": 0.99455412314386826
+        }
+      },
+      "usage": {
+        "input_tokens": 74,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {
+      "json": {
+        "integers_beyond_int64": ["18446744073709551615", "9223372036854775808", "123456789012345678901234567890"]
+      }
+    },
+    "prepare": [
+      {
+        "question": "valid",
+        "prompt_sha256": "1edb04f7f8d56bc993f8fc6e453f372b94f3c220fed0f1873ea49a18be1a98ea",
+        "state_tokens": 52,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "valid",
+        "raw_logprobs": ["0xc08f2544", "0xbd0fd900", "0xc12e8bb7", "0xc0dffc32", "0xc14317f8"],
+        "logprob_scores": ["0xbd0fd900", "0xc0dffc32"],
+        "logsumexp": "0x4163fe95",
+        "distribution": [0.99455412314386826, 0.0054458768561317919]
+      }
+    ]
+  }
+}

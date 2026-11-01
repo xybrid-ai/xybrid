@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-chat-media-part",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "8969c785b1d9fda4394560b90d2e3fa75b5e827afe9ebfed8970ff9849346732",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "receipt",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "receipt",
+          "prompt": "<|startoftext|><|im_start|>user\n[\n  {\n    \"role\": \"user\",\n    \"content\": [\n      {\n        \"type\": \"text\",\n        \"text\": \"See the attached receipt.\"\n      },\n      {\n        \"type\": \"image_url\",\n        \"image_url\": {\n          \"url\": \"data:image/png;base64,iVBORw0KGgo=\"\n        }\n      }\n    ]\n  }\n]\n\n\nQUESTION:\nDoes the customer mention a receipt?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 14200, 229, 827, 360, 496, 15688, 6380, 496, 5922, 6107, 360, 496, 7915, 6380, 19843, 733, 827, 463, 496, 5882, 6380, 496, 1384, 6107, 463, 496, 1384, 6380, 496, 6490, 278, 12429, 42651, 1917, 733, 10016, 733, 827, 463, 496, 5882, 6380, 496, 9304, 21778, 6107, 463, 496, 9304, 21778, 6380, 827, 937, 496, 7826, 6380, 496, 5911, 34, 9304, 8824, 881, 35, 14384, 2251, 31411, 62, 42, 2349, 95, 24, 67484, 1585, 65991, 463, 1130, 733, 1130, 360, 23174, 229, 1130, 88887, 63509, 833, 29088, 278, 13107, 5668, 267, 42651, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 109,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "receipt",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x410a2c5e", "0x41635134", "0x4031ffd6", "0x40fad6f1", "0x3fd89ce6"]
+      ],
+      "scores": [
+        ["0x41635134", "0x40fad6f1"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "receipt": {
+          "type": "noul",
+          "noul": 0.99152330586817983
+        }
+      },
+      "usage": {
+        "input_tokens": 110,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "receipt",
+        "prompt_sha256": "826e941fc76cd859126e3dbb70996ed4ce9df6c9575996c09f532ba580b2f69d",
+        "state_tokens": 89,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "receipt",
+        "raw_logprobs": ["0xc0b30984", "0xbcbfd800", "0xc137312a", "0xc0cc8b4f", "0xc1489d83"],
+        "logprob_scores": ["0xbcbfd800", "0xc0cc8b4f"],
+        "logsumexp": "0x4163b120",
+        "distribution": [0.99152330586817983, 0.0084766941318200669]
+      }
+    ]
+  }
+}
