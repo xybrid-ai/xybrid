@@ -133,3 +133,41 @@ fn characters_split_across_tokens_survive_on_qwen3() {
     };
     assert_split_characters_survive(&backend(&gguf), &["🙂 ok", "日本語"]);
 }
+
+/// The text a token carries ahead of a stop it completes is streamed.
+/// Primed this way, FunctionGemma writes "The rest" as "The" then " rest",
+/// so "The" completes the stop "he": the stream used to emit nothing while
+/// the final text was "T".
+#[test]
+fn text_ahead_of_a_stop_inside_a_token_is_streamed() {
+    let Some(gguf) = gguf("functiongemma-270m-it", "functiongemma-270m-it-q8_0.gguf") else {
+        return;
+    };
+    let backend = backend(&gguf);
+    let mut config = GenerationConfig::greedy()
+        .with_max_tokens(2)
+        .with_grammar(r#"root ::= "The rest""#);
+    config.stop_sequences = vec!["he".to_string()];
+
+    let mut chunks = Vec::new();
+    let output = backend
+        .generate_streaming(
+            &[ChatMessage::user("Repeat after me: The rest")],
+            &config,
+            collect_into(&mut chunks),
+        )
+        .expect("streaming chat generation succeeds");
+    assert_eq!(output.text, "T", "generate_streaming");
+    assert_eq!(streamed(&chunks), "T", "generate_streaming deltas");
+
+    let mut chunks = Vec::new();
+    let output = backend
+        .generate_raw_streaming(
+            "The rest\nThe rest\nThe rest\n",
+            &config,
+            collect_into(&mut chunks),
+        )
+        .expect("streaming raw generation succeeds");
+    assert_eq!(output.text, "T", "generate_raw_streaming");
+    assert_eq!(streamed(&chunks), "T", "generate_raw_streaming deltas");
+}
