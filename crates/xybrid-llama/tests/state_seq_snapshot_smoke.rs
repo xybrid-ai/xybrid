@@ -148,12 +148,12 @@ fn snapshot_restores_the_prefix(gguf: PathBuf, expect_recurrent: bool) {
 
     // Reference: the same decode calls as the snapshot path, minus the
     // snapshot, so the outputs can be compared token for token.
-    ctx.kv_cache_clear();
+    ctx.kv_cache_clear().expect("clear the memory");
     prefill(&ctx, &model, &prefix, 0);
     let reference = answer(&ctx, &model, &question, n_prefix);
     assert!(!reference.is_empty(), "the reference answer is empty");
 
-    ctx.kv_cache_clear();
+    ctx.kv_cache_clear().expect("clear the memory");
     prefill(&ctx, &model, &prefix, 0);
     let snapshot = ctx.state_seq_save(0).expect("save the prefix");
     assert!(snapshot.size_bytes() > 0);
@@ -204,7 +204,7 @@ fn snapshot_restores_the_prefix(gguf: PathBuf, expect_recurrent: bool) {
     // An empty snapshot empties the sequence: a fresh prefill from position
     // 0 then gives the reference again. Left-over cells would make that
     // decode fail (plain KV) or attend to stale tokens (hybrid).
-    ctx.kv_cache_clear();
+    ctx.kv_cache_clear().expect("clear the memory");
     let empty = ctx.state_seq_save(0).expect("save an empty sequence");
     prefill(&ctx, &model, &prefix, 0);
     answer(&ctx, &model, &other, n_prefix);

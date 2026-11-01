@@ -145,6 +145,8 @@ pub(crate) const ABSENT: i32 = sys::LLAMA_XYBRID_ABSENT;
 /// The status the guarded shims return when llama.cpp raised an exception
 /// (an allocation failure) or got a null argument.
 pub(crate) const FAILED: i32 = sys::LLAMA_XYBRID_FAILED;
+/// A shim's status when llama.cpp refused the request and changed nothing.
+pub(crate) const REFUSED: i32 = sys::LLAMA_XYBRID_REFUSED;
 /// `llama_decode_c`'s status when llama.cpp raised an exception.
 pub(crate) const DECODE_EXCEPTION: i32 = sys::LLAMA_XYBRID_DECODE_EXCEPTION;
 
@@ -195,16 +197,22 @@ pub(crate) unsafe fn set_abort_callback(
 /// Makes the next call of the guarded shim `shim`, on any thread, throw
 /// `std::bad_alloc` inside its exception boundary, as an allocation failure
 /// in llama.cpp would. One-shot and process-wide (see wrapper.h): the tests
-/// arm it in a child process that makes the one call.
+/// arm it in a child process that makes the calls.
 ///
 /// # Panics
 ///
 /// When `shim` is not a guarded shim.
 #[cfg(test)]
 pub(crate) fn fail_next_native_call(shim: &str) {
+    fail_native_call_after(shim, 0);
+}
+
+/// [`fail_next_native_call`], letting `skip` calls of `shim` through first.
+#[cfg(test)]
+pub(crate) fn fail_native_call_after(shim: &str, skip: u32) {
     let name = CString::new(shim).expect("a shim name has no NUL");
     // SAFETY: the shim only reads the name during the call.
-    let armed = unsafe { sys::llama_xybrid_fail_next_c(name.as_ptr()) };
+    let armed = unsafe { sys::llama_xybrid_fail_next_c(name.as_ptr(), skip) };
     assert!(armed, "{shim} is not a guarded shim");
 }
 
@@ -234,25 +242,40 @@ pub(crate) unsafe fn free_context(ptr: *mut c_void) {
     }
 }
 
-/// Clear the KV cache for `ctx`.
-///
-/// # Safety
-///
-/// `ctx` must be a live, non-null context pointer.
-pub(crate) unsafe fn kv_cache_clear(ctx: *mut c_void) {
-    sys::llama_kv_cache_clear_c(ctx);
+/// What [`kv_cache_seq_rm`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Trim {
+    /// The positions are gone.
+    Done,
+    /// The context has no memory, so there was nothing to drop.
+    NoMemory,
+    /// Refused, changing nothing: `seq_id` is not one of the context's
+    /// sequences, or llama.cpp cannot drop part of it (a recurrent state).
+    Refused,
 }
 
 /// Truncate the KV cache for `seq_id` to a prefix length, dropping
-/// positions `[p_keep, ∞)`.
+/// positions `[p_keep, ∞)`. A failure inside llama.cpp is an error, after
+/// which the memory is in whatever state llama.cpp left it.
 ///
 /// # Safety
 ///
-/// `ctx` must be a live, non-null context pointer. `p_keep` is saturated
-/// at `i32::MAX` at the call site to honor the C signature.
-pub(crate) unsafe fn kv_cache_seq_rm(ctx: *mut c_void, seq_id: i32, p_keep: usize) {
+/// `ctx` must be a live context pointer, or null (an error). `p_keep` is
+/// saturated at `i32::MAX` to honor the C signature.
+pub(crate) unsafe fn kv_cache_seq_rm(
+    ctx: *mut c_void,
+    seq_id: i32,
+    p_keep: usize,
+) -> Result<Trim, LlamaError> {
+    #[cfg(test)]
+    record_native_call();
     let p_keep_c = p_keep.min(c_int::MAX as usize) as c_int;
-    let _ = sys::llama_kv_cache_seq_rm_c(ctx, seq_id, p_keep_c);
+    match sys::llama_kv_cache_seq_rm_c(ctx, seq_id, p_keep_c) {
+        0 => Ok(Trim::Done),
+        -1 => Ok(Trim::NoMemory),
+        REFUSED => Ok(Trim::Refused),
+        _ => Err(native_failure("trimming the context's memory")),
+    }
 }
 
 /// Clear the whole memory of `ctx`: its KV cache and any recurrent state.
@@ -260,19 +283,17 @@ pub(crate) unsafe fn kv_cache_seq_rm(ctx: *mut c_void, seq_id: i32, p_keep: usiz
 /// Returns `Ok(false)`, clearing nothing, when the context has no memory:
 /// llama.cpp creates none for encoder-only and diffusion models, and decodes
 /// their batches with the encoder. A failure inside llama.cpp is an error,
-/// never "no memory".
+/// never "no memory", after which the memory is in whatever state llama.cpp
+/// left it.
 ///
 /// # Safety
 ///
-/// `ctx` must be a live, non-null context pointer.
+/// `ctx` must be a live context pointer, or null (an error).
 pub(crate) unsafe fn clear_memory(ctx: *mut c_void) -> Result<bool, LlamaError> {
-    // The shim's seq_rm returns -1 when the context has no memory. Dropping
-    // sequence 0 first costs nothing: the full clear empties every sequence.
-    match sys::llama_kv_cache_seq_rm_c(ctx, 0, 0) {
-        0 => {
-            sys::llama_kv_cache_clear_c(ctx);
-            Ok(true)
-        }
+    #[cfg(test)]
+    record_native_call();
+    match sys::llama_kv_cache_clear_c(ctx) {
+        0 => Ok(true),
         -1 => Ok(false),
         _ => Err(native_failure("clearing the context's memory")),
     }

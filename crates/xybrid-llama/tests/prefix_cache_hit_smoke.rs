@@ -152,7 +152,7 @@ fn qwen2_5_0_5b_three_turns_show_prefix_cache_hit_on_turn_2_and_3() {
         // the assertion above is what proves the prefix-cache-hit
         // metric would have been > 0 on turn ≥ 2 if the runtime
         // adapter were driving the cache.
-        ctx.kv_cache_clear();
+        ctx.kv_cache_clear().expect("clear the memory");
         let _ = generate_with_stops(
             &ctx,
             &model,

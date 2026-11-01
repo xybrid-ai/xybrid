@@ -59,20 +59,21 @@ extern "C" {
    count, attribute bits). A failure is never reported as an absence. */
 #define LLAMA_XYBRID_ABSENT (-1) /* no such key, template or token */
 #define LLAMA_XYBRID_FAILED (-2) /* llama.cpp raised an exception, or an argument was NULL */
+#define LLAMA_XYBRID_REFUSED (-3) /* llama.cpp refused the request and changed nothing */
 /* llama_decode_c's status when llama.cpp raised an exception; none of
    llama_decode's own statuses. */
 #define LLAMA_XYBRID_DECODE_EXCEPTION (-1000)
 
-/* Fault injection for tests: the next call of the guarded shim named
-   `shim_name` (e.g. "llama_decode_c"), on any thread, throws std::bad_alloc
-   inside its exception boundary, as an allocation failure inside llama.cpp
-   would. One-shot and process-wide: the call that fails consumes the arm
-   (a compare-exchange, so two calls cannot both fail), arming again replaces
-   an arm not yet consumed, and NULL disarms. Returns whether a shim is now
-   armed: false for NULL, and for a name that is not a guarded shim (which
-   disarms too). Nothing calls this outside tests, which arm it in a process
-   of their own. */
-bool llama_xybrid_fail_next_c(const char* shim_name);
+/* Fault injection for tests: after `skip` more calls of the guarded shim
+   named `shim_name` (e.g. "llama_decode_c"), the next one, on any thread,
+   throws std::bad_alloc inside its exception boundary, as an allocation
+   failure inside llama.cpp would. One-shot and process-wide: each call of
+   the shim takes its turn atomically, so exactly one fails; arming again
+   replaces an arm not yet consumed, and NULL disarms. Returns whether a shim
+   is now armed: false for NULL, and for a name that is not a guarded shim
+   (which disarms too). Nothing calls this outside tests, which arm it in a
+   process of their own. */
+bool llama_xybrid_fail_next_c(const char* shim_name, uint32_t skip);
 
 /* Backend lifecycle */
 void llama_backend_init_c(void);
@@ -100,9 +101,15 @@ XYBRID_LLAMA_CONTEXT* llama_new_context_with_model_c(
     int n_batch,
     bool flash_attn);
 void  llama_free_c(XYBRID_LLAMA_CONTEXT* ctx);
-/* Guarded; an exception leaves the memory as llama.cpp left it. */
-void  llama_kv_cache_clear_c(XYBRID_LLAMA_CONTEXT* ctx);
-/* Guarded: 0, -1 when the context has no memory, LLAMA_XYBRID_FAILED. */
+/* Clear the whole memory (KV cache and recurrent state). Guarded: 0, -1 when
+   the context has no memory, LLAMA_XYBRID_FAILED (the memory is then in
+   whatever state llama.cpp left it). */
+int32_t llama_kv_cache_clear_c(XYBRID_LLAMA_CONTEXT* ctx);
+/* Drop positions [p_keep, end) of sequence seq_id. Guarded: 0, -1 when the
+   context has no memory, LLAMA_XYBRID_REFUSED, changing nothing, for a seq_id
+   outside [0, n_seq_max) and when llama.cpp cannot remove that part (a
+   recurrent state), LLAMA_XYBRID_FAILED (the memory is then in whatever
+   state llama.cpp left it). */
 int   llama_kv_cache_seq_rm_c(XYBRID_LLAMA_CONTEXT* ctx, int seq_id, int p_keep);
 
 /* Per-sequence state snapshots (KV cache plus recurrent state). Each returns

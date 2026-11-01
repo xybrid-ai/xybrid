@@ -16,6 +16,7 @@ pub const LLAMA_STATE_SEQ_FLAGS_ON_DEVICE: u32 = 2;
 pub const LLAMA_DRY_MAX_SEQ_BREAKERS: u32 = 64;
 pub const LLAMA_XYBRID_ABSENT: i32 = -1;
 pub const LLAMA_XYBRID_FAILED: i32 = -2;
+pub const LLAMA_XYBRID_REFUSED: i32 = -3;
 pub const LLAMA_XYBRID_DECODE_EXCEPTION: i32 = -1000;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -955,7 +956,7 @@ pub struct mtmd_helper_gen_audio_inp {
     pub out_type: mtmd_helper_gen_audio_outtype,
 }
 unsafe extern "C" {
-    pub fn llama_xybrid_fail_next_c(shim_name: *const ::std::os::raw::c_char) -> bool;
+    pub fn llama_xybrid_fail_next_c(shim_name: *const ::std::os::raw::c_char, skip: u32) -> bool;
 }
 unsafe extern "C" {
     pub fn llama_backend_init_c();
@@ -992,7 +993,7 @@ unsafe extern "C" {
     pub fn llama_free_c(ctx: *mut ::std::os::raw::c_void);
 }
 unsafe extern "C" {
-    pub fn llama_kv_cache_clear_c(ctx: *mut ::std::os::raw::c_void);
+    pub fn llama_kv_cache_clear_c(ctx: *mut ::std::os::raw::c_void) -> i32;
 }
 unsafe extern "C" {
     pub fn llama_kv_cache_seq_rm_c(

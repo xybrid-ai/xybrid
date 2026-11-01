@@ -374,7 +374,7 @@ impl LlamaCppBackend {
         // per-turn re-prefill of the full conversation — correct, just
         // not the prefix-reuse optimisation.
         if model.has_recurrent_state() {
-            context.kv_cache_clear();
+            context.kv_cache_clear()?;
             state.cached_tokens = new_tokens.to_vec();
             state.last_prefix_hit = Some(0);
             return Ok((new_tokens.to_vec(), 0));
@@ -391,7 +391,7 @@ impl LlamaCppBackend {
         let would_overflow =
             generation_would_overflow_context(prefix_len, new_tokens.len(), max_new_tokens, n_ctx);
         if prefix_len == 0 || would_overflow {
-            context.kv_cache_clear();
+            context.kv_cache_clear()?;
             state.cached_tokens = new_tokens.to_vec();
             state.last_prefix_hit = Some(0);
             return Ok((new_tokens.to_vec(), 0));
@@ -401,7 +401,7 @@ impl LlamaCppBackend {
         // wrapper's batch.seq_id[..][0] = 0 path uses a single sequence;
         // when we add multi-sequence support the seq_id needs to flow
         // through prepare too.
-        context.kv_cache_seq_rm(0, prefix_len);
+        context.kv_cache_seq_rm(0, prefix_len)?;
         let tail = new_tokens[prefix_len..].to_vec();
         state.cached_tokens = new_tokens.to_vec();
         state.last_prefix_hit = Some(prefix_len);
@@ -409,7 +409,9 @@ impl LlamaCppBackend {
     }
 
     fn reset_kv_cache_after_failed_stream(&self, context: &xybrid_llama::LlamaContext) {
-        context.kv_cache_clear();
+        // Best effort, on a path that has already failed: if this clear
+        // fails too, the context refuses to run until a later clear succeeds.
+        let _ = context.kv_cache_clear();
         self.clear_cached_prefix_state();
     }
 
@@ -1507,7 +1509,7 @@ impl LlmBackend for LlamaCppBackend {
                 } else {
                     None
                 };
-                context.kv_cache_clear();
+                context.kv_cache_clear()?;
                 self.clear_cached_prefix_state();
                 xybrid_trace::add_metadata("tokens_in", summary.helper_total_tokens.to_string());
                 let n_batch = context.n_batch();
@@ -1686,7 +1688,7 @@ impl LlmBackend for LlamaCppBackend {
                     None
                 };
 
-                context.kv_cache_clear();
+                context.kv_cache_clear()?;
                 self.clear_cached_prefix_state();
                 xybrid_trace::add_metadata("tokens_in", summary.helper_total_tokens.to_string());
                 let n_batch = context.n_batch();

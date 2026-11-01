@@ -93,6 +93,12 @@ pub enum LlamaError {
     /// once the request is cleared.
     #[error("the readout was cancelled")]
     Cancelled,
+
+    /// A clear or trim of the context's memory failed, so what the memory
+    /// holds is unknown: the context refuses to run, or to touch its
+    /// memory, until `LlamaContext::kv_cache_clear` succeeds.
+    #[error("the context's memory could not be reset; clear it again before using the context")]
+    ContextUnusable,
 }
 
 /// Result alias used throughout the safe wrappers.

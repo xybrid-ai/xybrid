@@ -73,11 +73,12 @@
 #endif
 
 // Fault injection for the Rust tests, armed with llama_xybrid_fail_next_c:
-// the next call of the named shim, on any thread, throws std::bad_alloc
-// inside its boundary. The arm is one atomic index into k_failpoints, whose
-// names never change, and the call that fails consumes it with a
-// compare-exchange: two calls cannot both fail, and no shim reads memory an
-// arm writes. With nothing armed, a shim pays one relaxed load.
+// a later call of the named shim, on any thread, throws std::bad_alloc
+// inside its boundary. The arm is one atomic word holding an index into
+// k_failpoints (whose names never change) and the number of calls still to
+// let through, and each call of the shim takes its turn with a
+// compare-exchange: exactly one call fails, and no shim reads memory an arm
+// writes. With nothing armed, a shim pays one relaxed load.
 static const char* const k_failpoints[] = {
     "",  // nothing armed
     "llama_load_model_from_file_c",
@@ -98,13 +99,20 @@ static const char* const k_failpoints[] = {
     "llama_get_logits_c",
     "llama_get_logits_ith_c",
 };
-static std::atomic<size_t> g_failpoint{0};
+static std::atomic<uint64_t> g_failpoint{0};  // calls to let through << 32 | index
 
 static void xybrid_failpoint(const char* shim) {
-    size_t armed = g_failpoint.load(std::memory_order_relaxed);
-    if (armed != 0 && strcmp(k_failpoints[armed], shim) == 0 &&
-        g_failpoint.compare_exchange_strong(armed, 0, std::memory_order_relaxed)) {
-        throw std::bad_alloc();
+    uint64_t armed = g_failpoint.load(std::memory_order_relaxed);
+    while ((armed & 0xffffffffu) != 0 && strcmp(k_failpoints[armed & 0xffffffffu], shim) == 0) {
+        const uint64_t skip = armed >> 32;
+        const uint64_t next = skip == 0 ? 0 : armed - (uint64_t(1) << 32);
+        // On failure the exchange reloads `armed`, and the loop checks it again.
+        if (g_failpoint.compare_exchange_weak(armed, next, std::memory_order_relaxed)) {
+            if (skip == 0) {
+                throw std::bad_alloc();
+            }
+            return;
+        }
     }
 }
 
@@ -161,16 +169,16 @@ static void xybrid_log_callback(enum ggml_log_level level, const char* text, voi
 
 extern "C" {
 
-bool llama_xybrid_fail_next_c(const char* shim_name) {
-    size_t armed = 0;
+bool llama_xybrid_fail_next_c(const char* shim_name, uint32_t skip) {
+    uint64_t index = 0;
     for (size_t i = 1; shim_name && i < sizeof(k_failpoints) / sizeof(k_failpoints[0]); i++) {
         if (strcmp(k_failpoints[i], shim_name) == 0) {
-            armed = i;
+            index = i;
             break;
         }
     }
-    g_failpoint.store(armed, std::memory_order_relaxed);
-    return armed != 0;
+    g_failpoint.store(index == 0 ? 0 : (uint64_t(skip) << 32) | index, std::memory_order_relaxed);
+    return index != 0;
 }
 
 // =============================================================================
@@ -552,15 +560,19 @@ void llama_free_c(llama_context* ctx) {
     }
 }
 
-void llama_kv_cache_clear_c(llama_context* ctx) {
-    guarded<int>(__func__, 0, [&]() -> int {
-        if (ctx) {
-            // Use the new memory API: get memory and clear it
-            llama_memory_t mem = llama_get_memory(ctx);
-            if (mem) {
-                llama_memory_clear(mem, true);  // Clear data buffers too
-            }
+// Clear the whole memory: KV cache and recurrent state. Returns 0, -1 when
+// the context has no memory, and LLAMA_XYBRID_FAILED on a null context or
+// when llama.cpp raised an exception.
+int32_t llama_kv_cache_clear_c(llama_context* ctx) {
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (!ctx) {
+            return LLAMA_XYBRID_FAILED;
         }
+        llama_memory_t mem = llama_get_memory(ctx);
+        if (!mem) {
+            return -1;
+        }
+        llama_memory_clear(mem, true);  // Clear data buffers too
         return 0;
     });
 }
@@ -573,12 +585,19 @@ void llama_kv_cache_clear_c(llama_context* ctx) {
 // at position p_keep. Pairs with the n_past_in parameter on
 // llama_generate_streaming_c.
 //
-// Returns 0 on success, -1 on null context / no memory available, and
-// LLAMA_XYBRID_FAILED when llama.cpp raised an exception.
+// Returns 0 on success, -1 when the context has no memory,
+// LLAMA_XYBRID_REFUSED, changing nothing, for a seq_id outside the
+// context's sequences (llama.cpp's KV cache asserts, aborting, on one) and
+// when llama.cpp cannot remove that part of the sequence (a recurrent state:
+// its memories refuse before they change anything), and LLAMA_XYBRID_FAILED
+// on a null context or when llama.cpp raised an exception.
 int llama_kv_cache_seq_rm_c(llama_context* ctx, int seq_id, int p_keep) {
     return guarded<int>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int {
         if (!ctx) {
-            return -1;
+            return LLAMA_XYBRID_FAILED;
+        }
+        if (seq_id < 0 || (uint32_t) seq_id >= llama_n_seq_max(ctx)) {
+            return LLAMA_XYBRID_REFUSED;
         }
         llama_memory_t mem = llama_get_memory(ctx);
         if (!mem) {
@@ -587,7 +606,9 @@ int llama_kv_cache_seq_rm_c(llama_context* ctx, int seq_id, int p_keep) {
         // llama.cpp's seq_rm semantics: remove tokens in the half-open range
         // [p0, p1). p1 = -1 means "to the end". We keep [0, p_keep) and drop
         // everything from p_keep onward.
-        llama_memory_seq_rm(mem, (llama_seq_id) seq_id, (llama_pos) p_keep, -1);
+        if (!llama_memory_seq_rm(mem, (llama_seq_id) seq_id, (llama_pos) p_keep, -1)) {
+            return LLAMA_XYBRID_REFUSED;
+        }
         return 0;
     });
 }

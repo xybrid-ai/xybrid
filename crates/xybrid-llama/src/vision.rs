@@ -485,6 +485,7 @@ pub fn mtmd_helper_eval_chunks(
     n_batch: usize,
     logits_last: bool,
 ) -> LlamaResult<i32> {
+    lctx.ensure_usable()?;
     if let Some(model) = &ctx.model {
         if !Arc::ptr_eq(model, lctx.model_handle()) {
             return Err(LlamaError::InvalidInput(
