@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    P4 spike (not shipped): runs the decision round trip through the committed,
+    Unity-down-leveled bindings in bindings/unity/Runtime/Bolt at Unity's
+    language level (C# 9), on .NET 8 so it executes on a Linux host. Point
+    LD_LIBRARY_PATH (or DYLD_LIBRARY_PATH) at a boltffi-relinked
+    libxybrid_bolt (e.g. the one inside `boltffi pack python`'s wheel).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <LangVersion>9</LangVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../../../bindings/unity/Runtime/Bolt/*.cs" />
+    <Compile Include="../../../../bindings/unity/Runtime/BoltSupplement/*.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+
+</Project>
