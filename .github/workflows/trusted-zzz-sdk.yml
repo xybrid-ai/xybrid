@@ -35,7 +35,7 @@ jobs:
     if: github.repository == 'xybrid-ai/xybrid' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.run_attempt == 1
     steps:
       - name: Fresh trusted tooling at runtime master
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           ref: ${{ github.sha }}
           path: trusted-tooling
@@ -44,7 +44,7 @@ jobs:
           submodules: false
 
       - name: Separate master object store for candidate data
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           ref: ${{ github.sha }}
           path: source-objects
@@ -113,7 +113,7 @@ jobs:
             --root "$RUNNER_TEMP/zzz-trusted-$GITHUB_RUN_ID"
 
       - name: Upload exact Apple SDK candidate and source binding
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: zzz-sdk-apple-${{ github.run_id }}-attempt-1
           path: |

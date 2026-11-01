@@ -59,11 +59,11 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           key: whispercpp-integration
           # Per-image cache: ort-sys's build-script output records this image's
@@ -81,7 +81,7 @@ jobs:
       # for download, but a mutable artifact cannot silently redefine the test.
       - name: Cache whisper-tiny-ggml
         id: cache-whisper-tiny-ggml
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: integration-tests/fixtures/models/whisper-tiny-ggml
           key: whisper-tiny-ggml-${{ runner.os }}-818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7
