@@ -586,8 +586,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - 文本分类 / NER：Tokenize → 模型 → ArgMax
 - 文本生成（GGUF）：Gguf 模板，无步骤
 
-完整字段参考：https://github.com/xybrid-ai/xybrid/blob/main/docs/sdk/MODEL_METADATA.md
-JSON Schema：https://github.com/xybrid-ai/xybrid/blob/main/docs/sdk/model_metadata.schema.json
+完整字段参考：https://github.com/xybrid-ai/xybrid/blob/master/docs/sdk/MODEL_METADATA.md
+JSON Schema：https://github.com/xybrid-ai/xybrid/blob/master/docs/sdk/model_metadata.schema.json
 ````
 
 ### 实战示例：配置 BERT NER 模型
