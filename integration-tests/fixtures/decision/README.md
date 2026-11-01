@@ -9,7 +9,8 @@ with it stage by stage, and what xybrid must do.
 | `artifacts.json` | The pinned artifacts (repo, revision, file, bytes, sha256) and the settings ids. Shared by every decision gate |
 | `schema.json` | Case schema, version 1 (JSON Schema 2020-12) |
 | `cases/<id>.json` | One case per file |
-| `oracle.json` | How the upstream observations were made: llama.cpp commit, build, platform, server flags per settings id, the facts read from each artifact |
+| `oracle.json` | How the upstream observations were made: whether the collector was official, the identity stamped into the executables (llama.cpp commit and clean state, source hashes, build profile, CPU-only backends), the settings as they ran (server arguments, effective context, devices), the recipe hashes, the platform, the facts read from the artifact |
+| `NOTICE` | The llama.cpp material held here (the `systemone` template in `oracle.json`) and its MIT license |
 
 The cases are written by the upstream oracle,
 [`tools/conformance/decision`](../../../tools/conformance/decision), which runs
@@ -155,7 +156,7 @@ its own error variants.
 | `empty_option_key` | A choice key that is the empty string (upstream accepts it) |
 | `media_unsupported` | `files`, `images`, `videos` or a media part in the state's messages: the text profile has no media |
 | `spoken_instructions` | Instructions that are an audio part |
-| `json_too_deep` | Nesting beyond the limit |
+| `json_too_deep` | Nesting beyond upstream's limit for the field (see the `depth-*` cases) |
 | `number_out_of_range` | A number upstream cannot render faithfully (see the cases) |
 | `escaped_key_collision` | Two keys of one object that `d1_break` makes equal (upstream keeps one) |
 | `no_single_token_label` | No single-token label left for an option |
@@ -171,7 +172,7 @@ missing:
 
 | Area | Tags |
 |---|---|
-| State | `state-string`, `state-empty`, `state-null`, `state-object`, `state-array`, `state-messages` |
+| State | `state-string`, `state-empty`, `state-null`, `state-scalar`, `state-object`, `state-array`, `state-messages` |
 | JSON rendering | `json-order`, `json-float`, `json-int`, `json-unicode`, `json-escapes`, `json-literals`, `json-depth` |
 | Instructions and descriptions | `instructions-structured`, `description-structured`, `description-falsy`, `description-null` |
 | Choice labels | `choice-letter-keys`, `choice-lowercase-keys`, `choice-one-option`, `choice-26`, `choice-27`, `choice-pool-fallback`, `choice-max-options`, `choice-order` |
@@ -187,7 +188,7 @@ missing:
 
 | Review item | Cases |
 |---|---|
-| Structured, null and empty values | `state-null`, `state-empty-string`, `state-whitespace`, `instructions-object`, `instructions-array`, `instructions-scalars`, `choice-null-descriptions`, `choice-falsy-descriptions`, `choice-structured-descriptions`, `score-null-levels`, `score-structured-levels`, `noul-structured-descriptions` |
+| Structured, null and empty values | `state-null`, `state-empty-string`, `state-whitespace`, `state-number`, `state-negative-float`, `state-true`, `state-false`, `instructions-object`, `instructions-array`, `instructions-scalars`, `choice-null-descriptions`, `choice-falsy-descriptions`, `choice-structured-descriptions`, `score-null-levels`, `score-structured-levels`, `noul-structured-descriptions` |
 | Nested, unsorted objects | `state-object-nested`, `state-wrapped-messages`, `instructions-object`, `choice-criteria-order` |
 | Float and integer formatting | `state-numbers`, `state-u64-above-i64`, `state-number-overflow`, `choice-structured-descriptions` |
 | All-letter and lowercase keys | `choice-letter-keys`, `choice-lowercase-keys`, `choice-mixed-case-keys`, `choice-letter-and-word-keys`, `choice-non-letter-short-keys` |
@@ -199,4 +200,22 @@ missing:
 | Score with 2 and 10 levels | `score-2-levels`, `score-10-levels` |
 | Null state against empty text | `state-null`, `state-empty-string` |
 | Malformed requests | the `parse-*` cases, `instructions-null`, `instructions-missing`, `choice-criteria-*`, `choice-256-options`, `score-1-level`, `score-11-levels`, `score-criteria-object`, `noul-criteria-array`, `depth-*-over-limit`, `budget-over-limit` |
+| Nesting depth | `depth-*`: upstream's limit depends on the field (below) |
+| Media fields present but empty | `parse-files-empty`, `parse-files-null`, `parse-images-empty`, `parse-videos-null`: upstream answers, xybrid refuses on presence |
 | Answer arithmetic | `math-median-b3` (the review's float32 counterexample), `math-median-exact-half`, `math-median-not-mode`, `math-choice-tie`, `math-noul-tie`, `math-underflow`, `math-neg-inf-some`, `math-neg-inf-all`, `math-nan*`, `math-pos-inf*`, `math-alias-max`, `math-temperature-*`, `math-score-bias`, `math-media-temperature*` |
+
+Two notes on what the cases show:
+
+- **Nesting depth.** Count the innermost value as a level: a scalar or an empty
+  container is 1, `[1]` is 2. Upstream renders a state or instructions up to
+  127 levels deep and a choice, noul or score description up to 125, because
+  descriptions sit two levels deeper in the template's input; one more level is
+  refused (`JSON is nested more than 128 levels deep`). The `depth-*` cases pin
+  each boundary.
+- **No label token is shared between groups on this vocabulary.** Choice
+  primaries are checked distinct by upstream, aliases are the space-prefixed
+  spellings of distinct codes, and noul and score labels are distinct strings.
+  LFM3's byte-level BPE gives a one-token string the token that spells it
+  (NFC leaves these ASCII labels alone), so two different labels cannot select
+  the same id, and no case can show one. Tokenizers that fold case or strip
+  spaces could; that needs a fake vocabulary, not this model.

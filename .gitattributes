@@ -11,6 +11,13 @@ crates/llama-cpp-sys/build.rs -text
 crates/llama-cpp-sys/wrapper.cpp -text
 crates/llama-cpp-sys/wrapper.h -text
 
+# The decision conformance fixtures are pinned byte for byte (case files,
+# oracle.json, schema.json), and the decision oracle's sources are hashed into
+# the identity stamped into its executables and recorded in oracle.json. Check
+# both out exactly as committed: no CRLF conversion under core.autocrlf.
+integration-tests/fixtures/decision/** -text
+tools/conformance/decision/** -text
+
 # G1's conformance tools are identified by their SHA-256 (the held-out recipe's
 # digest, the comparator stamped into reports), so check them out byte for byte.
 tools/conformance/decision_g1/** -text

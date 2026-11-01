@@ -17,11 +17,16 @@
 // stops the request at its stage, with the status llama-server would answer. test_access.h lists
 // the private members it reads.
 //
+// It runs on the ggml CPU backend only: it refuses to start if any other device is registered,
+// and to run if the model was given an offload device. Every output carries the identity stamped
+// into this executable at build time (identity.cmake).
+//
 // Usage:
 //   decision-oracle run --input IN.json --output OUT.json -- <llama-server arguments>
 //   decision-oracle run --input IN.json --output OUT.json --vocab-only MODEL.gguf
 //   decision-oracle variant --base IN.gguf --output OUT.gguf [--set KEY=f32:VALUE|KEY=str:TEXT]...
 //                           [--remove KEY]... [--token-type ID=TYPE]...
+//   decision-oracle --identity
 //
 // README.md documents the input and output formats.
 
@@ -33,10 +38,15 @@
 
 #include "arg.h"
 #include "common.h"
+#include "ggml-backend.h"
 #include "gguf.h"
 #include "llama.h"
 #include "log.h"
 #include "speculative.h"
+#include "src/llama-ext.h" // staging API: llama_model_n_devices
+
+// written by identity.cmake: "XYBRID_ORACLE_IDENTITY " followed by the identity JSON
+extern "C" const char xybrid_oracle_identity[];
 
 #include <clocale>
 #include <cmath>
@@ -232,6 +242,41 @@ std::string meta_str(const llama_model * model, const std::string & key) {
     return n < 0 ? std::string() : std::string(buf.data());
 }
 
+// the identity JSON identity.cmake stamped into this executable, empty in a build that has none
+std::string identity_json() {
+    const char * brace = std::strchr(xybrid_oracle_identity, '{');
+    return brace == nullptr ? std::string() : std::string(brace);
+}
+
+const char * device_type_name(enum ggml_backend_dev_type type) {
+    switch (type) {
+        case GGML_BACKEND_DEVICE_TYPE_CPU:   return "cpu";
+        case GGML_BACKEND_DEVICE_TYPE_GPU:   return "gpu";
+        case GGML_BACKEND_DEVICE_TYPE_IGPU:  return "igpu";
+        case GGML_BACKEND_DEVICE_TYPE_ACCEL: return "accel";
+        case GGML_BACKEND_DEVICE_TYPE_META:  return "meta";
+    }
+    return "unknown";
+}
+
+// every device ggml can reach in this process, a dynamically loadable backend included, must be a
+// CPU device: the cpu-* settings mean the ggml CPU backend
+bool cpu_only(std::string & err) {
+    ggml_backend_load_all();
+    if (ggml_backend_dev_count() == 0) {
+        err = "no ggml device is registered";
+        return false;
+    }
+    for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (ggml_backend_dev_type(dev) != GGML_BACKEND_DEVICE_TYPE_CPU) {
+            err = string_format("device %s (%s) is not a CPU device", ggml_backend_dev_name(dev), device_type_name(ggml_backend_dev_type(dev)));
+            return false;
+        }
+    }
+    return true;
+}
+
 //
 // the model, as llama-server loads it
 //
@@ -310,6 +355,28 @@ void write_facts(json_writer & w, const oracle_model & m) {
     w.key("add_bos");
     w.boolean(llama_vocab_get_add_bos(m.vocab));
 
+    // where the model runs: the registered devices, and the devices the model was given for offload
+    w.key("devices");
+    w.begin_array();
+    for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        w.begin_object();
+        w.key("name");
+        w.str(ggml_backend_dev_name(dev));
+        w.key("type");
+        w.str(device_type_name(ggml_backend_dev_type(dev)));
+        w.key("description");
+        w.str(ggml_backend_dev_description(dev));
+        w.end_object();
+    }
+    w.end_array();
+    w.key("model_devices");
+    w.begin_array();
+    for (int32_t i = 0; i < llama_model_n_devices(m.model); i++) {
+        w.str(ggml_backend_dev_name(llama_model_get_device(m.model, i)));
+    }
+    w.end_array();
+
     if (m.ctx != nullptr) {
         w.key("context");
         w.begin_object();
@@ -325,6 +392,11 @@ void write_facts(json_writer & w, const oracle_model & m) {
         w.num(m.params.n_outputs_max);
         w.key("n_outputs_max_per_seq");
         w.num(m.params.n_outputs_max_per_seq);
+        w.key("n_gpu_layers");
+        w.num(m.params.n_gpu_layers);
+        // --device none leaves one null entry: no offload device at all
+        w.key("offload_devices");
+        w.str(m.params.devices.empty() ? "default" : m.params.devices.size() == 1 && m.params.devices[0] == nullptr ? "none" : "listed");
         w.key("n_threads");
         w.num(llama_n_threads(m.ctx));
         w.key("n_threads_batch");
@@ -701,7 +773,8 @@ int usage() {
         "  decision-oracle run --input IN.json --output OUT.json -- <llama-server arguments>\n"
         "  decision-oracle run --input IN.json --output OUT.json --vocab-only MODEL.gguf\n"
         "  decision-oracle variant --base IN.gguf --output OUT.gguf [--set KEY=f32:VALUE|KEY=str:TEXT]... [--remove KEY]...\n"
-        "                          [--token-type ID=TYPE]...\n");
+        "                          [--token-type ID=TYPE]...\n"
+        "  decision-oracle --identity\n");
     return 2;
 }
 
@@ -734,11 +807,21 @@ int cmd_run(int argc, char ** argv) {
     }
     const auto cases = read_cases(input);
 
+    std::string err;
+    if (!cpu_only(err)) {
+        fprintf(stderr, "decision-oracle: %s; the oracle runs on the ggml CPU backend only\n", err.c_str());
+        return 1;
+    }
+
     oracle_model m;
     if (!vocab_only.empty()) {
         llama_backend_init();
+        // no layer and no offload device: the vocabulary and metadata only
+        static ggml_backend_dev_t no_devices[] = {nullptr};
         llama_model_params mparams = llama_model_default_params();
-        mparams.vocab_only = true;
+        mparams.vocab_only   = true;
+        mparams.n_gpu_layers = 0;
+        mparams.devices      = no_devices;
         m.vocab_model = llama_model_load_from_file(vocab_only.c_str(), mparams);
         if (m.vocab_model == nullptr) {
             fprintf(stderr, "decision-oracle: cannot load %s\n", vocab_only.c_str());
@@ -776,8 +859,18 @@ int cmd_run(int argc, char ** argv) {
     }
     m.vocab = llama_model_get_vocab(m.model);
 
+    // the registry again, now that the arguments and the model are loaded, and the model's own devices
+    if (!cpu_only(err) || llama_model_n_devices(m.model) != 0) {
+        fprintf(stderr, "decision-oracle: %s; the oracle runs on the ggml CPU backend only\n",
+                err.empty() ? "the model was given an offload device" : err.c_str());
+        return 1;
+    }
+
     json_writer w;
     w.begin_object();
+    const std::string identity = identity_json();
+    w.key("identity");
+    w.raw(identity.empty() ? "null" : identity);
     // llama-server fails to start when init() throws: no request is answered
     try {
         m.decision.init(m.model);
@@ -899,6 +992,11 @@ int main(int argc, char ** argv) {
     }
     try {
         const std::string cmd = argv[1];
+        if (cmd == "--identity") {
+            const std::string identity = identity_json();
+            printf("%s\n", identity.c_str());
+            return identity.empty() ? 1 : 0;
+        }
         if (cmd == "run") {
             return cmd_run(argc - 2, argv + 2);
         }

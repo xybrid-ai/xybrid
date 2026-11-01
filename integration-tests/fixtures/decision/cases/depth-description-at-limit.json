@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "depth-description-at-limit",
   "profile": "lfm3-d1/text/v1",
-  "title": "124 nested arrays in a choice description: descriptions sit two levels deeper",
+  "title": "A choice description 125 levels deep: descriptions sit two levels deeper than the state",
   "covers": ["json-depth", "description-structured"],
   "artifact": "d1-2b-q4km",
   "settings": "cpu-t4-fa-off",
