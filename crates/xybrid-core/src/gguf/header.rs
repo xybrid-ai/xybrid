@@ -498,6 +498,40 @@ impl GgufFileStamp {
     pub fn header_sha256(&self) -> &[u8; 32] {
         &self.header_sha256
     }
+
+    /// The file's device and inode when it was scanned, on Unix (`None`
+    /// elsewhere, where size and time stand in for them).
+    pub fn identity(&self) -> Option<(u64, u64)> {
+        self.identity
+    }
+
+    /// Whether `metadata`, a fresh `stat` of the path, still shows the
+    /// scanned file: the same size, modification time and (on Unix) device
+    /// and inode. Reads and hashes nothing.
+    ///
+    /// Advisory: a cheap answer to "is the loaded file unchanged?", for a
+    /// status query. It misses a same-size edit made in place with the time
+    /// put back. [`GgufHeader::verify_file_unchanged`] (which
+    /// `verify_native_load` runs) also re-hashes the header, and stays the
+    /// check before a model runs.
+    pub fn matches_stat(&self, metadata: &Metadata) -> bool {
+        self.stat_difference(metadata).is_none()
+    }
+
+    /// What differs between `metadata` and the scanned file's size, time and
+    /// identity, first to last.
+    fn stat_difference(&self, metadata: &Metadata) -> Option<&'static str> {
+        if metadata.len() != self.len {
+            return Some("its size");
+        }
+        if metadata.modified().ok() != self.modified {
+            return Some("its modification time");
+        }
+        if file_identity(metadata) != self.identity {
+            return Some("its device and inode");
+        }
+        None
+    }
 }
 
 /// The device and inode of a file, on Unix.
@@ -589,23 +623,41 @@ impl GgufHeader {
     pub fn verify_file_unchanged(&self, path: impl AsRef<Path>) -> Result<(), GgufError> {
         let stamp = self.file.as_ref().ok_or(GgufError::NoFileStamp)?;
         let file = File::open(path)?;
-        let metadata = file.metadata()?;
-        let changed = |what| Err(GgufError::FileChanged { what });
-        if metadata.len() != stamp.len {
-            return changed("its size");
-        }
-        if metadata.modified().ok() != stamp.modified {
-            return changed("its modification time");
-        }
-        if file_identity(&metadata) != stamp.identity {
-            return changed("its device and inode");
+        if let Some(what) = stamp.stat_difference(&file.metadata()?) {
+            return Err(GgufError::FileChanged { what });
         }
         let mut hasher = Sha256::new();
         let read = std::io::copy(&mut file.take(self.header_bytes), &mut hasher)?;
         if read != self.header_bytes || <[u8; 32]>::from(hasher.finalize()) != stamp.header_sha256 {
-            return changed("its header bytes");
+            return Err(GgufError::FileChanged {
+                what: "its header bytes",
+            });
         }
         Ok(())
+    }
+
+    /// The cheap, advisory form of [`Self::verify_file_unchanged`]: one
+    /// `stat` of `path` compared with the scan's size, modification time
+    /// and (on Unix) device and inode ([`GgufFileStamp::matches_stat`]), no
+    /// read and no hashing. `Ok(false)` when the file has changed or is
+    /// gone.
+    ///
+    /// For a status query such as "is the loaded file unchanged?". It
+    /// misses a same-size edit made in place with the time put back;
+    /// [`Self::verify_file_unchanged`] stays the check before a model runs.
+    ///
+    /// # Errors
+    ///
+    /// [`GgufError::NoFileStamp`] for a header not read from a file, and
+    /// [`GgufError::Io`] when `path` cannot be examined for another reason
+    /// than not existing.
+    pub fn file_unchanged_cheap(&self, path: impl AsRef<Path>) -> Result<bool, GgufError> {
+        let stamp = self.file.as_ref().ok_or(GgufError::NoFileStamp)?;
+        match std::fs::metadata(path) {
+            Ok(metadata) => Ok(stamp.matches_stat(&metadata)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// Read a GGUF header from `reader`, which must be at the start of the

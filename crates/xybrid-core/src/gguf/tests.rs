@@ -903,6 +903,77 @@ fn a_same_size_edit_in_place_is_caught_by_the_header_digest() {
     ));
 }
 
+/// The cheap check is one `stat`: it sees a new time, another file in the
+/// path's place, a file that is gone, and is advisory: a same-size edit in
+/// place with the time put back passes it, where the full check fails.
+#[test]
+fn the_cheap_check_compares_size_time_and_identity_without_reading() {
+    use std::time::Duration;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("model.gguf");
+    let original = d1_builder().build();
+    std::fs::write(&path, &original).unwrap();
+    let header = GgufHeader::read_file(&path).unwrap();
+    let stamp = header.file_stamp().expect("read from a file");
+    assert!(header.file_unchanged_cheap(&path).unwrap());
+    assert!(stamp.matches_stat(&std::fs::metadata(&path).unwrap()));
+    #[cfg(unix)]
+    assert!(stamp.identity().is_some());
+
+    let modified = stamp.modified().expect("a modification time");
+    let set_time = |file: &std::path::Path, time| {
+        std::fs::File::options()
+            .write(true)
+            .open(file)
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+    };
+    let at = original
+        .windows(11)
+        .position(|w| w == b"{{ state }}")
+        .unwrap();
+    let mut edited = original.clone();
+    edited[at..at + 11].copy_from_slice(b"{{ STATE }}");
+    std::fs::write(&path, &edited).unwrap();
+    set_time(&path, modified);
+    assert!(
+        header.file_unchanged_cheap(&path).unwrap(),
+        "advisory: it reads nothing"
+    );
+    assert!(matches!(
+        header.verify_file_unchanged(&path),
+        Err(GgufError::FileChanged {
+            what: "its header bytes"
+        })
+    ));
+
+    std::fs::write(&path, &original).unwrap();
+    set_time(&path, modified + Duration::from_secs(10));
+    assert!(!header.file_unchanged_cheap(&path).unwrap(), "a new time");
+    set_time(&path, modified);
+    assert!(header.file_unchanged_cheap(&path).unwrap());
+
+    #[cfg(unix)]
+    {
+        let next = dir.path().join("next.gguf");
+        std::fs::write(&next, &original).unwrap();
+        set_time(&next, modified);
+        std::fs::rename(&next, &path).unwrap();
+        assert!(
+            !header.file_unchanged_cheap(&path).unwrap(),
+            "another file, same size and time"
+        );
+    }
+
+    std::fs::remove_file(&path).unwrap();
+    assert!(!header.file_unchanged_cheap(&path).unwrap(), "gone");
+    assert!(matches!(
+        read(&original).unwrap().file_unchanged_cheap(&path),
+        Err(GgufError::NoFileStamp)
+    ));
+}
+
 #[test]
 fn the_stamp_records_the_file_and_the_header_bytes() {
     use sha2::{Digest, Sha256};
