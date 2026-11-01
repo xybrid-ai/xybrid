@@ -4,9 +4,14 @@ Every test that generates requests uses a seed other than make_heldout.SEED, so 
 before G1's bounds are frozen. Run: python3 -m unittest discover -s tools/conformance/decision_g1/tests
 """
 
+import hashlib
 import importlib.util
 import json
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -245,6 +250,71 @@ class DomainTest(unittest.TestCase):
     def test_duplicate_keys_are_refused_on_load(self):
         with self.assertRaises(ValueError):
             mh.strict_load('{"state": "a", "state": "b"}')
+
+
+class MeasuredWithTest(unittest.TestCase):
+    """The generation record's measuring tool and vocabulary, on a fake decision-oracle; nothing is generated."""
+
+    IDENTITY = {"identity_version": 1, "fingerprint": "ab" * 32,
+                "llama_cpp_dir": "/home/someone/xybrid/vendor/llama-cpp",
+                "llama_cpp": {"checkout": "git", "commit": "c" * 40, "dirty": False}}
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="measured-with-")).resolve()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.oracle = self.tmp / "build" / "bin" / "decision-oracle"
+        self.oracle.parent.mkdir(parents=True)
+        # Prints its identity for --identity alone, as the real tool does, and refuses anything else.
+        self.oracle.write_text("#!/bin/sh\n"
+                               "[ \"$#\" -eq 1 ] && [ \"$1\" = --identity ] || exit 2\n"
+                               f"cat <<'EOF'\n{json.dumps(self.IDENTITY, indent=2)}\nEOF\n")
+        self.oracle.chmod(0o755)
+        self.vocab = self.tmp / "models" / "d1-2B-Q4_K_M.gguf"
+        self.vocab.parent.mkdir()
+        self.vocab.write_bytes(b"GGUF vocabulary bytes")
+
+    def test_the_record_holds_digests_and_the_identity_without_its_directory(self):
+        record = mh.measured_with(self.oracle, self.vocab, 61)
+        self.assertEqual(record["tool_sha256"], hashlib.sha256(self.oracle.read_bytes()).hexdigest())
+        self.assertEqual(record["tool_identity"], {k: v for k, v in self.IDENTITY.items() if k != "llama_cpp_dir"})
+        self.assertEqual(record["vocab"], "d1-2B-Q4_K_M.gguf")
+        self.assertEqual(record["vocab_sha256"], hashlib.sha256(b"GGUF vocabulary bytes").hexdigest())
+        self.assertEqual(record["calls"], 61)
+
+    def test_outside_the_repository_the_tool_is_its_file_name(self):
+        self.assertNotIn(mh.REPO, self.oracle.parents)
+        record = mh.measured_with(self.oracle, self.vocab, 1)
+        self.assertEqual(record["tool"], "decision-oracle")
+        self.assertNotIn(str(self.tmp), json.dumps(record))
+        self.assertNotIn("/home/someone", json.dumps(record))
+
+    def test_inside_the_repository_the_tool_is_its_repository_path(self):
+        repo = mh.REPO
+        mh.REPO = self.tmp  # the module's repository root, here a temporary tree holding the tool
+        try:
+            record = mh.measured_with(self.oracle, self.vocab, 1)
+        finally:
+            mh.REPO = repo
+        self.assertEqual(record["tool"], "build/bin/decision-oracle")
+        self.assertNotIn(str(self.tmp), json.dumps(record))
+
+    def test_relative_paths_are_resolved_first(self):
+        here = Path.cwd()
+        os.chdir(self.tmp)
+        try:
+            record = mh.measured_with(Path("build/bin/decision-oracle"), Path("models/d1-2B-Q4_K_M.gguf"), 1)
+        finally:
+            os.chdir(here)
+        self.assertEqual(record["tool"], "decision-oracle")
+        self.assertEqual(record["vocab"], "d1-2B-Q4_K_M.gguf")
+        self.assertEqual(record["tool_sha256"], hashlib.sha256(self.oracle.read_bytes()).hexdigest())
+
+    def test_a_tool_that_cannot_state_its_identity_fails(self):
+        broken = self.tmp / "broken-oracle"
+        broken.write_text("#!/bin/sh\nexit 3\n")
+        broken.chmod(0o755)
+        with self.assertRaises(subprocess.CalledProcessError):
+            mh.measured_with(broken, self.vocab, 1)
 
 
 if __name__ == "__main__":

@@ -1265,6 +1265,24 @@ def dump(value: Any) -> str:
     return json.dumps(value, indent=2, ensure_ascii=False) + "\n"
 
 
+def measured_with(oracle: Path, vocab: Path, calls: int) -> Dict[str, Any]:
+    """How the prompt lengths were measured, with no local state: the tool (its path in the repository, or its file
+    name outside it), its sha256 and its stamped build identity (`decision-oracle --identity`, without the llama.cpp
+    directory: a local path, which the identity's fingerprint already leaves out), the vocabulary file and its sha256,
+    and the number of measurements."""
+    oracle, vocab = oracle.resolve(), vocab.resolve()
+    identity = json.loads(subprocess.run([str(oracle), "--identity"], stdout=subprocess.PIPE, check=True).stdout)
+    identity.pop("llama_cpp_dir", None)
+    return {
+        "tool": oracle.relative_to(REPO).as_posix() if REPO in oracle.parents else oracle.name,
+        "tool_sha256": hashlib.sha256(oracle.read_bytes()).hexdigest(),
+        "tool_identity": identity,
+        "vocab": vocab.name,
+        "vocab_sha256": hashlib.sha256(vocab.read_bytes()).hexdigest(),
+        "calls": calls,
+    }
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--oracle", help="decision-oracle (tools/conformance/decision/build.sh)")
@@ -1309,12 +1327,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except RecipeError as error:
         print(f"make_heldout.py: the recipe failed: {error}", file=sys.stderr)
         return 1
-    generation["measured_with"] = {
-        "tool": str(Path(args.oracle).resolve()),
-        "tool_sha256": hashlib.sha256(Path(args.oracle).read_bytes()).hexdigest(),
-        "vocab_sha256": hashlib.sha256(Path(args.vocab).read_bytes()).hexdigest(),
-        "calls": measure.calls,
-    }
+    generation["measured_with"] = measured_with(Path(args.oracle), Path(args.vocab), measure.calls)
     (out / "cases").mkdir(parents=True)
     for case in cases:
         (out / "cases" / f"{case['id']}.json").write_text(dump(case), encoding="utf-8")
