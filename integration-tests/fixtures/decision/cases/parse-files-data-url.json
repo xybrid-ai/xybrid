@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "parse-files-data-url",
+  "profile": "lfm3-d1/text/v1",
+  "title": "An image data URL in files: no mmproj, so the server answers 501",
+  "covers": ["media", "refusal-parse"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"files\": [\"data:image/png;base64,iVBORw0KGgo=\"], \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "not_supported",
+        "status": 501,
+        "type": "not_supported_error",
+        "message": "This server does not support image input for decisions. For a model that supports it, start it with `--mmproj`"
+      }
+    },
+    "server": {
+      "status": 501,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "media_unsupported"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

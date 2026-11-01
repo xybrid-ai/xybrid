@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "depth-state-empty-over-limit",
+  "profile": "lfm3-d1/text/v1",
+  "title": "128 nested empty arrays in the state are refused",
+  "covers": ["json-depth", "refusal-prepare"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"state\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]], \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"x\"}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "refusal": {
+        "question": "q",
+        "exception": "invalid_argument",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "JSON is nested more than 128 levels deep"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": {
+      "refuse": "json_too_deep"
+    },
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

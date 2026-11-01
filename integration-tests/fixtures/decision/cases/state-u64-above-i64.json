@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "id": "state-u64-above-i64",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Integers above i64::MAX and below 2^64: upstream renders them wrapped to negative numbers",
+  "covers": ["json-int", "divergence"],
+  "notes": "The Jinja engine reads every JSON integer with get<int64_t>(), so 18446744073709551615 prints as -1 and 9223372036854775808 as -9223372036854775808. xybrid must not reproduce a wrong number; its parser refuses an integer above i64::MAX.",
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": {\"u64_max\": 18446744073709551615, \"two_63\": 9223372036854775808}, \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the account flagged?\"}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"u64_max\": -1,\n  \"two_63\": -9223372036854775808\n}\n\n\nQUESTION:\nIs the account flagged?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 93, 2251, 52979, 6380, 640, 25, 920, 229, 496, 25583, 71, 4946, 6380, 640, 25680, 26689, 12350, 25416, 32357, 27952, 32, 207, 64024, 63509, 833, 4439, 278, 3362, 11483, 4062, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 51,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40a2cb80", "0x40f8471e", "0x40a4d627", "0x4100257b", "0x402fb310"]
+      ],
+      "scores": [
+        ["0x40f8471e", "0x4100257b"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "noul",
+          "noul": 0.45331612700400786
+        }
+      },
+      "usage": {
+        "input_tokens": 52,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "number_out_of_range"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

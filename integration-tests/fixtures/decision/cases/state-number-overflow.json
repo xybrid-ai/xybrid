@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "state-number-overflow",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A number beyond f64: upstream's JSON parser refuses the request",
+  "covers": ["json-float", "refusal-parse"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"state\": {\"huge\": 1e400}, \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"x\"}}}",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "common_json_error",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "[json.exception.out_of_range.406] number overflow parsing '1e400'"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "number_out_of_range"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

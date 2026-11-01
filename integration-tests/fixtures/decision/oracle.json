@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "llama_cpp": {
+    "commit": "8642541b255bfb5dc39cd351a178be09013a55d6",
+    "path": "vendor/llama-cpp",
+    "routines": "tools/server/server-decision.cpp, linked unmodified from the server-context library"
+  },
+  "oracle": {
+    "tool": "tools/conformance/decision",
+    "sources": {
+      "CMakeLists.txt": "c9a99571b40720d8e5cb15438e27fa88c616732bba948c4807da381f62ea1d30",
+      "oracle.cpp": "20c5d58fd23db83d2b09742fc99caf33b67e28acbb5540995bdb66680105b6e7",
+      "test_access.h": "41d4b5ed68279a1957eb72edd18fdef41b4e5f0e504b19ee4453155ba3f91cd1",
+      "cases.py": "99f699b1039f85d03cdc283d94a6f32579e8ba2190a074cfaacb0e4651ff4617",
+      "oracle.py": "c4212b50b0aa23b549d52354e4508c80db6fe2da4c0228242af5c761ea96f146"
+    }
+  },
+  "build": {
+    "build_type": "Release",
+    "compiler": "c++ (GCC) 11.5.0 20240719 (Red Hat 11.5.0-5)",
+    "options": {
+      "GGML_AVX": "ON",
+      "GGML_AVX2": "ON",
+      "GGML_AVX512": "OFF",
+      "GGML_BMI2": "ON",
+      "GGML_CUDA": "OFF",
+      "GGML_F16C": "ON",
+      "GGML_FMA": "ON",
+      "GGML_LLAMAFILE": "ON",
+      "GGML_METAL": "OFF",
+      "GGML_NATIVE": "OFF",
+      "GGML_OPENMP": "OFF",
+      "GGML_SSE42": "ON",
+      "GGML_VULKAN": "OFF",
+      "LLAMA_BUILD_SERVER": "ON",
+      "LLAMA_OPENSSL": "OFF"
+    }
+  },
+  "platform": {
+    "system": "Linux",
+    "machine": "x86_64",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.90GHz",
+    "libc": "glibc 2.34"
+  },
+  "settings": {
+    "cpu-t4-fa-off": {
+      "llama_server_args": ["-c", "4096", "-b", "4096", "-ub", "4096", "-np", "1", "-t", "4", "-tb", "4", "-fa", "off"],
+      "context": {
+        "n_ctx": 4096,
+        "n_batch": 4096,
+        "n_ubatch": 4096,
+        "n_seq_max": 1,
+        "n_outputs_max": 1,
+        "n_outputs_max_per_seq": 1,
+        "n_threads": 4,
+        "n_threads_batch": 4,
+        "flash_attn": "off",
+        "causal_attn": false,
+        "memory": false
+      }
+    }
+  },
+  "artifacts": {
+    "d1-2b-q4km": {
+      "architecture": "lfm3",
+      "decision_type": "lfm3-d1",
+      "decision_metadata": {
+        "lfm3.decision.type": "lfm3-d1",
+        "lfm3.decision.temperature.choice": "1.337398",
+        "lfm3.decision.temperature.noul": "1.337398",
+        "lfm3.decision.temperature.score": "1.337398"
+      },
+      "temperatures": {
+        "choice": "0x3fab2fdc",
+        "noul": "0x3fab2fdc",
+        "score": "0x3fab2fdc"
+      },
+      "score_bias": {},
+      "n_vocab": 128000,
+      "add_bos": false,
+      "template_sha256": "ee5fc62461a9bbbcb8389c57f4cd2cd694ccb0dec19521576bd1419049490d8b",
+      "template": "<|startoftext|><|im_start|>user\n{% for image in images %}{{ image }}{% endfor %}{% if state is not none %}{% if state is string %}{{ state }}{% else %}{{ state | tojson(indent=2) }}{% endif %}{{ '\\n\\n\\nQUESTION:\\n' }}{% endif %}{{ instructions if instructions is string else instructions | tojson }}{% if type == 'choice' %}{{ '\\n\\nOptions:\\n' }}{% for o in options %}{{ o.label }} {% if o.description %}{{ o.description if o.description is string else o.description | tojson }}{% else %}{{ o.key | replace('_', ' ') }}{% endif %}{% if not loop.last %}{{ '\\n' }}{% endif %}{% endfor %}{{ '\\n\\nReply with the option code only.' }}{% elif type == 'noul' %}{% set ns = namespace(criteria=false) %}{% for o in options %}{% if o.description is not none %}{% set ns.criteria = true %}{% endif %}{% endfor %}{% if ns.criteria %}{% for o in options %}{{ '\\nYes: ' if o.key == 'true' else '\\nNo: ' }}{% if o.description is none %}None{% else %}{{ o.description if o.description is string else o.description | tojson }}{% endif %}{% endfor %}{% endif %}{{ '\\n\\nReply with yes or no only.' }}{% else %}{{ '\\n\\n' }}{% for o in options %}{{ o.key }} {{ o.description if o.description is string else o.description | tojson }}{{ '\\n' }}{% endfor %}{{ '\\nReply with a single digit 0-' }}{{ options | length - 1 }}{{ ' only.' }}{% endif %}{{ '<|im_end|>\\n<|im_start|>assistant\\n' }}<think></think>",
+      "control_spellings": {
+        "count": 124,
+        "sha256": "7cb928f61b47149d6bb4af5684b02809bf8c8361f7a57802d2b19e9afe53925b",
+        "longest_first": ["<|img_row_10_col_10|>", "<|img_row_1_col_10|>", "<|img_row_2_col_10|>", "<|img_row_3_col_10|>", "<|img_row_4_col_10|>", "<|img_row_5_col_10|>", "<|img_row_6_col_10|>", "<|img_row_7_col_10|>", "<|img_row_8_col_10|>", "<|img_row_9_col_10|>", "<|img_row_10_col_1|>", "<|img_row_10_col_2|>", "<|img_row_10_col_3|>", "<|img_row_10_col_4|>", "<|img_row_10_col_5|>", "<|img_row_10_col_6|>", "<|img_row_10_col_7|>", "<|img_row_10_col_8|>", "<|img_row_10_col_9|>", "<|tool_list_start|>", "<|tool_call_start|>", "<|img_row_1_col_1|>", "<|img_row_1_col_2|>", "<|img_row_1_col_3|>", "<|img_row_1_col_4|>", "<|img_row_1_col_5|>", "<|img_row_1_col_6|>", "<|img_row_1_col_7|>", "<|img_row_1_col_8|>", "<|img_row_1_col_9|>", "<|img_row_2_col_1|>", "<|img_row_2_col_2|>", "<|img_row_2_col_3|>", "<|img_row_2_col_4|>", "<|img_row_2_col_5|>", "<|img_row_2_col_6|>", "<|img_row_2_col_7|>", "<|img_row_2_col_8|>", "<|img_row_2_col_9|>", "<|img_row_3_col_1|>", "<|img_row_3_col_2|>", "<|img_row_3_col_3|>", "<|img_row_3_col_4|>", "<|img_row_3_col_5|>", "<|img_row_3_col_6|>", "<|img_row_3_col_7|>", "<|img_row_3_col_8|>", "<|img_row_3_col_9|>", "<|img_row_4_col_1|>", "<|img_row_4_col_2|>", "<|img_row_4_col_3|>", "<|img_row_4_col_4|>", "<|img_row_4_col_5|>", "<|img_row_4_col_6|>", "<|img_row_4_col_7|>", "<|img_row_4_col_8|>", "<|img_row_4_col_9|>", "<|img_row_5_col_1|>", "<|img_row_5_col_2|>", "<|img_row_5_col_3|>", "<|img_row_5_col_4|>", "<|img_row_5_col_5|>", "<|img_row_5_col_6|>", "<|img_row_5_col_7|>", "<|img_row_5_col_8|>", "<|img_row_5_col_9|>", "<|img_row_6_col_1|>", "<|img_row_6_col_2|>", "<|img_row_6_col_3|>", "<|img_row_6_col_4|>", "<|img_row_6_col_5|>", "<|img_row_6_col_6|>", "<|img_row_6_col_7|>", "<|img_row_6_col_8|>", "<|img_row_6_col_9|>", "<|img_row_7_col_1|>", "<|img_row_7_col_2|>", "<|img_row_7_col_3|>", "<|img_row_7_col_4|>", "<|img_row_7_col_5|>", "<|img_row_7_col_6|>", "<|img_row_7_col_7|>", "<|img_row_7_col_8|>", "<|img_row_7_col_9|>", "<|img_row_8_col_1|>", "<|img_row_8_col_2|>", "<|img_row_8_col_3|>", "<|img_row_8_col_4|>", "<|img_row_8_col_5|>", "<|img_row_8_col_6|>", "<|img_row_8_col_7|>", "<|img_row_8_col_8|>", "<|img_row_8_col_9|>", "<|img_row_9_col_1|>", "<|img_row_9_col_2|>", "<|img_row_9_col_3|>", "<|img_row_9_col_4|>", "<|img_row_9_col_5|>", "<|img_row_9_col_6|>", "<|img_row_9_col_7|>", "<|img_row_9_col_8|>", "<|img_row_9_col_9|>", "<|tool_list_end|>", "<|tool_call_end|>", "<|img_thumbnail|>", "<|vision_start|>", "<|startoftext|>", "<|image_split|>", "<|audio_start|>", "<|mixed_start|>", "<|vision_end|>", "<|text_start|>", "<|endoftext|>", "<|mixed_end|>", "<|im_start|>", "<|text_end|>", "<|fim_pre|>", "<|fim_mid|>", "<|fim_suf|>", "<|im_end|>", "<|video|>", "<|image|>", "<|pad|>", "<image>"]
+      }
+    }
+  }
+}
