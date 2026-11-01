@@ -5,6 +5,18 @@ description: On-device ML inference for Flutter applications
 
 The Flutter SDK (`xybrid_flutter`) provides Dart bindings to the Xybrid Rust core via FFI, enabling on-device ML inference in mobile and desktop applications.
 
+## Requirements
+
+- iOS 16.0+
+- macOS 14.0+ on Apple Silicon
+- Android 9 / API 28+
+
+The precompiled native libraries are built for these versions. For releases after 0.16.0 the plugin also declares them, so an app that targets an older version fails at build time. Raise your app's minimums:
+
+- **Android**: set `minSdk = 28` or higher in `defaultConfig` of `android/app/build.gradle.kts`. Flutter's default, `flutter.minSdkVersion`, is lower.
+- **iOS**: set `platform :ios, '16.0'` in `ios/Podfile` and the Runner target's iOS Deployment Target to 16.0 in Xcode.
+- **macOS**: set `platform :osx, '14.0'` in `macos/Podfile` and the Runner target's macOS Deployment Target to 14.0 in Xcode.
+
 ## Installation
 
 Add to your `pubspec.yaml`:

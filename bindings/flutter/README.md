@@ -315,11 +315,23 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 
 ### Platform Requirements
 
-- **macOS**: 13.3+, Xcode 15+, Apple Silicon
-- **iOS**: 16.0+, Xcode 15+ (the precompiled library targets iOS 16)
-- **Android**: Android 9 (API 28)+, NDK r25+, 64-bit only. The precompiled
-  libraries need API 28 even though the plugin declares minSdk 21.
+- **macOS**: 14.0+, Xcode 15+, Apple Silicon
+- **iOS**: 16.0+, Xcode 15+
+- **Android**: Android 9 (API 28)+, NDK r25+, 64-bit only
 - **Linux/Windows**: x86_64
+
+The precompiled libraries are built for these versions, and the plugin
+declares them, so an app that targets an older one fails at build time:
+`pod install` rejects the plugin, or the Android manifest merge fails. Raise
+your app's minimums:
+
+- **Android**: `minSdk = 28` in `defaultConfig` of
+  `android/app/build.gradle.kts` (Flutter's default, `flutter.minSdkVersion`,
+  is lower).
+- **iOS**: `platform :ios, '16.0'` in `ios/Podfile`, and an iOS Deployment
+  Target of 16.0 for the Runner target in Xcode.
+- **macOS**: `platform :osx, '14.0'` in `macos/Podfile`, and a macOS
+  Deployment Target of 14.0 for the Runner target in Xcode.
 
 ## Native Libraries
 

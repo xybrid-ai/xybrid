@@ -22,7 +22,13 @@ with intelligent routing based on device capabilities. Supports ASR, TTS, and LL
   s.source_files     = 'Classes/**/*'
   s.dependency 'FlutterMacOS'
 
-  s.platform = :osx, '10.15'
+  # macOS 14.0 minimum: the precompiled library's llama.cpp and whisper.cpp
+  # objects are built for it (hermetic-llvm's default; --config=macos-metal
+  # sets no --macos_minimum_os). Declaring it makes `pod install` reject an
+  # app with a lower deployment target. release-prep fails if an object in
+  # the library needs a newer macOS (tools/scripts/verify_apple_min_os.py
+  # reads this line).
+  s.platform = :osx, '14.0'
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
   s.swift_version = '5.0'
 

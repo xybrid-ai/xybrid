@@ -122,6 +122,8 @@ dependencies:
   xybrid_flutter: ^0.16.0
 ```
 
+The plugin needs iOS 16.0, macOS 14.0 and Android 9 (API 28) or later; the [Flutter guide](https://docs.xybrid.dev/en/docs/sdks/flutter#requirements) shows how to raise your app's minimums.
+
 **Run a model:**
 
 ```dart
