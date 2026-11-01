@@ -154,18 +154,34 @@ output during real forwards, then replays every call on a float32 deep copy of
 the module, the parameters a float32 load holds. The run stops (exit 1, nothing
 written) if:
 
-- a floating input is not float32;
+- a floating input is not float32, or an input or output holds a value the
+  checks cannot read;
 - the replay's output differs from the recorded one in structure (types,
   lengths, keys), dtype, shape or a single byte;
+- checking a call fails at all (the replay, an input check, a byte view, a
+  comparison or its message): that proves nothing, so it is a failure too;
 - the run verified no call, or left a hooked module unverified.
+
+The first failure stands: every hook is guarded and records it, so neither a
+later call nor the coverage count passes after it, even if the reference
+caught the exception on its way out. Only the reference's own code refuses a
+request, and only before its model runs (its question checks, prompt building
+and tokenizer). Whatever is raised once a forward has begun, in this runner's
+hooks, or by this machine's limits (memory, recursion) ends the run instead of
+becoming a recorded refusal.
 
 The modules chain, so a passing proof makes the whole forward a float32
 load's. The committed observation and packed runs ran under it; their
 coverage is in `hf/provenance.json` under `verification.float32_parity`, and
 `provenance.py` refuses an observation run without a passing proof.
 `run.sh tests` holds the gate's regression tests (a changed output, one
-flipped bit, an extra output, a bfloat16 input, an empty or partial proof, and
-a failed run writing nothing). They use torch, not the weights.
+flipped bit, an extra output, a bfloat16 input, an empty or partial proof,
+failures inside the checks, and a failed run writing nothing). Its production
+path tests run `main` and the real hooks around a tiny model with the same 27
+hooked modules: two cases, the first verifying every module and the second
+failing inside the comparison (or any hook, or the model once it ran), write
+nothing and exit 1, while refusals before the model runs are still recorded.
+They use torch, not the weights.
 
 Determinism:
 
