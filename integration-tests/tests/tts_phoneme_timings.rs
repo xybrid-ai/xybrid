@@ -101,8 +101,10 @@ fn pcm_samples(result: &InferenceResult) -> Vec<i16> {
     let bytes = result.audio_bytes().expect("TTS returns audio");
     assert_eq!(bytes.len() % 2, 0, "TTSAudioEncode returns 16-bit PCM");
     bytes
-        .chunks_exact(2)
-        .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| i16::from_le_bytes(*pair))
         .collect()
 }
 
