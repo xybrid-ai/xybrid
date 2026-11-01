@@ -270,6 +270,25 @@ fn integers_are_classified_as_nlohmann_classifies_them() {
 }
 
 #[test]
+fn minus_zero_is_the_integer_zero() {
+    // nlohmann::json reads `-0` with strtoll: the integer 0, no sign.
+    // `matches!` checks the variant itself; `==` would also accept U64(0).
+    assert!(matches!(number("-0"), JsonNumber::I64(0)));
+    let nested = parse(r#"[-0, {"k": -0}]"#);
+    let items = nested.as_array().unwrap();
+    assert!(matches!(items[0].as_number(), Some(JsonNumber::I64(0))));
+    assert!(matches!(
+        items[1].get("k").and_then(OrderedJson::as_number),
+        Some(JsonNumber::I64(0))
+    ));
+    assert_eq!(compact("-0"), "0");
+    let JsonNumber::F64(float) = number("-0.0") else {
+        panic!("-0.0 is a float");
+    };
+    assert!(float == 0.0 && float.is_sign_negative());
+}
+
+#[test]
 fn a_fraction_or_an_exponent_makes_a_float() {
     let cases: [(&str, f64, &str); 14] = [
         ("1.0", 1.0, "1.0"),

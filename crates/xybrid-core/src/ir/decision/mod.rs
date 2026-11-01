@@ -20,7 +20,7 @@
 //! |------|------|
 //! | [`OrderedJson`] | JSON content that keeps key order and number identity |
 //! | [`DecisionContent`] | Text, or a JSON value that is not a string |
-//! | [`DecisionRequest`], [`DecisionState`], [`DecisionQuestion`], [`DecisionQuestionKind`], [`DecisionOption`] | The request |
+//! | [`DecisionRequest`], [`DecisionState`], [`DecisionQuestion`], [`DecisionQuestionKind`], [`DecisionOption`], [`DecisionLevel`] | The request |
 //! | [`Decisions`], [`DecisionAnswer`], [`DecisionScore`], [`DecisionValue`] | One answer per question, in question order |
 //! | [`validate_structure`], [`StructuralLimits`] | The checks every protocol needs |
 //! | [`DecisionError`] | Every refusal, with content-free messages |
@@ -75,23 +75,33 @@
 //!
 //! # Compatibility
 //!
-//! Each kind of compatibility has its own rule:
+//! The representation is frozen; these are the rules for changing it.
 //!
-//! - **Rust source.** Structs have private fields, constructors and
-//!   accessors; [`OrderedJson`] and [`DecisionContent`] are opaque; enums
-//!   that will grow are `#[non_exhaustive]` ([`DecisionMedia`],
-//!   [`DecisionInstructions`], [`DecisionQuestionKind`], [`DecisionValue`],
-//!   [`DecisionError`] and its kinds). Adding a struct field, or a variant
-//!   to one of those enums, is not a breaking change for Rust callers.
-//!   Adding a field to a variant of [`DecisionQuestionKind`] or
-//!   [`DecisionValue`] is: their fields are public, so callers build and
-//!   match them.
+//! - **Enums are append-only.** A new variant goes last, and existing
+//!   variants never move or go away: bincode and the generated bindings
+//!   encode a variant by its index (pinned by tests). Every enum that can
+//!   grow is `#[non_exhaustive]` ([`DecisionMedia`], [`DecisionInstructions`],
+//!   [`DecisionQuestionKind`], [`DecisionValue`], [`DecisionOrigin`],
+//!   [`ScoreStatistic`], [`DecisionError`] and its kinds), and so is every
+//!   variant of [`DecisionQuestionKind`] and [`DecisionValue`]: code outside
+//!   this crate builds them with their constructors
+//!   ([`DecisionQuestionKind::choice`], [`DecisionValue::score`], ...) and
+//!   reads them with their accessors or `{ .. }` patterns, with a wildcard
+//!   arm for variants added later. Sets that cannot grow stay exhaustive:
+//!   [`JsonKind`], [`JsonView`], [`JsonNumber`], [`DecisionContentView`].
+//! - **Record field sets freeze at the first release.** Structs have private
+//!   fields, constructors and accessors, and [`OrderedJson`] and
+//!   [`DecisionContent`] are opaque, so Rust callers never name a field. But
+//!   bincode and the generated FFI records are positional, so after the
+//!   first release a need for more data is met by a new variant or a new
+//!   type, never by a new field.
 //! - **JSON.** Every struct refuses unknown fields, so a decoder built
 //!   before a field was added rejects data that has it: deliberate, so that
 //!   nothing is silently dropped. Enums use serde's default external
 //!   tagging, and an old decoder refuses a new variant. `f64` fields
 //!   round-trip through serde_json exactly only if its float parsing is
-//!   exact (its `float_roundtrip` feature, off in this workspace).
+//!   exact (its `float_roundtrip` feature, off in this workspace);
+//!   [`DecisionAnswer`] decoding allows for that.
 //! - **`OrderedJson` in serde.** In every format it is one string holding
 //!   its compact JSON text, which keeps key order and number identity
 //!   exactly and works in formats that cannot carry an ordered map
@@ -102,17 +112,21 @@
 //! - **Raw scores.** In human-readable formats a finite
 //!   [`DecisionScore::raw_score`] is a number and `-inf` is the string
 //!   `"-Infinity"`, never `null`; binary formats keep the `f32` itself.
-//! - **bincode and envelopes.** bincode has no field names: adding a field
-//!   to any struct here changes its bytes, so binaries built before and
-//!   after cannot exchange them. Envelope kinds that carry these types are
-//!   appended to [`EnvelopeKind`](super::EnvelopeKind) without moving
-//!   existing ordinals, by the envelope's own rule; this module adds none.
+//! - **bincode and envelopes.** bincode writes no field names or tags: a
+//!   struct is its fields in order and a variant its index, which is why
+//!   the two rules above keep bytes readable across releases. Envelope kinds
+//!   that carry these types are appended to
+//!   [`EnvelopeKind`](super::EnvelopeKind) without moving existing ordinals,
+//!   by the envelope's own rule; this module adds none.
 //! - **FFI.** Generated bindings carry their own records (content as
 //!   `{text}` or `{json_text}`, ordered JSON as text for
-//!   [`OrderedJson::parse`]) and are versioned with the bindings.
+//!   [`OrderedJson::parse`]) and are versioned with the bindings. Converting
+//!   this IR to them is fallible: a variant added after a binding was
+//!   generated is refused as unrepresentable, never dropped or
+//!   approximated.
 //!
 //! Nothing promises that an older client understands a newer variant or
-//! field.
+//! field; it refuses it.
 //!
 //! # Example
 //!
@@ -130,12 +144,10 @@
 //! let action = DecisionQuestion::new(
 //!     "action",
 //!     Some(DecisionContent::text("What should support do next?").into()),
-//!     DecisionQuestionKind::Choice {
-//!         options: vec![
-//!             DecisionOption::new("refund", Some(DecisionContent::text("Refund the order"))),
-//!             DecisionOption::new("send_replacement", None),
-//!         ],
-//!     },
+//!     DecisionQuestionKind::choice(vec![
+//!         DecisionOption::new("refund", Some(DecisionContent::text("Refund the order"))),
+//!         DecisionOption::new("send_replacement", None),
+//!     ]),
 //! );
 //! let request = DecisionRequest::new(state, vec![action]);
 //! validate_structure(&request, &StructuralLimits::default())?;
@@ -147,7 +159,7 @@
 //!         DecisionScore::new("refund", 2.5, 0.75, DecisionOrigin::Caller),
 //!         DecisionScore::new("send_replacement", 1.0, 0.25, DecisionOrigin::Caller),
 //!     ],
-//!     DecisionValue::Choice { key: "refund".into() },
+//!     DecisionValue::choice("refund"),
 //!     Some(0.75),
 //! )?;
 //! let decisions = Decisions::new(vec![answer], DecisionUsage::new(1, 412));
@@ -175,8 +187,8 @@ pub use json::{
     DEFAULT_MAX_JSON_NODES, MAX_JSON_DEPTH,
 };
 pub use request::{
-    DecisionContent, DecisionContentView, DecisionInstructions, DecisionMedia, DecisionOption,
-    DecisionQuestion, DecisionQuestionKind, DecisionRequest, DecisionState,
+    DecisionContent, DecisionContentView, DecisionInstructions, DecisionLevel, DecisionMedia,
+    DecisionOption, DecisionQuestion, DecisionQuestionKind, DecisionRequest, DecisionState,
 };
 pub use validate::{
     validate_structure, StructuralLimits, DEFAULT_MAX_OPTIONS, DEFAULT_MAX_QUESTIONS,

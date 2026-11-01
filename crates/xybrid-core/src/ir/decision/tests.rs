@@ -46,13 +46,15 @@ fn canary_request() -> DecisionRequest {
             DecisionQuestion::new(
                 format!("{CANARY}-score"),
                 None,
-                DecisionQuestionKind::Score {
-                    levels: vec![
+                DecisionQuestionKind::score(
+                    [
                         None,
                         Some(DecisionContent::text(CANARY)),
                         content(&format!("[{NUMBER_CANARY}]")),
-                    ],
-                },
+                    ]
+                    .map(DecisionLevel::new)
+                    .to_vec(),
+                ),
             ),
         ],
     )
@@ -179,9 +181,10 @@ fn serde_forms_are_pinned() {
             DecisionQuestion::new(
                 "s",
                 None,
-                DecisionQuestionKind::Score {
-                    levels: vec![None, Some(DecisionContent::text("high"))],
-                },
+                DecisionQuestionKind::score(vec![
+                    DecisionLevel::new(None),
+                    DecisionLevel::new(Some(DecisionContent::text("high"))),
+                ]),
             ),
         ],
     );
@@ -192,7 +195,8 @@ fn serde_forms_are_pinned() {
             r#"{"id":"q","instructions":{"Content":{"Text":"Pick"}},"kind":{"Choice":{"options":["#,
             r#"{"key":"x","description":null},{"key":"y","description":{"Json":"[1]"}}]}}},"#,
             r#"{"id":"n","instructions":null,"kind":{"YesNo":{"yes":null,"no":{"Text":"no"}}}},"#,
-            r#"{"id":"s","instructions":null,"kind":{"Score":{"levels":[null,{"Text":"high"}]}}}]}"#,
+            r#"{"id":"s","instructions":null,"kind":{"Score":{"levels":["#,
+            r#"{"description":null},{"description":{"Text":"high"}}]}}}]}"#,
         )
     );
 
@@ -234,21 +238,15 @@ fn bincode_variant_indexes_are_pinned() {
         0
     );
     let kinds = [
-        DecisionQuestionKind::Choice { options: vec![] },
-        DecisionQuestionKind::YesNo {
-            yes: None,
-            no: None,
-        },
-        DecisionQuestionKind::Score { levels: vec![] },
+        DecisionQuestionKind::choice(vec![]),
+        DecisionQuestionKind::yes_no(None, None),
+        DecisionQuestionKind::score(vec![]),
     ];
     assert_eq!(kinds.map(|kind| index(&kind)), [0, 1, 2]);
     let values = [
-        DecisionValue::Choice { key: String::new() },
-        DecisionValue::YesNo { p_yes: 0.0 },
-        DecisionValue::Score {
-            value: 0.0,
-            statistic: ScoreStatistic::Median,
-        },
+        DecisionValue::choice(""),
+        DecisionValue::yes_no(0.0),
+        DecisionValue::score(0.0, ScoreStatistic::Median),
     ];
     assert_eq!(values.map(|value| index(&value)), [0, 1, 2]);
     assert_eq!(
@@ -258,6 +256,79 @@ fn bincode_variant_indexes_are_pinned() {
     assert_eq!(
         [ScoreStatistic::Median, ScoreStatistic::Expected].map(|statistic| index(&statistic)),
         [0, 1]
+    );
+}
+
+/// `DecisionLevel` is a one-field record, which bincode writes as the field
+/// alone: a score question's bytes are what they were when levels were bare
+/// `Option<DecisionContent>`s, variant index included.
+#[test]
+fn score_levels_as_records_keep_their_bincode_bytes() {
+    let descriptions = vec![None, Some(DecisionContent::text("high")), content("[1]")];
+    let kind = DecisionQuestionKind::score(
+        descriptions
+            .iter()
+            .cloned()
+            .map(DecisionLevel::new)
+            .collect(),
+    );
+    let mut before = 2u32.to_le_bytes().to_vec();
+    before.extend(bincode::serialize(&descriptions).unwrap());
+    assert_eq!(bincode::serialize(&kind).unwrap(), before);
+    let back: DecisionQuestionKind = bincode::deserialize(&before).unwrap();
+    assert_eq!(back, kind);
+}
+
+#[test]
+fn constructors_and_accessors_cover_every_variant() {
+    let options = vec![DecisionOption::new("a", None)];
+    let yes = DecisionContent::text("it is");
+    let levels = vec![
+        DecisionLevel::new(None),
+        DecisionLevel::new(Some(yes.clone())),
+    ];
+    let choice = DecisionQuestionKind::choice(options.clone());
+    let yes_no = DecisionQuestionKind::yes_no(Some(yes.clone()), None);
+    let score = DecisionQuestionKind::score(levels.clone());
+    assert_eq!(
+        choice,
+        DecisionQuestionKind::Choice {
+            options: options.clone()
+        }
+    );
+    assert_eq!(choice.as_choice(), Some(options.as_slice()));
+    assert_eq!(yes_no.as_yes_no(), Some((Some(&yes), None)));
+    assert_eq!(score.as_score(), Some(levels.as_slice()));
+    for (kind, accessors) in [
+        (&choice, [true, false, false]),
+        (&yes_no, [false, true, false]),
+        (&score, [false, false, true]),
+    ] {
+        let found = [
+            kind.as_choice().is_some(),
+            kind.as_yes_no().is_some(),
+            kind.as_score().is_some(),
+        ];
+        assert_eq!(found, accessors, "{}", kind.name());
+    }
+
+    let values = [
+        DecisionValue::choice("a"),
+        DecisionValue::yes_no(0.25),
+        DecisionValue::score(1.5, ScoreStatistic::Expected),
+    ];
+    assert_eq!(values[0], DecisionValue::Choice { key: "a".into() });
+    assert_eq!(
+        values.each_ref().map(DecisionValue::as_choice),
+        [Some("a"), None, None]
+    );
+    assert_eq!(
+        values.each_ref().map(DecisionValue::as_yes_no),
+        [None, Some(0.25), None]
+    );
+    assert_eq!(
+        values.each_ref().map(DecisionValue::as_score),
+        [None, None, Some((1.5, ScoreStatistic::Expected))]
     );
 }
 

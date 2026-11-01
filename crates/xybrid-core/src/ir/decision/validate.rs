@@ -119,7 +119,7 @@ impl StructuralLimits {
 /// let options = vec![DecisionOption::new("a", None), DecisionOption::new("a", None)];
 /// let request = DecisionRequest::new(
 ///     DecisionState::text("a state"),
-///     vec![DecisionQuestion::new("q", None, DecisionQuestionKind::Choice { options })],
+///     vec![DecisionQuestion::new("q", None, DecisionQuestionKind::choice(options))],
 /// );
 /// let error = validate_structure(&request, &StructuralLimits::default()).unwrap_err();
 /// assert!(matches!(error, DecisionError::DuplicateOptionKey { question: 0, option: 1, first: 0 }));
@@ -202,7 +202,7 @@ pub fn validate_structure(
                     });
                 }
                 for level in levels {
-                    totals.content(level.as_ref());
+                    totals.content(level.description());
                 }
             }
         }
@@ -250,7 +250,9 @@ impl Totals {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::decision::{DecisionOption, DecisionQuestion, DecisionState, OrderedJson};
+    use crate::ir::decision::{
+        DecisionLevel, DecisionOption, DecisionQuestion, DecisionState, OrderedJson,
+    };
 
     const CANARY: &str = "canary-7f3a9c";
 
@@ -281,9 +283,7 @@ mod tests {
         DecisionQuestion::new(
             id,
             None,
-            DecisionQuestionKind::Score {
-                levels: vec![None; levels],
-            },
+            DecisionQuestionKind::score(vec![DecisionLevel::new(None); levels]),
         )
     }
 
@@ -319,9 +319,11 @@ mod tests {
                 DecisionQuestion::new(
                     "level",
                     None,
-                    DecisionQuestionKind::Score {
-                        levels: vec![None, content("0"), content(r#"{"k":null}"#)],
-                    },
+                    DecisionQuestionKind::score(
+                        [None, content("0"), content(r#"{"k":null}"#)]
+                            .map(DecisionLevel::new)
+                            .to_vec(),
+                    ),
                 ),
             ],
         );
@@ -445,9 +447,10 @@ mod tests {
                 DecisionQuestion::new(
                     "s",
                     None,
-                    DecisionQuestionKind::Score {
-                        levels: vec![None, Some(DecisionContent::text("hi"))],
-                    },
+                    DecisionQuestionKind::score(vec![
+                        DecisionLevel::new(None),
+                        DecisionLevel::new(Some(DecisionContent::text("hi"))),
+                    ]),
                 ),
             ],
         );

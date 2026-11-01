@@ -34,8 +34,11 @@ pub const PROBABILITY_TOLERANCE: f64 = 1e-6;
 const DECODING_NOISE: f64 = 1e-12;
 
 /// Where a distribution entry came from.
+///
+/// `#[non_exhaustive]`: match it with a wildcard arm for origins added later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[non_exhaustive]
 pub enum DecisionOrigin {
     /// From the request: an option, a level, or yes/no.
     Caller,
@@ -45,8 +48,12 @@ pub enum DecisionOrigin {
 }
 
 /// Which statistic of a score distribution a score value is.
+///
+/// `#[non_exhaustive]`: match it with a wildcard arm for statistics added
+/// later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[non_exhaustive]
 pub enum ScoreStatistic {
     /// The first level whose cumulative probability reaches one half
     /// (LFM3 d1).
@@ -144,6 +151,44 @@ impl fmt::Debug for DecisionScore {
 
 /// The answer to one question, derived from its distribution.
 ///
+/// The enum and each of its variants are `#[non_exhaustive]`. Outside this
+/// crate, build a value with [`choice`](Self::choice), [`yes_no`](Self::yes_no)
+/// or [`score`](Self::score), and read it with the `as_*` accessors or with
+/// `{ .. }` patterns and a wildcard arm, so a value appended later (see the
+/// module's compatibility rules) breaks no caller:
+///
+/// ```
+/// use xybrid_core::ir::{DecisionValue, ScoreStatistic};
+///
+/// let values = [
+///     DecisionValue::choice("refund"),
+///     DecisionValue::yes_no(0.75),
+///     DecisionValue::score(2.0, ScoreStatistic::Median),
+/// ];
+/// assert_eq!(values[0].as_choice(), Some("refund"));
+/// assert_eq!(values[1].as_yes_no(), Some(0.75));
+/// assert_eq!(values[2].as_score(), Some((2.0, ScoreStatistic::Median)));
+/// let kinds: Vec<&str> = values
+///     .iter()
+///     .map(|value| match value {
+///         DecisionValue::Choice { .. } => "choice",
+///         DecisionValue::YesNo { p_yes, .. } if *p_yes > 0.5 => "yes",
+///         DecisionValue::YesNo { .. } => "no",
+///         DecisionValue::Score { statistic: ScoreStatistic::Median, .. } => "median",
+///         _ => "other", // a value or statistic added later
+///     })
+///     .collect();
+/// assert_eq!(kinds, ["choice", "yes", "median"]);
+/// ```
+///
+/// Struct expressions do not compile outside this crate:
+///
+/// ```compile_fail,E0639
+/// use xybrid_core::ir::DecisionValue;
+///
+/// let value = DecisionValue::YesNo { p_yes: 0.5 };
+/// ```
+///
 /// `Debug` prints the chosen key's length and the numbers, never the key.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -151,22 +196,66 @@ impl fmt::Debug for DecisionScore {
 #[non_exhaustive]
 pub enum DecisionValue {
     /// The chosen option: the key with the highest probability.
+    #[non_exhaustive]
     Choice {
         /// Its key.
         key: String,
     },
     /// The probability of yes: the distribution's `"true"` entry.
+    #[non_exhaustive]
     YesNo {
         /// That probability.
         p_yes: f64,
     },
     /// A level, as the named statistic of the distribution.
+    #[non_exhaustive]
     Score {
         /// The level (whole for [`ScoreStatistic::Median`]).
         value: f64,
         /// Which statistic it is.
         statistic: ScoreStatistic,
     },
+}
+
+impl DecisionValue {
+    /// The chosen option, by key.
+    pub fn choice(key: impl Into<String>) -> Self {
+        Self::Choice { key: key.into() }
+    }
+
+    /// The probability of yes.
+    pub fn yes_no(p_yes: f64) -> Self {
+        Self::YesNo { p_yes }
+    }
+
+    /// A level, as `statistic` of the distribution.
+    pub fn score(value: f64, statistic: ScoreStatistic) -> Self {
+        Self::Score { value, statistic }
+    }
+
+    /// The chosen key of a choice.
+    pub fn as_choice(&self) -> Option<&str> {
+        match self {
+            Self::Choice { key } => Some(key),
+            _ => None,
+        }
+    }
+
+    /// The probability of yes of a yes/no answer.
+    pub fn as_yes_no(&self) -> Option<f64> {
+        match self {
+            Self::YesNo { p_yes } => Some(*p_yes),
+            _ => None,
+        }
+    }
+
+    /// The level and statistic of a score.
+    pub fn as_score(&self) -> Option<(f64, ScoreStatistic)> {
+        match self {
+            Self::Score { value, statistic } => Some((*value, *statistic)),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Debug for DecisionValue {
@@ -278,7 +367,7 @@ impl DecisionAnswer {
     ///     .collect();
     ///
     /// // The first level reaching half the mass is level 1, not level 0.
-    /// let median = |value| DecisionValue::Score { value, statistic: ScoreStatistic::Median };
+    /// let median = |value| DecisionValue::score(value, ScoreStatistic::Median);
     /// let answer = DecisionAnswer::new("severity", levels.clone(), median(1.0), Some(0.5000000018693014))?;
     /// assert_eq!(answer.value(), &median(1.0));
     /// assert!(DecisionAnswer::new("severity", levels, median(0.0), None).is_err());

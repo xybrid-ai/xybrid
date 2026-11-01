@@ -310,11 +310,82 @@ impl fmt::Debug for DecisionOption {
     }
 }
 
+/// One level of a score question, with an optional description.
+///
+/// Level `i` of a question is keyed `"i"` (decimal, from `"0"`) in its
+/// answer's distribution. A level without a description is still a level
+/// (LFM3 d1 shows it as JSON `null`); build one from JSON with
+/// [`DecisionContent::from_json`], which turns `null` into `None`.
+///
+/// `Debug` prints the description's kind and length, never the description.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct DecisionLevel {
+    description: Option<DecisionContent>,
+}
+
+impl DecisionLevel {
+    /// A level with an optional description.
+    pub fn new(description: Option<DecisionContent>) -> Self {
+        Self { description }
+    }
+
+    /// The description, if any.
+    pub fn description(&self) -> Option<&DecisionContent> {
+        self.description.as_ref()
+    }
+}
+
+impl fmt::Debug for DecisionLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DecisionLevel")
+            .field("description", &self.description)
+            .finish()
+    }
+}
+
 /// What a question asks for, with its alternatives.
 ///
 /// Which kinds, how many alternatives and which descriptions a model
 /// accepts is up to its protocol; [`validate_structure`](super::validate_structure)
 /// only checks what every protocol needs.
+///
+/// The enum and each of its variants are `#[non_exhaustive]`. Outside this
+/// crate, build a kind with [`choice`](Self::choice), [`yes_no`](Self::yes_no)
+/// or [`score`](Self::score), and read it with the `as_*` accessors or with
+/// `{ .. }` patterns and a wildcard arm, so a kind appended later (see the
+/// module's compatibility rules) breaks no caller:
+///
+/// ```
+/// use xybrid_core::ir::{DecisionContent, DecisionLevel, DecisionOption, DecisionQuestionKind};
+///
+/// let kinds = [
+///     DecisionQuestionKind::choice(vec![DecisionOption::new("a", None)]),
+///     DecisionQuestionKind::yes_no(Some(DecisionContent::text("it is")), None),
+///     DecisionQuestionKind::score(vec![DecisionLevel::new(None); 3]),
+/// ];
+/// let alternatives: Vec<usize> = kinds
+///     .iter()
+///     .map(|kind| match kind {
+///         DecisionQuestionKind::Choice { options, .. } => options.len(),
+///         DecisionQuestionKind::YesNo { .. } => 2,
+///         DecisionQuestionKind::Score { levels, .. } => levels.len(),
+///         _ => 0, // a kind added later
+///     })
+///     .collect();
+/// assert_eq!(alternatives, [1, 2, 3]);
+/// assert_eq!(kinds[1].as_yes_no().map(|(yes, _)| yes.is_some()), Some(true));
+/// assert_eq!(kinds[2].as_score().map(<[_]>::len), Some(3));
+/// ```
+///
+/// Struct expressions do not compile outside this crate:
+///
+/// ```compile_fail,E0639
+/// use xybrid_core::ir::DecisionQuestionKind;
+///
+/// let kind = DecisionQuestionKind::Choice { options: Vec::new() };
+/// ```
 ///
 /// `Debug` prints counts, never content.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -325,28 +396,68 @@ pub enum DecisionQuestionKind {
     /// Pick one option. The answer's distribution has one entry per option,
     /// keyed by its key, in option order; a model with fixed choices of its
     /// own appends them after, as [`DecisionOrigin::Fixed`](super::DecisionOrigin::Fixed).
+    #[non_exhaustive]
     Choice {
         /// The options, in the order the caller offers them.
         options: Vec<DecisionOption>,
     },
     /// Yes or no, each optionally described. The answer's distribution is
     /// keyed `"true"` and `"false"`, in the protocol's order.
+    #[non_exhaustive]
     YesNo {
         /// What "yes" means.
         yes: Option<DecisionContent>,
         /// What "no" means.
         no: Option<DecisionContent>,
     },
-    /// A level on a scale. Level `i` is keyed `"i"` (decimal, from `"0"`)
-    /// in the answer's distribution; a level without a description is
-    /// still a level.
+    /// A level on a scale ([`DecisionLevel`]).
+    #[non_exhaustive]
     Score {
-        /// The level descriptions, lowest first.
-        levels: Vec<Option<DecisionContent>>,
+        /// The levels, lowest first.
+        levels: Vec<DecisionLevel>,
     },
 }
 
 impl DecisionQuestionKind {
+    /// A choice question offering `options`, in order.
+    pub fn choice(options: Vec<DecisionOption>) -> Self {
+        Self::Choice { options }
+    }
+
+    /// A yes/no question, with optional descriptions of yes and no.
+    pub fn yes_no(yes: Option<DecisionContent>, no: Option<DecisionContent>) -> Self {
+        Self::YesNo { yes, no }
+    }
+
+    /// A score question on `levels`, lowest first.
+    pub fn score(levels: Vec<DecisionLevel>) -> Self {
+        Self::Score { levels }
+    }
+
+    /// The options of a choice question.
+    pub fn as_choice(&self) -> Option<&[DecisionOption]> {
+        match self {
+            Self::Choice { options } => Some(options),
+            _ => None,
+        }
+    }
+
+    /// The descriptions of yes and no, in that order, of a yes/no question.
+    pub fn as_yes_no(&self) -> Option<(Option<&DecisionContent>, Option<&DecisionContent>)> {
+        match self {
+            Self::YesNo { yes, no } => Some((yes.as_ref(), no.as_ref())),
+            _ => None,
+        }
+    }
+
+    /// The levels of a score question, lowest first.
+    pub fn as_score(&self) -> Option<&[DecisionLevel]> {
+        match self {
+            Self::Score { levels } => Some(levels),
+            _ => None,
+        }
+    }
+
     /// The kind's name: `"choice"`, `"yes/no"` or `"score"`.
     pub fn name(&self) -> &'static str {
         match self {
@@ -595,15 +706,46 @@ mod tests {
     #[test]
     fn kind_names() {
         let names = [
-            DecisionQuestionKind::Choice { options: vec![] },
-            DecisionQuestionKind::YesNo {
-                yes: None,
-                no: None,
-            },
-            DecisionQuestionKind::Score { levels: vec![] },
+            DecisionQuestionKind::choice(vec![]),
+            DecisionQuestionKind::yes_no(None, None),
+            DecisionQuestionKind::score(vec![]),
         ]
         .map(|kind| kind.name());
         assert_eq!(names, ["choice", "yes/no", "score"]);
+    }
+
+    #[test]
+    fn levels_are_records_with_an_optional_description() {
+        let described = DecisionLevel::new(DecisionContent::from_json(json(r#"{"a":1}"#)));
+        assert_eq!(
+            described.description().and_then(DecisionContent::as_json),
+            Some(&json(r#"{"a":1}"#))
+        );
+        // A JSON null description is no description.
+        let null = DecisionLevel::new(DecisionContent::from_json(json("null")));
+        assert_eq!(null, DecisionLevel::new(None));
+        assert!(null.description().is_none());
+
+        let encoded = serde_json::to_string(&described).unwrap();
+        assert_eq!(encoded, r#"{"description":{"Json":"{\"a\":1}"}}"#);
+        assert_eq!(
+            serde_json::from_str::<DecisionLevel>(&encoded).unwrap(),
+            described
+        );
+        assert_eq!(
+            serde_json::from_str::<DecisionLevel>(r#"{"description":null}"#).unwrap(),
+            DecisionLevel::new(None)
+        );
+        assert!(serde_json::from_str::<DecisionLevel>(r#"{"description":null,"x":1}"#).is_err());
+        assert!(serde_json::from_str::<DecisionLevel>("null").is_err());
+
+        let canary = DecisionLevel::new(Some(DecisionContent::text(CANARY)));
+        let rendered = format!("{canary:?}");
+        assert!(!rendered.contains(CANARY), "{rendered}");
+        assert_eq!(
+            rendered,
+            r#"DecisionLevel { description: Some(DecisionContent { kind: "text", bytes: 13 }) }"#
+        );
     }
 
     #[test]
@@ -723,13 +865,15 @@ mod tests {
             yes: Some(DecisionContent::text(CANARY)),
             no: Some(content.clone()),
         };
-        let score = DecisionQuestionKind::Score {
-            levels: vec![
+        let score = DecisionQuestionKind::score(
+            [
                 None,
                 Some(DecisionContent::text(CANARY)),
                 Some(content.clone()),
-            ],
-        };
+            ]
+            .map(DecisionLevel::new)
+            .to_vec(),
+        );
         let request = DecisionRequest::new(
             DecisionState::new(Some(content.clone())),
             vec![question.clone()],
