@@ -315,7 +315,9 @@ C10, the second is the method P11 applies.
   including the 3,605-token case. The largest gap (difference of max-pooled
   logit differences) is 0.0033 for `d1-2b-f16` and 0.027 for `d1-2b-bf16`. The
   largest probability difference is 0.00049 and 0.0042. Flash attention on
-  leaves BF16 in the same range (0.031). `d1-2b-q4km` drifts by up to 0.87 in
+  leaves BF16 in the same range (0.031); no F16 run with flash attention on
+  was made here (C16 holds `cpu-t4-fa-on` to its cap as a hypothesis under
+  test, not a measured bound). `d1-2b-q4km` drifts by up to 0.87 in
   gap and 0.097 in probability, still with no answer change: G3's report, not
   G1's. With C16's two `hf-diff-*` cases added (26 cases, 32 questions),
   `d1-2b-f16` still tokenizes alike and agrees on every answer; its largest
@@ -332,30 +334,40 @@ C10, the second is the method P11 applies.
 - **`d1-2b-f16` is the G1 artifact (contract C10).** ggml rounds a matmul's
   activations to the weight type: bf16 (8 significant bits) for the BF16 GGUF,
   f16 (11) for the F16 GGUF. F16 therefore tracks the float32 reference about
-  8× more tightly. A cap of a few times its noise (around 0.01 to 0.02 in gap)
-  still catches every prompt difference measured here. That proposed cap is
-  for F16 only: BF16 bounds would have to sit near the smallest prompt-induced
-  gap. Every case here names `d1-2b-f16` as its `artifact`, and the BF16 and
-  Q4_K_M cross-checks are reports.
+  8× more tightly. C16 (quoted below) fixes the cap at C = 0.020 logits for
+  `cpu-t4-fa-off` and `cpu-t4-fa-on` alike, with a bound B_s per setting from
+  its headroom rule. On this folder's gap metric, which is not C16's AGE,
+  every prompt difference measured here (0.053 and up) lies above C, and the
+  BF16 GGUF's noise (0.027) does too. Every case here names `d1-2b-f16` as its
+  `artifact`, and the BF16 and Q4_K_M cross-checks are reports.
 - **For P11: the comparison method.**
+  - What G1 accepts is contract C16, verbatim (framework-v2.md):
+
+    > C16. **G1 acceptance contract (after Codex rb2, `review-p11-plan.md`; P11 owns the implementation).** G1's numeric domain is P11's **explicit semantic allowlist** with verified exclusion kinds, replacing C10's blanket `hf-diff-` prefix exclusion (`hf-diff-packing` from `observations/` with `set_size = 1`, and `hf-diff-duplicate-keys` as reference-to-reference evidence, are included; xybrid still refuses duplicate keys at parse). Metric: anchored gap error (AGE) over all offered groups, gated `AGE ≤ B_s` per setting on its own; near-tie certificates are necessary conditions only. Cap C = 0.020 logits for both `cpu-t4-fa-off` and `cpu-t4-fa-on` as a predeclared quality requirement (a hypothesis under test, not a measured FA-on bound); clipped headroom rule `M_s ≤ C/2`, `B_s = min(C, max(0.005, ⌈3·M_s⌉₀.₀₀₁))`, B/M ≥ 2× recorded. A failing FA-on result is a blocking failure for the product default (no omission, no silent switch to FA-off, no borrowed Q4 allowance); a changed target is a new experiment. Held-out: recipe + literal seed committed before representative observations, bytes generated after the freeze, structural strata (36-option fallback, 63/64/65-token FA tiling boundary, near-default-budget length); a targeted regression suite, not a statistical certification. G0 has no automatic threshold exemptions.
+
+  - P11's allowlist is 26 cases, 32 question observations and 26 distinct
+    token sequences: the 24 cases not named `hf-diff-`, plus
+    `hf-diff-packing` (5 questions, read from `observations/`; `packed/`
+    holds the difference) and `hf-diff-duplicate-keys` (both references keep
+    the last value). Its 20 exclusions each have a verified kind:
+    `prompt_differs` ×9, `upstream_refuses` ×7, `hf_refuses` ×3 and
+    `hf_no_groups` ×1 (`hf-diff-choice-multiple`). This folder's
+    observations and F16 cross-check agree with every one. The names `hf-*`
+    and `hf-diff-*` say why a case was written, not whether it is in the
+    allowlist; the 24-case pilot subset in `hf/crosscheck/`,
+    `provenance.json` and `DIFFERENCES.md` section 6 is historical, a summary
+    rather than the allowlist.
   - Compare logits or logit gaps, not log-probabilities or probabilities at
     the publisher temperature. The temperatures differ by 3.0e-7 relative,
     enough to flip a median at a boundary (`hf/synthetic/median.json`), and
-    the reference reads log-probabilities where upstream reads logits.
-  - Which cases bound G1 is P11's semantic allowlist (contract C16), not a
-    name prefix: `hf-*` and `hf-diff-*` say why a case was written, not
-    whether it is in the allowlist. C16 includes `hf-diff-packing`, read from
-    `observations/` (`set_size = 1`: each question alone, as upstream reads
-    it; `packed/` holds the difference), and `hf-diff-duplicate-keys` as
-    reference-to-reference evidence (both references keep the last value),
-    which xybrid still refuses at parse by design. The 24-case pilot subset
-    in `hf/crosscheck/`, `provenance.json` and `DIFFERENCES.md` section 6 is
-    historical: a summary, not the allowlist.
+    the reference reads log-probabilities where upstream reads logits. This
+    folder's "gap" (the difference of max-pooled logit differences) is not
+    C16's AGE: its numbers are evidence, not a B_s.
   - Report discrete winner and median disagreements separately from the
     numeric bounds.
   - Include the threshold-sensitive cases (`hf-choice-ambiguous`,
-    `hf-score-borderline`, `hf-choice-27`) and cases the bounds were not
-    fitted on.
+    `hf-score-borderline`, `hf-choice-27`); held-out cases follow C16's
+    freeze (recipe and seed committed before the observations).
 
 The measurements are the cross-check files under `hf/crosscheck/`, summarized
 in `DIFFERENCES.md` section 6. They are a black-box check through the stock
