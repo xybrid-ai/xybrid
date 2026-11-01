@@ -271,9 +271,11 @@ C10, the second is the method P11 applies.
 - **The reference runs.** The `set_size = 1` float32 forward fits the 8 GiB
   machine and is bit-reproducible at one thread. A question takes a median of
   6.1 s (5.2 to 9.4 s for 29 to 234 prompt tokens), 28.5 s at 1,064 tokens and
-  86 s at 3,605, near the 4,096-token budget of `cpu-t4-fa-off`. Four threads
-  are about 1.9× faster but not bit-identical to one, so fixtures keep one
-  thread. A full float32 load does not fit; the parity check stands in for it.
+  86 s at 3,605, near the 4,096-token budget of `cpu-t4-fa-off`. The parity
+  proof the committed runs carry triples that: a median of 18.4 s, and 216 s
+  for the 3,605-token case, at a peak of 7.3 GB resident. Four threads are about
+  1.9× faster but not bit-identical to one, so fixtures keep one thread. A full
+  float32 load does not fit; the parity proof stands in for it.
 - **The shared domain agrees.** On the 24 shared-domain cases (26 questions),
   the stock `llama-server` (v0.8.0, `cpu-t4-fa-off`) and the reference
   tokenize every prompt to the same length and agree on every answer,
@@ -282,13 +284,14 @@ C10, the second is the method P11 applies.
   largest probability difference is 0.00049 and 0.0042. Flash attention on
   leaves BF16 in the same range (0.031). `d1-2b-q4km` drifts by up to 0.87 in
   gap and 0.097 in probability, still with no answer change: G3's report, not
-  G1's. On this CPU the server takes about 2 s a short question but 124 to
-  159 s for the 3,605-token case on BF16 and F16 (83 s on Q4_K_M). That
-  matters for the measured budgets of P2 and G3.
+  G1's. On this CPU the server takes about 2 s a short question but 2 to 3
+  minutes for the 3,605-token case on BF16 and F16 (124 to 173 s across two
+  runs; 83 to 109 s on Q4_K_M). That matters for the measured budgets of P2
+  and G3.
 - **Prompt differences stand out, against F16.** The difference cases that
-  both sides answer show gaps from 0.055 (single against double quotes in
+  both sides answer show gaps from 0.053 (single against double quotes in
   object instructions) to 7.9, and different token counts wherever the prompt
-  length changes. 0.055 is 17 times F16's noise but only twice BF16's.
+  length changes. 0.053 is 16 times F16's noise but only twice BF16's.
 - **`d1-2b-f16` is the G1 artifact (contract C10).** ggml rounds a matmul's
   activations to the weight type: bf16 (8 significant bits) for the BF16 GGUF,
   f16 (11) for the F16 GGUF. F16 therefore tracks the float32 reference about
