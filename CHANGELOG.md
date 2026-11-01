@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-30
+
 ### Added
 
 - **Android, React Native:** on-device speech with Phonon and Kitten TTS 2 in
@@ -16,8 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Kitten TTS 2 bundle loads from a local directory, through the existing model
   and run APIs (see [Phonon speech](docs/sdk/PHONON.md)). The armeabi-v7a and
   x86_64 libraries are built without the engine: there the registry does not
-  serve `phonon-31m-en` and a Kitten bundle fails to load. React Native on iOS
-  is unchanged and has no speech engine. The AAR also carries the
+  serve `phonon-31m-en` and a Kitten bundle fails to load. On iOS the standard
+  Swift package, Flutter plugin and React Native module are unchanged and have
+  no speech engine, so the registry does not serve them `phonon-31m-en`; its
+  `ios-arm64` entry serves only custom `tts-zzz` builds, whose speech linkage
+  remains unqualified. The AAR also carries the
   engine's fourteen notice files (its runtime terms and the upstream licenses)
   under `assets/xybrid/zzz/`. Android merges library assets into the APK, so
   every app that ships the SDK carries them.
@@ -46,7 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `//bindings/kotlin:xybrid_kotlin_zzz_aar` target. Crates that enable either
   feature must drop it. `xybrid_zzz_sys::UnavailableReason` drops its
   companion-only variants and keeps `UnsupportedCpu`, so code naming a removed
-  variant must be updated. Custom static `tts-zzz` builds are unchanged.
+  variant must be updated. The removal does not affect custom static `tts-zzz`
+  builds.
 
 ### Fixed
 
@@ -62,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   including when the model is cached. Flutter load failures throw
   `XybridException`, and native diagnostics retain their causes without an extra
   inference prefix.
+- Rust builds with `asr-whispercpp` on hosts with libclang 22 or newer generate
+  a usable `whisper_full_params` binding. The llama.cpp and whisper.cpp build
+  scripts now use bindgen 0.72.1, which resolves forward-declared structs that
+  older bindgen emitted as opaque placeholders.
 - Unity iOS players import native symbols from the statically linked application
   (`__Internal`). The generated bindings previously tried to load `xybrid_bolt`
   as a dynamic library. The Unity Editor continues using its host's dynamic library,
