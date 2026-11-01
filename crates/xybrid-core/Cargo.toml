@@ -124,9 +124,11 @@ default = ["ort-download"]
 schema = ["dep:schemars"]
 
 # Expose the `testing` module (mocks + model fixtures) to downstream crates.
-# No-op marker today (the module is currently always `pub`); it exists so
-# consumers can depend on `xybrid-core/test-util` now and stay correct once
-# the `testing` module is gated behind this feature (audit 4a).
+# For `testing` it is a marker today (the module is currently always `pub`); it
+# exists so consumers can depend on `xybrid-core/test-util` now and stay correct
+# once the `testing` module is gated behind this feature (audit 4a). It also
+# makes `execution::decision` (the LFM3 d1 protocol, crate-internal otherwise)
+# public, for cross-crate decision conformance tests.
 test-util = []
 
 # ONNX Runtime — the static-vs-dynamic mode is decided per-target by the
