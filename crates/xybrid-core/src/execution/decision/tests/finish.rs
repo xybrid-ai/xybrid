@@ -5,14 +5,14 @@ use crate::execution::decision::plan::{AnswerPlan, FinalizeRule, LabelGroup, Req
 use crate::execution::decision::{finish, DecisionPass, DecisionPlan, Token};
 use crate::ir::decision::{
     DecisionContent, DecisionError, DecisionLevel, DecisionOption, DecisionOrigin,
-    DecisionQuestion, DecisionQuestionKind, DecisionRequest, DecisionState, ScoreStatistic,
+    DecisionQuestion, DecisionQuestionKind, DecisionRequest, DecisionState, OrderedJson,
+    ScoreStatistic,
 };
 
 /// d1-2B's effective temperature, `strtof("1.337398")`.
 const D1_T: u32 = 0x3fab2fdc;
 
-/// A question, its plan (one pass, one token per option unless `sizes`
-/// says more), on a 10-token prompt.
+/// A question and its plan ([`plan_for`]).
 fn single(
     kind: DecisionQuestionKind,
     rule: FinalizeRule,
@@ -21,6 +21,20 @@ fn single(
     t: f32,
 ) -> (DecisionRequest, DecisionPlan) {
     let question = DecisionQuestion::new("q", Some(DecisionContent::text("x").into()), kind);
+    let request = DecisionRequest::new(DecisionState::text("s"), vec![question]);
+    let plan = plan_for(&request, rule, keys, sizes, t);
+    (request, plan)
+}
+
+/// The plan of `request`'s one question: one pass, one token per option
+/// unless `sizes` says more, on a 10-token prompt.
+fn plan_for(
+    request: &DecisionRequest,
+    rule: FinalizeRule,
+    keys: &[&str],
+    sizes: &[usize],
+    t: f32,
+) -> DecisionPlan {
     let mut select: Vec<Token> = Vec::new();
     let groups = keys
         .iter()
@@ -36,8 +50,7 @@ fn single(
             }
         })
         .collect();
-    let request = DecisionRequest::new(DecisionState::text("s"), vec![question]);
-    let plan = DecisionPlan {
+    DecisionPlan {
         passes: vec![DecisionPass {
             tokens: (0..10).collect(),
             select,
@@ -52,9 +65,8 @@ fn single(
                 value: t,
             },
         }],
-        request: RequestDigest::of(&request),
-    };
-    (request, plan)
+        request: RequestDigest::of(request),
+    }
 }
 
 fn choice(keys: &[&str], t: f32) -> (DecisionRequest, DecisionPlan) {
@@ -278,6 +290,52 @@ fn a_plan_for_another_state_of_the_same_shape_is_a_bug() {
     let (_, questions) = request.into_parts();
     let other = DecisionRequest::new(DecisionState::text("t"), questions);
     let _ = finish(&other, &plan, vec![vec![0.0, 1.0]]);
+}
+
+/// The digest is the request's value. A JSON request read back through
+/// serde, as JSON or as bincode, is the same request: floats by their bits
+/// (`-0.0` included), integers by value, members in order.
+#[test]
+fn a_json_request_decoded_through_serde_is_the_same_request() {
+    let json = |text: &str| OrderedJson::parse(text).expect("JSON");
+    let state = r#"{"z": {"b": -0.0, "a": [1.5, 0.1, 42, -7]}, "nested": {"k": {"k": 1e-300}}}"#;
+    let options = vec![
+        DecisionOption::new(
+            "a",
+            DecisionContent::from_json(json(r#"{"w": [-0.0, 2, {"deep": 0.5}]}"#)),
+        ),
+        DecisionOption::new("b", None),
+    ];
+    let question = DecisionQuestion::new(
+        "q",
+        DecisionContent::from_json(json(r#"{"ask": "which?", "n": 3}"#)).map(Into::into),
+        DecisionQuestionKind::choice(options),
+    );
+    let request = DecisionRequest::new(DecisionState::from_json(json(state)), vec![question]);
+    let plan = plan_for(&request, FinalizeRule::Choice, &["a", "b"], &[1, 1], 1.0);
+
+    let through_json: DecisionRequest =
+        serde_json::from_str(&serde_json::to_string(&request).unwrap()).unwrap();
+    let through_bincode: DecisionRequest =
+        bincode::deserialize(&bincode::serialize(&request).unwrap()).unwrap();
+    for decoded in [through_json, through_bincode] {
+        assert!(decoded == request);
+        assert!(RequestDigest::of(&decoded) == RequestDigest::of(&request));
+        let decisions = finish(&decoded, &plan, vec![vec![0.0, 1.0]]).unwrap();
+        assert_eq!(decisions.answers()[0].value().as_choice(), Some("b"));
+    }
+
+    // One value changed is another request: `0.0` for `-0.0`, a float for
+    // an integer, members in another order.
+    for other in [
+        r#"{"z": {"b": 0.0, "a": [1.5, 0.1, 42, -7]}, "nested": {"k": {"k": 1e-300}}}"#,
+        r#"{"z": {"b": -0.0, "a": [1.5, 0.1, 42.0, -7]}, "nested": {"k": {"k": 1e-300}}}"#,
+        r#"{"z": {"a": [1.5, 0.1, 42, -7], "b": -0.0}, "nested": {"k": {"k": 1e-300}}}"#,
+    ] {
+        let (_, questions) = request.clone().into_parts();
+        let other = DecisionRequest::new(DecisionState::from_json(json(other)), questions);
+        assert!(RequestDigest::of(&other) != RequestDigest::of(&request));
+    }
 }
 
 #[test]

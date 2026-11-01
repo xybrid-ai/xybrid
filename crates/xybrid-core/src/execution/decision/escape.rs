@@ -57,6 +57,13 @@ pub(super) const ESCAPE_STEPS_PER_BYTE: usize = 64;
 /// [`ESCAPE_STEPS_PER_BYTE`], for short strings.
 pub(super) const ESCAPE_STEPS_PER_STRING: usize = 1024;
 
+/// The trie steps escaping `text` may take, all passes together.
+pub(super) fn escape_budget(text: &str) -> usize {
+    ESCAPE_STEPS_PER_BYTE
+        .saturating_mul(text.len())
+        .saturating_add(ESCAPE_STEPS_PER_STRING)
+}
+
 /// A vocabulary's CONTROL spellings, as `d1_break` tries them.
 #[derive(Debug, Clone)]
 pub(super) struct Spellings {
@@ -154,11 +161,23 @@ impl Spellings {
     ///
     /// [`new`]: Self::new
     pub(super) fn d1_break(&self, text: &str) -> Result<String, DecisionError> {
-        let mut steps = ESCAPE_STEPS_PER_BYTE
-            .saturating_mul(text.len())
-            .saturating_add(ESCAPE_STEPS_PER_STRING);
+        self.d1_break_within(text, &mut escape_budget(text))
+    }
+
+    /// [`Self::d1_break`] and the trie steps it took: its whole budget when
+    /// it refuses.
+    #[cfg(test)]
+    pub(super) fn d1_break_counted(&self, text: &str) -> (Result<String, DecisionError>, usize) {
+        let budget = escape_budget(text);
+        let mut steps = budget;
+        let result = self.d1_break_within(text, &mut steps);
+        (result, budget - steps)
+    }
+
+    /// [`Self::d1_break`] within `steps` trie steps, which it takes from.
+    fn d1_break_within(&self, text: &str, steps: &mut usize) -> Result<String, DecisionError> {
         let mut current = text.to_string();
-        while let Some(next) = self.break_once(&current, &mut steps)? {
+        while let Some(next) = self.break_once(&current, steps)? {
             current = next;
         }
         Ok(current)

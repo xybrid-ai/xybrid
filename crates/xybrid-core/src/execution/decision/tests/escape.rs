@@ -6,8 +6,8 @@
 use std::sync::Arc;
 
 use crate::execution::decision::escape::{
-    Escaped, Spellings, ESCAPE_STEPS_PER_BYTE, ESCAPE_STEPS_PER_STRING, MAX_SPELLINGS,
-    MAX_SPELLINGS_BYTES, MAX_SPELLING_BYTES,
+    escape_budget, Escaped, Spellings, ESCAPE_STEPS_PER_BYTE, ESCAPE_STEPS_PER_STRING,
+    MAX_SPELLINGS, MAX_SPELLINGS_BYTES, MAX_SPELLING_BYTES,
 };
 use crate::ir::decision::{ContentPart, DecisionContent, DecisionError, OrderedJson};
 
@@ -327,30 +327,35 @@ fn spellings_past_the_caps_are_refused() {
 
 #[test]
 fn a_common_prefix_that_never_completes_costs_bounded_work() {
-    // 900 spellings sharing a long prefix of `a`, which the text matches at
-    // every position without ever completing a spelling: each position walks
-    // the shared prefix once, never every spelling.
+    // 900 spellings sharing a 30-byte prefix of `a`, which the text matches
+    // at every position without ever completing a spelling. Each position
+    // walks the shared prefix once, never every spelling: 31 trie steps (30
+    // bytes of `a`, then the failed lookup of a 31st), and one per byte left
+    // in the last 30 positions, where the text ends first. One pass, as
+    // nothing breaks.
     let text = "a".repeat(64 << 10);
     let short: Vec<String> = (0..900)
         .map(|i| format!("{}{i:03}X", "a".repeat(30)))
         .collect();
     let refs: Vec<&str> = short.iter().map(String::as_str).collect();
-    let started = std::time::Instant::now();
-    assert_eq!(spellings(&refs).d1_break(&text).unwrap(), text);
-    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    let (escaped, steps) = spellings(&refs).d1_break_counted(&text);
+    assert_eq!(escaped.unwrap(), text);
+    assert_eq!(steps, 31 * (text.len() - 30) + (1..=30).sum::<usize>());
+    assert!(steps < escape_budget(&text));
 
-    // With a prefix longer than the work ceiling allows per byte, the
-    // escaping stops at the ceiling and refuses the vocabulary.
+    // With a prefix longer than the ceiling allows per byte (201 steps a
+    // position against 64), escaping takes its whole budget, never more, and
+    // refuses the vocabulary.
     let long: Vec<String> = (0..200)
         .map(|i| format!("{}{i:03}X", "a".repeat(200)))
         .collect();
     let refs: Vec<&str> = long.iter().map(String::as_str).collect();
-    let started = std::time::Instant::now();
-    assert!(matches!(
-        spellings(&refs).d1_break(&text),
-        Err(DecisionError::EscapeWorkExceeded)
-    ));
-    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    let (escaped, steps) = spellings(&refs).d1_break_counted(&text);
+    assert!(matches!(escaped, Err(DecisionError::EscapeWorkExceeded)));
+    assert_eq!(
+        steps,
+        ESCAPE_STEPS_PER_BYTE * text.len() + ESCAPE_STEPS_PER_STRING
+    );
     // The ceiling is per byte of text, plus a constant per string that lets
     // a short string walk the longest spelling.
     const { assert!(ESCAPE_STEPS_PER_BYTE >= 32 && ESCAPE_STEPS_PER_STRING >= MAX_SPELLING_BYTES) };
