@@ -348,7 +348,10 @@ next to a decision model is refused, as is a header that does not read
 completely. Decision models this build does not run are refused under every
 template: `lfm3-d1-omni` (LiquidAI's d1-omni, which needs media support), any
 other decision type, and an `lfm3-d1` model with decision keys the
-`lfm3-d1/text/v1` profile does not implement, such as a `score_bias`.
+`lfm3-d1/text/v1` profile does not implement, such as a `score_bias`. The check
+reads at most 4,096 metadata keys per GGUF, chat models included: a GGUF that
+declares more is refused as above this build's limit
+(`UnsupportedModelCapability`, with both counts), not as a damaged file.
 
 When xybrid writes the metadata itself (a Hugging Face repo without
 `model_metadata.json`, `--model-file`, `fromModelFile`, `xybrid init`), it

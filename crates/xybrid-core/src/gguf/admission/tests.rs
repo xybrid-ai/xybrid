@@ -122,6 +122,8 @@ enum Class {
     NotDecision,
     /// An error: the header does not read or classify completely.
     Malformed,
+    /// More metadata keys than this build reads: a limit, not a fault.
+    OverLimit,
 }
 
 struct Row {
@@ -160,7 +162,14 @@ fn check_row(row: &Row) {
             Some(decision_type.clone())
         }
         (Class::NotDecision, Ok(DecisionClassification::NotDecision))
-        | (Class::Malformed, Err(_)) => None,
+        | (Class::OverLimit, Err(GgufError::TooManyEntries { .. })) => None,
+        (Class::Malformed, Err(error)) => {
+            assert!(
+                !matches!(error, GgufError::TooManyEntries { .. }),
+                "{name}: a limit, not a fault"
+            );
+            None
+        }
         (class, classified) => panic!("{name}: expected {class:?}, classified {classified:?}"),
     };
 
@@ -218,6 +227,13 @@ fn check_row(row: &Row) {
                     message.starts_with("model 'bundle-model': its GGUF cannot be classified"),
                     "{name}: {message}"
                 );
+            }
+        }
+        Class::OverLimit => {
+            for result in [as_decision, as_chat] {
+                let (capability, hint) = capability_refusal(result);
+                assert_eq!(capability, "loading in this build", "{name}");
+                assert!(hint.contains("above this build's limit"), "{name}: {hint}");
             }
         }
     }
@@ -484,7 +500,12 @@ fn matrix() -> Vec<Row> {
     rows.push(row(
         "an ordinary model over the key ceiling",
         with_keys(llama(), 4097),
-        Class::Malformed,
+        Class::OverLimit,
+    ));
+    rows.push(row(
+        "a decision model over the key ceiling",
+        with_keys(d1_builder(), 4097),
+        Class::OverLimit,
     ));
     rows
 }
@@ -662,18 +683,27 @@ fn an_invalid_spec_is_refused_before_the_gguf_is_read() {
     }
 }
 
-/// The key ceiling applies to every GGUF admission reads: an ordinary chat
-/// model over it is refused, not truncated, with a message that gives the
-/// counts and nothing from the file. One at the ceiling is admitted.
+/// The key ceiling applies to every GGUF admission reads. It is a resource
+/// limit of this build, not a fault of the file (valid GGUFs can carry more
+/// keys), so a model over it is refused as unsupported here, never
+/// truncated and never called malformed, with both counts and nothing from
+/// the file. One at the ceiling is admitted.
 #[test]
-fn a_chat_model_over_the_key_ceiling_is_refused_with_its_counts() {
+fn a_model_over_the_key_ceiling_is_refused_as_a_limit_with_its_counts() {
     assert_eq!(GgufLimits::DEFAULT_MAX_METADATA_ENTRIES, 4096);
-    for metadata in [chat(), vision()] {
+    for metadata in [chat(), vision(), decision()] {
+        let refusal = admit(&metadata, &with_keys(llama(), 4097).build()).unwrap_err();
         assert_eq!(
-            invalid_input(admit(&metadata, &with_keys(llama(), 4097).build())),
-            "model 'bundle-model': its GGUF cannot be classified, so it does not load: \
-             the GGUF header declares 4097 metadata keys; the scan allows 4096"
+            refusal.to_string(),
+            "Unsupported model capability: model 'bundle-model' does not support loading in \
+             this build; the GGUF declares 4097 metadata keys, above this build's limit of 4096"
         );
+        assert!(matches!(
+            refusal,
+            AdapterError::UnsupportedModelCapability { .. }
+        ));
+    }
+    for metadata in [chat(), vision()] {
         assert!(matches!(
             admit(&metadata, &with_keys(llama(), 4096).build()),
             Ok(GgufAdmission::NotDecision)

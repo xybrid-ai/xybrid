@@ -23,6 +23,10 @@
 //! - a header that does not read or classify completely, which is an error
 //!   and never taken for an ordinary model.
 //!
+//! A header with more metadata keys than this build reads (4,096 by
+//! default) is refused too, as a limit of this build rather than a fault of
+//! the file: valid GGUFs can carry more.
+//!
 //! # Which files
 //!
 //! Admission classifies the GGUF llama.cpp builds a model from: the
@@ -158,17 +162,18 @@ impl fmt::Debug for AdmittedDecisionModel {
 /// - [`AdapterError::IOError`] when the file cannot be read;
 /// - [`AdapterError::InvalidInput`] for an invalid `GgufDecision` spec or
 ///   metadata (a `vision_encoder` block included), a header that does not
-///   read or classify completely (one over the key ceiling included), and a
-///   `GgufDecision` scorer whose protocol differs from the GGUF's decision
-///   type;
+///   read or classify completely, and a `GgufDecision` scorer whose protocol
+///   differs from the GGUF's decision type;
 /// - [`AdapterError::UnsupportedModelCapability`] for a decision GGUF
-///   declared as anything but a `GgufDecision` scorer, and for a
-///   `GgufDecision` scorer on a GGUF that is not a decision model or whose
-///   protocol no profile in this build admits.
+///   declared as anything but a `GgufDecision` scorer, for a `GgufDecision`
+///   scorer on a GGUF that is not a decision model or whose protocol no
+///   profile in this build admits, and for a GGUF that declares more
+///   metadata keys than this build's limit (a resource limit, reported with
+///   both counts).
 ///
 /// Messages name the model id, the declared template and the file's
-/// decision facts (types, keys), quoted and cut short; never request
-/// content.
+/// decision facts (types, keys, counts), quoted and cut short; never
+/// request content.
 pub fn admit_gguf(
     metadata: &ModelMetadata,
     model_dir: &Path,
@@ -286,13 +291,22 @@ fn check_declaration(
 }
 
 /// A header that does not read or classify completely. An I/O failure stays
-/// one, with its kind.
+/// one, with its kind, and the key limit is reported as a limit.
 fn unclassifiable(model_id: &str, error: GgufError) -> AdapterError {
     match error {
         GgufError::Io(error) => AdapterError::IOError(std::io::Error::new(
             error.kind(),
             format!("model '{model_id}': cannot read its GGUF: {error}"),
         )),
+        // A resource limit of this build, not a fault of the file: valid
+        // GGUFs can carry more keys (custom metadata, merge provenance).
+        GgufError::TooManyEntries { count, limit } => AdapterError::UnsupportedModelCapability {
+            model_id: model_id.to_string(),
+            capability: "loading in this build".to_string(),
+            hint: format!(
+                "the GGUF declares {count} metadata keys, above this build's limit of {limit}"
+            ),
+        },
         other => AdapterError::InvalidInput(format!(
             "model '{model_id}': its GGUF cannot be classified, so it does not load: {}",
             bounded(&other.to_string())

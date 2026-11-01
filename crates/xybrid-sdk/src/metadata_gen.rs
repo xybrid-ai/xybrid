@@ -76,8 +76,9 @@ pub fn inspect_and_generate(
     // only a complete header without decision keys continues on them.
     let primary = primary_model_file(&model_files);
     if primary.format == ModelFormat::Gguf {
-        if let Some(decision) = classify_gguf(&dir.join(&primary.filename), &primary.filename)? {
-            let model_id = model_id_for(dir, repo, model_id_override);
+        let model_id = model_id_for(dir, repo, model_id_override);
+        let path = dir.join(&primary.filename);
+        if let Some(decision) = classify_gguf(&path, &primary.filename, &model_id)? {
             let metadata = build_decision_metadata(
                 &model_id,
                 &model_id,
@@ -253,7 +254,7 @@ pub fn generate_metadata_for_gguf_file(gguf_path: &Path) -> SdkResult<ModelMetad
 
     // Classified first: a decision model never gets chat metadata, and a header
     // that does not read completely is refused.
-    if let Some(decision) = classify_gguf(gguf_path, &filename)? {
+    if let Some(decision) = classify_gguf(gguf_path, &filename, &model_id)? {
         return Ok(build_decision_metadata(
             &model_id, &filename, &filename, None, &decision,
         ));
@@ -754,13 +755,25 @@ struct DecisionGguf {
 /// [`SdkError::LoadError`] for a decision model this build does not run,
 /// and for a header that does not read or classify completely: a damaged
 /// file is not evidence that a model is ordinary.
-fn classify_gguf(path: &Path, filename: &str) -> SdkResult<Option<DecisionGguf>> {
-    let unclassifiable = |error: xybrid_core::gguf::GgufError| {
-        SdkError::load(format!(
+/// [`SdkError::UnsupportedModelCapability`] for `model_id`'s GGUF when it
+/// declares more metadata keys than this build reads: a resource limit,
+/// reported with both counts, not a fault of the file.
+fn classify_gguf(path: &Path, filename: &str, model_id: &str) -> SdkResult<Option<DecisionGguf>> {
+    let unclassifiable = |error: xybrid_core::gguf::GgufError| match error {
+        xybrid_core::gguf::GgufError::TooManyEntries { count, limit } => {
+            SdkError::UnsupportedModelCapability {
+                model_id: model_id.to_string(),
+                capability: "loading in this build".to_string(),
+                hint: format!(
+                    "the GGUF declares {count} metadata keys, above this build's limit of {limit}"
+                ),
+            }
+        }
+        other => SdkError::load(format!(
             "'{filename}' cannot be classified: {}. A GGUF that cannot be classified from its \
              complete header is refused, not assumed to be an ordinary model",
-            bounded(&error.to_string())
-        ))
+            bounded(&other.to_string())
+        )),
     };
     let header = GgufHeader::read_file(path).map_err(unclassifiable)?;
     let profile = match classify(&header).map_err(unclassifiable)? {
@@ -3981,14 +3994,6 @@ mod tests {
                 Gguf::new().u32("x", 1).bytes(),
                 "GGUF key \"general.architecture\" is missing",
             ),
-            // An ordinary chat model over the key ceiling: refused, with its
-            // counts, not truncated.
-            (
-                (1..4097)
-                    .fold(lfm3_chat(), |gguf, i| gguf.u32(&format!("filler.{i}"), i))
-                    .bytes(),
-                "the GGUF header declares 4100 metadata keys; the scan allows 4096",
-            ),
         ] {
             let dir = TempDir::new().unwrap();
             let path = dir.path().join("model.gguf");
@@ -4006,6 +4011,42 @@ mod tests {
             }
             assert!(!dir.path().join("model_metadata.json").exists());
         }
+    }
+
+    /// The key ceiling is a resource limit of this build, not a fault of
+    /// the file (valid GGUFs can carry more keys): a chat model over it is
+    /// refused as unsupported here, with both counts and nothing from the
+    /// file, never truncated and never called malformed.
+    #[test]
+    fn a_gguf_over_the_key_ceiling_is_refused_as_a_limit() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("LFM3-1.7B-Q4_K_M.gguf");
+        // Four keys, then fillers up to 4,100.
+        (4..4100)
+            .fold(lfm3_chat(), |gguf, i| gguf.u32(&format!("filler.{i}"), i))
+            .write(&path);
+
+        let refused = |result: SdkResult<ModelMetadata>, model: &str| match result {
+            Err(SdkError::UnsupportedModelCapability {
+                model_id,
+                capability,
+                hint,
+            }) => {
+                assert_eq!(model_id, model);
+                assert_eq!(capability, "loading in this build");
+                assert_eq!(
+                    hint,
+                    "the GGUF declares 4100 metadata keys, above this build's limit of 4096"
+                );
+            }
+            other => panic!("expected a limit refusal, got {other:?}"),
+        };
+        refused(generate_metadata_for_gguf_file(&path), "lfm3-1.7b-q4_k_m");
+        refused(
+            generate_metadata(dir.path(), "LiquidAI/LFM3-1.7B-GGUF").map(|(m, _)| m),
+            "lfm3-1.7b-gguf",
+        );
+        assert!(!dir.path().join("model_metadata.json").exists());
     }
 
     #[test]
