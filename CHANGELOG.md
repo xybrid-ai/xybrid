@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Rust:** decision-model data types in `xybrid_core::ir::decision`,
+  re-exported from `xybrid_core::ir` and `xybrid_sdk`. `DecisionRequest` is a
+  state plus choice, yes/no and score questions; `Decisions` holds one answer
+  per question with the distribution it was read from, checked against it on
+  construction and decoding. `OrderedJson` carries JSON content with its key
+  order and number identity. Decoding refuses oversized payloads before
+  allocating them. Data only: nothing runs them yet.
+
+### Changed
+
+- **Rust:** `xybrid-core` turns on serde_json's `float_roundtrip` feature, so
+  every crate that links it parses JSON floats correctly rounded (serde_json's
+  default is best-effort and can be one ulp off). Float-dense JSON parses about
+  19–32% slower.
+
 ## [0.16.0] - 2026-10-30
 
 ### Added
