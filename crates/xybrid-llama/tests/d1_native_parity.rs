@@ -12,8 +12,10 @@
 //! context, batch and microbatch size equal to the token budget, one
 //! sequence, one output row, no embeddings, the model's own attention type,
 //! Flash Attention on or off, one thread count for prompts and single
-//! tokens, and llama.cpp's default KV types and `swa_full` (the defaults the
-//! readout context inherits, asserted). Its batch is the server's: the whole
+//! tokens, no op offload, and llama.cpp's default KV types and `swa_full`.
+//! These are built independently and then compared, field by field, with the
+//! parameters `wrapper.cpp` gives the readout context
+//! (`llama_xybrid_readout_params_c`). Its batch is the server's: the whole
 //! prompt as sequence 0 at positions `0..n`, only the last token flagged for
 //! output, in `llama_batch_init` storage filled as `common_batch_add` fills
 //! it.
@@ -34,7 +36,8 @@
 //!   nothing selected, ids outside the vocabulary) against a fresh context's;
 //! - readouts after a cancel, before a readout and in the middle of a
 //!   2,048-token one that llama.cpp stops between graph nodes, once the
-//!   request is cleared;
+//!   next request has started, with stale handles of earlier requests used
+//!   again;
 //! - readouts after an injected native failure in the decode shim and in the
 //!   logits shim (P2's fault hook throws inside the shim's exception boundary
 //!   before its body runs: an exception and status path, not a partially
@@ -71,8 +74,8 @@
 //!
 //! The tests take a lock, so they run one at a time whatever the thread
 //! count, and two budget-sized contexts never compete for memory. The whole
-//! file takes about forty minutes on four cores, most of it in the
-//! full-corpus sweeps.
+//! file takes about fifty minutes on four cores (peak RSS about 5 GB), most
+//! of it in the full-corpus sweeps.
 
 #![cfg(feature = "bindings")]
 
@@ -273,6 +276,29 @@ impl<'m> HarnessContext<'m> {
         let threads = i32::try_from(setting.threads).expect("threads fit an i32");
         params.n_threads = threads;
         params.n_threads_batch = threads;
+        // Every operation runs where its weights are, as in the readout context.
+        params.op_offload = false;
+        // The readout context's parameters, as wrapper.cpp builds them: the
+        // harness built its own above, and they must agree field by field.
+        // SAFETY: the shim only writes the struct it is given.
+        let readout = unsafe {
+            let mut readout = llama_context_default_params();
+            sys::llama_xybrid_readout_params_c(
+                setting.budget,
+                setting.budget,
+                setting.budget,
+                1,
+                threads,
+                setting.flash_attn,
+                &mut readout,
+            );
+            readout
+        };
+        assert_eq!(
+            format!("{params:?}"),
+            format!("{readout:?}"),
+            "the harness asks llama.cpp for the readout context's parameters, every field"
+        );
         // SAFETY: the model is live and outlives the context ('m).
         let ptr = unsafe { llama_init_from_model(model.ptr.as_ptr(), params) };
         let context = Self {
@@ -890,8 +916,9 @@ fn process_cpu_seconds() -> Option<f64> {
 /// boundary, before its body runs (P2's test hook in `wrapper.cpp`).
 fn arm_native_fault(shim: &str) {
     let name = CString::new(shim).expect("a shim name");
-    // SAFETY: the hook copies the name before returning.
-    unsafe { sys::llama_xybrid_fail_next_c(name.as_ptr()) };
+    // SAFETY: the hook reads the name during the call and keeps no pointer.
+    let armed = unsafe { sys::llama_xybrid_fail_next_c(name.as_ptr(), 0) };
+    assert!(armed, "{shim} is one of wrapper.cpp's guarded shims");
 }
 
 // =========================================================================
@@ -1239,9 +1266,10 @@ fn a_cancelled_readout_leaves_the_context_as_new() {
         let mut differences = Vec::new();
         let mut ctx = fx.readout(setting);
 
-        // Before a readout: refused without evaluating anything. A handle is
-        // taken for each scenario, so a generation-scoped one still applies.
-        ctx.cancel_handle().cancel();
+        // Before a readout: refused without evaluating anything. A handle
+        // binds to the current request; clear_cancel starts the next.
+        let first_request = ctx.cancel_handle();
+        first_request.cancel();
         assert!(matches!(
             ctx.read_last(&a.tokens, &a.select),
             Err(LlamaError::Cancelled)
@@ -1295,6 +1323,9 @@ fn a_cancelled_readout_leaves_the_context_as_new() {
             &after,
             &expected_a,
         ));
+        // Handles of earlier requests cannot cancel the current one.
+        first_request.cancel();
+        cancel.cancel();
         let full = Instant::now();
         let again = bits(&ctx.read_last(&long, &source.select).expect("a readout"));
         let full_time = full.elapsed();
@@ -1319,7 +1350,7 @@ fn a_cancelled_readout_leaves_the_context_as_new() {
         println!(
             "{}: readouts after a cancel (before a readout; 300 ms into a 2,048-token one, \
              stopped after {call_time:.2?} and {} s of CPU, where a full readout takes \
-             {full_time:.2?}): {} [{:.1} s]",
+             {full_time:.2?}), and with stale handles cancelled: {} [{:.1} s]",
             setting.label(),
             cpu_spent.map_or("?".to_string(), |cpu| format!("{cpu:.2}")),
             verdict(&differences),
