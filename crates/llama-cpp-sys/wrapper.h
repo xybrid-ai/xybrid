@@ -83,8 +83,13 @@ void llama_backend_free_c(void);
 void llama_log_set_verbosity_c(int level);
 int  llama_log_get_verbosity_c(void);
 
-/* Model lifecycle */
-XYBRID_LLAMA_MODEL* llama_load_model_from_file_c(const char* path_model, int n_gpu_layers);
+/* Model lifecycle. Guarded: llama_load_model_from_file_c returns 0 and sets
+   *out_model to the model, or to NULL when llama.cpp could not load the
+   file (it reports its own exceptions this way), and LLAMA_XYBRID_FAILED,
+   with *out_model NULL, when an exception escaped llama.cpp or an argument
+   was NULL. Free the model with llama_free_model_c. */
+int32_t llama_load_model_from_file_c(
+    const char* path_model, int n_gpu_layers, XYBRID_LLAMA_MODEL** out_model);
 void  llama_free_model_c(XYBRID_LLAMA_MODEL* model);
 
 /* Context lifecycle */

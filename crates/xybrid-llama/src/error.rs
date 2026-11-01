@@ -25,8 +25,9 @@ pub enum LlamaError {
     #[error("invalid input: {0}")]
     InvalidInput(String),
 
-    /// `llama_load_model_from_file_c` returned a null pointer for the given
-    /// path. The string captures the model path the caller passed.
+    /// llama.cpp could not load the model at the given path
+    /// (`llama_load_model_from_file_c` returned no model). The string
+    /// captures the model path the caller passed.
     #[error("failed to load model from {0}")]
     LoadFailed(String),
 

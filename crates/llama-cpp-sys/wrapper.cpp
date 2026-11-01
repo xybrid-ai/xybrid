@@ -80,6 +80,7 @@
 // arm writes. With nothing armed, a shim pays one relaxed load.
 static const char* const k_failpoints[] = {
     "",  // nothing armed
+    "llama_load_model_from_file_c",
     "llama_new_readout_context_c",
     "llama_context_facts_c",
     "llama_set_abort_callback_c",
@@ -213,21 +214,33 @@ void llama_backend_free_c(void) {
 // Model Loading (using new API)
 // =============================================================================
 
-llama_model* llama_load_model_from_file_c(
+int32_t llama_load_model_from_file_c(
     const char* path_model,
-    int n_gpu_layers
+    int n_gpu_layers,
+    llama_model** out_model
 ) {
-    llama_model_params params = llama_model_default_params();
-    params.n_gpu_layers = n_gpu_layers;
+    if (out_model == nullptr) {
+        return LLAMA_XYBRID_FAILED;
+    }
+    *out_model = nullptr;
+    // llama.cpp catches its own exceptions while it loads, but copies the
+    // path into a std::string before it gets there.
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (path_model == nullptr) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        llama_model_params params = llama_model_default_params();
+        params.n_gpu_layers = n_gpu_layers;
 #ifdef __EMSCRIPTEN__
-    // llama.cpp trims mapped files with partial munmap calls. Emscripten's
-    // emulated mmap only supports unmapping the original complete allocation,
-    // so trimmed mappings otherwise survive model destruction. Read tensors
-    // into owned backend buffers that llama_model_free can release instead.
-    params.load_mode = LLAMA_LOAD_MODE_NONE;
+        // llama.cpp trims mapped files with partial munmap calls. Emscripten's
+        // emulated mmap only supports unmapping the original complete allocation,
+        // so trimmed mappings otherwise survive model destruction. Read tensors
+        // into owned backend buffers that llama_model_free can release instead.
+        params.load_mode = LLAMA_LOAD_MODE_NONE;
 #endif
-
-    return llama_model_load_from_file(path_model, params);
+        *out_model = llama_model_load_from_file(path_model, params);
+        return 0;
+    });
 }
 
 void llama_free_model_c(llama_model* model) {

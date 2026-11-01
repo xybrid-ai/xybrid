@@ -53,16 +53,23 @@ pub(crate) fn cstring(s: &str, context: &'static str) -> Result<CString, LlamaEr
     CString::new(s).map_err(|_| LlamaError::InvalidInput(format!("{context}: contains null byte")))
 }
 
-/// Load a GGUF model from a filesystem path.
+/// Load a GGUF model from a filesystem path: a null pointer when llama.cpp
+/// could not load the file, an error when an exception escaped it.
 ///
 /// # Safety
 ///
 /// `path` is a NUL-terminated UTF-8 C string the caller owns for the
-/// duration of this call. The returned pointer is owned by the caller and
-/// must be freed via [`free_model`] exactly once. A null return indicates
-/// failure.
-pub(crate) unsafe fn load_model_from_file(path: &CString, n_gpu_layers: i32) -> *mut c_void {
-    sys::llama_load_model_from_file_c(path.as_ptr(), n_gpu_layers as c_int)
+/// duration of this call. A non-null result is owned by the caller and must
+/// be freed via [`free_model`] exactly once.
+pub(crate) unsafe fn load_model_from_file(
+    path: &CString,
+    n_gpu_layers: i32,
+) -> Result<*mut c_void, LlamaError> {
+    let mut model = std::ptr::null_mut();
+    match sys::llama_load_model_from_file_c(path.as_ptr(), n_gpu_layers as c_int, &mut model) {
+        0 => Ok(model),
+        _ => Err(native_failure("loading a model")),
+    }
 }
 
 /// Free a model handle previously returned by [`load_model_from_file`].

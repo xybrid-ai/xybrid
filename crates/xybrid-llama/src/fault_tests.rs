@@ -9,9 +9,11 @@
 //! Most cases arm the shim's fault hook (`llama_xybrid_fail_next_c`), which
 //! throws `std::bad_alloc` inside the named shim's exception boundary; on a
 //! model or context with no native handle the hook fires before anything
-//! is read, so they need no model. The others need the staged d1 model:
-//! paths that only reach the shim on a real model, and two real allocation
-//! failures inside llama.cpp, provoked with an address-space limit.
+//! is read, so they need no model. The others are real allocation failures
+//! inside llama.cpp, provoked with an address-space limit (Linux, 64-bit):
+//! in the loader's copy of a path, which needs no model, and in metadata
+//! lookups on the staged d1 model; and the paths that only reach their shim
+//! on a real model, which need it too.
 
 use crate::context::LlamaContext;
 use crate::error::LlamaError;
@@ -23,9 +25,13 @@ use crate::test_models::{run_test_in_child, staged_d1};
 const CASE_ENV: &str = "XYBRID_FAULT_CASE";
 const CHILD: &str = "fault_tests::fault_case";
 
+/// A path the hook fails the loader on before it is opened.
+const NO_FILE: &str = "/nonexistent/xybrid-fault-test.gguf";
+
 /// Cases on handles with no native model or context: (case, the shim the
 /// hook fails, the start of the error the call must return).
 const STUB_CASES: &[(&str, &str, &str)] = &[
+    ("load", "llama_load_model_from_file_c", "Err(Internal("),
     ("meta_str", "llama_model_meta_val_str_c", "Err(Internal("),
     ("meta_count", "llama_model_meta_count_c", "Err(Internal("),
     ("meta_values", "llama_model_meta_lookup_c", "Err(Internal("),
@@ -57,6 +63,11 @@ const STUB_CASES: &[(&str, &str, &str)] = &[
         "1 of 8 calls threw",
     ),
 ];
+
+/// Real allocation failures that need no model: (case, the start of the
+/// error the call must return).
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+const MEMORY_CASES: &[(&str, &str)] = &[("load_out_of_memory", "Err(Internal(")];
 
 /// Cases on the real d1 model.
 const MODEL_CASES: &[(&str, &str)] = &[
@@ -106,6 +117,15 @@ fn an_exception_in_any_guarded_shim_is_an_error() {
     }
 }
 
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+#[test]
+fn allocation_failures_without_a_model_are_errors() {
+    for &(case, expected) in MEMORY_CASES {
+        let report = run_case(case);
+        assert!(report.starts_with(expected), "{case}: {report}");
+    }
+}
+
 #[test]
 fn allocation_failures_on_a_real_model_are_errors() {
     if staged_d1().is_none() {
@@ -131,15 +151,31 @@ fn fault_case() {
     };
     let report = match STUB_CASES.iter().find(|(name, _, _)| *name == case) {
         Some(&(_, shim, _)) => stub_case(&case, shim),
+        #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+        None if MEMORY_CASES.iter().any(|(name, _)| *name == case) => memory_case(&case),
         None => model_case(&case),
     };
     println!("\nFAULT {case}: {report}");
+}
+
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+fn memory_case(case: &str) -> String {
+    match case {
+        "load_out_of_memory" => {
+            // llama.cpp copies the path into a std::string before its own
+            // exception handling starts.
+            let path = format!("/nonexistent/{}", "p".repeat(LARGE));
+            out_of_address_space(|| format!("{:?}", LlamaModel::load(&path, 0).map(|_| ())))
+        }
+        other => panic!("unknown case {other}"),
+    }
 }
 
 fn stub_case(case: &str, shim: &str) -> String {
     let model = LlamaModel::test_stub();
     ffi::fail_next_native_call(shim);
     match case {
+        "load" => format!("{:?}", LlamaModel::load(NO_FILE, 0).map(|_| ())),
         "meta_str" => format!("{:?}", model.meta_str("lfm3.decision.type")),
         "meta_count" => format!("{:?}", model.meta_count()),
         "meta_values" => format!("{:?}", model.meta_values(&["general.architecture"])),

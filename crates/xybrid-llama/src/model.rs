@@ -56,11 +56,18 @@ impl LlamaModel {
     /// `n_gpu_layers` is forwarded verbatim to llama.cpp's loader (a
     /// negative value means "all layers on the GPU"; zero forces CPU
     /// inference).
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::LoadFailed`] when llama.cpp cannot load the file (it
+    /// reports its own exceptions, an allocation failure included, this
+    /// way), [`LlamaError::Internal`] when an exception escaped llama.cpp,
+    /// and [`LlamaError::InvalidInput`] when `path` contains a NUL byte.
     pub fn load(path: &str, n_gpu_layers: i32) -> LlamaResult<Self> {
         let c_path = ffi::cstring(path, "model path")?;
         // SAFETY: `c_path` outlives the call; `n_gpu_layers` is plain
-        // data. A null return surfaces as `LoadFailed`.
-        let ptr = unsafe { ffi::load_model_from_file(&c_path, n_gpu_layers) };
+        // data. A null model surfaces as `LoadFailed`.
+        let ptr = unsafe { ffi::load_model_from_file(&c_path, n_gpu_layers) }?;
         if ptr.is_null() {
             return Err(LlamaError::LoadFailed(path.to_string()));
         }

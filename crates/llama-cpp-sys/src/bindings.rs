@@ -973,7 +973,8 @@ unsafe extern "C" {
     pub fn llama_load_model_from_file_c(
         path_model: *const ::std::os::raw::c_char,
         n_gpu_layers: ::std::os::raw::c_int,
-    ) -> *mut ::std::os::raw::c_void;
+        out_model: *mut *mut ::std::os::raw::c_void,
+    ) -> i32;
 }
 unsafe extern "C" {
     pub fn llama_free_model_c(model: *mut ::std::os::raw::c_void);
