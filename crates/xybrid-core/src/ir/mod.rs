@@ -6,9 +6,17 @@
 //! transmission between local processes or over HTTP to cloud endpoints.
 
 pub mod choice;
+pub mod decision;
 pub mod envelope;
 
 pub use choice::{Choice, ChoiceRequest, ChoiceScore, ChoiceScores};
+pub use decision::{
+    AnswerInvariant, DecisionAnswer, DecisionContent, DecisionContentView, DecisionError,
+    DecisionInstructions, DecisionMedia, DecisionOption, DecisionOrigin, DecisionQuestion,
+    DecisionQuestionKind, DecisionRequest, DecisionScore, DecisionState, DecisionUsage,
+    DecisionValue, Decisions, JsonErrorKind, JsonKind, JsonNumber, JsonView, OrderedJson,
+    ScoreStatistic,
+};
 pub use envelope::{AudioSamples, Envelope, EnvelopeKind, ToolCallResult};
 pub use envelope::{
     ImageDimensions, ImageFormat, ImagePlane, ImageSource, ImageSummary, ImageSummarySource,

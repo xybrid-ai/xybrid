@@ -267,6 +267,14 @@ pub use result::{
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
 pub use xybrid_core::ir::{Choice, ChoiceRequest, ChoiceScore, ChoiceScores};
+// Decision models: a state plus typed questions, and one answer per question.
+pub use xybrid_core::ir::{
+    AnswerInvariant, DecisionAnswer, DecisionContent, DecisionContentView, DecisionError,
+    DecisionInstructions, DecisionMedia, DecisionOption, DecisionOrigin, DecisionQuestion,
+    DecisionQuestionKind, DecisionRequest, DecisionScore, DecisionState, DecisionUsage,
+    DecisionValue, Decisions, JsonErrorKind, JsonKind, JsonNumber, JsonView, OrderedJson,
+    ScoreStatistic,
+};
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)
 pub use streaming::{FfiPartialResult, FfiStreamState, FfiStreamStats, FfiStreamingConfig};
 pub use telemetry::{
