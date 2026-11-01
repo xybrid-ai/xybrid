@@ -6,9 +6,9 @@
 //! classified, a hand-written `GgufDecision` scorer on a chat model. A
 //! decision GGUF loaded as a chat model generates text from prompts it was
 //! never trained on, and nothing in llama.cpp stops it (LiquidAI's d1 GGUFs
-//! carry an ordinary chat template too). So every load route checks the file
-//! itself against the metadata before it allocates a context: [`admit_gguf`]
-//! reads the header, classifies it ([`classify`]) and refuses
+//! carry an ordinary chat template too). So a load checks the file itself
+//! against the metadata before it allocates a context: [`admit_gguf`] reads
+//! the header, classifies it ([`classify`]) and refuses
 //!
 //! - a decision model declared as anything but a `ChoiceScorer` with a
 //!   [`GgufDecision`](ChoiceScorerSpec::GgufDecision) scorer: a stale chat
@@ -152,9 +152,10 @@ impl fmt::Debug for AdmittedDecisionModel {
 /// `GgufDecision` scorer of its protocol, an ordinary model only as
 /// anything else.
 ///
-/// Every load route calls it (sidecars, bundles and cached models,
+/// Every load route is to call it (sidecars, bundles and cached models,
 /// standalone files, Hugging Face downloads with generated metadata) before
-/// any context is allocated. A `GgufDecision` spec and its metadata
+/// any context is allocated; the SDK's routes adopt it with the decision
+/// runtime. A `GgufDecision` spec and its metadata
 /// ([`ModelMetadata::validate`]) are validated first, without reading
 /// anything. Reading the header reads and hashes only the header (8 MB for
 /// d1-2B's 128,000-token vocabulary), within [`GgufLimits`](super::GgufLimits)'

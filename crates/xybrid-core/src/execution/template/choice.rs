@@ -62,8 +62,8 @@ pub enum ChoiceScorerSpec {
     /// of generating text.
     ///
     /// The GGUF must classify as a decision model of `protocol`
-    /// ([`crate::gguf::classify`]); every load checks it with
-    /// [`crate::gguf::admit_gguf`].
+    /// ([`crate::gguf::classify`]); [`crate::gguf::admit_gguf`] checks it
+    /// before a load.
     GgufDecision(GgufDecisionSpec),
 }
 
@@ -190,7 +190,7 @@ pub struct GgufDecisionSpec {
     /// GGUF file, relative to the model directory.
     pub model_file: String,
     /// The decision protocol the GGUF must carry. Checked against the file's
-    /// decision type at every load, never applied to it.
+    /// decision type when the model is admitted, never applied to it.
     pub protocol: DecisionProtocol,
     /// Most tokens one readout may evaluate: one question's whole prompt. It
     /// sizes the native context (context, batch and micro-batch alike), so

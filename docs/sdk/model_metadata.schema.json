@@ -238,7 +238,7 @@
           ]
         },
         {
-          "description": "A llama.cpp decision model in one GGUF, such as LiquidAI's LFM3 d1:\nit answers decision questions with one readout per question instead\nof generating text.\n\nThe GGUF must classify as a decision model of `protocol`\n([`crate::gguf::classify`]); every load checks it with\n[`crate::gguf::admit_gguf`].",
+          "description": "A llama.cpp decision model in one GGUF, such as LiquidAI's LFM3 d1:\nit answers decision questions with one readout per question instead\nof generating text.\n\nThe GGUF must classify as a decision model of `protocol`\n([`crate::gguf::classify`]); [`crate::gguf::admit_gguf`] checks it\nbefore a load.",
           "type": "object",
           "properties": {
             "flash_attn": {
@@ -275,7 +275,7 @@
               "type": "string"
             },
             "protocol": {
-              "description": "The decision protocol the GGUF must carry. Checked against the file's\ndecision type at every load, never applied to it.",
+              "description": "The decision protocol the GGUF must carry. Checked against the file's\ndecision type when the model is admitted, never applied to it.",
               "$ref": "#/$defs/DecisionProtocol"
             },
             "token_budget": {

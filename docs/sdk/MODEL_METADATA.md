@@ -323,7 +323,7 @@ know:
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `model_file` | string | yes | — | Path to the `.gguf` file (relative to the model directory) |
-| `protocol` | string | yes | — | The decision protocol the GGUF must carry: `"lfm3-d1"`. Checked against the file's `<arch>.decision.type` at every load, never applied to it |
+| `protocol` | string | yes | — | The decision protocol the GGUF must carry: `"lfm3-d1"`. Checked against the file's `<arch>.decision.type` when the model is admitted (below), never applied to it |
 | `token_budget` | integer | no | `4096` | Most tokens one readout (one question's whole prompt) may evaluate. It sizes the native context, so memory and latency grow with it. From 1 to 8,192, or to 4,096 with `flash_attn` off |
 | `flash_attn` | boolean | no | `true` | Flash attention. `false` is a diagnostic setting: it changes the scores slightly, and the compute buffer then grows quadratically with the budget |
 | `max_questions` | integer | no | `16` | Most questions one request may ask, each one readout; from 1 to 16 |
@@ -332,33 +332,43 @@ know:
 
 The metadata declares no `vision_encoder` (or any other media companion): the
 `lfm3-d1/text/v1` profile reads no media, and decision media support will come
-with its own protocol. A load refuses such metadata before reading the GGUF.
+with its own protocol. The admission check below refuses such metadata before
+it reads the GGUF.
 
 The budget and limits are provisional. They come from CPU measurements of d1-2B
 (Q4_K_M, four threads: 4,096 tokens take about 0.6 GiB of compute buffer and
 2.3 GiB at peak, 8,192 tokens about 3.0 GiB at peak) and will change once mobile
 and GPU devices are measured. A bundle may lower them for a platform.
 
-Every load checks the GGUF against the metadata before it allocates anything:
-the header is read in full and classified, whatever the route (a bundle, a
-sidecar next to a file, a cached model, a Hugging Face download). A decision
-GGUF loads only as a `GgufDecision` scorer of its protocol, and a `GgufDecision`
-scorer only on such a GGUF, so a stale `Gguf` or `VisionLanguage` metadata file
-next to a decision model is refused, as is a header that does not read
-completely. Decision models this build does not run are refused under every
-template: `lfm3-d1-omni` (LiquidAI's d1-omni, which needs media support), any
-other decision type, and an `lfm3-d1` model with decision keys the
-`lfm3-d1/text/v1` profile does not implement, such as a `score_bias`. The check
-reads at most 4,096 metadata keys per GGUF, chat models included: a GGUF that
-declares more is refused as above this build's limit
-(`UnsupportedModelCapability`, with both counts), not as a damaged file.
+`xybrid_core::gguf::admit_gguf` checks a model's GGUF against its metadata
+before anything is allocated: it reads the header in full, classifies it, and
+refuses a mismatch. A decision GGUF passes only as a `GgufDecision` scorer of
+its protocol, and a `GgufDecision` scorer only on such a GGUF, so a stale `Gguf`
+or `VisionLanguage` metadata file next to a decision model is refused, as is a
+header that does not read or classify completely. Decision models this build
+does not run are refused under each template it checks: `lfm3-d1-omni`
+(LiquidAI's d1-omni, which needs media support), any other decision type, and an
+`lfm3-d1` model with decision keys the `lfm3-d1/text/v1` profile does not
+implement, such as a `score_bias`. It reads at most 4,096 metadata keys per
+GGUF, chat models included: a GGUF that declares more is refused as above this
+build's limit (`UnsupportedModelCapability`, with both counts), not as a damaged
+file.
+
+The check exists, but the SDK's load routes (bundles, sidecars next to a file,
+cached models, Hugging Face downloads) do not call it yet: they adopt it with
+the decision request API. Its scope is narrow: it reads only the language-model
+file of a `Gguf`, `VisionLanguage` or `GgufDecision` template, so a decision
+GGUF declared as a vision projector or as a zzz speech model is not detected by
+it; those loaders fail on such a file.
 
 When xybrid writes the metadata itself (a Hugging Face repo without
 `model_metadata.json`, `--model-file`, `fromModelFile`, `xybrid init`), it
 classifies the GGUF before anything else: a decision model gets this template
 at the defaults above, with `metadata.task` set to `"decision"`, whatever
 projector sits beside it. LiquidAI's repo ships one; the text profile reads no
-media.
+media. Generation refuses a decision model this build does not run, and a GGUF
+over the key limit, with `UnsupportedModelCapability`; a header it cannot read
+is an I/O error, and one it cannot classify a load error.
 
 The text profile reads a text, JSON or absent state and answers choice, yes/no
 and score questions. The decision request API that runs it is not in this
