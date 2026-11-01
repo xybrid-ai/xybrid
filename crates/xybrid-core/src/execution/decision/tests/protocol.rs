@@ -4,7 +4,9 @@
 use super::fake::{d1_header, D1_TEMPERATURE_BITS};
 use crate::execution::decision::facts::{sha256_hex, SYSTEMONE_TEMPLATE};
 use crate::execution::decision::protocol::check;
-use crate::execution::decision::{DecisionLimits, DecisionModelFacts, SYSTEMONE_TEMPLATE_SHA256};
+use crate::execution::decision::{
+    DecisionLimits, DecisionModelFacts, ProfileRules, SYSTEMONE_TEMPLATE_SHA256,
+};
 use crate::gguf::DecisionProfileId;
 use crate::ir::decision::{
     ContentPart, DecisionContent, DecisionError, DecisionLevel, DecisionOption, DecisionQuestion,
@@ -384,4 +386,41 @@ fn temperatures_are_looked_up_by_bucket_then_type_then_one() {
     assert_eq!(t("noul", 2), (None, 1.0f32.to_bits()), "no key: 1");
     // The stored value is not the one used: the six-decimal string is.
     assert_ne!(D1_TEMPERATURE_BITS, 0x3fab2fdc);
+}
+
+#[test]
+fn the_profile_rules_are_what_prepare_checks() {
+    let rules = super::fake::d1_facts(DecisionLimits::default()).rules();
+    assert_eq!(rules, ProfileRules::of(DecisionProfileId::Lfm3D1Text));
+    assert_eq!(
+        (rules.max_options, rules.min_levels, rules.max_levels),
+        (255, 2, 10)
+    );
+    assert_eq!(
+        (
+            rules.max_state_depth,
+            rules.max_instructions_depth,
+            rules.max_description_depth
+        ),
+        (127, 127, 125)
+    );
+    // The check refuses just past each rule.
+    let at_limit = request(
+        DecisionState::from_json(OrderedJson::parse(&nested(rules.max_state_depth)).unwrap()),
+        vec![ask(DecisionQuestionKind::score(vec![
+            DecisionLevel::new(
+                None
+            );
+            rules.max_levels
+        ]))],
+    );
+    assert!(checked(&at_limit).is_ok());
+    let past = request(
+        DecisionState::from_json(OrderedJson::parse(&nested(rules.max_state_depth + 1)).unwrap()),
+        vec![ask(DecisionQuestionKind::yes_no(None, None))],
+    );
+    assert!(matches!(
+        checked(&past),
+        Err(DecisionError::ContentTooDeep { .. })
+    ));
 }

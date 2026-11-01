@@ -6,6 +6,7 @@
 //! | Item | Role |
 //! |------|------|
 //! | [`DecisionModelFacts`] | What a model's GGUF header says the protocol needs: its profile, temperatures and [`DecisionLimits`] |
+//! | [`ProfileRules`] | The profile's ceilings (options, levels, JSON depths), for a capability view |
 //! | [`DecisionVocab`] | The model's tokenizer and control-token spellings (`llama::LlamaVocab` with `llm-llamacpp`) |
 //! | `prepare` (`llm-llamacpp`) | Checks a whole request, renders and tokenizes one pass per question, allocates labels: a [`DecisionPlan`] |
 //! | [`finish`] | Reads each question's answer from its pass's readout, in `f64` |
@@ -197,6 +198,43 @@ impl DecisionLimits {
     }
 }
 
+/// The ceilings a decision profile reads requests under, as `prepare`
+/// checks them: what a caller describing a model's capabilities reads,
+/// rather than copies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ProfileRules {
+    /// Most options of a choice question.
+    pub max_options: usize,
+    /// Fewest levels of a score question.
+    pub min_levels: usize,
+    /// Most levels of a score question.
+    pub max_levels: usize,
+    /// Deepest JSON state, counting a value itself
+    /// ([`OrderedJson::depth`](crate::ir::decision::OrderedJson::depth)).
+    pub max_state_depth: usize,
+    /// Deepest JSON instructions.
+    pub max_instructions_depth: usize,
+    /// Deepest JSON option, yes/no or level description.
+    pub max_description_depth: usize,
+}
+
+impl ProfileRules {
+    /// The rules of `profile`.
+    pub const fn of(profile: DecisionProfileId) -> Self {
+        match profile {
+            DecisionProfileId::Lfm3D1Text => Self {
+                max_options: protocol::MAX_OPTIONS,
+                min_levels: protocol::MIN_LEVELS,
+                max_levels: protocol::MAX_LEVELS,
+                max_state_depth: protocol::MAX_STATE_DEPTH,
+                max_instructions_depth: protocol::MAX_INSTRUCTIONS_DEPTH,
+                max_description_depth: protocol::MAX_DESCRIPTION_DEPTH,
+            },
+        }
+    }
+}
+
 /// What the protocol needs from a decision model's GGUF: its profile, its
 /// temperatures, and the limits it runs under.
 ///
@@ -247,6 +285,11 @@ impl DecisionModelFacts {
     /// The limits requests run under.
     pub fn limits(&self) -> &DecisionLimits {
         &self.limits
+    }
+
+    /// The ceilings the profile reads requests under.
+    pub fn rules(&self) -> ProfileRules {
+        ProfileRules::of(self.profile)
     }
 }
 
