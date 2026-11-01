@@ -104,6 +104,9 @@ pub(crate) mod session_cache;
 // TTS text chunking (internal)
 pub(crate) mod text_chunking;
 
+// TTS per-phoneme timing arithmetic (internal)
+pub(crate) mod tts_timing;
+
 // LLM telemetry span stampers (internal, LLM features only)
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 pub(crate) mod llm_telemetry;

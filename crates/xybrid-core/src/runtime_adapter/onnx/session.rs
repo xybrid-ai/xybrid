@@ -546,18 +546,39 @@ impl ONNXSession {
     ) -> AdapterResult<ArrayD<f32>> {
         // ort asserts on an empty output name; refuse it as an error instead.
         if name.is_empty() {
-            return Err(AdapterError::InvalidInput(
-                "Output name must not be empty".to_string(),
-            ));
+            return Err(empty_output_name());
         }
-        self.run_then(inputs, options, |outputs| {
-            let value = outputs.get(name).ok_or_else(|| {
-                AdapterError::RuntimeError(format!("Model has no output named '{name}'"))
-            })?;
-            let array = value.try_extract_array::<f32>().map_err(|e| {
-                AdapterError::RuntimeError(format!("Output '{name}' is not float32: {e}"))
-            })?;
-            Ok(array.to_owned())
+        self.run_then(inputs, options, |outputs| extract_f32_output(outputs, name))
+    }
+
+    /// Runs inference and returns the float32 output `f32_name`, plus the
+    /// output `i64_name` (when given) read leniently as integers.
+    ///
+    /// The `f32_name` read is exactly that of
+    /// [`ONNXSession::run_single_output_f32`]; with `i64_name` `None` the two
+    /// behave the same. The `i64_name` read never fails the run: an int64 or
+    /// int32 output is taken as is, a float32 one is rounded and clamped at 0,
+    /// and a missing output or any other element type gives `None` (logged at
+    /// debug level). Values come out in row-major order, so a `[1, N]` tensor
+    /// yields `N` values.
+    ///
+    /// # Errors
+    ///
+    /// As [`ONNXSession::run_single_output_f32`] for `f32_name`.
+    pub(crate) fn run_f32_with_optional_i64(
+        &self,
+        inputs: HashMap<String, Value>,
+        f32_name: &str,
+        i64_name: Option<&str>,
+    ) -> AdapterResult<(ArrayD<f32>, Option<Vec<i64>>)> {
+        // ort asserts on an empty output name; refuse it as an error instead.
+        if f32_name.is_empty() {
+            return Err(empty_output_name());
+        }
+        self.run_then(inputs, None, |outputs| {
+            let primary = extract_f32_output(outputs, f32_name)?;
+            let secondary = i64_name.and_then(|name| extract_integers_lenient(outputs, name));
+            Ok((primary, secondary))
         })
     }
 
@@ -784,6 +805,64 @@ impl ONNXSession {
     }
 }
 
+/// The error for an empty output name, which ort would assert on.
+fn empty_output_name() -> AdapterError {
+    AdapterError::InvalidInput("Output name must not be empty".to_string())
+}
+
+/// Reads the float32 output `name`, unconverted: an output of any other
+/// element type is an error.
+fn extract_f32_output(
+    outputs: &ort::session::SessionOutputs<'_>,
+    name: &str,
+) -> AdapterResult<ArrayD<f32>> {
+    let value = outputs
+        .get(name)
+        .ok_or_else(|| AdapterError::RuntimeError(format!("Model has no output named '{name}'")))?;
+    let array = value
+        .try_extract_array::<f32>()
+        .map_err(|e| AdapterError::RuntimeError(format!("Output '{name}' is not float32: {e}")))?;
+    Ok(array.to_owned())
+}
+
+/// Reads the output `name` as integers in row-major order, or `None` when it
+/// is missing or not int64, int32 or float32. Float values are rounded and
+/// clamped at 0 (a non-finite value reads as 0).
+fn extract_integers_lenient(
+    outputs: &ort::session::SessionOutputs<'_>,
+    name: &str,
+) -> Option<Vec<i64>> {
+    if name.is_empty() {
+        return None;
+    }
+    let Some(value) = outputs.get(name) else {
+        log::debug!("Model has no output named '{name}'; reading no values from it");
+        return None;
+    };
+    if let Ok(array) = value.try_extract_array::<i64>() {
+        return Some(array.iter().copied().collect());
+    }
+    if let Ok(array) = value.try_extract_array::<i32>() {
+        return Some(array.iter().map(|&v| i64::from(v)).collect());
+    }
+    if let Ok(array) = value.try_extract_array::<f32>() {
+        return Some(array.iter().map(|&v| round_non_negative(v)).collect());
+    }
+    log::debug!("Output '{name}' is not int64, int32 or float32; reading no values from it");
+    None
+}
+
+/// Rounds `value` to the nearest integer, reading negative and non-finite
+/// values as 0.
+fn round_non_negative(value: f32) -> i64 {
+    if value.is_finite() && value > 0.0 {
+        // Saturates above i64::MAX, which no frame count reaches.
+        value.round() as i64
+    } else {
+        0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -981,6 +1060,16 @@ mod tests {
             10,
             "MNIST output should have 10 elements"
         );
+    }
+
+    #[test]
+    fn float_durations_round_to_non_negative_frames() {
+        assert_eq!(round_non_negative(3.4), 3);
+        assert_eq!(round_non_negative(3.5), 4);
+        assert_eq!(round_non_negative(0.0), 0);
+        assert_eq!(round_non_negative(-2.7), 0);
+        assert_eq!(round_non_negative(f32::NAN), 0);
+        assert_eq!(round_non_negative(f32::INFINITY), 0);
     }
 
     #[test]

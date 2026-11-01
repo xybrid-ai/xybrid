@@ -1389,6 +1389,8 @@ public sealed class InferenceResult : IDisposable
   public string ReasoningContent { get; }
   public bool HasAudio { get; }
   public bool HasEmbedding { get; }
+  public IReadOnlyList<PhonemeTiming> PhonemeTimings { get; }  // Never null
+  public bool HasPhonemeTimings { get; }
 }
 
 public enum OutputType { Text, Audio, Embedding, Unknown }
@@ -1477,6 +1479,71 @@ public sealed class StageLatency
 }
 ```
 
+### Phoneme timings (TTS)
+
+A TTS result says when each phoneme is spoken in its audio if the model
+declares a per-token duration output (`duration`, `durations` or `pred_dur`;
+see [`TTSAudioEncode`](MODEL_METADATA.md#ttsaudioencode)). Use it to drive lip
+sync or word highlighting from the playback clock. KittenTTS 0.8 declares
+`duration`; stock Kokoro-82M needs the output added first, which
+`tools/conformance/expose_tts_duration.py` does without changing the audio.
+For every other model the list is empty.
+
+Each entry is one token the model was fed, named by its symbol in the tokens
+file: a phoneme character, a stress mark (`ˈ`, `ˌ`), a space or a punctuation
+mark. `start` and `end` are seconds from the first sample of `audioBytes`, the
+audio exactly as returned, after silence trimming and the crossfades between
+long-text chunks. Entries are in order, never overlap and stay within the
+audio. Pads and silence tokens are not listed, so there can be gaps between
+entries, and audio after the last one when the model's end pad is audible (up
+to about 0.1 s on KittenTTS 0.8; none on Kokoro-82M).
+
+```rust
+// xybrid_core::ir::PhonemeTiming, also reachable as xybrid_sdk::ir::PhonemeTiming
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PhonemeTiming {
+    pub phoneme: String,
+    pub start: f32,  // seconds
+    pub end: f32,    // seconds
+}
+
+impl InferenceResult {
+    /// Empty when the key is absent or malformed.
+    pub fn phoneme_timings(&self) -> Vec<PhonemeTiming>;
+}
+```
+
+```csharp
+public sealed class PhonemeTiming
+{
+  public string Phoneme { get; }
+  public float Start { get; }   // Seconds from the first sample of AudioBytes
+  public float End { get; }
+}
+```
+
+```csharp
+using var result = model.Run(Envelope.Text(line, voiceId, speed));
+result.ThrowIfFailed();
+byte[] pcm = result.AudioBytes;
+foreach (var t in result.PhonemeTimings)
+    Debug.Log($"{t.Phoneme}: {t.Start:F3}-{t.End:F3} s");
+```
+
+The timings travel in the result envelope's metadata under `phoneme_timings`
+(`Envelope::PHONEME_TIMINGS_METADATA_KEY` in Rust) as a JSON array. The key is
+absent, not empty, when there are none:
+
+```json
+[{"phoneme":"h","start":0.0125,"end":0.05},{"phoneme":"ə","start":0.05,"end":0.1}]
+```
+
+Kotlin, Swift and Python have no typed field yet; read that entry from
+`result.envelope.metadata` and parse the JSON. Dart results carry no envelope
+metadata, so Dart has no timings yet. No binding gets timings from streaming
+TTS, the zzz speech engines (Phonon, Kitten TTS 2), codec TTS (NeuTTS) or runs
+answered by the cloud.
+
 ### Implementation Status
 
 | Property | Dart | Kotlin | Swift | C# |
@@ -1496,6 +1563,8 @@ public sealed class StageLatency
 | `metrics.ttftMs` | ✅ | ✅ | ✅ | ✅ |
 | `metrics.tokensPerSecond` | ✅ | ✅ | ✅ | ✅ |
 | `metrics.stageLatenciesMs` | ✅ | ✅ | ✅ | ✅ |
+| `phonemeTimings` | — | — | — | ✅ |
+| `hasPhonemeTimings` | — | — | — | ✅ |
 
 ---
 

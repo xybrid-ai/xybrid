@@ -91,6 +91,18 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# The fake ONNX TTS models (with and without a duration output) that
+# tts_phoneme_timings runs, with their tokens, Misaki dictionary and metadata,
+# written by tools/conformance/gen_fake_tts.py.
+filegroup(
+    name = "tts_fake_fixtures",
+    srcs = glob(
+        ["fixtures/tts/fake/**"],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)
+
 filegroup(
     name = "coreml_model_fixture",
     srcs = glob(["fixtures/coreml/xybrid_linear.mlpackage/**"]),
@@ -120,6 +132,7 @@ _E2E_TESTS = {
     "reasoning_budget": ["llm-llamacpp"],
     "reasoning_capture": ["llm-llamacpp"],
     "tts_integration": [],
+    "tts_phoneme_timings": [],
     "whispercpp_integration": ["asr-whispercpp"],
 }
 
@@ -127,14 +140,19 @@ _E2E_TEST_DATA = {
     "choice_forms_conformance": [":choice_fixtures"],
     "coreml_native": [":coreml_model_fixture"],
     "embedding_parity": [":embedding_fixtures"],
+    "tts_phoneme_timings": [":tts_fake_fixtures"],
 }
 
 # Crates a test links beyond the defaults below. choice_forms_conformance runs
-# CUA-S1-FORMS through the public SDK.
+# CUA-S1-FORMS, and tts_phoneme_timings the fake TTS models, through the
+# public SDK.
 _E2E_TEST_DEPS = {
     "choice_forms_conformance": [
         "//crates/xybrid-sdk:xybrid-sdk",
         "@crates//:serde",
+    ],
+    "tts_phoneme_timings": [
+        "//crates/xybrid-sdk:xybrid-sdk",
     ],
 }
 

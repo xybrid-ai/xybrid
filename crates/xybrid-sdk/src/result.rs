@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use xybrid_core::gateway::ToolCall;
-use xybrid_core::ir::{ChoiceScores, Envelope, EnvelopeKind};
+use xybrid_core::ir::{ChoiceScores, Envelope, EnvelopeKind, PhonemeTiming};
 
 /// Per-stage latency entry for pipeline runs.
 ///
@@ -338,6 +338,23 @@ impl InferenceResult {
             .unwrap_or_default()
     }
 
+    /// When each phoneme is spoken in the returned audio, for lip sync or
+    /// word highlighting.
+    ///
+    /// Present on a TTS result when the model reports how long each input
+    /// token lasts (an ONNX TTS model with a `duration` output). Times are
+    /// seconds from the first sample of [`audio_bytes`](Self::audio_bytes),
+    /// in order and never overlapping; padding and silence tokens are left
+    /// out. Returns an empty vec when the metadata is absent or unparseable,
+    /// as for models without durations, streamed audio and cloud results.
+    pub fn phoneme_timings(&self) -> Vec<PhonemeTiming> {
+        self.envelope
+            .metadata
+            .get(Envelope::PHONEME_TIMINGS_METADATA_KEY)
+            .and_then(|raw| serde_json::from_str(raw).ok())
+            .unwrap_or_default()
+    }
+
     /// Get audio bytes if available.
     ///
     /// Returns `None` if the output is not audio.
@@ -551,6 +568,72 @@ mod tests {
         let result = InferenceResult::new(envelope, "llm-model", 10);
 
         assert!(result.tool_calls().is_empty());
+    }
+
+    #[test]
+    fn test_phoneme_timings_parses_valid_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            Envelope::PHONEME_TIMINGS_METADATA_KEY.to_string(),
+            r#"[{"phoneme":"h","start":0.0125,"end":0.05},{"phoneme":"\"","start":0.05,"end":0.1}]"#
+                .to_string(),
+        );
+        let envelope = Envelope {
+            kind: EnvelopeKind::Audio(vec![0; 4800]),
+            metadata,
+        };
+        let result = InferenceResult::new(envelope, "kokoro-82m-timed", 50);
+
+        assert_eq!(
+            result.phoneme_timings(),
+            vec![
+                PhonemeTiming {
+                    phoneme: "h".to_string(),
+                    start: 0.0125,
+                    end: 0.05,
+                },
+                PhonemeTiming {
+                    phoneme: "\"".to_string(),
+                    start: 0.05,
+                    end: 0.1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_phoneme_timings_absent_or_malformed_returns_empty_vec() {
+        let absent = InferenceResult::new(
+            Envelope {
+                kind: EnvelopeKind::Audio(vec![1, 2, 3, 4]),
+                metadata: HashMap::new(),
+            },
+            "kokoro-82m",
+            50,
+        );
+        assert!(absent.phoneme_timings().is_empty());
+
+        for raw in [
+            "not-json",
+            r#"{"phoneme":"h","start":0.0,"end":0.1}"#,
+            r#"[{"phoneme":"h","start":"soon","end":0.1}]"#,
+            r#"[{"phoneme":"h","start":0.0}]"#,
+        ] {
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                Envelope::PHONEME_TIMINGS_METADATA_KEY.to_string(),
+                raw.to_string(),
+            );
+            let malformed = InferenceResult::new(
+                Envelope {
+                    kind: EnvelopeKind::Audio(vec![1, 2, 3, 4]),
+                    metadata,
+                },
+                "kokoro-82m-timed",
+                50,
+            );
+            assert!(malformed.phoneme_timings().is_empty(), "{raw}");
+        }
     }
 
     #[test]
