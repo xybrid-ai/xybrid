@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "case": "g1h-01-choice-2",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "4cbfc24f347521157f2c49a57d62d43253da44c138e70bbaaf636519b6b1e1fe",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["no_request", "meter_check"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nThe water meter reading on the bill is lower than the reading the tenant took on the same day.\n\n\nQUESTION:\nWhat is the customer most likely asking for?\n\nOptions:\nA Just information, no action\nB A visit to read or test the meter\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 597, 1382, 14273, 4686, 383, 278, 4862, 355, 3229, 898, 278, 4686, 278, 43915, 3543, 383, 278, 1542, 1784, 64673, 63509, 833, 2992, 355, 278, 13107, 1028, 3348, 13564, 374, 64929, 13314, 833, 41, 5446, 1702, 20, 794, 3771, 207, 42, 334, 4588, 310, 1561, 432, 1426, 278, 14273, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 67,
+          "select": [41, 334, 42, 378]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "no_request",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "meter_check",
+              "code": "B",
+              "range": [2, 4]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x410cba77", "0x40be386b", "0x4126efaa", "0x40f0b445"]
+      ],
+      "scores": [
+        ["0x410cba77", "0x4126efaa"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "meter_check",
+          "confidence": 0.77289960581057049,
+          "probabilities": {
+            "no_request": 0.22710039418942943,
+            "meter_check": 0.77289960581057049
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 68,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "9ec4244b01f356bf9601651350af764b587b3cbde6fe2f093d04f2fa604100ed",
+        "state_tokens": 26,
+        "select_tokens": ["A", "ĠA", "B", "ĠB"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xc00a1460", "0xc0a046b3", "0xbf04fe50", "0xc05b95b2"],
+        "logprob_scores": ["0xc00a1460", "0xbf04fe50"],
+        "logsumexp": "0x412f3f8f",
+        "distribution": [0.22710039418942943, 0.77289960581057049]
+      }
+    ]
+  }
+}

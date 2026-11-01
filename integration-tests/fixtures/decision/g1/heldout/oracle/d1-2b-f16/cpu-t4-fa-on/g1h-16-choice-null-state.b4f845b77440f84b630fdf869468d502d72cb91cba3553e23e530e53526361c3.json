@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "g1h-16-choice-null-state",
+  "source_file": "g1h-16-choice-null-state.json",
+  "case_file_sha256": "8c7820d50677f75d852d35273e92a2de951026f20fe3fc31249f38234b650088",
+  "request_sha256": "b4f845b77440f84b630fdf869468d502d72cb91cba3553e23e530e53526361c3",
+  "inputs_sha256": "f771860ff909a3e118877be6ae49cd14b951b9693eaa708bcd21409d4e3967d8",
+  "inputs": {
+    "request_sha256": "b4f845b77440f84b630fdf869468d502d72cb91cba3553e23e530e53526361c3",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["none_listed", "tree_nuts", "eggs"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nWhich allergen is the main concern in this dish?\n\nOptions:\nA No common allergen\nB Almonds, walnuts, hazelnuts and similar\nC Whole eggs or egg products\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 28327, 16643, 1157, 355, 278, 1619, 3606, 296, 532, 17507, 64929, 13314, 833, 41, 2752, 2123, 16643, 1157, 207, 42, 990, 9768, 91, 20, 22165, 49324, 20, 10220, 4321, 5364, 309, 2955, 207, 43, 44675, 10041, 432, 6766, 3921, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 57,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "none_listed",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "tree_nuts",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "eggs",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x41122fcc", "0x40c0475c", "0x40eec5a8", "0x4088e7c1", "0x41003f3c", "0x409e3293"]
+      ],
+      "scores": [
+        ["0x41122fcc", "0x40eec5a8", "0x41003f3c"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "none_listed",
+          "probabilities": {
+            "none_listed": 0.58199902211864518,
+            "tree_nuts": 0.16633536977025665,
+            "eggs": 0.251665608111098
+          },
+          "confidence": 0.58199902211864518
+        }
+      },
+      "usage": {
+        "input_tokens": 58,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

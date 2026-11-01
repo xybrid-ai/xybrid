@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "case": "g1h-07-choice-8-600-tokens",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "b96f9b32c6911ecefaeb1ce4b60b4f35291f275061965eb58c1516e25434cb21",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["flexible_work", "special_leave", "training", "sick_leave", "unpaid_leave", "parental_leave", "annual_leave", "not_a_leave_request"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nA new parent wants to switch to four days a week for six months after their leave ends. (1) The office is closed on public holidays. (2) Leave requests are usually answered within three working days. (3) The team has seven members across two sites. (4) Shift swaps are arranged on a shared calendar. (5) The handbook was updated at the start of the year. (6) Overtime is recorded in the time-tracking tool. (7) Managers review absences once a month. (8) New starters receive their allowance pro rata. (9) The payroll cut-off is the twentieth of each month. (10) Questions can be sent to the people team mailbox. (11) The office is closed on public holidays. (12) Leave requests are usually answered within three working days. (13) The team has seven members across two sites. (14) Shift swaps are arranged on a shared calendar. (15) The handbook was updated at the start of the year. (16) Overtime is recorded in the time-tracking tool. (17) Managers review absences once a month. (18) New starters receive their allowance pro rata. (19) The payroll cut-off is the twentieth of each month. (20) Questions can be sent to the people team mailbox. (21) The office is closed on public holidays. (22) Leave requests are usually answered within three working days. (23) The team has seven members across two sites. (24) Shift swaps are arranged on a shared calendar. (25) The handbook was updated at the start of the year. (26) Overtime is recorded in the time-tracking tool. (27) Managers review absences once a month. (28) New starters receive their allowance pro rata. (29) The payroll cut-off is the twentieth of each month. (30) Questions can be sent to the people team mailbox. (31) The office is closed on public holidays. (32) Leave requests are usually answered within three working days. (33) The team has seven members across two sites. (34) Shift swaps are arranged on a shared calendar. (35) The handbook was updated at the start of the year. (36) Overtime is recorded in the time-tracking tool. (37) Managers review absences once a month. also noted today again later\n\n\nQUESTION:\nWhich policy applies to this request?\n\nOptions:\nA Changes to hours or working pattern\nB Moving, weddings, bereavement\nC Courses and exams\nD Absence because of illness\nE Time off without pay\nF Leave for a new child\nG Paid holidays from the yearly allowance\nH Something other than time off\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 860, 6934, 10966, 310, 9410, 310, 2258, 2877, 267, 2524, 374, 3749, 3992, 1219, 648, 6281, 11676, 22, 342, 25, 17, 440, 6255, 355, 8056, 383, 1251, 31731, 22, 342, 26, 17, 40571, 19352, 437, 3475, 20469, 2137, 1703, 3321, 2877, 22, 342, 27, 17, 440, 2909, 677, 7077, 3466, 3147, 1046, 5780, 22, 342, 28, 17, 1450, 2333, 92111, 437, 20059, 383, 267, 8570, 20540, 22, 342, 29, 17, 440, 1589, 4372, 452, 13567, 462, 278, 1654, 302, 278, 922, 22, 342, 30, 17, 480, 2636, 674, 355, 7611, 296, 278, 893, 2005, 36714, 6189, 22, 342, 31, 17, 2382, 15622, 3701, 3031, 1410, 3580, 267, 5304, 22, 342, 32, 17, 1381, 1654, 370, 6483, 648, 61132, 398, 113152, 22, 342, 33, 17, 440, 3524, 2252, 3668, 11697, 355, 278, 29475, 302, 1394, 5304, 22, 342, 654, 17, 26539, 510, 373, 3066, 310, 278, 1018, 2909, 17990, 4927, 22, 342, 1131, 17, 440, 6255, 355, 8056, 383, 1251, 31731, 22, 342, 873, 17, 40571, 19352, 437, 3475, 20469, 2137, 1703, 3321, 2877, 22, 342, 1031, 17, 440, 2909, 677, 7077, 3466, 3147, 1046, 5780, 22, 342, 1035, 17, 1450, 2333, 92111, 437, 20059, 383, 267, 8570, 20540, 22, 342, 885, 17, 440, 1589, 4372, 452, 13567, 462, 278, 1654, 302, 278, 922, 22, 342, 942, 17, 480, 2636, 674, 355, 7611, 296, 278, 893, 2005, 36714, 6189, 22, 342, 916, 17, 2382, 15622, 3701, 3031, 1410, 3580, 267, 5304, 22, 342, 632, 17, 1381, 1654, 370, 6483, 648, 61132, 398, 113152, 22, 342, 412, 17, 440, 3524, 2252, 3668, 11697, 355, 278, 29475, 302, 1394, 5304, 22, 342, 397, 17, 26539, 510, 373, 3066, 310, 278, 1018, 2909, 17990, 4927, 22, 342, 1696, 17, 440, 6255, 355, 8056, 383, 1251, 31731, 22, 342, 1518, 17, 40571, 19352, 437, 3475, 20469, 2137, 1703, 3321, 2877, 22, 342, 1467, 17, 440, 2909, 677, 7077, 3466, 3147, 1046, 5780, 22, 342, 1325, 17, 1450, 2333, 92111, 437, 20059, 383, 267, 8570, 20540, 22, 342, 1197, 17, 440, 1589, 4372, 452, 13567, 462, 278, 1654, 302, 278, 922, 22, 342, 1616, 17, 480, 2636, 674, 355, 7611, 296, 278, 893, 2005, 36714, 6189, 22, 342, 1641, 17, 2382, 15622, 3701, 3031, 1410, 3580, 267, 5304, 22, 342, 1637, 17, 1381, 1654, 370, 6483, 648, 61132, 398, 113152, 22, 342, 1734, 17, 440, 3524, 2252, 3668, 11697, 355, 278, 29475, 302, 1394, 5304, 22, 342, 1163, 17, 26539, 510, 373, 3066, 310, 278, 1018, 2909, 17990, 4927, 22, 342, 2498, 17, 440, 6255, 355, 8056, 383, 1251, 31731, 22, 342, 2424, 17, 40571, 19352, 437, 3475, 20469, 2137, 1703, 3321, 2877, 22, 342, 2124, 17, 440, 2909, 677, 7077, 3466, 3147, 1046, 5780, 22, 342, 2432, 17, 1450, 2333, 92111, 437, 20059, 383, 267, 8570, 20540, 22, 342, 2036, 17, 440, 1589, 4372, 452, 13567, 462, 278, 1654, 302, 278, 922, 22, 342, 2523, 17, 480, 2636, 674, 355, 7611, 296, 278, 893, 2005, 36714, 6189, 22, 342, 2591, 17, 2382, 15622, 3701, 3031, 1410, 3580, 267, 5304, 22, 735, 7865, 3507, 1529, 2418, 7, 63509, 833, 28327, 5291, 18874, 310, 532, 5439, 64929, 13314, 833, 41, 33517, 310, 4433, 432, 3321, 4309, 207, 42, 53151, 20, 288, 47485, 20, 9085, 413, 850, 207, 43, 340, 35658, 309, 31905, 207, 44, 14395, 587, 1428, 302, 8365, 207, 45, 8260, 1111, 2129, 3524, 207, 46, 40571, 374, 267, 860, 1179, 207, 47, 122843, 31731, 487, 278, 40200, 61132, 207, 48, 39280, 811, 898, 893, 1111, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 599,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407, 46, 410, 47, 417, 48, 403]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "flexible_work",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "special_leave",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "training",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "sick_leave",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "unpaid_leave",
+              "code": "E",
+              "range": [8, 10]
+            },
+            {
+              "key": "parental_leave",
+              "code": "F",
+              "range": [10, 12]
+            },
+            {
+              "key": "annual_leave",
+              "code": "G",
+              "range": [12, 14]
+            },
+            {
+              "key": "not_a_leave_request",
+              "code": "H",
+              "range": [14, 16]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4158ed01", "0x41007efb", "0x40ccab9d", "0x3f134e71", "0x40952c67", "0xbfa3dff5", "0x40a2d650", "0xbf22cd6d", "0x40d3c8b2", "0x3fa32174", "0x4128abdc", "0x40bce414", "0x40c989c0", "0x3f943cf2", "0x410b2bde", "0x405edae8"]
+      ],
+      "scores": [
+        ["0x4158ed01", "0x40ccab9d", "0x40952c67", "0x40a2d650", "0x40d3c8b2", "0x4128abdc", "0x40c989c0", "0x410b2bde"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "flexible_work",
+          "confidence": 0.8702848907443419,
+          "probabilities": {
+            "flexible_work": 0.8702848907443419,
+            "special_leave": 0.0041111896658152132,
+            "training": 0.0011240715328506891,
+            "sick_leave": 0.0015468596922929131,
+            "unpaid_leave": 0.004854619420722078,
+            "parental_leave": 0.09126502127878891,
+            "annual_leave": 0.0038210406636123148,
+            "not_a_leave_request": 0.022992307001575979
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 600,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "524ed5c50238d0c1af8113bb93c8b55d0b5acd853a311948161506e6d4bc6873",
+        "state_tokens": 518,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC", "D", "ĠD", "E", "ĠE", "F", "ĠF", "G", "ĠG", "H", "ĠH"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xbdaaf380", "0xc0b387da", "0xc0e7da33", "0xc1510e01", "0xc10facb4", "0xc16ebee7", "0xc108d7c0", "0xc1646fbf", "0xc0e0bd1e", "0xc145deba", "0xc0465c30", "0xc0f7a1bc", "0xc0eafc10", "0xc147bb4a", "0xc09e2e14", "0xc1228c2e"],
+        "logprob_scores": ["0xbdaaf380", "0xc0e7da33", "0xc10facb4", "0xc108d7c0", "0xc0e0bd1e", "0xc0465c30", "0xc0eafc10", "0xc09e2e14"],
+        "logsumexp": "0x415a42e8",
+        "distribution": [0.8702848907443419, 0.0041111896658152132, 0.0011240715328506891, 0.0015468596922929131, 0.004854619420722078, 0.09126502127878891, 0.0038210406636123148, 0.022992307001575979]
+      }
+    ]
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "case": "g1h-32-score-7",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "4247ad415772c13a5f403190e9ec6f2e0becae1b2e64cdc0cd5a0b49ce6faeae",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "score",
+          "keys": ["0", "1", "2", "3", "4", "5", "6"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nAn employee asks for three days off next week to move house, and has twelve days of leave left this year.\n\n\nQUESTION:\nHow much planning does the team need for this absence?\n\n0 none\n1 very little\n2 little\n3 some\n4 considerable\n5 extensive\n6 a full replacement\n\nReply with a single digit 0-6 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2296, 18984, 20589, 374, 1703, 2877, 1111, 2779, 2524, 310, 4375, 3121, 20, 309, 677, 18775, 2877, 302, 6281, 2690, 532, 922, 64673, 63509, 833, 3522, 1471, 7891, 1676, 278, 2909, 1094, 374, 532, 12458, 64929, 24, 10234, 207, 25, 1442, 2722, 207, 26, 2722, 207, 27, 928, 207, 28, 14181, 207, 29, 11323, 207, 30, 267, 3021, 15899, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 30, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 81,
+          "select": [24, 25, 26, 27, 28, 29, 30]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            },
+            {
+              "key": "4",
+              "code": "4",
+              "range": [4, 5]
+            },
+            {
+              "key": "5",
+              "code": "5",
+              "range": [5, 6]
+            },
+            {
+              "key": "6",
+              "code": "6",
+              "range": [6, 7]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4104e34c", "0x411651e4", "0x411e588c", "0x41121df4", "0x40f418a3", "0x40cb38f9", "0x40b0ad6f"]
+      ],
+      "scores": [
+        ["0x4104e34c", "0x411651e4", "0x411e588c", "0x41121df4", "0x40f418a3", "0x40cb38f9", "0x40b0ad6f"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "score",
+          "score": 2.0,
+          "confidence": 0.35111191827671961,
+          "probabilities": {
+            "0": 0.10684595976474247,
+            "1": 0.24129729850017179,
+            "2": 0.35111191827671961,
+            "3": 0.19826778434247216,
+            "4": 0.064381020434467737,
+            "5": 0.024772982918642241,
+            "6": 0.013323035762783894
+          },
+          "legend": {
+            "0": "none",
+            "1": "very little",
+            "2": "little",
+            "3": "some",
+            "4": "considerable",
+            "5": "extensive",
+            "6": "a full replacement"
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 82,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "ebeef41bbe87576cb94c4dc9b5ae896b1cc65cc87daf6fe10b679e787a1b3fa3",
+        "state_tokens": 29,
+        "select_tokens": ["0", "1", "2", "3", "4", "5", "6"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xc0276d48", "0xbfc365d0", "0xbf833090", "0xbfe50550", "0xc052c932", "0xc0924443", "0xc0accfcd"],
+        "logprob_scores": ["0xc0276d48", "0xbfc365d0", "0xbf833090", "0xbfe50550", "0xc052c932", "0xc0924443", "0xc0accfcd"],
+        "logsumexp": "0x412ebe9e",
+        "distribution": [0.10684595976474247, 0.24129729850017179, 0.35111191827671961, 0.19826778434247216, 0.064381020434467737, 0.024772982918642241, 0.013323035762783894]
+      }
+    ]
+  }
+}

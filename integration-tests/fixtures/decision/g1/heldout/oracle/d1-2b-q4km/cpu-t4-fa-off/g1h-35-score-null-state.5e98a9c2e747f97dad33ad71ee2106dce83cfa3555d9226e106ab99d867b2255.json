@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "id": "g1h-35-score-null-state",
+  "source_file": "g1h-35-score-null-state.json",
+  "case_file_sha256": "ca98bb816daeb81c3878464e54691f40843330ca1afda21fb16f863fc484ca77",
+  "request_sha256": "5e98a9c2e747f97dad33ad71ee2106dce83cfa3555d9226e106ab99d867b2255",
+  "inputs_sha256": "24716722c491176444b25b0f63642c1c940e586eded518399d73638ecfc26902",
+  "inputs": {
+    "request_sha256": "5e98a9c2e747f97dad33ad71ee2106dce83cfa3555d9226e106ab99d867b2255",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nHow risky is this clause for the customer?\n\n0 no risk\n1 moderate\n2 unacceptable\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 3522, 41530, 355, 532, 32286, 374, 278, 13107, 64929, 24, 794, 2264, 207, 25, 15034, 207, 26, 57448, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 40,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40f4fc38", "0x40e13386", "0x40e2eab7"]
+      ],
+      "scores": [
+        ["0x40f4fc38", "0x40e13386", "0x40e2eab7"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": "no risk",
+            "1": "moderate",
+            "2": "unacceptable"
+          },
+          "probabilities": {
+            "0": 0.43754930318456664,
+            "1": 0.27558936742671647,
+            "2": 0.286861329388717
+          },
+          "confidence": 0.43754930318456664
+        }
+      },
+      "usage": {
+        "input_tokens": 41,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

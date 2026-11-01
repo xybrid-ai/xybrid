@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "g1h-26-noul-json-array",
+  "source_file": "g1h-26-noul-json-array.json",
+  "case_file_sha256": "6a04eb07b8db19f64b601348d352fb08f2223c9b087f9205a2e6b567caf0445e",
+  "request_sha256": "7b70aa70d693fbe6f2b4ef8ba5af906522cab19f710221a54c8b723d8de3b424",
+  "inputs_sha256": "e837b74efd9975b2d44fac9cd15e4d5b774b924994bb67f010b21eca3d8b9639",
+  "inputs": {
+    "request_sha256": "7b70aa70d693fbe6f2b4ef8ba5af906522cab19f710221a54c8b723d8de3b424",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\n[\n  {\n    \"from\": \"first\",\n    \"text\": \"The electricity bill for January is three times last January's, although nobody lived in the flat for two weeks.\"\n  },\n  {\n    \"from\": \"second\",\n    \"text\": \"The account has been active for four years.\"\n  },\n  \"in_review\",\n  44\n]\n\n\nQUESTION:\nIs a meter reading mentioned?\nYes: A reading is given or questioned\nNo: No reading is mentioned\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 14200, 229, 827, 360, 496, 5890, 6380, 496, 15557, 6107, 360, 496, 1384, 6380, 496, 597, 9865, 4862, 374, 4749, 355, 1703, 2716, 2158, 4749, 589, 20, 5321, 31230, 8158, 296, 278, 9144, 374, 1046, 5771, 1917, 229, 10016, 229, 827, 360, 496, 5890, 6380, 496, 16707, 6107, 360, 496, 1384, 6380, 496, 597, 3362, 677, 880, 5091, 374, 2258, 1278, 1917, 229, 10016, 229, 496, 268, 15122, 1764, 6107, 229, 229, 2836, 207, 88887, 63509, 833, 4439, 267, 14273, 4686, 8314, 1283, 12447, 34, 334, 4686, 355, 2496, 432, 38494, 207, 4547, 34, 2752, 4686, 355, 8314, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 116,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x3fb5aa9d", "0x40df4efa", "0x40ab6724", "0x4141972f", "0x40a3d3ba"]
+      ],
+      "scores": [
+        ["0x40df4efa", "0x4141972f"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "noul",
+          "noul": 0.02126722719412967
+        }
+      },
+      "usage": {
+        "input_tokens": 117,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

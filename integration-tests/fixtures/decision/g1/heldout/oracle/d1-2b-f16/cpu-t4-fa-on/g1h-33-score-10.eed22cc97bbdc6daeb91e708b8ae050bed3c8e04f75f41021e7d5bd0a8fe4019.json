@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "id": "g1h-33-score-10",
+  "source_file": "g1h-33-score-10.json",
+  "case_file_sha256": "6370801db93b7f85c834ca06c90722d3a92c05b3684688da54979f48274a1230",
+  "request_sha256": "eed22cc97bbdc6daeb91e708b8ae050bed3c8e04f75f41021e7d5bd0a8fe4019",
+  "inputs_sha256": "d09a063deca9e632d532cb4efeedfb455be0c25b695c52e3de66dcc671d31c73",
+  "inputs": {
+    "request_sha256": "eed22cc97bbdc6daeb91e708b8ae050bed3c8e04f75f41021e7d5bd0a8fe4019",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "score",
+          "keys": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nA laptop was stolen from a train while its owner slept; the theft was reported to the police the next morning.\n\n\nQUESTION:\nHow likely is the claim to be paid in full?\n\n0 impossible\n1 very unlikely\n2 unlikely\n3 doubtful\n4 uncertain\n5 plausible\n6 likely\n7 very likely\n8 almost certain\n9 certain\n\nReply with a single digit 0-9 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 34575, 452, 35203, 487, 267, 8341, 1657, 851, 11652, 51206, 35, 278, 38382, 452, 3967, 310, 278, 7666, 278, 2779, 8031, 64673, 63509, 833, 3522, 3348, 355, 278, 4172, 310, 373, 9773, 296, 3021, 64929, 24, 10995, 207, 25, 1442, 19138, 207, 26, 19138, 207, 27, 11141, 1164, 207, 28, 11792, 207, 29, 45764, 207, 30, 3348, 207, 31, 1442, 3348, 207, 32, 4046, 2796, 207, 33, 2796, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 33, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 91,
+          "select": [24, 25, 26, 27, 28, 29, 30, 31, 32, 33]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            },
+            {
+              "key": "4",
+              "code": "4",
+              "range": [4, 5]
+            },
+            {
+              "key": "5",
+              "code": "5",
+              "range": [5, 6]
+            },
+            {
+              "key": "6",
+              "code": "6",
+              "range": [6, 7]
+            },
+            {
+              "key": "7",
+              "code": "7",
+              "range": [7, 8]
+            },
+            {
+              "key": "8",
+              "code": "8",
+              "range": [8, 9]
+            },
+            {
+              "key": "9",
+              "code": "9",
+              "range": [9, 10]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40eeeadc", "0x40e08ed4", "0x40e620db", "0x40eb9a74", "0x41065b20", "0x40f131da", "0x40edc17a", "0x40f45de2", "0x40e7bb7c", "0x40f549b0"]
+      ],
+      "scores": [
+        ["0x40eeeadc", "0x40e08ed4", "0x40e620db", "0x40eb9a74", "0x41065b20", "0x40f131da", "0x40edc17a", "0x40f45de2", "0x40e7bb7c", "0x40f549b0"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "score",
+          "score": 4.0,
+          "legend": {
+            "0": "impossible",
+            "1": "very unlikely",
+            "2": "unlikely",
+            "3": "doubtful",
+            "4": "uncertain",
+            "5": "plausible",
+            "6": "likely",
+            "7": "very likely",
+            "8": "almost certain",
+            "9": "certain"
+          },
+          "probabilities": {
+            "0": 0.094068972443266022,
+            "1": 0.067255608971671571,
+            "2": 0.076604844956653248,
+            "3": 0.087059380719922794,
+            "4": 0.18871055380536683,
+            "5": 0.099210174214792335,
+            "6": 0.091549956948533739,
+            "7": 0.10684276868446516,
+            "8": 0.07953047368046344,
+            "9": 0.10916726557486503
+          },
+          "confidence": 0.18871055380536683
+        }
+      },
+      "usage": {
+        "input_tokens": 92,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

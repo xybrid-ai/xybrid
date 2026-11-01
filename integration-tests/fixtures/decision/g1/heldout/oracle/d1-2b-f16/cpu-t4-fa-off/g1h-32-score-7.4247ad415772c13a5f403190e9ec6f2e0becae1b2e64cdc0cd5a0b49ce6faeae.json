@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "id": "g1h-32-score-7",
+  "source_file": "g1h-32-score-7.json",
+  "case_file_sha256": "2c12f96b694b29a15880ec2d00a9eb128786e9b250bfeabe33bdc2955b131fe0",
+  "request_sha256": "4247ad415772c13a5f403190e9ec6f2e0becae1b2e64cdc0cd5a0b49ce6faeae",
+  "inputs_sha256": "b5d642ad68d0ee2c6e09502d51d5eb18de034e1d9ae8cd8e9c03e386c58df32b",
+  "inputs": {
+    "request_sha256": "4247ad415772c13a5f403190e9ec6f2e0becae1b2e64cdc0cd5a0b49ce6faeae",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "score",
+          "keys": ["0", "1", "2", "3", "4", "5", "6"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nAn employee asks for three days off next week to move house, and has twelve days of leave left this year.\n\n\nQUESTION:\nHow much planning does the team need for this absence?\n\n0 none\n1 very little\n2 little\n3 some\n4 considerable\n5 extensive\n6 a full replacement\n\nReply with a single digit 0-6 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2296, 18984, 20589, 374, 1703, 2877, 1111, 2779, 2524, 310, 4375, 3121, 20, 309, 677, 18775, 2877, 302, 6281, 2690, 532, 922, 64673, 63509, 833, 3522, 1471, 7891, 1676, 278, 2909, 1094, 374, 532, 12458, 64929, 24, 10234, 207, 25, 1442, 2722, 207, 26, 2722, 207, 27, 928, 207, 28, 14181, 207, 29, 11323, 207, 30, 267, 3021, 15899, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 30, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 81,
+          "select": [24, 25, 26, 27, 28, 29, 30]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            },
+            {
+              "key": "4",
+              "code": "4",
+              "range": [4, 5]
+            },
+            {
+              "key": "5",
+              "code": "5",
+              "range": [5, 6]
+            },
+            {
+              "key": "6",
+              "code": "6",
+              "range": [6, 7]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4104e169", "0x41164a21", "0x411e52dc", "0x41121c46", "0x40f417d9", "0x40cb36aa", "0x40b0aa82"]
+      ],
+      "scores": [
+        ["0x4104e169", "0x41164a21", "0x411e52dc", "0x41121c46", "0x40f417d9", "0x40cb36aa", "0x40b0aa82"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "score",
+          "score": 2.0,
+          "legend": {
+            "0": "none",
+            "1": "very little",
+            "2": "little",
+            "3": "some",
+            "4": "considerable",
+            "5": "extensive",
+            "6": "a full replacement"
+          },
+          "probabilities": {
+            "0": 0.10689647960128844,
+            "1": 0.24115268087244379,
+            "2": 0.35103441735630031,
+            "3": 0.19836906476813948,
+            "4": 0.064428999721254626,
+            "5": 0.024787999418459696,
+            "6": 0.013330358262113776
+          },
+          "confidence": 0.35103441735630031
+        }
+      },
+      "usage": {
+        "input_tokens": 82,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "id": "g1h-08-choice-upper-letter-keys",
+  "source_file": "g1h-08-choice-upper-letter-keys.json",
+  "case_file_sha256": "477246aa462a08bacce1fecfe845450e581d042fb369d544515c524a90c43041",
+  "request_sha256": "b6c74a13d719d2256110d5447ab90192b5815507aedaae101fc2a89fd4c89e3f",
+  "inputs_sha256": "8c4df0707bc5bb1184dd725583a148dd61b3973e2caed3319b285b13e8410fde",
+  "inputs": {
+    "request_sha256": "b6c74a13d719d2256110d5447ab90192b5815507aedaae101fc2a89fd4c89e3f",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["A", "B", "C", "D"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nA storm broke a window and water soaked the living room carpet; the policy holder sent photos the same night.\n\n\nQUESTION:\nWhich kind of claim is this?\n\nOptions:\nA Nothing the policy covers\nB Medical costs\nC Damage caused to someone else\nD Damage to a building or its contents\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 9819, 16821, 267, 7948, 309, 1382, 600, 10096, 278, 4123, 4861, 38511, 35, 278, 5291, 35840, 3066, 9942, 278, 1542, 4414, 64673, 63509, 833, 28327, 3245, 302, 4172, 355, 532, 64929, 13314, 833, 41, 28156, 278, 5291, 13045, 207, 42, 7944, 6524, 207, 43, 63007, 4956, 310, 5290, 3080, 207, 44, 63007, 310, 267, 3703, 432, 851, 15642, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 77,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "A",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "B",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "C",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "D",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x410692fd", "0x409b53a4", "0x408be109", "0x3e46f208", "0x410430d6", "0x409d4b4e", "0x413478a4", "0x41045370"]
+      ],
+      "scores": [
+        ["0x410692fd", "0x408be109", "0x410430d6", "0x413478a4"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "D",
+          "probabilities": {
+            "A": 0.095379386249679607,
+            "B": 0.0046521126113415519,
+            "C": 0.085326050084678834,
+            "D": 0.8146424510543
+          },
+          "confidence": 0.8146424510543
+        }
+      },
+      "usage": {
+        "input_tokens": 78,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "g1h-19-noul-criteria-a",
+  "source_file": "g1h-19-noul-criteria-a.json",
+  "case_file_sha256": "4b882f62d55d04f310ebfbd0d3dfa3aadda7904cd9121e5a1e2ff22035d1728a",
+  "request_sha256": "1ee0f297d2619ed7ded10fbe0c39594ec48a74b43fe3edb308c38ff1b30adc35",
+  "inputs_sha256": "d2c126acf847d74e7316685f5603309e2b09b3a67a755220d9070f831523489a",
+  "inputs": {
+    "request_sha256": "1ee0f297d2619ed7ded10fbe0c39594ec48a74b43fe3edb308c38ff1b30adc35",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nA team lead reports that a colleague has been off sick for two weeks without sending a doctor's note.\n\n\nQUESTION:\nDoes the request need a manager's approval?\nYes: A manager must sign it off\nNo: It is granted automatically by policy\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 2909, 1584, 7443, 395, 267, 42543, 677, 880, 1111, 11367, 374, 1046, 5771, 2129, 18011, 267, 6148, 589, 6133, 64673, 63509, 833, 29088, 278, 5439, 1094, 267, 10929, 589, 17283, 1283, 12447, 34, 334, 10929, 1946, 1222, 435, 1111, 207, 4547, 34, 810, 355, 14510, 14253, 467, 5291, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 67,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40af3d38", "0x4124fd71", "0x4061a146", "0x410a2fe6", "0x406292a4"]
+      ],
+      "scores": [
+        ["0x4124fd71", "0x410a2fe6"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "noul",
+          "noul": 0.77774399825583007
+        }
+      },
+      "usage": {
+        "input_tokens": 68,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

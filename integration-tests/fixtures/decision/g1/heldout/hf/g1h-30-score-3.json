@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "case": "g1h-30-score-3",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "c3d7094a1b92f13da3e4e39933cd22fe0c5bc4b74a83a1babfa8ec00b127b21a",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nA new loop reads a file line by line and keeps every line in memory before processing it.\n\n\nQUESTION:\nHow risky is merging this change?\n\n0 no risk\n1 some\n2 dangerous\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 860, 13971, 20077, 267, 3848, 2216, 467, 2216, 309, 16981, 1472, 2216, 296, 5947, 1575, 8646, 435, 64673, 63509, 833, 3522, 41530, 355, 61089, 532, 2284, 64929, 24, 794, 2264, 207, 25, 928, 207, 26, 10143, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 59,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x411e4866", "0x41189b82", "0x412c2127"]
+      ],
+      "scores": [
+        ["0x411e4866", "0x41189b82", "0x412c2127"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "score",
+          "score": 2.0,
+          "confidence": 0.51943726786573208,
+          "probabilities": {
+            "0": 0.27196002807354352,
+            "1": 0.20860270406072437,
+            "2": 0.51943726786573208
+          },
+          "legend": {
+            "0": "no risk",
+            "1": "some",
+            "2": "dangerous"
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 60,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "27a5ebdde3069ec26251573c2e7a48fe7b90dcbd0859d0456083af7b6db6f841",
+        "state_tokens": 25,
+        "select_tokens": ["0", "1", "2"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xbfc34d30", "0xbff0b450", "0xbf290e50"],
+        "logprob_scores": ["0xbfc34d30", "0xbff0b450", "0xbf290e50"],
+        "logsumexp": "0x4136b20c",
+        "distribution": [0.27196002807354352, 0.20860270406072437, 0.51943726786573208]
+      }
+    ]
+  }
+}

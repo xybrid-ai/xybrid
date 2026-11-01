@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "id": "g1h-03-choice-4",
+  "source_file": "g1h-03-choice-4.json",
+  "case_file_sha256": "7773be37b1fae1e1a0f75255130640841ae56d978e712fea660839762680d176",
+  "request_sha256": "91e77af40c681a3a5d925ca49ee1bb4dd4c5177567d743062bdc52238c59945f",
+  "inputs_sha256": "fb6bd83e54f87882055cfea896df75390abb720b1d5541a9108d3692480c395e",
+  "inputs": {
+    "request_sha256": "91e77af40c681a3a5d925ca49ee1bb4dd4c5177567d743062bdc52238c59945f",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["dairy", "none_listed", "soy", "sesame"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nThis curry is cooked with coconut milk, lentils, cumin and fresh coriander, served with rice.\n\n\nQUESTION:\nWhich allergen is the main concern in this dish?\n\nOptions:\nA Milk, butter and cheese\nB No common allergen\nC Soy beans and soy sauce\nD Sesame seeds or oil\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 1942, 1420, 657, 355, 23882, 415, 34001, 8514, 20, 28712, 2844, 20, 280, 7055, 309, 6947, 1293, 81, 3871, 20, 6313, 415, 11638, 64673, 63509, 833, 28327, 16643, 1157, 355, 278, 1619, 3606, 296, 532, 17507, 64929, 13314, 833, 41, 45490, 20, 12407, 309, 18203, 207, 42, 2752, 2123, 16643, 1157, 207, 43, 44411, 18962, 309, 17386, 21380, 207, 44, 33165, 567, 9940, 432, 4398, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 83,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "dairy",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "none_listed",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "soy",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "sesame",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x41266d74", "0x40cb2a1f", "0x413f733d", "0x40fda79e", "0x40b2de84", "0x3fac338c", "0x40f7ce8e", "0x4084e625"]
+      ],
+      "scores": [
+        ["0x41266d74", "0x413f733d", "0x40b2de84", "0x40f7ce8e"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "none_listed",
+          "probabilities": {
+            "dairy": 0.22808094255413355,
+            "none_listed": 0.73441187028281585,
+            "soy": 0.0062440243345477714,
+            "sesame": 0.031263162828502868
+          },
+          "confidence": 0.73441187028281585
+        }
+      },
+      "usage": {
+        "input_tokens": 84,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

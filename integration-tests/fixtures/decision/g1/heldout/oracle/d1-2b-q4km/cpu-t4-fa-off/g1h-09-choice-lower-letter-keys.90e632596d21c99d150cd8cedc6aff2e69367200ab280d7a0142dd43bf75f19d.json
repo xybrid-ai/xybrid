@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "id": "g1h-09-choice-lower-letter-keys",
+  "source_file": "g1h-09-choice-lower-letter-keys.json",
+  "case_file_sha256": "df778d607e76342021f392bcdc38dcd1206c1084580fa2d224011259e233d351",
+  "request_sha256": "90e632596d21c99d150cd8cedc6aff2e69367200ab280d7a0142dd43bf75f19d",
+  "inputs_sha256": "6b8c034cfab0b2c23f3207d84061c3382d70c05c3a4837c58492cb1d0eff41dd",
+  "inputs": {
+    "request_sha256": "90e632596d21c99d150cd8cedc6aff2e69367200ab280d7a0142dd43bf75f19d",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["a", "b", "c", "d", "e"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nAn elderly patient has had a dry cough for three weeks, sleeps poorly and lost some appetite, but has no fever.\n\n\nQUESTION:\nWhich service should see this patient first?\n\nOptions:\na Rehabilitation and movement\nb Routine assessment and referral\nc Skin conditions and rashes\nd Immediate danger to life\ne Medication advice only\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2296, 19563, 4586, 677, 819, 267, 6025, 20812, 374, 1703, 5771, 20, 4891, 91, 23626, 309, 5306, 928, 28992, 20, 702, 677, 794, 14759, 64673, 63509, 833, 28327, 3213, 1252, 1629, 532, 4586, 1008, 64929, 13314, 833, 73, 60988, 309, 5181, 207, 74, 27233, 475, 8356, 309, 51818, 207, 75, 36293, 3151, 309, 376, 19499, 207, 76, 2403, 15271, 6762, 310, 1604, 207, 77, 6985, 351, 10163, 1049, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 86,
+          "select": [73, 267, 74, 293, 75, 280, 76, 277, 77, 320]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "a",
+              "code": "a",
+              "range": [0, 2]
+            },
+            {
+              "key": "b",
+              "code": "b",
+              "range": [2, 4]
+            },
+            {
+              "key": "c",
+              "code": "c",
+              "range": [4, 6]
+            },
+            {
+              "key": "d",
+              "code": "d",
+              "range": [6, 8]
+            },
+            {
+              "key": "e",
+              "code": "e",
+              "range": [8, 10]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40f52d94", "0x403855de", "0x41386e4b", "0x40d4a6a6", "0x40900da8", "0xbedad101", "0x40c728ce", "0x4003190c", "0x4100d9c2", "0x407c5fac"]
+      ],
+      "scores": [
+        ["0x40f52d94", "0x41386e4b", "0x40900da8", "0x40c728ce", "0x4100d9c2"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "b",
+          "probabilities": {
+            "a": 0.048148606642890265,
+            "b": 0.86637409063033832,
+            "c": 0.0045330072820572286,
+            "d": 0.016428345450693733,
+            "e": 0.064515949994020522
+          },
+          "confidence": 0.86637409063033832
+        }
+      },
+      "usage": {
+        "input_tokens": 87,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

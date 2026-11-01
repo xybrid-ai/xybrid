@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "id": "g1h-15-choice-json-array",
+  "source_file": "g1h-15-choice-json-array.json",
+  "case_file_sha256": "37e47c5581b9844438064e332a4995fd668a5744441d6b6c8930fae27b46e756",
+  "request_sha256": "a122d2e1e74b0d1b72f40e26b2430d1a32c888a01d0d2f510e569bcc43b17294",
+  "inputs_sha256": "bc9e15fde1c1f4e5904c24788bde9beb07b0f9d0fc85c068d4ba31118356af62",
+  "inputs": {
+    "request_sha256": "a122d2e1e74b0d1b72f40e26b2430d1a32c888a01d0d2f510e569bcc43b17294",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["postponed", "retirement", "loss", "unknown"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\n[\n  {\n    \"from\": \"first\",\n    \"text\": \"The home team led 2-0 at half time, conceded three goals in ten minutes and lost 2-3.\"\n  },\n  {\n    \"from\": \"second\",\n    \"text\": \"The event was broadcast on regional television.\"\n  },\n  \"finished\",\n  87\n]\n\n\nQUESTION:\nHow did the event end for the athlete or team?\n\nOptions:\nA Moved to another date\nB Stopped before the end\nC A defeat\nD The text does not say\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 14200, 229, 827, 360, 496, 5890, 6380, 496, 15557, 6107, 360, 496, 1384, 6380, 496, 597, 2180, 2909, 3961, 229, 26, 21, 24, 462, 3810, 893, 20, 33557, 290, 1703, 7653, 296, 3175, 4611, 309, 5306, 229, 26, 21, 27, 1917, 229, 10016, 229, 827, 360, 496, 5890, 6380, 496, 16707, 6107, 360, 496, 1384, 6380, 496, 597, 2807, 452, 14176, 383, 9135, 8086, 1917, 229, 10016, 229, 496, 39998, 6107, 229, 229, 5042, 207, 88887, 63509, 833, 3522, 1671, 278, 2807, 1263, 374, 278, 35163, 432, 2909, 64929, 13314, 833, 41, 356, 4663, 310, 2271, 5061, 207, 42, 586, 9574, 1575, 278, 1263, 207, 43, 334, 18916, 207, 44, 440, 2803, 1676, 513, 2491, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 133,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "postponed",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "retirement",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "loss",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "unknown",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x408ce784", "0x3eb3416c", "0x40e66f0b", "0x406002b8", "0x413af822", "0x41029185", "0x40fb5e7c", "0x40986541"]
+      ],
+      "scores": [
+        ["0x408ce784", "0x40e66f0b", "0x413af822", "0x40fb5e7c"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "loss",
+          "probabilities": {
+            "postponed": 0.0039378980188326746,
+            "retirement": 0.031900287933074631,
+            "loss": 0.91213312565903515,
+            "unknown": 0.052028688389057581
+          },
+          "confidence": 0.91213312565903515
+        }
+      },
+      "usage": {
+        "input_tokens": 134,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

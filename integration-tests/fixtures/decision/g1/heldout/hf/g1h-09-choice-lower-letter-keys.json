@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "case": "g1h-09-choice-lower-letter-keys",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "90e632596d21c99d150cd8cedc6aff2e69367200ab280d7a0142dd43bf75f19d",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["a", "b", "c", "d", "e"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nAn elderly patient has had a dry cough for three weeks, sleeps poorly and lost some appetite, but has no fever.\n\n\nQUESTION:\nWhich service should see this patient first?\n\nOptions:\na Rehabilitation and movement\nb Routine assessment and referral\nc Skin conditions and rashes\nd Immediate danger to life\ne Medication advice only\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2296, 19563, 4586, 677, 819, 267, 6025, 20812, 374, 1703, 5771, 20, 4891, 91, 23626, 309, 5306, 928, 28992, 20, 702, 677, 794, 14759, 64673, 63509, 833, 28327, 3213, 1252, 1629, 532, 4586, 1008, 64929, 13314, 833, 73, 60988, 309, 5181, 207, 74, 27233, 475, 8356, 309, 51818, 207, 75, 36293, 3151, 309, 376, 19499, 207, 76, 2403, 15271, 6762, 310, 1604, 207, 77, 6985, 351, 10163, 1049, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 86,
+          "select": [73, 267, 74, 293, 75, 280, 76, 277, 77, 320]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "a",
+              "code": "a",
+              "range": [0, 2]
+            },
+            {
+              "key": "b",
+              "code": "b",
+              "range": [2, 4]
+            },
+            {
+              "key": "c",
+              "code": "c",
+              "range": [4, 6]
+            },
+            {
+              "key": "d",
+              "code": "d",
+              "range": [6, 8]
+            },
+            {
+              "key": "e",
+              "code": "e",
+              "range": [8, 10]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40f96ed1", "0x403c4254", "0x4137371e", "0x40ceb52d", "0x4090374b", "0xbf0d316d", "0x40ba433c", "0x3fc94144", "0x40fecd48", "0x4077fba5"]
+      ],
+      "scores": [
+        ["0x40f96ed1", "0x4137371e", "0x4090374b", "0x40ba433c", "0x40fecd48"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "b",
+          "confidence": 0.86278604365674605,
+          "probabilities": {
+            "a": 0.056056911038969211,
+            "b": 0.86278604365674605,
+            "c": 0.0047962879345708927,
+            "d": 0.012811140412474841,
+            "e": 0.063549616957239291
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 87,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "c8d23e5b4896167c16b6e35e168ecc37413a3216fe5e1674e66107fee2d298ad",
+        "state_tokens": 31,
+        "select_tokens": ["a", "Ġa", "b", "Ġb", "c", "Ġc", "d", "Ġd", "e", "Ġe"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xc0814673", "0xc10e4a0d", "0xbec47080", "0xc0ac0017", "0xc0ea7df9", "0xc1462db9", "0xc0c07208", "0xc124327a", "0xc077cff8", "0xc0feb772"],
+        "logprob_scores": ["0xc0814673", "0xbec47080", "0xc0ea7df9", "0xc0c07208", "0xc077cff8"],
+        "logsumexp": "0x413d5aa2",
+        "distribution": [0.056056911038969211, 0.86278604365674605, 0.0047962879345708927, 0.012811140412474841, 0.063549616957239291]
+      }
+    ]
+  }
+}

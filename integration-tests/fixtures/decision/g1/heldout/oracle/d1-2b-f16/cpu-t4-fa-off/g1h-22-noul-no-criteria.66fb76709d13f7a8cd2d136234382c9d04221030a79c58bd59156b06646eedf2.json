@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "g1h-22-noul-no-criteria",
+  "source_file": "g1h-22-noul-no-criteria.json",
+  "case_file_sha256": "2490e6b616c460c0408815ca777542111154f8d3c37a80325d0bdfe5aab84f94",
+  "request_sha256": "66fb76709d13f7a8cd2d136234382c9d04221030a79c58bd59156b06646eedf2",
+  "inputs_sha256": "85520c6d59f67c3a08aa00921b579391ab729a7217932166bc659913c9bd989e",
+  "inputs": {
+    "request_sha256": "66fb76709d13f7a8cd2d136234382c9d04221030a79c58bd59156b06646eedf2",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nEither party may end this agreement with thirty days' written notice, without giving a reason.\n\n\nQUESTION:\nDoes the clause favour the supplier?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 93324, 6498, 899, 1263, 532, 9948, 415, 18045, 2877, 15, 4484, 8959, 20, 2129, 7351, 267, 3591, 64673, 63509, 833, 29088, 278, 32286, 16876, 278, 42305, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 44,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4064887c", "0x410800b5", "0x40a77d12", "0x4128c19b", "0x4061a231"]
+      ],
+      "scores": [
+        ["0x410800b5", "0x4128c19b"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "noul",
+          "noul": 0.17789794500609921
+        }
+      },
+      "usage": {
+        "input_tokens": 45,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

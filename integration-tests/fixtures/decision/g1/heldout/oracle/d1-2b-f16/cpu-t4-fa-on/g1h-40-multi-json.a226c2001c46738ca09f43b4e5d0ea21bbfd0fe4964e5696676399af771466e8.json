@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "id": "g1h-40-multi-json",
+  "source_file": "g1h-40-multi-json.json",
+  "case_file_sha256": "097648eeb835ec906218dbcb2da0b076a1b6f900047c021b4925737b5d07d0e8",
+  "request_sha256": "a226c2001c46738ca09f43b4e5d0ea21bbfd0fe4964e5696676399af771466e8",
+  "inputs_sha256": "2ccb74f20234a6977263980542d27f63d5396899945eddc0b8f4688a82e02bc6",
+  "inputs": {
+    "request_sha256": "a226c2001c46738ca09f43b4e5d0ea21bbfd0fe4964e5696676399af771466e8",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "flag",
+          "type": "noul",
+          "keys": ["true", "false"]
+        },
+        {
+          "id": "route",
+          "type": "choice",
+          "keys": ["no_action", "platform", "database", "network"]
+        },
+        {
+          "id": "level",
+          "type": "score",
+          "keys": ["0", "1", "2", "3"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "flag",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"A scheduled certificate renewal failed; the current certificate expires in nine days.\",\n  \"incident\": {\n    \"status\": \"investigating\",\n    \"id\": 6949,\n    \"tags\": [\n      \"new\",\n      \"investigating\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"Logs are kept for thirty days.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"The vendor's support line answered within an hour.\"\n    }\n  ],\n  \"metrics\": {\n    \"count\": 168,\n    \"ratio\": 0.25,\n    \"amount\": 781.25,\n    \"offset\": -201,\n    \"verified\": false,\n    \"reviewer\": null,\n    \"large\": 1000000353,\n    \"zero\": 0.0\n  }\n}\n\n\nQUESTION:\nIs data at risk of being lost?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 41, 19670, 24867, 53473, 9078, 35, 278, 2334, 24867, 2215, 2799, 296, 10675, 2877, 66216, 229, 496, 3874, 1048, 6380, 827, 360, 496, 18747, 6380, 496, 91173, 338, 1055, 6107, 360, 496, 332, 6380, 229, 26453, 33, 920, 360, 496, 30356, 6380, 19843, 733, 496, 3013, 6107, 733, 496, 91173, 338, 1055, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 8579, 91, 437, 8042, 374, 18045, 2877, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 597, 52009, 589, 1757, 2216, 20469, 2137, 401, 8330, 1917, 360, 1130, 229, 40439, 229, 496, 3966, 8230, 6380, 827, 360, 496, 15866, 6380, 229, 9672, 920, 360, 496, 53120, 6380, 229, 24, 22, 1197, 920, 360, 496, 50008, 6380, 229, 25204, 22, 1197, 920, 360, 496, 21999, 6380, 640, 523, 920, 360, 496, 420, 1940, 6380, 4330, 920, 360, 496, 63202, 269, 6380, 3495, 920, 360, 496, 42681, 6380, 229, 1595, 1372, 31536, 27, 920, 360, 496, 32523, 6380, 229, 24, 22, 24, 207, 229, 1130, 64024, 63509, 833, 4439, 1317, 462, 2264, 302, 1493, 5306, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 221,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        },
+        {
+          "question": "route",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"A scheduled certificate renewal failed; the current certificate expires in nine days.\",\n  \"incident\": {\n    \"status\": \"investigating\",\n    \"id\": 6949,\n    \"tags\": [\n      \"new\",\n      \"investigating\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"Logs are kept for thirty days.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"The vendor's support line answered within an hour.\"\n    }\n  ],\n  \"metrics\": {\n    \"count\": 168,\n    \"ratio\": 0.25,\n    \"amount\": 781.25,\n    \"offset\": -201,\n    \"verified\": false,\n    \"reviewer\": null,\n    \"large\": 1000000353,\n    \"zero\": 0.0\n  }\n}\n\n\nQUESTION:\nWhich team should own this incident?\n\nOptions:\nA Not an incident\nB Servers, containers and deployments\nC Database servers and storage\nD Connectivity, routing and VPN\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 41, 19670, 24867, 53473, 9078, 35, 278, 2334, 24867, 2215, 2799, 296, 10675, 2877, 66216, 229, 496, 3874, 1048, 6380, 827, 360, 496, 18747, 6380, 496, 91173, 338, 1055, 6107, 360, 496, 332, 6380, 229, 26453, 33, 920, 360, 496, 30356, 6380, 19843, 733, 496, 3013, 6107, 733, 496, 91173, 338, 1055, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 8579, 91, 437, 8042, 374, 18045, 2877, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 597, 52009, 589, 1757, 2216, 20469, 2137, 401, 8330, 1917, 360, 1130, 229, 40439, 229, 496, 3966, 8230, 6380, 827, 360, 496, 15866, 6380, 229, 9672, 920, 360, 496, 53120, 6380, 229, 24, 22, 1197, 920, 360, 496, 50008, 6380, 229, 25204, 22, 1197, 920, 360, 496, 21999, 6380, 640, 523, 920, 360, 496, 420, 1940, 6380, 4330, 920, 360, 496, 63202, 269, 6380, 3495, 920, 360, 496, 42681, 6380, 229, 1595, 1372, 31536, 27, 920, 360, 496, 32523, 6380, 229, 24, 22, 24, 207, 229, 1130, 64024, 63509, 833, 28327, 2909, 1252, 1562, 532, 13008, 64929, 13314, 833, 41, 4023, 401, 13008, 207, 42, 8071, 370, 20, 22770, 309, 16995, 1166, 207, 43, 21548, 26160, 309, 8283, 207, 44, 15983, 3342, 20, 45108, 309, 42670, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 250,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        },
+        {
+          "question": "level",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"A scheduled certificate renewal failed; the current certificate expires in nine days.\",\n  \"incident\": {\n    \"status\": \"investigating\",\n    \"id\": 6949,\n    \"tags\": [\n      \"new\",\n      \"investigating\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"Logs are kept for thirty days.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"The vendor's support line answered within an hour.\"\n    }\n  ],\n  \"metrics\": {\n    \"count\": 168,\n    \"ratio\": 0.25,\n    \"amount\": 781.25,\n    \"offset\": -201,\n    \"verified\": false,\n    \"reviewer\": null,\n    \"large\": 1000000353,\n    \"zero\": 0.0\n  }\n}\n\n\nQUESTION:\nHow severe is this incident?\n\n0 negligible\n1 low\n2 major\n3 catastrophic\n\nReply with a single digit 0-3 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 41, 19670, 24867, 53473, 9078, 35, 278, 2334, 24867, 2215, 2799, 296, 10675, 2877, 66216, 229, 496, 3874, 1048, 6380, 827, 360, 496, 18747, 6380, 496, 91173, 338, 1055, 6107, 360, 496, 332, 6380, 229, 26453, 33, 920, 360, 496, 30356, 6380, 19843, 733, 496, 3013, 6107, 733, 496, 91173, 338, 1055, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 8579, 91, 437, 8042, 374, 18045, 2877, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 597, 52009, 589, 1757, 2216, 20469, 2137, 401, 8330, 1917, 360, 1130, 229, 40439, 229, 496, 3966, 8230, 6380, 827, 360, 496, 15866, 6380, 229, 9672, 920, 360, 496, 53120, 6380, 229, 24, 22, 1197, 920, 360, 496, 50008, 6380, 229, 25204, 22, 1197, 920, 360, 496, 21999, 6380, 640, 523, 920, 360, 496, 420, 1940, 6380, 4330, 920, 360, 496, 63202, 269, 6380, 3495, 920, 360, 496, 42681, 6380, 229, 1595, 1372, 31536, 27, 920, 360, 496, 32523, 6380, 229, 24, 22, 24, 207, 229, 1130, 64024, 63509, 833, 3522, 6880, 355, 532, 13008, 64929, 24, 50115, 207, 25, 2419, 207, 26, 2437, 207, 27, 44605, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 27, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 235,
+          "select": [24, 25, 26, 27]
+        }
+      ],
+      "answers": [
+        {
+          "question": "flag",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "route",
+          "type": "choice",
+          "pass": 1,
+          "groups": [
+            {
+              "key": "no_action",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "platform",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "database",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "network",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "level",
+          "type": "score",
+          "pass": 2,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40bd6288", "0x41176be8", "0x40a10a84", "0x4105d975", "0x40285963"],
+        ["0x40d91069", "0x402eaa7f", "0x411906dc", "0x40babe7e", "0x4116b6c9", "0x40b6878e", "0x410b26f6", "0x40ac3080"],
+        ["0x4105ab3a", "0x41203dfa", "0x41254f5a", "0x4100c43a"]
+      ],
+      "scores": [
+        ["0x41176be8", "0x4105d975"],
+        ["0x40d91069", "0x411906dc", "0x4116b6c9", "0x410b26f6"],
+        ["0x4105ab3a", "0x41203dfa", "0x41254f5a", "0x4100c43a"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "flag": {
+          "type": "noul",
+          "noul": 0.6944882982524635
+        },
+        "route": {
+          "type": "choice",
+          "choice": "platform",
+          "probabilities": {
+            "no_action": 0.049111645068780588,
+            "platform": 0.39285802426630317,
+            "database": 0.35261110062324541,
+            "network": 0.2054192300416709
+          },
+          "confidence": 0.39285802426630317
+        },
+        "level": {
+          "type": "score",
+          "score": 2.0,
+          "legend": {
+            "0": "negligible",
+            "1": "low",
+            "2": "major",
+            "3": "catastrophic"
+          },
+          "probabilities": {
+            "0": 0.10368803492893033,
+            "1": 0.35896384462420644,
+            "2": 0.45489022698137604,
+            "3": 0.082457893465487153
+          },
+          "confidence": 0.45489022698137604
+        }
+      },
+      "usage": {
+        "input_tokens": 709,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

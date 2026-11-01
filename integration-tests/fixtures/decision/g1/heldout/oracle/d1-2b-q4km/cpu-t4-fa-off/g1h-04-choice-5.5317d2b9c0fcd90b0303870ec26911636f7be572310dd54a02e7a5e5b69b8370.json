@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "id": "g1h-04-choice-5",
+  "source_file": "g1h-04-choice-5.json",
+  "case_file_sha256": "92fe370af73a21362ec38a49573b0293aac84731e45859150e34cd409afcbe50",
+  "request_sha256": "5317d2b9c0fcd90b0303870ec26911636f7be572310dd54a02e7a5e5b69b8370",
+  "inputs_sha256": "55e1e6e4389e5bd8d8a5c70b8f49f5297304127c6cc7384eb06aa49401fde2fa",
+  "inputs": {
+    "request_sha256": "5317d2b9c0fcd90b0303870ec26911636f7be572310dd54a02e7a5e5b69b8370",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["contract", "neighbour_dispute", "deposit", "rent", "health_hazard"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nThe landlord wants to raise the rent by 9 percent at the end of the fixed term.\n\n\nQUESTION:\nWhat kind of issue is this?\n\nOptions:\nA Terms of the lease\nB A problem with neighbours\nC The security deposit\nD Rent level or payment\nE Damp, mould, gas or electrical danger\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 597, 1995, 45629, 10966, 310, 9419, 278, 15928, 467, 229, 33, 2915, 462, 278, 1263, 302, 278, 8666, 1743, 64673, 63509, 833, 2992, 3245, 302, 4879, 355, 532, 64929, 13314, 833, 41, 42642, 302, 278, 41369, 207, 42, 334, 2719, 415, 51303, 207, 43, 440, 5867, 28052, 207, 44, 55156, 1618, 432, 16154, 207, 45, 388, 1192, 20, 42747, 20, 4415, 432, 10812, 6762, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 82,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "contract",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "neighbour_dispute",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "deposit",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "rent",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "health_hazard",
+              "code": "E",
+              "range": [8, 10]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4131c900", "0x40d8279b", "0x40bd7d88", "0x3f873bb8", "0x40b0cd32", "0x3f5adb9f", "0x413af55e", "0x40f9763c", "0x40756db9", "0xbf2af474"]
+      ],
+      "scores": [
+        ["0x4131c900", "0x40bd7d88", "0x40b0cd32", "0x413af55e", "0x40756db9"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "rent",
+          "probabilities": {
+            "contract": 0.38826471452049655,
+            "neighbour_dispute": 0.0080126277109271796,
+            "deposit": 0.005956771178739724,
+            "rent": 0.59608266150948974,
+            "health_hazard": 0.0016832250803468978
+          },
+          "confidence": 0.59608266150948974
+        }
+      },
+      "usage": {
+        "input_tokens": 83,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

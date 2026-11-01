@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "case": "g1h-03-choice-4",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "91e77af40c681a3a5d925ca49ee1bb4dd4c5177567d743062bdc52238c59945f",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["dairy", "none_listed", "soy", "sesame"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nThis curry is cooked with coconut milk, lentils, cumin and fresh coriander, served with rice.\n\n\nQUESTION:\nWhich allergen is the main concern in this dish?\n\nOptions:\nA Milk, butter and cheese\nB No common allergen\nC Soy beans and soy sauce\nD Sesame seeds or oil\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 1942, 1420, 657, 355, 23882, 415, 34001, 8514, 20, 28712, 2844, 20, 280, 7055, 309, 6947, 1293, 81, 3871, 20, 6313, 415, 11638, 64673, 63509, 833, 28327, 16643, 1157, 355, 278, 1619, 3606, 296, 532, 17507, 64929, 13314, 833, 41, 45490, 20, 12407, 309, 18203, 207, 42, 2752, 2123, 16643, 1157, 207, 43, 44411, 18962, 309, 17386, 21380, 207, 44, 33165, 567, 9940, 432, 4398, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 83,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "dairy",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "none_listed",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "soy",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "sesame",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4129561a", "0x40d66846", "0x4139d793", "0x40f6c49d", "0x40ae8fd1", "0x3f9e4771", "0x40f372d0", "0x40801c27"]
+      ],
+      "scores": [
+        ["0x4129561a", "0x4139d793", "0x40ae8fd1", "0x40f372d0"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "none_listed",
+          "confidence": 0.65688145438716761,
+          "probabilities": {
+            "dairy": 0.30373273564855369,
+            "none_listed": 0.65688145438716761,
+            "soy": 0.0065632803630444559,
+            "sesame": 0.032822529601234329
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 84,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "c6616f7088b893650d10d06b2407b1134357df6d469048bd6cb1a6c4dd8be790",
+        "state_tokens": 30,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC", "D", "ĠD"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xbfba99d0", "0xc0aaea62", "0xbeda3820", "0xc08a8e0b", "0xc0d2c2d7", "0xc12ce066", "0xc08ddfd8", "0xc1009b40"],
+        "logprob_scores": ["0xbfba99d0", "0xbeda3820", "0xc0d2c2d7", "0xc08ddfd8"],
+        "logsumexp": "0x4140a954",
+        "distribution": [0.30373273564855369, 0.65688145438716761, 0.0065632803630444559, 0.032822529601234329]
+      }
+    ]
+  }
+}

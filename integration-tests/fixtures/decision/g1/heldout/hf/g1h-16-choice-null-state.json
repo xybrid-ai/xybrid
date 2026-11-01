@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "case": "g1h-16-choice-null-state",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "b4f845b77440f84b630fdf869468d502d72cb91cba3553e23e530e53526361c3",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["none_listed", "tree_nuts", "eggs"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nWhich allergen is the main concern in this dish?\n\nOptions:\nA No common allergen\nB Almonds, walnuts, hazelnuts and similar\nC Whole eggs or egg products\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 28327, 16643, 1157, 355, 278, 1619, 3606, 296, 532, 17507, 64929, 13314, 833, 41, 2752, 2123, 16643, 1157, 207, 42, 990, 9768, 91, 20, 22165, 49324, 20, 10220, 4321, 5364, 309, 2955, 207, 43, 44675, 10041, 432, 6766, 3921, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 57,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "none_listed",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "tree_nuts",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "eggs",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x411231d0", "0x40c04ee8", "0x40eeccff", "0x4088f535", "0x410042cf", "0x409e402f"]
+      ],
+      "scores": [
+        ["0x411231d0", "0x40eeccff", "0x410042cf"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "none_listed",
+          "confidence": 0.58192803900311174,
+          "probabilities": {
+            "none_listed": 0.58192803900311174,
+            "tree_nuts": 0.16636537847305757,
+            "eggs": 0.25170658252383066
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 58,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "cc5298f4feb99c365cc6b2db3d2491c0d14d2ae07205676b2b2d1164e98f3c33",
+        "state_tokens": 4,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xbf8cf4c8", "0xc08751ea", "0xc031a7a6", "0xc0beab9d", "0xc00e3668", "0xc0a960a3"],
+        "logprob_scores": ["0xbf8cf4c8", "0xc031a7a6", "0xc00e3668"],
+        "logsumexp": "0x4123d069",
+        "distribution": [0.58192803900311174, 0.16636537847305757, 0.25170658252383066]
+      }
+    ]
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "id": "g1h-13-choice-json-object",
+  "source_file": "g1h-13-choice-json-object.json",
+  "case_file_sha256": "9fb8340e1c727b41c3e110ca9742471f84dbe57cfb446df03acfe441396078f7",
+  "request_sha256": "98ce08da33d3b03b3bed673f366c62bd98cebe67b4acb830912919601f4a362e",
+  "inputs_sha256": "4ff40128cada2caefcc18ac0451c28ae83eae1bb03e3087836a6b3aa3f6e2291",
+  "inputs": {
+    "request_sha256": "98ce08da33d3b03b3bed673f366c62bd98cebe67b4acb830912919601f4a362e",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["application", "desktop_support", "vendor", "platform"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"Users in the Berlin office cannot reach the intranet since 08:40, while the public website works.\",\n  \"incident\": {\n    \"status\": \"investigating\",\n    \"id\": 5069,\n    \"tags\": [\n      \"investigating\",\n      \"resolved\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"Logs are kept for thirty days.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"The runbook for this service was reviewed in spring.\"\n    }\n  ]\n}\n\n\nQUESTION:\nWhich team should own this incident?\n\nOptions:\nA Bugs in business software\nB Laptops, printers and accounts\nC A third-party service provider\nD Servers, containers and deployments\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 39931, 296, 278, 6552, 6255, 4083, 5107, 278, 1006, 807, 312, 2407, 229, 4027, 34, 1607, 20, 1657, 278, 1251, 5146, 3616, 66216, 229, 496, 3874, 1048, 6380, 827, 360, 496, 18747, 6380, 496, 91173, 338, 1055, 6107, 360, 496, 332, 6380, 229, 30179, 33, 920, 360, 496, 30356, 6380, 19843, 733, 496, 91173, 338, 1055, 6107, 733, 496, 65899, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 8579, 91, 437, 8042, 374, 18045, 2877, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 597, 2184, 4372, 374, 532, 3213, 452, 19041, 296, 7998, 1917, 360, 1130, 229, 23174, 64024, 63509, 833, 28327, 2909, 1252, 1562, 532, 13008, 64929, 13314, 833, 41, 378, 11434, 296, 2935, 5400, 207, 42, 402, 2421, 3313, 20, 51009, 309, 11823, 207, 43, 334, 4475, 37520, 3213, 14027, 207, 44, 8071, 370, 20, 22770, 309, 16995, 1166, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 190,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "application",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "desktop_support",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "vendor",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "platform",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4108cbc3", "0x409d147b", "0x411405fc", "0x40b73c8e", "0x4107bf4b", "0x40a346d3", "0x411a293e", "0x40d204d4"]
+      ],
+      "scores": [
+        ["0x4108cbc3", "0x411405fc", "0x4107bf4b", "0x411a293e"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "platform",
+          "probabilities": {
+            "application": 0.16968064358050822,
+            "desktop_support": 0.28674819548677111,
+            "vendor": 0.16156530265792846,
+            "platform": 0.38200585827479222
+          },
+          "confidence": 0.38200585827479222
+        }
+      },
+      "usage": {
+        "input_tokens": 191,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

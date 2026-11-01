@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "id": "g1h-10-choice-27",
+  "source_file": "g1h-10-choice-27.json",
+  "case_file_sha256": "70f66f5ddf5affafd7bfe3cfd41ea00ae5fe30bd3b30a34c23ecb39946812ff8",
+  "request_sha256": "9727f4a2cef8438cc0dc745988d7d9910afe844ff575feee5d247243c3bb3450",
+  "inputs_sha256": "185c56d6ba013cda41a04a93b086e79ebd5d9331eafa128ea2e4213f1575ad13",
+  "inputs": {
+    "request_sha256": "9727f4a2cef8438cc0dc745988d7d9910afe844ff575feee5d247243c3bb3450",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["danube", "rhine", "elbe", "loire", "seine", "rhone", "tagus", "douro", "ebro", "po", "tiber", "arno", "oder", "vistula", "dnieper", "volga", "don", "thames", "severn", "shannon", "meuse", "scheldt", "garonne", "dordogne", "inn", "drava", "sava"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nEither party may end this agreement with thirty days' written notice, without giving a reason.\n\n\nQUESTION:\nWhich regional office should file this report?\n\nOptions:\nA The danube basin office\nB The rhine basin office\nC The elbe basin office\nD The loire basin office\nE The seine basin office\nF The rhone basin office\nG The tagus basin office\nH The douro basin office\nI The ebro basin office\nJ The po basin office\nK The tiber basin office\nL The arno basin office\nM The oder basin office\nN The vistula basin office\nO The dnieper basin office\nP The volga basin office\nQ The don basin office\nR The thames basin office\nS The severn basin office\nT The shannon basin office\nU The meuse basin office\nV The scheldt basin office\nW The garonne basin office\nX The dordogne basin office\nY The inn basin office\nZ The drava basin office\nAA The sava basin office\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 93324, 6498, 899, 1263, 532, 9948, 415, 18045, 2877, 15, 4484, 8959, 20, 2129, 7351, 267, 3591, 64673, 63509, 833, 28327, 9135, 6255, 1252, 3848, 532, 1811, 64929, 13314, 833, 41, 440, 7850, 4800, 28614, 6255, 207, 42, 440, 8684, 475, 28614, 6255, 207, 43, 440, 616, 1118, 28614, 6255, 207, 44, 440, 1569, 545, 28614, 6255, 207, 45, 440, 8417, 28614, 6255, 207, 46, 440, 8684, 673, 28614, 6255, 207, 47, 440, 10194, 367, 28614, 6255, 207, 48, 440, 3372, 304, 28614, 6255, 207, 49, 440, 320, 9194, 28614, 6255, 207, 50, 440, 945, 28614, 6255, 207, 51, 440, 265, 2667, 28614, 6255, 207, 52, 440, 637, 2243, 28614, 6255, 207, 53, 440, 3640, 28614, 6255, 207, 54, 440, 346, 392, 3748, 28614, 6255, 207, 55, 440, 277, 5712, 506, 28614, 6255, 207, 56, 440, 1812, 2956, 28614, 6255, 207, 57, 440, 1507, 28614, 6255, 207, 58, 440, 322, 1568, 28614, 6255, 207, 59, 440, 2195, 86, 28614, 6255, 207, 60, 440, 526, 32434, 28614, 6255, 207, 61, 440, 622, 1969, 28614, 6255, 207, 62, 440, 5311, 472, 92, 28614, 6255, 207, 63, 440, 335, 4440, 542, 28614, 6255, 207, 64, 440, 277, 560, 34031, 28614, 6255, 207, 65, 440, 4714, 28614, 6255, 207, 66, 440, 7487, 2348, 28614, 6255, 207, 6713, 440, 274, 2502, 28614, 6255, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 236,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407, 46, 410, 47, 417, 48, 403, 49, 358, 50, 461, 51, 483, 52, 402, 53, 356, 54, 427, 55, 480, 56, 372, 57, 1392, 58, 408, 59, 325, 60, 336, 61, 502, 62, 518, 63, 422, 64, 1549, 65, 766, 66, 895, 6713, 27196]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "danube",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "rhine",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "elbe",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "loire",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "seine",
+              "code": "E",
+              "range": [8, 10]
+            },
+            {
+              "key": "rhone",
+              "code": "F",
+              "range": [10, 12]
+            },
+            {
+              "key": "tagus",
+              "code": "G",
+              "range": [12, 14]
+            },
+            {
+              "key": "douro",
+              "code": "H",
+              "range": [14, 16]
+            },
+            {
+              "key": "ebro",
+              "code": "I",
+              "range": [16, 18]
+            },
+            {
+              "key": "po",
+              "code": "J",
+              "range": [18, 20]
+            },
+            {
+              "key": "tiber",
+              "code": "K",
+              "range": [20, 22]
+            },
+            {
+              "key": "arno",
+              "code": "L",
+              "range": [22, 24]
+            },
+            {
+              "key": "oder",
+              "code": "M",
+              "range": [24, 26]
+            },
+            {
+              "key": "vistula",
+              "code": "N",
+              "range": [26, 28]
+            },
+            {
+              "key": "dnieper",
+              "code": "O",
+              "range": [28, 30]
+            },
+            {
+              "key": "volga",
+              "code": "P",
+              "range": [30, 32]
+            },
+            {
+              "key": "don",
+              "code": "Q",
+              "range": [32, 34]
+            },
+            {
+              "key": "thames",
+              "code": "R",
+              "range": [34, 36]
+            },
+            {
+              "key": "severn",
+              "code": "S",
+              "range": [36, 38]
+            },
+            {
+              "key": "shannon",
+              "code": "T",
+              "range": [38, 40]
+            },
+            {
+              "key": "meuse",
+              "code": "U",
+              "range": [40, 42]
+            },
+            {
+              "key": "scheldt",
+              "code": "V",
+              "range": [42, 44]
+            },
+            {
+              "key": "garonne",
+              "code": "W",
+              "range": [44, 46]
+            },
+            {
+              "key": "dordogne",
+              "code": "X",
+              "range": [46, 48]
+            },
+            {
+              "key": "inn",
+              "code": "Y",
+              "range": [48, 50]
+            },
+            {
+              "key": "drava",
+              "code": "Z",
+              "range": [50, 52]
+            },
+            {
+              "key": "sava",
+              "code": "AA",
+              "range": [52, 54]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40904c18", "0x3f7df803", "0x4094dfb0", "0x3f7795a6", "0x40976008", "0x3f8c5312", "0x4093a452", "0x3fb35496", "0x40a010ea", "0x3fde80d0", "0x409adf29", "0x3fc98b88", "0x40815284", "0x3f534598", "0x408c8b98", "0x3f97e7a0", "0x408015f6", "0x3e9fbc76", "0x409e68e9", "0x4007563f", "0x40959ee8", "0x3fc22857", "0x4095e8e2", "0x3fa58d76", "0x40a14864", "0x3fa91b38", "0x4094ec84", "0x3fa0c938", "0x405aee70", "0x3e8285cd", "0x407c5775", "0x3f13ae1a", "0x40939f20", "0x3fe2f227", "0x408d9f1c", "0x3f9b8770", "0x408eba75", "0x3f947e9e", "0x40912b16", "0x3f9ad250", "0x409aad5b", "0x3ff1a5b2", "0x40a8f41e", "0x3ffefbaa", "0x4093ccb8", "0x3ffa6a2e", "0x408a7c2f", "0x3f9255a4", "0x409a642e", "0x3ffd5c30", "0x40837d50", "0x3fa39974", "0x406bd65f", "0x3fc1473d"]
+      ],
+      "scores": [
+        ["0x40904c18", "0x4094dfb0", "0x40976008", "0x4093a452", "0x40a010ea", "0x409adf29", "0x40815284", "0x408c8b98", "0x408015f6", "0x409e68e9", "0x40959ee8", "0x4095e8e2", "0x40a14864", "0x4094ec84", "0x405aee70", "0x407c5775", "0x40939f20", "0x408d9f1c", "0x408eba75", "0x40912b16", "0x409aad5b", "0x40a8f41e", "0x4093ccb8", "0x408a7c2f", "0x409a642e", "0x40837d50", "0x406bd65f"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "scheldt",
+          "probabilities": {
+            "danube": 0.035296251207345489,
+            "rhine": 0.039279917027539635,
+            "elbe": 0.041644129666729958,
+            "loire": 0.038165363701954384,
+            "seine": 0.051020904315950175,
+            "rhone": 0.045189413293906605,
+            "tagus": 0.024875139926468223,
+            "douro": 0.032333622129727853,
+            "ebro": 0.024166697366927573,
+            "po": 0.049084077792508375,
+            "tiber": 0.039971502520697276,
+            "arno": 0.040242310234689237,
+            "oder": 0.052492237353696521,
+            "vistula": 0.03932593605042782,
+            "dnieper": 0.01564096801092885,
+            "volga": 0.023109177520661175,
+            "don": 0.038147269997840079,
+            "thames": 0.033157043484403043,
+            "severn": 0.034025749538099642,
+            "shannon": 0.0360220141700772,
+            "meuse": 0.044984453093409899,
+            "scheldt": 0.062796756287256492,
+            "garonne": 0.038306352395647544,
+            "dordogne": 0.030813981555864862,
+            "inn": 0.044684999419423339,
+            "drava": 0.026167225819446464,
+            "sava": 0.019056506118372073
+          },
+          "confidence": 0.062796756287256492
+        }
+      },
+      "usage": {
+        "input_tokens": 237,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

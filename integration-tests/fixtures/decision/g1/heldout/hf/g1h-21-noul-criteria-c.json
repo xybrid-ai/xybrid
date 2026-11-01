@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "case": "g1h-21-noul-criteria-c",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "2a5d430fab09624153bad010aec880533298a907d1b79a44e3bd48cbd1ea8a6b",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nA parent calls because their child has a rash on both arms after a weekend at the lake; the child is playing normally.\n\n\nQUESTION:\nDoes the patient need to be seen today?\nYes: Symptoms could get worse within hours\nNo: It can safely wait for a routine appointment\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 6934, 9795, 1428, 648, 1179, 677, 267, 34903, 383, 1558, 10056, 1219, 267, 20182, 462, 278, 14731, 35, 278, 1179, 355, 7923, 11964, 64673, 63509, 833, 29088, 278, 4586, 1094, 310, 373, 3502, 3507, 1283, 12447, 34, 30944, 1237, 1172, 11527, 2137, 4433, 207, 4547, 34, 810, 510, 18915, 6997, 374, 267, 13919, 19827, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 73,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40739d9e", "0x410b0430", "0x405f0e68", "0x4118c1a4", "0x408b34a4"]
+      ],
+      "scores": [
+        ["0x410b0430", "0x4118c1a4"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "noul",
+          "noul": 0.34477035471788231
+        }
+      },
+      "usage": {
+        "input_tokens": 74,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "0fb89ec0b23f85342956db04d28e0e6b8cd712d1ae4569c23af9a15f95acc20a",
+        "state_tokens": 31,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xc0d338c3", "0xbfdbfcc8", "0xc0dd805e", "0xbf5c2250", "0xc0c1d2ee"],
+        "logprob_scores": ["0xbfdbfcc8", "0xbf5c2250"],
+        "logsumexp": "0x412683c9",
+        "distribution": [0.34477035471788231, 0.65522964528211769]
+      }
+    ]
+  }
+}

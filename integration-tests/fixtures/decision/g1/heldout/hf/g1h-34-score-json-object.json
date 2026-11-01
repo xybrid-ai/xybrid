@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "case": "g1h-34-score-json-object",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "d6c577d3cb4419850086657ea7bfb99d5720f1c545461e49b151b91fcefbf6a3",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "score",
+          "keys": ["0", "1", "2", "3"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"An elderly patient has had a dry cough for three weeks, sleeps poorly and lost some appetite, but has no fever.\",\n  \"patient\": {\n    \"status\": \"discharged\",\n    \"id\": 8673,\n    \"tags\": [\n      \"referred\",\n      \"discharged\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"The previous visit was eleven months ago, for a vaccination.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"The patient arrived at the front desk at nine and filled in the intake form.\"\n    }\n  ]\n}\n\n\nQUESTION:\nHow urgent is this case?\n\n0 no urgency\n1 slight\n2 high\n3 critical\n\nReply with a single digit 0-3 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 2296, 19563, 4586, 677, 819, 267, 6025, 20812, 374, 1703, 5771, 20, 4891, 91, 23626, 309, 5306, 928, 28992, 20, 702, 677, 794, 14759, 66216, 229, 496, 29191, 6380, 827, 360, 496, 18747, 6380, 496, 76, 1221, 960, 290, 6107, 360, 496, 332, 6380, 229, 25738, 27, 920, 360, 496, 30356, 6380, 19843, 733, 496, 281, 25244, 6107, 733, 496, 76, 1221, 960, 290, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 597, 3474, 4588, 452, 31247, 3992, 5526, 20, 374, 267, 21258, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 597, 4586, 10922, 462, 278, 4248, 26361, 462, 10675, 309, 10773, 296, 278, 12604, 1033, 1917, 360, 1130, 229, 23174, 64024, 63509, 833, 3522, 30648, 355, 532, 2032, 64929, 24, 794, 58311, 207, 25, 7236, 207, 26, 1068, 207, 27, 5749, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 27, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 185,
+          "select": [24, 25, 26, 27]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x412d0aa8", "0x411f91f8", "0x410b3667", "0x40e992da"]
+      ],
+      "scores": [
+        ["0x412d0aa8", "0x411f91f8", "0x410b3667", "0x40e992da"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "score",
+          "score": 0.0,
+          "confidence": 0.552251025854127,
+          "probabilities": {
+            "0": 0.552251025854127,
+            "1": 0.29425553860347248,
+            "2": 0.11364537125531231,
+            "3": 0.039848064287088272
+          },
+          "legend": {
+            "0": "no urgency",
+            "1": "slight",
+            "2": "high",
+            "3": "critical"
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 186,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "ca24353cc476073877406675e732130b0deae977ccd25c64bfa865156b1fae7f",
+        "state_tokens": 149,
+        "select_tokens": ["0", "1", "2", "3"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xbf11cbc0", "0xbfb4ab60", "0xc02bc3f4", "0xc082bbee"],
+        "logprob_scores": ["0xbf11cbc0", "0xbfb4ab60", "0xc02bc3f4", "0xc082bbee"],
+        "logsumexp": "0x41362764",
+        "distribution": [0.552251025854127, 0.29425553860347248, 0.11364537125531231, 0.039848064287088272]
+      }
+    ]
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "case": "g1h-23-noul-63-tokens",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "0f8aab4e0d2ec6e64221d50e601a02a5d7cb3e361351f5d8f0125f88a4aea768",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nMy train is delayed by ten minutes. (1) The traveller checked in online the evening before. also noted today again later here then too still now soon please thanks\n\n\nQUESTION:\nIs the traveller stranded overnight?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 8069, 8341, 355, 23908, 467, 3175, 4611, 22, 342, 25, 17, 440, 5722, 6231, 19924, 296, 3674, 278, 13866, 1575, 22, 735, 7865, 3507, 1529, 2418, 2211, 1256, 2449, 2009, 1665, 5330, 8193, 13664, 7, 63509, 833, 4439, 278, 5722, 6231, 1511, 26751, 27768, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 62,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x404ebc14", "0x40f53a1a", "0x40d32ea7", "0x41372f34", "0x40920cfd"]
+      ],
+      "scores": [
+        ["0x40f53a1a", "0x41372f34"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "noul",
+          "noul": 0.05569119660710161
+        }
+      },
+      "usage": {
+        "input_tokens": 63,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "2a99118ac333b80caa1602a920d35528383da7e97ce5f31022e1b3067b60af7c",
+        "state_tokens": 41,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xc105e1b8", "0xc07bcec0", "0xc09ff2d3", "0xbe186240", "0xc0e1147d"],
+        "logprob_scores": ["0xc07bcec0", "0xbe186240"],
+        "logsumexp": "0x413990bd",
+        "distribution": [0.05569119660710161, 0.94430880339289835]
+      }
+    ]
+  }
+}

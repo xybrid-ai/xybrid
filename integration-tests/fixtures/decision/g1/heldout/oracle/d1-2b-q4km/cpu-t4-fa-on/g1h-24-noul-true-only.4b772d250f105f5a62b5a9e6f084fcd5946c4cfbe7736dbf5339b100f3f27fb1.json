@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "g1h-24-noul-true-only",
+  "source_file": "g1h-24-noul-true-only.json",
+  "case_file_sha256": "47fed0cf337157f773fb0cf3ae7820a75981f4c41957af3cce9f26a886a1fb70",
+  "request_sha256": "4b772d250f105f5a62b5a9e6f084fcd5946c4cfbe7736dbf5339b100f3f27fb1",
+  "inputs_sha256": "4ebf3e9be679ea52e94cf4d0b985098fc1b1d86d25d3b964508f14b48db8c57b",
+  "inputs": {
+    "request_sha256": "4b772d250f105f5a62b5a9e6f084fcd5946c4cfbe7736dbf5339b100f3f27fb1",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nTwo students handed in essays with several identical paragraphs.\n\n\nQUESTION:\nIs a medical reason given?\nYes: Illness or injury is mentioned\nNo: None\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 15279, 1907, 28736, 296, 17249, 415, 2492, 16582, 43995, 64673, 63509, 833, 4439, 267, 4128, 3591, 2496, 1283, 12447, 34, 8274, 1621, 432, 7961, 355, 8314, 207, 4547, 34, 10856, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 48,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0xbd633cd0", "0x40bbc62c", "0x409b3a3a", "0x413ff1c1", "0x409aa874"]
+      ],
+      "scores": [
+        ["0x40bbc62c", "0x413ff1c1"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "noul",
+          "noul": 0.01012605342912597
+        }
+      },
+      "usage": {
+        "input_tokens": 49,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

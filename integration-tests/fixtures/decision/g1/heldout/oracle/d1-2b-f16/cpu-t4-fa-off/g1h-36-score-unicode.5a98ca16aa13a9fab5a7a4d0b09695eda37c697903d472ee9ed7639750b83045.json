@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "id": "g1h-36-score-unicode",
+  "source_file": "g1h-36-score-unicode.json",
+  "case_file_sha256": "a16a914bf160212221b9ce4eebc556683d526217a4a0e6efa2172da4625b0841",
+  "request_sha256": "5a98ca16aa13a9fab5a7a4d0b09695eda37c697903d472ee9ed7639750b83045",
+  "inputs_sha256": "4eb507b79c3796f438b96b288d74401a44c84323d9090ee0b926a92f35923eaf",
+  "inputs": {
+    "request_sha256": "5a98ca16aa13a9fab5a7a4d0b09695eda37c697903d472ee9ed7639750b83045",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "score",
+          "keys": ["0", "1", "2", "3", "4"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nR\u00e9sum\u00e9: l'\u00e9quipe de Saint-\u00c9tienne a men\u00e9 2-0, puis a perdu 2-3; le gardien S\u00f8ren \u00d8deg\u00e5rd s'est bless\u00e9.\n\n\nQUESTION:\nHow disappointing is the result for the fans?\n\n0 delightful\n1 pleasing\n2 mixed\n3 very disappointing\n4 devastating\n\nReply with a single digit 0-4 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 44841, 51020, 34, 308, 22701, 324, 5737, 21, 30153, 8790, 267, 1893, 359, 229, 26, 21, 24, 20, 9393, 267, 52357, 229, 26, 21, 27, 35, 444, 5484, 793, 325, 4939, 779, 49328, 32644, 33718, 274, 3444, 14051, 359, 64673, 63509, 833, 3522, 24162, 299, 355, 278, 1224, 374, 278, 16775, 64929, 24, 23670, 1164, 207, 25, 59512, 207, 26, 9871, 207, 27, 1442, 24162, 299, 207, 28, 29323, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 28, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 91,
+          "select": [24, 25, 26, 27, 28]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            },
+            {
+              "key": "4",
+              "code": "4",
+              "range": [4, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40b7e062", "0x40e9d149", "0x41161948", "0x41297df4", "0x4113bb63"]
+      ],
+      "scores": [
+        ["0x40b7e062", "0x40e9d149", "0x41161948", "0x41297df4", "0x4113bb63"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "score",
+          "score": 3.0,
+          "legend": {
+            "0": "delightful",
+            "1": "pleasing",
+            "2": "mixed",
+            "3": "very disappointing",
+            "4": "devastating"
+          },
+          "probabilities": {
+            "0": 0.014199847339878086,
+            "1": 0.045611803609116507,
+            "2": 0.2151249659897162,
+            "3": 0.53246373361984045,
+            "4": 0.19259964944144875
+          },
+          "confidence": 0.53246373361984045
+        }
+      },
+      "usage": {
+        "input_tokens": 92,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

@@ -1,0 +1,305 @@
+{
+  "schema_version": 1,
+  "id": "g1h-11-choice-36-pool-fallback",
+  "source_file": "g1h-11-choice-36-pool-fallback.json",
+  "case_file_sha256": "9f67108889f6e867f17c3cf2ec5f35b63aec2d408932d20a3611db9ce60022c4",
+  "request_sha256": "684db9f9652c18de144534a92d1c7ddd0e8e656f25d7a55aa9446e05b1212c94",
+  "inputs_sha256": "ee3e6c51e97ccf6ee3b17465643dc008988391de1e08da46a330528dd016ebf1",
+  "inputs": {
+    "request_sha256": "684db9f9652c18de144534a92d1c7ddd0e8e656f25d7a55aa9446e05b1212c94",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["anise", "basil", "bay_leaf", "caraway", "cardamom", "cayenne", "chervil", "chives", "cinnamon", "clove", "coriander", "cumin", "dill", "fennel", "fenugreek", "galangal", "garlic", "ginger", "juniper", "lavender", "lemongrass", "mace", "marjoram", "mint", "mustard", "nutmeg", "oregano", "paprika", "parsley", "pepper", "rosemary", "saffron", "sage", "sumac", "tarragon", "thyme"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nA rental car was returned with a full tank, but the company charged a refuelling fee.\n\n\nQUESTION:\nWhich shelf should this jar go on?\n\nOptions:\nA Shelf for anise\nB Shelf for basil\nC Shelf for bay leaf\nD Shelf for caraway\nE Shelf for cardamom\nF Shelf for cayenne\nG Shelf for chervil\nH Shelf for chives\nI Shelf for cinnamon\nJ Shelf for clove\nK Shelf for coriander\nL Shelf for cumin\nM Shelf for dill\nN Shelf for fennel\nO Shelf for fenugreek\nP Shelf for galangal\nQ Shelf for garlic\nR Shelf for ginger\nS Shelf for juniper\nT Shelf for lavender\nU Shelf for lemongrass\nV Shelf for mace\nW Shelf for marjoram\nX Shelf for mint\nY Shelf for mustard\nZ Shelf for nutmeg\nAA Shelf for oregano\nAB Shelf for paprika\nAC Shelf for parsley\nAD Shelf for pepper\nAE Shelf for rosemary\nAF Shelf for saffron\nAG Shelf for sage\nAH Shelf for sumac\nAI Shelf for tarragon\n00 Shelf for thyme\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 45166, 1180, 452, 6943, 415, 267, 3021, 12819, 20, 702, 278, 3628, 14917, 267, 1822, 93, 3554, 22318, 64673, 63509, 833, 28327, 32564, 1252, 532, 33121, 1137, 383, 64929, 13314, 833, 41, 25234, 78, 374, 401, 845, 207, 42, 25234, 78, 374, 38265, 207, 43, 25234, 78, 374, 22325, 11567, 207, 44, 25234, 78, 374, 1180, 18308, 207, 45, 25234, 78, 374, 4559, 330, 315, 207, 46, 25234, 78, 374, 62743, 7737, 207, 47, 25234, 78, 374, 478, 706, 313, 207, 48, 25234, 78, 374, 478, 1370, 207, 49, 25234, 78, 374, 49922, 207, 50, 25234, 78, 374, 563, 1142, 207, 51, 25234, 78, 374, 1293, 81, 3871, 207, 52, 25234, 78, 374, 280, 7055, 207, 53, 25234, 78, 374, 277, 436, 207, 54, 25234, 78, 374, 291, 1482, 307, 207, 55, 25234, 78, 374, 21195, 884, 5606, 207, 56, 25234, 78, 374, 7132, 605, 285, 207, 57, 25234, 78, 374, 24719, 207, 58, 25234, 78, 374, 40662, 207, 59, 25234, 78, 374, 27839, 506, 207, 60, 25234, 78, 374, 20620, 2368, 207, 61, 25234, 78, 374, 78871, 592, 22893, 207, 62, 25234, 78, 374, 295, 658, 207, 63, 25234, 78, 374, 1686, 35485, 330, 207, 64, 25234, 78, 374, 23143, 207, 65, 25234, 78, 374, 54746, 207, 66, 25234, 78, 374, 3883, 85, 663, 207, 6713, 25234, 78, 374, 432, 663, 2149, 207, 5193, 25234, 78, 374, 2566, 19481, 207, 2843, 25234, 78, 374, 23605, 2273, 207, 3875, 25234, 78, 374, 21004, 207, 28527, 25234, 78, 374, 16167, 54110, 207, 10593, 25234, 78, 374, 891, 515, 1210, 207, 5157, 25234, 78, 374, 43960, 207, 51133, 25234, 78, 374, 9632, 406, 207, 22348, 25234, 78, 374, 14558, 13225, 207, 555, 25234, 78, 374, 13236, 976, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 304,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407, 46, 410, 47, 417, 48, 403, 49, 358, 50, 461, 51, 483, 52, 402, 53, 356, 54, 427, 55, 480, 56, 372, 57, 1392, 58, 408, 59, 325, 60, 336, 61, 502, 62, 518, 63, 422, 64, 1549, 65, 766, 66, 895, 6713, 27196, 5193, 19033, 2843, 13677, 3875, 7437, 28527, 42605, 10593, 23398, 5157, 14321, 51133, 48643, 22348, 13508, 555]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "anise",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "basil",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "bay_leaf",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "caraway",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "cardamom",
+              "code": "E",
+              "range": [8, 10]
+            },
+            {
+              "key": "cayenne",
+              "code": "F",
+              "range": [10, 12]
+            },
+            {
+              "key": "chervil",
+              "code": "G",
+              "range": [12, 14]
+            },
+            {
+              "key": "chives",
+              "code": "H",
+              "range": [14, 16]
+            },
+            {
+              "key": "cinnamon",
+              "code": "I",
+              "range": [16, 18]
+            },
+            {
+              "key": "clove",
+              "code": "J",
+              "range": [18, 20]
+            },
+            {
+              "key": "coriander",
+              "code": "K",
+              "range": [20, 22]
+            },
+            {
+              "key": "cumin",
+              "code": "L",
+              "range": [22, 24]
+            },
+            {
+              "key": "dill",
+              "code": "M",
+              "range": [24, 26]
+            },
+            {
+              "key": "fennel",
+              "code": "N",
+              "range": [26, 28]
+            },
+            {
+              "key": "fenugreek",
+              "code": "O",
+              "range": [28, 30]
+            },
+            {
+              "key": "galangal",
+              "code": "P",
+              "range": [30, 32]
+            },
+            {
+              "key": "garlic",
+              "code": "Q",
+              "range": [32, 34]
+            },
+            {
+              "key": "ginger",
+              "code": "R",
+              "range": [34, 36]
+            },
+            {
+              "key": "juniper",
+              "code": "S",
+              "range": [36, 38]
+            },
+            {
+              "key": "lavender",
+              "code": "T",
+              "range": [38, 40]
+            },
+            {
+              "key": "lemongrass",
+              "code": "U",
+              "range": [40, 42]
+            },
+            {
+              "key": "mace",
+              "code": "V",
+              "range": [42, 44]
+            },
+            {
+              "key": "marjoram",
+              "code": "W",
+              "range": [44, 46]
+            },
+            {
+              "key": "mint",
+              "code": "X",
+              "range": [46, 48]
+            },
+            {
+              "key": "mustard",
+              "code": "Y",
+              "range": [48, 50]
+            },
+            {
+              "key": "nutmeg",
+              "code": "Z",
+              "range": [50, 52]
+            },
+            {
+              "key": "oregano",
+              "code": "AA",
+              "range": [52, 54]
+            },
+            {
+              "key": "paprika",
+              "code": "AB",
+              "range": [54, 56]
+            },
+            {
+              "key": "parsley",
+              "code": "AC",
+              "range": [56, 58]
+            },
+            {
+              "key": "pepper",
+              "code": "AD",
+              "range": [58, 60]
+            },
+            {
+              "key": "rosemary",
+              "code": "AE",
+              "range": [60, 62]
+            },
+            {
+              "key": "saffron",
+              "code": "AF",
+              "range": [62, 64]
+            },
+            {
+              "key": "sage",
+              "code": "AG",
+              "range": [64, 66]
+            },
+            {
+              "key": "sumac",
+              "code": "AH",
+              "range": [66, 68]
+            },
+            {
+              "key": "tarragon",
+              "code": "AI",
+              "range": [68, 70]
+            },
+            {
+              "key": "thyme",
+              "code": "00",
+              "range": [70, 71]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40553cfe", "0x3e01f514", "0x405e0a30", "0x3dc4f6fc", "0x4057b50e", "0x3d6fb470", "0x4070b104", "0x3f74d5d5", "0x4069537c", "0x3f377164", "0x4060fbf8", "0x3f29cd66", "0x405d83b0", "0x3f2fc11c", "0x405c2450", "0x3f21a277", "0x40765636", "0x3f406a38", "0x406fb17e", "0x3fa131fb", "0x406b0c48", "0x3f868a33", "0x4065b3f1", "0x3f30a0e9", "0x406897c7", "0x3ebc1b96", "0x40694043", "0x3f4ce751", "0x404972d6", "0x3f2723a7", "0x405da393", "0x3f2061ee", "0x4082078b", "0x3fe197ae", "0x4063d3f7", "0x3f81394d", "0x406c030e", "0x3f5a48aa", "0x40554153", "0x3ee056a2", "0x405a6a5e", "0x3f6358b7", "0x40701eeb", "0x3f6cd000", "0x4061c36c", "0x3f857b3a", "0x40675a0c", "0x3f673d2a", "0x407cda96", "0x3fda59df", "0x4068417a", "0x3f9d2ac8", "0x405e7815", "0x3fcd417b", "0x40502ad6", "0x3f58063a", "0x4048242e", "0x3f93635d", "0x406a301d", "0x3fb6e418", "0x405cc290", "0x3fcdb621", "0x4060eb74", "0x3fb051a4", "0x40592f03", "0x3f87e617", "0x403e839e", "0x3f89c2e6", "0x4070e175", "0x3fc6511e", "0x40774f75"]
+      ],
+      "scores": [
+        ["0x40553cfe", "0x405e0a30", "0x4057b50e", "0x4070b104", "0x4069537c", "0x4060fbf8", "0x405d83b0", "0x405c2450", "0x40765636", "0x406fb17e", "0x406b0c48", "0x4065b3f1", "0x406897c7", "0x40694043", "0x404972d6", "0x405da393", "0x4082078b", "0x4063d3f7", "0x406c030e", "0x40554153", "0x405a6a5e", "0x40701eeb", "0x4061c36c", "0x40675a0c", "0x407cda96", "0x4068417a", "0x405e7815", "0x40502ad6", "0x4048242e", "0x406a301d", "0x405cc290", "0x4060eb74", "0x40592f03", "0x403e839e", "0x4070e175", "0x40774f75"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "garlic",
+          "probabilities": {
+            "anise": 0.023290504484829205,
+            "basil": 0.025812925646616587,
+            "bay_leaf": 0.023972116270521274,
+            "caraway": 0.032097730892529888,
+            "cardamom": 0.029451207066397894,
+            "cayenne": 0.02671635317939142,
+            "chervil": 0.02565496581001913,
+            "chives": 0.025246849266457455,
+            "cinnamon": 0.034286101386056006,
+            "clove": 0.031725600903144191,
+            "coriander": 0.030049669095639005,
+            "cumin": 0.028230540684150363,
+            "dill": 0.029199992877295529,
+            "fennel": 0.029425381765480891,
+            "fenugreek": 0.020293597104115248,
+            "galangal": 0.025692326654266882,
+            "garlic": 0.040247906298161169,
+            "ginger": 0.027618879789046796,
+            "juniper": 0.030390003065128263,
+            "lavender": 0.023295109518203315,
+            "lemongrass": 0.024742742210618458,
+            "mace": 0.031884431346372116,
+            "marjoram": 0.026960648684043742,
+            "mint": 0.028779638011530728,
+            "mustard": 0.03699860078807083,
+            "nutmeg": 0.029085214022572827,
+            "oregano": 0.025942709957573463,
+            "paprika": 0.021950753698081169,
+            "parsley": 0.019986012122996104,
+            "pepper": 0.029749246104278086,
+            "rosemary": 0.025429844375190202,
+            "saffron": 0.026696223915004556,
+            "sage": 0.024389196032709767,
+            "sumac": 0.017859879062927082,
+            "tarragon": 0.032168768870466172,
+            "thyme": 0.034678329040113934
+          },
+          "confidence": 0.040247906298161169
+        }
+      },
+      "usage": {
+        "input_tokens": 305,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

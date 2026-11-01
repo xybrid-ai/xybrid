@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "case": "g1h-37-choice-unicode",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "7644a9c16045ed9e4d80667ca34bb52f2cd4c3b2d888336de33c2e0b9938bc62",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["new_booking", "rebooking", "nothing", "compensation"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nReisende: Frau Jürgensen aus Göteborg; der Anschlussflug nach Málaga fällt aus, Hotel in São Paulo bestätigt.\n\n\nQUESTION:\nWhat should the traveller ask for first?\n\nOptions:\nA A fresh reservation elsewhere\nB A seat on another flight or train\nC No request is needed\nD A payment for the delay\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 1120, 282, 2787, 34, 21032, 461, 1246, 79, 20837, 2112, 55189, 35, 639, 46896, 26304, 2932, 356, 3546, 9225, 60139, 2112, 20, 13400, 296, 16869, 19881, 124766, 64673, 63509, 833, 2992, 1252, 278, 5722, 6231, 2951, 374, 1008, 64929, 13314, 833, 41, 334, 6947, 49489, 17142, 207, 42, 334, 12298, 383, 2271, 10897, 432, 8341, 207, 43, 2752, 5439, 355, 4101, 207, 44, 334, 16154, 374, 278, 10904, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 86,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "new_booking",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "rebooking",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "nothing",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "compensation",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4105216f", "0x40925686", "0x4128c842", "0x40dde00a", "0x41200159", "0x40cd3df1", "0x40d70cf3", "0x40537e47"]
+      ],
+      "scores": [
+        ["0x4105216f", "0x4128c842", "0x41200159", "0x40d70cf3"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "rebooking",
+          "confidence": 0.52366006769547024,
+          "probabilities": {
+            "new_booking": 0.098963487533321445,
+            "rebooking": 0.52366006769547024,
+            "nothing": 0.34746771581394348,
+            "compensation": 0.029908728957264773
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 87,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "c26e0a0d1dc7156ee82120ffa89d6f9122be0d9b8f75553fd2e97f252dab3898",
+        "state_tokens": 34,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC", "D", "ĠD"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xc040a868", "0xc0d8408c", "0xbf483470", "0xc08cb708", "0xbfaa5180", "0xc09d5921", "0xc0938a1f", "0xc1006bf7"],
+        "logprob_scores": ["0xc040a868", "0xbf483470", "0xbfaa5180", "0xc0938a1f"],
+        "logsumexp": "0x41354b89",
+        "distribution": [0.098963487533321445, 0.52366006769547024, 0.34746771581394348, 0.029908728957264773]
+      }
+    ]
+  }
+}

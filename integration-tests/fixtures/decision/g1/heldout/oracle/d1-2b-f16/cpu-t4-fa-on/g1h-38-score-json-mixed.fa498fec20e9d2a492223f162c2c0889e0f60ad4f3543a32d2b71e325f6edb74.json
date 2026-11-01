@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "id": "g1h-38-score-json-mixed",
+  "source_file": "g1h-38-score-json-mixed.json",
+  "case_file_sha256": "22cab674ad8a43bd19d7fde216e5f6eb1c009b925980b75a99810145c7c92755",
+  "request_sha256": "fa498fec20e9d2a492223f162c2c0889e0f60ad4f3543a32d2b71e325f6edb74",
+  "inputs_sha256": "d8b4d06d563d4419e9807282cb279a173a7806a1757a0b73dbc4091240911e9a",
+  "inputs": {
+    "request_sha256": "fa498fec20e9d2a492223f162c2c0889e0f60ad4f3543a32d2b71e325f6edb74",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "score",
+          "keys": ["0", "1", "2", "3", "4", "5"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"A rental car was returned with a full tank, but the company charged a refuelling fee.\",\n  \"booking\": {\n    \"status\": \"changed\",\n    \"id\": 4773,\n    \"tags\": [\n      \"completed\",\n      \"changed\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"Announcements were made in three languages.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"The boarding pass was stored on a phone.\"\n    }\n  ],\n  \"metrics\": {\n    \"count\": 27,\n    \"ratio\": 0.125,\n    \"amount\": 2137.5,\n    \"offset\": -1,\n    \"verified\": false,\n    \"reviewer\": null,\n    \"large\": 1000000601,\n    \"zero\": 0.0\n  }\n}\n\n\nQUESTION:\nHow disruptive is this for the trip?\n\n0 none\n1 minor\n2 noticeable\n3 significant\n4 major\n5 trip ruined\n\nReply with a single digit 0-5 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 41, 45166, 1180, 452, 6943, 415, 267, 3021, 12819, 20, 702, 278, 3628, 14917, 267, 1822, 93, 3554, 22318, 66216, 229, 496, 4372, 299, 6380, 827, 360, 496, 18747, 6380, 496, 30162, 6107, 360, 496, 332, 6380, 229, 32357, 27, 920, 360, 496, 30356, 6380, 19843, 733, 496, 804, 26659, 6107, 733, 496, 30162, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 35210, 24525, 1166, 665, 1546, 296, 1703, 9745, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 597, 53052, 1729, 452, 11110, 383, 267, 8660, 1917, 360, 1130, 229, 40439, 229, 496, 3966, 8230, 6380, 827, 360, 496, 15866, 6380, 229, 1641, 920, 360, 496, 53120, 6380, 229, 24, 22, 9152, 920, 360, 496, 50008, 6380, 229, 19588, 31, 22, 29, 920, 360, 496, 21999, 6380, 640, 25, 920, 360, 496, 420, 1940, 6380, 4330, 920, 360, 496, 63202, 269, 6380, 3495, 920, 360, 496, 42681, 6380, 229, 1595, 1372, 29641, 25, 920, 360, 496, 32523, 6380, 229, 24, 22, 24, 207, 229, 1130, 64024, 63509, 833, 3522, 62939, 355, 532, 374, 278, 11290, 64929, 24, 10234, 207, 25, 7416, 207, 26, 39852, 207, 27, 2568, 207, 28, 2437, 207, 29, 11290, 57058, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 29, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 247,
+          "select": [24, 25, 26, 27, 28, 29]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            },
+            {
+              "key": "4",
+              "code": "4",
+              "range": [4, 5]
+            },
+            {
+              "key": "5",
+              "code": "5",
+              "range": [5, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x41295d03", "0x412e5c9e", "0x41180cb6", "0x41077e3d", "0x40e85992", "0x40ad636c"]
+      ],
+      "scores": [
+        ["0x41295d03", "0x412e5c9e", "0x41180cb6", "0x41077e3d", "0x40e85992", "0x40ad636c"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": "none",
+            "1": "minor",
+            "2": "noticeable",
+            "3": "significant",
+            "4": "major",
+            "5": "trip ruined"
+          },
+          "probabilities": {
+            "0": 0.33134059769233193,
+            "1": 0.41852536244301075,
+            "2": 0.14753050080230809,
+            "3": 0.068054316574626017,
+            "4": 0.027591805580404579,
+            "5": 0.0069574169073187428
+          },
+          "confidence": 0.41852536244301075
+        }
+      },
+      "usage": {
+        "input_tokens": 248,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

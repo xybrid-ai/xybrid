@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "case": "g1h-35-score-null-state",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "5e98a9c2e747f97dad33ad71ee2106dce83cfa3555d9226e106ab99d867b2255",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nHow risky is this clause for the customer?\n\n0 no risk\n1 moderate\n2 unacceptable\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 3522, 41530, 355, 532, 32286, 374, 278, 13107, 64929, 24, 794, 2264, 207, 25, 15034, 207, 26, 57448, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 40,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40eb5682", "0x40d87230", "0x40d4cfc0"]
+      ],
+      "scores": [
+        ["0x40eb5682", "0x40d87230", "0x40d4cfc0"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "score",
+          "score": 1.0,
+          "confidence": 0.44765416867227492,
+          "probabilities": {
+            "0": 0.44765416867227492,
+            "1": 0.28789288898392579,
+            "2": 0.26445294234379924
+          },
+          "legend": {
+            "0": "no risk",
+            "1": "moderate",
+            "2": "unacceptable"
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 41,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "04ff2f1744e4d18cecfb671854af50d8318df0fd71f1441fdd87b4be9d1df77f",
+        "state_tokens": 4,
+        "select_tokens": ["0", "1", "2"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xc014e794", "0xc03ab038", "0xc041f518"],
+        "logprob_scores": ["0xc014e794", "0xc03ab038", "0xc041f518"],
+        "logsumexp": "0x411ae526",
+        "distribution": [0.44765416867227492, 0.28789288898392579, 0.26445294234379924]
+      }
+    ]
+  }
+}

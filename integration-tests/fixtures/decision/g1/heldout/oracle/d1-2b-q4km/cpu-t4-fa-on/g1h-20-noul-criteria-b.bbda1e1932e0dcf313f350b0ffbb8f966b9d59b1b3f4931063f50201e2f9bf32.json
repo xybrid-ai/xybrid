@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "g1h-20-noul-criteria-b",
+  "source_file": "g1h-20-noul-criteria-b.json",
+  "case_file_sha256": "d8118626e5bd1f38a9631d865540bc02e35acad9cd317ddebb1f7abc74dc85ee",
+  "request_sha256": "bbda1e1932e0dcf313f350b0ffbb8f966b9d59b1b3f4931063f50201e2f9bf32",
+  "inputs_sha256": "ac865b3dbc9b41e3587c0942c75b3a854370b4b39d8482f5658bf7e0c29a4509",
+  "inputs": {
+    "request_sha256": "bbda1e1932e0dcf313f350b0ffbb8f966b9d59b1b3f4931063f50201e2f9bf32",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nA parked car was scratched along one side in a supermarket car park; there are no witnesses.\n\n\nQUESTION:\nWas the event reported to the police?\nYes: A police report exists or was filed\nNo: No police report is mentioned\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 9137, 290, 1180, 452, 61867, 2800, 2755, 734, 2891, 296, 267, 59882, 1180, 9137, 35, 912, 437, 794, 37181, 64673, 63509, 833, 28018, 278, 2807, 3967, 310, 278, 7666, 1283, 12447, 34, 334, 7666, 1811, 9146, 432, 452, 25251, 207, 4547, 34, 2752, 7666, 1811, 355, 8314, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 66,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x401d8444", "0x40ee29a8", "0x4061abc8", "0x4119d838", "0x4087e44c"]
+      ],
+      "scores": [
+        ["0x40ee29a8", "0x4119d838"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "noul",
+          "noul": 0.16457495477804454
+        }
+      },
+      "usage": {
+        "input_tokens": 67,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

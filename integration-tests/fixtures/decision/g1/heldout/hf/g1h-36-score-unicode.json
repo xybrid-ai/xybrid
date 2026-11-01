@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "case": "g1h-36-score-unicode",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "5a98ca16aa13a9fab5a7a4d0b09695eda37c697903d472ee9ed7639750b83045",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "score",
+          "keys": ["0", "1", "2", "3", "4"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nRésumé: l'équipe de Saint-Étienne a mené 2-0, puis a perdu 2-3; le gardien Søren Ødegård s'est blessé.\n\n\nQUESTION:\nHow disappointing is the result for the fans?\n\n0 delightful\n1 pleasing\n2 mixed\n3 very disappointing\n4 devastating\n\nReply with a single digit 0-4 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 44841, 51020, 34, 308, 22701, 324, 5737, 21, 30153, 8790, 267, 1893, 359, 229, 26, 21, 24, 20, 9393, 267, 52357, 229, 26, 21, 27, 35, 444, 5484, 793, 325, 4939, 779, 49328, 32644, 33718, 274, 3444, 14051, 359, 64673, 63509, 833, 3522, 24162, 299, 355, 278, 1224, 374, 278, 16775, 64929, 24, 23670, 1164, 207, 25, 59512, 207, 26, 9871, 207, 27, 1442, 24162, 299, 207, 28, 29323, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 28, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 91,
+          "select": [24, 25, 26, 27, 28]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            },
+            {
+              "key": "4",
+              "code": "4",
+              "range": [4, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40b7daf6", "0x40e9ca4b", "0x411618b1", "0x41297d96", "0x4113b9c0"]
+      ],
+      "scores": [
+        ["0x40b7daf6", "0x40e9ca4b", "0x411618b1", "0x41297d96", "0x4113b9c0"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "score",
+          "score": 3.0,
+          "confidence": 0.5325091707378804,
+          "probabilities": {
+            "0": 0.014194999910981649,
+            "1": 0.045589682226706695,
+            "2": 0.21513463751262768,
+            "3": 0.5325091707378804,
+            "4": 0.19257150961180361
+          },
+          "legend": {
+            "0": "delightful",
+            "1": "pleasing",
+            "2": "mixed",
+            "3": "very disappointing",
+            "4": "devastating"
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 92,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "530d26f984f90df1ec96dc067a95b1c3b48fcd0293beea918a0dc04ff5d4799a",
+        "state_tokens": 46,
+        "select_tokens": ["0", "1", "2", "3", "4"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xc0ad159c", "0xc0764c8e", "0xbfe2fcc0", "0xbf0fab30", "0xbff5f448"],
+        "logprob_scores": ["0xc0ad159c", "0xc0764c8e", "0xbfe2fcc0", "0xbf0fab30", "0xbff5f448"],
+        "logsumexp": "0x41327849",
+        "distribution": [0.014194999910981649, 0.045589682226706695, 0.21513463751262768, 0.5325091707378804, 0.19257150961180361]
+      }
+    ]
+  }
+}

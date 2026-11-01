@@ -1,0 +1,235 @@
+{
+  "schema_version": 1,
+  "case": "g1h-40-multi-json",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "a226c2001c46738ca09f43b4e5d0ea21bbfd0fe4964e5696676399af771466e8",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "flag",
+          "type": "noul",
+          "keys": ["true", "false"]
+        },
+        {
+          "id": "route",
+          "type": "choice",
+          "keys": ["no_action", "platform", "database", "network"]
+        },
+        {
+          "id": "level",
+          "type": "score",
+          "keys": ["0", "1", "2", "3"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "flag",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"A scheduled certificate renewal failed; the current certificate expires in nine days.\",\n  \"incident\": {\n    \"status\": \"investigating\",\n    \"id\": 6949,\n    \"tags\": [\n      \"new\",\n      \"investigating\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"Logs are kept for thirty days.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"The vendor's support line answered within an hour.\"\n    }\n  ],\n  \"metrics\": {\n    \"count\": 168,\n    \"ratio\": 0.25,\n    \"amount\": 781.25,\n    \"offset\": -201,\n    \"verified\": false,\n    \"reviewer\": null,\n    \"large\": 1000000353,\n    \"zero\": 0.0\n  }\n}\n\n\nQUESTION:\nIs data at risk of being lost?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 41, 19670, 24867, 53473, 9078, 35, 278, 2334, 24867, 2215, 2799, 296, 10675, 2877, 66216, 229, 496, 3874, 1048, 6380, 827, 360, 496, 18747, 6380, 496, 91173, 338, 1055, 6107, 360, 496, 332, 6380, 229, 26453, 33, 920, 360, 496, 30356, 6380, 19843, 733, 496, 3013, 6107, 733, 496, 91173, 338, 1055, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 8579, 91, 437, 8042, 374, 18045, 2877, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 597, 52009, 589, 1757, 2216, 20469, 2137, 401, 8330, 1917, 360, 1130, 229, 40439, 229, 496, 3966, 8230, 6380, 827, 360, 496, 15866, 6380, 229, 9672, 920, 360, 496, 53120, 6380, 229, 24, 22, 1197, 920, 360, 496, 50008, 6380, 229, 25204, 22, 1197, 920, 360, 496, 21999, 6380, 640, 523, 920, 360, 496, 420, 1940, 6380, 4330, 920, 360, 496, 63202, 269, 6380, 3495, 920, 360, 496, 42681, 6380, 229, 1595, 1372, 31536, 27, 920, 360, 496, 32523, 6380, 229, 24, 22, 24, 207, 229, 1130, 64024, 63509, 833, 4439, 1317, 462, 2264, 302, 1493, 5306, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 221,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        },
+        {
+          "question": "route",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"A scheduled certificate renewal failed; the current certificate expires in nine days.\",\n  \"incident\": {\n    \"status\": \"investigating\",\n    \"id\": 6949,\n    \"tags\": [\n      \"new\",\n      \"investigating\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"Logs are kept for thirty days.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"The vendor's support line answered within an hour.\"\n    }\n  ],\n  \"metrics\": {\n    \"count\": 168,\n    \"ratio\": 0.25,\n    \"amount\": 781.25,\n    \"offset\": -201,\n    \"verified\": false,\n    \"reviewer\": null,\n    \"large\": 1000000353,\n    \"zero\": 0.0\n  }\n}\n\n\nQUESTION:\nWhich team should own this incident?\n\nOptions:\nA Not an incident\nB Servers, containers and deployments\nC Database servers and storage\nD Connectivity, routing and VPN\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 41, 19670, 24867, 53473, 9078, 35, 278, 2334, 24867, 2215, 2799, 296, 10675, 2877, 66216, 229, 496, 3874, 1048, 6380, 827, 360, 496, 18747, 6380, 496, 91173, 338, 1055, 6107, 360, 496, 332, 6380, 229, 26453, 33, 920, 360, 496, 30356, 6380, 19843, 733, 496, 3013, 6107, 733, 496, 91173, 338, 1055, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 8579, 91, 437, 8042, 374, 18045, 2877, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 597, 52009, 589, 1757, 2216, 20469, 2137, 401, 8330, 1917, 360, 1130, 229, 40439, 229, 496, 3966, 8230, 6380, 827, 360, 496, 15866, 6380, 229, 9672, 920, 360, 496, 53120, 6380, 229, 24, 22, 1197, 920, 360, 496, 50008, 6380, 229, 25204, 22, 1197, 920, 360, 496, 21999, 6380, 640, 523, 920, 360, 496, 420, 1940, 6380, 4330, 920, 360, 496, 63202, 269, 6380, 3495, 920, 360, 496, 42681, 6380, 229, 1595, 1372, 31536, 27, 920, 360, 496, 32523, 6380, 229, 24, 22, 24, 207, 229, 1130, 64024, 63509, 833, 28327, 2909, 1252, 1562, 532, 13008, 64929, 13314, 833, 41, 4023, 401, 13008, 207, 42, 8071, 370, 20, 22770, 309, 16995, 1166, 207, 43, 21548, 26160, 309, 8283, 207, 44, 15983, 3342, 20, 45108, 309, 42670, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 250,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        },
+        {
+          "question": "level",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"A scheduled certificate renewal failed; the current certificate expires in nine days.\",\n  \"incident\": {\n    \"status\": \"investigating\",\n    \"id\": 6949,\n    \"tags\": [\n      \"new\",\n      \"investigating\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"Logs are kept for thirty days.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"The vendor's support line answered within an hour.\"\n    }\n  ],\n  \"metrics\": {\n    \"count\": 168,\n    \"ratio\": 0.25,\n    \"amount\": 781.25,\n    \"offset\": -201,\n    \"verified\": false,\n    \"reviewer\": null,\n    \"large\": 1000000353,\n    \"zero\": 0.0\n  }\n}\n\n\nQUESTION:\nHow severe is this incident?\n\n0 negligible\n1 low\n2 major\n3 catastrophic\n\nReply with a single digit 0-3 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 41, 19670, 24867, 53473, 9078, 35, 278, 2334, 24867, 2215, 2799, 296, 10675, 2877, 66216, 229, 496, 3874, 1048, 6380, 827, 360, 496, 18747, 6380, 496, 91173, 338, 1055, 6107, 360, 496, 332, 6380, 229, 26453, 33, 920, 360, 496, 30356, 6380, 19843, 733, 496, 3013, 6107, 733, 496, 91173, 338, 1055, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 8579, 91, 437, 8042, 374, 18045, 2877, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 597, 52009, 589, 1757, 2216, 20469, 2137, 401, 8330, 1917, 360, 1130, 229, 40439, 229, 496, 3966, 8230, 6380, 827, 360, 496, 15866, 6380, 229, 9672, 920, 360, 496, 53120, 6380, 229, 24, 22, 1197, 920, 360, 496, 50008, 6380, 229, 25204, 22, 1197, 920, 360, 496, 21999, 6380, 640, 523, 920, 360, 496, 420, 1940, 6380, 4330, 920, 360, 496, 63202, 269, 6380, 3495, 920, 360, 496, 42681, 6380, 229, 1595, 1372, 31536, 27, 920, 360, 496, 32523, 6380, 229, 24, 22, 24, 207, 229, 1130, 64024, 63509, 833, 3522, 6880, 355, 532, 13008, 64929, 24, 50115, 207, 25, 2419, 207, 26, 2437, 207, 27, 44605, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 27, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 235,
+          "select": [24, 25, 26, 27]
+        }
+      ],
+      "answers": [
+        {
+          "question": "flag",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        },
+        {
+          "question": "route",
+          "type": "choice",
+          "pass": 1,
+          "groups": [
+            {
+              "key": "no_action",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "platform",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "database",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "network",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        },
+        {
+          "question": "level",
+          "type": "score",
+          "pass": 2,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40bd690e", "0x41176fe3", "0x40a1043c", "0x4105d6ec", "0x40284fa1"],
+        ["0x40d8fc67", "0x402e7aa8", "0x41190a43", "0x40bac560", "0x4116b697", "0x40b68683", "0x410b25fc", "0x40ac3006"],
+        ["0x4105a7b4", "0x41203b27", "0x41254ac1", "0x4100bf24"]
+      ],
+      "scores": [
+        ["0x41176fe3", "0x4105d6ec"],
+        ["0x40d8fc67", "0x41190a43", "0x4116b697", "0x410b25fc"],
+        ["0x4105a7b4", "0x41203b27", "0x41254ac1", "0x4100bf24"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "flag": {
+          "type": "noul",
+          "noul": 0.69474055194600071
+        },
+        "route": {
+          "type": "choice",
+          "choice": "platform",
+          "confidence": 0.39306068702235847,
+          "probabilities": {
+            "no_action": 0.049016905075031286,
+            "platform": 0.39306068702235847,
+            "database": 0.35256139263220321,
+            "network": 0.20536101527040709
+          }
+        },
+        "level": {
+          "type": "score",
+          "score": 2.0,
+          "confidence": 0.45483140421504914,
+          "probabilities": {
+            "0": 0.10369500520578002,
+            "1": 0.35903366624021349,
+            "2": 0.45483140421504914,
+            "3": 0.082439924338957124
+          },
+          "legend": {
+            "0": "negligible",
+            "1": "low",
+            "2": "major",
+            "3": "catastrophic"
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 709,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "flag",
+        "prompt_sha256": "3d8b756d71123fdddfe174ef2fd7a9880d037954ad510c64f79348ffaaa20fec",
+        "state_tokens": 200,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      },
+      {
+        "question": "route",
+        "prompt_sha256": "72415cfbbbcaa5c5eaeee57aa699ac5fb29ebddd974343e2c3029d272efc85d8",
+        "state_tokens": 200,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC", "D", "ĠD"],
+        "temperature_f64": 1.337398453966105
+      },
+      {
+        "question": "level",
+        "prompt_sha256": "b286f7eaac584562ff99a820f504dcd2167ae32c4ab08508afe168266f6b1ddf",
+        "state_tokens": 200,
+        "select_tokens": ["0", "1", "2", "3"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "flag",
+        "raw_logprobs": ["0xc089c0ac", "0xbf424fa0", "0xc0a6257e", "0xbfedef88", "0xc0f301ea"],
+        "logprob_scores": ["0xbf424fa0", "0xbfedef88"],
+        "logsumexp": "0x412394dd",
+        "distribution": [0.69474055194600071, 0.30525944805399935]
+      },
+      {
+        "question": "route",
+        "raw_logprobs": ["0xc081b37b", "0xc101b947", "0xbfa26d70", "0xc09fea82", "0xbfb50ad0", "0xc0a4295f", "0xc008c7d4", "0xc0ae7fdc"],
+        "logprob_scores": ["0xc081b37b", "0xbfa26d70", "0xbfb50ad0", "0xc008c7d4"],
+        "logsumexp": "0x412d57f1",
+        "distribution": [0.049016905075031286, 0.39306068702235847, 0.35256139263220321, 0.20536101527040709]
+      },
+      {
+        "question": "level",
+        "raw_logprobs": ["0xc03349d8", "0xbf91f818", "0xbf52f690", "0xc046ec18"],
+        "logprob_scores": ["0xc03349d8", "0xbf91f818", "0xbf52f690", "0xc046ec18"],
+        "logsumexp": "0x41327a2a",
+        "distribution": [0.10369500520578002, 0.35903366624021349, 0.45483140421504914, 0.082439924338957124]
+      }
+    ]
+  }
+}

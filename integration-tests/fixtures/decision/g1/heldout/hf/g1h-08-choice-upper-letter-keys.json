@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "case": "g1h-08-choice-upper-letter-keys",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "b6c74a13d719d2256110d5447ab90192b5815507aedaae101fc2a89fd4c89e3f",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["A", "B", "C", "D"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nA storm broke a window and water soaked the living room carpet; the policy holder sent photos the same night.\n\n\nQUESTION:\nWhich kind of claim is this?\n\nOptions:\nA Nothing the policy covers\nB Medical costs\nC Damage caused to someone else\nD Damage to a building or its contents\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 9819, 16821, 267, 7948, 309, 1382, 600, 10096, 278, 4123, 4861, 38511, 35, 278, 5291, 35840, 3066, 9942, 278, 1542, 4414, 64673, 63509, 833, 28327, 3245, 302, 4172, 355, 532, 64929, 13314, 833, 41, 28156, 278, 5291, 13045, 207, 42, 7944, 6524, 207, 43, 63007, 4956, 310, 5290, 3080, 207, 44, 63007, 310, 267, 3703, 432, 851, 15642, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 77,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "A",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "B",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "C",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "D",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4104a6c4", "0x409aaad7", "0x4088daf8", "0x3e3fc365", "0x4100ea4a", "0x4097c063", "0x4136a8d5", "0x4106dbf0"]
+      ],
+      "scores": [
+        ["0x4104a6c4", "0x4088daf8", "0x4100ea4a", "0x4136a8d5"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "D",
+          "confidence": 0.84562425253691842,
+          "probabilities": {
+            "A": 0.081701461859982671,
+            "B": 0.0040622377230586561,
+            "C": 0.068612047880040147,
+            "D": 0.84562425253691842
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 78,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "51516e6b8d8c929b21a5253489ef7c361e4cf33cf93f86a2fd6359ad616f0858",
+        "state_tokens": 29,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC", "D", "ĠD"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xc0597370", "0xc0db5c69", "0xc0ed2c48", "0xc1380492", "0xc0686558", "0xc0de46dd", "0xbe8b5960", "0xc0509ec0"],
+        "logprob_scores": ["0xc0597370", "0xc0ed2c48", "0xc0686558", "0xbe8b5960"],
+        "logsumexp": "0x413b03a0",
+        "distribution": [0.081701461859982671, 0.0040622377230586561, 0.068612047880040147, 0.84562425253691842]
+      }
+    ]
+  }
+}

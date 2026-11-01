@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "id": "g1h-37-choice-unicode",
+  "source_file": "g1h-37-choice-unicode.json",
+  "case_file_sha256": "fc6c1ad0c323f06cc8363f6c3c27d2de6e567fda20914630eefaf8dba2339895",
+  "request_sha256": "7644a9c16045ed9e4d80667ca34bb52f2cd4c3b2d888336de33c2e0b9938bc62",
+  "inputs_sha256": "a08e4b5f67fbdda0f4ddbc233577023a5e2da2b7af3c1fddf983774a5820001b",
+  "inputs": {
+    "request_sha256": "7644a9c16045ed9e4d80667ca34bb52f2cd4c3b2d888336de33c2e0b9938bc62",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["new_booking", "rebooking", "nothing", "compensation"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nReisende: Frau J\u00fcrgensen aus G\u00f6teborg; der Anschlussflug nach M\u00e1laga f\u00e4llt aus, Hotel in S\u00e3o Paulo best\u00e4tigt.\n\n\nQUESTION:\nWhat should the traveller ask for first?\n\nOptions:\nA A fresh reservation elsewhere\nB A seat on another flight or train\nC No request is needed\nD A payment for the delay\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 1120, 282, 2787, 34, 21032, 461, 1246, 79, 20837, 2112, 55189, 35, 639, 46896, 26304, 2932, 356, 3546, 9225, 60139, 2112, 20, 13400, 296, 16869, 19881, 124766, 64673, 63509, 833, 2992, 1252, 278, 5722, 6231, 2951, 374, 1008, 64929, 13314, 833, 41, 334, 6947, 49489, 17142, 207, 42, 334, 12298, 383, 2271, 10897, 432, 8341, 207, 43, 2752, 5439, 355, 4101, 207, 44, 334, 16154, 374, 278, 10904, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 86,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "new_booking",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "rebooking",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "nothing",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "compensation",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x410325c7", "0x408c0adc", "0x412a4e16", "0x40df80c7", "0x411c2fa0", "0x40c753d4", "0x40caff69", "0x403b0919"]
+      ],
+      "scores": [
+        ["0x410325c7", "0x412a4e16", "0x411c2fa0", "0x40caff69"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "rebooking",
+          "probabilities": {
+            "new_booking": 0.093405859685432038,
+            "rebooking": 0.58223910707797499,
+            "nothing": 0.3009864090923271,
+            "compensation": 0.023368624144265951
+          },
+          "confidence": 0.58223910707797499
+        }
+      },
+      "usage": {
+        "input_tokens": 87,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "id": "g1h-34-score-json-object",
+  "source_file": "g1h-34-score-json-object.json",
+  "case_file_sha256": "8e59db9aa03ab413065c93e21bab755c37e2dfbabd48ace6a796053df9e197a0",
+  "request_sha256": "d6c577d3cb4419850086657ea7bfb99d5720f1c545461e49b151b91fcefbf6a3",
+  "inputs_sha256": "b74fe8ba3e83c0f047f85d94b9cf49be33e1539ad97c6289fa6f8e66a8ea5e3f",
+  "inputs": {
+    "request_sha256": "d6c577d3cb4419850086657ea7bfb99d5720f1c545461e49b151b91fcefbf6a3",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "score",
+          "keys": ["0", "1", "2", "3"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"An elderly patient has had a dry cough for three weeks, sleeps poorly and lost some appetite, but has no fever.\",\n  \"patient\": {\n    \"status\": \"discharged\",\n    \"id\": 8673,\n    \"tags\": [\n      \"referred\",\n      \"discharged\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"The previous visit was eleven months ago, for a vaccination.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"The patient arrived at the front desk at nine and filled in the intake form.\"\n    }\n  ]\n}\n\n\nQUESTION:\nHow urgent is this case?\n\n0 no urgency\n1 slight\n2 high\n3 critical\n\nReply with a single digit 0-3 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 2296, 19563, 4586, 677, 819, 267, 6025, 20812, 374, 1703, 5771, 20, 4891, 91, 23626, 309, 5306, 928, 28992, 20, 702, 677, 794, 14759, 66216, 229, 496, 29191, 6380, 827, 360, 496, 18747, 6380, 496, 76, 1221, 960, 290, 6107, 360, 496, 332, 6380, 229, 25738, 27, 920, 360, 496, 30356, 6380, 19843, 733, 496, 281, 25244, 6107, 733, 496, 76, 1221, 960, 290, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 597, 3474, 4588, 452, 31247, 3992, 5526, 20, 374, 267, 21258, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 597, 4586, 10922, 462, 278, 4248, 26361, 462, 10675, 309, 10773, 296, 278, 12604, 1033, 1917, 360, 1130, 229, 23174, 64024, 63509, 833, 3522, 30648, 355, 532, 2032, 64929, 24, 794, 58311, 207, 25, 7236, 207, 26, 1068, 207, 27, 5749, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 27, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 185,
+          "select": [24, 25, 26, 27]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x412b4e7d", "0x411c5de7", "0x410a8f00", "0x40e9784e"]
+      ],
+      "scores": [
+        ["0x412b4e7d", "0x411c5de7", "0x410a8f00", "0x40e9784e"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "score",
+          "score": 0.0,
+          "legend": {
+            "0": "no urgency",
+            "1": "slight",
+            "2": "high",
+            "3": "critical"
+          },
+          "probabilities": {
+            "0": 0.55803475877847564,
+            "1": 0.27761827612667589,
+            "2": 0.1207864579410758,
+            "3": 0.04356050715377266
+          },
+          "confidence": 0.55803475877847564
+        }
+      },
+      "usage": {
+        "input_tokens": 186,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

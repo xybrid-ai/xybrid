@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "g1h-05-choice-ambiguous",
+  "source_file": "g1h-05-choice-ambiguous.json",
+  "case_file_sha256": "d4161f1a2cab409f7cf66cb0dc260064a810c1953dcc271bdbf0688dbc88cdd1",
+  "request_sha256": "c4e3dfd2e41322b481529a4e96215bd2d29e2f5983a0b96685c5b1bdd98411ee",
+  "inputs_sha256": "c9a35d46e1701b45ad262346e8360335e4bae00e4a79223fe8fe96d891f0ea10",
+  "inputs": {
+    "request_sha256": "c4e3dfd2e41322b481529a4e96215bd2d29e2f5983a0b96685c5b1bdd98411ee",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "service",
+          "type": "choice",
+          "keys": ["cardiology", "sports_medicine", "general_practice"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "service",
+          "prompt": "<|startoftext|><|im_start|>user\nPatient reports chest tightness after a long run this morning; it eased after resting, came back briefly while climbing stairs, and there is no history of heart problems.\n\n\nQUESTION:\nWhich service should see this patient first?\n\nOptions:\nA Possible heart-related symptoms\nB Exercise-related strain or injury\nC Routine assessment and referral\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 51056, 7443, 13487, 12117, 1621, 1219, 267, 1286, 2184, 532, 8031, 35, 435, 320, 1070, 1219, 30670, 20, 3509, 1391, 21422, 1657, 32287, 36576, 20, 309, 912, 355, 794, 2628, 302, 3214, 3274, 64673, 63509, 833, 28327, 3213, 1252, 1629, 532, 4586, 1008, 64929, 13314, 833, 41, 57092, 3214, 8395, 4223, 207, 42, 35099, 8395, 14274, 432, 7961, 207, 43, 27233, 475, 8356, 309, 51818, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 83,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "service",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "cardiology",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "sports_medicine",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "general_practice",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4119014c", "0x40ca5076", "0x4121598e", "0x40dc012c", "0x411ef2aa", "0x40d97cc6"]
+      ],
+      "scores": [
+        ["0x4119014c", "0x4121598e", "0x411ef2aa"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "service": {
+          "type": "choice",
+          "choice": "sports_medicine",
+          "probabilities": {
+            "cardiology": 0.26336160449956464,
+            "sports_medicine": 0.38896900204690482,
+            "general_practice": 0.34766939345353054
+          },
+          "confidence": 0.38896900204690482
+        }
+      },
+      "usage": {
+        "input_tokens": 84,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "id": "g1h-31-score-borderline",
+  "source_file": "g1h-31-score-borderline.json",
+  "case_file_sha256": "1f06f7ddde3e93c8eaf3f3e68b5c5f24f4ef310926a1786880dae5b723db9ea6",
+  "request_sha256": "10c862eaadd2beee5bea6f8176a64ce2bef750d65a9f310487c81d66b81343d8",
+  "inputs_sha256": "7a9a66e65a261f67d9045bb29c228b6ff74e1aa7a23b4c2ab473bd72068f0d9a",
+  "inputs": {
+    "request_sha256": "10c862eaadd2beee5bea6f8176a64ce2bef750d65a9f310487c81d66b81343d8",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "severity",
+          "type": "score",
+          "keys": ["0", "1", "2", "3", "4"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "severity",
+          "prompt": "<|startoftext|><|im_start|>user\nThe nightly backup finished two hours late. No data was lost, but the morning sales report used yesterday's figures and two managers made decisions on them before the delay was noticed.\n\n\nQUESTION:\nHow severe is this incident?\n\n0 negligible\n1 minor\n2 moderate\n3 major\n4 critical\n\nReply with a single digit 0-4 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 597, 4414, 375, 32065, 9913, 1046, 4433, 4518, 22, 2752, 1317, 452, 5306, 20, 702, 278, 8031, 11098, 1811, 1092, 30023, 589, 10579, 309, 1046, 17038, 1546, 8947, 383, 876, 1575, 278, 10904, 452, 16483, 64673, 63509, 833, 3522, 6880, 355, 532, 13008, 64929, 24, 50115, 207, 25, 7416, 207, 26, 15034, 207, 27, 2437, 207, 28, 5749, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 28, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 80,
+          "select": [24, 25, 26, 27, 28]
+        }
+      ],
+      "answers": [
+        {
+          "question": "severity",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            },
+            {
+              "key": "4",
+              "code": "4",
+              "range": [4, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4105a7ca", "0x411ad7ea", "0x41252b16", "0x411903b2", "0x40f0d6f6"]
+      ],
+      "scores": [
+        ["0x4105a7ca", "0x411ad7ea", "0x41252b16", "0x411903b2", "0x40f0d6f6"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "severity": {
+          "type": "score",
+          "score": 2.0,
+          "legend": {
+            "0": "negligible",
+            "1": "minor",
+            "2": "moderate",
+            "3": "major",
+            "4": "critical"
+          },
+          "probabilities": {
+            "0": 0.090395530276780697,
+            "1": 0.24331653428941968,
+            "2": 0.39420516049720095,
+            "3": 0.22338357465249931,
+            "4": 0.048699200284099499
+          },
+          "confidence": 0.39420516049720095
+        }
+      },
+      "usage": {
+        "input_tokens": 81,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

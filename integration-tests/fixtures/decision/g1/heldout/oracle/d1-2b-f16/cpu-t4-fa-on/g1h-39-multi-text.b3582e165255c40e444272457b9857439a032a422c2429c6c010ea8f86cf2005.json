@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "id": "g1h-39-multi-text",
+  "source_file": "g1h-39-multi-text.json",
+  "case_file_sha256": "58e593940443e0956f699d61294d50657c0ff191d3d579ff06623138346e71e1",
+  "request_sha256": "b3582e165255c40e444272457b9857439a032a422c2429c6c010ea8f86cf2005",
+  "inputs_sha256": "64174a3cf3645a18d987b1745a7e613a071977ce3403e6958e90d3209f318a88",
+  "inputs": {
+    "request_sha256": "b3582e165255c40e444272457b9857439a032a422c2429c6c010ea8f86cf2005",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "route",
+          "type": "choice",
+          "keys": ["learning_support", "counsellor", "parents"]
+        },
+        {
+          "id": "today",
+          "type": "noul",
+          "keys": ["true", "false"]
+        },
+        {
+          "id": "level",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "route",
+          "prompt": "<|startoftext|><|im_start|>user\nA parent asks whether their son can skip the swimming lessons because of an ear infection.\n\n\nQUESTION:\nWho should handle this first?\n\nOptions:\nA Extra help with learning\nB Wellbeing and personal issues\nC The family\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 6934, 20589, 3483, 648, 1652, 510, 29683, 278, 20122, 12425, 1428, 302, 401, 8376, 5970, 64673, 63509, 833, 16907, 1252, 9435, 532, 1008, 64929, 13314, 833, 41, 37831, 1300, 415, 2980, 207, 42, 11521, 24076, 309, 3796, 4161, 207, 43, 440, 2331, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 61,
+          "select": [41, 334, 42, 378, 43, 340]
+        },
+        {
+          "question": "today",
+          "prompt": "<|startoftext|><|im_start|>user\nA parent asks whether their son can skip the swimming lessons because of an ear infection.\n\n\nQUESTION:\nIs a medical reason given?\nYes: Illness or injury is mentioned\nNo: No medical reason is given\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 6934, 20589, 3483, 648, 1652, 510, 29683, 278, 20122, 12425, 1428, 302, 401, 8376, 5970, 64673, 63509, 833, 4439, 267, 4128, 3591, 2496, 1283, 12447, 34, 8274, 1621, 432, 7961, 355, 8314, 207, 4547, 34, 2752, 4128, 3591, 355, 2496, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 59,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        },
+        {
+          "question": "level",
+          "prompt": "<|startoftext|><|im_start|>user\nA parent asks whether their son can skip the swimming lessons because of an ear infection.\n\n\nQUESTION:\nHow concerning is this situation?\n\n0 not at all\n1 somewhat\n2 extremely\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 6934, 20589, 3483, 648, 1652, 510, 29683, 278, 20122, 12425, 1428, 302, 401, 8376, 5970, 64673, 63509, 833, 3522, 15326, 355, 532, 5586, 64929, 24, 513, 462, 612, 207, 25, 13670, 207, 26, 8269, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 57,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "route",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "learning_support",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "counsellor",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "parents",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "today",
+          "type": "noul",
+          "pass": 1,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "level",
+          "type": "score",
+          "pass": 2,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40ea6c22", "0x407b5e17", "0x412c2cbe", "0x40f0ba0d", "0x411cac34", "0x40d4fc02"],
+        ["0x40edc474", "0x4150f3ec", "0x3ff80877", "0x40e9dd9a", "0x402782d8"],
+        ["0x412b8fe2", "0x413edcfc", "0x41191589"]
+      ],
+      "scores": [
+        ["0x40ea6c22", "0x412c2cbe", "0x411cac34"],
+        ["0x4150f3ec", "0x40e9dd9a"],
+        ["0x412b8fe2", "0x413edcfc", "0x41191589"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "route": {
+          "type": "choice",
+          "choice": "counsellor",
+          "probabilities": {
+            "learning_support": 0.049091791399211826,
+            "counsellor": 0.64051919220055697,
+            "parents": 0.3103890164002312
+          },
+          "confidence": 0.64051919220055697
+        },
+        "today": {
+          "type": "noul",
+          "noul": 0.98661741337174269
+        },
+        "level": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": "not at all",
+            "1": "somewhat",
+            "2": "extremely"
+          },
+          "probabilities": {
+            "0": 0.2573217672345548,
+            "1": 0.63417203820119561,
+            "2": 0.10850619456424956
+          },
+          "confidence": 0.63417203820119561
+        }
+      },
+      "usage": {
+        "input_tokens": 180,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

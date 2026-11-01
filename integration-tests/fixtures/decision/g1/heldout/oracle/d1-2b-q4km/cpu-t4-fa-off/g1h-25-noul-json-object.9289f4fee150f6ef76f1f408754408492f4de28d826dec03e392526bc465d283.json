@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "g1h-25-noul-json-object",
+  "source_file": "g1h-25-noul-json-object.json",
+  "case_file_sha256": "a07639435d1d43911147f023e7cd1aefe767fb8b76d68ccf9e4f8cfb70a8303e",
+  "request_sha256": "9289f4fee150f6ef76f1f408754408492f4de28d826dec03e392526bc465d283",
+  "inputs_sha256": "aca8abd31c990f358b9a80e20183d5b06d07808d262a404cfec101f779cc002c",
+  "inputs": {
+    "request_sha256": "9289f4fee150f6ef76f1f408754408492f4de28d826dec03e392526bc465d283",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"A scheduled certificate renewal failed; the current certificate expires in nine days.\",\n  \"incident\": {\n    \"status\": \"resolved\",\n    \"id\": 9972,\n    \"tags\": [\n      \"investigating\",\n      \"resolved\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"The status page was not updated yet.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"Logs are kept for thirty days.\"\n    }\n  ]\n}\n\n\nQUESTION:\nIs a customer-facing service affected?\nYes: Customers notice the problem\nNo: Only internal users are affected\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 41, 19670, 24867, 53473, 9078, 35, 278, 2334, 24867, 2215, 2799, 296, 10675, 2877, 66216, 229, 496, 3874, 1048, 6380, 827, 360, 496, 18747, 6380, 496, 65899, 6107, 360, 496, 332, 6380, 229, 25720, 26, 920, 360, 496, 30356, 6380, 19843, 733, 496, 91173, 338, 1055, 6107, 733, 496, 65899, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 597, 5241, 4237, 452, 513, 13567, 4262, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 8579, 91, 437, 8042, 374, 18045, 2877, 1917, 360, 1130, 229, 23174, 64024, 63509, 833, 4439, 267, 13107, 1825, 6999, 3213, 7050, 1283, 12447, 34, 21758, 370, 8959, 278, 2719, 207, 4547, 34, 10504, 6976, 6538, 437, 7050, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 160,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40ada965", "0x4120f6f4", "0x408dfec8", "0x41175530", "0x406aeb56"]
+      ],
+      "scores": [
+        ["0x4120f6f4", "0x41175530"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "noul",
+          "noul": 0.61066846676292375
+        }
+      },
+      "usage": {
+        "input_tokens": 161,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

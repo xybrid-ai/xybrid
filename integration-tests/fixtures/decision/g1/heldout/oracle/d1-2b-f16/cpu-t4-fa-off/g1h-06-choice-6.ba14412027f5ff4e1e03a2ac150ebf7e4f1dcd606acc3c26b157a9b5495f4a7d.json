@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "id": "g1h-06-choice-6",
+  "source_file": "g1h-06-choice-6.json",
+  "case_file_sha256": "d48d066ec6fa71b26079e0ccd7d30ca16be9773df69ae4181de855242f7fa565",
+  "request_sha256": "ba14412027f5ff4e1e03a2ac150ebf7e4f1dcd606acc3c26b157a9b5495f4a7d",
+  "inputs_sha256": "0e47b95c3866d1488706887cff1c93257f5062552a8ed109ffd5b9e2ba308d0c",
+  "inputs": {
+    "request_sha256": "ba14412027f5ff4e1e03a2ac150ebf7e4f1dcd606acc3c26b157a9b5495f4a7d",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["documentation", "tests", "performance", "api_break", "style", "error_handling"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nA new loop reads a file line by line and keeps every line in memory before processing it.\n\n\nQUESTION:\nWhat is the main concern in this change?\n\nOptions:\nA Docs or changelog out of date\nB Missing or weak tests\nC Speed or memory use\nD A change that breaks existing users\nE Naming and formatting\nF Errors hidden or mishandled\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 860, 13971, 20077, 267, 3848, 2216, 467, 2216, 309, 16981, 1472, 2216, 296, 5947, 1575, 8646, 435, 64673, 63509, 833, 2992, 355, 278, 1619, 3606, 296, 532, 2284, 64929, 13314, 833, 41, 388, 12610, 432, 2088, 307, 451, 729, 302, 5061, 207, 42, 63433, 432, 7732, 6129, 207, 43, 28776, 432, 5947, 1016, 207, 44, 334, 2284, 395, 18884, 7104, 6538, 207, 45, 427, 10462, 309, 53153, 207, 46, 2049, 19356, 13638, 432, 295, 719, 404, 1358, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 96,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407, 46, 410]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "documentation",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "tests",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "performance",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "api_break",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "style",
+              "code": "E",
+              "range": [8, 10]
+            },
+            {
+              "key": "error_handling",
+              "code": "F",
+              "range": [10, 12]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40a275b0", "0x3f5ed9fe", "0x40cd1ea8", "0x40094e96", "0x413b8810", "0x40fe4016", "0x40eb0542", "0x4076029f", "0x40c2313b", "0x402a388f", "0x40f08333", "0x40894887"]
+      ],
+      "scores": [
+        ["0x40a275b0", "0x40cd1ea8", "0x413b8810", "0x40eb0542", "0x40c2313b", "0x40f08333"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "performance",
+          "probabilities": {
+            "documentation": 0.0062051796995248702,
+            "tests": 0.016813634395063691,
+            "performance": 0.89169949739304544,
+            "api_break": 0.033813492519634634,
+            "style": 0.01302481707437482,
+            "error_handling": 0.03844337891835653
+          },
+          "confidence": 0.89169949739304544
+        }
+      },
+      "usage": {
+        "input_tokens": 97,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

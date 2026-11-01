@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "case": "g1h-15-choice-json-array",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "a122d2e1e74b0d1b72f40e26b2430d1a32c888a01d0d2f510e569bcc43b17294",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["postponed", "retirement", "loss", "unknown"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\n[\n  {\n    \"from\": \"first\",\n    \"text\": \"The home team led 2-0 at half time, conceded three goals in ten minutes and lost 2-3.\"\n  },\n  {\n    \"from\": \"second\",\n    \"text\": \"The event was broadcast on regional television.\"\n  },\n  \"finished\",\n  87\n]\n\n\nQUESTION:\nHow did the event end for the athlete or team?\n\nOptions:\nA Moved to another date\nB Stopped before the end\nC A defeat\nD The text does not say\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 14200, 229, 827, 360, 496, 5890, 6380, 496, 15557, 6107, 360, 496, 1384, 6380, 496, 597, 2180, 2909, 3961, 229, 26, 21, 24, 462, 3810, 893, 20, 33557, 290, 1703, 7653, 296, 3175, 4611, 309, 5306, 229, 26, 21, 27, 1917, 229, 10016, 229, 827, 360, 496, 5890, 6380, 496, 16707, 6107, 360, 496, 1384, 6380, 496, 597, 2807, 452, 14176, 383, 9135, 8086, 1917, 229, 10016, 229, 496, 39998, 6107, 229, 229, 5042, 207, 88887, 63509, 833, 3522, 1671, 278, 2807, 1263, 374, 278, 35163, 432, 2909, 64929, 13314, 833, 41, 356, 4663, 310, 2271, 5061, 207, 42, 586, 9574, 1575, 278, 1263, 207, 43, 334, 18916, 207, 44, 440, 2803, 1676, 513, 2491, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 133,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "postponed",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "retirement",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "loss",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "unknown",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x408a5b3d", "0x3e92dc47", "0x40db778e", "0x40449233", "0x413d3c9c", "0x4103afda", "0x40feabdd", "0x4098ee09"]
+      ],
+      "scores": [
+        ["0x408a5b3d", "0x40db778e", "0x413d3c9c", "0x40feabdd"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "loss",
+          "confidence": 0.9229980481174993,
+          "probabilities": {
+            "postponed": 0.0033770017807164677,
+            "retirement": 0.022471321433732368,
+            "loss": 0.9229980481174993,
+            "unknown": 0.05115362866805194
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 134,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "997be9018c49d927164617127f39adb0db6723c74ee0729c7fd0c60378864933",
+        "state_tokens": 82,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC", "D", "ĠD"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xc0f53567", "0xc13b3170", "0xc0a41916", "0xc10ea3c5", "0xbe22ed80", "0xc07061e0", "0xc080e4c7", "0xc0e6a29b"],
+        "logprob_scores": ["0xc0f53567", "0xc0a41916", "0xbe22ed80", "0xc080e4c7"],
+        "logsumexp": "0x413fc852",
+        "distribution": [0.0033770017807164677, 0.022471321433732368, 0.9229980481174993, 0.05115362866805194]
+      }
+    ]
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "case": "g1h-13-choice-json-object",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "98ce08da33d3b03b3bed673f366c62bd98cebe67b4acb830912919601f4a362e",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["application", "desktop_support", "vendor", "platform"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"Users in the Berlin office cannot reach the intranet since 08:40, while the public website works.\",\n  \"incident\": {\n    \"status\": \"investigating\",\n    \"id\": 5069,\n    \"tags\": [\n      \"investigating\",\n      \"resolved\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"Logs are kept for thirty days.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"The runbook for this service was reviewed in spring.\"\n    }\n  ]\n}\n\n\nQUESTION:\nWhich team should own this incident?\n\nOptions:\nA Bugs in business software\nB Laptops, printers and accounts\nC A third-party service provider\nD Servers, containers and deployments\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 39931, 296, 278, 6552, 6255, 4083, 5107, 278, 1006, 807, 312, 2407, 229, 4027, 34, 1607, 20, 1657, 278, 1251, 5146, 3616, 66216, 229, 496, 3874, 1048, 6380, 827, 360, 496, 18747, 6380, 496, 91173, 338, 1055, 6107, 360, 496, 332, 6380, 229, 30179, 33, 920, 360, 496, 30356, 6380, 19843, 733, 496, 91173, 338, 1055, 6107, 733, 496, 65899, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 8579, 91, 437, 8042, 374, 18045, 2877, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 597, 2184, 4372, 374, 532, 3213, 452, 19041, 296, 7998, 1917, 360, 1130, 229, 23174, 64024, 63509, 833, 28327, 2909, 1252, 1562, 532, 13008, 64929, 13314, 833, 41, 378, 11434, 296, 2935, 5400, 207, 42, 402, 2421, 3313, 20, 51009, 309, 11823, 207, 43, 334, 4475, 37520, 3213, 14027, 207, 44, 8071, 370, 20, 22770, 309, 16995, 1166, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 190,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "application",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "desktop_support",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "vendor",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "platform",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4105b44a", "0x409aa2da", "0x411112c2", "0x40b4f9bc", "0x410a9d78", "0x40a9d9f5", "0x411aa8b0", "0x40d2e527"]
+      ],
+      "scores": [
+        ["0x4105b44a", "0x411112c2", "0x410a9d78", "0x411aa8b0"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "platform",
+          "confidence": 0.40209218320453305,
+          "probabilities": {
+            "application": 0.15102060829813263,
+            "desktop_support": 0.2569082952260881,
+            "vendor": 0.18997891327124625,
+            "platform": 0.40209218320453305
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 191,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "8a076c1bfa2fb9a2090fde78172dc7ba732033052b47a538937ccc961068a4fd",
+        "state_tokens": 136,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC", "D", "ĠD"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xc01fa108", "0xc0c0963e", "0xbfe44e50", "0xc0a63f5c", "0xc00bfc50", "0xc0b15f23", "0xbf979ee0", "0xc08853f1"],
+        "logprob_scores": ["0xc01fa108", "0xbfe44e50", "0xc00bfc50", "0xbf979ee0"],
+        "logsumexp": "0x412d9c8c",
+        "distribution": [0.15102060829813263, 0.2569082952260881, 0.18997891327124625, 0.40209218320453305]
+      }
+    ]
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "case": "g1h-06-choice-6",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "ba14412027f5ff4e1e03a2ac150ebf7e4f1dcd606acc3c26b157a9b5495f4a7d",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["documentation", "tests", "performance", "api_break", "style", "error_handling"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nA new loop reads a file line by line and keeps every line in memory before processing it.\n\n\nQUESTION:\nWhat is the main concern in this change?\n\nOptions:\nA Docs or changelog out of date\nB Missing or weak tests\nC Speed or memory use\nD A change that breaks existing users\nE Naming and formatting\nF Errors hidden or mishandled\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 41, 860, 13971, 20077, 267, 3848, 2216, 467, 2216, 309, 16981, 1472, 2216, 296, 5947, 1575, 8646, 435, 64673, 63509, 833, 2992, 355, 278, 1619, 3606, 296, 532, 2284, 64929, 13314, 833, 41, 388, 12610, 432, 2088, 307, 451, 729, 302, 5061, 207, 42, 63433, 432, 7732, 6129, 207, 43, 28776, 432, 5947, 1016, 207, 44, 334, 2284, 395, 18884, 7104, 6538, 207, 45, 427, 10462, 309, 53153, 207, 46, 2049, 19356, 13638, 432, 295, 719, 404, 1358, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 96,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407, 46, 410]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "documentation",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "tests",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "performance",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "api_break",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "style",
+              "code": "E",
+              "range": [8, 10]
+            },
+            {
+              "key": "error_handling",
+              "code": "F",
+              "range": [10, 12]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40a26bd0", "0x3f5e7020", "0x40cd2476", "0x4009570c", "0x413b8c2b", "0x40fe4542", "0x40eb04ad", "0x4075fc32", "0x40c22c4a", "0x402a27f0", "0x40f080b2", "0x4089430d"]
+      ],
+      "scores": [
+        ["0x40a26bd0", "0x40cd2476", "0x413b8c2b", "0x40eb04ad", "0x40c22c4a", "0x40f080b2"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "performance",
+          "confidence": 0.89178345383470159,
+          "probabilities": {
+            "documentation": 0.0061955372579985532,
+            "tests": 0.016811544801406862,
+            "performance": 0.89178345383470159,
+            "api_break": 0.033789579908585964,
+            "style": 0.013010431890476468,
+            "error_handling": 0.038409452306830537
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 97,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "b414e4889d8ea42c13647c0400e91f69bbed7fecf809a6f247a806cc01f4b38e",
+        "state_tokens": 25,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC", "D", "ĠD", "E", "ĠE", "F", "ĠF"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xc0da7c82", "0xc1308d27", "0xc0afc3dc", "0xc11c1e66", "0xbe39ff80", "0xc07d4620", "0xc091e3a5", "0xc100f51c", "0xc0babc08", "0xc113ea2d", "0xc08c67a0", "0xc0f3a545"],
+        "logprob_scores": ["0xc0da7c82", "0xc0afc3dc", "0xbe39ff80", "0xc091e3a5", "0xc0babc08", "0xc08c67a0"],
+        "logsumexp": "0x413e7429",
+        "distribution": [0.0061955372579985532, 0.016811544801406862, 0.89178345383470159, 0.033789579908585964, 0.013010431890476468, 0.038409452306830537]
+      }
+    ]
+  }
+}

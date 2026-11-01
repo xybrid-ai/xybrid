@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "g1h-14-choice-json-object-1500-tokens",
+  "source_file": "g1h-14-choice-json-object-1500-tokens.json",
+  "case_file_sha256": "25effb7cef41b9c2b697114d746d73c6b760ed16f7494c06626e71b1459f6e39",
+  "request_sha256": "841e4b72215bc9c98a7c77addd740a0bc52d3a880ac491282e39dfc751dafd40",
+  "inputs_sha256": "97a23d59a3fb63b8ef8c71037ac7a2bcb9f62b347c6b532fde10bc1d811e01bb",
+  "inputs": {
+    "request_sha256": "841e4b72215bc9c98a7c77addd740a0bc52d3a880ac491282e39dfc751dafd40",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["bill_correction", "payment_plan", "tariff_change"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"summary\": \"The water meter reading on the bill is lower than the reading the tenant took on the same day.\",\n  \"account\": {\n    \"status\": \"active\",\n    \"id\": 7644,\n    \"tags\": [\n      \"closed\",\n      \"moving\"\n    ]\n  },\n  \"history\": [\n    {\n      \"step\": 1,\n      \"note\": \"The customer has a smart meter installed in the hall.\"\n    },\n    {\n      \"step\": 2,\n      \"note\": \"Prices include taxes at the standard rate.\"\n    }\n  ],\n  \"notes\": [\n    \"(1) The account has been active for four years.\",\n    \"(2) Payments are made by direct debit on the first of the month.\",\n    \"(3) The flat has electric heating and a gas cooker.\",\n    \"(4) The last meter reading was submitted online.\",\n    \"(5) Bills are sent by email as PDF files.\",\n    \"(6) The customer has a smart meter installed in the hall.\",\n    \"(7) Prices include taxes at the standard rate.\",\n    \"(8) The supplier's call centre is open on weekdays.\",\n    \"(9) An annual statement is issued every December.\",\n    \"(10) The tenant shares the flat with one other person.\",\n    \"(11) The account has been active for four years.\",\n    \"(12) Payments are made by direct debit on the first of the month.\",\n    \"(13) The flat has electric heating and a gas cooker.\",\n    \"(14) The last meter reading was submitted online.\",\n    \"(15) Bills are sent by email as PDF files.\",\n    \"(16) The customer has a smart meter installed in the hall.\",\n    \"(17) Prices include taxes at the standard rate.\",\n    \"(18) The supplier's call centre is open on weekdays.\",\n    \"(19) An annual statement is issued every December.\",\n    \"(20) The tenant shares the flat with one other person.\",\n    \"(21) The account has been active for four years.\",\n    \"(22) Payments are made by direct debit on the first of the month.\",\n    \"(23) The flat has electric heating and a gas cooker.\",\n    \"(24) The last meter reading was submitted online.\",\n    \"(25) Bills are sent by email as PDF files.\",\n    \"(26) The customer has a smart meter installed in the hall.\",\n    \"(27) Prices include taxes at the standard rate.\",\n    \"(28) The supplier's call centre is open on weekdays.\",\n    \"(29) An annual statement is issued every December.\",\n    \"(30) The tenant shares the flat with one other person.\",\n    \"(31) The account has been active for four years.\",\n    \"(32) Payments are made by direct debit on the first of the month.\",\n    \"(33) The flat has electric heating and a gas cooker.\",\n    \"(34) The last meter reading was submitted online.\",\n    \"(35) Bills are sent by email as PDF files.\",\n    \"(36) The customer has a smart meter installed in the hall.\",\n    \"(37) Prices include taxes at the standard rate.\",\n    \"(38) The supplier's call centre is open on weekdays.\",\n    \"(39) An annual statement is issued every December.\",\n    \"(40) The tenant shares the flat with one other person.\",\n    \"(41) The account has been active for four years.\",\n    \"(42) Payments are made by direct debit on the first of the month.\",\n    \"(43) The flat has electric heating and a gas cooker.\",\n    \"(44) The last meter reading was submitted online.\",\n    \"(45) Bills are sent by email as PDF files.\",\n    \"(46) The customer has a smart meter installed in the hall.\",\n    \"(47) Prices include taxes at the standard rate.\",\n    \"(48) The supplier's call centre is open on weekdays.\",\n    \"(49) An annual statement is issued every December.\",\n    \"(50) The tenant shares the flat with one other person.\",\n    \"(51) The account has been active for four years.\",\n    \"(52) Payments are made by direct debit on the first of the month.\",\n    \"(53) The flat has electric heating and a gas cooker.\",\n    \"(54) The last meter reading was submitted online.\",\n    \"(55) Bills are sent by email as PDF files.\",\n    \"(56) The customer has a smart meter installed in the hall.\",\n    \"(57) Prices include taxes at the standard rate.\",\n    \"(58) The supplier's call centre is open on weekdays.\",\n    \"(59) An annual statement is issued every December.\",\n    \"(60) The tenant shares the flat with one other person.\",\n    \"(61) The account has been active for four years.\",\n    \"(62) Payments are made by direct debit on the first of the month.\",\n    \"(63) The flat has electric heating and a gas cooker.\",\n    \"(64) The last meter reading was submitted online.\",\n    \"(65) Bills are sent by email as PDF files.\",\n    \"(66) The customer has a smart meter installed in the hall.\",\n    \"(67) Prices include taxes at the standard rate.\",\n    \"(68) The supplier's call centre is open on weekdays.\",\n    \"(69) An annual statement is issued every December.\",\n    \"(70) The tenant shares the flat with one other person.\",\n    \"(71) The account has been active for four years.\",\n    \"(72) Payments are made by direct debit on the first of the month.\",\n    \"(73) The flat has electric heating and a gas cooker.\",\n    \"(74) The last meter reading was submitted online.\",\n    \"(75) Bills are sent by email as PDF files.\",\n    \"(76) The customer has a smart meter installed in the hall.\",\n    \"(77) Prices include taxes at the standard rate.\",\n    \"(78) The supplier's call centre is open on weekdays.\",\n    \"(79) An annual statement is issued every December.\",\n    \"(80) The tenant shares the flat with one other person.\",\n    \"(81) The account has been active for four years.\",\n    \"(82) Payments are made by direct debit on the first of the month.\",\n    \"(83) The flat has electric heating and a gas cooker.\",\n    \"(84) The last meter reading was submitted online.\",\n    \"(85) Bills are sent by email as PDF files.\",\n    \"(86) The customer has a smart meter installed in the hall.\",\n    \"(87) Prices include taxes at the standard rate.\",\n    \"(88) The supplier's call centre is open on weekdays.\",\n    \"(89) An annual statement is issued every December.\",\n    \"(90) The tenant shares the flat with one other person.\",\n    \"(91) The account has been active for four years.\",\n    \"(92) Payments are made by direct debit on the first of the month.\",\n    \"(93) The flat has electric heating and a gas cooker also noted today again.\"\n  ]\n}\n\n\nQUESTION:\nWhat is the customer most likely asking for?\n\nOptions:\nA A corrected invoice\nB Paying in instalments\nC A cheaper or different tariff\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 7319, 6380, 496, 597, 1382, 14273, 4686, 383, 278, 4862, 355, 3229, 898, 278, 4686, 278, 43915, 3543, 383, 278, 1542, 1784, 66216, 229, 496, 24979, 6380, 827, 360, 496, 18747, 6380, 496, 5816, 6107, 360, 496, 332, 6380, 229, 26069, 28, 920, 360, 496, 30356, 6380, 19843, 733, 496, 21049, 6107, 733, 496, 117345, 1110, 360, 23174, 229, 10016, 229, 496, 40835, 6380, 19843, 360, 827, 733, 496, 31249, 6380, 229, 25, 920, 733, 496, 14700, 6380, 496, 597, 13107, 677, 267, 9837, 14273, 12996, 296, 278, 11416, 1917, 360, 10016, 360, 827, 733, 496, 31249, 6380, 229, 26, 920, 733, 496, 14700, 6380, 496, 56, 17029, 2456, 16635, 462, 278, 4053, 3501, 1917, 360, 1130, 229, 40439, 229, 496, 26037, 6380, 19843, 360, 57596, 25, 17, 440, 3362, 677, 880, 5091, 374, 2258, 1278, 66216, 360, 57596, 26, 17, 123419, 437, 1546, 467, 1813, 3190, 284, 383, 278, 1008, 302, 278, 5304, 66216, 360, 57596, 27, 17, 440, 9144, 677, 5541, 16041, 309, 267, 4415, 5617, 269, 66216, 360, 57596, 28, 17, 440, 2158, 14273, 4686, 452, 19198, 3674, 66216, 360, 57596, 29, 17, 378, 2612, 437, 3066, 467, 7854, 405, 16018, 8148, 66216, 360, 57596, 30, 17, 440, 13107, 677, 267, 9837, 14273, 12996, 296, 278, 11416, 66216, 360, 57596, 31, 17, 372, 17029, 2456, 16635, 462, 278, 4053, 3501, 66216, 360, 57596, 32, 17, 440, 42305, 589, 1367, 8294, 355, 2213, 383, 2524, 23962, 66216, 360, 57596, 33, 17, 1091, 8399, 7793, 355, 12299, 1472, 5031, 66216, 360, 57596, 654, 17, 440, 43915, 18689, 278, 9144, 415, 734, 811, 1310, 66216, 360, 57596, 1131, 17, 440, 3362, 677, 880, 5091, 374, 2258, 1278, 66216, 360, 57596, 873, 17, 123419, 437, 1546, 467, 1813, 3190, 284, 383, 278, 1008, 302, 278, 5304, 66216, 360, 57596, 1031, 17, 440, 9144, 677, 5541, 16041, 309, 267, 4415, 5617, 269, 66216, 360, 57596, 1035, 17, 440, 2158, 14273, 4686, 452, 19198, 3674, 66216, 360, 57596, 885, 17, 378, 2612, 437, 3066, 467, 7854, 405, 16018, 8148, 66216, 360, 57596, 942, 17, 440, 13107, 677, 267, 9837, 14273, 12996, 296, 278, 11416, 66216, 360, 57596, 916, 17, 372, 17029, 2456, 16635, 462, 278, 4053, 3501, 66216, 360, 57596, 632, 17, 440, 42305, 589, 1367, 8294, 355, 2213, 383, 2524, 23962, 66216, 360, 57596, 412, 17, 1091, 8399, 7793, 355, 12299, 1472, 5031, 66216, 360, 57596, 397, 17, 440, 43915, 18689, 278, 9144, 415, 734, 811, 1310, 66216, 360, 57596, 1696, 17, 440, 3362, 677, 880, 5091, 374, 2258, 1278, 66216, 360, 57596, 1518, 17, 123419, 437, 1546, 467, 1813, 3190, 284, 383, 278, 1008, 302, 278, 5304, 66216, 360, 57596, 1467, 17, 440, 9144, 677, 5541, 16041, 309, 267, 4415, 5617, 269, 66216, 360, 57596, 1325, 17, 440, 2158, 14273, 4686, 452, 19198, 3674, 66216, 360, 57596, 1197, 17, 378, 2612, 437, 3066, 467, 7854, 405, 16018, 8148, 66216, 360, 57596, 1616, 17, 440, 13107, 677, 267, 9837, 14273, 12996, 296, 278, 11416, 66216, 360, 57596, 1641, 17, 372, 17029, 2456, 16635, 462, 278, 4053, 3501, 66216, 360, 57596, 1637, 17, 440, 42305, 589, 1367, 8294, 355, 2213, 383, 2524, 23962, 66216, 360, 57596, 1734, 17, 1091, 8399, 7793, 355, 12299, 1472, 5031, 66216, 360, 57596, 1163, 17, 440, 43915, 18689, 278, 9144, 415, 734, 811, 1310, 66216, 360, 57596, 2498, 17, 440, 3362, 677, 880, 5091, 374, 2258, 1278, 66216, 360, 57596, 2424, 17, 123419, 437, 1546, 467, 1813, 3190, 284, 383, 278, 1008, 302, 278, 5304, 66216, 360, 57596, 2124, 17, 440, 9144, 677, 5541, 16041, 309, 267, 4415, 5617, 269, 66216, 360, 57596, 2432, 17, 440, 2158, 14273, 4686, 452, 19198, 3674, 66216, 360, 57596, 2036, 17, 378, 2612, 437, 3066, 467, 7854, 405, 16018, 8148, 66216, 360, 57596, 2523, 17, 440, 13107, 677, 267, 9837, 14273, 12996, 296, 278, 11416, 66216, 360, 57596, 2591, 17, 372, 17029, 2456, 16635, 462, 278, 4053, 3501, 66216, 360, 57596, 2481, 17, 440, 42305, 589, 1367, 8294, 355, 2213, 383, 2524, 23962, 66216, 360, 57596, 2687, 17, 1091, 8399, 7793, 355, 12299, 1472, 5031, 66216, 360, 57596, 1607, 17, 440, 43915, 18689, 278, 9144, 415, 734, 811, 1310, 66216, 360, 57596, 4035, 17, 440, 3362, 677, 880, 5091, 374, 2258, 1278, 66216, 360, 57596, 3843, 17, 123419, 437, 1546, 467, 1813, 3190, 284, 383, 278, 1008, 302, 278, 5304, 66216, 360, 57596, 4112, 17, 440, 9144, 677, 5541, 16041, 309, 267, 4415, 5617, 269, 66216, 360, 57596, 2836, 17, 440, 2158, 14273, 4686, 452, 19198, 3674, 66216, 360, 57596, 2136, 17, 378, 2612, 437, 3066, 467, 7854, 405, 16018, 8148, 66216, 360, 57596, 3694, 17, 440, 13107, 677, 267, 9837, 14273, 12996, 296, 278, 11416, 66216, 360, 57596, 3244, 17, 372, 17029, 2456, 16635, 462, 278, 4053, 3501, 66216, 360, 57596, 2666, 17, 440, 42305, 589, 1367, 8294, 355, 2213, 383, 2524, 23962, 66216, 360, 57596, 3255, 17, 1091, 8399, 7793, 355, 12299, 1472, 5031, 66216, 360, 57596, 1337, 17, 440, 43915, 18689, 278, 9144, 415, 734, 811, 1310, 66216, 360, 57596, 6643, 17, 440, 3362, 677, 880, 5091, 374, 2258, 1278, 66216, 360, 57596, 6557, 17, 123419, 437, 1546, 467, 1813, 3190, 284, 383, 278, 1008, 302, 278, 5304, 66216, 360, 57596, 6688, 17, 440, 9144, 677, 5541, 16041, 309, 267, 4415, 5617, 269, 66216, 360, 57596, 7033, 17, 440, 2158, 14273, 4686, 452, 19198, 3674, 66216, 360, 57596, 3377, 17, 378, 2612, 437, 3066, 467, 7854, 405, 16018, 8148, 66216, 360, 57596, 7067, 17, 440, 13107, 677, 267, 9837, 14273, 12996, 296, 278, 11416, 66216, 360, 57596, 4988, 17, 372, 17029, 2456, 16635, 462, 278, 4053, 3501, 66216, 360, 57596, 4545, 17, 440, 42305, 589, 1367, 8294, 355, 2213, 383, 2524, 23962, 66216, 360, 57596, 5098, 17, 1091, 8399, 7793, 355, 12299, 1472, 5031, 66216, 360, 57596, 1697, 17, 440, 43915, 18689, 278, 9144, 415, 734, 811, 1310, 66216, 360, 57596, 4940, 17, 440, 3362, 677, 880, 5091, 374, 2258, 1278, 66216, 360, 57596, 4869, 17, 123419, 437, 1546, 467, 1813, 3190, 284, 383, 278, 1008, 302, 278, 5304, 66216, 360, 57596, 4946, 17, 440, 9144, 677, 5541, 16041, 309, 267, 4415, 5617, 269, 66216, 360, 57596, 2251, 17, 440, 2158, 14273, 4686, 452, 19198, 3674, 66216, 360, 57596, 2257, 17, 378, 2612, 437, 3066, 467, 7854, 405, 16018, 8148, 66216, 360, 57596, 3088, 17, 440, 13107, 677, 267, 9837, 14273, 12996, 296, 278, 11416, 66216, 360, 57596, 2874, 17, 372, 17029, 2456, 16635, 462, 278, 4053, 3501, 66216, 360, 57596, 2698, 17, 440, 42305, 589, 1367, 8294, 355, 2213, 383, 2524, 23962, 66216, 360, 57596, 3301, 17, 1091, 8399, 7793, 355, 12299, 1472, 5031, 66216, 360, 57596, 1975, 17, 440, 43915, 18689, 278, 9144, 415, 734, 811, 1310, 66216, 360, 57596, 8960, 17, 440, 3362, 677, 880, 5091, 374, 2258, 1278, 66216, 360, 57596, 7832, 17, 123419, 437, 1546, 467, 1813, 3190, 284, 383, 278, 1008, 302, 278, 5304, 66216, 360, 57596, 9125, 17, 440, 9144, 677, 5541, 16041, 309, 267, 4415, 5617, 269, 66216, 360, 57596, 9212, 17, 440, 2158, 14273, 4686, 452, 19198, 3674, 66216, 360, 57596, 2224, 17, 378, 2612, 437, 3066, 467, 7854, 405, 16018, 8148, 66216, 360, 57596, 9024, 17, 440, 13107, 677, 267, 9837, 14273, 12996, 296, 278, 11416, 66216, 360, 57596, 3055, 17, 372, 17029, 2456, 16635, 462, 278, 4053, 3501, 66216, 360, 57596, 2274, 17, 440, 42305, 589, 1367, 8294, 355, 2213, 383, 2524, 23962, 66216, 360, 57596, 4238, 17, 1091, 8399, 7793, 355, 12299, 1472, 5031, 66216, 360, 57596, 1845, 17, 440, 43915, 18689, 278, 9144, 415, 734, 811, 1310, 66216, 360, 57596, 9230, 17, 440, 3362, 677, 880, 5091, 374, 2258, 1278, 66216, 360, 57596, 9192, 17, 123419, 437, 1546, 467, 1813, 3190, 284, 383, 278, 1008, 302, 278, 5304, 66216, 360, 57596, 9364, 17, 440, 9144, 677, 5541, 16041, 309, 267, 4415, 5617, 269, 66216, 360, 57596, 8957, 17, 440, 2158, 14273, 4686, 452, 19198, 3674, 66216, 360, 57596, 3019, 17, 378, 2612, 437, 3066, 467, 7854, 405, 16018, 8148, 66216, 360, 57596, 8701, 17, 440, 13107, 677, 267, 9837, 14273, 12996, 296, 278, 11416, 66216, 360, 57596, 5042, 17, 372, 17029, 2456, 16635, 462, 278, 4053, 3501, 66216, 360, 57596, 3251, 17, 440, 42305, 589, 1367, 8294, 355, 2213, 383, 2524, 23962, 66216, 360, 57596, 5100, 17, 1091, 8399, 7793, 355, 12299, 1472, 5031, 66216, 360, 57596, 1974, 17, 440, 43915, 18689, 278, 9144, 415, 734, 811, 1310, 66216, 360, 57596, 9505, 17, 440, 3362, 677, 880, 5091, 374, 2258, 1278, 66216, 360, 57596, 9262, 17, 123419, 437, 1546, 467, 1813, 3190, 284, 383, 278, 1008, 302, 278, 5304, 66216, 360, 57596, 9561, 17, 440, 9144, 677, 5541, 16041, 309, 267, 4415, 5617, 269, 735, 7865, 3507, 1529, 1917, 229, 23174, 64024, 63509, 833, 2992, 355, 278, 13107, 1028, 3348, 13564, 374, 64929, 13314, 833, 41, 334, 34600, 121004, 207, 42, 15424, 299, 296, 20697, 1166, 207, 43, 334, 28329, 432, 1346, 14558, 3389, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 1499,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "bill_correction",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "payment_plan",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "tariff_change",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x413f829b", "0x40fb5d55", "0x40c17aa4", "0x3fc08770", "0x411397ec", "0x40a581ac"]
+      ],
+      "scores": [
+        ["0x413f829b", "0x40c17aa4", "0x411397ec"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "bill_correction",
+          "probabilities": {
+            "bill_correction": 0.87691458426475866,
+            "payment_plan": 0.010459777555487774,
+            "tariff_change": 0.11262563817975366
+          },
+          "confidence": 0.87691458426475866
+        }
+      },
+      "usage": {
+        "input_tokens": 1500,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

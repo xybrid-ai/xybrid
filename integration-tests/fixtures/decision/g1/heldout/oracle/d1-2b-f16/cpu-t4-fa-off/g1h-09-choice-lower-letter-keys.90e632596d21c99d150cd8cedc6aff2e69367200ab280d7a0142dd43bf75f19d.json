@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "id": "g1h-09-choice-lower-letter-keys",
+  "source_file": "g1h-09-choice-lower-letter-keys.json",
+  "case_file_sha256": "df778d607e76342021f392bcdc38dcd1206c1084580fa2d224011259e233d351",
+  "request_sha256": "90e632596d21c99d150cd8cedc6aff2e69367200ab280d7a0142dd43bf75f19d",
+  "inputs_sha256": "e7c45f82bdb631d91986c1a809827d57db79d65b0200dc7934d0ba712092e466",
+  "inputs": {
+    "request_sha256": "90e632596d21c99d150cd8cedc6aff2e69367200ab280d7a0142dd43bf75f19d",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "choice",
+          "keys": ["a", "b", "c", "d", "e"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nAn elderly patient has had a dry cough for three weeks, sleeps poorly and lost some appetite, but has no fever.\n\n\nQUESTION:\nWhich service should see this patient first?\n\nOptions:\na Rehabilitation and movement\nb Routine assessment and referral\nc Skin conditions and rashes\nd Immediate danger to life\ne Medication advice only\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2296, 19563, 4586, 677, 819, 267, 6025, 20812, 374, 1703, 5771, 20, 4891, 91, 23626, 309, 5306, 928, 28992, 20, 702, 677, 794, 14759, 64673, 63509, 833, 28327, 3213, 1252, 1629, 532, 4586, 1008, 64929, 13314, 833, 73, 60988, 309, 5181, 207, 74, 27233, 475, 8356, 309, 51818, 207, 75, 36293, 3151, 309, 376, 19499, 207, 76, 2403, 15271, 6762, 310, 1604, 207, 77, 6985, 351, 10163, 1049, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 86,
+          "select": [73, 267, 74, 293, 75, 280, 76, 277, 77, 320]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "a",
+              "code": "a",
+              "range": [0, 2]
+            },
+            {
+              "key": "b",
+              "code": "b",
+              "range": [2, 4]
+            },
+            {
+              "key": "c",
+              "code": "c",
+              "range": [4, 6]
+            },
+            {
+              "key": "d",
+              "code": "d",
+              "range": [6, 8]
+            },
+            {
+              "key": "e",
+              "code": "e",
+              "range": [8, 10]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40f97de8", "0x403c6e46", "0x41373097", "0x40ceaa90", "0x40903e02", "0xbf0ce846", "0x40ba2b88", "0x3fc8ea4b", "0x40fecb0c", "0x4077fc61"]
+      ],
+      "scores": [
+        ["0x40f97de8", "0x41373097", "0x40903e02", "0x40ba2b88", "0x40fecb0c"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "choice",
+          "choice": "b",
+          "probabilities": {
+            "a": 0.056189642375256157,
+            "b": 0.8626108650238874,
+            "c": 0.004803967345118401,
+            "d": 0.012796080114267016,
+            "e": 0.063599445141471089
+          },
+          "confidence": 0.8626108650238874
+        }
+      },
+      "usage": {
+        "input_tokens": 87,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

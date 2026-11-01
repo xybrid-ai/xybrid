@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "case": "g1h-29-score-2",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "183fcdc098edcebc2a55d2154b5de9e51dccb9cbdc409f9819d74e7461759c2e",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "answer",
+          "type": "score",
+          "keys": ["0", "1"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "answer",
+          "prompt": "<|startoftext|><|im_start|>user\nThe tenant reports black mould on the bedroom ceiling that came back two weeks after it was cleaned.\n\n\nQUESTION:\nHow urgent is the repair?\n\n0 not urgent\n1 dangerous now\n\nReply with a single digit 0-1 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 597, 43915, 7443, 3553, 42747, 383, 278, 32373, 29577, 395, 3509, 1391, 1046, 5771, 1219, 435, 452, 34584, 64673, 63509, 833, 3522, 30648, 355, 278, 12439, 64929, 24, 513, 30648, 207, 25, 10143, 1665, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 25, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 56,
+          "select": [24, 25]
+        }
+      ],
+      "answers": [
+        {
+          "question": "answer",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x412069b0", "0x412eaca9"]
+      ],
+      "scores": [
+        ["0x412069b0", "0x412eaca9"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "answer": {
+          "type": "score",
+          "score": 1.0,
+          "confidence": 0.66071476357731318,
+          "probabilities": {
+            "0": 0.33928523642268671,
+            "1": 0.66071476357731318
+          },
+          "legend": {
+            "0": "not urgent",
+            "1": "dangerous now"
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 57,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "answer",
+        "prompt_sha256": "9427ccc0809a91b2b73b0bed7807df2fd0b9711d349fa576ce79cbb0ca43c754",
+        "state_tokens": 25,
+        "select_tokens": ["0", "1"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "answer",
+        "raw_logprobs": ["0xbfb020f0", "0xbef824a0"],
+        "logprob_scores": ["0xbfb020f0", "0xbef824a0"],
+        "logsumexp": "0x41366dce",
+        "distribution": [0.33928523642268671, 0.66071476357731318]
+      }
+    ]
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "case": "g1h-31-score-borderline",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "10c862eaadd2beee5bea6f8176a64ce2bef750d65a9f310487c81d66b81343d8",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "severity",
+          "type": "score",
+          "keys": ["0", "1", "2", "3", "4"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "severity",
+          "prompt": "<|startoftext|><|im_start|>user\nThe nightly backup finished two hours late. No data was lost, but the morning sales report used yesterday's figures and two managers made decisions on them before the delay was noticed.\n\n\nQUESTION:\nHow severe is this incident?\n\n0 negligible\n1 minor\n2 moderate\n3 major\n4 critical\n\nReply with a single digit 0-4 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 597, 4414, 375, 32065, 9913, 1046, 4433, 4518, 22, 2752, 1317, 452, 5306, 20, 702, 278, 8031, 11098, 1811, 1092, 30023, 589, 10579, 309, 1046, 17038, 1546, 8947, 383, 876, 1575, 278, 10904, 452, 16483, 64673, 63509, 833, 3522, 6880, 355, 532, 13008, 64929, 24, 50115, 207, 25, 7416, 207, 26, 15034, 207, 27, 2437, 207, 28, 5749, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 28, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 80,
+          "select": [24, 25, 26, 27, 28]
+        }
+      ],
+      "answers": [
+        {
+          "question": "severity",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            },
+            {
+              "key": "4",
+              "code": "4",
+              "range": [4, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4105a614", "0x411ad13e", "0x4125272c", "0x411901c0", "0x40f0d352"]
+      ],
+      "scores": [
+        ["0x4105a614", "0x411ad13e", "0x4125272c", "0x411901c0", "0x40f0d352"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "severity": {
+          "type": "score",
+          "score": 2.0,
+          "confidence": 0.39420005287489795,
+          "probabilities": {
+            "0": 0.090430760988259209,
+            "1": 0.24319095514075376,
+            "2": 0.39420005287489795,
+            "3": 0.22346101436808968,
+            "4": 0.048717216627999382
+          },
+          "legend": {
+            "0": "negligible",
+            "1": "minor",
+            "2": "moderate",
+            "3": "major",
+            "4": "critical"
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 81,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "severity",
+        "prompt_sha256": "e88bb8f6e23a52d2afc0e095d3dafcc22c6ab9e7702dca9098f00f7823df07b4",
+        "state_tokens": 42,
+        "select_tokens": ["0", "1", "2", "3", "4"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "severity",
+        "raw_logprobs": ["0xc0372bc8", "0xbfc4fe40", "0xbf649da0", "0xbfd37a30", "0xc06c1d74"],
+        "logprob_scores": ["0xc0372bc8", "0xbfc4fe40", "0xbf649da0", "0xbfd37a30", "0xc06c1d74"],
+        "logsumexp": "0x41337106",
+        "distribution": [0.090430760988259209, 0.24319095514075376, 0.39420005287489795, 0.22346101436808968, 0.048717216627999382]
+      }
+    ]
+  }
+}
