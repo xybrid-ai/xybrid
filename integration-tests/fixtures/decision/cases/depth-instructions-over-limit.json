@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "depth-instructions-over-limit",
   "profile": "lfm3-d1/text/v1",
-  "title": "127 nested arrays in the instructions are refused",
+  "title": "Instructions 128 levels deep are refused",
   "covers": ["json-depth", "refusal-prepare"],
   "artifact": "d1-2b-q4km",
   "settings": null,

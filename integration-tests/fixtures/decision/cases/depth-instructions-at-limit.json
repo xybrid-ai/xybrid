@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "depth-instructions-at-limit",
   "profile": "lfm3-d1/text/v1",
-  "title": "126 nested arrays around a value in the instructions: the deepest upstream renders",
+  "title": "Instructions 127 levels deep (126 arrays around a value): the deepest upstream renders",
   "covers": ["json-depth", "instructions-structured"],
   "artifact": "d1-2b-q4km",
   "settings": "cpu-t4-fa-off",
