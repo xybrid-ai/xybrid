@@ -11,11 +11,13 @@ Add the Xybrid SDK from Maven Central:
 
 ```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.13.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.16.0")
 }
 ```
 
-Minimum SDK: **29** (Android 10) for releases after 0.15.0: set `minSdk = 29` or higher in your app's `defaultConfig`, or the build fails at the manifest merge. 0.15.0 and earlier need **24** (Android 7.0).
+Minimum SDK: **29** (Android 10) for releases 0.16.0 and later: set `minSdk = 29` or higher in your app's `defaultConfig`, or the build fails at the manifest merge. Releases before 0.16.0 need **24** (Android 7.0).
+
+Downloading models from the registry needs network access, and the SDK declares no permissions: add `<uses-permission android:name="android.permission.INTERNET" />` to your app's `AndroidManifest.xml`.
 
 ## Quick Start
 

@@ -137,7 +137,7 @@ xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.6.0
+  xybrid_flutter: ^0.16.0
 ```
 
 **运行模型：**
@@ -154,9 +154,13 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.6.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.16.0")
 }
 ```
+
+0.16.0 及更高版本需要 Android 10（API 29）：请在应用的 `defaultConfig` 中将 `minSdk` 设为 29 或更高，否则构建会在清单合并阶段失败。
+
+从注册表下载模型需要网络访问，而 SDK 不声明任何权限：请在应用的 `AndroidManifest.xml` 中添加 `<uses-permission android:name="android.permission.INTERNET" />`。
 
 **运行模型：**
 
@@ -172,7 +176,7 @@ val result = model.runAsync(Envelope.text("国破山河在，城春草木深"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.6.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.16.0")
 ]
 ```
 
@@ -221,7 +225,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 ```toml
 [dependencies]
-xybrid = "0.6.0"
+xybrid = "0.16.0"
 ```
 
 **运行模型：**
