@@ -254,7 +254,8 @@ cat request.json | xybrid run --model-file d1-2B-Q4_K_M.gguf --decision - --dry-
   lowest first; a noul may describe `"true"`, `"false"` or both, or have no
   criteria. A description is text, JSON, or `null` for none. An option key can
   change the answer: LFM3 d1 shows the model single-letter keys as labels, and
-  the key itself in place of an empty description.
+  the key itself (`_` read as a space) in place of a missing or empty
+  description.
 - `model` is accepted and ignored.
 
 Text and JSON reach the model as written: object keys in their order, and
@@ -283,8 +284,8 @@ content:
 | `media_unsupported` | A `files`, `images` or `videos` field (even empty or `null`), or an image, audio or video part in the state's chat messages |
 | `unknown_field` | Any other field at the top level, in a question (`multiple`, say) or in noul criteria (`yes` and `no` included) |
 | `empty_question_id`, `empty_option_key` | An id or option key that is the empty string |
-| `json_too_deep` | Text or JSON nested more than 128 levels deep |
-| `number_out_of_range` | A number beyond the 64-bit float range (`1e400`), or an integer above 9223372036854775807, which the model would read wrapped to a negative number |
+| `json_too_deep` | JSON content (state, instructions, a description) nested more than 128 levels deep |
+| `number_out_of_range` | A number beyond the 64-bit float range (`1e400`), or an integer from 9223372036854775808 to 18446744073709551615, which the model would read wrapped to a negative number (larger integers are read as floats, as llama.cpp reads them) |
 
 llama.cpp's server ignores unknown fields and keeps the last of repeated keys;
 `xybrid` refuses both, so nothing in a request is silently dropped. A request
