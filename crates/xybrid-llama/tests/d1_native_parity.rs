@@ -525,13 +525,26 @@ fn native_identity() -> NativeIdentity {
             candidates.push((dir, search, libs));
         }
     }
-    if candidates.len() != 1 {
+    if candidates.is_empty() {
+        return unknown("no llama-cpp-sys build record matches this test's features");
+    }
+    // Rebuilding llama-cpp-sys with other inputs leaves the earlier record in
+    // place. A strict run needs exactly one (a fresh target directory), so
+    // that the archives named are the ones linked; otherwise the newest is
+    // the one this build used, as noted.
+    let records = candidates.len();
+    if records > 1 && strict() {
         return unknown(&format!(
-            "{} llama-cpp-sys build records match this test's features",
-            candidates.len()
+            "{records} llama-cpp-sys build records match this test's features: build in a fresh \
+             target directory"
         ));
     }
-    let (dir, search, libs) = candidates.remove(0);
+    candidates.sort_by_key(|(dir, _, _)| {
+        std::fs::metadata(dir.join("output"))
+            .and_then(|m| m.modified())
+            .ok()
+    });
+    let (dir, search, libs) = candidates.pop().expect("one record at least");
     let out = dir.join("out");
     let mut lines = Vec::new();
     let mut all_under_out = true;
@@ -604,11 +617,18 @@ fn native_identity() -> NativeIdentity {
             }
         }
     }
+    let note = if records > 1 {
+        format!(", the newest of {records} build records")
+    } else {
+        String::new()
+    };
     NativeIdentity {
         kind: if source_build {
-            format!("source build ({})", out.display())
+            format!("source build ({}{note})", out.display())
         } else {
-            "prebuilt or staged slice: its producer is recorded by the slice, not here".to_string()
+            format!(
+                "prebuilt or staged slice{note}: its producer is recorded by the slice, not here"
+            )
         },
         lines,
     }
@@ -934,12 +954,8 @@ fn both_sides_build_the_same_context() {
         CPU_T4_FA_ON,
         CPU_T4_FA_OFF.with_threads(1).with_budget(512),
     ] {
-        let started = Instant::now();
         let readout = fx.readout(setting).facts();
-        let readout_seconds = started.elapsed().as_secs_f64();
-        let started = Instant::now();
         let harness = fx.harness(setting).facts();
-        let harness_seconds = started.elapsed().as_secs_f64();
         assert_eq!(
             Facts {
                 n_ctx: readout.n_ctx,
@@ -953,11 +969,7 @@ fn both_sides_build_the_same_context() {
             "{}",
             setting.label()
         );
-        println!(
-            "{}: the same facts; a context takes {readout_seconds:.2} s (readout) and \
-             {harness_seconds:.2} s (harness) to create and free",
-            setting.label()
-        );
+        println!("{}: the same context facts", setting.label());
     }
 
     // The corpus holds what the comparisons below are meant to cover.
