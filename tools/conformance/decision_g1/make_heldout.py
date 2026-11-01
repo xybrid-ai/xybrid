@@ -16,9 +16,14 @@ Prompt lengths. Six slots name a target length in prompt tokens: 63, 64 and 65 (
 tiling boundary at 64 query rows), 600, 1,500 and 4,064 (near the 4,096-token default budget). The length is measured
 with upstream's own preparation: `decision-oracle run --vocab-only` on the pinned GGUF's vocabulary
 (tools/conformance/decision), which renders and tokenizes the request without evaluating anything. Padding is
-deterministic: the slot's filler sentences are appended in order while the prompt stays within the target, then its
-filler words in order, a word that would overshoot being skipped. If no exact hit results, generation fails: the
-recipe is fixed and re-reviewed; there is no retry with another seed.
+deterministic (`pad`): first the most of the slot's filler sentences, in order, that keep the prompt within the
+target, then words from FILLER_WORDS, placed at the end of a text state or before the final period of an object
+state's last note. The words come from a breadth-first search over increasing-index subsequences of FILLER_WORDS:
+each level (at most MAX_WORD_LEVELS) appends one later word to every sequence the previous level kept, measures them
+all in one batch and keeps the first sequence found for each new prompt length within the target, until one reaches
+the target exactly; the search is tried with the most sentences, then one and two fewer. The padded request is then
+measured again and must be exactly the target. If no exact hit results, generation fails: the recipe is fixed and
+re-reviewed; there is no retry with another seed.
 
 The shared domain. Every request must build the same prompt on the HF reference and in llama.cpp
 (tools/conformance/decision_hf/DIFFERENCES.md); `check_domain` enforces the rules executably and the comparator
