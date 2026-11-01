@@ -130,8 +130,8 @@ BF16 0.027 and 0.0042, still with every answer and token count equal.
 The answers and gaps above are identical across two runs of these binaries.
 The server timings are not: the same long pass took 124 to 159 s in an
 earlier run on this shared 4-vCPU machine. At one thread, the reference takes
-a median of about 6 s a question without the parity proof and 18 s with it,
-and 86 s and 216 s for the 3,605-token case.
+a median of about 6 s a case without the parity proof and 18.6 s with it,
+and 86 s and 224 s for the 3,605-token case.
 
 The `hf-diff-*` cases on `d1-2b-f16`, where both sides answered (the BF16 run
 gives each gap within a few percent):

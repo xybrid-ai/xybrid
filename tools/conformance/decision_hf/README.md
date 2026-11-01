@@ -299,11 +299,12 @@ G1 is feasible here. Two conclusions shaped the plan: the first is now contract
 C10, the second is the method P11 applies.
 
 - **The reference runs.** The `set_size = 1` float32 forward fits the 8 GiB
-  machine and is bit-reproducible at one thread. A question takes a median of
-  6.1 s (5.2 to 9.4 s for 29 to 234 prompt tokens), 28.5 s at 1,064 tokens and
-  86 s at 3,605, near the 4,096-token budget of `cpu-t4-fa-off`. The parity
-  proof the committed runs carry triples that: a median of 18.4 s, and 216 s
-  for the 3,605-token case, at a peak of 7.3 GB resident. Four threads are about
+  machine and is bit-reproducible at one thread. Without the parity proof (the
+  run first committed, at `aea334e`), a question takes a median of 6.1 s (5.2
+  to 9.4 s for 29 to 234 prompt tokens), 28.5 s at 1,064 tokens and 86 s at
+  3,605, near the 4,096-token budget of `cpu-t4-fa-off`. The proof the
+  committed runs carry triples that: a median of 18.6 s a case, and 224 s for
+  the 3,605-token case, at a peak of 7.1 GiB resident. Four threads are about
   1.9× faster but not bit-identical to one, so fixtures keep one thread. A full
   float32 load does not fit; the parity proof stands in for it.
 - **The pilot cases agree.** The cross-checks were first summarized on 24
