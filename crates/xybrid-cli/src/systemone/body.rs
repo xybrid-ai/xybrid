@@ -20,8 +20,15 @@
 //!    the only way to build an [`OrderedJson`] and checks its depth from the
 //!    content itself.
 //!
-//! The grammar here and in [`OrderedJson::parse`] must agree; the tests hold
-//! the two to the same verdicts.
+//! The grammar here is [`OrderedJson::parse`]'s, so within its own limits
+//! (depth, size and value ceilings) the two accept exactly the same texts.
+//! Where a text has more than one problem, the one reported can differ, on
+//! purpose: a repeated key is reported here only once the whole text is
+//! known to be JSON, so `[{"a":1,"a":2},]` is a syntax error here and a
+//! repeated key there; and among several repeats this module names the
+//! first in the text, while [`OrderedJson::parse`] names one in the first
+//! object to close. The tests compare the two on a corpus and on generated
+//! and mutated texts, and pin these differences.
 //!
 //! [`OrderedJson`]: xybrid_core::ir::OrderedJson
 //! [`OrderedJson::parse`]: xybrid_core::ir::OrderedJson::parse
@@ -618,6 +625,7 @@ fn first_repeated_key(members: &[(String, Value)]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use xybrid_core::ir::decision::JsonLimits;
     use xybrid_core::ir::{DecisionError, OrderedJson};
 
     const LOTS: usize = 1 << 20;
@@ -626,15 +634,58 @@ mod tests {
         read(text, LOTS)
     }
 
-    /// What `OrderedJson::parse` says about `text`, in this module's terms.
-    fn core_verdict(text: &str) -> Result<(), BodyError> {
-        match OrderedJson::parse(text) {
-            Ok(_) => Ok(()),
-            Err(DecisionError::InvalidJson { kind, offset }) => {
-                Err(BodyError::Json { kind, offset })
-            }
-            Err(other) => panic!("unexpected core error for {text:?}: {other}"),
-        }
+    /// Why `read` and `OrderedJson::parse` disagree about `text` under a
+    /// value ceiling of `limit`, beyond what the module docs allow; `None`
+    /// when they agree.
+    ///
+    /// They must accept the same texts. A text that is not JSON is refused
+    /// by both at the same first problem, kind and offset, unless
+    /// `OrderedJson::parse` met a repeated key before it: then this module
+    /// reports the first syntax problem (or the value ceiling) instead, which
+    /// comes after that object closed. A text that is JSON but repeats a key
+    /// is refused by both for a repeat, this module naming the first in the
+    /// text, so never a later one.
+    fn disagreement(text: &str, limit: usize) -> Option<String> {
+        const REPEAT: JsonErrorKind = JsonErrorKind::DuplicateKey;
+        let ours = read(text, limit).map(|_| ());
+        let limits = JsonLimits::default()
+            .with_max_bytes(usize::MAX)
+            .with_max_nodes(limit);
+        let core = OrderedJson::parse_with_limits(text, &limits).map(|_| ());
+        let agree = match (&ours, &core) {
+            (Ok(()), Ok(())) => true,
+            (
+                Err(BodyError::TooManyValues { max }),
+                Err(DecisionError::JsonTooManyNodes { max: core_max }),
+            ) => max == core_max,
+            (
+                Err(BodyError::Json { kind, offset }),
+                Err(DecisionError::InvalidJson {
+                    kind: core_kind,
+                    offset: core_offset,
+                }),
+            ) if *core_kind != REPEAT => kind == core_kind && offset == core_offset,
+            (
+                Err(BodyError::Json { kind, offset }),
+                Err(DecisionError::InvalidJson {
+                    kind: REPEAT,
+                    offset: core_offset,
+                }),
+            ) if *kind == REPEAT => offset <= core_offset,
+            (
+                Err(BodyError::Json { offset, .. }),
+                Err(DecisionError::InvalidJson {
+                    kind: REPEAT,
+                    offset: core_offset,
+                }),
+            ) => offset > core_offset,
+            (
+                Err(BodyError::TooManyValues { .. }),
+                Err(DecisionError::InvalidJson { kind: REPEAT, .. }),
+            ) => true,
+            _ => false,
+        };
+        (!agree).then(|| format!("{text:?} under {limit} values: ours {ours:?}, core {core:?}"))
     }
 
     /// Texts within `OrderedJson::parse`'s depth and size limits, valid and
@@ -757,24 +808,217 @@ mod tests {
     #[test]
     fn the_grammar_matches_ordered_json() {
         for text in CORPUS {
-            let ours = read_text(text).map(|_| ());
-            let core = core_verdict(text);
-            // A repeated key is reported at the first repeat in the text;
-            // `OrderedJson::parse` reports it when the object closes, which
-            // can name a later repeat first. Both refuse the text.
-            match (ours, core) {
-                (
-                    Err(BodyError::Json {
-                        kind: JsonErrorKind::DuplicateKey,
-                        ..
-                    }),
-                    Err(BodyError::Json {
-                        kind: JsonErrorKind::DuplicateKey,
-                        ..
-                    }),
-                ) => {}
-                (ours, core) => assert_eq!(ours, core, "{text:?}"),
+            for limit in [LOTS, 3] {
+                if let Some(disagreement) = disagreement(text, limit) {
+                    panic!("{disagreement}");
+                }
             }
+        }
+    }
+
+    /// A deterministic generator (splitmix64), so every run sees the same
+    /// texts and a failure replays.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            z ^ (z >> 31)
+        }
+
+        fn below(&mut self, n: usize) -> usize {
+            usize::try_from(self.next() % u64::try_from(n).unwrap()).unwrap()
+        }
+    }
+
+    /// Texts to mutate: JSON with nested containers, every kind of number
+    /// and escape, odd keys, whitespace and a byte-order mark, and two that
+    /// repeat keys.
+    const SEEDS: &[&str] = &[
+        r#"{"state": {"b": [1, -0, 2.5e-3, {"k": null}], "a": "x\n\"\\\u00e9\ud83d\ude00"}, "questions": {"q": {"type": "choice", "instructions": [true, false], "criteria": {"a": 1.0, "b": [{}]}}}}"#,
+        r#"[0, -1, 1.5, 1e10, -1E-5, 0.000123, 9223372036854775807, 18446744073709551615, 18446744073709551616, 1.7976931348623157e308, 5e-324]"#,
+        r#"{"a": {"b": {"c": {"d": [[[[{"e": "f", "g": [null]}]]]]}}}}"#,
+        r#"{"esc": "\/\b\f\n\r\t\u0000\u001f\"\\", "uni": "\u4e2d\uD83D\uDE00é中"}"#,
+        "\u{feff} {\"bom\": true} ",
+        r#"{"a": 1, "b": {"c": 1, "c": 2}, "a": 3}"#,
+        r#"[{"a":1,"a":2},[1,2,{"z":[]}],{"k":{"k":{"k":1}}}]"#,
+        r#"{"":"","\u0000":0,"a b":[ ],"x":{ }}"#,
+        "[\n  1,\n  {\n    \"key\" : \"value\"\n  }\n]\n",
+        r#""a string with \"quotes\" and \\u0041""#,
+        "123",
+        "-0.0e-0",
+        "true",
+        "null",
+    ];
+
+    /// Bytes a mutation inserts or writes: JSON's structure, number and
+    /// literal characters, whitespace and control characters.
+    const BYTES: &[u8] = b"{}[]\",:\\/-+.eE0123456789 \t\n\rtrufalsenu\x00\x01\x1f\x7f";
+
+    /// Snippets a mutation inserts: escapes (whole, cut short, or half a
+    /// surrogate pair), a multi-byte character, an overflowing number,
+    /// separators and an empty key.
+    const SNIPPETS: &[&str] = &[
+        "\\u", "\\ud83d", "\\udc00", "\\u12g4", "é", "1e999", "-", "\"\":", ",,", "[{", "}]", "\\x",
+    ];
+
+    /// The `"..."` spans followed by `:`: the keys, as far as a quick scan
+    /// can tell.
+    fn keys(bytes: &[u8]) -> Vec<std::ops::Range<usize>> {
+        let mut keys = Vec::new();
+        let mut at = 0;
+        while at < bytes.len() {
+            if bytes[at] != b'"' {
+                at += 1;
+                continue;
+            }
+            let start = at;
+            at += 1;
+            while at < bytes.len() && bytes[at] != b'"' {
+                at += if bytes[at] == b'\\' { 2 } else { 1 };
+            }
+            let end = (at + 1).min(bytes.len());
+            let after = bytes[end..]
+                .iter()
+                .position(|byte| !byte.is_ascii_whitespace());
+            if after.is_some_and(|skip| bytes[end + skip] == b':') {
+                keys.push(start..end);
+            }
+            at = end;
+        }
+        keys
+    }
+
+    /// One to three edits of `seed`: a byte deleted, inserted, replaced,
+    /// swapped, a slice repeated, the text cut short, a snippet inserted, or
+    /// one key copied over another (a repeat, when both share an object).
+    /// `None` when the edits leave invalid UTF-8.
+    fn mutate(rng: &mut Rng, seed: &str) -> Option<String> {
+        let mut bytes = seed.as_bytes().to_vec();
+        for _ in 0..1 + rng.below(3) {
+            let len = bytes.len();
+            let at = rng.below(len + 1);
+            match rng.below(8) {
+                0 if at < len => {
+                    bytes.remove(at);
+                }
+                1 => bytes.insert(at, BYTES[rng.below(BYTES.len())]),
+                2 if at < len => bytes[at] = BYTES[rng.below(BYTES.len())],
+                3 if at < len => {
+                    let end = (at + 1 + rng.below(8)).min(len);
+                    let slice = bytes[at..end].to_vec();
+                    bytes.splice(at..at, slice);
+                }
+                4 => bytes.truncate(at),
+                5 if at < len => {
+                    let other = rng.below(len);
+                    bytes.swap(at, other);
+                }
+                6 => {
+                    let snippet = SNIPPETS[rng.below(SNIPPETS.len())];
+                    bytes.splice(at..at, snippet.bytes());
+                }
+                7 => {
+                    let keys = keys(&bytes);
+                    if keys.len() >= 2 {
+                        let from = keys[rng.below(keys.len())].clone();
+                        let to = keys[rng.below(keys.len())].clone();
+                        let key = bytes[from].to_vec();
+                        bytes.splice(to, key);
+                    }
+                }
+                _ => {}
+            }
+        }
+        String::from_utf8(bytes).ok()
+    }
+
+    #[test]
+    fn generated_and_mutated_texts_match_ordered_json() {
+        let mut rng = Rng(0x5eed_d1d1);
+        let (mut accepted, mut refused, mut repeats, mut ceilings) = (0, 0, 0, 0);
+        let mut disagreements = Vec::new();
+        let texts = SEEDS.iter().map(|seed| Some(seed.to_string())).chain(
+            SEEDS
+                .iter()
+                .cycle()
+                .take(SEEDS.len() * 4_000)
+                .map(|seed| mutate(&mut rng, seed)),
+        );
+        for text in texts.flatten() {
+            for limit in [LOTS, 6] {
+                if let Some(disagreement) = disagreement(&text, limit) {
+                    disagreements.push(disagreement);
+                }
+                match read(&text, limit) {
+                    Ok(_) => accepted += 1,
+                    Err(BodyError::Json {
+                        kind: JsonErrorKind::DuplicateKey,
+                        ..
+                    }) => repeats += 1,
+                    Err(BodyError::TooManyValues { .. }) => ceilings += 1,
+                    Err(BodyError::Json { .. }) => refused += 1,
+                }
+            }
+        }
+        assert!(
+            disagreements.is_empty(),
+            "{} disagreements, the first:\n{}",
+            disagreements.len(),
+            disagreements[..disagreements.len().min(5)].join("\n")
+        );
+        eprintln!(
+            "{accepted} accepted, {refused} refused, {repeats} repeated keys, {ceilings} value \
+             ceilings"
+        );
+        // The mutations reach every outcome, often.
+        for (outcome, count) in [
+            ("accepted", accepted),
+            ("refused", refused),
+            ("repeated keys", repeats),
+            ("value ceilings", ceilings),
+        ] {
+            assert!(count >= 500, "only {count} {outcome}");
+        }
+    }
+
+    #[test]
+    fn a_repeated_key_waits_for_the_rest_of_the_text() {
+        // `OrderedJson::parse` reports a repeat when its object closes; this
+        // module once the whole text is JSON, so a later syntax problem
+        // comes first here. Among repeats, this module names the first in
+        // the text, `OrderedJson::parse` one in the first object to close.
+        let cases = [
+            (
+                r#"[{"a":1,"a":2},]"#,
+                (JsonErrorKind::ExpectedValue, 15),
+                (JsonErrorKind::DuplicateKey, 8),
+            ),
+            (
+                r#"{"a":1,"a":2}x"#,
+                (JsonErrorKind::TrailingCharacters, 13),
+                (JsonErrorKind::DuplicateKey, 7),
+            ),
+            (
+                r#"{"a":1,"a":2,"b":{"c":1,"c":2}}"#,
+                (JsonErrorKind::DuplicateKey, 7),
+                (JsonErrorKind::DuplicateKey, 24),
+            ),
+        ];
+        for (text, (kind, offset), (core_kind, core_offset)) in cases {
+            assert_eq!(
+                read_text(text).err(),
+                Some(BodyError::Json { kind, offset })
+            );
+            assert!(matches!(
+                OrderedJson::parse(text),
+                Err(DecisionError::InvalidJson { kind, offset })
+                    if kind == core_kind && offset == core_offset
+            ));
+            assert_eq!(disagreement(text, LOTS), None);
         }
     }
 
