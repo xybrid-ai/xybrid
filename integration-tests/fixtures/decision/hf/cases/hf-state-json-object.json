@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "hf-state-json-object",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A nested JSON object state (indent 2): unsorted keys, int/float/bool/null, -0.0, 1e-05, 1e+16, empty containers, non-ASCII text.",
+  "covers": [
+    "state-object",
+    "json-order",
+    "json-float",
+    "json-int",
+    "json-unicode",
+    "json-literals"
+  ],
+  "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": {\"ticket\": {\"id\": 4471, \"priority\": null, \"tags\": [\"refund\", \"duplicate charge\"], \"amount_eur\": 59.9, \"verified\": true}, \"customer\": {\"name\": \"Zoë Ångström\", \"tier\": \"gold\", \"since\": 2019}, \"messages\": [{\"from\": \"customer\", \"text\": \"Charged twice for order 4471.\"}, {\"from\": \"agent\", \"text\": \"Looking into it.\"}], \"meta\": {}, \"attachments\": [], \"balance\": -0.0, \"ratio\": 1e-05, \"limit\": 1e+16}, \"questions\": {\"need\": {\"type\": \"choice\", \"instructions\": \"What does the customer need?\", \"criteria\": {\"refund\": \"Money back for the duplicate charge\", \"delivery\": \"Help with a missing parcel\", \"account\": \"Changes to the account\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

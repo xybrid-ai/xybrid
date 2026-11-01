@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "case": "hf-state-unicode",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "d80cbb546ae41c387c98abc73d14f536450d32306b169217b39fb192157d61f8",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "language",
+          "type": "choice",
+          "keys": ["fr", "ja", "es", "mixed"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "language",
+          "prompt": "<|startoftext|><|im_start|>user\nBonjour, je n'ai pas reçu mon colis 📦. 注文番号は 8841 です。 ¿Pueden ayudarme?\n\n\nQUESTION:\nWhich language is the message written in?\n\nOptions:\nA French\nB Japanese\nC Spanish\nD Several languages\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 34432, 12642, 20, 1749, 316, 11624, 2194, 45632, 1271, 974, 282, 88457, 108, 22, 229, 31616, 46676, 924, 229, 26020, 25, 229, 2050, 646, 14042, 56, 2185, 270, 21980, 48701, 39, 7, 63509, 833, 28327, 3368, 355, 278, 5781, 4484, 296, 64929, 13314, 833, 41, 4770, 207, 42, 7314, 207, 43, 8140, 207, 44, 17356, 9745, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 74,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "language",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "fr",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "ja",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "es",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "mixed",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4114dc9a", "0x40c3085a", "0x40b158b5", "0x3fecb1fb", "0x40ff0a1e", "0x40993770", "0x412cd452", "0x4101808b"]
+      ],
+      "scores": [
+        ["0x4114dc9a", "0x40b158b5", "0x40ff0a1e", "0x412cd452"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "language": {
+          "type": "choice",
+          "choice": "mixed",
+          "confidence": 0.6820418112837241,
+          "probabilities": {
+            "fr": 0.22252116394236407,
+            "ja": 0.013359976213048002,
+            "es": 0.082077048560863855,
+            "mixed": 0.6820418112837241
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 75,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "language",
+        "prompt_sha256": "ff4aea76183d914569ff60afcf70183aece2fbbd22c537ff6becf1b99320a681",
+        "state_tokens": 38,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC", "D", "ĠD"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "language",
+        "raw_logprobs": ["0xbffeabf8", "0xc0a65bd8", "0xc0b80b7d", "0xc1171bda", "0xc054b428", "0xc0d02cc2", "0xbefbb8e0", "0xc04cc638"],
+        "logprob_scores": ["0xbffeabf8", "0xc0b80b7d", "0xc054b428", "0xbefbb8e0"],
+        "logsumexp": "0x4134b219",
+        "distribution": [0.22252116394236407, 0.013359976213048002, 0.082077048560863855, 0.6820418112837241]
+      }
+    ]
+  }
+}

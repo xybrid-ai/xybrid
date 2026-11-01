@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-noul-null-criteria",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Yes/no criteria that are all null print no Yes/No lines",
+  "covers": [
+    "noul-null-criteria"
+  ],
+  "notes": "Yes/no criteria whose values are all null: the reference prints Yes: None / No: None, llama.cpp nothing. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice and my parcel never arrived. Please refund one charge.\", \"questions\": {\"refund\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\", \"criteria\": {\"true\": null, \"false\": null}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

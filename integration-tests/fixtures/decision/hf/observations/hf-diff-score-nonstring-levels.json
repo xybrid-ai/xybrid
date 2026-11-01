@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-score-nonstring-levels",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "1b818fc6475c5c6b9f75b95e97e7853673d17c84a9243834b728a961a9a417c6",
+  "hf": {
+    "parse": {
+      "refusal": {
+        "question": "urgency",
+        "exception": "ValueError",
+        "message": "a score's \"criteria\" lists 2 to 10 levels, lowest first: [\"Can wait\", \"Today\", \"Now\"]"
+      }
+    }
+  },
+  "detail": {
+    "parse": {}
+  }
+}

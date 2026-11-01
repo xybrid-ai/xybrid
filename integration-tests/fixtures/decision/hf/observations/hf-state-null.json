@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "case": "hf-state-null",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "ad8698d528516155c47193ae29ce15b019d0f3f4a04c3ce8ead94dd4cfee32a7",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "formality",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "formality",
+          "prompt": "<|startoftext|><|im_start|>user\nHow formal is the greeting 'Dear Sir or Madam'?\n\n0 casual\n1 neutral\n2 formal\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 3522, 9384, 355, 278, 2080, 10642, 951, 116037, 9777, 432, 5122, 330, 15, 64929, 24, 20821, 207, 25, 12786, 207, 26, 9384, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 44,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "formality",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40c451ba", "0x410676d1", "0x414ae5b2"]
+      ],
+      "scores": [
+        ["0x40c451ba", "0x410676d1", "0x414ae5b2"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "formality": {
+          "type": "score",
+          "score": 2.0,
+          "confidence": 0.95389975698168117,
+          "probabilities": {
+            "0": 0.007141375668543691,
+            "1": 0.038958867349775189,
+            "2": 0.95389975698168117
+          },
+          "legend": {
+            "0": "casual",
+            "1": "neutral",
+            "2": "formal"
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 45,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "formality",
+        "prompt_sha256": "635fcddadb2ddf6662976ac81c3a9cabdf3f704a970309edbdb0e9a04679f630",
+        "state_tokens": 4,
+        "select_tokens": ["0", "1", "2"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "formality",
+        "raw_logprobs": ["0xc0d33820", "0xc08a9c38", "0xbd5f3b00"],
+        "logprob_scores": ["0xc0d33820", "0xc08a9c38", "0xbd5f3b00"],
+        "logsumexp": "0x414bc4ed",
+        "distribution": [0.007141375668543691, 0.038958867349775189, 0.95389975698168117]
+      }
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-choice-multiple",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "49d4265f010db089bde8bfbd64c4f9161a303f3d95f7357b90f46bca3480de57",
+  "hf": {},
+  "detail": {
+    "parse": {
+      "typed": {
+        "topics": "choice"
+      }
+    },
+    "typed": {
+      "answers": {
+        "topics": {
+          "type": "choice",
+          "choices": ["billing", "delivery"],
+          "probabilities": {
+            "billing": 0.93344426975104111,
+            "delivery": 0.96527338888426506,
+            "login": 0.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 85,
+        "output_tokens": 0
+      }
+    }
+  }
+}

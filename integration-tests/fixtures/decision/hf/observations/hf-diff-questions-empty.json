@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-questions-empty",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "3e13013c767393144abdd458a113ae22c042d36d40837d8c34f6b2a31ac7939e",
+  "hf": {
+    "parse": {
+      "questions": []
+    },
+    "prepare": {
+      "passes": [],
+      "answers": []
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [],
+      "scores": []
+    },
+    "finalize": {
+      "answers": {},
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [],
+    "evaluate": []
+  }
+}

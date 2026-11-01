@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "case": "hf-choice-key-fallback",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "99d96bdca327fcceb8d1fceecca68ec1ffe08dd9bd3a992e2662acf6c8e055c9",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "route",
+          "type": "choice",
+          "keys": ["needs_human_review", "auto_close", "escalate_to_tier_2", "wait_for_customer"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "route",
+          "prompt": "<|startoftext|><|im_start|>user\nTicket 8812: the customer reports the same crash for the third time this week and asks to talk to a person.\n\n\nQUESTION:\nWhat should happen to this ticket?\n\nOptions:\nA needs human review\nB auto close\nC Send it to the second support tier\nD wait for customer\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 97286, 229, 25861, 26, 34, 278, 13107, 7443, 278, 1542, 20563, 374, 278, 4475, 893, 532, 2524, 309, 20589, 310, 3931, 310, 267, 1310, 64673, 63509, 833, 2992, 1252, 8111, 310, 532, 29936, 64929, 13314, 833, 41, 3487, 1994, 3701, 207, 42, 9006, 4275, 207, 43, 26494, 435, 310, 278, 1840, 1757, 30881, 207, 44, 6997, 374, 13107, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 76,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "route",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "needs_human_review",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "auto_close",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "escalate_to_tier_2",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "wait_for_customer",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4136d304", "0x40e69754", "0x40b9fda5", "0x3f97f2c4", "0x411f5482", "0x40baba11", "0x40f9d926", "0x40810120"]
+      ],
+      "scores": [
+        ["0x4136d304", "0x40b9fda5", "0x411f5482", "0x40f9d926"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "route": {
+          "type": "choice",
+          "choice": "needs_human_review",
+          "confidence": 0.70651454432717142,
+          "probabilities": {
+            "needs_human_review": 0.70651454432717142,
+            "auto_close": 0.010616547221421628,
+            "escalate_to_tier_2": 0.23566279900645773,
+            "wait_for_customer": 0.047206109444949136
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 77,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "route",
+        "prompt_sha256": "2f8aafe0559476b17efb2e247305b56fb6957fa87aaf4bd4fca7c9d07a4abb36",
+        "state_tokens": 31,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC", "D", "ĠD"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "route",
+        "raw_logprobs": ["0xbebcbe80", "0xc092da9c", "0xc0bf744b", "0xc129baa0", "0xbfeb23b0", "0xc0beb7df", "0xc07f3194", "0xc0f870d0"],
+        "logprob_scores": ["0xbebcbe80", "0xc0bf744b", "0xbfeb23b0", "0xc07f3194"],
+        "logsumexp": "0x413cb8f8",
+        "distribution": [0.70651454432717142, 0.010616547221421628, 0.23566279900645773, 0.047206109444949136]
+      }
+    ]
+  }
+}

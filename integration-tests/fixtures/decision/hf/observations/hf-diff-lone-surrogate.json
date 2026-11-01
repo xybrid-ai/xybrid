@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-lone-surrogate",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "e34f635f4b5520e6af5afbbf5e8fc67b1c763e2f9f4ad2941865e4d9b6409c38",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "valid",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "refusal": {
+        "question": "valid",
+        "exception": "TypeError",
+        "message": "TextEncodeInput must be Union[TextInputSequence, Tuple[InputSequence, InputSequence]]"
+      }
+    }
+  },
+  "detail": {
+    "parse": {
+      "json": {
+        "lone_surrogates": 1
+      }
+    }
+  }
+}

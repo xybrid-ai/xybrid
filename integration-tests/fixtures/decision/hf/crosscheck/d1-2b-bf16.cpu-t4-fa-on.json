@@ -1,0 +1,900 @@
+{
+  "server": "llama-server v0.8.0 (vendor/llama-cpp 8642541, CPU, GGML_NATIVE=ON) on d1-2b-bf16 (d1-2B-BF16.gguf); settings cpu-t4-fa-on: -t 4 -c 4096 -b 4096 -ub 4096 -fa on -np 1",
+  "temperature": 1.3373980522155762,
+  "cases": [
+    {
+      "case": "hf-card-three",
+      "status": 200,
+      "seconds": 4.71,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "refund": {
+            "type": "noul",
+            "noul": 0.9978645948236333
+          },
+          "team": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.6177868652469873,
+              "shipping": 0.30581682575100183,
+              "technical": 0.07639630900201073
+            },
+            "confidence": 0.6177868652469873
+          },
+          "urgency": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            },
+            "probabilities": {
+              "0": 0.19449657469846038,
+              "1": 0.6516932307510818,
+              "2": 0.1538101945504578
+            },
+            "confidence": 0.6516932307510818
+          }
+        },
+        "usage": {
+          "input_tokens": 161,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "refund": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 1.0970307915858513e-05,
+          "max_abs_gap": 0.0069050788879163605
+        },
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0007682441801999396,
+          "max_abs_gap": 0.004562377929687389,
+          "skipped_underflow": 0
+        },
+        "urgency": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.0004452244812671591,
+          "max_abs_gap": 0.0036249160766601562,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-27",
+      "status": 200,
+      "seconds": 4.9,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "department": {
+            "type": "choice",
+            "choice": "phones",
+            "probabilities": {
+              "appliances": 0.005274441638629429,
+              "automotive": 0.02244950785438319,
+              "baby": 0.001910841463989066,
+              "beauty": 0.0017112441264799424,
+              "books": 0.001975311790052248,
+              "cameras": 0.021586991848136276,
+              "clothing": 0.009930909413809553,
+              "computers": 0.01711463432876915,
+              "crafts": 0.0028254873944754564,
+              "electronics": 0.34569279178336526,
+              "furniture": 0.0018867158132591204,
+              "garden": 0.0018512606182864576,
+              "grocery": 0.0009696234712415427,
+              "hardware": 0.04980248875724791,
+              "health": 0.001757754564728369,
+              "jewelry": 0.0014364724770977797,
+              "kitchen": 0.001211962470447097,
+              "lighting": 0.001345507943434921,
+              "music": 0.001329934906269984,
+              "office": 0.004372376216961142,
+              "pets": 0.0026074606230502813,
+              "phones": 0.3887464526253988,
+              "shoes": 0.005289251070178191,
+              "sports": 0.07815607177129671,
+              "toys": 0.012693520041493987,
+              "travel": 0.012368164884377624,
+              "video_games": 0.003702820103140703
+            },
+            "confidence": 0.3887464526253988
+          }
+        },
+        "usage": {
+          "input_tokens": 168,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "department": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0006375186477101114,
+          "max_abs_gap": 0.025039196014404297,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-36",
+      "status": 200,
+      "seconds": 5.92,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "department": {
+            "type": "choice",
+            "choice": "watches",
+            "probabilities": {
+              "appliances": 0.0008925898061478741,
+              "automotive": 0.001284817584564175,
+              "baby": 0.0005185148887683083,
+              "beauty": 0.0024712931472489572,
+              "books": 0.001044653635237329,
+              "cameras": 0.0013006494982477036,
+              "clothing": 0.010765698301324319,
+              "computers": 0.0010552711766122914,
+              "crafts": 0.004973261830486051,
+              "electronics": 0.006833297729269529,
+              "furniture": 0.000793571665664224,
+              "garden": 0.0004584929089992004,
+              "grocery": 0.0006317398163836315,
+              "hardware": 0.0021352018722326288,
+              "health": 0.0011155617422757846,
+              "jewelry": 0.1357773858121354,
+              "kitchen": 0.000892574848767213,
+              "lighting": 0.0006247298530638589,
+              "music": 0.0005417167343499675,
+              "office": 0.0009719763790495487,
+              "pets": 0.0005685013709486465,
+              "phones": 0.0023596168750738685,
+              "shoes": 0.010601172064367243,
+              "sports": 0.0012105680897291627,
+              "toys": 0.0013249508432612372,
+              "travel": 0.0009026980578067741,
+              "video_games": 0.003645888442366004,
+              "bedding": 0.0006897876969969492,
+              "candy": 0.0005188275087255935,
+              "cleaning": 0.0011931196100868967,
+              "fabrics": 0.004330682750587135,
+              "luggage": 0.0007751183405488422,
+              "outdoor": 0.002453848094292929,
+              "party": 0.0012731041175434608,
+              "pharmacy": 0.004557136741433159,
+              "watches": 0.7885119801654041
+            },
+            "confidence": 0.7885119801654041
+          }
+        },
+        "usage": {
+          "input_tokens": 205,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "department": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0007991890125693679,
+          "max_abs_gap": 0.015515804290771484,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-ambiguous",
+      "status": 200,
+      "seconds": 2.46,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "team": {
+            "type": "choice",
+            "choice": "shipping",
+            "probabilities": {
+              "billing": 0.08279560199846452,
+              "shipping": 0.6716145302544646,
+              "technical": 0.24558986774707084
+            },
+            "confidence": 0.6716145302544646
+          }
+        },
+        "usage": {
+          "input_tokens": 76,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0006354336006955119,
+          "max_abs_gap": 0.0041713714599609375,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-card",
+      "status": 200,
+      "seconds": 1.91,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "team": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {
+              "billing": 0.6177868652469873,
+              "shipping": 0.30581682575100183,
+              "technical": 0.07639630900201073
+            },
+            "confidence": 0.6177868652469873
+          }
+        },
+        "usage": {
+          "input_tokens": 64,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0007682441801999396,
+          "max_abs_gap": 0.004562377929687389,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-key-fallback",
+      "status": 200,
+      "seconds": 2.29,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "route": {
+            "type": "choice",
+            "choice": "needs_human_review",
+            "probabilities": {
+              "needs_human_review": 0.7082576690328302,
+              "auto_close": 0.010570911676637729,
+              "escalate_to_tier_2": 0.23437058093583188,
+              "wait_for_customer": 0.046800838354700294
+            },
+            "confidence": 0.7082576690328302
+          }
+        },
+        "usage": {
+          "input_tokens": 77,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "route": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0017431247056587384,
+          "max_abs_gap": 0.014825820922851562,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-letter-keys",
+      "status": 200,
+      "seconds": 1.81,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "planet": {
+            "type": "choice",
+            "choice": "B",
+            "probabilities": {
+              "A": 0.001988279939362608,
+              "B": 0.8754727182056095,
+              "C": 0.0016349857956034523,
+              "D": 0.12090401605942458
+            },
+            "confidence": 0.8754727182056095
+          }
+        },
+        "usage": {
+          "input_tokens": 61,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "planet": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.002469589633480651,
+          "max_abs_gap": 0.031154632568359375,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-lower-keys",
+      "status": 200,
+      "seconds": 1.71,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "category": {
+            "type": "choice",
+            "choice": "x",
+            "probabilities": {
+              "x": 0.9935801641000674,
+              "y": 0.0043435929585753895,
+              "z": 0.0020762429413571414
+            },
+            "confidence": 0.9935801641000674
+          }
+        },
+        "usage": {
+          "input_tokens": 58,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "category": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 1.5892396361515647e-05,
+          "max_abs_gap": 0.004917144775390625,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-choice-one",
+      "status": 200,
+      "seconds": 1.39,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "queue": {
+            "type": "choice",
+            "choice": "general",
+            "probabilities": {
+              "general": 1.0
+            },
+            "confidence": 1.0
+          }
+        },
+        "usage": {
+          "input_tokens": 44,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "queue": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.0,
+          "max_abs_gap": 0.0,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-noul-card",
+      "status": 200,
+      "seconds": 1.3,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "refund": {
+            "type": "noul",
+            "noul": 0.9978645948236333
+          }
+        },
+        "usage": {
+          "input_tokens": 43,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "refund": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 1.0970307915858513e-05,
+          "max_abs_gap": 0.0069050788879163605
+        }
+      }
+    },
+    {
+      "case": "hf-noul-criteria-partial",
+      "status": 200,
+      "seconds": 1.51,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "legal": {
+            "type": "noul",
+            "noul": 0.48858197909953777
+          }
+        },
+        "usage": {
+          "input_tokens": 52,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "legal": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.002103879372659656,
+          "max_abs_gap": 0.011261940002441337
+        }
+      }
+    },
+    {
+      "case": "hf-noul-criteria",
+      "status": 200,
+      "seconds": 2.0,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "damaged": {
+            "type": "noul",
+            "noul": 0.04753834832750356
+          }
+        },
+        "usage": {
+          "input_tokens": 67,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "damaged": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 2.7428145875599275e-05,
+          "max_abs_gap": 0.0008115768432617188
+        }
+      }
+    },
+    {
+      "case": "hf-score-borderline",
+      "status": 200,
+      "seconds": 1.71,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "urgency": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            },
+            "probabilities": {
+              "0": 0.19717040408393227,
+              "1": 0.7419986499579098,
+              "2": 0.06083094595815799
+            },
+            "confidence": 0.7419986499579098
+          }
+        },
+        "usage": {
+          "input_tokens": 59,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "urgency": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.0011322700023610188,
+          "max_abs_gap": 0.009121894836425781,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-score-card",
+      "status": 200,
+      "seconds": 1.66,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "urgency": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "low",
+              "1": "medium",
+              "2": "high"
+            },
+            "probabilities": {
+              "0": 0.19449657469846038,
+              "1": 0.6516932307510818,
+              "2": 0.1538101945504578
+            },
+            "confidence": 0.6516932307510818
+          }
+        },
+        "usage": {
+          "input_tokens": 54,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "urgency": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.0004452244812671591,
+          "max_abs_gap": 0.0036249160766601562,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-score-ten",
+      "status": 200,
+      "seconds": 2.7,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "rating": {
+            "type": "score",
+            "score": 5.0,
+            "legend": {
+              "0": "terrible",
+              "1": "very bad",
+              "2": "bad",
+              "3": "poor",
+              "4": "mediocre",
+              "5": "fair",
+              "6": "good",
+              "7": "very good",
+              "8": "excellent",
+              "9": "perfect"
+            },
+            "probabilities": {
+              "0": 0.001293915141740764,
+              "1": 0.0027766821294935083,
+              "2": 0.017473229800988702,
+              "3": 0.10797637781934377,
+              "4": 0.3452531839300924,
+              "5": 0.46196768797416765,
+              "6": 0.05770722251759374,
+              "7": 0.003881203559385537,
+              "8": 0.0011284359507633666,
+              "9": 0.000542061176430441
+            },
+            "confidence": 0.46196768797416765
+          }
+        },
+        "usage": {
+          "input_tokens": 91,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "rating": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.0011385802889570251,
+          "max_abs_gap": 0.011201858520507812,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-score-two",
+      "status": 200,
+      "seconds": 1.52,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "risk": {
+            "type": "score",
+            "score": 1.0,
+            "legend": {
+              "0": "no risk",
+              "1": "risk"
+            },
+            "probabilities": {
+              "0": 0.06689129079701507,
+              "1": 0.9331087092029849
+            },
+            "confidence": 0.9331087092029849
+          }
+        },
+        "usage": {
+          "input_tokens": 53,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "risk": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.0004673894023495828,
+          "max_abs_gap": 0.010048389434814453,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-state-empty",
+      "status": 200,
+      "seconds": 0.9,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "enough": {
+            "type": "noul",
+            "noul": 0.32501125768953926
+          }
+        },
+        "usage": {
+          "input_tokens": 29,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "enough": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.0018791317256502404,
+          "max_abs_gap": 0.011438369750976896
+        }
+      }
+    },
+    {
+      "case": "hf-state-json-array",
+      "status": 200,
+      "seconds": 3.02,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "resolved": {
+            "type": "noul",
+            "noul": 0.20023874531330846
+          }
+        },
+        "usage": {
+          "input_tokens": 105,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "resolved": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.00048288431744022975,
+          "max_abs_gap": 0.004036903381347656
+        }
+      }
+    },
+    {
+      "case": "hf-state-json-object",
+      "status": 200,
+      "seconds": 6.7,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "need": {
+            "type": "choice",
+            "choice": "refund",
+            "probabilities": {
+              "refund": 0.9955204731533076,
+              "delivery": 0.0014376013966496963,
+              "account": 0.0030419254500426707
+            },
+            "confidence": 0.9955204731533076
+          }
+        },
+        "usage": {
+          "input_tokens": 234,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "need": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 4.5735686586168e-05,
+          "max_abs_gap": 0.01461172103881836,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-state-long",
+      "status": 200,
+      "seconds": 124.36,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "team": {
+            "type": "choice",
+            "choice": "shipping",
+            "probabilities": {
+              "billing": 0.219244439244701,
+              "shipping": 0.676057632880724,
+              "technical": 0.104697927874575
+            },
+            "confidence": 0.676057632880724
+          }
+        },
+        "usage": {
+          "input_tokens": 3605,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "team": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.000838318249615666,
+          "max_abs_gap": 0.006221771240234153,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-state-null",
+      "status": 200,
+      "seconds": 1.52,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "formality": {
+            "type": "score",
+            "score": 2.0,
+            "legend": {
+              "0": "casual",
+              "1": "neutral",
+              "2": "formal"
+            },
+            "probabilities": {
+              "0": 0.007147180020154342,
+              "1": 0.038820475056788296,
+              "2": 0.9540323449230574
+            },
+            "confidence": 0.9540323449230574
+          }
+        },
+        "usage": {
+          "input_tokens": 45,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "formality": {
+          "type": "score",
+          "same_answer": true,
+          "max_abs_p": 0.00013839229298689276,
+          "max_abs_gap": 0.00494384765625,
+          "skipped_underflow": 0
+        }
+      }
+    },
+    {
+      "case": "hf-state-special-token-key",
+      "status": 200,
+      "seconds": 2.0,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "injection": {
+            "type": "noul",
+            "noul": 0.6476784241620809
+          }
+        },
+        "usage": {
+          "input_tokens": 58,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "injection": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 0.002790459102957721,
+          "max_abs_gap": 0.016324996948241743
+        }
+      }
+    },
+    {
+      "case": "hf-state-special-tokens",
+      "status": 200,
+      "seconds": 2.38,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "injection": {
+            "type": "noul",
+            "noul": 0.8467764720282168
+          }
+        },
+        "usage": {
+          "input_tokens": 70,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "injection": {
+          "type": "noul",
+          "same_answer": true,
+          "max_abs_p": 6.854364982133987e-05,
+          "max_abs_gap": 0.000705718994140625
+        }
+      }
+    },
+    {
+      "case": "hf-state-unicode",
+      "status": 200,
+      "seconds": 2.51,
+      "body": {
+        "model": "target/decision-hf/gguf/d1-2B-BF16.gguf",
+        "answers": {
+          "language": {
+            "type": "choice",
+            "choice": "mixed",
+            "probabilities": {
+              "fr": 0.22451431233642036,
+              "ja": 0.013480607372728803,
+              "es": 0.08306704345334151,
+              "mixed": 0.6789380368375093
+            },
+            "confidence": 0.6789380368375093
+          }
+        },
+        "usage": {
+          "input_tokens": 75,
+          "output_tokens": 0
+        }
+      },
+      "same_usage": true,
+      "questions": {
+        "language": {
+          "type": "choice",
+          "same_answer": true,
+          "max_abs_p": 0.003103774446214791,
+          "max_abs_gap": 0.02213573455810547,
+          "skipped_underflow": 0
+        }
+      }
+    }
+  ]
+}

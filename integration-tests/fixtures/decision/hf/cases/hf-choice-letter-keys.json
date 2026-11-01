@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "hf-choice-letter-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Single upper-case letter keys: the keys are the codes.",
+  "covers": [
+    "choice-letter-keys"
+  ],
+  "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"The largest planet of the Solar System is a gas giant with a storm called the Great Red Spot.\", \"questions\": {\"planet\": {\"type\": \"choice\", \"instructions\": \"Which planet does the text describe?\", \"criteria\": {\"A\": \"Mars\", \"B\": \"Jupiter\", \"C\": \"Venus\", \"D\": \"Saturn\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

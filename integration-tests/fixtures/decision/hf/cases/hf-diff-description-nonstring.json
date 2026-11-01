@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-description-nonstring",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Object, boolean and number choice descriptions render as JSON",
+  "covers": [
+    "description-structured"
+  ],
+  "notes": "Choice descriptions that are an object, true and a number: the reference writes str() (True, single quotes), llama.cpp JSON (true, double quotes). Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice and my parcel never arrived. Please refund one charge.\", \"questions\": {\"action\": {\"type\": \"choice\", \"instructions\": \"What should the agent do?\", \"criteria\": {\"refund\": {\"action\": \"refund\", \"max_eur\": 100}, \"ignore\": true, \"escalate\": 3.5}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

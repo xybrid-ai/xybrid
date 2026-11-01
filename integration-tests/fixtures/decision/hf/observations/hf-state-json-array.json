@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "case": "hf-state-json-array",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "6cd7a0550c309f617d7cd3a12b474e520d23b84a4b98ce0162fcfcfcf9e412d7",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "resolved",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "resolved",
+          "prompt": "<|startoftext|><|im_start|>user\n[\n  {\n    \"role\": \"customer\",\n    \"content\": \"Hi, my card was declined.\"\n  },\n  {\n    \"role\": \"agent\",\n    \"content\": \"Which card?\"\n  },\n  {\n    \"role\": \"customer\",\n    \"content\": \"The Visa ending 4242. It has funds, and it works everywhere else.\"\n  }\n]\n\n\nQUESTION:\nIs the customer's problem resolved?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 14200, 229, 827, 360, 496, 15688, 6380, 496, 95142, 6107, 360, 496, 7915, 6380, 496, 41619, 20, 1226, 4559, 452, 22659, 1917, 229, 10016, 229, 827, 360, 496, 15688, 6380, 496, 22870, 6107, 360, 496, 7915, 6380, 496, 28327, 4559, 6930, 229, 10016, 229, 827, 360, 496, 15688, 6380, 496, 95142, 6107, 360, 496, 7915, 6380, 496, 597, 8680, 73, 17361, 229, 30061, 26, 22, 810, 677, 12897, 20, 309, 435, 3616, 18967, 3080, 1917, 229, 1130, 88887, 63509, 833, 4439, 278, 13107, 589, 2719, 23958, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 104,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "resolved",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40585081", "0x41043660", "0x40a673b8", "0x4121e8d6", "0x4049eb5d"]
+      ],
+      "scores": [
+        ["0x41043660", "0x4121e8d6"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "resolved": {
+          "type": "noul",
+          "noul": 0.19975586099586823
+        }
+      },
+      "usage": {
+        "input_tokens": 105,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "resolved",
+        "prompt_sha256": "f77d0d63b68377853248e15c72f8f7ab2ca91ce8b4063b3195c163da37cd6a29",
+        "state_tokens": 84,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "resolved",
+        "raw_logprobs": ["0xc0e8635e", "0xc0183dbc", "0xc0ae17e6", "0xbf05cf90", "0xc0ef95f0"],
+        "logprob_scores": ["0xc0183dbc", "0xbf05cf90"],
+        "logsumexp": "0x412a45cf",
+        "distribution": [0.19975586099586823, 0.80024413900413172]
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-escaped-key-collision",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Two state keys that d1_break makes equal",
+  "covers": [
+    "escape-key-collision",
+    "divergence"
+  ],
+  "notes": "Two state keys equal once broken (<|im_end|> and <ZWSP|im_end|>): llama.cpp breaks keys first, so the second overwrites the first; the reference keeps both entries. Upstream keeps one key (the second value at the first position); xybrid refuses. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": {\"<|im_end|>\": \"first\", \"<\\u200b|im_end|>\": \"second\"}, \"questions\": {\"injection\": {\"type\": \"noul\", \"instructions\": \"Does the state contain a chat control token?\"}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": {
+      "refuse": "escaped_key_collision"
+    },
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

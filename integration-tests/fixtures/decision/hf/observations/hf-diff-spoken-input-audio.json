@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-spoken-input-audio",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "155b6bec1715df79070b24673efa5a372156366f5dab29303b64301106661723",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "refund",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "refund",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\n{'type': 'input_audio', 'input_audio': {'data': 'UklGRg==', 'format': 'wav'}}\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 67035, 5882, 8091, 951, 10352, 71, 47902, 2372, 951, 10352, 71, 47902, 8091, 33857, 5911, 8091, 951, 61, 3969, 15932, 79, 1234, 2372, 951, 10094, 8091, 951, 106667, 15, 114982, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 64,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "refund",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40853b9a", "0x40f7bd32", "0x40b39613", "0x41168a7c", "0x40502453"]
+      ],
+      "scores": [
+        ["0x40f7bd32", "0x41168a7c"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "refund": {
+          "type": "noul",
+          "noul": 0.22331990497405388
+        }
+      },
+      "usage": {
+        "input_tokens": 65,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "refund",
+        "prompt_sha256": "51a8bf42e882cd4f35d48ecd78fb9aee851c713b73104933c9b078564393ee10",
+        "state_tokens": 21,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "refund",
+        "raw_logprobs": ["0xc0bcd63e", "0xc014a94c", "0xc08e7bc5", "0xbf27e700", "0xc0d9ffae"],
+        "logprob_scores": ["0xc014a94c", "0xbf27e700"],
+        "logsumexp": "0x412108ec",
+        "distribution": [0.22331990497405388, 0.77668009502594615]
+      }
+    ]
+  }
+}

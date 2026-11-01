@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "hf-state-unicode",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Accents, CJK and an emoji in a text state.",
+  "covers": [
+    "state-string"
+  ],
+  "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"Bonjour, je n'ai pas reçu mon colis 📦. 注文番号は 8841 です。 ¿Pueden ayudarme?\", \"questions\": {\"language\": {\"type\": \"choice\", \"instructions\": \"Which language is the message written in?\", \"criteria\": {\"fr\": \"French\", \"ja\": \"Japanese\", \"es\": \"Spanish\", \"mixed\": \"Several languages\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

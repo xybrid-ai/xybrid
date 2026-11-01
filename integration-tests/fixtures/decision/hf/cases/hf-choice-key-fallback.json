@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "hf-choice-key-fallback",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Falsy descriptions (null, empty string, false) print the key with underscores as spaces.",
+  "covers": [
+    "description-falsy",
+    "description-null"
+  ],
+  "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"Ticket 8812: the customer reports the same crash for the third time this week and asks to talk to a person.\", \"questions\": {\"route\": {\"type\": \"choice\", \"instructions\": \"What should happen to this ticket?\", \"criteria\": {\"needs_human_review\": null, \"auto_close\": \"\", \"escalate_to_tier_2\": \"Send it to the second support tier\", \"wait_for_customer\": false}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-instructions-object",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Object instructions render as compact JSON",
+  "covers": [
+    "instructions-structured"
+  ],
+  "notes": "Instructions that are a JSON object: the reference writes Python's str() of the dict, llama.cpp writes compact JSON. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-bf16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"WIN A FREE CRUISE!!! Click now to claim your prize.\", \"questions\": {\"spam\": {\"type\": \"noul\", \"instructions\": {\"task\": \"Is this message spam?\", \"language\": \"en\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

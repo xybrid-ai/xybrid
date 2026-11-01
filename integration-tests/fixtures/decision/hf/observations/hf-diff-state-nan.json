@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-state-nan",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "f2b24dc8fd7225ea98522f5df84b9150c1e4e80f6906952921193bf9817f3ec9",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "valid",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "valid",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"amount\": NaN,\n  \"limit\": Infinity\n}\n\n\nQUESTION:\nIs the amount a number?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 50008, 6380, 7647, 54, 920, 229, 496, 34935, 6380, 529, 58538, 207, 64024, 63509, 833, 4439, 278, 3184, 267, 1579, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 41,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "valid",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4088e661", "0x40ebc16c", "0x40e82e1d", "0x412d6874", "0x40a55c32"]
+      ],
+      "scores": [
+        ["0x40ebc16c", "0x412d6874"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "valid": {
+          "type": "noul",
+          "noul": 0.069456498627867028
+        }
+      },
+      "usage": {
+        "input_tokens": 42,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {
+      "json": {
+        "non_finite": ["NaN", "Infinity"]
+      }
+    },
+    "prepare": [
+      {
+        "question": "valid",
+        "prompt_sha256": "ffa470f4e8de137483de182a83a36ba21485c530d69c9101ce9c303352121f60",
+        "state_tokens": 22,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "valid",
+        "raw_logprobs": ["0xc0dac6e5", "0xc06fd7b4", "0xc076fe52", "0xbe8dc5e0", "0xc0be5114"],
+        "logprob_scores": ["0xc06fd7b4", "0xbe8dc5e0"],
+        "logsumexp": "0x4131d6a3",
+        "distribution": [0.069456498627867028, 0.93054350137213304]
+      }
+    ]
+  }
+}

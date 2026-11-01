@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "case": "hf-diff-noul-null-criteria",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "75d7850739bdb50ace2548735c108d06ab27a88f49dfe26a37cfeee6a223bad7",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "refund",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "refund",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nIs the customer asking for a refund?\nYes: None\nNo: None\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 4439, 278, 13107, 13564, 374, 267, 52966, 1283, 12447, 34, 10856, 207, 4547, 34, 10856, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 50,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "refund",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x41177d81", "0x41760c7d", "0x4009847d", "0x40f7aabd", "0x3fcbc6d7"]
+      ],
+      "scores": [
+        ["0x41760c7d", "0x40f7aabd"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "refund": {
+          "type": "noul",
+          "noul": 0.99670296553229754
+        }
+      },
+      "usage": {
+        "input_tokens": 51,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "refund",
+        "prompt_sha256": "546ef1ef163ba40793996903dde3a3ec68bdf766aae6b2623cec78158455ac7e",
+        "state_tokens": 21,
+        "select_tokens": ["yes", "Yes", "no", "No", "NO"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "refund",
+        "raw_logprobs": ["0xc0bd81e4", "0xbc47d800", "0xc153dd54", "0xc0f4d229", "0xc15cc598"],
+        "logprob_scores": ["0xbc47d800", "0xc0f4d229"],
+        "logsumexp": "0x41763e73",
+        "distribution": [0.99670296553229754, 0.0032970344677025277]
+      }
+    ]
+  }
+}

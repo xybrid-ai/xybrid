@@ -1,0 +1,145 @@
+{
+  "description": "The pinned LiquidAI/d1-2B snapshot that run_reference.py reads (contract artifact d1-2b-hf): every file, with its size and sha256. download.sh fetches each from resolve/<revision> and refuses a mismatch; run_reference.py checks them again before it loads anything. The small files were checked against the git blob ids the Hub lists for this revision, the two LFS files against its LFS sha256.",
+  "artifact": "d1-2b-hf",
+  "repo": "LiquidAI/d1-2B",
+  "revision": "10e7671d44e4b37700020b1eed3f594c5f2af0b4",
+  "license": "LFM Open License v1.0 (the pinned LICENSE file)",
+  "files": {
+    "LICENSE": {
+      "bytes": 10574,
+      "sha256": "4d28ca14dedc0b3d0fcc2b3339f0e79931faa33874f3d24f522183a8fc70068c"
+    },
+    "api.py": {
+      "bytes": 11734,
+      "sha256": "d57845b414b6766cd0410f0437080244320adebd4f9f031a03777acbec243d2a"
+    },
+    "attention.py": {
+      "bytes": 19450,
+      "sha256": "2608cc3f48bc3f906b64244322df81de5a18cd1faa8243680713289d5540fd2c"
+    },
+    "box.py": {
+      "bytes": 7747,
+      "sha256": "1a123160ce3c94c25074132407c41d553601a6d8cb7056c814397ad0718dd16f"
+    },
+    "calibration.json": {
+      "bytes": 4924,
+      "sha256": "e534464458f485d800fe6cc896ac241590bbc8cd54f5af08f7b3064b0d884d69"
+    },
+    "calibration.py": {
+      "bytes": 2867,
+      "sha256": "04243c3a2c1c727440184901dd60a4b4b04f72204dc577bd9f30b0ea3373d114"
+    },
+    "chat_template.jinja": {
+      "bytes": 12748,
+      "sha256": "66f3050983faa01907ac9897dcb01827b669917badfb512e610449a9eab32041"
+    },
+    "config.json": {
+      "bytes": 2903,
+      "sha256": "ffdc4c996152d23dbe8a2659a8c6aabe2992aa3fa3a41601dd0fca8771d6f332"
+    },
+    "configuration_lfm3.py": {
+      "bytes": 7136,
+      "sha256": "cd9e8499d5e764e058c7aa1bb62234a0592acdf086126bea36770eb9e45e48cf"
+    },
+    "configuration_lfm3_vl.py": {
+      "bytes": 9892,
+      "sha256": "d65e130693c7415a0b20b527e2c8df5322112cd8e7e4b3793348a2ddcd0343be"
+    },
+    "depthwise.py": {
+      "bytes": 3119,
+      "sha256": "0e55c1d97227ebdb144503f1726b93693ea1232d8e9a98e4c60c044fbfdb6ce1"
+    },
+    "grid.py": {
+      "bytes": 1714,
+      "sha256": "a5626b67094eda0a4a22d50e73346f3bc2f1b4b6eb6d95ba64333c6f71592eff"
+    },
+    "image_processing_lfm3_vl.py": {
+      "bytes": 13085,
+      "sha256": "4f319e51f80051bce417db52df568a94ff3ea9a4527e1e0844f8ed3e21934b4b"
+    },
+    "integrations_lfm3.py": {
+      "bytes": 8739,
+      "sha256": "4c443aab5945ef28298f7c4b58fb4c303dd9dec8fcb21adfca966b92e9caef00"
+    },
+    "json_spans.py": {
+      "bytes": 2060,
+      "sha256": "91c4a6d585a58dfe7e06e4430f4516956f8143523a3e2de870bc8dd92ba20375"
+    },
+    "lfm3.py": {
+      "bytes": 11046,
+      "sha256": "608348f7e2f963744c8b3940bcf93d29e4499643a1269a048b48bec0d6c47129"
+    },
+    "media.py": {
+      "bytes": 13064,
+      "sha256": "1b2c76ba9fa13e75bf8b66caa9294682e76fbf463fe56c13b4e1f47c96e81e8e"
+    },
+    "model.safetensors": {
+      "bytes": 3836417920,
+      "sha256": "b5e573687315e82ea80f4f7dd8d76b5cec3b6ee97e3509fd0493cfebb203719f"
+    },
+    "modeling_d1.py": {
+      "bytes": 3914,
+      "sha256": "214d3477cef38e7831f2b4fb0250ace7fb1aeac5b02066fcfd5cc030c541fd72"
+    },
+    "modeling_d1_lfm3_vl.py": {
+      "bytes": 369,
+      "sha256": "68d71f38188f07d11ad8af7cb557c8edc87536eb0db20870b7c5e6ae58fe5f30"
+    },
+    "modeling_lfm3.py": {
+      "bytes": 43385,
+      "sha256": "1617c42a7e3ccb97c810867536a8f6bb71f3543db00cafda9b3bd7a571ec72b9"
+    },
+    "modeling_lfm3_vl.py": {
+      "bytes": 46052,
+      "sha256": "c61dd6d90425d126de8402a9aa0a2a9d0241910100b719b8ab2bfee65e5e974f"
+    },
+    "native_lfm3.py": {
+      "bytes": 1268,
+      "sha256": "8c7e7533b406315546d7a4eaceb83c8a49bed4dac7cb29328a76fa9f972e8a19"
+    },
+    "native_lfm3_vl.py": {
+      "bytes": 1387,
+      "sha256": "90574b978c7138f36ea9970fff4fb691ad9ccd472580ae20c4110de090ed4b94"
+    },
+    "parsing.py": {
+      "bytes": 16157,
+      "sha256": "0f0a05e7f2eee037f2e5ce1fefc984ff34824e07e7999120d94563a82642b54a"
+    },
+    "pointer.py": {
+      "bytes": 7700,
+      "sha256": "53e7b403d5f9d6f24e18a3f08b4dd9e93fea6da1da7eaeea92d07a4700cfedb3"
+    },
+    "processing_lfm3_vl.py": {
+      "bytes": 13012,
+      "sha256": "f4198f935ff6474cb1f44d5bdf02248f800a11eb7fc782dc1a168889b0b53da8"
+    },
+    "processor_config.json": {
+      "bytes": 1254,
+      "sha256": "37396ef3370083a04381ef25f9e1b50dec184b8cdcf08cf718feb8944ad8f3bc"
+    },
+    "prompt.py": {
+      "bytes": 34780,
+      "sha256": "e9d40f98c36ab68b8e3c33fd00a77e58218460fdc88c96b5edeef793a260d20b"
+    },
+    "runner.py": {
+      "bytes": 22405,
+      "sha256": "ac195b19f60f985a6081ccecc1a5c9f7c9fbe6711e8916c0e9835aaaac0bc2a2"
+    },
+    "slots.py": {
+      "bytes": 2463,
+      "sha256": "67adea5fb377a79832827c43054b4ce94de0fa48f5ba0a39e6f2867b7e59f373"
+    },
+    "tokenizer.json": {
+      "bytes": 17908258,
+      "sha256": "a39eed58008cbcbc09e5b629b81338a654269c64cd13348aaa6090f4db75c7e7"
+    },
+    "tokenizer_config.json": {
+      "bytes": 623,
+      "sha256": "594a96e4caedd07536a595b48f5dc84655bd672b715b6ac891ca3d503d439f76"
+    },
+    "video_processing_lfm3_vl.py": {
+      "bytes": 18210,
+      "sha256": "597ca93c1df97f746166b93f3431edec4da6d938a1b3a60a9bf9900e54ab4e93"
+    }
+  }
+}

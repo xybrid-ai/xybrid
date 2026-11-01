@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "case": "hf-choice-card",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "744a84512333bc3e69e8c121ec890b90951283a271ba6473ce8400e0ae1efb3c",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "team",
+          "type": "choice",
+          "keys": ["billing", "shipping", "technical"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "team",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nWhich team should handle this?\n\nOptions:\nA Charges, refunds, invoices\nB Delivery and parcels\nC App or site faults\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 28327, 2909, 1252, 9435, 532, 64929, 13314, 833, 41, 120315, 20, 52966, 91, 20, 60326, 1363, 207, 42, 57615, 309, 18830, 1205, 207, 43, 4634, 432, 2974, 49521, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 63,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "team",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "billing",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "shipping",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "technical",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x412c9cf4", "0x40daf9e7", "0x411da3c2", "0x40bc3a0d", "0x40ffb140", "0x4084391d"]
+      ],
+      "scores": [
+        ["0x412c9cf4", "0x411da3c2", "0x40ffb140"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "team": {
+          "type": "choice",
+          "choice": "billing",
+          "confidence": 0.61722947875159517,
+          "probabilities": {
+            "billing": 0.61722947875159517,
+            "shipping": 0.30658506993120177,
+            "technical": 0.07618545131720296
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 64,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "team",
+        "prompt_sha256": "35b055c6bd11b25b2d1d60371568ab96b178c5ce1a5a5ca290656410e6d274ae",
+        "state_tokens": 21,
+        "select_tokens": ["A", "ĠA", "B", "ĠB", "C", "ĠC"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "team",
+        "raw_logprobs": ["0xbf152b60", "0xc090e56d", "0xbfc25f40", "0xc0afa547", "0xc0585c28", "0xc0e7a637"],
+        "logprob_scores": ["0xbf152b60", "0xbfc25f40", "0xc0585c28"],
+        "logsumexp": "0x4135efaa",
+        "distribution": [0.61722947875159517, 0.30658506993120177, 0.07618545131720296]
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+# decision_hf environment: the LiquidAI/d1-2B reference runner (lock.sh locks it).
+# The model card asks for transformers>=5.19; 5.19.0 is the version the pinned
+# config.json records, and it ships no LFM3 classes, so the snapshot's own
+# vendored copies run (run_reference.py refuses otherwise).
+huggingface-hub==1.32.0
+numpy==2.4.6
+safetensors==0.8.0
+tokenizers==0.23.2
+torch==2.14.0
+# The vendored LFM3-VL processors import torchvision at module level, so text
+# runs need it too; 0.29.0 is the release built against torch 2.14.0.
+torchvision==0.29.0
+transformers==5.19.0

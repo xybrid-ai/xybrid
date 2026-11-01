@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "case": "hf-score-ten",
+  "source": "hf-reference",
+  "artifact": "d1-2b-hf",
+  "settings": "hf-cpu-f32-t1",
+  "request_text_sha256": "c3be4fbb92b554bf0cae4f6a397b34152c842bd0e4ce0bc0c4678d6d141b2772",
+  "hf": {
+    "parse": {
+      "questions": [
+        {
+          "id": "rating",
+          "type": "score",
+          "keys": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "rating",
+          "prompt": "<|startoftext|><|im_start|>user\nThe hotel was clean and the staff friendly, but the room was tiny and the breakfast was cold. Decent value for one night.\n\n\nQUESTION:\nHow positive is this review?\n\n0 terrible\n1 very bad\n2 bad\n3 poor\n4 mediocre\n5 fair\n6 good\n7 very good\n8 excellent\n9 perfect\n\nReply with a single digit 0-9 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 597, 14268, 452, 4657, 309, 278, 6456, 16243, 20, 702, 278, 4861, 452, 12464, 309, 278, 22693, 452, 6206, 22, 1015, 1132, 2035, 374, 734, 4414, 64673, 63509, 833, 3522, 4447, 355, 532, 3701, 64929, 24, 22896, 207, 25, 1442, 5162, 207, 26, 5162, 207, 27, 4833, 207, 28, 10847, 465, 281, 207, 29, 6904, 207, 30, 1683, 207, 31, 1442, 1683, 207, 32, 9490, 207, 33, 5946, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 33, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 90,
+          "select": [24, 25, 26, 27, 28, 29, 30, 31, 32, 33]
+        }
+      ],
+      "answers": [
+        {
+          "question": "rating",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            },
+            {
+              "key": "4",
+              "code": "4",
+              "range": [4, 5]
+            },
+            {
+              "key": "5",
+              "code": "5",
+              "range": [5, 6]
+            },
+            {
+              "key": "6",
+              "code": "6",
+              "range": [6, 7]
+            },
+            {
+              "key": "7",
+              "code": "7",
+              "range": [7, 8]
+            },
+            {
+              "key": "8",
+              "code": "8",
+              "range": [8, 9]
+            },
+            {
+              "key": "9",
+              "code": "9",
+              "range": [9, 10]
+            }
+          ],
+          "temperature": "1.337398453966105",
+          "temperature_f32": "0x3fab2fdf"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x407f9138", "0x40a0867c", "0x40ef37ee", "0x411eb01a", "0x4137964c", "0x413db742", "0x4111068e", "0x40aeac93", "0x4073c1f5", "0x40353ae2"]
+      ],
+      "scores": [
+        ["0x407f9138", "0x40a0867c", "0x40ef37ee", "0x411eb01a", "0x4137964c", "0x413db742", "0x4111068e", "0x40aeac93", "0x4073c1f5", "0x40353ae2"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "rating": {
+          "type": "score",
+          "score": 5.0,
+          "confidence": 0.46126951534719224,
+          "probabilities": {
+            "0": 0.0012890535175111985,
+            "1": 0.0027703101973581582,
+            "2": 0.017421826252257057,
+            "3": 0.1081985557652351,
+            "4": 0.34639176421904944,
+            "5": 0.46126951534719224,
+            "6": 0.05713944374962722,
+            "7": 0.0038557423948586472,
+            "8": 0.0011229226365843227,
+            "9": 0.00054086592032667443
+          },
+          "legend": {
+            "0": "terrible",
+            "1": "very bad",
+            "2": "bad",
+            "3": "poor",
+            "4": "mediocre",
+            "5": "fair",
+            "6": "good",
+            "7": "very good",
+            "8": "excellent",
+            "9": "perfect"
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 91,
+        "output_tokens": 0
+      }
+    }
+  },
+  "detail": {
+    "parse": {},
+    "prepare": [
+      {
+        "question": "rating",
+        "prompt_sha256": "b538f27fc42817eef8b973957449208208260fa992ca90c766cb2fdeedfa87f4",
+        "state_tokens": 33,
+        "select_tokens": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+        "temperature_f64": 1.337398453966105
+      }
+    ],
+    "evaluate": [
+      {
+        "question": "rating",
+        "raw_logprobs": ["0xc10871c2", "0xc0f025a4", "0xc0a17432", "0xc02697d8", "0xbf85fe20", "0xbf29ece0", "0xc05d3e08", "0xc0e1ff8d", "0xc10b6593", "0xc11b0758"],
+        "logprob_scores": ["0xc10871c2", "0xc0f025a4", "0xc0a17432", "0xc02697d8", "0xbf85fe20", "0xbf29ece0", "0xc05d3e08", "0xc0e1ff8d", "0xc10b6593", "0xc11b0758"],
+        "logsumexp": "0x41485610",
+        "distribution": [0.0012890535175111985, 0.0027703101973581582, 0.017421826252257057, 0.1081985557652351, 0.34639176421904944, 0.46126951534719224, 0.05713944374962722, 0.0038557423948586472, 0.0011229226365843227, 0.00054086592032667443]
+      }
+    ]
+  }
+}
