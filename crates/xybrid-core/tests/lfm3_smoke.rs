@@ -204,6 +204,10 @@ fn lfm3_calls_a_tool_and_answers_from_its_result() {
 
     assert!(tool_calls(&answer).is_empty(), "{:?}", text(&answer));
     assert!(text(&answer).contains("21"), "{:?}", text(&answer));
+    assert_eq!(
+        answer.metadata.get("finish_reason").map(String::as_str),
+        Some("stop")
+    );
 }
 
 /// The same tool turn with thinking on, as the registry entries ship: the
@@ -270,6 +274,10 @@ fn lfm3_calls_a_tool_with_thinking_on() {
     assert!(tool_calls(&answer).is_empty(), "{:?}", text(&answer));
     assert!(text(&answer).contains("21"), "{:?}", text(&answer));
     assert!(!text(&answer).contains("think>"), "{:?}", text(&answer));
+    assert_eq!(
+        answer.metadata.get("finish_reason").map(String::as_str),
+        Some("stop")
+    );
 }
 
 /// Runs the weather call turn with thinking on and returns the continuation
@@ -365,7 +373,9 @@ fn lfm3_streams_a_tool_continuation_with_thinking_on() {
 }
 
 /// A continuation whose budget runs out mid-thought has no answer yet: the
-/// partial reasoning is reasoning, batch or streamed, never `text`.
+/// partial reasoning is reasoning, batch or streamed, never `text`. The
+/// stream shows nothing, but still ends with the terminal token that reports
+/// `length`.
 #[test]
 fn lfm3_tool_continuation_out_of_budget_mid_thought_has_no_answer() {
     let Some(model_dir) = model_fixtures::model_or_skip(TEXT_MODEL_ID) else {
@@ -428,6 +438,15 @@ fn lfm3_tool_continuation_out_of_budget_mid_thought_has_no_answer() {
         );
     }
     assert!(streamed.trim().is_empty(), "{streamed:?}");
+    // The filter suppressed every delta; the terminal token is the only place
+    // a callback learns the turn ran out of budget.
+    assert_eq!(
+        tokens
+            .last()
+            .and_then(|token| token.finish_reason.as_deref()),
+        Some("length"),
+        "{tokens:?}"
+    );
 }
 
 /// LFM3 writes argument values as text; the schema types them.
