@@ -1070,6 +1070,80 @@ unsafe extern "C" {
     pub fn llama_model_has_recurrent_state_c(model: *const ::std::os::raw::c_void) -> bool;
 }
 unsafe extern "C" {
+    pub fn llama_model_has_encoder_c(model: *const ::std::os::raw::c_void) -> bool;
+}
+unsafe extern "C" {
+    pub fn llama_model_meta_count_c(model: *const ::std::os::raw::c_void) -> i32;
+}
+unsafe extern "C" {
+    pub fn llama_model_meta_key_by_index_c(
+        model: *const ::std::os::raw::c_void,
+        i: i32,
+        buf: *mut ::std::os::raw::c_char,
+        buf_size: usize,
+    ) -> i32;
+}
+unsafe extern "C" {
+    pub fn llama_model_meta_val_str_by_index_c(
+        model: *const ::std::os::raw::c_void,
+        i: i32,
+        buf: *mut ::std::os::raw::c_char,
+        buf_size: usize,
+    ) -> i32;
+}
+unsafe extern "C" {
+    pub fn llama_model_meta_val_str_c(
+        model: *const ::std::os::raw::c_void,
+        key: *const ::std::os::raw::c_char,
+        buf: *mut ::std::os::raw::c_char,
+        buf_size: usize,
+    ) -> i32;
+}
+unsafe extern "C" {
+    pub fn llama_model_chat_template_named_c(
+        model: *const ::std::os::raw::c_void,
+        name: *const ::std::os::raw::c_char,
+    ) -> *const ::std::os::raw::c_char;
+}
+unsafe extern "C" {
+    pub fn llama_vocab_get_attr_c(model: *const ::std::os::raw::c_void, token: i32) -> i32;
+}
+unsafe extern "C" {
+    pub fn llama_vocab_get_text_c(
+        model: *const ::std::os::raw::c_void,
+        token: i32,
+    ) -> *const ::std::os::raw::c_char;
+}
+unsafe extern "C" {
+    pub fn llama_new_readout_context_c(
+        model: *mut ::std::os::raw::c_void,
+        n_ctx: u32,
+        n_batch: u32,
+        n_ubatch: u32,
+        n_outputs_max: u32,
+        n_threads: ::std::os::raw::c_int,
+        flash_attn: bool,
+    ) -> *mut ::std::os::raw::c_void;
+}
+unsafe extern "C" {
+    pub fn llama_n_batch_c(ctx: *const ::std::os::raw::c_void) -> u32;
+}
+unsafe extern "C" {
+    pub fn llama_n_ubatch_c(ctx: *const ::std::os::raw::c_void) -> u32;
+}
+unsafe extern "C" {
+    pub fn llama_n_seq_max_c(ctx: *const ::std::os::raw::c_void) -> u32;
+}
+unsafe extern "C" {
+    pub fn llama_context_has_memory_c(ctx: *const ::std::os::raw::c_void) -> bool;
+}
+unsafe extern "C" {
+    pub fn llama_get_causal_attn_c(ctx: *const ::std::os::raw::c_void) -> bool;
+}
+unsafe extern "C" {
+    pub fn llama_get_logits_ith_c(ctx: *mut ::std::os::raw::c_void, i: i32) -> *mut f32;
+}
+unsafe extern "C" {
     pub fn llama_decode_c(
         ctx: *mut ::std::os::raw::c_void,
         batch: *const llama_batch,

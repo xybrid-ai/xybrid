@@ -114,6 +114,59 @@ int  llama_n_vocab_c(const XYBRID_LLAMA_MODEL* model);
 int  llama_n_ctx_c(const XYBRID_LLAMA_CONTEXT* ctx);
 bool llama_model_is_recurrent_c(const XYBRID_LLAMA_MODEL* model);
 bool llama_model_has_recurrent_state_c(const XYBRID_LLAMA_MODEL* model);
+bool llama_model_has_encoder_c(const XYBRID_LLAMA_MODEL* model);
+
+/* The GGUF metadata llama.cpp loaded with the model: every scalar key, its
+   value written as a string (floats through std::to_string, so with six
+   decimals). Array-valued keys are not visible. The accessors return the
+   length of the whole value or key, excluding the terminating NUL, and write
+   at most buf_size - 1 bytes of it plus a NUL; -1 when the key or index does
+   not exist. buf may be NULL when buf_size is 0, to probe the length. */
+int32_t llama_model_meta_count_c(const XYBRID_LLAMA_MODEL* model);
+int32_t llama_model_meta_key_by_index_c(
+    const XYBRID_LLAMA_MODEL* model, int32_t i, char* buf, size_t buf_size);
+int32_t llama_model_meta_val_str_by_index_c(
+    const XYBRID_LLAMA_MODEL* model, int32_t i, char* buf, size_t buf_size);
+int32_t llama_model_meta_val_str_c(
+    const XYBRID_LLAMA_MODEL* model, const char* key, char* buf, size_t buf_size);
+
+/* The chat template stored as `tokenizer.chat_template.<name>`, or NULL when
+   the model has none by that name. Owned by the model. */
+const char* llama_model_chat_template_named_c(const XYBRID_LLAMA_MODEL* model, const char* name);
+
+/* A vocabulary entry's attributes (a LLAMA_TOKEN_ATTR_* bit set) and stored
+   text, owned by the model. An id outside the vocabulary gets -1 and NULL. */
+int32_t llama_vocab_get_attr_c(const XYBRID_LLAMA_MODEL* model, int32_t token);
+const char* llama_vocab_get_text_c(const XYBRID_LLAMA_MODEL* model, int32_t token);
+
+/* A context for one-shot readouts: one sequence, the given context, batch and
+   microbatch sizes, at most n_outputs_max outputs (0 = n_batch, llama.cpp's
+   default) and one per sequence, no embeddings, and the model's own attention
+   type. Returns NULL on failure. Whether it has memory is the model's choice:
+   check it. */
+XYBRID_LLAMA_CONTEXT* llama_new_readout_context_c(
+    XYBRID_LLAMA_MODEL* model,
+    uint32_t n_ctx,
+    uint32_t n_batch,
+    uint32_t n_ubatch,
+    uint32_t n_outputs_max,
+    int n_threads,
+    bool flash_attn);
+
+/* The sizes and attention a context actually got, which can differ from the
+   ones requested. has_memory is false when llama.cpp runs the model without
+   a KV cache or recurrent state (it then decodes with the encoder). */
+uint32_t llama_n_batch_c(const XYBRID_LLAMA_CONTEXT* ctx);
+uint32_t llama_n_ubatch_c(const XYBRID_LLAMA_CONTEXT* ctx);
+uint32_t llama_n_seq_max_c(const XYBRID_LLAMA_CONTEXT* ctx);
+bool llama_context_has_memory_c(const XYBRID_LLAMA_CONTEXT* ctx);
+bool llama_get_causal_attn_c(const XYBRID_LLAMA_CONTEXT* ctx);
+
+/* The logits row of batch entry i from the last decode, owned by the context
+   until its next decode. Only pass an entry the last successful decode
+   flagged for output: for any other, llama.cpp returns NULL when built with
+   NDEBUG and aborts the process when built without it. */
+float* llama_get_logits_ith_c(XYBRID_LLAMA_CONTEXT* ctx, int32_t i);
 
 /* Low-level generation primitives (carried in wrapper.cpp's exports
    even though xybrid-llama drives generation via the higher-level

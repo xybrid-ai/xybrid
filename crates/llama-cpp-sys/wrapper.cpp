@@ -384,6 +384,63 @@ llama_context* llama_new_context_with_model_c(
     return llama_init_from_model(model, params);
 }
 
+// A context for one-shot readouts, every size explicit. Decision models such
+// as LFM3 d1 run without memory, as encoders, and need the whole prompt in one
+// microbatch. n_outputs_max matters at their scale: llama.cpp reserves the
+// prompt graph for that many output rows, each a full vocabulary of logits,
+// and 0 means n_batch of them. The attention type is left to the model, and
+// whether the context gets memory is the model's choice too, so the caller
+// checks both on the result.
+llama_context* llama_new_readout_context_c(
+    llama_model* model,
+    uint32_t n_ctx,
+    uint32_t n_batch,
+    uint32_t n_ubatch,
+    uint32_t n_outputs_max,
+    int n_threads,
+    bool flash_attn
+) {
+    if (!model || n_ctx == 0 || n_batch == 0 || n_ubatch == 0) {
+        return nullptr;
+    }
+    llama_context_params params = llama_context_default_params();
+    params.n_ctx = n_ctx;
+    params.n_batch = n_batch;
+    params.n_ubatch = n_ubatch;
+    params.n_seq_max = 1;
+    params.n_outputs_max = n_outputs_max;
+    params.n_outputs_max_per_seq = 1;
+    params.embeddings = false;
+    params.attention_type = LLAMA_ATTENTION_TYPE_UNSPECIFIED;
+    params.flash_attn_type = flash_attn ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    int actual_threads = n_threads > 0 ? n_threads : std::thread::hardware_concurrency();
+    if (actual_threads == 0) actual_threads = 4;  // Fallback if detection fails
+    params.n_threads = static_cast<int32_t>(actual_threads);
+    params.n_threads_batch = static_cast<int32_t>(actual_threads);
+
+    return llama_init_from_model(model, params);
+}
+
+uint32_t llama_n_batch_c(const llama_context* ctx) {
+    return ctx ? llama_n_batch(ctx) : 0;
+}
+
+uint32_t llama_n_ubatch_c(const llama_context* ctx) {
+    return ctx ? llama_n_ubatch(ctx) : 0;
+}
+
+uint32_t llama_n_seq_max_c(const llama_context* ctx) {
+    return ctx ? llama_n_seq_max(ctx) : 0;
+}
+
+bool llama_context_has_memory_c(const llama_context* ctx) {
+    return ctx && llama_get_memory(ctx) != nullptr;
+}
+
+bool llama_get_causal_attn_c(const llama_context* ctx) {
+    return ctx && llama_get_causal_attn(ctx);
+}
+
 void llama_free_c(llama_context* ctx) {
     if (ctx) {
         llama_free(ctx);
@@ -605,6 +662,93 @@ bool llama_model_has_recurrent_state_c(const llama_model* model) {
     return llama_model_is_recurrent(model) || llama_model_is_hybrid(model);
 }
 
+// Encoder-decoder models (T5). llama.cpp ignores a context's n_outputs_max
+// for them and reserves n_batch outputs instead.
+bool llama_model_has_encoder_c(const llama_model* model) {
+    if (!model) {
+        return false;
+    }
+    return llama_model_has_encoder(model);
+}
+
+// =============================================================================
+// GGUF Metadata
+// =============================================================================
+
+// llama.cpp keeps every scalar GGUF key of the model as a string (arrays are
+// skipped at load) and these read that map. Each returns the length of the
+// whole string, like snprintf, so a call with buf_size 0 probes the length.
+
+int32_t llama_model_meta_count_c(const llama_model* model) {
+    if (!model) {
+        return -1;
+    }
+    return llama_model_meta_count(model);
+}
+
+int32_t llama_model_meta_key_by_index_c(const llama_model* model, int32_t i, char* buf, size_t buf_size) {
+    if (!model || (!buf && buf_size > 0)) {
+        return -1;
+    }
+    return llama_model_meta_key_by_index(model, i, buf, buf_size);
+}
+
+int32_t llama_model_meta_val_str_by_index_c(const llama_model* model, int32_t i, char* buf, size_t buf_size) {
+    if (!model || (!buf && buf_size > 0)) {
+        return -1;
+    }
+    return llama_model_meta_val_str_by_index(model, i, buf, buf_size);
+}
+
+int32_t llama_model_meta_val_str_c(const llama_model* model, const char* key, char* buf, size_t buf_size) {
+    if (!model || !key || (!buf && buf_size > 0)) {
+        return -1;
+    }
+    return llama_model_meta_val_str(model, key, buf, buf_size);
+}
+
+// A named template such as "systemone", stored as
+// `tokenizer.chat_template.<name>`. Unlike the default template, a named one
+// gets no built-in fallback from llama.cpp.
+const char* llama_model_chat_template_named_c(const llama_model* model, const char* name) {
+    if (!model || !name) {
+        return nullptr;
+    }
+    return llama_model_chat_template(model, name);
+}
+
+// =============================================================================
+// Vocabulary Entries
+// =============================================================================
+
+// llama.cpp indexes its token table with .at(): an id outside the vocabulary
+// would throw through this C boundary and terminate the process.
+static bool vocab_has_token(const llama_vocab* vocab, int32_t token) {
+    return token >= 0 && token < llama_vocab_n_tokens(vocab);
+}
+
+int32_t llama_vocab_get_attr_c(const llama_model* model, int32_t token) {
+    if (!model) {
+        return -1;
+    }
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+    if (!vocab_has_token(vocab, token)) {
+        return -1;
+    }
+    return static_cast<int32_t>(llama_vocab_get_attr(vocab, token));
+}
+
+const char* llama_vocab_get_text_c(const llama_model* model, int32_t token) {
+    if (!model) {
+        return nullptr;
+    }
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+    if (!vocab_has_token(vocab, token)) {
+        return nullptr;
+    }
+    return llama_vocab_get_text(vocab, token);
+}
+
 // =============================================================================
 // Generation (low-level)
 // =============================================================================
@@ -615,6 +759,15 @@ int llama_decode_c(llama_context* ctx, const llama_batch* batch) {
 
 float* llama_get_logits_c(llama_context* ctx) {
     return llama_get_logits(ctx);
+}
+
+// The caller passes only an entry its last successful decode flagged for
+// output: llama.cpp aborts on any other one in builds without NDEBUG.
+float* llama_get_logits_ith_c(llama_context* ctx, int32_t i) {
+    if (!ctx) {
+        return nullptr;
+    }
+    return llama_get_logits_ith(ctx, i);
 }
 
 // =============================================================================
