@@ -330,6 +330,10 @@ know:
 | `max_options` | integer | no | `255` | Most options of a choice question, and levels of a score question; from 1 to 255, llama.cpp's ceiling for LFM3 d1 |
 | `max_total_tokens` | integer | no | `16384` | Most tokens one request may evaluate across all its readouts; from `token_budget` to 131,072 |
 
+The metadata declares no `vision_encoder` (or any other media companion): the
+`lfm3-d1/text/v1` profile reads no media, and decision media support will come
+with its own protocol. A load refuses such metadata before reading the GGUF.
+
 The budget and limits are provisional. They come from CPU measurements of d1-2B
 (Q4_K_M, four threads: 4,096 tokens take about 0.6 GiB of compute buffer and
 2.3 GiB at peak, 8,192 tokens about 3.0 GiB at peak) and will change once mobile

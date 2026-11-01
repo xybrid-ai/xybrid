@@ -657,6 +657,28 @@ fn an_invalid_spec_is_refused_before_the_gguf_is_read() {
     }
 }
 
+/// The decision profiles read no media, so a media companion is refused
+/// with the spec, before anything is read, and the message names no file.
+#[test]
+fn a_media_companion_on_a_decision_bundle_is_refused_before_the_gguf_is_read() {
+    let mut metadata = decision();
+    metadata.files.push("mmproj.gguf".to_string());
+    metadata.vision_encoder = serde_json::from_value(serde_json::json!({
+        "file": "mmproj.gguf", "preprocessing_preset": "siglip", "image_size": 512,
+    }))
+    .unwrap();
+    let empty = tempfile::tempdir().unwrap();
+    assert_eq!(
+        invalid_input(admit_gguf(&metadata, empty.path())),
+        "model 'bundle-model': a GgufDecision scorer reads no media, so it takes no \
+         vision_encoder block"
+    );
+
+    metadata.vision_encoder = None;
+    let dir = model_dir(&d1_builder().build());
+    admitted(admit_gguf(&metadata, dir.path()).unwrap());
+}
+
 #[test]
 fn a_missing_gguf_is_an_io_error_naming_the_model() {
     let empty = tempfile::tempdir().unwrap();

@@ -640,6 +640,36 @@ mod tests {
         }
     }
 
+    /// The decision profiles read no media: a GgufDecision bundle declares
+    /// no vision encoder, and the refusal names no file.
+    #[test]
+    fn a_gguf_decision_bundle_takes_no_media_companion() {
+        use crate::execution::template::ModelMetadata;
+
+        let mut metadata: ModelMetadata = serde_json::from_value(serde_json::json!({
+            "model_id": "d1",
+            "version": "1.0",
+            "execution_template": {
+                "type": "ChoiceScorer",
+                "scorer": serde_json::from_str::<serde_json::Value>(D1_SPEC).unwrap(),
+            },
+            "files": ["d1-2B-Q4_K_M.gguf", "mmproj-d1-2B-Q8_0.gguf"],
+        }))
+        .unwrap();
+        metadata.validate().unwrap();
+
+        metadata.vision_encoder = serde_json::from_value(serde_json::json!({
+            "file": "mmproj-d1-2B-Q8_0.gguf",
+            "preprocessing_preset": "siglip",
+            "image_size": 512,
+        }))
+        .unwrap();
+        assert_eq!(
+            metadata.validate().unwrap_err(),
+            "a GgufDecision scorer reads no media, so it takes no vision_encoder block"
+        );
+    }
+
     /// The telemetry backend id follows the scorer kind, whatever the hint.
     #[test]
     fn each_scorer_kind_reports_its_runtime() {

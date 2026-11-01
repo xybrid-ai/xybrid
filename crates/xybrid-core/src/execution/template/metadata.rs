@@ -675,6 +675,21 @@ impl ModelMetadata {
             );
         }
 
+        // The decision profiles read no media yet; one that does comes with
+        // its own protocol, not a companion bolted onto this one.
+        if matches!(
+            self.execution_template,
+            ExecutionTemplate::ChoiceScorer {
+                scorer: ChoiceScorerSpec::GgufDecision(_)
+            }
+        ) && self.vision_encoder.is_some()
+        {
+            return Err(
+                "a GgufDecision scorer reads no media, so it takes no vision_encoder block"
+                    .to_string(),
+            );
+        }
+
         if let Some(vision_encoder) = &self.vision_encoder {
             if !self.files.iter().any(|file| file == &vision_encoder.file) {
                 return Err(format!(

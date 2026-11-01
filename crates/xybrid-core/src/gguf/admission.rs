@@ -17,6 +17,9 @@
 //!   whose protocol no profile in this build admits;
 //! - a `GgufDecision` scorer whose `protocol` differs from the GGUF's
 //!   decision type: the protocol is an assertion, never an override;
+//! - a `GgufDecision` scorer with a media companion (a `vision_encoder`
+//!   block): the decision profiles read no media, and one that does comes
+//!   with its own protocol;
 //! - a header that does not read or classify completely, which is an error
 //!   and never taken for an ordinary model.
 //!
@@ -175,8 +178,9 @@ impl fmt::Debug for AdmittedDecisionModel {
 ///
 /// Every load route calls it (sidecars, bundles and cached models,
 /// standalone files, Hugging Face downloads with generated metadata) before
-/// any context is allocated. A `GgufDecision` spec is validated first,
-/// without reading anything. Reading the header reads only the header (8 MB
+/// any context is allocated. A `GgufDecision` spec and its metadata
+/// ([`ModelMetadata::validate`]) are validated first, without reading
+/// anything. Reading the header reads only the header (8 MB
 /// for d1-2B's 128,000-token vocabulary), within
 /// [`GgufLimits`](super::GgufLimits)' default ceiling.
 ///
@@ -184,9 +188,10 @@ impl fmt::Debug for AdmittedDecisionModel {
 ///
 /// - [`AdapterError::IOError`] when the file cannot be read, or changes
 ///   while its header is read;
-/// - [`AdapterError::InvalidInput`] for an invalid `GgufDecision` spec, a
-///   header that does not read or classify completely, and a `GgufDecision`
-///   scorer whose protocol differs from the GGUF's decision type;
+/// - [`AdapterError::InvalidInput`] for an invalid `GgufDecision` spec or
+///   metadata (a `vision_encoder` block included), a header that does not
+///   read or classify completely, and a `GgufDecision` scorer whose protocol
+///   differs from the GGUF's decision type;
 /// - [`AdapterError::UnsupportedModelCapability`] for a decision GGUF
 ///   declared as anything but a `GgufDecision` scorer, and for a
 ///   `GgufDecision` scorer on a GGUF that is not a decision model or whose
@@ -204,6 +209,10 @@ pub fn admit_gguf(
         ExecutionTemplate::ChoiceScorer { scorer } => match scorer {
             ChoiceScorerSpec::GgufDecision(spec) => {
                 validate_scorer_spec(scorer)?;
+                // Cross-field rules, a media companion's refusal among them.
+                metadata.validate().map_err(|reason| {
+                    AdapterError::InvalidInput(format!("model '{model_id}': {reason}"))
+                })?;
                 (spec.model_file.as_str(), Some(spec))
             }
             // An ONNX scorer reads no GGUF.
