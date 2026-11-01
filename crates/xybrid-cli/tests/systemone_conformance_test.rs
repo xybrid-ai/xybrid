@@ -4,41 +4,48 @@
 //! - **Parse**: every case's `xybrid.parse` expectation holds. `match`: the
 //!   request parses, its questions are `upstream.parse.questions` (ids,
 //!   types, keys, in order), and its content equals what the whole request
-//!   reads as through `OrderedJson::parse` (where the request is shallow
-//!   enough to be read whole). `{"refuse": kind}`: the request is refused
-//!   with that kind, and the message quotes none of its strings.
+//!   reads as through `OrderedJson::parse`. `{"refuse": kind}`: the request
+//!   is refused with that kind, and the message quotes none of its strings.
 //!   `not_reached`: an earlier stage (load) refuses, and the request itself
 //!   parses.
 //! - **Response**: for every case whose `xybrid.finalize` is `match`, the
 //!   answers upstream computed, rebuilt as `Decisions`, are written as
 //!   exactly `upstream.finalize`'s answers and usage, value for value.
 //!
-//! Case files are read with `OrderedJson::parse`, which reads floats
-//! correctly rounded, so each 17-digit f64 comes back exact (serde_json's
-//! default float parser does not promise that).
+//! Case files and requests are read with `OrderedJson::parse`, which reads
+//! floats correctly rounded, so each 17-digit f64 comes back exact
+//! (serde_json's default float parser does not promise that). The depth
+//! cases nest past the 128 levels it reads, in their requests and, for an
+//! answered score, in the expected legend; such a text is read in pieces
+//! ([`read_deep`]): each deep run of nested arrays is cut out and read alone.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use xybrid_cli::systemone::{parse_request, render_response, RefusalKind, RequestLimits};
 use xybrid_core::ir::decision::{validate_structure, StructuralLimits};
 use xybrid_core::ir::{
-    DecisionAnswer, DecisionContent, DecisionInstructions, DecisionLevel, DecisionOption,
-    DecisionOrigin, DecisionQuestion, DecisionQuestionKind, DecisionRequest, DecisionScore,
-    DecisionState, DecisionUsage, DecisionValue, Decisions, JsonNumber, JsonView, OrderedJson,
-    ScoreStatistic,
+    DecisionAnswer, DecisionContent, DecisionContentView, DecisionError, DecisionInstructions,
+    DecisionLevel, DecisionOption, DecisionOrigin, DecisionQuestion, DecisionQuestionKind,
+    DecisionRequest, DecisionScore, DecisionState, DecisionUsage, DecisionValue, Decisions,
+    JsonNumber, JsonView, OrderedJson, ScoreStatistic,
 };
 
 /// The parse census of the current case set: cases whose request must
 /// parse, be refused, or is not reached (an earlier stage refuses). Update
 /// it when cases are added or their expectations change.
 const CENSUS: Census = Census {
-    matched: 90,
-    refused: 40,
+    matched: 98,
+    refused: 42,
     not_reached: 3,
 };
 
 /// Cases whose answers the response is checked against.
-const RESPONSE_CASES: usize = 76;
+const RESPONSE_CASES: usize = 82;
+
+/// Where the depth cases put their deep content. Each must be checked
+/// through [`read_deep`] at least once.
+const DEEP_PLACES: [&str; 5] = ["state", "instructions", "option", "noul", "level"];
 
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Census {
@@ -55,10 +62,13 @@ fn decision_fixtures() -> PathBuf {
     Path::new(&manifest_dir).join("../../integration-tests/fixtures/decision")
 }
 
-/// One case file, read whole.
+/// One case file, read whole (in pieces when it is too deep, see
+/// [`read_deep`]).
 struct Case {
     id: String,
     json: OrderedJson,
+    /// The deep runs cut out of the case file, read alone.
+    cuts: Vec<OrderedJson>,
 }
 
 impl Case {
@@ -108,11 +118,11 @@ fn cases() -> Vec<Case> {
         .map(|path| {
             let text = std::fs::read_to_string(path)
                 .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-            let json =
-                OrderedJson::parse(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let Deep { shallow, cuts } = read_deep(&text);
             let case = Case {
                 id: path.file_stem().unwrap().to_string_lossy().into_owned(),
-                json,
+                json: shallow,
+                cuts,
             };
             assert_eq!(
                 case.at(&["schema_version"]).as_number(),
@@ -182,10 +192,127 @@ fn expected_shapes(case: &Case) -> Vec<(String, &'static str, Vec<String>)> {
         .collect()
 }
 
-/// The request as the whole text reads through `OrderedJson::parse`, built
-/// without the transport: `None` when the text is too deep to read whole.
-fn reference_request(text: &str) -> Option<DecisionRequest> {
-    let root = OrderedJson::parse(text).ok()?;
+/// A run of this many nested arrays, whitespace between their brackets
+/// allowed, marks deep content: [`read_deep`] cuts there. The depth cases
+/// nest well past it, and nothing else in a case comes near.
+const DEEP_RUN: usize = 32;
+
+/// A JSON text read through `OrderedJson::parse`: whole, or in pieces when
+/// it nests deeper than the 128 levels `OrderedJson` holds.
+struct Deep {
+    /// The text, with each cut replaced by the string [`cut_mark`]`(n)`.
+    shallow: OrderedJson,
+    /// The cuts, each read alone, in text order.
+    cuts: Vec<OrderedJson>,
+}
+
+/// Reads `text` whole, or, when it is too deep (and only then), in pieces:
+/// wherever [`DEEP_RUN`] arrays have opened in a row outside strings, the
+/// array opening there is cut out, up to the bracket that closes it, and
+/// read alone; the rest of the text is read with a mark in its place. Any
+/// other parse error fails the test.
+fn read_deep(text: &str) -> Deep {
+    match OrderedJson::parse(text) {
+        Ok(shallow) => Deep {
+            shallow,
+            cuts: Vec::new(),
+        },
+        Err(DecisionError::JsonTooDeep { .. }) => {
+            let (shallow, cuts) = cut_deep_runs(text);
+            assert!(
+                !cuts.is_empty(),
+                "too deep, yet no run of {DEEP_RUN} arrays"
+            );
+            let read = |text: &str| {
+                OrderedJson::parse(text).unwrap_or_else(|error| panic!("a piece: {error}"))
+            };
+            Deep {
+                shallow: read(&shallow),
+                cuts: cuts.iter().map(|cut| read(cut)).collect(),
+            }
+        }
+        Err(error) => panic!("not JSON the fixtures hold: {error}"),
+    }
+}
+
+/// The string that stands for cut `n`.
+fn cut_mark(n: usize) -> String {
+    format!("\u{0}cut:{n}")
+}
+
+/// `text` with its deep runs cut out (see [`read_deep`]), and the cuts.
+fn cut_deep_runs(text: &str) -> (String, Vec<String>) {
+    let bytes = text.as_bytes();
+    let (mut shallow, mut cuts) = (String::with_capacity(text.len()), Vec::new());
+    let (mut copied, mut pos, mut run) = (0, 0, 0);
+    while pos < bytes.len() {
+        match bytes[pos] {
+            b'"' => {
+                pos = string_end(bytes, pos);
+                run = 0;
+                continue;
+            }
+            b'[' => {
+                run += 1;
+                if run == DEEP_RUN {
+                    let end = closing(bytes, pos);
+                    shallow.push_str(&text[copied..pos]);
+                    shallow.push_str(&format!("\"\\u0000cut:{}\"", cuts.len()));
+                    cuts.push(text[pos..end].to_string());
+                    (copied, pos, run) = (end, end, 0);
+                    continue;
+                }
+            }
+            b' ' | b'\t' | b'\n' | b'\r' => {}
+            _ => run = 0,
+        }
+        pos += 1;
+    }
+    shallow.push_str(&text[copied..]);
+    (shallow, cuts)
+}
+
+/// The index after the string whose opening quote is at `start`.
+fn string_end(bytes: &[u8], start: usize) -> usize {
+    let mut pos = start + 1;
+    loop {
+        match bytes[pos] {
+            b'\\' => pos += 2,
+            b'"' => return pos + 1,
+            _ => pos += 1,
+        }
+    }
+}
+
+/// The index after the bracket that closes the one at `start`.
+fn closing(bytes: &[u8], start: usize) -> usize {
+    let (mut depth, mut pos) = (0usize, start);
+    loop {
+        match bytes[pos] {
+            b'"' => {
+                pos = string_end(bytes, pos);
+                continue;
+            }
+            b'[' | b'{' => depth += 1,
+            b']' | b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return pos + 1;
+                }
+            }
+            _ => {}
+        }
+        pos += 1;
+    }
+}
+
+/// The request the text reads as through `OrderedJson::parse` (via
+/// [`read_deep`]), built without the transport, and its cuts.
+fn reference_request(text: &str) -> (DecisionRequest, Vec<OrderedJson>) {
+    let Deep {
+        shallow: root,
+        cuts,
+    } = read_deep(text);
     let content = |value: Option<&OrderedJson>| value.cloned().and_then(DecisionContent::from_json);
     let state = DecisionState::from_json(root.get("state").cloned().unwrap());
     let questions = root
@@ -227,7 +354,69 @@ fn reference_request(text: &str) -> Option<DecisionRequest> {
             )
         })
         .collect();
-    Some(DecisionRequest::new(state, questions))
+    (DecisionRequest::new(state, questions), cuts)
+}
+
+/// A request as text, one line per piece of content (a text as a quoted
+/// string, JSON as compact JSON text), with each [`cut_mark`] put back as
+/// its cut's compact text. Two requests render the same exactly when they
+/// are equal, so a request read in pieces compares with one read whole.
+/// Also returns the places ([`DEEP_PLACES`]) where a cut went back.
+fn render_request(
+    request: &DecisionRequest,
+    cuts: &[OrderedJson],
+) -> (String, BTreeSet<&'static str>) {
+    let mut places = BTreeSet::new();
+    let mut put_back = |content: Option<&DecisionContent>, place: &'static str| -> String {
+        let text = match content.map(DecisionContent::view) {
+            None => return "-".to_string(),
+            Some(DecisionContentView::Text(text)) => {
+                match cuts.iter().enumerate().find(|(n, _)| text == cut_mark(*n)) {
+                    Some((_, cut)) => format!("json {}", cut.to_json_text()),
+                    None => return format!("text {text:?}"),
+                }
+            }
+            Some(DecisionContentView::Json(value)) => format!("json {}", value.to_json_text()),
+        };
+        cuts.iter().enumerate().fold(text, |text, (n, cut)| {
+            let mark = format!("\"\\u0000cut:{n}\"");
+            if text.contains(&mark) || text == format!("json {}", cut.to_json_text()) {
+                places.insert(place);
+            }
+            text.replace(&mark, &cut.to_json_text())
+        })
+    };
+    let mut lines = vec![format!(
+        "state {}",
+        put_back(request.state().body(), "state")
+    )];
+    for question in request.questions() {
+        lines.push(format!("question {:?}", question.id()));
+        let instructions = question
+            .instructions()
+            .and_then(DecisionInstructions::as_content);
+        lines.push(format!(
+            "instructions {}",
+            put_back(instructions, "instructions")
+        ));
+        let kind = question.kind();
+        if let Some(options) = kind.as_choice() {
+            for option in options {
+                let description = put_back(option.description(), "option");
+                lines.push(format!("option {:?} {description}", option.key()));
+            }
+        } else if let Some((yes, no)) = kind.as_yes_no() {
+            lines.push(format!("true {}", put_back(yes, "noul")));
+            lines.push(format!("false {}", put_back(no, "noul")));
+        } else if let Some(levels) = kind.as_score() {
+            for level in levels {
+                lines.push(format!("level {}", put_back(level.description(), "level")));
+            }
+        } else {
+            panic!("a question kind the transport does not build");
+        }
+    }
+    (lines.join("\n"), places)
 }
 
 /// Every string of a JSON value, keys included.
@@ -272,8 +461,8 @@ const PROTOCOL_WORDS: &[&str] = &[
 #[test]
 fn every_case_parses_or_refuses_as_expected() {
     let mut census = Census::default();
-    let mut reference_checked = 0;
-    let mut too_deep_to_read_whole = Vec::new();
+    let mut read_in_pieces = Vec::new();
+    let mut deep_places = BTreeSet::new();
     let mut failures = Vec::new();
     for case in cases() {
         let text = case.request_text();
@@ -291,15 +480,17 @@ fn every_case_parses_or_refuses_as_expected() {
                 if let Err(error) = validate_structure(request, &StructuralLimits::default()) {
                     failures.push(format!("{}: validate_structure: {error}", case.id));
                 }
-                match reference_request(text) {
-                    Some(reference) => {
-                        reference_checked += 1;
-                        if &reference != request {
-                            failures
-                                .push(format!("{}: content differs from the reference", case.id));
-                        }
-                    }
-                    None => too_deep_to_read_whole.push(case.id.clone()),
+                let (reference, cuts) = reference_request(text);
+                let same = if cuts.is_empty() {
+                    &reference == request
+                } else {
+                    read_in_pieces.push(case.id.clone());
+                    let (expected, places) = render_request(&reference, &cuts);
+                    deep_places.extend(places);
+                    render_request(request, &[]).0 == expected
+                };
+                if !same {
+                    failures.push(format!("{}: content differs from the reference", case.id));
                 }
             }
             ("not_reached", Ok(_)) => {
@@ -316,10 +507,15 @@ fn every_case_parses_or_refuses_as_expected() {
                 if Some(kind) != expected.strip_prefix("refuse:") {
                     failures.push(format!("{}: refused as {kind:?}: {error}", case.id));
                 }
-                // Content-free: no string of the request in the message.
+                // Content-free: no string of the request in the message. A
+                // request that is not JSON has no strings to collect.
                 let mut words = Vec::new();
-                if let Ok(json) = OrderedJson::parse(text) {
-                    strings(&json, &mut words);
+                match OrderedJson::parse(text) {
+                    Ok(json) => strings(&json, &mut words),
+                    Err(DecisionError::JsonTooDeep { .. }) => {
+                        strings(&read_deep(text).shallow, &mut words);
+                    }
+                    Err(_) => {}
                 }
                 let message = format!("{error} {error:?}");
                 for word in words {
@@ -343,18 +539,23 @@ fn every_case_parses_or_refuses_as_expected() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!(census, CENSUS, "the case set changed; update CENSUS");
-    // Only requests nested past 128 levels as a whole cannot be read whole;
-    // their content is what the depth cases check.
+    // Only the depth cases nest past 128 levels as a whole, and among them
+    // they put deep content in every place a request has content.
     assert!(
-        too_deep_to_read_whole
-            .iter()
-            .all(|id| id.starts_with("depth-")),
-        "{too_deep_to_read_whole:?}"
+        read_in_pieces.iter().all(|id| id.starts_with("depth-")),
+        "{read_in_pieces:?}"
+    );
+    assert_eq!(
+        deep_places,
+        BTreeSet::from(DEEP_PLACES),
+        "deep content checked in {deep_places:?}"
     );
     eprintln!(
-        "parse: {} matched ({reference_checked} against the whole-text reference), {} refused, \
-         {} not reached",
-        census.matched, census.refused, census.not_reached
+        "parse: {} matched ({} of them read in pieces), {} refused, {} not reached",
+        census.matched,
+        read_in_pieces.len(),
+        census.refused,
+        census.not_reached
     );
 }
 
@@ -545,6 +746,7 @@ fn upstream_decisions(case: &Case, request: &DecisionRequest) -> Decisions {
 #[test]
 fn responses_match_upstream_value_for_value() {
     let mut checked = 0;
+    let mut deep_legends = 0;
     let mut failures = Vec::new();
     for case in cases() {
         if case.expectation("finalize").as_deref() != Some("match") {
@@ -556,7 +758,12 @@ fn responses_match_upstream_value_for_value() {
         let decisions = upstream_decisions(&case, &request);
         let text = render_response("d1-2B", &request, &decisions)
             .unwrap_or_else(|e| panic!("{}: {e}", case.id));
-        let response = OrderedJson::parse(&text).expect("the response is JSON");
+        // A deep legend is cut out of the response where it is cut out of
+        // the case file: at the same run of arrays.
+        let Deep {
+            shallow: response,
+            cuts,
+        } = read_deep(&text);
         let members: Vec<&str> = response
             .as_object()
             .unwrap()
@@ -582,11 +789,20 @@ fn responses_match_upstream_value_for_value() {
                 ));
             }
         }
+        if cuts != case.cuts {
+            failures.push(format!("{}: the deep legend differs", case.id));
+        }
+        deep_legends += usize::from(!cuts.is_empty());
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!(
         checked, RESPONSE_CASES,
         "the case set changed; update RESPONSE_CASES"
     );
-    eprintln!("response: {checked} cases written as upstream answered them");
+    // The answered deep score level gives its legend deep content.
+    assert!(deep_legends > 0, "no deep legend was checked");
+    eprintln!(
+        "response: {checked} cases written as upstream answered them ({deep_legends} with a deep \
+         legend)"
+    );
 }

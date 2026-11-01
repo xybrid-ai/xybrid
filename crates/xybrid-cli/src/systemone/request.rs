@@ -1480,46 +1480,73 @@ mod tests {
 
     #[test]
     fn content_depth_counts_from_the_content() {
-        let nested = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
-        // Instructions sit four levels into the body, yet may nest 128
-        // levels themselves: the protocol, not the transport, caps them
-        // lower.
-        let at_limit = one(
-            "null",
-            &format!(r#"{{"type": "noul", "instructions": {}}}"#, nested(128)),
-        );
-        let instructions = parse(&at_limit).unwrap().questions()[0]
-            .instructions()
-            .and_then(DecisionInstructions::as_content)
-            .and_then(DecisionContent::as_json)
-            .map(OrderedJson::depth);
-        assert_eq!(instructions, Some(128));
-        let over = one(
-            "null",
-            &format!(r#"{{"type": "noul", "instructions": {}}}"#, nested(129)),
-        );
-        assert_eq!(
-            refused(&over),
-            RequestError::TooDeep(ContentAt::Instructions { question: 0 })
-        );
-        assert_eq!(
-            refused(&one(&nested(129), NOUL)),
-            RequestError::TooDeep(ContentAt::State)
-        );
-        let level = one(
-            "null",
-            &format!(
-                r#"{{"type": "score", "instructions": "x", "criteria": [null, {}]}}"#,
-                nested(129)
+        // Content may nest 128 levels counting from itself, wherever it sits
+        // (the protocol, not the transport, caps it lower), so each of these
+        // bodies is deeper than an `OrderedJson` holds, and the content
+        // comes through exactly. The score level opens right after the
+        // criteria's own bracket.
+        let nested = |depth: usize| format!("{}1{}", "[".repeat(depth - 1), "]".repeat(depth - 1));
+        let places: [(&str, ContentAt); 6] = [
+            (
+                r#"{"state": #, "questions": {"q": {"type": "noul", "instructions": "x"}}}"#,
+                ContentAt::State,
             ),
-        );
-        assert_eq!(
-            refused(&level),
-            RequestError::TooDeep(ContentAt::Level {
-                question: 0,
-                level: 1
-            })
-        );
+            (
+                r#"{"state": null, "questions": {"q": {"type": "noul", "instructions": #}}}"#,
+                ContentAt::Instructions { question: 0 },
+            ),
+            (
+                r#"{"state": null, "questions": {"q": {"type": "choice", "instructions": "x", "criteria": {"a": null, "b": #}}}}"#,
+                ContentAt::Option {
+                    question: 0,
+                    option: 1,
+                },
+            ),
+            (
+                r#"{"state": null, "questions": {"q": {"type": "noul", "instructions": "x", "criteria": {"true": #}}}}"#,
+                ContentAt::Yes { question: 0 },
+            ),
+            (
+                r#"{"state": null, "questions": {"q": {"type": "noul", "instructions": "x", "criteria": {"true": null, "false": #}}}}"#,
+                ContentAt::No { question: 0 },
+            ),
+            (
+                r#"{"state": null, "questions": {"q": {"type": "score", "instructions": "x", "criteria": [#, null]}}}"#,
+                ContentAt::Level {
+                    question: 0,
+                    level: 0,
+                },
+            ),
+        ];
+        let content_at = |request: &DecisionRequest, at: ContentAt| -> Option<DecisionContent> {
+            let kind = || request.questions()[0].kind();
+            match at {
+                ContentAt::State => request.state().body().cloned(),
+                ContentAt::Instructions { .. } => request.questions()[0]
+                    .instructions()
+                    .and_then(DecisionInstructions::as_content)
+                    .cloned(),
+                ContentAt::Option { option, .. } => {
+                    kind().as_choice()?[option].description().cloned()
+                }
+                ContentAt::Yes { .. } => kind().as_yes_no()?.0.cloned(),
+                ContentAt::No { .. } => kind().as_yes_no()?.1.cloned(),
+                ContentAt::Level { level, .. } => kind().as_score()?[level].description().cloned(),
+            }
+        };
+        for (template, at) in places {
+            let deepest = nested(128);
+            let request = parse(&template.replace('#', &deepest))
+                .unwrap_or_else(|error| panic!("{at:?}: {error}"));
+            let content = content_at(&request, at).unwrap_or_else(|| panic!("{at:?}"));
+            let json = content.as_json().unwrap_or_else(|| panic!("{at:?}"));
+            assert_eq!(json.depth(), 128, "{at:?}");
+            assert_eq!(json.to_json_text(), deepest, "{at:?}");
+            assert_eq!(
+                refused(&template.replace('#', &nested(129))),
+                RequestError::TooDeep(at)
+            );
+        }
     }
 
     #[test]
