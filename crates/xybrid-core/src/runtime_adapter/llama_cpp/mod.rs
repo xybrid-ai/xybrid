@@ -47,6 +47,7 @@ use crate::runtime_adapter::AdapterError;
 use crate::runtime_adapter::{MultimodalChatMessage, MultimodalMessagePart};
 use crate::tracing as xybrid_trace;
 use std::sync::Mutex;
+use xybrid_llama::GenerationEnd;
 
 // Backend init is idempotent through `xybrid_llama::backend_init`; the OS
 // reclaims llama.cpp resources at process exit.
@@ -554,7 +555,7 @@ impl LlamaCppBackend {
         config: &GenerationConfig,
         stop_sequences: &[String],
         mut on_chunk: F,
-    ) -> LlmResult<(Vec<i32>, bool, StreamingTelemetryFields)>
+    ) -> LlmResult<(Vec<i32>, GenerationEnd, StreamingTelemetryFields)>
     where
         F: FnMut(
             i32,
@@ -564,7 +565,11 @@ impl LlamaCppBackend {
     {
         xybrid_trace::add_metadata("tokens_in", prepared.prompt_token_count.to_string());
         let mut tel = StreamingTelemetry::new(prepared.prompt_token_count);
-        let (output_tokens, stopped_by_callback) = xybrid_llama::generate_streaming(
+        // The flag only reports a callback stop, and the trampoline turns
+        // every callback stop into an error, so it is never set here. Why the
+        // loop ended is read from its tokens below, with the same stops and
+        // budget it ran with.
+        let (output_tokens, _stopped_by_callback) = xybrid_llama::generate_streaming(
             context,
             model,
             &prepared.tail,
@@ -580,7 +585,13 @@ impl LlamaCppBackend {
             prepared.n_past,
         )?;
         let fields = tel.finalize(output_tokens.len());
-        Ok((output_tokens, stopped_by_callback, fields))
+        let end = xybrid_llama::generation_end(
+            model,
+            &output_tokens,
+            prepared.max_tokens,
+            stop_sequences,
+        )?;
+        Ok((output_tokens, end, fields))
     }
 }
 
@@ -663,14 +674,16 @@ fn should_emit_recovered_answer(
         && !recovered_text.is_empty()
 }
 
-/// Whether generation exhausted its budget without a stop signal or EOG token.
-fn generation_truncated_by_budget(
-    stopped: bool,
-    ended_on_eog: bool,
-    generated: usize,
-    budget: usize,
-) -> bool {
-    !stopped && !ended_on_eog && generated >= budget
+/// Whether the token budget cut the output off: the native loop used its
+/// whole budget with no EOG token or stop sequence, and no stop pattern cut
+/// the decoded text short either. The finish reason is `length` exactly when
+/// this holds (unless the turn parsed into tool calls).
+///
+/// `stopped_in_text` is for the paths that truncate their text at a complete
+/// stop pattern; a trimmed partial stop suffix does not count, since the
+/// output never completed that stop.
+fn generation_truncated_by_budget(stopped_in_text: bool, end: GenerationEnd) -> bool {
+    !stopped_in_text && end == GenerationEnd::MaxTokens
 }
 
 /// The native loop stores the terminal EOG token before breaking, and
@@ -941,7 +954,7 @@ impl LlmBackend for LlamaCppBackend {
                 &config.stop_sequences,
                 record_only,
             );
-            let (output_tokens, stopped_by_callback, fields) = match stream_result {
+            let (output_tokens, end, fields) = match stream_result {
                 Ok(result) => result,
                 Err(err) => {
                     self.reset_kv_cache_after_failed_stream(context);
@@ -958,9 +971,7 @@ impl LlmBackend for LlamaCppBackend {
             );
 
             // Decode tokens to text
-            let ended_on_eog = output_tokens
-                .last()
-                .is_some_and(|&token| model.vocab_is_eog(token));
+            let ended_on_eog = end == GenerationEnd::EndOfGeneration;
             let mut text =
                 model.detokenize(text_tokens_without_terminal_eog(&output_tokens, ended_on_eog))?;
 
@@ -975,13 +986,10 @@ impl LlmBackend for LlamaCppBackend {
             let final_stop_patterns = chat_stop_patterns(config);
             log::debug!(target: "xybrid_core", "Searching for stop patterns: {:?}", final_stop_patterns);
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
-            let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let truncated_by_budget = generation_truncated_by_budget(
-                stopped_in_text || trimmed_partial || stopped_by_callback,
-                ended_on_eog,
-                output_tokens.len(),
-                prepared.max_tokens,
-            );
+            trim_partial_stop_suffix(&mut text, &final_stop_patterns);
+            // `end` covers the stops the native loop ended on, including ones
+            // whose decoded text the pattern scan above would not find.
+            let truncated_by_budget = generation_truncated_by_budget(stopped_in_text, end);
             let (clean, reasoning_content) =
                 strip_and_capture_thinking_tags_primed(
                     &text,
@@ -989,19 +997,10 @@ impl LlmBackend for LlamaCppBackend {
                     truncated_by_budget,
                 );
             let text = clean.trim().to_string();
-            // `stopped_by_callback` catches the C layer detecting a stop
-            // before the Rust post-scan would — e.g. the user-supplied
-            // stop sequences that the C layer sees first. Prior code
-            // silently dropped this signal and sometimes reported
-            // `length` for a clean stop.
-            let finish_reason = if stopped_in_text
-                || trimmed_partial
-                || stopped_by_callback
-                || ended_on_eog
-            {
-                "stop"
-            } else {
+            let finish_reason = if truncated_by_budget {
                 "length"
+            } else {
+                "stop"
             }
             .to_string();
 
@@ -1042,7 +1041,7 @@ impl LlmBackend for LlamaCppBackend {
             // Without this the dashboard's TOKENS column shows `—` for the
             // local leg of every aborted run. Successful runs harmlessly
             // overwrite this with the same value after finalize.
-            let (output_tokens, stopped_by_callback, fields) = Self::run_streaming_generation(
+            let (output_tokens, end, fields) = Self::run_streaming_generation(
                 context,
                 model,
                 &prepared,
@@ -1051,12 +1050,15 @@ impl LlmBackend for LlamaCppBackend {
                 record_only,
             )?;
 
+            // The text keeps any stop sequence and terminal EOG token as
+            // generated; only surrounding whitespace is trimmed. The finish
+            // reason is the native loop's own: it never depends on that text.
             let text = model.detokenize(&output_tokens)?;
             let text = text.trim().to_string();
-            let finish_reason = if stopped_by_callback {
-                "stop"
-            } else {
+            let finish_reason = if generation_truncated_by_budget(false, end) {
                 "length"
+            } else {
+                "stop"
             }
             .to_string();
 
@@ -1134,7 +1136,7 @@ impl LlmBackend for LlamaCppBackend {
                     )
                 },
             );
-            let (output_tokens, stopped_by_callback, fields) = match stream_result {
+            let (output_tokens, end, fields) = match stream_result {
                 Ok(result) => result,
                 Err(err) => {
                     self.reset_kv_cache_after_failed_stream(context);
@@ -1142,21 +1144,15 @@ impl LlmBackend for LlamaCppBackend {
                 }
             };
 
-            let ended_on_eog = output_tokens
-                .last()
-                .is_some_and(|&token| model.vocab_is_eog(token));
+            let ended_on_eog = end == GenerationEnd::EndOfGeneration;
             let mut text = model.detokenize(text_tokens_without_terminal_eog(
                 &output_tokens,
                 ended_on_eog,
             ))?;
             let stopped_in_text = truncate_at_first_stop(&mut text, &stop_patterns);
-            let trimmed_partial = trim_partial_stop_suffix(&mut text, &stop_patterns);
-            let truncated_by_budget = generation_truncated_by_budget(
-                filter.is_stopped() || stopped_in_text || trimmed_partial || stopped_by_callback,
-                ended_on_eog,
-                output_tokens.len(),
-                prepared.max_tokens,
-            );
+            trim_partial_stop_suffix(&mut text, &stop_patterns);
+            let truncated_by_budget =
+                generation_truncated_by_budget(filter.is_stopped() || stopped_in_text, end);
             // `primed = false` for the same reason the filter is unprimed.
             let (clean, reasoning_content) =
                 strip_and_capture_thinking_tags_primed(&text, false, truncated_by_budget);
@@ -1169,17 +1165,13 @@ impl LlmBackend for LlamaCppBackend {
             };
             let emitted_tool_calls = !parsed_tool_calls.is_empty();
             let finish_reason = if emitted_tool_calls {
-                "tool_calls".to_string()
-            } else if filter.is_stopped()
-                || stopped_in_text
-                || trimmed_partial
-                || stopped_by_callback
-                || ended_on_eog
-            {
-                "stop".to_string()
+                "tool_calls"
+            } else if truncated_by_budget {
+                "length"
             } else {
-                "length".to_string()
-            };
+                "stop"
+            }
+            .to_string();
 
             let tool_block_suppressed = suppress_tools && filter.saw_tool_call_block();
             // No `should_emit_recovered_answer` here, unlike the chat paths:
@@ -1277,7 +1269,7 @@ impl LlmBackend for LlamaCppBackend {
             }
             let mut token_index = 0usize;
 
-            let (output_tokens, stopped_by_callback, fields) = Self::run_streaming_generation(
+            let (output_tokens, end, fields) = Self::run_streaming_generation(
                 context,
                 model,
                 &prepared,
@@ -1312,30 +1304,23 @@ impl LlmBackend for LlamaCppBackend {
             // included here because this is final-text only — no streaming
             // false-positive risk.
             let final_patterns = chat_stop_patterns(config);
-            let ended_on_eog = output_tokens
-                .last()
-                .is_some_and(|&token| model.vocab_is_eog(token));
+            let ended_on_eog = end == GenerationEnd::EndOfGeneration;
             let mut text = model.detokenize(text_tokens_without_terminal_eog(
                 &output_tokens,
                 ended_on_eog,
             ))?;
             let stopped_full = truncate_at_first_stop(&mut text, &final_patterns);
-            let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_patterns);
-            let truncated_by_budget = generation_truncated_by_budget(
-                filter.is_stopped() || stopped_full || trimmed_partial || stopped_by_callback,
-                ended_on_eog,
-                output_tokens.len(),
-                prepared.max_tokens,
-            );
+            trim_partial_stop_suffix(&mut text, &final_patterns);
+            // `end` covers the stops the native loop ended on, including ones
+            // whose decoded text the pattern scan above would not find.
+            let truncated_by_budget =
+                generation_truncated_by_budget(filter.is_stopped() || stopped_full, end);
             let (clean, reasoning_content) = strip_and_capture_thinking_tags_primed(
                 &text,
                 self.reasoning_enabled(),
                 truncated_by_budget,
             );
             let text = clean.trim().to_string();
-            // `stopped_by_callback` is an independent signal from the C
-            // layer that a stop sequence was hit — previously dropped.
-            //
             // finish_reason gates on a REAL parse of the final text — the
             // exact criterion `build_llm_response_envelope` uses — so the
             // terminal token and the envelope can never disagree. The
@@ -1350,17 +1335,13 @@ impl LlmBackend for LlamaCppBackend {
             };
             let emitted_tool_calls = !parsed_tool_calls.is_empty();
             let finish_reason = if emitted_tool_calls {
-                "tool_calls".to_string()
-            } else if filter.is_stopped()
-                || stopped_full
-                || trimmed_partial
-                || stopped_by_callback
-                || ended_on_eog
-            {
-                "stop".to_string()
+                "tool_calls"
+            } else if truncated_by_budget {
+                "length"
             } else {
-                "length".to_string()
-            };
+                "stop"
+            }
+            .to_string();
 
             let tool_block_suppressed = suppress_tools && saw_tool_call_block;
             if should_emit_recovered_answer(
@@ -1472,7 +1453,7 @@ impl LlmBackend for LlamaCppBackend {
                 merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
             let (
                 _loaded,
-                (output_tokens, stopped_by_callback, fields, image_preprocess_ms, max_tokens),
+                (output_tokens, _stopped_by_callback, fields, image_preprocess_ms, max_tokens),
             ) = self.with_mtmd_context_loaded(model, &mmproj_path, |mtmd_context| {
                 let image_preprocess_started = std::time::Instant::now();
                 let bitmaps = inputs
@@ -1557,36 +1538,36 @@ impl LlmBackend for LlamaCppBackend {
                 ))
             })?;
 
+            // The callback-stop flag is never set (see
+            // `run_streaming_generation`); the end cause comes from the tokens.
+            let end = xybrid_llama::generation_end(
+                model,
+                &output_tokens,
+                max_tokens,
+                &generation_stop_patterns,
+            )?;
             let final_stop_patterns =
                 merge_stop_patterns(&generation_stop_patterns, CHAT_STOP_PATTERNS_BROKEN);
-            let ended_on_eog = output_tokens
-                .last()
-                .is_some_and(|&token| model.vocab_is_eog(token));
+            let ended_on_eog = end == GenerationEnd::EndOfGeneration;
             let mut text = model.detokenize(text_tokens_without_terminal_eog(
                 &output_tokens,
                 ended_on_eog,
             ))?;
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
-            let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let truncated_by_budget = generation_truncated_by_budget(
-                stopped_in_text || trimmed_partial || stopped_by_callback,
-                ended_on_eog,
-                output_tokens.len(),
-                max_tokens,
-            );
+            trim_partial_stop_suffix(&mut text, &final_stop_patterns);
+            let truncated_by_budget = generation_truncated_by_budget(stopped_in_text, end);
             let (clean, reasoning_content) = strip_and_capture_thinking_tags_primed(
                 &text,
                 self.reasoning_enabled(),
                 truncated_by_budget,
             );
             let text = clean.trim().to_string();
-            let finish_reason =
-                if stopped_in_text || trimmed_partial || stopped_by_callback || ended_on_eog {
-                    "stop"
-                } else {
-                    "length"
-                }
-                .to_string();
+            let finish_reason = if truncated_by_budget {
+                "length"
+            } else {
+                "stop"
+            }
+            .to_string();
 
             Ok(GenerationOutput {
                 text,
@@ -1642,7 +1623,7 @@ impl LlmBackend for LlamaCppBackend {
                 _loaded,
                 (
                     output_tokens,
-                    stopped_by_callback,
+                    _stopped_by_callback,
                     fields,
                     image_preprocess_ms,
                     max_tokens,
@@ -1762,23 +1743,25 @@ impl LlmBackend for LlamaCppBackend {
             })?;
 
             let mut token_index = token_index;
+            // The callback-stop flag is never set (see
+            // `run_streaming_generation`); the end cause comes from the tokens.
+            let end = xybrid_llama::generation_end(
+                model,
+                &output_tokens,
+                max_tokens,
+                &generation_stop_patterns,
+            )?;
             let final_stop_patterns =
                 merge_stop_patterns(&generation_stop_patterns, CHAT_STOP_PATTERNS_BROKEN);
-            let ended_on_eog = output_tokens
-                .last()
-                .is_some_and(|&token| model.vocab_is_eog(token));
+            let ended_on_eog = end == GenerationEnd::EndOfGeneration;
             let mut text = model.detokenize(text_tokens_without_terminal_eog(
                 &output_tokens,
                 ended_on_eog,
             ))?;
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
-            let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let truncated_by_budget = generation_truncated_by_budget(
-                filter_stopped || stopped_in_text || trimmed_partial || stopped_by_callback,
-                ended_on_eog,
-                output_tokens.len(),
-                max_tokens,
-            );
+            trim_partial_stop_suffix(&mut text, &final_stop_patterns);
+            let truncated_by_budget =
+                generation_truncated_by_budget(filter_stopped || stopped_in_text, end);
             let (clean, reasoning_content) = strip_and_capture_thinking_tags_primed(
                 &text,
                 self.reasoning_enabled(),
@@ -1796,17 +1779,13 @@ impl LlmBackend for LlamaCppBackend {
             };
             let emitted_tool_calls = !parsed_tool_calls.is_empty();
             let finish_reason = if emitted_tool_calls {
-                "tool_calls".to_string()
-            } else if filter_stopped
-                || stopped_in_text
-                || trimmed_partial
-                || stopped_by_callback
-                || ended_on_eog
-            {
-                "stop".to_string()
+                "tool_calls"
+            } else if truncated_by_budget {
+                "length"
             } else {
-                "length".to_string()
-            };
+                "stop"
+            }
+            .to_string();
 
             let tool_block_suppressed = suppress_tools && filter_saw_tool_call_block;
             if should_emit_recovered_answer(
@@ -1942,12 +1921,33 @@ mod tests {
         assert!(!should_emit_recovered_answer(0, false, false, true, ""));
     }
 
+    /// `length` means the budget cut the output off. The native loop's EOG
+    /// and stop checks run before its budget check, so an EOG or stop on the
+    /// last budgeted token reads as that cause, never as `MaxTokens`.
     #[test]
-    fn generation_truncation_excludes_eog_at_exact_budget_boundary() {
-        assert!(!generation_truncated_by_budget(false, true, 4, 4));
-        assert!(generation_truncated_by_budget(false, false, 4, 4));
-        assert!(!generation_truncated_by_budget(false, false, 3, 4));
-        assert!(!generation_truncated_by_budget(true, false, 4, 4));
+    fn only_a_budget_end_without_a_text_stop_is_truncation() {
+        assert!(generation_truncated_by_budget(
+            false,
+            GenerationEnd::MaxTokens
+        ));
+        assert!(!generation_truncated_by_budget(
+            false,
+            GenerationEnd::EndOfGeneration
+        ));
+        assert!(!generation_truncated_by_budget(
+            false,
+            GenerationEnd::StopSequence
+        ));
+        // A complete stop pattern cut the decoded text short.
+        assert!(!generation_truncated_by_budget(
+            true,
+            GenerationEnd::MaxTokens
+        ));
+        // An early end with neither is not the budget's doing.
+        assert!(!generation_truncated_by_budget(
+            false,
+            GenerationEnd::Interrupted
+        ));
     }
 
     #[test]

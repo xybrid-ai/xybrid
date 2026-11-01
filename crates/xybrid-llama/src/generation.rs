@@ -221,6 +221,101 @@ fn stop_array_ptrs(stop_tokens: &[i32], stop_lens: &[c_int]) -> (*const i32, *co
     }
 }
 
+/// Why a native generation loop ended.
+///
+/// The loop stores each sampled token, then ends on the first check that
+/// passes: the token is an end-of-generation token, the output now ends with
+/// a stop sequence, or the output has reached the token budget.
+/// [`generation_end`] reads the cause back from the returned tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GenerationEnd {
+    /// The last token is an end-of-generation token (EOS, `<|im_end|>`,
+    /// `<end_of_turn>`, ...). The loop keeps it in the output.
+    EndOfGeneration,
+    /// The output ends with the tokens of a stop sequence.
+    StopSequence,
+    /// The token budget ran out.
+    MaxTokens,
+    /// The loop ended before the budget with neither. [`generate_with_stops`]
+    /// and [`generate_streaming`] end this way, without an error code, when
+    /// `llama_decode` fails on a generated token.
+    Interrupted,
+}
+
+/// Read why a generation ended from the tokens it returned.
+///
+/// Pass the `max_tokens` and `stop_sequences` the generation ran with. The
+/// stop sequences are tokenized exactly as the generate functions tokenize
+/// them, so one that tokenizes to nothing, like `""`, never matches. A stop
+/// matches only when the output's last tokens are its tokens, the check the
+/// native loop makes after every token. The decoded text plays no part: text
+/// that merely contains a stop, such as `"he"` inside a `"The"` token, is not
+/// one, and trimming the text cannot hide one.
+///
+/// # Errors
+///
+/// The errors the generate functions return for the same stop sequences:
+/// [`LlamaError::InvalidInput`] for one that holds a NUL byte, and
+/// [`LlamaError::TokenizationFailed`] when llama.cpp cannot tokenize one.
+pub fn generation_end(
+    model: &LlamaModel,
+    output_tokens: &[i32],
+    max_tokens: usize,
+    stop_sequences: &[String],
+) -> LlamaResult<GenerationEnd> {
+    let (stop_tokens, stop_lens) = build_stop_token_arrays(model, stop_sequences)?;
+    Ok(classify_generation_end(
+        output_tokens,
+        max_tokens,
+        &stop_tokens,
+        &stop_lens,
+        |token| model.vocab_is_eog(token),
+    ))
+}
+
+/// [`generation_end`] on stop sequences already in the flattened
+/// `(tokens, lens)` form the native loop receives. The checks run in the
+/// loop's order: end-of-generation, then stop sequence, then budget.
+fn classify_generation_end(
+    output_tokens: &[i32],
+    max_tokens: usize,
+    stop_tokens: &[i32],
+    stop_lens: &[c_int],
+    is_eog: impl Fn(i32) -> bool,
+) -> GenerationEnd {
+    if output_tokens.last().is_some_and(|&token| is_eog(token)) {
+        GenerationEnd::EndOfGeneration
+    } else if ends_with_stop_sequence(output_tokens, stop_tokens, stop_lens) {
+        GenerationEnd::StopSequence
+    } else if output_tokens.len() >= max_tokens {
+        GenerationEnd::MaxTokens
+    } else {
+        GenerationEnd::Interrupted
+    }
+}
+
+/// Whether `output_tokens` ends with one of the flattened stop sequences,
+/// the match `check_stop_sequences` makes in `wrapper.cpp`. An empty
+/// sequence never matches.
+fn ends_with_stop_sequence(
+    output_tokens: &[i32],
+    stop_tokens: &[i32],
+    stop_lens: &[c_int],
+) -> bool {
+    let mut rest = stop_tokens;
+    for &len in stop_lens {
+        // Each length is a token count `build_stop_token_arrays` recorded
+        // for the tokens it appended, so the split stays in bounds.
+        let (sequence, tail) = rest.split_at(len as usize);
+        if !sequence.is_empty() && output_tokens.ends_with(sequence) {
+            return true;
+        }
+        rest = tail;
+    }
+    false
+}
+
 /// Autoregressive generation without streaming. Returns the generated
 /// token IDs.
 ///
@@ -592,13 +687,14 @@ fn prompt_from_template_bytes(buf: &[u8], len: usize) -> LlamaResult<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        chat_template_render_failed, decode_hard_error, interpret_streaming_result,
-        prompt_from_template_bytes, streaming_trampoline, LlamaError, StreamingContext,
+        chat_template_render_failed, classify_generation_end, decode_hard_error,
+        interpret_streaming_result, prompt_from_template_bytes, streaming_trampoline,
+        GenerationEnd, LlamaError, StreamingContext,
     };
     use std::error::Error;
     use std::ffi::CString;
     use std::fmt;
-    use std::os::raw::c_void;
+    use std::os::raw::{c_int, c_void};
     use std::time::{Duration, Instant};
 
     #[derive(Debug)]
@@ -708,6 +804,105 @@ mod tests {
         assert_eq!(seqs, stop_tokens.as_ptr());
         assert_eq!(lens, stop_lens.as_ptr());
         assert_eq!(count, 2);
+    }
+
+    // A synthetic vocabulary for the end-cause tests: each id stands for the
+    // piece in its comment, and `EOG` is the only end-of-generation token.
+    const EOG: i32 = 1;
+    const THE: i32 = 10; // "The"
+    const REST: i32 = 11; // " rest"
+    const HE: i32 = 12; // "he", which "The" contains as text but not as a token
+    const NEWLINE: i32 = 13; // "\n"
+
+    /// The end cause of `output` under `max_tokens`, given each stop
+    /// sequence's tokens, flattened the way the native loop receives them.
+    fn end_of(output: &[i32], max_tokens: usize, stops: &[&[i32]]) -> GenerationEnd {
+        let stop_tokens = stops.concat();
+        let stop_lens: Vec<c_int> = stops.iter().map(|stop| stop.len() as c_int).collect();
+        classify_generation_end(output, max_tokens, &stop_tokens, &stop_lens, |token| {
+            token == EOG
+        })
+    }
+
+    #[test]
+    fn a_budget_that_runs_out_without_eog_or_stop_is_max_tokens() {
+        assert_eq!(end_of(&[THE, REST], 2, &[]), GenerationEnd::MaxTokens);
+    }
+
+    /// `build_stop_token_arrays` drops a stop that tokenizes to nothing, so
+    /// `""` never reaches the matcher; an empty entry still never matches,
+    /// and it does not shift where the next stop's tokens start.
+    #[test]
+    fn empty_stop_sequences_never_match() {
+        assert_eq!(end_of(&[THE, REST], 2, &[&[]]), GenerationEnd::MaxTokens);
+        assert_eq!(
+            end_of(&[THE, REST], 2, &[&[], &[REST]]),
+            GenerationEnd::StopSequence
+        );
+    }
+
+    #[test]
+    fn a_stop_inside_a_longer_token_is_not_a_stop() {
+        assert_eq!(end_of(&[THE, REST], 2, &[&[HE]]), GenerationEnd::MaxTokens);
+    }
+
+    #[test]
+    fn a_multi_token_stop_matches_only_as_a_whole_suffix() {
+        let stop: &[i32] = &[THE, REST];
+        assert_eq!(
+            end_of(&[THE, REST], 2, &[stop]),
+            GenerationEnd::StopSequence
+        );
+        assert_eq!(end_of(&[HE, REST], 2, &[stop]), GenerationEnd::MaxTokens);
+        assert_eq!(end_of(&[REST], 1, &[stop]), GenerationEnd::MaxTokens);
+    }
+
+    #[test]
+    fn later_stops_are_read_at_their_own_offsets() {
+        assert_eq!(
+            end_of(&[THE, REST], 2, &[&[HE, HE], &[NEWLINE], &[REST]]),
+            GenerationEnd::StopSequence
+        );
+        assert_eq!(
+            end_of(&[THE, REST], 2, &[&[HE, REST], &[NEWLINE]]),
+            GenerationEnd::MaxTokens
+        );
+    }
+
+    /// The native loop checks for a stop before it checks the budget, so a
+    /// stop on the last allowed token is a stop, whitespace included.
+    #[test]
+    fn a_stop_on_the_last_budgeted_token_is_a_stop() {
+        assert_eq!(
+            end_of(&[THE, REST], 2, &[&[REST]]),
+            GenerationEnd::StopSequence
+        );
+        assert_eq!(
+            end_of(&[NEWLINE], 1, &[&[NEWLINE]]),
+            GenerationEnd::StopSequence
+        );
+    }
+
+    #[test]
+    fn an_eog_on_the_last_budgeted_token_is_an_eog() {
+        assert_eq!(end_of(&[THE, EOG], 2, &[]), GenerationEnd::EndOfGeneration);
+        assert_eq!(end_of(&[EOG], 4, &[]), GenerationEnd::EndOfGeneration);
+        // The loop tests for an end-of-generation token first.
+        assert_eq!(
+            end_of(&[THE, EOG], 2, &[&[EOG]]),
+            GenerationEnd::EndOfGeneration
+        );
+    }
+
+    #[test]
+    fn an_early_stop_ends_before_the_budget() {
+        assert_eq!(end_of(&[THE], 2, &[&[THE]]), GenerationEnd::StopSequence);
+    }
+
+    #[test]
+    fn an_early_end_without_eog_or_stop_is_interrupted() {
+        assert_eq!(end_of(&[THE], 2, &[&[REST]]), GenerationEnd::Interrupted);
+        assert_eq!(end_of(&[], 2, &[]), GenerationEnd::Interrupted);
     }
 
     #[test]
