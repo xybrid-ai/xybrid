@@ -427,43 +427,15 @@ pub(crate) unsafe fn model_meta_count(model: *const c_void) -> i32 {
     sys::llama_model_meta_count_c(model)
 }
 
-/// Writes metadata key `i` into `buf` (NUL-terminated, truncated to fit) and
-/// returns its whole length, [`ABSENT`] when `i` is not an entry, or
-/// [`FAILED`].
+/// Writes the value of `key` into `buf` (NUL-terminated, truncated to fit)
+/// and returns its whole length, [`ABSENT`] when the model has no such
+/// scalar key, or [`FAILED`].
 ///
 /// # Safety
 ///
-/// `model` must be a live model pointer or null. `buf` must be writable for
-/// `buf_len` bytes, or null with `buf_len == 0` to probe the length.
-pub(crate) unsafe fn model_meta_key_by_index(
-    model: *const c_void,
-    i: i32,
-    buf: *mut c_char,
-    buf_len: usize,
-) -> i32 {
-    #[cfg(test)]
-    record_native_call();
-    sys::llama_model_meta_key_by_index_c(model, i, buf, buf_len)
-}
-
-/// Like [`model_meta_key_by_index`], for the entry's value.
-///
-/// # Safety: as [`model_meta_key_by_index`].
-pub(crate) unsafe fn model_meta_val_by_index(
-    model: *const c_void,
-    i: i32,
-    buf: *mut c_char,
-    buf_len: usize,
-) -> i32 {
-    #[cfg(test)]
-    record_native_call();
-    sys::llama_model_meta_val_str_by_index_c(model, i, buf, buf_len)
-}
-
-/// Like [`model_meta_key_by_index`], for the value of `key`; [`ABSENT`]
-/// when the model has no such scalar key.
-///
-/// # Safety: as [`model_meta_key_by_index`], and `key` outlives the call.
+/// `model` must be a live model pointer or null, and `key` outlive the call.
+/// `buf` must be writable for `buf_len` bytes, or null with `buf_len == 0`
+/// to probe the length.
 pub(crate) unsafe fn model_meta_val(
     model: *const c_void,
     key: &CString,
@@ -473,6 +445,62 @@ pub(crate) unsafe fn model_meta_val(
     #[cfg(test)]
     record_native_call();
     sys::llama_model_meta_val_str_c(model, key.as_ptr(), buf, buf_len)
+}
+
+/// The values of `keys` in two native calls whatever their number (one to
+/// size the buffer, one to fill it), each a hash lookup per key: `None` for
+/// a key the model does not have.
+///
+/// # Safety: `model` must be a live model pointer or null (an error).
+pub(crate) unsafe fn model_meta_lookup(
+    model: *const c_void,
+    keys: &[CString],
+) -> Result<Vec<Option<Vec<u8>>>, LlamaError> {
+    let pointers: Vec<*const c_char> = keys.iter().map(|key| key.as_ptr()).collect();
+    let mut lens = vec![0i64; keys.len()];
+    #[cfg(test)]
+    record_native_call();
+    let total = sys::llama_model_meta_lookup_c(
+        model,
+        pointers.as_ptr(),
+        pointers.len(),
+        std::ptr::null_mut(),
+        0,
+        lens.as_mut_ptr(),
+    );
+    let total = usize::try_from(total).map_err(|_| native_failure("reading model metadata"))?;
+    let mut buf = Vec::new();
+    buf.try_reserve_exact(total + 1)
+        .map_err(|_| native_failure("reading model metadata"))?;
+    buf.resize(total + 1, 0u8);
+    let mut copied = vec![0i64; keys.len()];
+    #[cfg(test)]
+    record_native_call();
+    let written = sys::llama_model_meta_lookup_c(
+        model,
+        pointers.as_ptr(),
+        pointers.len(),
+        buf.as_mut_ptr().cast::<c_char>(),
+        buf.len(),
+        copied.as_mut_ptr(),
+    );
+    if usize::try_from(written).ok() != Some(total) || copied != lens {
+        return Err(LlamaError::Internal(
+            "model metadata changed between two reads".to_string(),
+        ));
+    }
+    let mut values = Vec::with_capacity(keys.len());
+    let mut offset = 0;
+    for len in lens {
+        if len == i64::from(ABSENT) {
+            values.push(None);
+            continue;
+        }
+        let len = usize::try_from(len).map_err(|_| native_failure("reading model metadata"))?;
+        values.push(Some(buf[offset..offset + len].to_vec()));
+        offset += len;
+    }
+    Ok(values)
 }
 
 /// Reads a string from one of the `llama_model_meta_*` accessors, which

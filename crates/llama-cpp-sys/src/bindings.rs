@@ -1082,28 +1082,22 @@ unsafe extern "C" {
     pub fn llama_model_meta_count_c(model: *const ::std::os::raw::c_void) -> i32;
 }
 unsafe extern "C" {
-    pub fn llama_model_meta_key_by_index_c(
-        model: *const ::std::os::raw::c_void,
-        i: i32,
-        buf: *mut ::std::os::raw::c_char,
-        buf_size: usize,
-    ) -> i32;
-}
-unsafe extern "C" {
-    pub fn llama_model_meta_val_str_by_index_c(
-        model: *const ::std::os::raw::c_void,
-        i: i32,
-        buf: *mut ::std::os::raw::c_char,
-        buf_size: usize,
-    ) -> i32;
-}
-unsafe extern "C" {
     pub fn llama_model_meta_val_str_c(
         model: *const ::std::os::raw::c_void,
         key: *const ::std::os::raw::c_char,
         buf: *mut ::std::os::raw::c_char,
         buf_size: usize,
     ) -> i32;
+}
+unsafe extern "C" {
+    pub fn llama_model_meta_lookup_c(
+        model: *const ::std::os::raw::c_void,
+        keys: *const *const ::std::os::raw::c_char,
+        n_keys: usize,
+        buf: *mut ::std::os::raw::c_char,
+        buf_size: usize,
+        lens: *mut i64,
+    ) -> i64;
 }
 unsafe extern "C" {
     pub fn llama_model_chat_template_named_c(

@@ -1,6 +1,8 @@
 //! A GGUF writer for tests: synthetic headers with exactly the keys, types
 //! and tensor entries a test needs, malformed ones included.
 
+use super::header::{GgufArray, GgufHeader, GgufValue};
+
 /// Builds the bytes of a GGUF header.
 #[derive(Clone)]
 pub(super) struct GgufBuilder {
@@ -159,6 +161,70 @@ impl GgufBuilder {
         }
         out.extend_from_slice(&self.tensors);
         out
+    }
+}
+
+/// `value`'s type code and payload, as a GGUF file stores them.
+pub(super) fn encode_value(value: &GgufValue) -> (u32, Vec<u8>) {
+    fn each<T>(items: &[T], encode: impl Fn(&T) -> Vec<u8>) -> Vec<u8> {
+        items.iter().flat_map(encode).collect()
+    }
+    let code = value.gguf_type().code();
+    let payload = match value {
+        GgufValue::U8(v) => v.to_le_bytes().to_vec(),
+        GgufValue::I8(v) => v.to_le_bytes().to_vec(),
+        GgufValue::U16(v) => v.to_le_bytes().to_vec(),
+        GgufValue::I16(v) => v.to_le_bytes().to_vec(),
+        GgufValue::U32(v) => v.to_le_bytes().to_vec(),
+        GgufValue::I32(v) => v.to_le_bytes().to_vec(),
+        GgufValue::F32(v) => v.to_le_bytes().to_vec(),
+        GgufValue::Bool(v) => vec![u8::from(*v)],
+        GgufValue::String(bytes) => gguf_string(bytes),
+        GgufValue::U64(v) => v.to_le_bytes().to_vec(),
+        GgufValue::I64(v) => v.to_le_bytes().to_vec(),
+        GgufValue::F64(v) => v.to_le_bytes().to_vec(),
+        GgufValue::Array(array) => {
+            let (elem, items) = match array {
+                GgufArray::U8(v) => (0, each(v, |x| x.to_le_bytes().to_vec())),
+                GgufArray::I8(v) => (1, each(v, |x| x.to_le_bytes().to_vec())),
+                GgufArray::U16(v) => (2, each(v, |x| x.to_le_bytes().to_vec())),
+                GgufArray::I16(v) => (3, each(v, |x| x.to_le_bytes().to_vec())),
+                GgufArray::U32(v) => (4, each(v, |x| x.to_le_bytes().to_vec())),
+                GgufArray::I32(v) => (5, each(v, |x| x.to_le_bytes().to_vec())),
+                GgufArray::F32(v) => (6, each(v, |x| x.to_le_bytes().to_vec())),
+                GgufArray::Bool(v) => (7, each(v, |x| vec![u8::from(*x)])),
+                GgufArray::String(v) => (8, each(v, |x| gguf_string(x))),
+                GgufArray::U64(v) => (10, each(v, |x| x.to_le_bytes().to_vec())),
+                GgufArray::I64(v) => (11, each(v, |x| x.to_le_bytes().to_vec())),
+                GgufArray::F64(v) => (12, each(v, |x| x.to_le_bytes().to_vec())),
+            };
+            let mut payload = (elem as u32).to_le_bytes().to_vec();
+            payload.extend((array.len() as u64).to_le_bytes());
+            payload.extend(items);
+            payload
+        }
+    };
+    (code, payload)
+}
+
+impl GgufBuilder {
+    /// A builder holding `header`'s version, metadata and tensor entries,
+    /// re-encoded, so a test can add keys to a real model's header.
+    pub(super) fn from_header(header: &GgufHeader) -> Self {
+        let mut builder = Self::new().version(header.version());
+        for (key, value) in header.metadata() {
+            let (code, payload) = encode_value(value);
+            builder = builder.raw(key.as_bytes(), code, &payload);
+        }
+        for tensor in header.tensors() {
+            builder = builder.tensor(
+                tensor.name(),
+                tensor.dims(),
+                tensor.ggml_type(),
+                tensor.offset(),
+            );
+        }
+        builder
     }
 }
 

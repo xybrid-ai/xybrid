@@ -383,6 +383,7 @@ impl GgufTensorInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GgufLimits {
     max_header_bytes: u64,
+    max_metadata_entries: u64,
 }
 
 impl GgufLimits {
@@ -392,14 +393,37 @@ impl GgufLimits {
     /// read and allocate.
     pub const DEFAULT_MAX_HEADER_BYTES: u64 = 128 << 20;
 
-    /// A scan that reads at most `max_header_bytes` bytes of header.
+    /// The default ceiling on metadata keys: 4,096. Real GGUFs carry tens
+    /// (d1-2B has 45; a model card's tags, languages and a few merged base
+    /// models stay near a hundred), so this is about ninety times d1-2B.
+    /// Every key is later looked up in llama.cpp's own copy of the
+    /// metadata, so the ceiling bounds that work too, and it is checked
+    /// before any key is read.
+    pub const DEFAULT_MAX_METADATA_ENTRIES: u64 = 4096;
+
+    /// A scan that reads at most `max_header_bytes` bytes of header and the
+    /// default number of metadata keys.
     pub const fn new(max_header_bytes: u64) -> Self {
-        Self { max_header_bytes }
+        Self {
+            max_header_bytes,
+            max_metadata_entries: Self::DEFAULT_MAX_METADATA_ENTRIES,
+        }
+    }
+
+    /// These limits with at most `max_metadata_entries` metadata keys.
+    pub const fn with_max_metadata_entries(mut self, max_metadata_entries: u64) -> Self {
+        self.max_metadata_entries = max_metadata_entries;
+        self
     }
 
     /// The most header bytes a scan reads.
     pub const fn max_header_bytes(&self) -> u64 {
         self.max_header_bytes
+    }
+
+    /// The most metadata keys a header may declare.
+    pub const fn max_metadata_entries(&self) -> u64 {
+        self.max_metadata_entries
     }
 }
 
@@ -459,7 +483,9 @@ impl GgufHeader {
     ///
     /// [`GgufError::Io`] for a read failure, [`GgufError::Truncated`] when
     /// the input ends inside the header, [`GgufError::LimitExceeded`] when
-    /// the header is larger than `limits` allow, and [`GgufError::NotGguf`],
+    /// the header is larger than `limits` allow,
+    /// [`GgufError::TooManyEntries`] when it declares more metadata keys than
+    /// they allow, and [`GgufError::NotGguf`],
     /// [`GgufError::UnsupportedVersion`] or [`GgufError::Malformed`] for a
     /// header llama.cpp would refuse: a bad magic or version, an empty or
     /// duplicate key, an unknown type or an array of arrays, a misplaced
@@ -493,6 +519,12 @@ impl GgufHeader {
         }
         let n_tensors = r.count("the tensor count")?;
         let n_kv = r.count("the metadata count")?;
+        if n_kv > limits.max_metadata_entries {
+            return Err(GgufError::TooManyEntries {
+                count: n_kv,
+                limit: limits.max_metadata_entries,
+            });
+        }
 
         let mut metadata = Vec::with_capacity(preallocation(n_kv));
         let mut seen = HashSet::new();

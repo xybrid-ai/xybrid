@@ -39,6 +39,16 @@ pub enum GgufError {
         limit: u64,
     },
 
+    /// The header declares more metadata keys than the scan's
+    /// [`GgufLimits`](super::GgufLimits) allow.
+    #[error("the GGUF header declares {count} metadata keys; the scan allows {limit}")]
+    TooManyEntries {
+        /// The declared count.
+        count: u64,
+        /// The limit.
+        limit: u64,
+    },
+
     /// A header llama.cpp would refuse, or one this scanner cannot
     /// represent (a key or tensor name that is not UTF-8).
     #[error("malformed GGUF header: {0}")]
@@ -72,8 +82,17 @@ pub enum GgufError {
     /// from its file.
     #[error("the loaded model's metadata differs from its GGUF header at {key:?}")]
     NativeMismatch {
-        /// The first key that differs (sorted order).
+        /// The first key that differs, in file order.
         key: String,
+    },
+
+    /// llama.cpp holds more scalar keys than the header read from the file.
+    #[error("llama.cpp loaded {native} scalar metadata keys; the GGUF header has {header}")]
+    NativeKeyCount {
+        /// The keys llama.cpp holds.
+        native: usize,
+        /// The header's scalar keys.
+        header: usize,
     },
 
     /// llama.cpp could not report a loaded model's metadata.

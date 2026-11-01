@@ -69,54 +69,70 @@ fn c_fixed6(x: f64) -> String {
 }
 
 /// Checks that llama.cpp loaded the model `header` describes: the same
-/// scalar keys, each with the string [`native_value`] predicts. A file
-/// replaced between the header scan and the load, or a disagreement
-/// between this scanner and llama.cpp's parser, fails here.
+/// scalar keys, each with the string [`native_value`] predicts. A
+/// disagreement between this scanner and llama.cpp's parser fails here.
+///
+/// This compares llama.cpp's string projection of the scalars, so it cannot
+/// see a type change that keeps the string (`f32` 1.3373984 and the string
+/// `"1.337398"`) or an array-valued key: on its own it does not prove the
+/// loaded file is the scanned one.
+///
+/// llama.cpp's metadata is read with one bulk lookup of the header's keys
+/// and a count, never enumerated: its only enumeration goes by index and
+/// walks its map from the start each time.
 ///
 /// # Errors
 ///
-/// [`GgufError::NativeMismatch`] naming the first key (in sorted order)
-/// whose presence or value differs, and [`GgufError::Native`] when
-/// llama.cpp cannot report the model's metadata.
+/// [`GgufError::NativeMismatch`] naming the first key (in file order) whose
+/// presence or value differs, [`GgufError::NativeKeyCount`] when llama.cpp
+/// holds keys the header does not, and [`GgufError::Native`] when llama.cpp
+/// cannot report the model's metadata.
 #[cfg(feature = "llm-llamacpp")]
 pub fn verify_native_metadata(
     header: &GgufHeader,
     model: &xybrid_llama::LlamaModel,
 ) -> Result<(), GgufError> {
-    let native = model
-        .meta()
-        .map_err(|error| GgufError::Native(error.to_string()))?;
-    compare_native(header, &native)
+    let native = |error: xybrid_llama::LlamaError| GgufError::Native(error.to_string());
+    let scalars = scalar_projection(header);
+    let keys: Vec<&str> = scalars.iter().map(|(key, _)| *key).collect();
+    let count = model.meta_count().map_err(native)?;
+    let values = model.meta_values(&keys).map_err(native)?;
+    compare_native(&scalars, count, &values)
 }
 
-/// The comparison behind [`verify_native_metadata`], over llama.cpp's
-/// entries sorted by key.
-pub(crate) fn compare_native(
-    header: &GgufHeader,
-    native: &[(String, String)],
-) -> Result<(), GgufError> {
-    let mut expected: Vec<(&str, Vec<u8>)> = header
+/// Every scalar key of `header` with the string llama.cpp keeps for it, in
+/// file order.
+pub(crate) fn scalar_projection(header: &GgufHeader) -> Vec<(&str, Vec<u8>)> {
+    header
         .metadata()
         .filter_map(|(key, value)| native_value(value).map(|bytes| (key, bytes)))
-        .collect();
-    expected.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        .collect()
+}
 
-    let mut native = native.iter();
-    let mut expected = expected.iter();
-    loop {
-        let mismatch = match (native.next(), expected.next()) {
-            (None, None) => return Ok(()),
-            (Some((nk, nv)), Some((ek, ev))) if nk == ek && nv.as_bytes() == ev.as_slice() => {
-                continue
-            }
-            (Some((nk, _)), Some((ek, _))) => nk.as_str().min(*ek),
-            (Some((key, _)), None) => key.as_str(),
-            (None, Some((key, _))) => key,
-        };
-        return Err(GgufError::NativeMismatch {
-            key: mismatch.to_string(),
+/// The comparison behind [`verify_native_metadata`]: `values[i]` is what
+/// llama.cpp holds for `scalars[i]`'s key, and `native_count` the number of
+/// keys it holds. All of the header's keys found with equal values, and no
+/// more keys than that, means the two sets are equal.
+pub(crate) fn compare_native(
+    scalars: &[(&str, Vec<u8>)],
+    native_count: usize,
+    values: &[Option<Vec<u8>>],
+) -> Result<(), GgufError> {
+    debug_assert_eq!(scalars.len(), values.len(), "one value per key");
+    for ((key, expected), value) in scalars.iter().zip(values) {
+        if value.as_deref() != Some(expected.as_slice()) {
+            return Err(GgufError::NativeMismatch {
+                key: (*key).to_string(),
+            });
+        }
+    }
+    if native_count != scalars.len() {
+        return Err(GgufError::NativeKeyCount {
+            native: native_count,
+            header: scalars.len(),
         });
     }
+    Ok(())
 }
 
 #[cfg(test)]

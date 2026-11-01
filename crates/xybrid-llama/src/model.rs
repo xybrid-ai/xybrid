@@ -318,64 +318,52 @@ impl LlamaModel {
             .transpose()
     }
 
-    /// Every scalar GGUF metadata key llama.cpp loaded with the model, with
-    /// its value as llama.cpp's own string accessor returns it, sorted by
-    /// key.
-    ///
-    /// These are the *effective* values: llama.cpp writes integers in
-    /// decimal, booleans as `true`/`false`, and floats through
-    /// `std::to_string`, so with six decimals (an `f32` of 1.3373984 reads
-    /// `1.337398`). Array-valued keys are not visible: llama.cpp skips them
-    /// when it loads the model, so this cannot prove a key absent from the
-    /// file (read the GGUF header for that).
+    /// The number of scalar GGUF metadata keys llama.cpp loaded with the
+    /// model. Array-valued keys are not counted: llama.cpp skips them when
+    /// it loads the model.
     ///
     /// # Errors
     ///
-    /// [`LlamaError::Internal`] when llama.cpp cannot report an entry or
-    /// fails while reading one, or a key or value is not UTF-8: the scan is
-    /// complete or it fails.
-    pub fn meta(&self) -> LlamaResult<Vec<(String, String)>> {
+    /// [`LlamaError::Internal`] when llama.cpp failed to count them.
+    pub fn meta_count(&self) -> LlamaResult<usize> {
         // SAFETY: the handle keeps the model pointer live.
         let count = unsafe { ffi::model_meta_count(self.as_ptr()) };
-        let count =
-            usize::try_from(count).map_err(|_| ffi::native_failure("counting model metadata"))?;
-        let mut entries = Vec::with_capacity(count);
-        for i in 0..count {
-            let index = i32::try_from(i).expect("the count came from an i32");
-            let key = self.meta_entry(i, |buf, len| {
-                // SAFETY: the handle keeps the model pointer live; `buf` is
-                // writable for `len` bytes, or null with `len == 0`.
-                unsafe { ffi::model_meta_key_by_index(self.as_ptr(), index, buf, len) }
-            })?;
-            let key = String::from_utf8(key)
-                .map_err(|_| LlamaError::Internal(format!("metadata key {i} is not UTF-8")))?;
-            let value = self.meta_entry(i, |buf, len| {
-                // SAFETY: as above.
-                unsafe { ffi::model_meta_val_by_index(self.as_ptr(), index, buf, len) }
-            })?;
-            let value = String::from_utf8(value).map_err(|_| {
-                LlamaError::Internal(format!("the value of metadata key {key:?} is not UTF-8"))
-            })?;
-            entries.push((key, value));
-        }
-        entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        Ok(entries)
+        usize::try_from(count).map_err(|_| ffi::native_failure("counting model metadata"))
     }
 
-    /// Entry `i` of a metadata scan; it must exist.
-    fn meta_entry(
-        &self,
-        i: usize,
-        write: impl FnMut(*mut std::os::raw::c_char, usize) -> i32,
-    ) -> LlamaResult<Vec<u8>> {
-        ffi::read_meta_string(write)?.ok_or_else(|| {
-            LlamaError::Internal(format!("llama.cpp could not read metadata entry {i}"))
-        })
+    /// The values of `keys` as llama.cpp's own string accessor returns them:
+    /// one `None` per key the model does not have as a scalar, in order.
+    ///
+    /// These are the *effective* values: llama.cpp writes integers in
+    /// decimal, booleans as `true`/`false`, floats through `std::to_string`,
+    /// so with six decimals (an `f32` of 1.3373984 reads `1.337398`), and
+    /// strings up to their first NUL byte. Array-valued keys read `None`:
+    /// llama.cpp skips them when it loads the model, so this cannot prove a
+    /// key absent from the file (read the GGUF header for that).
+    ///
+    /// The keys come from the caller, typically the GGUF header: llama.cpp
+    /// enumerates its metadata only by index, and each index lookup walks
+    /// its map from the start. This makes two native calls, whatever the
+    /// number of keys, each a hash lookup per key.
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::InvalidInput`] when a key contains a NUL byte, and
+    /// [`LlamaError::Internal`] when llama.cpp failed while reading them
+    /// (never reported as missing keys).
+    pub fn meta_values<K: AsRef<str>>(&self, keys: &[K]) -> LlamaResult<Vec<Option<Vec<u8>>>> {
+        let keys = keys
+            .iter()
+            .map(|key| ffi::cstring(key.as_ref(), "metadata key"))
+            .collect::<LlamaResult<Vec<_>>>()?;
+        // SAFETY: the handle keeps the model pointer live; the keys outlive
+        // both calls and the values are copied.
+        unsafe { ffi::model_meta_lookup(self.as_ptr(), &keys) }
     }
 
-    /// The value of the scalar metadata key `key`, as [`Self::meta`] reports
-    /// it, or `None` when the model has no such scalar key. An array-valued
-    /// key also reads `None`.
+    /// The value of the scalar metadata key `key`, as
+    /// [`Self::meta_values`] reports it, as text, or `None` when the model
+    /// has no such scalar key. An array-valued key also reads `None`.
     ///
     /// # Errors
     ///
@@ -516,9 +504,10 @@ impl TokenAttr {
 //   - llama_vocab_get_add_bos_c     : read-only
 //   - llama_model_chat_template_c   : read-only (returns interior C string)
 //   - llama_model_chat_template_named_c : read-only (returns interior C string)
-//   - llama_model_meta_count_c / _key_by_index_c / _val_str_by_index_c /
-//     _val_str_c                    : read-only over the loaded metadata map;
-//                                     write to caller's out-buffer
+//   - llama_model_meta_count_c / _val_str_c / _lookup_c : read-only over
+//                                     the loaded metadata map (concurrent
+//                                     finds on a const unordered_map); write
+//                                     to caller's out-buffers
 //   - llama_vocab_get_attr_c        : read-only (range-checked by the shim)
 //   - llama_vocab_get_text_c        : read-only (returns interior C string)
 //   - llama_n_vocab_c               : read-only
@@ -541,3 +530,25 @@ impl TokenAttr {
 // is `Send + Sync` through its `Arc`, which contexts on other threads share.
 unsafe impl Send for ModelHandle {}
 unsafe impl Sync for ModelHandle {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_models::staged_d1;
+
+    #[test]
+    fn metadata_takes_two_native_calls_whatever_the_number_of_keys() {
+        let Some(path) = staged_d1() else { return };
+        crate::backend_init();
+        let model = LlamaModel::load(path.to_str().unwrap(), 0).expect("load d1-2B");
+        let mut keys: Vec<String> = (0..10_000).map(|i| format!("missing.{i}")).collect();
+        keys.push("lfm3.decision.type".to_string());
+
+        let calls = ffi::native_calls();
+        let values = model.meta_values(&keys).expect("one bulk lookup");
+        assert_eq!(ffi::native_calls() - calls, 2, "size, then copy");
+        assert!(values[..10_000].iter().all(Option::is_none));
+        assert_eq!(values[10_000].as_deref(), Some(&b"lfm3-d1"[..]));
+        assert!(model.meta_values::<&str>(&[]).unwrap().is_empty());
+    }
+}

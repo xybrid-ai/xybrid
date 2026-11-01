@@ -768,30 +768,47 @@ int32_t llama_model_meta_count_c(const llama_model* model) {
     });
 }
 
-int32_t llama_model_meta_key_by_index_c(const llama_model* model, int32_t i, char* buf, size_t buf_size) {
-    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
-        if (!model || (!buf && buf_size > 0)) {
-            return LLAMA_XYBRID_FAILED;
-        }
-        return meta_status(llama_model_meta_key_by_index(model, i, buf, buf_size));
-    });
-}
-
-int32_t llama_model_meta_val_str_by_index_c(const llama_model* model, int32_t i, char* buf, size_t buf_size) {
-    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
-        if (!model || (!buf && buf_size > 0)) {
-            return LLAMA_XYBRID_FAILED;
-        }
-        return meta_status(llama_model_meta_val_str_by_index(model, i, buf, buf_size));
-    });
-}
-
 int32_t llama_model_meta_val_str_c(const llama_model* model, const char* key, char* buf, size_t buf_size) {
     return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
         if (!model || !key || (!buf && buf_size > 0)) {
             return LLAMA_XYBRID_FAILED;
         }
         return meta_status(llama_model_meta_val_str(model, key, buf, buf_size));
+    });
+}
+
+// One hash lookup per key; values written back to back (see wrapper.h).
+int64_t llama_model_meta_lookup_c(
+    const llama_model* model,
+    const char** keys,
+    size_t n_keys,
+    char* buf,
+    size_t buf_size,
+    int64_t* lens
+) {
+    return guarded<int64_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int64_t {
+        if (!model || (n_keys > 0 && (!keys || !lens)) || (!buf && buf_size > 0)) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        int64_t total = 0;
+        for (size_t i = 0; i < n_keys; i++) {
+            if (!keys[i]) {
+                return LLAMA_XYBRID_FAILED;
+            }
+            // snprintf writes the value and a NUL the next value overwrites.
+            const size_t offset = static_cast<size_t>(total);
+            const bool room = buf && offset < buf_size;
+            const int32_t n = llama_model_meta_val_str(
+                model, keys[i], room ? buf + offset : nullptr, room ? buf_size - offset : 0);
+            if (n < -1) {
+                return LLAMA_XYBRID_FAILED;
+            }
+            lens[i] = n;
+            if (n > 0) {
+                total += n;
+            }
+        }
+        return total;
     });
 }
 

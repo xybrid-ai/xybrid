@@ -142,24 +142,36 @@ fn the_gguf_carries_the_lfm3_d1_profile() {
         Err(LlamaError::InvalidInput(_))
     ));
 
-    let entries = model.meta().expect("a complete metadata scan");
-    let keys: Vec<&str> = entries.iter().map(|(key, _)| key.as_str()).collect();
-    assert!(
-        keys.windows(2).all(|pair| pair[0] < pair[1]),
-        "sorted, unique"
-    );
-    for (key, value) in &entries {
-        assert_eq!(
-            meta(key).as_deref(),
-            Some(value.as_str()),
-            "{key}: the scan and the lookup agree"
-        );
-    }
     assert_eq!(
-        entries.len(),
+        model.meta_count().unwrap(),
         37,
         "d1-2B has 45 keys, 8 of them arrays llama.cpp does not keep"
     );
+    let keys = [
+        "general.architecture",
+        "lfm3.decision.type",
+        "lfm3.attention.causal",
+        "lfm3.decision.temperature.choice",
+        "tokenizer.ggml.tokens",
+        "no.such.key",
+    ];
+    let values = model.meta_values(&keys).expect("one bulk lookup");
+    let expected: [Option<&[u8]>; 6] = [
+        Some(b"lfm3"),
+        Some(b"lfm3-d1"),
+        Some(b"false"),
+        Some(b"1.337398"),
+        None,
+        None,
+    ];
+    for ((key, value), expected) in keys.iter().zip(&values).zip(expected) {
+        assert_eq!(value.as_deref(), expected, "{key}");
+        assert_eq!(
+            meta(key).map(String::into_bytes).as_deref(),
+            expected,
+            "{key}: the bulk and single lookups agree"
+        );
+    }
 }
 
 #[test]

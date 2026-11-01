@@ -1,7 +1,7 @@
 //! The scanner's and the classification rule's test vectors, then checks
 //! against LiquidAI's d1-2B GGUF when it is staged.
 
-use super::native::compare_native;
+use super::native::{compare_native, scalar_projection};
 use super::testing::{d1_builder, gguf_string, GgufBuilder, D1_TEMPERATURE};
 use super::*;
 
@@ -193,9 +193,13 @@ fn a_length_past_the_end_of_a_file_is_refused_before_it_is_allocated() {
 
 #[test]
 fn declared_counts_do_not_allocate_without_bytes() {
-    // 2^62 keys, then arrays of 2^29 and 2^30 + 1 strings, in a few bytes.
-    let huge_kv = GgufBuilder::new().declare(0, 1 << 62).build();
-    assert!(matches!(read(&huge_kv), Err(GgufError::Truncated { .. })));
+    // 4,000 keys (under the ceiling), then arrays of 2^29 and 2^30 + 1
+    // strings, in a few bytes.
+    let declared_kv = GgufBuilder::new().declare(1 << 40, 4000).build();
+    assert!(matches!(
+        read(&declared_kv),
+        Err(GgufError::Truncated { .. })
+    ));
     let huge_array = GgufBuilder::new()
         .array("tokenizer.ggml.tokens", 8, 1 << 29, &[])
         .build();
@@ -207,6 +211,51 @@ fn declared_counts_do_not_allocate_without_bytes() {
         .array("tokenizer.ggml.tokens", 8, (1 << 30) + 1, &[])
         .build();
     assert!(matches!(read(&too_many), Err(GgufError::Malformed(_))));
+}
+
+#[test]
+fn the_scan_refuses_more_keys_than_its_ceiling_before_reading_them() {
+    let limits = GgufLimits::default().with_max_metadata_entries(64);
+    let mut at_ceiling = GgufBuilder::new();
+    for i in 0..64 {
+        at_ceiling = at_ceiling.u32(&format!("key.{i}"), i);
+    }
+    assert!(GgufHeader::read(&at_ceiling.build()[..], &limits).is_ok());
+    let over = at_ceiling.u32("key.64", 64).build();
+    assert!(matches!(
+        GgufHeader::read(&over[..], &limits),
+        Err(GgufError::TooManyEntries {
+            count: 65,
+            limit: 64
+        })
+    ));
+
+    // A declared count past the ceiling is refused before any key is read:
+    // these headers have no keys at all.
+    for declared in [4097, 1 << 40, 1 << 62] {
+        assert!(matches!(
+            read(&GgufBuilder::new().declare(0, declared).build()),
+            Err(GgufError::TooManyEntries { count, limit: 4096 }) if count == declared
+        ));
+    }
+
+    // The default ceiling is 4,096 keys.
+    assert_eq!(
+        GgufLimits::default().max_metadata_entries(),
+        GgufLimits::DEFAULT_MAX_METADATA_ENTRIES
+    );
+    let mut many = GgufBuilder::new();
+    for i in 0..4096 {
+        many = many.u32(&format!("key.{i}"), i);
+    }
+    assert_eq!(read(&many.build()).unwrap().metadata().len(), 4096);
+    assert!(matches!(
+        read(&many.u32("one.more", 0).build()),
+        Err(GgufError::TooManyEntries {
+            count: 4097,
+            limit: 4096
+        })
+    ));
 }
 
 #[test]
@@ -620,10 +669,10 @@ fn errors_become_invalid_input_unless_they_are_io() {
 // llama.cpp's view against the header
 // ---------------------------------------------------------------------------
 
-/// What `LlamaModel::meta` reports for `d1_builder()`'s header: every
-/// scalar, as llama.cpp writes it, sorted by key.
-fn d1_native() -> Vec<(String, String)> {
-    let mut native: Vec<(String, String)> = [
+/// What llama.cpp holds for `d1_builder()`'s header: every scalar, as it
+/// writes it.
+fn d1_native() -> Vec<(&'static str, &'static str)> {
+    vec![
         ("general.architecture", "lfm3"),
         ("lfm3.attention.causal", "false"),
         ("lfm3.block_count", "24"),
@@ -633,36 +682,58 @@ fn d1_native() -> Vec<(String, String)> {
         ("lfm3.decision.type", "lfm3-d1"),
         ("tokenizer.chat_template.systemone", "{{ state }}"),
     ]
-    .iter()
-    .map(|(k, v)| (k.to_string(), v.to_string()))
-    .collect();
-    native.sort();
-    native
+}
+
+/// Compares `header` with a llama.cpp that holds `native`, looked up the way
+/// `verify_native_metadata` looks it up.
+fn compare_with(header: &GgufHeader, native: &[(&str, &str)]) -> Result<(), GgufError> {
+    let scalars = scalar_projection(header);
+    let values: Vec<Option<Vec<u8>>> = scalars
+        .iter()
+        .map(|(key, _)| {
+            native
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.as_bytes().to_vec())
+        })
+        .collect();
+    compare_native(&scalars, native.len(), &values)
 }
 
 #[test]
 fn the_native_view_matches_the_header_it_was_loaded_from() {
     let header = read(&d1_builder().build()).unwrap();
-    assert!(compare_native(&header, &d1_native()).is_ok());
+    assert!(compare_with(&header, &d1_native()).is_ok());
+    assert_eq!(
+        scalar_projection(&header).len(),
+        8,
+        "arrays are not projected"
+    );
     assert_eq!(
         native_f32(f32::from_bits(D1_TEMPERATURE)),
         "1.337398",
         "the temperature string llama.cpp reads"
     );
 
-    let mismatch = |native: Vec<(String, String)>| match compare_native(&header, &native) {
+    let mismatch = |native: Vec<(&str, &str)>| match compare_with(&header, &native) {
         Err(GgufError::NativeMismatch { key }) => key,
         other => panic!("{other:?}"),
     };
     let mut changed = d1_native();
-    changed[3].1 = "1.337399".to_string();
+    changed[3].1 = "1.337399";
     assert_eq!(mismatch(changed), "lfm3.decision.temperature.choice");
     let mut missing = d1_native();
     missing.remove(6);
     assert_eq!(mismatch(missing), "lfm3.decision.type");
     let mut extra = d1_native();
-    extra.push(("zzz.extra".to_string(), "1".to_string()));
-    assert_eq!(mismatch(extra), "zzz.extra");
+    extra.push(("zzz.extra", "1"));
+    assert!(matches!(
+        compare_with(&header, &extra),
+        Err(GgufError::NativeKeyCount {
+            native: 9,
+            header: 8
+        })
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -786,6 +857,71 @@ mod published {
             let model = xybrid_llama::LlamaModel::load(path.to_str().expect("a UTF-8 path"), 0)
                 .expect("load the GGUF");
             verify_native_metadata(&header, &model).expect("the same metadata");
+        }
+    }
+
+    /// `XYBRID_OTHER_GGUF` with `extra` more scalar keys: the original
+    /// header, re-encoded with the keys added, then the original tensor data
+    /// at the new header's alignment.
+    pub(super) fn with_extra_keys(original: &[u8], extra: usize) -> Vec<u8> {
+        let header = read(original).expect("the original header");
+        let alignment = header
+            .get("general.alignment")
+            .and_then(GgufValue::as_u64)
+            .unwrap_or(32);
+        let align = |n: u64| n.div_ceil(alignment) * alignment;
+        let data = usize::try_from(align(header.header_bytes())).unwrap();
+        let mut builder = GgufBuilder::from_header(&header);
+        for i in 0..extra {
+            builder = builder.u32(&format!("xybrid.test.key.{i}"), i as u32);
+        }
+        let mut bytes = builder.build();
+        bytes.resize(usize::try_from(align(bytes.len() as u64)).unwrap(), 0);
+        bytes.extend_from_slice(&original[data..]);
+        bytes
+    }
+
+    /// The native check reads llama.cpp's metadata with one bulk lookup of
+    /// the header's keys, so it stays linear: the index walk it replaced took
+    /// 0.16 / 0.73 / 4.3 s of CPU at 4,096 / 8,192 / 16,384 keys. Set
+    /// `XYBRID_OTHER_GGUF` to a small ordinary GGUF (stories260K).
+    #[cfg(feature = "llm-llamacpp")]
+    #[test]
+    fn many_metadata_keys_are_checked_in_linear_time() {
+        let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") else {
+            eprintln!("Skipping test: set XYBRID_OTHER_GGUF to a small ordinary GGUF");
+            return;
+        };
+        let original = std::fs::read(&path).expect("read the GGUF");
+        let dir = tempfile::tempdir().unwrap();
+        xybrid_llama::backend_init();
+        for extra in [4_000, 16_000] {
+            let file = dir.path().join(format!("keys-{extra}.gguf"));
+            std::fs::write(&file, with_extra_keys(&original, extra)).unwrap();
+            if extra > 4_000 {
+                assert!(
+                    matches!(
+                        GgufHeader::read_file(&file),
+                        Err(GgufError::TooManyEntries { .. })
+                    ),
+                    "the default ceiling refuses {extra} extra keys"
+                );
+            }
+            let limits = GgufLimits::default().with_max_metadata_entries(1 << 20);
+            let header = GgufHeader::read_file_with_limits(&file, &limits).unwrap();
+            let model = xybrid_llama::LlamaModel::load(file.to_str().unwrap(), 0)
+                .expect("llama.cpp loads the rewritten GGUF");
+            let start = std::time::Instant::now();
+            verify_native_metadata(&header, &model).expect("the same metadata");
+            let elapsed = start.elapsed();
+            eprintln!(
+                "{} keys checked against llama.cpp in {elapsed:?}",
+                header.metadata().len()
+            );
+            assert!(
+                elapsed < std::time::Duration::from_secs(1),
+                "{extra} extra keys took {elapsed:?}"
+            );
         }
     }
 

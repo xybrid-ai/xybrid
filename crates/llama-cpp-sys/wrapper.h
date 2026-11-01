@@ -140,18 +140,31 @@ int32_t llama_model_has_encoder_c(const XYBRID_LLAMA_MODEL* model);
 
 /* The GGUF metadata llama.cpp loaded with the model: every scalar key, its
    value written as a string (floats through std::to_string, so with six
-   decimals). Array-valued keys are not visible. Guarded. The accessors
-   return the length of the whole value or key, excluding the terminating
-   NUL, and write at most buf_size - 1 bytes of it plus a NUL;
-   LLAMA_XYBRID_ABSENT when the key or index does not exist. buf may be NULL
-   when buf_size is 0, to probe the length. */
+   decimals). Array-valued keys are not visible. Guarded.
+
+   There is no enumeration: llama.cpp's only one goes by index, and each
+   index lookup walks its map from the start. Callers take the keys from the
+   GGUF header and look them up, one hash lookup each.
+
+   llama_model_meta_count_c returns the number of keys. llama_model_meta_val_str_c
+   returns the length of one value, excluding the terminating NUL, and writes
+   at most buf_size - 1 bytes of it plus a NUL, or returns
+   LLAMA_XYBRID_ABSENT. llama_model_meta_lookup_c looks up n_keys keys in
+   one call: it writes the values back to back into buf (no terminators,
+   plus one NUL after the last), sets lens[i] to each value's length or
+   LLAMA_XYBRID_ABSENT, and returns the total length of the values; call it
+   with buf_size 0 to size buf, then with buf_size > that total. buf may be
+   NULL when buf_size is 0. */
 int32_t llama_model_meta_count_c(const XYBRID_LLAMA_MODEL* model);
-int32_t llama_model_meta_key_by_index_c(
-    const XYBRID_LLAMA_MODEL* model, int32_t i, char* buf, size_t buf_size);
-int32_t llama_model_meta_val_str_by_index_c(
-    const XYBRID_LLAMA_MODEL* model, int32_t i, char* buf, size_t buf_size);
 int32_t llama_model_meta_val_str_c(
     const XYBRID_LLAMA_MODEL* model, const char* key, char* buf, size_t buf_size);
+int64_t llama_model_meta_lookup_c(
+    const XYBRID_LLAMA_MODEL* model,
+    const char* XYBRID_CONST_PTR* keys,
+    size_t n_keys,
+    char* buf,
+    size_t buf_size,
+    int64_t* lens);
 
 /* The chat template stored as `tokenizer.chat_template.<name>`. Guarded:
    returns its length and points *out at it (owned by the model), or

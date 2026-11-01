@@ -26,7 +26,8 @@ const CHILD: &str = "fault_tests::fault_case";
 /// hook fails, the start of the error the call must return).
 const STUB_CASES: &[(&str, &str, &str)] = &[
     ("meta_str", "llama_model_meta_val_str_c", "Err(Internal("),
-    ("meta", "llama_model_meta_count_c", "Err(Internal("),
+    ("meta_count", "llama_model_meta_count_c", "Err(Internal("),
+    ("meta_values", "llama_model_meta_lookup_c", "Err(Internal("),
     (
         "named_chat_template",
         "llama_model_chat_template_named_c",
@@ -122,7 +123,8 @@ fn stub_case(case: &str, shim: &str) -> String {
     ffi::fail_next_native_call(shim);
     match case {
         "meta_str" => format!("{:?}", model.meta_str("lfm3.decision.type")),
-        "meta" => format!("{:?}", model.meta()),
+        "meta_count" => format!("{:?}", model.meta_count()),
+        "meta_values" => format!("{:?}", model.meta_values(&["general.architecture"])),
         "named_chat_template" => format!("{:?}", model.named_chat_template("systemone")),
         "token_attr" => format!("{:?}", model.token_attr(0)),
         "token_text" => format!("{:?}", model.token_text(0)),
