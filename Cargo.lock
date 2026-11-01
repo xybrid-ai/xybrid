@@ -6400,6 +6400,7 @@ dependencies = [
 name = "xybrid-llama"
 version = "0.15.0"
 dependencies = [
+ "serde_json",
  "thiserror 1.0.69",
  "tracing",
  "xybrid-llama-sys",

@@ -24,3 +24,7 @@ vision = ["bindings", "xybrid-llama-sys/vision"]
 xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.15.0" }
 thiserror = { workspace = true }
 tracing = "0.1"
+
+[dev-dependencies]
+# tests/d1_native_parity.rs reads the decision cases' prepared passes.
+serde_json = { workspace = true }

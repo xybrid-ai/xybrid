@@ -84,6 +84,22 @@ _LLAMA_INTEGRATION_TESTS = {
     for name, features in _LLAMA_INTEGRATION_TESTS.items()
 ]
 
+# G2 readout parity: its harness calls llama.cpp's C API directly, so it links
+# llama-cpp-sys itself, and it reads the decision cases with serde_json.
+# Model-gated and release-only, so in the sandbox it compiles and skips.
+rust_test(
+    name = "d1_native_parity",
+    version = XYBRID_VERSION,
+    srcs = ["tests/d1_native_parity.rs"],
+    crate_features = ["bindings"],
+    edition = "2021",
+    deps = [
+        ":xybrid_llama",
+        "//crates/llama-cpp-sys:llama_cpp_sys",
+        "@crates//:serde_json",
+    ],
+)
+
 # Dir-basename alias so `//crates/xybrid-llama` (the label all_crate_deps()
 # emits for xybrid-core) resolves to the proven target above.
 alias(
