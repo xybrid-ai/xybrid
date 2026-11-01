@@ -655,15 +655,9 @@ HF_NUMERICS = {"settings": HF_SETTINGS, "precision": "f32", "threads": 1, "set_s
 
 
 def hf_numerics_from_provenance(prov: Dict[str, Any], run_name: str) -> Dict[str, Any]:
-    """The numerics tuple a provenance.json records for one of its runs, in the run log's terms."""
-    run = (prov.get("runs") or {}).get(run_name) or {}
-    recipe = (prov.get("settings") or {}).get(run.get("settings")) or {}
-    precision = recipe.get("precision")
-    if isinstance(precision, str) and precision.startswith("float32 forward"):
-        precision = "f32"
-    return {"settings": run.get("settings"), "precision": precision, "threads": recipe.get("threads"),
-            "set_size": recipe.get("set_size"), "deterministic_algorithms": recipe.get("deterministic_algorithms"),
-            "mode": recipe.get("mode"), "float32_parity_gate": run.get("float32_parity_gate")}
+    """The numerics tuple a provenance.json records for one of its runs (the same tuple a run log records)."""
+    numerics = ((prov.get("runs") or {}).get(run_name) or {}).get("numerics") or {}
+    return {k: numerics.get(k) for k in HF_NUMERICS}
 
 
 def hf_fingerprint(reference: Dict[str, Any], pins_sha256: Any, requirements_sha256: Any, recipe: Dict[str, Any],
@@ -744,8 +738,10 @@ def hf_identity(directory: Path, cases: Dict[str, "Case"], hf: Dict[str, Observa
     if numerics != HF_NUMERICS:
         failures.append(f"{where}: {directory.name} ran with numerics {numerics}, not {HF_NUMERICS}")
     recipe_block = ((prov.get("settings") or {}).get(HF_SETTINGS) or {})
-    if recipe_block.get("batch") != 1 or recipe_block.get("padding") is not False:
-        failures.append(f"{where}: {HF_SETTINGS} is not a batch of one without padding")
+    declared = recipe_block.get("numerics") or {}
+    if {k: declared.get(k) for k in declared} != {k: HF_NUMERICS[k] for k in declared} or not declared or \
+            recipe_block.get("batch") != 1 or recipe_block.get("padding") is not False:
+        failures.append(f"{where}: {HF_SETTINGS} is not declared as {HF_NUMERICS}, a batch of one without padding")
     parity = ((prov.get("verification") or {}).get("float32_parity") or {}).get(directory.name) or {}
     if not parity.get("calls") or parity.get("bit_identical") != parity.get("calls") or \
             parity.get("non_float32_inputs") != 0 or parity.get("modules_verified") != parity.get("modules_hooked"):
