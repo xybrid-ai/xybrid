@@ -23,16 +23,6 @@ use schemars::JsonSchema;
 /// (LFM3 d1) are held to them by their conformance tests.
 pub const PROBABILITY_TOLERANCE: f64 = 1e-6;
 
-/// Floating-point noise that decoding allows in the two comparisons that
-/// pick an answer: the highest probability, and the level where the
-/// cumulative mass reaches one half. A text format can read a float back
-/// one ulp off (serde_json does, without its `float_roundtrip` feature),
-/// and a valid answer must survive its own round trip. 1e-12 is far above
-/// that noise (an ulp of a probability is at most 1.1e-16, summed over at
-/// most a few hundred levels) and far below any real disagreement, such as
-/// the 1.9e-9 a float32-rounded distribution can move a median boundary.
-const DECODING_NOISE: f64 = 1e-12;
-
 /// Where a distribution entry came from.
 ///
 /// `#[non_exhaustive]`: match it with a wildcard arm for origins added later.
@@ -84,7 +74,9 @@ impl fmt::Display for ScoreStatistic {
 /// distribution, not a calibrated probability that the entry is correct.
 ///
 /// In human-readable serde formats `raw_score` is a number, or the string
-/// `"-Infinity"` for `-inf` (never `null`); binary formats keep the `f32`.
+/// `"-Infinity"` for `-inf` (never `null`), and `probability` is a decimal
+/// string read back exactly (see [`DecisionAnswer`]); binary formats keep
+/// the `f32` and the `f64`.
 ///
 /// `Debug` prints the key's length and the numbers, never the key.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -95,6 +87,8 @@ pub struct DecisionScore {
     #[serde(with = "raw_score")]
     #[cfg_attr(feature = "schema", schemars(schema_with = "raw_score::schema"))]
     raw_score: f32,
+    #[serde(with = "exact_f64")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     probability: f64,
     origin: DecisionOrigin,
 }
@@ -205,12 +199,16 @@ pub enum DecisionValue {
     #[non_exhaustive]
     YesNo {
         /// That probability.
+        #[serde(with = "exact_f64")]
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
         p_yes: f64,
     },
     /// A level, as the named statistic of the distribution.
     #[non_exhaustive]
     Score {
         /// The level (whole for [`ScoreStatistic::Median`]).
+        #[serde(with = "exact_f64")]
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
         value: f64,
         /// Which statistic it is.
         statistic: ScoreStatistic,
@@ -279,11 +277,17 @@ impl fmt::Debug for DecisionValue {
 /// it, and a confidence.
 ///
 /// [`DecisionAnswer::new`] is the only way to build one, and deserializing
-/// checks the same invariants, so every answer is consistent with its
-/// distribution. Decoding allows 1e-12 of floating-point noise in the two
-/// comparisons that pick the answer (the highest probability, the median
-/// boundary), so that an answer survives a text format that reads a float
-/// back one ulp off; `new` allows none.
+/// goes through it in every format, so every answer is consistent with its
+/// distribution, exactly.
+///
+/// That holds across a text round trip because human-readable formats never
+/// carry an `f64` here as a number: a probability, `p_yes`, a score value
+/// and a confidence are decimal strings with the shortest digits that read
+/// back as the same `f64`, read back with a correctly rounded parser.
+/// serde_json's own float parsing is best-effort unless its
+/// `float_roundtrip` feature is on, and can move a probability by an ulp,
+/// enough to move the level where the mass reaches one half. Binary formats
+/// carry the `f64` itself.
 ///
 /// `Debug` prints lengths and numbers, never the question id or keys.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -293,6 +297,8 @@ pub struct DecisionAnswer {
     question_id: String,
     distribution: Vec<DecisionScore>,
     value: DecisionValue,
+    #[serde(with = "exact_f64::option")]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     confidence: Option<f64>,
 }
 
@@ -304,6 +310,8 @@ struct AnswerFields {
     question_id: String,
     distribution: Vec<DecisionScore>,
     value: DecisionValue,
+    #[serde(with = "exact_f64::option")]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     confidence: Option<f64>,
 }
 
@@ -311,16 +319,12 @@ impl TryFrom<AnswerFields> for DecisionAnswer {
     type Error = DecisionError;
 
     fn try_from(fields: AnswerFields) -> Result<Self, Self::Error> {
-        let answer = Self {
-            question_id: fields.question_id,
-            distribution: fields.distribution,
-            value: fields.value,
-            confidence: fields.confidence,
-        };
-        answer
-            .check(DECODING_NOISE)
-            .map_err(DecisionError::InvalidAnswer)?;
-        Ok(answer)
+        Self::new(
+            fields.question_id,
+            fields.distribution,
+            fields.value,
+            fields.confidence,
+        )
     }
 }
 
@@ -385,14 +389,11 @@ impl DecisionAnswer {
             value,
             confidence,
         };
-        answer.check(0.0).map_err(DecisionError::InvalidAnswer)?;
+        answer.check().map_err(DecisionError::InvalidAnswer)?;
         Ok(answer)
     }
 
-    /// The invariants, with `noise` allowed in the comparisons that pick
-    /// the answer (0 for [`DecisionAnswer::new`], [`DECODING_NOISE`] when
-    /// decoding).
-    fn check(&self, noise: f64) -> Result<(), AnswerInvariant> {
+    fn check(&self) -> Result<(), AnswerInvariant> {
         if self.question_id.is_empty() {
             return Err(AnswerInvariant::EmptyQuestionId);
         }
@@ -433,7 +434,7 @@ impl DecisionAnswer {
                     .get(key.as_str())
                     .map(|&index| self.distribution[index].probability)
                     .ok_or(AnswerInvariant::ChoiceNotInDistribution)?;
-                if self.probabilities().any(|p| p > chosen + noise) {
+                if self.probabilities().any(|p| p > chosen) {
                     return Err(AnswerInvariant::ChoiceNotHighest);
                 }
             }
@@ -456,7 +457,7 @@ impl DecisionAnswer {
                     }
                 }
                 let matches = match statistic {
-                    ScoreStatistic::Median => is_median(*value, self.probabilities(), noise),
+                    ScoreStatistic::Median => is_median(*value, self.probabilities()),
                     ScoreStatistic::Expected => {
                         let levels = self.distribution.len();
                         let tolerance = PROBABILITY_TOLERANCE * (levels.max(2) - 1) as f64;
@@ -506,11 +507,10 @@ impl DecisionAnswer {
 
 /// Whether `value` is the median level: the first level whose cumulative
 /// probability, summed in level order in `f64` from 0, reaches 0.5, or the
-/// last level if none does (LFM3 d1, `format_answer` in
-/// `tools/server/server-decision.cpp`). With `noise` 0 that is exactly
-/// upstream's loop; a positive `noise` also accepts a level that would be
-/// the median were each cumulative mass moved by at most `noise`.
-fn is_median(value: f64, probabilities: impl ExactSizeIterator<Item = f64>, noise: f64) -> bool {
+/// last level if none does. That is llama.cpp's loop for LFM3 d1
+/// (`format_answer` in `tools/server/server-decision.cpp`), checked against
+/// a transcription of it in the tests.
+fn is_median(value: f64, probabilities: impl ExactSizeIterator<Item = f64>) -> bool {
     let last = probabilities.len().saturating_sub(1);
     let mut below = 0.0; // the cumulative mass before `level`
     for (level, probability) in probabilities.enumerate() {
@@ -518,8 +518,7 @@ fn is_median(value: f64, probabilities: impl ExactSizeIterator<Item = f64>, nois
         if value == level as f64 {
             // The mass before the level has not reached one half, and the
             // mass through it has (or no level does and this is the last).
-            return (level == 0 || below < 0.5 + noise)
-                && (through >= 0.5 - noise || level == last);
+            return (level == 0 || below < 0.5) && (through >= 0.5 || level == last);
         }
         below = through;
     }
@@ -624,6 +623,91 @@ impl fmt::Debug for Decisions {
             .field("answers", &self.answers)
             .field("usage", &self.usage)
             .finish()
+    }
+}
+
+/// The serde form of the `f64` fields (a probability, `p_yes`, a score
+/// value, a confidence): in human-readable formats a decimal string with
+/// the shortest digits that read back as the same `f64`, read back with a
+/// correctly rounded parser of JSON's number grammar; in binary formats the
+/// `f64` itself. A text round trip is therefore exact in every format,
+/// serde_json included, and decoding needs no tolerance. NaN and infinities
+/// never reach a human-readable wire.
+mod exact_f64 {
+    use super::*;
+    use crate::ir::decision::json::{float_text, parse_float};
+
+    pub(super) fn serialize<S: Serializer>(value: &f64, serializer: S) -> Result<S::Ok, S::Error> {
+        if !serializer.is_human_readable() {
+            serializer.serialize_f64(*value)
+        } else if value.is_finite() {
+            serializer.serialize_str(&float_text(*value))
+        } else {
+            Err(ser::Error::custom(
+                "a probability, level or confidence is NaN or infinite, which a valid answer never holds",
+            ))
+        }
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f64, D::Error> {
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_str(DecimalVisitor)
+        } else {
+            f64::deserialize(deserializer)
+        }
+    }
+
+    struct DecimalVisitor;
+
+    impl Visitor<'_> for DecimalVisitor {
+        type Value = f64;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("a finite decimal number written as a string")
+        }
+
+        fn visit_str<E: de::Error>(self, text: &str) -> Result<f64, E> {
+            parse_float(text).ok_or_else(|| {
+                E::custom(
+                    "a probability, level or confidence string is not a finite decimal number",
+                )
+            })
+        }
+    }
+
+    /// `Option<f64>` in the same form, `None` as the format's null.
+    pub(super) mod option {
+        use super::*;
+
+        pub(in super::super) fn serialize<S: Serializer>(
+            value: &Option<f64>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            match value {
+                None => serializer.serialize_none(),
+                Some(value) => serializer.serialize_some(&Exact(*value)),
+            }
+        }
+
+        pub(in super::super) fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Option<f64>, D::Error> {
+            Ok(Option::<Exact>::deserialize(deserializer)?.map(|Exact(value)| value))
+        }
+
+        struct Exact(f64);
+
+        impl Serialize for Exact {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                super::serialize(&self.0, serializer)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for Exact {
+            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                super::deserialize(deserializer).map(Exact)
+            }
+        }
     }
 }
 
@@ -940,17 +1024,17 @@ mod tests {
             let median = median_level(&probabilities);
             for level in 0..levels {
                 assert_eq!(
-                    is_median(level as f64, probabilities.iter().copied(), 0.0),
+                    is_median(level as f64, probabilities.iter().copied()),
                     level == median,
                     "{probabilities:?} level {level}"
                 );
             }
             for odd in [-1.0, 0.5, levels as f64, f64::NAN] {
-                assert!(!is_median(odd, probabilities.iter().copied(), 0.0));
+                assert!(!is_median(odd, probabilities.iter().copied()));
             }
         }
         assert_eq!(median_level(&[0.1, 0.1, 0.1]), 2);
-        assert!(is_median(2.0, [0.1, 0.1, 0.1].into_iter(), 0.0));
+        assert!(is_median(2.0, [0.1, 0.1, 0.1].into_iter()));
     }
 
     #[test]
@@ -1073,13 +1157,13 @@ mod tests {
         let finite = entry("a", 1.5, 0.25);
         assert_eq!(
             serde_json::to_string(&finite).unwrap(),
-            r#"{"key":"a","raw_score":1.5,"probability":0.25,"origin":"Caller"}"#
+            r#"{"key":"a","raw_score":1.5,"probability":"0.25","origin":"Caller"}"#
         );
         let ruled_out = entry("a", f32::NEG_INFINITY, 0.0);
         let text = serde_json::to_string(&ruled_out).unwrap();
         assert_eq!(
             text,
-            r#"{"key":"a","raw_score":"-Infinity","probability":0.0,"origin":"Caller"}"#
+            r#"{"key":"a","raw_score":"-Infinity","probability":"0.0","origin":"Caller"}"#
         );
         assert_eq!(
             serde_json::from_str::<DecisionScore>(&text).unwrap(),
@@ -1104,9 +1188,10 @@ mod tests {
             );
         }
 
-        let integer: DecisionScore =
-            serde_json::from_str(r#"{"key":"a","raw_score":3,"probability":1.0,"origin":"Fixed"}"#)
-                .unwrap();
+        let integer: DecisionScore = serde_json::from_str(
+            r#"{"key":"a","raw_score":3,"probability":"1.0","origin":"Fixed"}"#,
+        )
+        .unwrap();
         assert_eq!(
             (integer.raw_score(), integer.origin()),
             (3.0, DecisionOrigin::Fixed)
@@ -1120,7 +1205,7 @@ mod tests {
             "[]",
         ] {
             let text =
-                format!(r#"{{"key":"a","raw_score":{raw},"probability":1.0,"origin":"Caller"}}"#);
+                format!(r#"{{"key":"a","raw_score":{raw},"probability":"1.0","origin":"Caller"}}"#);
             assert!(
                 serde_json::from_str::<DecisionScore>(&text).is_err(),
                 "{raw}"
@@ -1137,8 +1222,70 @@ mod tests {
     }
 
     #[test]
+    fn f64_fields_are_decimal_strings_in_human_readable_formats() {
+        let accepted: [(&str, f64); 8] = [
+            ("0.25", 0.25),
+            ("1.0", 1.0),
+            ("1", 1.0),
+            ("0", 0.0),
+            ("-0.0", -0.0),
+            ("1E-3", 0.001),
+            ("2.5e-1", 0.25),
+            ("0.18475726705416062", 0.18475726705416062),
+        ];
+        for (text, value) in accepted {
+            let json =
+                format!(r#"{{"key":"a","raw_score":0,"probability":"{text}","origin":"Caller"}}"#);
+            let score: DecisionScore = serde_json::from_str(&json).unwrap();
+            assert_eq!(score.probability().to_bits(), value.to_bits(), "{text}");
+        }
+        // A JSON number is refused (serde_json would have rounded it already),
+        // and so is any string outside JSON's number grammar.
+        for probability in [
+            "0.25",
+            r#""NaN""#,
+            r#""inf""#,
+            r#""+1""#,
+            r#"".5""#,
+            r#""0x1""#,
+            r#""""#,
+            r#""1e400""#,
+            r#""0.5 0.5""#,
+            "null",
+        ] {
+            let json = format!(
+                r#"{{"key":"a","raw_score":0,"probability":{probability},"origin":"Caller"}}"#
+            );
+            assert!(
+                serde_json::from_str::<DecisionScore>(&json).is_err(),
+                "{probability}"
+            );
+        }
+        let value = r#"{"Score":{"value":2.0,"statistic":"Median"}}"#;
+        assert!(serde_json::from_str::<DecisionValue>(value).is_err());
+        let value = r#"{"Score":{"value":"2.0","statistic":"Median"}}"#;
+        assert_eq!(
+            serde_json::from_str::<DecisionValue>(value).unwrap(),
+            median(2.0)
+        );
+        assert_eq!(
+            serde_json::to_string(&yes_no(0.125)).unwrap(),
+            r#"{"YesNo":{"p_yes":"0.125"}}"#
+        );
+        // NaN and infinities never reach the JSON wire; bincode carries them
+        // and the answer check refuses them.
+        for probability in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(serde_json::to_string(&entry("a", 0.0, probability)).is_err());
+            assert!(serde_json::to_string(&yes_no(probability)).is_err());
+        }
+        let wire = Wire::new(vec![entry("a", 0.0, f64::NAN)], choice("a"));
+        let bytes = bincode::serialize(&wire).unwrap();
+        assert!(bincode::deserialize::<DecisionAnswer>(&bytes).is_err());
+    }
+
+    #[test]
     fn deserializing_an_answer_checks_it() {
-        let valid = r#"{"question_id":"q","distribution":[{"key":"true","raw_score":2.0,"probability":0.75,"origin":"Caller"},{"key":"false","raw_score":"-Infinity","probability":0.25,"origin":"Caller"}],"value":{"YesNo":{"p_yes":0.75}},"confidence":null}"#;
+        let valid = r#"{"question_id":"q","distribution":[{"key":"true","raw_score":2.0,"probability":"0.75","origin":"Caller"},{"key":"false","raw_score":"-Infinity","probability":"0.25","origin":"Caller"}],"value":{"YesNo":{"p_yes":"0.75"}},"confidence":null}"#;
         let answer: DecisionAnswer = serde_json::from_str(valid).unwrap();
         assert_eq!(serde_json::to_string(&answer).unwrap(), valid);
         let bytes = bincode::serialize(&answer).unwrap();
@@ -1147,7 +1294,7 @@ mod tests {
             answer
         );
 
-        let mismatch = valid.replace(r#""p_yes":0.75"#, r#""p_yes":0.5"#);
+        let mismatch = valid.replace(r#""p_yes":"0.75""#, r#""p_yes":"0.5""#);
         let error = serde_json::from_str::<DecisionAnswer>(&mismatch).unwrap_err();
         assert!(
             error.to_string().contains("p_yes is not the probability"),
@@ -1156,10 +1303,15 @@ mod tests {
         let extra = valid.replace(r#""confidence":null"#, r#""confidence":null,"extra":1"#);
         assert!(serde_json::from_str::<DecisionAnswer>(&extra).is_err());
         let unknown_value = valid.replace(
-            r#"{"YesNo":{"p_yes":0.75}}"#,
-            r#"{"YesNo":{"p_yes":0.75,"p_no":0.25}}"#,
+            r#"{"YesNo":{"p_yes":"0.75"}}"#,
+            r#"{"YesNo":{"p_yes":"0.75","p_no":"0.25"}}"#,
         );
         assert!(serde_json::from_str::<DecisionAnswer>(&unknown_value).is_err());
+        let confident = valid.replace(r#""confidence":null"#, r#""confidence":"0.75""#);
+        let decoded: DecisionAnswer = serde_json::from_str(&confident).unwrap();
+        assert_eq!(decoded.confidence(), Some(0.75));
+        let number = valid.replace(r#""confidence":null"#, r#""confidence":0.75"#);
+        assert!(serde_json::from_str::<DecisionAnswer>(&number).is_err());
 
         // bincode goes through the same check.
         let mut invalid = answer.clone();
@@ -1168,57 +1320,142 @@ mod tests {
         assert!(bincode::deserialize::<DecisionAnswer>(&bytes).is_err());
     }
 
+    /// An answer's serde form, written without the checks, to put invalid
+    /// answers on the wire.
+    #[derive(Serialize)]
+    struct Wire {
+        question_id: String,
+        distribution: Vec<DecisionScore>,
+        value: DecisionValue,
+        #[serde(with = "super::exact_f64::option")]
+        confidence: Option<f64>,
+    }
+
+    impl Wire {
+        fn new(distribution: Vec<DecisionScore>, value: DecisionValue) -> Self {
+            Self {
+                question_id: "q".into(),
+                distribution,
+                value,
+                confidence: None,
+            }
+        }
+
+        /// The answer decoded from JSON and from bincode.
+        fn decode(&self) -> [Result<DecisionAnswer, String>; 2] {
+            let text = serde_json::to_string(self).unwrap();
+            let bytes = bincode::serialize(self).unwrap();
+            [
+                serde_json::from_str::<DecisionAnswer>(&text).map_err(|error| error.to_string()),
+                bincode::deserialize::<DecisionAnswer>(&bytes).map_err(|error| error.to_string()),
+            ]
+        }
+    }
+
+    /// `results` are all refusals naming `reason`.
+    fn refused(results: [Result<DecisionAnswer, String>; 2], reason: &str) {
+        for (format, result) in ["json", "bincode"].into_iter().zip(results) {
+            let error = result.expect_err(format);
+            assert!(error.contains(reason), "{format}: {error}");
+        }
+    }
+
+    fn accepted(results: [Result<DecisionAnswer, String>; 2]) {
+        for (format, result) in ["json", "bincode"].into_iter().zip(results) {
+            assert!(result.is_ok(), "{format}: {result:?}");
+        }
+    }
+
     #[test]
-    fn decoding_survives_a_float_read_back_one_ulp_off() {
+    fn decoding_is_exactly_as_strict_as_new_in_every_format() {
+        // Exact half: [0.5, 0.5] reaches one half at level 0, so the median
+        // is level 0 and only level 0.
+        let half = || levels(&[0.5, 0.5]);
+        accepted(Wire::new(half(), median(0.0)).decode());
+        refused(Wire::new(half(), median(1.0)).decode(), "not the median");
+
+        // Near the boundary: the mass through level 0 falls 1e-13 short of
+        // one half, so the median is level 1.
+        let short = || levels(&[0.5 - 1e-13, 0.5 + 1e-13]);
+        refused(Wire::new(short(), median(0.0)).decode(), "not the median");
+        accepted(Wire::new(short(), median(1.0)).decode());
+
+        // A choice losing by 1e-13, or by one ulp, is not the choice.
+        let close = || vec![entry("a", 0.0, 0.5 + 1e-13), entry("b", 0.0, 0.5 - 1e-13)];
+        refused(
+            Wire::new(close(), choice("b")).decode(),
+            "highest probability",
+        );
+        accepted(Wire::new(close(), choice("a")).decode());
+        let ulp = || vec![entry("a", 0.0, 0.5), entry("b", 0.0, 0.5f64.next_up())];
+        refused(
+            Wire::new(ulp(), choice("a")).decode(),
+            "highest probability",
+        );
+        accepted(Wire::new(ulp(), choice("b")).decode());
+
+        // Review B3: the median read from the float32-rounded distribution.
+        let b3 = || levels(&[0.4999999981306987, 0.5000000018693014]);
+        refused(Wire::new(b3(), median(0.0)).decode(), "not the median");
+        accepted(Wire::new(b3(), median(1.0)).decode());
+    }
+
+    #[test]
+    fn text_round_trips_reproduce_every_bit() {
         // Score logits [0, 0.5343, 0.5343, 0] at T = 1, in llama.cpp's
-        // arithmetic: the mass through level 1 falls just short of one half,
-        // so the median is level 2...
+        // arithmetic: the mass through level 1 falls one ulp short of one
+        // half, so the median is level 2. serde_json, reading the
+        // probabilities as numbers, would read level 0's one ulp high and
+        // move the median; as decimal strings they come back exactly.
         let logits = [0.0f32, 0.5343, 0.5343, 0.0].map(f64::from);
         let max = logits.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         let weights = logits.map(|logit| ((logit - max) / 1.0).exp());
         let sum = weights.iter().fold(0.0, |sum, weight| sum + weight);
         let probabilities = weights.map(|weight| weight / sum);
         assert!(probabilities[0] + probabilities[1] < 0.5);
-        let scored = DecisionAnswer::new("q", levels(&probabilities), median(2.0), None).unwrap();
+        let scored = DecisionAnswer::new(
+            "q",
+            levels(&probabilities),
+            median(2.0),
+            Some(probabilities[1]),
+        )
+        .unwrap();
 
-        // ...and one ulp more on level 0 makes it level 1.
+        let text = serde_json::to_string(&scored).unwrap();
+        assert!(
+            text.contains(r#""probability":"0.18475726705416062""#),
+            "{text}"
+        );
+        let bytes = bincode::serialize(&scored).unwrap();
+        for back in [
+            serde_json::from_str::<DecisionAnswer>(&text).unwrap(),
+            bincode::deserialize::<DecisionAnswer>(&bytes).unwrap(),
+        ] {
+            assert_eq!(back.value(), &median(2.0));
+            assert_eq!(
+                back.confidence().map(f64::to_bits),
+                Some(probabilities[1].to_bits())
+            );
+            let bits = |answer: &DecisionAnswer| {
+                answer
+                    .distribution()
+                    .iter()
+                    .map(|entry| entry.probability().to_bits())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(bits(&back), bits(&scored));
+        }
+
+        // One ulp more on level 0 makes level 1 the median, and only level 1.
         let mut nudged = probabilities;
         nudged[0] = nudged[0].next_up();
         assert!(nudged[0] + nudged[1] >= 0.5);
         assert!(answer_of(&nudged, median(2.0)).is_err());
-        assert!(answer_of(&nudged, median(1.0)).is_ok());
-
-        // A text format that reads level 0 back one ulp high (serde_json
-        // without float_roundtrip misreads some 17-digit floats) must still
-        // decode the answer.
-        let text = serde_json::to_string(&scored).unwrap();
-        let exact = serde_json::to_string(&probabilities[0]).unwrap();
-        let misread = serde_json::to_string(&nudged[0]).unwrap();
-        let read_off = text.replacen(&exact, &misread, 1);
-        assert_ne!(read_off, text);
-        let decoded: DecisionAnswer = serde_json::from_str(&read_off).unwrap();
-        assert_eq!(decoded.value(), &median(2.0));
-        assert!(serde_json::from_str::<DecisionAnswer>(&text).is_ok());
-
-        // Two choices one ulp apart: `new` wants the exact maximum, decoding
-        // allows either.
-        let close = || vec![entry("a", 0.0, 0.5), entry("b", 0.0, 0.5f64.next_up())];
-        assert_eq!(
-            broken(answer(close(), choice("a"))),
-            AnswerInvariant::ChoiceNotHighest
+        refused(
+            Wire::new(levels(&nudged), median(2.0)).decode(),
+            "not the median",
         );
-        let text = serde_json::to_string(&answer(close(), choice("b")).unwrap()).unwrap();
-        let read_off = text.replacen(r#""Choice":{"key":"b"}"#, r#""Choice":{"key":"a"}"#, 1);
-        assert!(serde_json::from_str::<DecisionAnswer>(&read_off).is_ok());
-
-        // Decoding still refuses a real disagreement, such as review B3's
-        // median read from the float32-rounded distribution.
-        let b3 = [0.4999999981306987, 0.5000000018693014];
-        let text = serde_json::to_string(&answer_of(&b3, median(1.0)).unwrap()).unwrap();
-        let wrong = text.replacen(r#""value":1.0"#, r#""value":0.0"#, 1);
-        assert_ne!(wrong, text);
-        let error = serde_json::from_str::<DecisionAnswer>(&wrong).unwrap_err();
-        assert!(error.to_string().contains("not the median"), "{error}");
+        accepted(Wire::new(levels(&nudged), median(1.0)).decode());
     }
 
     #[test]
