@@ -88,9 +88,9 @@ pub enum LlamaError {
     #[error("internal llama.cpp error: {0}")]
     Internal(String),
 
-    /// A readout stopped because its context's cancel handle was used
-    /// (`MemorylessContext::cancel_handle`). The context can read again
-    /// once the request is cleared.
+    /// A readout stopped because the handle of its request was used
+    /// (`MemorylessContext::cancel_handle`). The context reads again in its
+    /// next request (`MemorylessContext::clear_cancel`).
     #[error("the readout was cancelled")]
     Cancelled,
 

@@ -347,6 +347,7 @@ fn a_long_readout_can_be_cancelled_from_another_thread() {
         Err(LlamaError::Cancelled)
     ));
     ctx.clear_cancel();
+    cancel.cancel(); // a handle of the cancelled request: nothing to stop now
     assert_eq!(
         bits(&ctx.read_last(&prompt, &[a]).unwrap()),
         bits(
