@@ -6,6 +6,20 @@
 //! parses special tokens) reads them as text
 //! (`tools/server/server-decision.cpp:606-661`, applied at `:1157-1159`).
 //! [`Escaped`] is the escaped template input the renderer reads.
+//!
+//! # Bounded work
+//!
+//! Upstream compares every spelling, longest first, at every position whose
+//! byte starts one: a vocabulary of many long spellings sharing a prefix
+//! costs `positions × spellings × length`. Here the spellings form a byte
+//! trie, and the longest one starting at a position is found in one walk of
+//! at most [`MAX_SPELLING_BYTES`] steps, which is the same choice (two
+//! spellings of one length that both match are the same text). The
+//! spellings themselves are capped ([`MAX_SPELLINGS`], [`MAX_SPELLING_BYTES`],
+//! [`MAX_SPELLINGS_BYTES`]), and so is the work each string may take, all
+//! passes together ([`ESCAPE_STEPS_PER_BYTE`] per byte of text, plus
+//! [`ESCAPE_STEPS_PER_STRING`]). Past either, the vocabulary is refused
+//! for the request, before anything is tokenized.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -18,47 +32,106 @@ use crate::ir::decision::{
 /// U+200B ZERO WIDTH SPACE, what `d1_break` inserts.
 const ZWSP: &str = "\u{200b}";
 
+/// Most CONTROL spellings of 2 bytes or more a vocabulary may have: d1-2B
+/// has 124 and d1-omni-2B 126; 4,096 leaves room for image grids of up to
+/// 64 × 64 tile tokens in a related vocabulary.
+pub(super) const MAX_SPELLINGS: usize = 4096;
+
+/// Longest CONTROL spelling, in bytes: d1-2B's longest
+/// (`<|img_row_10_col_10|>`) is 21.
+pub(super) const MAX_SPELLING_BYTES: usize = 256;
+
+/// All CONTROL spellings together, in bytes: d1-2B's 124 take 2,238.
+pub(super) const MAX_SPELLINGS_BYTES: usize = 64 << 10;
+
+/// Trie steps escaping may take per byte of a string, all passes together.
+/// d1-2B's spellings all start with `<` and none starts inside another, so
+/// a string costs at most 2 passes of 1 step per byte plus at most 21 per
+/// `<`: 64 is far above that, and far below what an unbounded vocabulary
+/// could cost.
+pub(super) const ESCAPE_STEPS_PER_BYTE: usize = 64;
+
+/// Trie steps escaping may take per string on top of
+/// [`ESCAPE_STEPS_PER_BYTE`], for short strings.
+pub(super) const ESCAPE_STEPS_PER_STRING: usize = 1024;
+
 /// A vocabulary's CONTROL spellings, as `d1_break` tries them.
 #[derive(Debug, Clone)]
 pub(super) struct Spellings {
-    /// Longest first; equal lengths keep token-id order (a stable sort).
-    longest_first: Vec<String>,
-    /// Which bytes start a spelling.
-    first_bytes: [bool; 256],
+    /// One node per byte of the spellings: the root, then each prefix.
+    nodes: Vec<Node>,
+}
+
+/// A trie node: its children by byte, and the length in bytes of the first
+/// character of the spelling that ends here, if one does.
+#[derive(Debug, Clone, Default)]
+struct Node {
+    children: Vec<(u8, u32)>,
+    first_char: Option<u8>,
+}
+
+impl Node {
+    fn child(&self, byte: u8) -> Option<usize> {
+        self.children
+            .binary_search_by_key(&byte, |&(b, _)| b)
+            .ok()
+            .map(|index| self.children[index].1 as usize)
+    }
 }
 
 impl Spellings {
     /// The spellings `d1_break` tries, from the vocabulary's CONTROL
     /// spellings in token-id order (`init_quoted_spellings`,
-    /// `server-decision.cpp:213-230`): those of 2 bytes or more, longest
-    /// first.
+    /// `server-decision.cpp:213-230`): those of 2 bytes or more.
     ///
     /// # Errors
     ///
     /// [`DecisionError::UnsupportedVocabulary`] for a spelling that is not
-    /// UTF-8, is a single character, or holds U+200B: breaking those cannot
-    /// end (a single character, or a spelling holding the inserted U+200B,
-    /// matches again after its break) or breaks a character apart. d1-2B's
-    /// 124 spellings are ASCII, 7 bytes or longer.
+    /// UTF-8, is a single character, or holds U+200B (breaking those cannot
+    /// end: a single character, or a spelling holding the inserted U+200B,
+    /// matches again after its break; or it breaks a character apart), and
+    /// for spellings past [`MAX_SPELLINGS`], [`MAX_SPELLING_BYTES`] or
+    /// [`MAX_SPELLINGS_BYTES`]. d1-2B's 124 spellings are ASCII, 7 to 21
+    /// bytes.
     pub(super) fn new(control: &[Vec<u8>]) -> Result<Self, DecisionError> {
-        let mut longest_first = Vec::with_capacity(control.len());
+        let refuse = || DecisionError::UnsupportedVocabulary;
+        let mut count = 0usize;
+        let mut total = 0usize;
+        let mut nodes = vec![Node::default()];
         for bytes in control.iter().filter(|bytes| bytes.len() >= 2) {
-            let text =
-                std::str::from_utf8(bytes).map_err(|_| DecisionError::UnsupportedVocabulary)?;
-            if text.chars().nth(1).is_none() || text.contains(ZWSP) {
-                return Err(DecisionError::UnsupportedVocabulary);
+            count += 1;
+            total += bytes.len();
+            if count > MAX_SPELLINGS
+                || bytes.len() > MAX_SPELLING_BYTES
+                || total > MAX_SPELLINGS_BYTES
+            {
+                return Err(refuse());
             }
-            longest_first.push(text.to_string());
+            let text = std::str::from_utf8(bytes).map_err(|_| refuse())?;
+            let first = text.chars().next().map_or(0, char::len_utf8);
+            if text.chars().nth(1).is_none() || text.contains(ZWSP) {
+                return Err(refuse());
+            }
+            let mut node = 0;
+            for &byte in bytes {
+                node = match nodes[node].child(byte) {
+                    Some(child) => child,
+                    None => {
+                        let child = nodes.len();
+                        nodes.push(Node::default());
+                        let children = &mut nodes[node].children;
+                        let at = children.partition_point(|&(b, _)| b < byte);
+                        children.insert(at, (byte, child as u32));
+                        child
+                    }
+                };
+            }
+            // A repeated spelling is the same text: the first one stands.
+            nodes[node]
+                .first_char
+                .get_or_insert(u8::try_from(first).expect("a character is at most 4 bytes"));
         }
-        longest_first.sort_by_key(|spelling| std::cmp::Reverse(spelling.len()));
-        let mut first_bytes = [false; 256];
-        for spelling in &longest_first {
-            first_bytes[usize::from(spelling.as_bytes()[0])] = true;
-        }
-        Ok(Self {
-            longest_first,
-            first_bytes,
-        })
+        Ok(Self { nodes })
     }
 
     /// `text` with U+200B after the first character of every spelling in
@@ -71,52 +144,73 @@ impl Spellings {
     /// a break splits its own occurrence and, with the spellings [`new`]
     /// admits, creates none.
     ///
+    /// # Errors
+    ///
+    /// [`DecisionError::EscapeWorkExceeded`] when the passes would take more
+    /// than [`ESCAPE_STEPS_PER_BYTE`] trie steps per byte of `text` plus
+    /// [`ESCAPE_STEPS_PER_STRING`].
+    ///
     /// [`new`]: Self::new
-    pub(super) fn d1_break(&self, text: &str) -> String {
+    pub(super) fn d1_break(&self, text: &str) -> Result<String, DecisionError> {
+        let mut steps = ESCAPE_STEPS_PER_BYTE
+            .saturating_mul(text.len())
+            .saturating_add(ESCAPE_STEPS_PER_STRING);
         let mut current = text.to_string();
-        while let Some(next) = self.break_once(&current) {
+        while let Some(next) = self.break_once(&current, &mut steps)? {
             current = next;
         }
-        current
+        Ok(current)
     }
 
     /// One pass of [`Self::d1_break`]; `None` when it finds no spelling.
-    fn break_once(&self, text: &str) -> Option<String> {
+    /// Every trie step (one byte looked up) takes one of `steps`.
+    fn break_once(&self, text: &str, steps: &mut usize) -> Result<Option<String>, DecisionError> {
         let bytes = text.as_bytes();
         let mut out: Option<String> = None;
         let mut copied = 0; // bytes of `text` already in `out`
         let mut i = 0;
         while i < bytes.len() {
-            let hit = self.first_bytes[usize::from(bytes[i])]
-                .then(|| {
-                    self.longest_first
-                        .iter()
-                        .find(|spelling| bytes[i..].starts_with(spelling.as_bytes()))
-                })
-                .flatten();
-            let Some(spelling) = hit else {
+            let Some((len, first)) = self.longest_at(&bytes[i..], steps)? else {
                 i += 1;
                 continue;
             };
             // A spelling starts with a whole character and `text` is UTF-8,
             // so `i` and `i + first` are character boundaries.
-            let first = spelling.chars().next().map_or(0, char::len_utf8);
             let out = out.get_or_insert_with(|| String::with_capacity(text.len() + 16));
             out.push_str(&text[copied..i + first]);
             out.push_str(ZWSP);
-            out.push_str(&text[i + first..i + spelling.len()]);
-            i += spelling.len();
+            out.push_str(&text[i + first..i + len]);
+            i += len;
             copied = i;
         }
-        out.map(|mut out| {
+        Ok(out.map(|mut out| {
             out.push_str(&text[copied..]);
             out
-        })
+        }))
     }
 
-    #[cfg(test)]
-    pub(super) fn longest_first(&self) -> &[String] {
-        &self.longest_first
+    /// The length of the longest spelling `text` starts with, and the length
+    /// of its first character.
+    fn longest_at(
+        &self,
+        text: &[u8],
+        steps: &mut usize,
+    ) -> Result<Option<(usize, usize)>, DecisionError> {
+        let mut node = 0;
+        let mut longest = None;
+        for (depth, &byte) in text.iter().enumerate() {
+            *steps = steps
+                .checked_sub(1)
+                .ok_or(DecisionError::EscapeWorkExceeded)?;
+            let Some(child) = self.nodes[node].child(byte) else {
+                break;
+            };
+            node = child;
+            if let Some(first) = self.nodes[node].first_char {
+                longest = Some((depth + 1, usize::from(first)));
+            }
+        }
+        Ok(longest)
     }
 }
 
@@ -158,18 +252,21 @@ impl Escaped {
     /// option): its keys are escaped too, as upstream escapes the whole
     /// input, and cannot collide (`d1_break` only inserts U+200B, which
     /// none of them holds, so it keeps distinct keys distinct).
-    pub(super) fn structure(spellings: &Spellings, members: Vec<(&str, Arc<Escaped>)>) -> Self {
-        Self::Object(
+    pub(super) fn structure(
+        spellings: &Spellings,
+        members: Vec<(&str, Arc<Escaped>)>,
+    ) -> Result<Self, DecisionError> {
+        Ok(Self::Object(
             members
                 .into_iter()
-                .map(|(key, value)| (spellings.d1_break(key), value))
-                .collect(),
-        )
+                .map(|(key, value)| Ok((spellings.d1_break(key)?, value)))
+                .collect::<Result<_, DecisionError>>()?,
+        ))
     }
 
     /// An escaped string.
-    pub(super) fn text(spellings: &Spellings, text: &str) -> Self {
-        Self::Str(spellings.d1_break(text))
+    pub(super) fn text(spellings: &Spellings, text: &str) -> Result<Self, DecisionError> {
+        Ok(Self::Str(spellings.d1_break(text)?))
     }
 
     /// Escaped content: text, JSON, or `null` for none.
@@ -188,7 +285,7 @@ impl Escaped {
     ) -> Result<Self, DecisionError> {
         match content.map(DecisionContent::view) {
             None => Ok(Self::Null),
-            Some(DecisionContentView::Text(text)) => Ok(Self::text(spellings, text)),
+            Some(DecisionContentView::Text(text)) => Self::text(spellings, text),
             Some(DecisionContentView::Json(value)) => Self::json(spellings, value, part),
         }
     }
@@ -206,7 +303,7 @@ impl Escaped {
                 return Err(DecisionError::NumberOutOfRange { part })
             }
             JsonView::Number(JsonNumber::F64(value)) => Self::Float(value),
-            JsonView::String(text) => Self::text(spellings, text),
+            JsonView::String(text) => Self::text(spellings, text)?,
             JsonView::Array(items) => Self::Array(
                 items
                     .iter()
@@ -217,7 +314,7 @@ impl Escaped {
                 let mut seen = HashSet::with_capacity(members.len());
                 let mut escaped = Vec::with_capacity(members.len());
                 for (key, item) in members {
-                    let key = spellings.d1_break(key);
+                    let key = spellings.d1_break(key)?;
                     if !seen.insert(key.clone()) {
                         return Err(DecisionError::EscapedKeyCollision { part });
                     }

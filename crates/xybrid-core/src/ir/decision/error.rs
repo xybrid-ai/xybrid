@@ -667,6 +667,11 @@ pub enum DecisionError {
     /// Reading the model's vocabulary (a token's attributes or text) failed.
     #[error("reading the model's vocabulary failed")]
     VocabularyFailed,
+    /// Escaping a string's special-token spellings would take more work than
+    /// the protocol allows (an unfamiliar vocabulary of long spellings
+    /// sharing a prefix, against text that keeps matching it).
+    #[error("escaping special-token spellings would take more work than this model's vocabulary is allowed")]
+    EscapeWorkExceeded,
     /// A question's prompt renders to more bytes than its pass can hold: the
     /// token budget times the most bytes one token of the vocabulary covers.
     /// Found while rendering, before anything is tokenized.
@@ -738,7 +743,8 @@ impl DecisionError {
             Self::UnsupportedMetadata
             | Self::UnsupportedTemplate
             | Self::ProfileMismatch
-            | Self::UnsupportedVocabulary => Kind::UnsupportedMetadata,
+            | Self::UnsupportedVocabulary
+            | Self::EscapeWorkExceeded => Kind::UnsupportedMetadata,
             Self::InvalidMetadata => Kind::InvalidMetadata,
             Self::InvalidAnswer(_)
             | Self::RenderFailed
@@ -784,6 +790,9 @@ impl DecisionError {
             Self::UnsupportedVocabulary => {
                 unsupported("its special-token spellings cannot be escaped")
             }
+            Self::EscapeWorkExceeded => unsupported(
+                "escaping its special-token spellings in this request takes too much work",
+            ),
             Self::InvalidMetadata => AdapterError::RuntimeError(self.to_string()),
             Self::InvalidAnswer(_)
             | Self::NonFiniteScores { .. }
@@ -1050,6 +1059,7 @@ mod tests {
                 question: 1,
                 max_bytes: 4096,
             },
+            DecisionError::EscapeWorkExceeded,
         ]);
         refusals
     }
@@ -1137,6 +1147,7 @@ mod tests {
             DecisionError::NonFiniteScores { .. } => "NonFiniteScores",
             DecisionError::VocabularyFailed => "VocabularyFailed",
             DecisionError::RenderedTooLong { .. } => "RenderedTooLong",
+            DecisionError::EscapeWorkExceeded => "EscapeWorkExceeded",
         };
         name.to_string()
     }
@@ -1161,9 +1172,9 @@ mod tests {
         let refusals = every_refusal();
         let names: std::collections::BTreeSet<String> = refusals.iter().map(variant).collect();
         // 13 JSON syntax kinds, 3 JSON ceilings, 12 request refusals, 15
-        // answer invariants and 21 protocol refusals and failures: every one,
+        // answer invariants and 22 protocol refusals and failures: every one,
         // each once.
-        assert_eq!(names.len(), 64, "{names:#?}");
+        assert_eq!(names.len(), 65, "{names:#?}");
         assert_eq!(refusals.len(), names.len());
 
         for error in refusals {
@@ -1535,6 +1546,11 @@ mod tests {
                 },
                 Some("budget_exceeded"),
                 "InvalidInput",
+            ),
+            (
+                DecisionError::EscapeWorkExceeded,
+                Some("unsupported_metadata"),
+                "UnsupportedModelCapability",
             ),
         ]
     }

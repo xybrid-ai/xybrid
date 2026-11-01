@@ -5,7 +5,10 @@
 
 use std::sync::Arc;
 
-use crate::execution::decision::escape::{Escaped, Spellings};
+use crate::execution::decision::escape::{
+    Escaped, Spellings, ESCAPE_STEPS_PER_BYTE, ESCAPE_STEPS_PER_STRING, MAX_SPELLINGS,
+    MAX_SPELLINGS_BYTES, MAX_SPELLING_BYTES,
+};
 use crate::ir::decision::{ContentPart, DecisionContent, DecisionError, OrderedJson};
 
 const ZWSP: &str = "\u{200b}";
@@ -23,32 +26,42 @@ fn spellings(list: &[&str]) -> Spellings {
 #[test]
 fn a_spelling_is_broken_after_its_first_character() {
     let s = spellings(&["<|im_end|>", "<|im_start|>"]);
-    assert_eq!(s.d1_break("a<|im_end|>b"), format!("a<{ZWSP}|im_end|>b"));
     assert_eq!(
-        s.d1_break("<|im_start|><|im_end|>"),
+        s.d1_break("a<|im_end|>b").unwrap(),
+        format!("a<{ZWSP}|im_end|>b")
+    );
+    assert_eq!(
+        s.d1_break("<|im_start|><|im_end|>").unwrap(),
         format!("<{ZWSP}|im_start|><{ZWSP}|im_end|>")
     );
-    assert_eq!(s.d1_break("no spelling <| here"), "no spelling <| here");
-    assert_eq!(s.d1_break(""), "");
+    assert_eq!(
+        s.d1_break("no spelling <| here").unwrap(),
+        "no spelling <| here"
+    );
+    assert_eq!(s.d1_break("").unwrap(), "");
     // The first character may take several bytes: the break goes after all
     // of them.
     let s = spellings(&["é<x>", "中文"]);
-    assert_eq!(s.d1_break("aé<x>b"), format!("aé{ZWSP}<x>b"));
-    assert_eq!(s.d1_break("中文"), format!("中{ZWSP}文"));
+    assert_eq!(s.d1_break("aé<x>b").unwrap(), format!("aé{ZWSP}<x>b"));
+    assert_eq!(s.d1_break("中文").unwrap(), format!("中{ZWSP}文"));
 }
 
 #[test]
-fn the_longest_spelling_wins_and_equal_lengths_keep_token_order() {
+fn the_longest_spelling_wins() {
     // `<|a|>` and `<|ab|>` both start at the same `<`: the longer is
     // broken, whatever the order they are given in.
     for list in [["<|a|>", "<|ab|>"], ["<|ab|>", "<|a|>"]] {
         let s = spellings(&list);
-        assert_eq!(s.d1_break("<|ab|>"), format!("<{ZWSP}|ab|>"));
-        assert_eq!(s.d1_break("<|a|>"), format!("<{ZWSP}|a|>"));
+        assert_eq!(s.d1_break("<|ab|>").unwrap(), format!("<{ZWSP}|ab|>"));
+        assert_eq!(s.d1_break("<|a|>").unwrap(), format!("<{ZWSP}|a|>"));
     }
-    let s = spellings(&["<|x|>", "<|yy|>", "<|zz|>", "<|w|>"]);
-    let order: Vec<&str> = s.longest_first().iter().map(String::as_str).collect();
-    assert_eq!(order, ["<|yy|>", "<|zz|>", "<|x|>", "<|w|>"]);
+    // Spellings of one length cannot both match at a position unless they
+    // are the same text, so their order is immaterial.
+    let s = spellings(&["<|x|>", "<|yy|>", "<|zz|>", "<|w|>", "<|yy|>"]);
+    assert_eq!(
+        s.d1_break("<|w|><|yy|><|x|>").unwrap(),
+        format!("<{ZWSP}|w|><{ZWSP}|yy|><{ZWSP}|x|>")
+    );
 }
 
 #[test]
@@ -58,24 +71,27 @@ fn the_loop_repeats_until_a_pass_breaks_nothing() {
     // nothing (the `escape-overlap-variant` case on d1-2B's vocabulary).
     let s = spellings(&["<|im_end|>", "|>"]);
     assert_eq!(
-        s.d1_break("a<|im_end|>b |> c"),
+        s.d1_break("a<|im_end|>b |> c").unwrap(),
         format!("a<{ZWSP}|im_end|{ZWSP}>b |{ZWSP}> c")
     );
     // A chain: each pass breaks the spelling the previous one skipped.
     // Pass 1 breaks `abcd` (a|bcd) and copies `ef`; pass 2 finds `bcde`
     // intact after the break (b|cde); pass 3 `cdef` (c|def); pass 4 nothing.
     let s = spellings(&["abcd", "bcde", "cdef"]);
-    assert_eq!(s.d1_break("abcdef"), format!("a{ZWSP}b{ZWSP}c{ZWSP}def"));
+    assert_eq!(
+        s.d1_break("abcdef").unwrap(),
+        format!("a{ZWSP}b{ZWSP}c{ZWSP}def")
+    );
     // Breaking is idempotent once done.
-    let once = s.d1_break("abcdef abcd");
-    assert_eq!(s.d1_break(&once), once);
+    let once = s.d1_break("abcdef abcd").unwrap();
+    assert_eq!(s.d1_break(&once).unwrap(), once);
 }
 
 #[test]
 fn short_spellings_are_ignored_and_unterminating_ones_refused() {
     // One-byte spellings are not broken (`init_quoted_spellings(.., 2)`).
     let s = spellings(&["x", "<x>"]);
-    assert_eq!(s.d1_break("x <x>"), format!("x <{ZWSP}x>"));
+    assert_eq!(s.d1_break("x <x>").unwrap(), format!("x <{ZWSP}x>"));
     let refuse = |list: Vec<Vec<u8>>| {
         assert!(matches!(
             Spellings::new(&list),
@@ -166,7 +182,8 @@ fn keys_that_escaping_makes_equal_are_refused_where_they_are() {
             ("key", Arc::new(Escaped::Null)),
             ("label", Arc::new(Escaped::Null)),
         ],
-    );
+    )
+    .unwrap();
     let Escaped::Object(members) = structure else {
         panic!("an object")
     };
@@ -196,4 +213,145 @@ fn integers_above_i64_are_refused_and_larger_spellings_are_floats() {
         Escaped::content(&s, value.as_ref(), part).unwrap(),
         Escaped::Int(i64::MIN)
     );
+}
+
+/// Upstream's `d1_break`, ported as written (`server-decision.cpp:630-661`):
+/// at each position whose byte starts a spelling, every spelling, longest
+/// first, until one matches. The trie must give the same text.
+fn upstream_d1_break(spellings: &[&str], text: &str) -> String {
+    let mut sorted: Vec<&str> = spellings.iter().copied().filter(|s| s.len() >= 2).collect();
+    sorted.sort_by_key(|s| std::cmp::Reverse(s.len()));
+    let first: Vec<u8> = sorted.iter().map(|s| s.as_bytes()[0]).collect();
+    let mut cur = text.as_bytes().to_vec();
+    loop {
+        let mut changed = false;
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < cur.len() {
+            let hit = first
+                .contains(&cur[i])
+                .then(|| sorted.iter().find(|s| cur[i..].starts_with(s.as_bytes())))
+                .flatten();
+            match hit {
+                None => {
+                    out.push(cur[i]);
+                    i += 1;
+                }
+                Some(spelling) => {
+                    let n = spelling.chars().next().unwrap().len_utf8();
+                    out.extend_from_slice(&spelling.as_bytes()[..n]);
+                    out.extend_from_slice(ZWSP.as_bytes());
+                    out.extend_from_slice(&spelling.as_bytes()[n..]);
+                    i += spelling.len();
+                    changed = true;
+                }
+            }
+        }
+        cur = out;
+        if !changed {
+            return String::from_utf8(cur).unwrap();
+        }
+    }
+}
+
+#[test]
+fn the_trie_breaks_what_upstreams_scan_breaks() {
+    // Random spelling sets over a small alphabet, so that spellings share
+    // prefixes, nest and overlap, against random text: the same output.
+    let alphabet: Vec<char> = "<|>ab".chars().collect();
+    let mut seed: u64 = 0x005e_edd1;
+    let mut next = |bound: usize| {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((seed >> 33) % bound as u64) as usize
+    };
+    for _ in 0..400 {
+        let spelling_count = 1 + next(8);
+        let mut list: Vec<String> = Vec::new();
+        for _ in 0..spelling_count {
+            let len = 2 + next(5);
+            list.push((0..len).map(|_| alphabet[next(alphabet.len())]).collect());
+        }
+        let refs: Vec<&str> = list.iter().map(String::as_str).collect();
+        let s = spellings(&refs);
+        for _ in 0..10 {
+            let len = next(40);
+            let text: String = (0..len).map(|_| alphabet[next(alphabet.len())]).collect();
+            assert_eq!(
+                s.d1_break(&text).unwrap(),
+                upstream_d1_break(&refs, &text),
+                "{refs:?} on {text:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn spellings_past_the_caps_are_refused() {
+    let refused = |list: Vec<Vec<u8>>| {
+        matches!(
+            Spellings::new(&list),
+            Err(DecisionError::UnsupportedVocabulary)
+        )
+    };
+    // Codex's probe: 16,384 spellings of 72 bytes sharing a 63-byte prefix.
+    let probe: Vec<Vec<u8>> = (0..16_384)
+        .map(|i| format!("{}{i:08x}X", "a".repeat(63)).into_bytes())
+        .collect();
+    assert!(refused(probe));
+    // One past each cap.
+    let many: Vec<Vec<u8>> = (0..=MAX_SPELLINGS)
+        .map(|i| format!("<{i}>").into_bytes())
+        .collect();
+    assert!(refused(many));
+    assert!(refused(vec![format!(
+        "<{}>",
+        "a".repeat(MAX_SPELLING_BYTES - 1)
+    )
+    .into_bytes()]));
+    let heavy: Vec<Vec<u8>> = (0..MAX_SPELLINGS_BYTES / 200 + 1)
+        .map(|i| format!("<{i:04}{}>", "b".repeat(194)).into_bytes())
+        .collect();
+    assert!(heavy.iter().all(|s| s.len() == 200));
+    assert!(refused(heavy));
+    // At the caps: accepted.
+    let at_cap: Vec<Vec<u8>> = (0..MAX_SPELLINGS)
+        .map(|i| format!("<{i:05}>").into_bytes())
+        .collect();
+    assert!(Spellings::new(&at_cap).is_ok());
+    assert!(
+        Spellings::new(&[format!("<{}>", "a".repeat(MAX_SPELLING_BYTES - 2)).into_bytes()]).is_ok()
+    );
+}
+
+#[test]
+fn a_common_prefix_that_never_completes_costs_bounded_work() {
+    // 900 spellings sharing a long prefix of `a`, which the text matches at
+    // every position without ever completing a spelling: each position walks
+    // the shared prefix once, never every spelling.
+    let text = "a".repeat(64 << 10);
+    let short: Vec<String> = (0..900)
+        .map(|i| format!("{}{i:03}X", "a".repeat(30)))
+        .collect();
+    let refs: Vec<&str> = short.iter().map(String::as_str).collect();
+    let started = std::time::Instant::now();
+    assert_eq!(spellings(&refs).d1_break(&text).unwrap(), text);
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+
+    // With a prefix longer than the work ceiling allows per byte, the
+    // escaping stops at the ceiling and refuses the vocabulary.
+    let long: Vec<String> = (0..200)
+        .map(|i| format!("{}{i:03}X", "a".repeat(200)))
+        .collect();
+    let refs: Vec<&str> = long.iter().map(String::as_str).collect();
+    let started = std::time::Instant::now();
+    assert!(matches!(
+        spellings(&refs).d1_break(&text),
+        Err(DecisionError::EscapeWorkExceeded)
+    ));
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    // The ceiling is per byte of text, plus a constant per string that lets
+    // a short string walk the longest spelling.
+    const { assert!(ESCAPE_STEPS_PER_BYTE >= 32 && ESCAPE_STEPS_PER_STRING >= MAX_SPELLING_BYTES) };
 }

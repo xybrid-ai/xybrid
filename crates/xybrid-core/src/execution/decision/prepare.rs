@@ -232,27 +232,27 @@ fn template_input(
             Ok(Arc::new(Escaped::structure(
                 spellings,
                 vec![
-                    ("key", Arc::new(Escaped::text(spellings, key))),
+                    ("key", Arc::new(Escaped::text(spellings, key)?)),
                     (
                         "description",
                         Arc::new(Escaped::content(spellings, description, part)?),
                     ),
-                    ("label", Arc::new(Escaped::text(spellings, &label.code))),
+                    ("label", Arc::new(Escaped::text(spellings, &label.code)?)),
                 ],
-            )))
+            )?))
         })
         .collect::<Result<Vec<_>, DecisionError>>()?;
 
     let mut input = Escaped::structure(
         spellings,
         vec![
-            ("id", Arc::new(Escaped::text(spellings, question.id()))),
-            ("type", Arc::new(Escaped::text(spellings, type_name))),
+            ("id", Arc::new(Escaped::text(spellings, question.id())?)),
+            ("type", Arc::new(Escaped::text(spellings, type_name)?)),
             ("instructions", Arc::new(instructions)),
             ("state", Arc::clone(state)),
             ("options", Arc::new(Escaped::Array(options))),
         ],
-    );
+    )?;
     if let Escaped::Object(members) = &mut input {
         members.push(("images".to_string(), Arc::new(Escaped::Array(Vec::new()))));
     }

@@ -399,7 +399,10 @@ fn tojson_takes_the_templates_arguments_and_refuses_the_rest() {
 /// A vocabulary that counts the prompts it tokenizes.
 struct Counting<'a> {
     inner: &'a FakeVocab,
+    /// Tokenizations with special tokens: prompts.
     prompts: std::sync::atomic::AtomicUsize,
+    /// Every tokenization: prompts and label forms.
+    calls: std::sync::atomic::AtomicUsize,
 }
 
 impl DecisionVocab for Counting<'_> {
@@ -409,6 +412,8 @@ impl DecisionVocab for Counting<'_> {
         add_special: bool,
         parse_special: bool,
     ) -> Result<Vec<crate::execution::decision::Token>, DecisionError> {
+        self.calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if parse_special {
             self.prompts
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -435,6 +440,7 @@ fn a_prompt_longer_than_its_budget_can_hold_is_refused_while_it_renders() {
     let vocab = Counting {
         inner: &fake,
         prompts: Default::default(),
+        calls: Default::default(),
     };
     let request = DecisionRequest::new(
         DecisionState::text("a state"),
@@ -511,4 +517,40 @@ fn json_content_too_long_for_the_prompt_is_refused_while_it_is_written() {
         ),
         "{error:?}"
     );
+}
+
+#[test]
+fn escaping_past_its_work_ceiling_refuses_before_anything_is_tokenized() {
+    // An unfamiliar vocabulary of long CONTROL spellings sharing a prefix
+    // that the state keeps matching: refused as the vocabulary's limit, with
+    // no token of the prompt or of a label read.
+    let spellings: Vec<String> = (0..200)
+        .map(|i| format!("{}{i:03}X", "a".repeat(200)))
+        .collect();
+    let fake = FakeVocab::new()
+        .d1_labels()
+        .control(spellings.iter().map(String::as_str));
+    let vocab = Counting {
+        inner: &fake,
+        prompts: Default::default(),
+        calls: Default::default(),
+    };
+    let request = DecisionRequest::new(
+        DecisionState::text("a".repeat(64 << 10)),
+        vec![yes_no("q", "Is it?")],
+    );
+    let error = prepare(&request, &d1_facts(DecisionLimits::default()), &vocab, None).unwrap_err();
+    assert!(
+        matches!(error, DecisionError::EscapeWorkExceeded),
+        "{error:?}"
+    );
+    assert_eq!(vocab.calls.load(std::sync::atomic::Ordering::Relaxed), 0);
+    assert_eq!(
+        error.kind().map(|k| k.as_str()),
+        Some("unsupported_metadata")
+    );
+    assert!(matches!(
+        AdapterError::from(error),
+        AdapterError::UnsupportedModelCapability { .. }
+    ));
 }

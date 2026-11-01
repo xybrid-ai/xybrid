@@ -62,7 +62,12 @@
 //!   label order.
 //! - A vocabulary whose control spellings `d1_break` cannot terminate on
 //!   (not UTF-8, a single character, or holding U+200B) is refused
-//!   ([`DecisionError::UnsupportedVocabulary`]); upstream would loop.
+//!   ([`DecisionError::UnsupportedVocabulary`]); upstream would loop. So is
+//!   one past 4,096 spellings, 256 bytes each or 64 KiB in all (d1-2B has
+//!   124, at most 21 bytes, 2,238 in all), and escaping that would take more
+//!   than 64 trie steps per byte of a string
+//!   ([`DecisionError::EscapeWorkExceeded`]): upstream compares every
+//!   spelling at every candidate position, with no bound.
 //!
 //! As upstream, only CONTROL spellings are broken: USER_DEFINED ones in the
 //! caller's text (`<think>`, `</think>`, `<tool_call>`, …) still tokenize as
@@ -402,7 +407,10 @@ impl fmt::Debug for DecisionPlan {
 /// is tokenized; only its label forms (one short code each) are tokenized
 /// before that, because the prompt shows the codes. That is the effective
 /// per-pass ceiling (d1-2B: 4,096 × 386 = 1,581,056 bytes), and a request
-/// renders at most `max_questions` (16 by default) of them.
+/// renders at most `max_questions` (16 by default) of them. Escaping is
+/// bounded on its own (`escape.rs`: capped CONTROL spellings, a trie walk per
+/// position, a work ceiling per string), not by the prompt's cap: some
+/// escaped fields (the question id) are never rendered.
 ///
 /// # Errors
 ///
