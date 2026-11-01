@@ -159,9 +159,10 @@ CASES = [
          ["json-int", "divergence"],
          request_text='{"state": {"u64_max": 18446744073709551615, "two_63": 9223372036854775808}, '
                       '"questions": {"q": {"type": "noul", "instructions": "Is the account flagged?"}}}',
-         xybrid=refuse("prepare", "number_out_of_range"),
+         xybrid=refuse("parse", "number_out_of_range"),
          notes="The Jinja engine reads every JSON integer with get<int64_t>(), so 18446744073709551615 prints as -1 and "
-               "9223372036854775808 as -9223372036854775808. xybrid must not reproduce a wrong number; it refuses."),
+               "9223372036854775808 as -9223372036854775808. xybrid must not reproduce a wrong number; its parser refuses "
+               "an integer above i64::MAX."),
     Case("state-number-overflow",
          "A number beyond f64: upstream's JSON parser refuses the request",
          ["json-float", "refusal-parse"],
@@ -184,7 +185,7 @@ CASES = [
     Case("instructions-array", "Array instructions: compact tojson", ["instructions-structured"],
          request=q1({"type": "noul", "instructions": ["Is", "this", "a refund", 1, None]})),
     Case("instructions-scalars",
-         "Number, boolean and empty-string instructions are accepted: tojson for the first ones, nothing for the last",
+         "Number, boolean, empty and blank instructions are accepted: tojson for the scalars, the text as is for the strings",
          ["instructions-structured", "json-literals", "multi-question"],
          request={"state": STATE, "questions": {
              "int": {"type": "noul", "instructions": 42},
@@ -192,6 +193,7 @@ CASES = [
              "false": {"type": "noul", "instructions": False},
              "true": {"type": "noul", "instructions": True},
              "empty": {"type": "noul", "instructions": ""},
+             "blank": {"type": "noul", "instructions": " \t "},
          }}),
     Case("instructions-null", "Null instructions are refused like missing ones", ["refusal-parse"],
          request=q1({"type": "noul", "instructions": None}), xybrid=refuse("parse", "missing_instructions")),
