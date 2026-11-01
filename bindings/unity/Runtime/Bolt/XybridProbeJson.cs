@@ -19,8 +19,8 @@ namespace XybridBolt
                 3 => new Uint(reader.ReadU64()),
                 4 => new Float(reader.ReadF64()),
                 5 => new Text(reader.ReadString()),
-                6 => new List(reader.ReadArray(reader => global::XybridBolt.XybridProbeJson.Decode(reader))),
-                7 => new Map(reader.ReadArray(reader => global::XybridBolt.XybridProbeJsonEntry.Decode(reader))),
+                6 => new Seq(reader.ReadArray(reader => global::XybridBolt.XybridProbeJson.Decode(reader))),
+                7 => new Obj(reader.ReadArray(reader => global::XybridBolt.XybridProbeJsonEntry.Decode(reader))),
                 uint tag => throw new global::System.InvalidOperationException($"Invalid XybridProbeJson tag: {tag}"),
             };
 
@@ -73,7 +73,7 @@ namespace XybridBolt
                     }
                     break;
                 }
-                case List value:
+                case Seq value:
                 {
                     writer.WriteU32(6);
                     {
@@ -85,7 +85,7 @@ namespace XybridBolt
                     }
                     break;
                 }
-                case Map value:
+                case Obj value:
                 {
                     writer.WriteU32(7);
                     {
@@ -114,9 +114,14 @@ namespace XybridBolt
 
         public sealed record Text(string Value) : XybridProbeJson;
 
-        public sealed record List(global::XybridBolt.XybridProbeJson[] Items) : XybridProbeJson;
+        /// <summary>
+        /// Not `List`: the Kotlin generator lets a variant named `List` shadow
+        /// `kotlin.collections.List` inside the sealed class, which then fails to
+        /// compile (it qualifies primitives such as `kotlin.Int`, not collections).
+        /// </summary>
+        public sealed record Seq(global::XybridBolt.XybridProbeJson[] Items) : XybridProbeJson;
 
-        public sealed record Map(global::XybridBolt.XybridProbeJsonEntry[] Entries) : XybridProbeJson;
+        public sealed record Obj(global::XybridBolt.XybridProbeJsonEntry[] Entries) : XybridProbeJson;
 
     }
 }

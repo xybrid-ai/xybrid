@@ -1102,7 +1102,7 @@ public struct XybridProbeNesting: Hashable, Equatable, Sendable {
     }
 }
 
-/// One entry of a [`XybridProbeJson::Map`], in document order.
+/// One entry of a [`XybridProbeJson::Obj`], in document order.
 public struct XybridProbeJsonEntry: Hashable, Equatable, Sendable {
     public var key: String
     public var value: XybridProbeJson
@@ -1660,8 +1660,11 @@ public enum XybridProbeJson: Hashable, Equatable, Sendable {
     case uint(value: UInt64)
     case float(value: Double)
     case text(value: String)
-    case list(items: [XybridProbeJson])
-    case map(entries: [XybridProbeJsonEntry])
+    /// Not `List`: the Kotlin generator lets a variant named `List` shadow
+    /// `kotlin.collections.List` inside the sealed class, which then fails to
+    /// compile (it qualifies primitives such as `kotlin.Int`, not collections).
+    case seq(items: [XybridProbeJson])
+    case obj(entries: [XybridProbeJsonEntry])
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridProbeJson {
         let tag = reader.readU32()
@@ -1679,9 +1682,9 @@ public enum XybridProbeJson: Hashable, Equatable, Sendable {
         case 5:
             return .text(value: reader.readString())
         case 6:
-            return .list(items: reader.readArray { reader in XybridProbeJson.decode(from: &reader) })
+            return .seq(items: reader.readArray { reader in XybridProbeJson.decode(from: &reader) })
         case 7:
-            return .map(entries: reader.readArray { reader in XybridProbeJsonEntry.decode(from: &reader) })
+            return .obj(entries: reader.readArray { reader in XybridProbeJsonEntry.decode(from: &reader) })
         default:
             fatalError("Invalid XybridProbeJson tag: \(tag)")
         }
@@ -1706,10 +1709,10 @@ public enum XybridProbeJson: Hashable, Equatable, Sendable {
         case let .text(value):
             writer.writeU32(5)
             writer.writeString(value)
-        case let .list(items):
+        case let .seq(items):
             writer.writeU32(6)
             writer.writeArray(items) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
-        case let .map(entries):
+        case let .obj(entries):
             writer.writeU32(7)
             writer.writeArray(entries) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
         }

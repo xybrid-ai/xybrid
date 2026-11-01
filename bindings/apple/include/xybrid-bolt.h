@@ -170,8 +170,8 @@ typedef uint32_t ___XybridProbeJson;
 #define XYBRID_PROBE_JSON_UINT ((___XybridProbeJson)3)
 #define XYBRID_PROBE_JSON_FLOAT ((___XybridProbeJson)4)
 #define XYBRID_PROBE_JSON_TEXT ((___XybridProbeJson)5)
-#define XYBRID_PROBE_JSON_LIST ((___XybridProbeJson)6)
-#define XYBRID_PROBE_JSON_MAP ((___XybridProbeJson)7)
+#define XYBRID_PROBE_JSON_SEQ ((___XybridProbeJson)6)
+#define XYBRID_PROBE_JSON_OBJ ((___XybridProbeJson)7)
 typedef uint32_t ___XybridProbePayload;
 #define XYBRID_PROBE_PAYLOAD_DECISION_REQUEST ((___XybridProbePayload)0)
 #define XYBRID_PROBE_PAYLOAD_DECISION_RESULT ((___XybridProbePayload)1)

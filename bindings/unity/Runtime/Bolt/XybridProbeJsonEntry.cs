@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 namespace XybridBolt
 {
     /// <summary>
-    /// One entry of a [`XybridProbeJson::Map`], in document order.
+    /// One entry of a [`XybridProbeJson::Obj`], in document order.
     /// </summary>
     public readonly struct XybridProbeJsonEntry
     {

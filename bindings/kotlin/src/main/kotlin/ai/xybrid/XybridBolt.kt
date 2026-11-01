@@ -2709,7 +2709,7 @@ data class XybridProbeNesting(
 
 
 /**
- * One entry of a [`XybridProbeJson::Map`], in document order.
+ * One entry of a [`XybridProbeJson::Obj`], in document order.
  */
 data class XybridProbeJsonEntry(
     val key: String,
@@ -3778,7 +3778,12 @@ sealed class XybridProbeJson {
             writer.writeString(this.value)
         }
     }
-    data class List(
+    /**
+     * Not `List`: the Kotlin generator lets a variant named `List` shadow
+     * `kotlin.collections.List` inside the sealed class, which then fails to
+     * compile (it qualifies primitives such as `kotlin.Int`, not collections).
+     */
+    data class Seq(
         val items: List<ai.xybrid.XybridProbeJson>
     ) : XybridProbeJson() {
         internal override fun wireSize(): kotlin.Int {
@@ -3790,7 +3795,7 @@ sealed class XybridProbeJson {
             writer.writeSequence(this.items, this.items.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
         }
     }
-    data class Map(
+    data class Obj(
         val entries: List<ai.xybrid.XybridProbeJsonEntry>
     ) : XybridProbeJson() {
         internal override fun wireSize(): kotlin.Int {
@@ -3813,8 +3818,8 @@ sealed class XybridProbeJson {
                 3.toUInt() -> Uint(reader.readU64())
                 4.toUInt() -> Float(reader.readF64())
                 5.toUInt() -> Text(reader.readString())
-                6.toUInt() -> List(reader.readSequence({ reader -> ai.xybrid.XybridProbeJson.fromReader(reader) }))
-                7.toUInt() -> Map(reader.readSequence({ reader -> ai.xybrid.XybridProbeJsonEntry.fromReader(reader) }))
+                6.toUInt() -> Seq(reader.readSequence({ reader -> ai.xybrid.XybridProbeJson.fromReader(reader) }))
+                7.toUInt() -> Obj(reader.readSequence({ reader -> ai.xybrid.XybridProbeJsonEntry.fromReader(reader) }))
                 else -> throw IllegalArgumentException("unknown XybridProbeJson tag: $tag")
             }
         }

@@ -432,7 +432,7 @@ class XybridProbeNesting:
 
 @dataclass(frozen=True, slots=True)
 class XybridProbeJsonEntry:
-    """One entry of a [`XybridProbeJson::Map`], in document order."""
+    """One entry of a [`XybridProbeJson::Obj`], in document order."""
     key: str
     value: XybridProbeJson
 
@@ -827,12 +827,16 @@ class XybridProbeJsonText(XybridProbeJson):
 
 
 @dataclass(frozen=True, slots=True)
-class XybridProbeJsonList(XybridProbeJson):
+class XybridProbeJsonSeq(XybridProbeJson):
+    """Not `List`: the Kotlin generator lets a variant named `List` shadow
+    `kotlin.collections.List` inside the sealed class, which then fails to
+    compile (it qualifies primitives such as `kotlin.Int`, not collections).
+    """
     items: list[XybridProbeJson]
 
 
 @dataclass(frozen=True, slots=True)
-class XybridProbeJsonMap(XybridProbeJson):
+class XybridProbeJsonObj(XybridProbeJson):
     entries: list[XybridProbeJsonEntry]
 
 

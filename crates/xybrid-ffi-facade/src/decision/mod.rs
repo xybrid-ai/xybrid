@@ -28,6 +28,7 @@
 //! Every type's `Debug` prints counts, lengths and kinds only, and every
 //! error names fields and indexes, never ids, keys, text or JSON.
 
+pub mod spike;
 pub mod stand_in;
 
 use std::fmt;

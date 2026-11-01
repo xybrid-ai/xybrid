@@ -1833,9 +1833,9 @@ class XybridProbeJson:
         if tag == 5:
             return XybridProbeJsonText._boltffi_from_reader_payload(reader)
         if tag == 6:
-            return XybridProbeJsonList._boltffi_from_reader_payload(reader)
+            return XybridProbeJsonSeq._boltffi_from_reader_payload(reader)
         if tag == 7:
-            return XybridProbeJsonMap._boltffi_from_reader_payload(reader)
+            return XybridProbeJsonObj._boltffi_from_reader_payload(reader)
         raise ValueError("invalid XybridProbeJson tag")
 
 
@@ -1932,7 +1932,11 @@ class XybridProbeJsonText(XybridProbeJson):
 
 
 @dataclass(frozen=True, slots=True)
-class XybridProbeJsonList(XybridProbeJson):
+class XybridProbeJsonSeq(XybridProbeJson):
+    """Not `List`: the Kotlin generator lets a variant named `List` shadow
+    `kotlin.collections.List` inside the sealed class, which then fails to
+    compile (it qualifies primitives such as `kotlin.Int`, not collections).
+    """
     items: list[XybridProbeJson]
 
     def _boltffi_wire(self) -> bytes:
@@ -1941,14 +1945,14 @@ class XybridProbeJsonList(XybridProbeJson):
         ))
 
     @classmethod
-    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridProbeJsonList":
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridProbeJsonSeq":
         return cls(
             items=reader.sequence(lambda: XybridProbeJson._boltffi_from_reader(reader)),
         )
 
 
 @dataclass(frozen=True, slots=True)
-class XybridProbeJsonMap(XybridProbeJson):
+class XybridProbeJsonObj(XybridProbeJson):
     entries: list[XybridProbeJsonEntry]
 
     def _boltffi_wire(self) -> bytes:
@@ -1957,7 +1961,7 @@ class XybridProbeJsonMap(XybridProbeJson):
         ))
 
     @classmethod
-    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridProbeJsonMap":
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridProbeJsonObj":
         return cls(
             entries=reader.sequence(lambda: XybridProbeJsonEntry._boltffi_from_reader(reader)),
         )
@@ -3396,7 +3400,7 @@ _native._register_xybrid_probe_nesting(XybridProbeNesting)
 
 @dataclass(frozen=True, slots=True)
 class XybridProbeJsonEntry:
-    """One entry of a [`XybridProbeJson::Map`], in document order."""
+    """One entry of a [`XybridProbeJson::Obj`], in document order."""
     key: str
     value: XybridProbeJson
 
@@ -4477,8 +4481,8 @@ __all__ = [
     "XybridProbeJsonUint",
     "XybridProbeJsonFloat",
     "XybridProbeJsonText",
-    "XybridProbeJsonList",
-    "XybridProbeJsonMap",
+    "XybridProbeJsonSeq",
+    "XybridProbeJsonObj",
     "XybridProbePayload",
     "XybridProbePayloadDecisionRequest",
     "XybridProbePayloadDecisionResult",

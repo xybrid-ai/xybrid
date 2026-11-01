@@ -2747,58 +2747,9 @@ pub fn decision_spike_echo_request(
 pub fn decision_spike_request_outline(
     request: XybridDecisionRequest,
 ) -> Result<Vec<String>, XybridError> {
-    use facade::decision::stand_in as ir;
-    fn content(content: Option<&ir::DecisionContent>) -> String {
-        match content.map(ir::DecisionContent::view) {
-            None => "none".into(),
-            Some(ir::DecisionContentView::Text(text)) => format!("text:{text}"),
-            Some(ir::DecisionContentView::Json(json)) => format!("json:{}", json.to_json_text()),
-        }
-    }
-    let request = spike_request_into_ir(request)?;
-    let mut lines = vec![format!("state={}", content(request.state().body()))];
-    for (q, question) in request.questions().iter().enumerate() {
-        let instructions = match question.instructions() {
-            None => "none".to_string(),
-            Some(ir::DecisionInstructions::Content(c)) => content(Some(c)),
-            // `#[non_exhaustive]` outside its crate: spoken instructions (O2).
-            Some(_) => "unknown".to_string(),
-        };
-        match question.kind() {
-            ir::DecisionQuestionKind::Choice { options } => {
-                lines.push(format!(
-                    "q{q}:id={}:choice:instructions={instructions}",
-                    question.id()
-                ));
-                for (o, option) in options.iter().enumerate() {
-                    lines.push(format!(
-                        "q{q}.o{o}:key={}:{}",
-                        option.key(),
-                        content(option.description())
-                    ));
-                }
-            }
-            ir::DecisionQuestionKind::YesNo { yes, no } => {
-                lines.push(format!(
-                    "q{q}:id={}:yes_no:instructions={instructions}",
-                    question.id()
-                ));
-                lines.push(format!("q{q}.yes:{}", content(yes.as_ref())));
-                lines.push(format!("q{q}.no:{}", content(no.as_ref())));
-            }
-            ir::DecisionQuestionKind::Score { levels } => {
-                lines.push(format!(
-                    "q{q}:id={}:score:instructions={instructions}",
-                    question.id()
-                ));
-                for (l, level) in levels.iter().enumerate() {
-                    lines.push(format!("q{q}.l{l}:{}", content(level.as_ref())));
-                }
-            }
-            _ => lines.push(format!("q{q}:id={}:unknown", question.id())),
-        }
-    }
-    Ok(lines)
+    Ok(facade::decision::spike::outline(&spike_request_into_ir(
+        request,
+    )?))
 }
 
 /// Spike: run the stub engine (d1 probability math on synthetic scores) and
@@ -2808,8 +2759,7 @@ pub fn decision_spike_decide(
     request: XybridDecisionRequest,
 ) -> Result<XybridDecisions, XybridError> {
     let ir = spike_request_into_ir(request)?;
-    let decisions = facade::decision::stand_in::stub_decide(&ir);
-    Ok(facade::decision::Decisions::from_ir(&decisions).into())
+    Ok(facade::decision::spike::decide(&ir).into())
 }
 
 /// Spike: the bit patterns of every float [`decision_spike_decide`] returns,
@@ -2819,28 +2769,10 @@ pub fn decision_spike_decide(
 pub fn decision_spike_decide_bits(
     request: XybridDecisionRequest,
 ) -> Result<Vec<String>, XybridError> {
-    let decisions = decision_spike_decide(request)?;
-    let mut lines = Vec::new();
-    for (a, answer) in decisions.answers.iter().enumerate() {
-        for (s, score) in answer.distribution.iter().enumerate() {
-            lines.push(format!("a{a}.s{s}.raw={:08x}", score.raw_score.to_bits()));
-            lines.push(format!("a{a}.s{s}.p={:016x}", score.probability.to_bits()));
-        }
-        lines.push(match &answer.value {
-            XybridDecisionValue::Choice { key } => format!("a{a}.value=choice:{key}"),
-            XybridDecisionValue::YesNo { p_yes } => {
-                format!("a{a}.value=yes_no:{:016x}", p_yes.to_bits())
-            }
-            XybridDecisionValue::Score { value, statistic } => {
-                format!("a{a}.value=score:{:016x}:{statistic:?}", value.to_bits())
-            }
-        });
-        lines.push(match answer.confidence {
-            Some(c) => format!("a{a}.confidence={:016x}", c.to_bits()),
-            None => format!("a{a}.confidence=none"),
-        });
-    }
-    Ok(lines)
+    let ir = spike_request_into_ir(request)?;
+    Ok(facade::decision::spike::bits(
+        &facade::decision::spike::decide(&ir),
+    ))
 }
 
 /// Spike: compare a result the foreign side re-encoded with the stub
@@ -2852,15 +2784,7 @@ pub fn decision_spike_verify_decisions(
     decisions: XybridDecisions,
 ) -> Result<Option<String>, XybridError> {
     let ir = spike_request_into_ir(request)?;
-    let expected =
-        facade::decision::Decisions::from_ir(&facade::decision::stand_in::stub_decide(&ir));
-    let received = facade::decision::Decisions::from(decisions);
-    if let Some(path) = facade::decision::first_bit_difference(&expected, &received) {
-        return Ok(Some(path));
-    }
-    // Also through the invariant-checking IR constructor.
-    received.into_ir().map_err(XybridError::from)?;
-    Ok(None)
+    facade::decision::spike::verify(&ir, decisions.into()).map_err(XybridError::from)
 }
 
 /// Probe: `Vec<Option<data enum>>` and `Vec<Option<String>>`, the shape a
@@ -2886,16 +2810,33 @@ pub struct XybridProbeNesting {
 #[derive(Clone, PartialEq)]
 pub enum XybridProbeJson {
     Null,
-    Bool { value: bool },
-    Int { value: i64 },
-    Uint { value: u64 },
-    Float { value: f64 },
-    Text { value: String },
-    List { items: Vec<XybridProbeJson> },
-    Map { entries: Vec<XybridProbeJsonEntry> },
+    Bool {
+        value: bool,
+    },
+    Int {
+        value: i64,
+    },
+    Uint {
+        value: u64,
+    },
+    Float {
+        value: f64,
+    },
+    Text {
+        value: String,
+    },
+    /// Not `List`: the Kotlin generator lets a variant named `List` shadow
+    /// `kotlin.collections.List` inside the sealed class, which then fails to
+    /// compile (it qualifies primitives such as `kotlin.Int`, not collections).
+    Seq {
+        items: Vec<XybridProbeJson>,
+    },
+    Obj {
+        entries: Vec<XybridProbeJsonEntry>,
+    },
 }
 
-/// One entry of a [`XybridProbeJson::Map`], in document order.
+/// One entry of a [`XybridProbeJson::Obj`], in document order.
 #[data]
 #[derive(Clone, PartialEq)]
 pub struct XybridProbeJsonEntry {
@@ -2946,7 +2887,7 @@ pub fn decision_spike_probe_json(json_text: String) -> Result<XybridProbeJson, X
             JsonKind::String => XybridProbeJson::Text {
                 value: view.as_str().expect("string node").to_string(),
             },
-            JsonKind::Array => XybridProbeJson::List {
+            JsonKind::Array => XybridProbeJson::Seq {
                 items: view
                     .items()
                     .expect("array node")
@@ -2954,7 +2895,7 @@ pub fn decision_spike_probe_json(json_text: String) -> Result<XybridProbeJson, X
                     .map(tree)
                     .collect(),
             },
-            JsonKind::Object => XybridProbeJson::Map {
+            JsonKind::Object => XybridProbeJson::Obj {
                 entries: view
                     .entries()
                     .expect("object node")
