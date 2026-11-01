@@ -12,9 +12,11 @@
 //!   implemented profile ([`DecisionClassification`]).
 //! - [`native_value`], [`native_f32`], [`effective_f32`]: a value as
 //!   llama.cpp's metadata accessors write it, which is what llama.cpp's
-//!   decision code reads (temperatures included), and
-//!   `verify_native_metadata` (feature `llm-llamacpp`), which checks a
-//!   loaded `xybrid_llama::LlamaModel` against the header of its file.
+//!   decision code reads (temperatures included).
+//! - [`GgufHeader::verify_file_unchanged`] and `verify_native_load` (feature
+//!   `llm-llamacpp`): after a native load, that the file is still the one
+//!   scanned (identity and header digest) and that llama.cpp holds the
+//!   metadata the header predicts.
 //!
 //! # When to use
 //!
@@ -23,17 +25,20 @@
 //! (bundles, sidecars, cached models, standalone files, auto-generated
 //! metadata) reads the header and classifies it before it allocates a
 //! context, and refuses anything that is not [`NotDecision`] or a
-//! [`Supported`] profile it implements. Reading a header opens and reads
-//! the file (only the header: a few MB for a 125,000-token vocabulary);
-//! there are no other side effects.
+//! [`Supported`] profile it implements. Then it loads the model natively
+//! and calls `verify_native_load` with the same path and header before it
+//! uses the model, so the model in memory is the file that was classified.
+//! Reading a header opens and reads the file (only the header: a few MB for
+//! a 128,000-token vocabulary) and hashes it; there are no other side
+//! effects.
 //!
 //! llama.cpp's own metadata accessors cannot replace the scan: they skip
 //! array-valued keys and stringify scalars, so they cannot prove a key
 //! absent. They remain the source of *effective* values, though: llama.cpp
 //! reads a decision temperature as its six-decimal string, so the
 //! temperature a d1 model runs at is [`effective_f32`] of the stored `f32`,
-//! and `verify_native_metadata` checks that llama.cpp's strings are the
-//! ones this header predicts.
+//! and `verify_native_load` checks that llama.cpp's strings are the ones
+//! this header predicts.
 //!
 //! ```no_run
 //! use xybrid_core::gguf::{classify, DecisionClassification, GgufHeader};
@@ -60,8 +65,12 @@
 //!    malformed or oversized file is an error, never [`NotDecision`].
 //! 2. `general.architecture` (`<arch>` below) must be a UTF-8 string;
 //!    otherwise an error.
-//! 3. A `<x>.decision.type` key with `<x>` other than `<arch>` is an error:
-//!    a decision model labelled for another architecture.
+//! 3. Every decision key, `<x>.decision.<rest>` (the first `.decision.`
+//!    decides `<x>`) or `decision.<rest>` (an empty `<x>`), must have
+//!    `<x> = <arch>`; any other is an error, whether it is a type, a
+//!    temperature, an array or anything else, and whether or not the file
+//!    has a decision type of its own: a decision model labelled for another
+//!    architecture. Tensor names are not keys.
 //! 4. Without `<arch>.decision.type`: any other `<arch>.decision.*` key is
 //!    an error (decision keys without a type); with none,
 //!    [`NotDecision`].
@@ -111,7 +120,9 @@ mod tests;
 
 pub use classify::{classify, DecisionClassification, DecisionProfileId, UnsupportedReason};
 pub use error::GgufError;
-pub use header::{GgufArray, GgufHeader, GgufLimits, GgufTensorInfo, GgufType, GgufValue};
+pub use header::{
+    GgufArray, GgufFileStamp, GgufHeader, GgufLimits, GgufTensorInfo, GgufType, GgufValue,
+};
 #[cfg(feature = "llm-llamacpp")]
-pub use native::verify_native_metadata;
+pub use native::verify_native_load;
 pub use native::{effective_f32, native_f32, native_value};

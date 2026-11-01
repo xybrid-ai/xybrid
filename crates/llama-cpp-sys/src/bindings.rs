@@ -14,6 +14,9 @@ pub const LLAMA_STATE_SEQ_FLAGS_SWA_ONLY: u32 = 1;
 pub const LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY: u32 = 1;
 pub const LLAMA_STATE_SEQ_FLAGS_ON_DEVICE: u32 = 2;
 pub const LLAMA_DRY_MAX_SEQ_BREAKERS: u32 = 64;
+pub const LLAMA_XYBRID_ABSENT: i32 = -1;
+pub const LLAMA_XYBRID_FAILED: i32 = -2;
+pub const LLAMA_XYBRID_DECODE_EXCEPTION: i32 = -1000;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ggml_context {
@@ -952,6 +955,9 @@ pub struct mtmd_helper_gen_audio_inp {
     pub out_type: mtmd_helper_gen_audio_outtype,
 }
 unsafe extern "C" {
+    pub fn llama_xybrid_fail_next_c(shim_name: *const ::std::os::raw::c_char);
+}
+unsafe extern "C" {
     pub fn llama_backend_init_c();
 }
 unsafe extern "C" {
@@ -1070,26 +1076,10 @@ unsafe extern "C" {
     pub fn llama_model_has_recurrent_state_c(model: *const ::std::os::raw::c_void) -> bool;
 }
 unsafe extern "C" {
-    pub fn llama_model_has_encoder_c(model: *const ::std::os::raw::c_void) -> bool;
+    pub fn llama_model_has_encoder_c(model: *const ::std::os::raw::c_void) -> i32;
 }
 unsafe extern "C" {
     pub fn llama_model_meta_count_c(model: *const ::std::os::raw::c_void) -> i32;
-}
-unsafe extern "C" {
-    pub fn llama_model_meta_key_by_index_c(
-        model: *const ::std::os::raw::c_void,
-        i: i32,
-        buf: *mut ::std::os::raw::c_char,
-        buf_size: usize,
-    ) -> i32;
-}
-unsafe extern "C" {
-    pub fn llama_model_meta_val_str_by_index_c(
-        model: *const ::std::os::raw::c_void,
-        i: i32,
-        buf: *mut ::std::os::raw::c_char,
-        buf_size: usize,
-    ) -> i32;
 }
 unsafe extern "C" {
     pub fn llama_model_meta_val_str_c(
@@ -1100,10 +1090,21 @@ unsafe extern "C" {
     ) -> i32;
 }
 unsafe extern "C" {
+    pub fn llama_model_meta_lookup_c(
+        model: *const ::std::os::raw::c_void,
+        keys: *const *const ::std::os::raw::c_char,
+        n_keys: usize,
+        buf: *mut ::std::os::raw::c_char,
+        buf_size: usize,
+        lens: *mut i64,
+    ) -> i64;
+}
+unsafe extern "C" {
     pub fn llama_model_chat_template_named_c(
         model: *const ::std::os::raw::c_void,
         name: *const ::std::os::raw::c_char,
-    ) -> *const ::std::os::raw::c_char;
+        out: *mut *const ::std::os::raw::c_char,
+    ) -> i32;
 }
 unsafe extern "C" {
     pub fn llama_vocab_get_attr_c(model: *const ::std::os::raw::c_void, token: i32) -> i32;
@@ -1112,7 +1113,8 @@ unsafe extern "C" {
     pub fn llama_vocab_get_text_c(
         model: *const ::std::os::raw::c_void,
         token: i32,
-    ) -> *const ::std::os::raw::c_char;
+        out: *mut *const ::std::os::raw::c_char,
+    ) -> i32;
 }
 unsafe extern "C" {
     pub fn llama_new_readout_context_c(
@@ -1125,20 +1127,30 @@ unsafe extern "C" {
         flash_attn: bool,
     ) -> *mut ::std::os::raw::c_void;
 }
-unsafe extern "C" {
-    pub fn llama_n_batch_c(ctx: *const ::std::os::raw::c_void) -> u32;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct llama_xybrid_context_facts {
+    pub n_ctx: u32,
+    pub n_batch: u32,
+    pub n_ubatch: u32,
+    pub n_seq_max: u32,
+    pub has_memory: bool,
+    pub causal_attn: bool,
 }
 unsafe extern "C" {
-    pub fn llama_n_ubatch_c(ctx: *const ::std::os::raw::c_void) -> u32;
+    pub fn llama_context_facts_c(
+        ctx: *const ::std::os::raw::c_void,
+        out: *mut llama_xybrid_context_facts,
+    ) -> i32;
 }
+pub type llama_xybrid_abort_callback =
+    ::std::option::Option<unsafe extern "C" fn(data: *mut ::std::os::raw::c_void) -> bool>;
 unsafe extern "C" {
-    pub fn llama_n_seq_max_c(ctx: *const ::std::os::raw::c_void) -> u32;
-}
-unsafe extern "C" {
-    pub fn llama_context_has_memory_c(ctx: *const ::std::os::raw::c_void) -> bool;
-}
-unsafe extern "C" {
-    pub fn llama_get_causal_attn_c(ctx: *const ::std::os::raw::c_void) -> bool;
+    pub fn llama_set_abort_callback_c(
+        ctx: *mut ::std::os::raw::c_void,
+        callback: llama_xybrid_abort_callback,
+        data: *mut ::std::os::raw::c_void,
+    ) -> i32;
 }
 unsafe extern "C" {
     pub fn llama_get_logits_ith_c(ctx: *mut ::std::os::raw::c_void, i: i32) -> *mut f32;

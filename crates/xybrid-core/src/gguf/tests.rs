@@ -1,7 +1,7 @@
 //! The scanner's and the classification rule's test vectors, then checks
 //! against LiquidAI's d1-2B GGUF when it is staged.
 
-use super::native::compare_native;
+use super::native::{compare_native, scalar_projection};
 use super::testing::{d1_builder, gguf_string, GgufBuilder, D1_TEMPERATURE};
 use super::*;
 
@@ -193,9 +193,13 @@ fn a_length_past_the_end_of_a_file_is_refused_before_it_is_allocated() {
 
 #[test]
 fn declared_counts_do_not_allocate_without_bytes() {
-    // 2^62 keys, then arrays of 2^29 and 2^30 + 1 strings, in a few bytes.
-    let huge_kv = GgufBuilder::new().declare(0, 1 << 62).build();
-    assert!(matches!(read(&huge_kv), Err(GgufError::Truncated { .. })));
+    // 4,000 keys (under the ceiling), then arrays of 2^29 and 2^30 + 1
+    // strings, in a few bytes.
+    let declared_kv = GgufBuilder::new().declare(1 << 40, 4000).build();
+    assert!(matches!(
+        read(&declared_kv),
+        Err(GgufError::Truncated { .. })
+    ));
     let huge_array = GgufBuilder::new()
         .array("tokenizer.ggml.tokens", 8, 1 << 29, &[])
         .build();
@@ -207,6 +211,51 @@ fn declared_counts_do_not_allocate_without_bytes() {
         .array("tokenizer.ggml.tokens", 8, (1 << 30) + 1, &[])
         .build();
     assert!(matches!(read(&too_many), Err(GgufError::Malformed(_))));
+}
+
+#[test]
+fn the_scan_refuses_more_keys_than_its_ceiling_before_reading_them() {
+    let limits = GgufLimits::default().with_max_metadata_entries(64);
+    let mut at_ceiling = GgufBuilder::new();
+    for i in 0..64 {
+        at_ceiling = at_ceiling.u32(&format!("key.{i}"), i);
+    }
+    assert!(GgufHeader::read(&at_ceiling.build()[..], &limits).is_ok());
+    let over = at_ceiling.u32("key.64", 64).build();
+    assert!(matches!(
+        GgufHeader::read(&over[..], &limits),
+        Err(GgufError::TooManyEntries {
+            count: 65,
+            limit: 64
+        })
+    ));
+
+    // A declared count past the ceiling is refused before any key is read:
+    // these headers have no keys at all.
+    for declared in [4097, 1 << 40, 1 << 62] {
+        assert!(matches!(
+            read(&GgufBuilder::new().declare(0, declared).build()),
+            Err(GgufError::TooManyEntries { count, limit: 4096 }) if count == declared
+        ));
+    }
+
+    // The default ceiling is 4,096 keys.
+    assert_eq!(
+        GgufLimits::default().max_metadata_entries(),
+        GgufLimits::DEFAULT_MAX_METADATA_ENTRIES
+    );
+    let mut many = GgufBuilder::new();
+    for i in 0..4096 {
+        many = many.u32(&format!("key.{i}"), i);
+    }
+    assert_eq!(read(&many.build()).unwrap().metadata().len(), 4096);
+    assert!(matches!(
+        read(&many.u32("one.more", 0).build()),
+        Err(GgufError::TooManyEntries {
+            count: 4097,
+            limit: 4096
+        })
+    ));
 }
 
 #[test]
@@ -591,6 +640,54 @@ fn inconsistent_decision_tagging_is_an_error() {
     );
 }
 
+/// Every decision key is checked for its architecture, not only a type, and
+/// with or without a decision type of the file's own.
+#[test]
+fn a_decision_key_of_another_architecture_is_an_error() {
+    let invalid = |builder: GgufBuilder, what: &str| match classify_bytes(&builder.build()) {
+        Err(GgufError::InvalidDecision(_)) => {}
+        other => panic!("{what}: {other:?}"),
+    };
+    let lfm3_chat = || {
+        GgufBuilder::new()
+            .str("general.architecture", "lfm3")
+            .bool("lfm3.attention.causal", true)
+    };
+    type AddKey = fn(GgufBuilder, &str) -> GgufBuilder;
+    let foreign: [(&str, AddKey); 5] = [
+        ("llama.decision.temperature.choice", |b, k| b.f32(k, 1.0)),
+        ("llama.decision.something_new", |b, k| b.u32(k, 3)),
+        ("llama.decision.labels", |b, k| {
+            b.str_array(k, &["yes", "no"])
+        }),
+        ("decision.temperature.choice", |b, k| b.f32(k, 1.0)),
+        ("lfm3.attention.decision.type", |b, k| b.str(k, "lfm3-d1")),
+    ];
+    for (key, add) in foreign {
+        invalid(add(lfm3_chat(), key), &format!("{key} without a type"));
+        invalid(
+            add(d1_builder(), key),
+            &format!("{key} in a complete d1 profile"),
+        );
+    }
+
+    // Keys that only mention "decision" are not decision keys, and neither
+    // are tensor names.
+    let unrelated = lfm3_chat()
+        .u32("general.decisions", 2)
+        .str("lfm3.decision", "x")
+        .tensor("decision.hidden_norm.weight", &[4], 0, 0)
+        .build();
+    assert_eq!(
+        classify_bytes(&unrelated).unwrap(),
+        DecisionClassification::NotDecision
+    );
+    assert_eq!(
+        classify_bytes(&d1_builder().u32("general.decisions", 2).build()).unwrap(),
+        D1
+    );
+}
+
 #[test]
 fn classification_needs_the_architecture() {
     let missing = GgufBuilder::new().u32("x", 1).build();
@@ -620,10 +717,10 @@ fn errors_become_invalid_input_unless_they_are_io() {
 // llama.cpp's view against the header
 // ---------------------------------------------------------------------------
 
-/// What `LlamaModel::meta` reports for `d1_builder()`'s header: every
-/// scalar, as llama.cpp writes it, sorted by key.
-fn d1_native() -> Vec<(String, String)> {
-    let mut native: Vec<(String, String)> = [
+/// What llama.cpp holds for `d1_builder()`'s header: every scalar, as it
+/// writes it.
+fn d1_native() -> Vec<(&'static str, &'static str)> {
+    vec![
         ("general.architecture", "lfm3"),
         ("lfm3.attention.causal", "false"),
         ("lfm3.block_count", "24"),
@@ -633,36 +730,199 @@ fn d1_native() -> Vec<(String, String)> {
         ("lfm3.decision.type", "lfm3-d1"),
         ("tokenizer.chat_template.systemone", "{{ state }}"),
     ]
-    .iter()
-    .map(|(k, v)| (k.to_string(), v.to_string()))
-    .collect();
-    native.sort();
-    native
+}
+
+/// Compares `header` with a llama.cpp that holds `native`, looked up the way
+/// `verify_native_load` looks it up.
+fn compare_with(header: &GgufHeader, native: &[(&str, &str)]) -> Result<(), GgufError> {
+    let scalars = scalar_projection(header);
+    let values: Vec<Option<Vec<u8>>> = scalars
+        .iter()
+        .map(|(key, _)| {
+            native
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.as_bytes().to_vec())
+        })
+        .collect();
+    compare_native(&scalars, native.len(), &values)
 }
 
 #[test]
 fn the_native_view_matches_the_header_it_was_loaded_from() {
     let header = read(&d1_builder().build()).unwrap();
-    assert!(compare_native(&header, &d1_native()).is_ok());
+    assert!(compare_with(&header, &d1_native()).is_ok());
+    assert_eq!(
+        scalar_projection(&header).len(),
+        8,
+        "arrays are not projected"
+    );
     assert_eq!(
         native_f32(f32::from_bits(D1_TEMPERATURE)),
         "1.337398",
         "the temperature string llama.cpp reads"
     );
 
-    let mismatch = |native: Vec<(String, String)>| match compare_native(&header, &native) {
+    let mismatch = |native: Vec<(&str, &str)>| match compare_with(&header, &native) {
         Err(GgufError::NativeMismatch { key }) => key,
         other => panic!("{other:?}"),
     };
     let mut changed = d1_native();
-    changed[3].1 = "1.337399".to_string();
+    changed[3].1 = "1.337399";
     assert_eq!(mismatch(changed), "lfm3.decision.temperature.choice");
     let mut missing = d1_native();
     missing.remove(6);
     assert_eq!(mismatch(missing), "lfm3.decision.type");
     let mut extra = d1_native();
-    extra.push(("zzz.extra".to_string(), "1".to_string()));
-    assert_eq!(mismatch(extra), "zzz.extra");
+    extra.push(("zzz.extra", "1"));
+    assert!(matches!(
+        compare_with(&header, &extra),
+        Err(GgufError::NativeKeyCount {
+            native: 9,
+            header: 8
+        })
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// The file a native load reads is the one scanned
+// ---------------------------------------------------------------------------
+
+const TEMPERATURE: &str = "lfm3.decision.temperature.choice";
+
+/// The d1 header with the temperature retyped from `f32` to the string
+/// llama.cpp prints for it, and with an array-valued decision key added:
+/// llama.cpp's string view of the scalars cannot tell either from the
+/// original.
+fn d1_lookalikes() -> [Vec<u8>; 2] {
+    [
+        d1_builder()
+            .without(TEMPERATURE)
+            .str(TEMPERATURE, "1.337398")
+            .build(),
+        d1_builder()
+            .str_array("lfm3.decision.labels", &["yes", "no"])
+            .build(),
+    ]
+}
+
+/// The string view llama.cpp keeps of `bytes`'s scalars, sorted.
+fn sorted_projection(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+    let header = read(bytes).unwrap();
+    let mut projection: Vec<(String, Vec<u8>)> = scalar_projection(&header)
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect();
+    projection.sort();
+    projection
+}
+
+#[test]
+fn lookalikes_differ_only_in_what_the_typed_header_sees() {
+    let original = d1_builder().build();
+    let [retyped, with_array] = d1_lookalikes();
+    assert_eq!(sorted_projection(&retyped), sorted_projection(&original));
+    assert_eq!(sorted_projection(&with_array), sorted_projection(&original));
+    assert!(matches!(
+        classify_bytes(&retyped),
+        Err(GgufError::WrongType { key, .. }) if key == TEMPERATURE
+    ));
+    assert_eq!(
+        classify_bytes(&with_array).unwrap(),
+        unsupported(
+            "lfm3-d1",
+            UnsupportedReason::DecisionKey {
+                key: "lfm3.decision.labels".to_string()
+            }
+        )
+    );
+}
+
+#[test]
+fn a_file_replaced_after_the_scan_is_caught() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("model.gguf");
+    let original = d1_builder().build();
+    for replacement in d1_lookalikes() {
+        for in_place in [false, true] {
+            std::fs::write(&path, &original).unwrap();
+            let header = GgufHeader::read_file(&path).unwrap();
+            assert_eq!(classify(&header).unwrap(), D1);
+            assert!(header.verify_file_unchanged(&path).is_ok());
+            if in_place {
+                std::fs::write(&path, &replacement).unwrap();
+            } else {
+                let next = dir.path().join("next.gguf");
+                std::fs::write(&next, &replacement).unwrap();
+                std::fs::rename(&next, &path).unwrap();
+            }
+            assert!(
+                matches!(
+                    header.verify_file_unchanged(&path),
+                    Err(GgufError::FileChanged { .. })
+                ),
+                "in place: {in_place}"
+            );
+        }
+    }
+}
+
+/// Same size, same inode and the modification time put back: only the
+/// header digest differs.
+#[test]
+fn a_same_size_edit_in_place_is_caught_by_the_header_digest() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("model.gguf");
+    let original = d1_builder().build();
+    std::fs::write(&path, &original).unwrap();
+    let header = GgufHeader::read_file(&path).unwrap();
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+    let at = original
+        .windows(11)
+        .position(|w| w == b"{{ state }}")
+        .unwrap();
+    let mut edited = original.clone();
+    edited[at..at + 11].copy_from_slice(b"{{ STATE }}");
+    std::fs::write(&path, &edited).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+
+    assert!(matches!(
+        header.verify_file_unchanged(&path),
+        Err(GgufError::FileChanged {
+            what: "its header bytes"
+        })
+    ));
+}
+
+#[test]
+fn the_stamp_records_the_file_and_the_header_bytes() {
+    use sha2::{Digest, Sha256};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("model.gguf");
+    let mut bytes = d1_builder().build();
+    let header_len = bytes.len();
+    bytes.extend_from_slice(&[0u8; 100]); // tensor data, not hashed
+    std::fs::write(&path, &bytes).unwrap();
+
+    let header = GgufHeader::read_file(&path).unwrap();
+    let stamp = header.file_stamp().expect("read from a file");
+    assert_eq!(stamp.len(), bytes.len() as u64);
+    assert_eq!(header.header_bytes(), header_len as u64);
+    assert_eq!(
+        stamp.header_sha256().as_slice(),
+        Sha256::digest(&bytes[..header_len]).as_slice()
+    );
+    assert!(matches!(
+        read(&bytes).unwrap().verify_file_unchanged(&path),
+        Err(GgufError::NoFileStamp)
+    ));
+    assert!(read(&bytes).unwrap().file_stamp().is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -785,7 +1045,134 @@ mod published {
             let path = std::path::Path::new(&path);
             let model = xybrid_llama::LlamaModel::load(path.to_str().expect("a UTF-8 path"), 0)
                 .expect("load the GGUF");
-            verify_native_metadata(&header, &model).expect("the same metadata");
+            verify_native_load(path, &header, &model).expect("the same file and metadata");
+        }
+    }
+
+    /// A real GGUF with its header edited: the original header, re-encoded
+    /// through `edit`, then the original tensor data at the new header's
+    /// alignment.
+    pub(super) fn rewritten(
+        original: &[u8],
+        edit: impl FnOnce(GgufBuilder) -> GgufBuilder,
+    ) -> Vec<u8> {
+        let header = read(original).expect("the original header");
+        let alignment = header
+            .get("general.alignment")
+            .and_then(GgufValue::as_u64)
+            .unwrap_or(32);
+        let align = |n: u64| n.div_ceil(alignment) * alignment;
+        let data = usize::try_from(align(header.header_bytes())).unwrap();
+        let mut bytes = edit(GgufBuilder::from_header(&header)).build();
+        bytes.resize(usize::try_from(align(bytes.len() as u64)).unwrap(), 0);
+        bytes.extend_from_slice(&original[data..]);
+        bytes
+    }
+
+    /// `original` with `extra` more scalar keys.
+    pub(super) fn with_extra_keys(original: &[u8], extra: usize) -> Vec<u8> {
+        rewritten(original, |mut builder| {
+            for i in 0..extra {
+                builder = builder.u32(&format!("xybrid.test.key.{i}"), i as u32);
+            }
+            builder
+        })
+    }
+
+    /// A model swapped between the scan and the native load is refused,
+    /// even where llama.cpp's strings match the scanned header: a scalar
+    /// retyped with the same string, and an added array-valued key. Set
+    /// `XYBRID_OTHER_GGUF` to a small ordinary GGUF (stories260K).
+    #[cfg(feature = "llm-llamacpp")]
+    #[test]
+    fn a_model_swapped_before_the_native_load_is_refused() {
+        let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") else {
+            eprintln!("Skipping test: set XYBRID_OTHER_GGUF to a small ordinary GGUF");
+            return;
+        };
+        let source = std::fs::read(&path).expect("read the GGUF");
+        let scanned = rewritten(&source, |b| b.f32("xybrid.test.value", 1.5));
+        let retyped = rewritten(&source, |b| b.str("xybrid.test.value", "1.500000"));
+        let with_array = rewritten(&source, |b| {
+            b.f32("xybrid.test.value", 1.5)
+                .str_array("xybrid.test.labels", &["yes", "no"])
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("model.gguf");
+        xybrid_llama::backend_init();
+        let load = |file: &std::path::Path| {
+            xybrid_llama::LlamaModel::load(file.to_str().unwrap(), 0).expect("llama.cpp loads it")
+        };
+
+        std::fs::write(&file, &scanned).unwrap();
+        let header = GgufHeader::read_file(&file).unwrap();
+        verify_native_load(&file, &header, &load(&file)).expect("an unchanged file passes");
+
+        for swapped in [&retyped, &with_array] {
+            std::fs::write(&file, &scanned).unwrap();
+            let header = GgufHeader::read_file(&file).unwrap();
+            let next = dir.path().join("next.gguf");
+            std::fs::write(&next, swapped).unwrap();
+            std::fs::rename(&next, &file).unwrap();
+            let model = load(&file);
+
+            // llama.cpp's strings alone cannot tell the swap.
+            let scalars = scalar_projection(&header);
+            let keys: Vec<&str> = scalars.iter().map(|(key, _)| *key).collect();
+            assert!(compare_native(
+                &scalars,
+                model.meta_count().unwrap(),
+                &model.meta_values(&keys).unwrap()
+            )
+            .is_ok());
+            assert!(matches!(
+                verify_native_load(&file, &header, &model),
+                Err(GgufError::FileChanged { .. })
+            ));
+        }
+    }
+
+    /// The native check reads llama.cpp's metadata with one bulk lookup of
+    /// the header's keys, so it stays linear: the index walk it replaced took
+    /// 0.16 / 0.73 / 4.3 s of CPU at 4,096 / 8,192 / 16,384 keys. Set
+    /// `XYBRID_OTHER_GGUF` to a small ordinary GGUF (stories260K).
+    #[cfg(feature = "llm-llamacpp")]
+    #[test]
+    fn many_metadata_keys_are_checked_in_linear_time() {
+        let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") else {
+            eprintln!("Skipping test: set XYBRID_OTHER_GGUF to a small ordinary GGUF");
+            return;
+        };
+        let original = std::fs::read(&path).expect("read the GGUF");
+        let dir = tempfile::tempdir().unwrap();
+        xybrid_llama::backend_init();
+        for extra in [4_000, 16_000] {
+            let file = dir.path().join(format!("keys-{extra}.gguf"));
+            std::fs::write(&file, with_extra_keys(&original, extra)).unwrap();
+            if extra > 4_000 {
+                assert!(
+                    matches!(
+                        GgufHeader::read_file(&file),
+                        Err(GgufError::TooManyEntries { .. })
+                    ),
+                    "the default ceiling refuses {extra} extra keys"
+                );
+            }
+            let limits = GgufLimits::default().with_max_metadata_entries(1 << 20);
+            let header = GgufHeader::read_file_with_limits(&file, &limits).unwrap();
+            let model = xybrid_llama::LlamaModel::load(file.to_str().unwrap(), 0)
+                .expect("llama.cpp loads the rewritten GGUF");
+            let start = std::time::Instant::now();
+            verify_native_load(&file, &header, &model).expect("the same file and metadata");
+            let elapsed = start.elapsed();
+            eprintln!(
+                "{} keys checked against llama.cpp in {elapsed:?}",
+                header.metadata().len()
+            );
+            assert!(
+                elapsed < std::time::Duration::from_secs(1),
+                "{extra} extra keys took {elapsed:?}"
+            );
         }
     }
 
@@ -800,7 +1187,7 @@ mod published {
         let model = xybrid_llama::LlamaModel::load(path.to_str().expect("a UTF-8 path"), 0)
             .expect("load d1-2B");
 
-        verify_native_metadata(&header, &model).expect("the same metadata");
+        verify_native_load(&path, &header, &model).expect("the same file and metadata");
         let template = model
             .named_chat_template("systemone")
             .unwrap()
