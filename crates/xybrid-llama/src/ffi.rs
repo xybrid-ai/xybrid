@@ -132,32 +132,67 @@ pub(crate) struct ReadoutSizes {
     pub(crate) n_outputs_max: u32,
 }
 
-/// # Safety: `ctx` must be a live context pointer or null (0).
-pub(crate) unsafe fn n_batch(ctx: *const c_void) -> u32 {
-    sys::llama_n_batch_c(ctx)
+/// The status the guarded shims return for a missing key, template or
+/// token; a failure is [`FAILED`], never this.
+pub(crate) const ABSENT: i32 = sys::LLAMA_XYBRID_ABSENT;
+/// The status the guarded shims return when llama.cpp raised an exception
+/// (an allocation failure) or got a null argument.
+pub(crate) const FAILED: i32 = sys::LLAMA_XYBRID_FAILED;
+/// `llama_decode_c`'s status when llama.cpp raised an exception.
+pub(crate) const DECODE_EXCEPTION: i32 = sys::LLAMA_XYBRID_DECODE_EXCEPTION;
+
+/// The error for a guarded shim that failed: llama.cpp raised an exception,
+/// in practice an allocation failure. Names the operation only.
+pub(crate) fn native_failure(what: &str) -> LlamaError {
+    LlamaError::Internal(format!(
+        "llama.cpp failed while {what} (an exception, such as running out of memory)"
+    ))
 }
 
-/// # Safety: `ctx` must be a live context pointer or null (0).
-pub(crate) unsafe fn n_ubatch(ctx: *const c_void) -> u32 {
-    sys::llama_n_ubatch_c(ctx)
-}
-
-/// # Safety: `ctx` must be a live context pointer or null (0).
-pub(crate) unsafe fn n_seq_max(ctx: *const c_void) -> u32 {
-    sys::llama_n_seq_max_c(ctx)
-}
-
-/// Whether llama.cpp gave the context memory (a KV cache or recurrent
-/// state). Without it, a decode runs the encoder.
+/// The sizes, memory and attention llama.cpp gave `ctx`, or `None` when the
+/// guarded query failed.
 ///
-/// # Safety: `ctx` must be a live context pointer or null (`false`).
-pub(crate) unsafe fn context_has_memory(ctx: *const c_void) -> bool {
-    sys::llama_context_has_memory_c(ctx)
+/// # Safety: `ctx` must be a live context pointer or null (`None`).
+pub(crate) unsafe fn context_facts(ctx: *const c_void) -> Option<sys::llama_xybrid_context_facts> {
+    #[cfg(test)]
+    record_native_call();
+    let mut facts = sys::llama_xybrid_context_facts {
+        n_ctx: 0,
+        n_batch: 0,
+        n_ubatch: 0,
+        n_seq_max: 0,
+        has_memory: false,
+        causal_attn: false,
+    };
+    (sys::llama_context_facts_c(ctx, &mut facts) == 0).then_some(facts)
 }
 
-/// # Safety: `ctx` must be a live context pointer or null (`false`).
-pub(crate) unsafe fn causal_attn(ctx: *const c_void) -> bool {
-    sys::llama_get_causal_attn_c(ctx)
+/// Registers `callback` (with `data`) as the function llama.cpp's CPU
+/// backend asks, between graph nodes, whether to stop. `false` when the
+/// guarded call failed.
+///
+/// # Safety
+///
+/// `ctx` must be a live context pointer, and `data` must stay valid for
+/// `callback` until the context is freed. `callback` must not unwind.
+pub(crate) unsafe fn set_abort_callback(
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(*mut c_void) -> bool,
+    data: *mut c_void,
+) -> bool {
+    #[cfg(test)]
+    record_native_call();
+    sys::llama_set_abort_callback_c(ctx, Some(callback), data) == 0
+}
+
+/// Makes the next call of the guarded shim `shim` throw `std::bad_alloc`
+/// inside its exception boundary, as an allocation failure in llama.cpp
+/// would.
+#[cfg(test)]
+pub(crate) fn fail_next_native_call(shim: &str) {
+    let shim = CString::new(shim).expect("a shim name has no NUL");
+    // SAFETY: the shim copies the name before returning.
+    unsafe { sys::llama_xybrid_fail_next_c(shim.as_ptr()) };
 }
 
 /// The logits row of batch entry `i` from the last decode.
@@ -209,21 +244,25 @@ pub(crate) unsafe fn kv_cache_seq_rm(ctx: *mut c_void, seq_id: i32, p_keep: usiz
 
 /// Clear the whole memory of `ctx`: its KV cache and any recurrent state.
 ///
-/// Returns `false`, clearing nothing, when the context has no memory:
+/// Returns `Ok(false)`, clearing nothing, when the context has no memory:
 /// llama.cpp creates none for encoder-only and diffusion models, and decodes
-/// their batches with the encoder.
+/// their batches with the encoder. A failure inside llama.cpp is an error,
+/// never "no memory".
 ///
 /// # Safety
 ///
 /// `ctx` must be a live, non-null context pointer.
-pub(crate) unsafe fn clear_memory(ctx: *mut c_void) -> bool {
+pub(crate) unsafe fn clear_memory(ctx: *mut c_void) -> Result<bool, LlamaError> {
     // The shim's seq_rm returns -1 when the context has no memory. Dropping
     // sequence 0 first costs nothing: the full clear empties every sequence.
-    if sys::llama_kv_cache_seq_rm_c(ctx, 0, 0) < 0 {
-        return false;
+    match sys::llama_kv_cache_seq_rm_c(ctx, 0, 0) {
+        0 => {
+            sys::llama_kv_cache_clear_c(ctx);
+            Ok(true)
+        }
+        -1 => Ok(false),
+        _ => Err(native_failure("clearing the context's memory")),
     }
-    sys::llama_kv_cache_clear_c(ctx);
-    true
 }
 
 /// Byte size of a state snapshot of `seq_id`. Zero on failure, including
@@ -383,74 +422,125 @@ pub(crate) unsafe fn model_has_recurrent_state(model: *const c_void) -> bool {
     sys::llama_model_has_recurrent_state_c(model)
 }
 
-/// # Safety: `model` must be a live model pointer or null (`false`).
-pub(crate) unsafe fn model_has_encoder(model: *const c_void) -> bool {
-    sys::llama_model_has_encoder_c(model)
+/// Whether the model has an encoder; `None` when the guarded query failed.
+///
+/// # Safety: `model` must be a live model pointer or null (`None`).
+pub(crate) unsafe fn model_has_encoder(model: *const c_void) -> Option<bool> {
+    #[cfg(test)]
+    record_native_call();
+    match sys::llama_model_has_encoder_c(model) {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
 }
 
-/// Number of scalar metadata keys llama.cpp loaded with the model; negative
-/// for a null model.
+/// Number of scalar metadata keys llama.cpp loaded with the model, or
+/// [`FAILED`].
 ///
-/// # Safety: `model` must be a live model pointer or null.
+/// # Safety: `model` must be a live model pointer or null ([`FAILED`]).
 pub(crate) unsafe fn model_meta_count(model: *const c_void) -> i32 {
+    #[cfg(test)]
+    record_native_call();
     sys::llama_model_meta_count_c(model)
 }
 
-/// Writes metadata key `i` into `buf` (NUL-terminated, truncated to fit) and
-/// returns its whole length, or -1 when `i` is not an entry.
+/// Writes the value of `key` into `buf` (NUL-terminated, truncated to fit)
+/// and returns its whole length, [`ABSENT`] when the model has no such
+/// scalar key, or [`FAILED`].
 ///
 /// # Safety
 ///
-/// `model` must be a live model pointer or null. `buf` must be writable for
-/// `buf_len` bytes, or null with `buf_len == 0` to probe the length.
-pub(crate) unsafe fn model_meta_key_by_index(
-    model: *const c_void,
-    i: i32,
-    buf: *mut c_char,
-    buf_len: usize,
-) -> i32 {
-    sys::llama_model_meta_key_by_index_c(model, i, buf, buf_len)
-}
-
-/// Like [`model_meta_key_by_index`], for the entry's value.
-///
-/// # Safety: as [`model_meta_key_by_index`].
-pub(crate) unsafe fn model_meta_val_by_index(
-    model: *const c_void,
-    i: i32,
-    buf: *mut c_char,
-    buf_len: usize,
-) -> i32 {
-    sys::llama_model_meta_val_str_by_index_c(model, i, buf, buf_len)
-}
-
-/// Like [`model_meta_key_by_index`], for the value of `key`; -1 when the
-/// model has no such scalar key.
-///
-/// # Safety: as [`model_meta_key_by_index`], and `key` outlives the call.
+/// `model` must be a live model pointer or null, and `key` outlive the call.
+/// `buf` must be writable for `buf_len` bytes, or null with `buf_len == 0`
+/// to probe the length.
 pub(crate) unsafe fn model_meta_val(
     model: *const c_void,
     key: &CString,
     buf: *mut c_char,
     buf_len: usize,
 ) -> i32 {
+    #[cfg(test)]
+    record_native_call();
     sys::llama_model_meta_val_str_c(model, key.as_ptr(), buf, buf_len)
+}
+
+/// The values of `keys` in two native calls whatever their number (one to
+/// size the buffer, one to fill it), each a hash lookup per key: `None` for
+/// a key the model does not have.
+///
+/// # Safety: `model` must be a live model pointer or null (an error).
+pub(crate) unsafe fn model_meta_lookup(
+    model: *const c_void,
+    keys: &[CString],
+) -> Result<Vec<Option<Vec<u8>>>, LlamaError> {
+    let pointers: Vec<*const c_char> = keys.iter().map(|key| key.as_ptr()).collect();
+    let mut lens = vec![0i64; keys.len()];
+    #[cfg(test)]
+    record_native_call();
+    let total = sys::llama_model_meta_lookup_c(
+        model,
+        pointers.as_ptr(),
+        pointers.len(),
+        std::ptr::null_mut(),
+        0,
+        lens.as_mut_ptr(),
+    );
+    let total = usize::try_from(total).map_err(|_| native_failure("reading model metadata"))?;
+    let mut buf = Vec::new();
+    buf.try_reserve_exact(total + 1)
+        .map_err(|_| native_failure("reading model metadata"))?;
+    buf.resize(total + 1, 0u8);
+    let mut copied = vec![0i64; keys.len()];
+    #[cfg(test)]
+    record_native_call();
+    let written = sys::llama_model_meta_lookup_c(
+        model,
+        pointers.as_ptr(),
+        pointers.len(),
+        buf.as_mut_ptr().cast::<c_char>(),
+        buf.len(),
+        copied.as_mut_ptr(),
+    );
+    if usize::try_from(written).ok() != Some(total) || copied != lens {
+        return Err(LlamaError::Internal(
+            "model metadata changed between two reads".to_string(),
+        ));
+    }
+    let mut values = Vec::with_capacity(keys.len());
+    let mut offset = 0;
+    for len in lens {
+        if len == i64::from(ABSENT) {
+            values.push(None);
+            continue;
+        }
+        let len = usize::try_from(len).map_err(|_| native_failure("reading model metadata"))?;
+        values.push(Some(buf[offset..offset + len].to_vec()));
+        offset += len;
+    }
+    Ok(values)
 }
 
 /// Reads a string from one of the `llama_model_meta_*` accessors, which
 /// return the string's whole length like `snprintf`: a probe with no buffer
 /// sizes it, a second call copies it. `None` when the accessor reports no
-/// such entry.
+/// such entry ([`ABSENT`]); a failure ([`FAILED`]) is an error, never an
+/// absence.
 ///
 /// `write(buf, len)` performs one accessor call.
 pub(crate) fn read_meta_string(
     mut write: impl FnMut(*mut c_char, usize) -> i32,
 ) -> Result<Option<Vec<u8>>, LlamaError> {
-    let Ok(len) = usize::try_from(write(std::ptr::null_mut(), 0)) else {
+    let probe = write(std::ptr::null_mut(), 0);
+    if probe == ABSENT {
         return Ok(None);
-    };
+    }
+    let len = usize::try_from(probe).map_err(|_| native_failure("reading model metadata"))?;
     let mut buf = vec![0u8; len + 1];
     let written = write(buf.as_mut_ptr().cast::<c_char>(), buf.len());
+    if written == FAILED {
+        return Err(native_failure("reading model metadata"));
+    }
     if usize::try_from(written).ok() != Some(len) || buf[len] != 0 {
         return Err(LlamaError::Internal(format!(
             "a metadata string changed length between reads ({len}, then {written})"
@@ -460,35 +550,76 @@ pub(crate) fn read_meta_string(
     Ok(Some(buf))
 }
 
-/// The chat template named `name`, or null when the model has none.
+/// The bytes of a C string the guarded shims point `out` at, given the
+/// length the shim returned: `None` for [`ABSENT`], an error for anything
+/// else that is not a length.
 ///
 /// # Safety
 ///
-/// `model` must be a live model pointer or null. The returned string is
-/// owned by the model and valid for its lifetime; the caller must not free it.
+/// For a length `len >= 0`, `out` must point at `len` readable bytes owned
+/// by the model, valid for the call.
+unsafe fn borrowed_bytes(
+    len: i32,
+    out: *const c_char,
+    what: &str,
+) -> Result<Option<Vec<u8>>, LlamaError> {
+    if len == ABSENT {
+        return Ok(None);
+    }
+    let len = usize::try_from(len).map_err(|_| native_failure(what))?;
+    if out.is_null() {
+        return Err(native_failure(what));
+    }
+    Ok(Some(
+        std::slice::from_raw_parts(out.cast::<u8>(), len).to_vec(),
+    ))
+}
+
+/// The chat template named `name`, copied; `None` when the model has none.
+///
+/// # Safety: `model` must be a live model pointer or null (an error).
 pub(crate) unsafe fn model_chat_template_named(
     model: *const c_void,
     name: &CString,
-) -> *const c_char {
-    sys::llama_model_chat_template_named_c(model, name.as_ptr())
+) -> Result<Option<Vec<u8>>, LlamaError> {
+    #[cfg(test)]
+    record_native_call();
+    let mut out = std::ptr::null();
+    let len = sys::llama_model_chat_template_named_c(model, name.as_ptr(), &mut out);
+    borrowed_bytes(len, out, "reading a chat template")
 }
 
-/// The attribute bits of `token`, or -1 when it is outside the vocabulary
+/// The attribute bits of `token`; `None` when it is outside the vocabulary
 /// (the shim checks the range).
 ///
-/// # Safety: `model` must be a live model pointer or null (-1).
-pub(crate) unsafe fn vocab_get_attr(model: *const c_void, token: i32) -> i32 {
-    sys::llama_vocab_get_attr_c(model, token)
+/// # Safety: `model` must be a live model pointer or null (an error).
+pub(crate) unsafe fn vocab_get_attr(
+    model: *const c_void,
+    token: i32,
+) -> Result<Option<u32>, LlamaError> {
+    #[cfg(test)]
+    record_native_call();
+    match sys::llama_vocab_get_attr_c(model, token) {
+        ABSENT => Ok(None),
+        bits => u32::try_from(bits)
+            .map(Some)
+            .map_err(|_| native_failure("reading a token's attributes")),
+    }
 }
 
-/// The stored text of `token`, or null when it is outside the vocabulary.
+/// The stored text of `token`, copied; `None` when it is outside the
+/// vocabulary.
 ///
-/// # Safety
-///
-/// `model` must be a live model pointer or null. The returned string is
-/// owned by the model and valid for its lifetime.
-pub(crate) unsafe fn vocab_get_text(model: *const c_void, token: i32) -> *const c_char {
-    sys::llama_vocab_get_text_c(model, token)
+/// # Safety: `model` must be a live model pointer or null (an error).
+pub(crate) unsafe fn vocab_get_text(
+    model: *const c_void,
+    token: i32,
+) -> Result<Option<Vec<u8>>, LlamaError> {
+    #[cfg(test)]
+    record_native_call();
+    let mut out = std::ptr::null();
+    let len = sys::llama_vocab_get_text_c(model, token, &mut out);
+    borrowed_bytes(len, out, "reading a token's text")
 }
 
 /// Render a chat conversation through the model's built-in template into
@@ -678,7 +809,9 @@ pub(crate) unsafe fn generate_from_current_logits(
     )
 }
 
-/// Decode `batch` on `ctx`. Returns llama.cpp's status: `0` on success.
+/// Decode `batch` on `ctx`. Returns llama.cpp's status: `0` on success, and
+/// [`DECODE_EXCEPTION`] when llama.cpp raised an exception (see
+/// [`decode_failure`]).
 ///
 /// # Safety
 ///
@@ -693,6 +826,17 @@ pub(crate) unsafe fn decode(ctx: *mut c_void, batch: &mut TokenBatch) -> c_int {
     // llama.cpp reads the arrays during the call and keeps no pointer to them.
     let view = batch.view();
     sys::llama_decode_c(ctx, &view)
+}
+
+/// What a failed [`decode`] status means, for an error message.
+pub(crate) fn decode_failure(code: c_int) -> &'static str {
+    match code {
+        DECODE_EXCEPTION => "llama.cpp raised an exception (such as running out of memory)",
+        1 => "llama.cpp found no memory slot for the batch",
+        2 => "llama.cpp aborted the evaluation",
+        -1 => "llama.cpp refused the batch",
+        _ => "llama.cpp failed to evaluate the batch",
+    }
 }
 
 /// The logits of the last decode's output rows, owned by `ctx`.

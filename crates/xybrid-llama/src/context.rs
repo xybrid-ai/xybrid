@@ -168,7 +168,11 @@ impl LlamaContext {
     }
 
     /// The sizes, memory and attention llama.cpp actually gave this context.
-    pub fn facts(&self) -> ContextFacts {
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::Internal`] when llama.cpp failed to report them.
+    pub fn facts(&self) -> LlamaResult<ContextFacts> {
         // SAFETY: self.ptr is a live context pointer.
         unsafe { ContextFacts::read(self.ptr) }
     }
@@ -354,16 +358,18 @@ pub struct ContextFacts {
 impl ContextFacts {
     /// # Safety
     ///
-    /// `ctx` must be a live context pointer.
-    pub(crate) unsafe fn read(ctx: *mut c_void) -> Self {
-        Self {
-            n_ctx: u32::try_from(ffi::n_ctx(ctx)).unwrap_or(0),
-            n_batch: ffi::n_batch(ctx),
-            n_ubatch: ffi::n_ubatch(ctx),
-            n_seq_max: ffi::n_seq_max(ctx),
-            has_memory: ffi::context_has_memory(ctx),
-            causal_attn: ffi::causal_attn(ctx),
-        }
+    /// `ctx` must be a live context pointer or null (an error).
+    pub(crate) unsafe fn read(ctx: *mut c_void) -> LlamaResult<Self> {
+        let facts = ffi::context_facts(ctx)
+            .ok_or_else(|| ffi::native_failure("reading the context's sizes"))?;
+        Ok(Self {
+            n_ctx: facts.n_ctx,
+            n_batch: facts.n_batch,
+            n_ubatch: facts.n_ubatch,
+            n_seq_max: facts.n_seq_max,
+            has_memory: facts.has_memory,
+            causal_attn: facts.causal_attn,
+        })
     }
 }
 

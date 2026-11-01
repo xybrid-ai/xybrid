@@ -110,7 +110,7 @@ const SYSTEMONE_TEMPLATE_KEY: &str = "tokenizer.chat_template.systemone";
 /// decision or profile key has the wrong type (an array-valued
 /// `<arch>.decision.type` included: it is malformed, not absent),
 /// [`GgufError::Malformed`] for a string that is not UTF-8, and
-/// [`GgufError::InvalidDecision`] for a decision type under another
+/// [`GgufError::InvalidDecision`] for any decision key under another
 /// architecture's prefix, decision keys without a decision type, or a
 /// decision temperature llama.cpp would refuse.
 pub fn classify(header: &GgufHeader) -> Result<DecisionClassification, GgufError> {
@@ -118,11 +118,14 @@ pub fn classify(header: &GgufHeader) -> Result<DecisionClassification, GgufError
         key: ARCHITECTURE_KEY.to_string(),
     })?;
 
+    // Every decision key must be the architecture's, whatever else the file
+    // holds: a type, a temperature or anything else under another prefix is
+    // a decision model labelled for another architecture.
     for (key, _) in header.metadata() {
-        if let Some(prefix) = key.strip_suffix(".decision.type") {
+        if let Some(prefix) = decision_prefix(key) {
             if prefix != arch {
                 return Err(GgufError::InvalidDecision(format!(
-                    "{key:?} does not belong to the {arch:?} architecture"
+                    "{key:?} is a decision key of another architecture than {arch:?}"
                 )));
             }
         }
@@ -213,6 +216,16 @@ pub fn classify(header: &GgufHeader) -> Result<DecisionClassification, GgufError
     Ok(DecisionClassification::Supported(
         DecisionProfileId::Lfm3D1Text,
     ))
+}
+
+/// The prefix of a decision key: `<prefix>` for a key of the form
+/// `<prefix>.decision.<rest>` (the first `.decision.` decides), the empty
+/// prefix for one that starts with `decision.`, and `None` for any other key.
+fn decision_prefix(key: &str) -> Option<&str> {
+    if key.starts_with("decision.") {
+        return Some("");
+    }
+    key.find(".decision.").map(|at| &key[..at])
 }
 
 /// A string-typed key as UTF-8 text, `None` when absent.
