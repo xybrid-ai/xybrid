@@ -92,6 +92,12 @@ fn reasoning_budget_exhaustion_recovers_with_ample_budget() {
 /// ends the turn mid-thought, every delta is suppressed and the terminal token
 /// is the only chunk left; it must still reach the callback, carrying
 /// `length`. The grammar keeps the single budgeted token inside the thought.
+///
+/// No workflow downloads qwen3-0.6b, so this runs only where the fixture is
+/// staged. CI runs the same adapter path through its FunctionGemma twin,
+/// `a_fully_suppressed_stream_still_sends_its_terminal_token` in
+/// `llamacpp_release.rs`: the priming comes from `LlmConfig::reasoning`, not
+/// from the model.
 #[test]
 fn reasoning_cut_off_mid_thought_still_sends_the_terminal_token() {
     let model_name = "qwen3-0.6b";
