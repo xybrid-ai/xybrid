@@ -316,8 +316,9 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 ### Platform Requirements
 
 - **macOS**: 13.3+, Xcode 15+, Apple Silicon
-- **iOS**: 13.0+, Xcode 15+
-- **Android**: minSdk 21, NDK r25+, 64-bit only
+- **iOS**: 16.0+, Xcode 15+ (the precompiled library targets iOS 16)
+- **Android**: Android 9 (API 28)+, NDK r25+, 64-bit only. The precompiled
+  libraries need API 28 even though the plugin declares minSdk 21.
 - **Linux/Windows**: x86_64
 
 ## Native Libraries
