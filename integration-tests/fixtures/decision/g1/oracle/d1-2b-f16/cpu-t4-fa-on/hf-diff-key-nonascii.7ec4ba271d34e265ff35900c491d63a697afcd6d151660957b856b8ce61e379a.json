@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-key-nonascii",
+  "source_file": "hf-diff-key-nonascii.json",
+  "case_file_sha256": "a6a10d455c6f2f222457ee6cf1fbbc648e720af4cce2264fe6d72a023aa6863c",
+  "request_sha256": "7ec4ba271d34e265ff35900c491d63a697afcd6d151660957b856b8ce61e379a",
+  "inputs_sha256": "83651c6e2c4bd41cee9cf7b52fee08e4b43ccf4294dd0a90b7a7779632636264",
+  "inputs": {
+    "request_sha256": "7ec4ba271d34e265ff35900c491d63a697afcd6d151660957b856b8ce61e379a",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "capital",
+          "type": "choice",
+          "keys": ["\u00e9", "\u00df", "\u00f8"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "capital",
+          "prompt": "<|startoftext|><|im_start|>user\nThe capital of France is Paris.\n\n\nQUESTION:\nWhich city is the capital?\n\nOptions:\nA Paris\nB Lyon\nC Marseille\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 597, 5205, 302, 3980, 355, 4741, 64673, 63509, 833, 28327, 3270, 355, 278, 5205, 64929, 13314, 833, 41, 4741, 207, 42, 26468, 207, 43, 41660, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 43,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "capital",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "\u00e9",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "\u00df",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "\u00f8",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4186fddd", "0x4131a3dc", "0x40d168ce", "0x3e2e23b8", "0x40ba87f8", "0xbea687d8"]
+      ],
+      "scores": [
+        ["0x4186fddd", "0x40d168ce", "0x40ba87f8"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "capital": {
+          "type": "choice",
+          "choice": "\u00e9",
+          "probabilities": {
+            "\u00e9": 0.99929929764993786,
+            "\u00df": 0.00044182829395995426,
+            "\u00f8": 0.00025887405610211956
+          },
+          "confidence": 0.99929929764993786
+        }
+      },
+      "usage": {
+        "input_tokens": 44,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

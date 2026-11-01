@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-chat-media-part",
+  "source_file": "hf-diff-chat-media-part.json",
+  "case_file_sha256": "1c75a0243a77b377d8c8aaa428b512018fc0d5f6f8385865464f613f2a6b55d6",
+  "request_sha256": "8969c785b1d9fda4394560b90d2e3fa75b5e827afe9ebfed8970ff9849346732",
+  "inputs_sha256": "bb7476d9ee8ede6bb8d77900c118f5fad6f22d4be370b7eae02bacb29634d485",
+  "inputs": {
+    "request_sha256": "8969c785b1d9fda4394560b90d2e3fa75b5e827afe9ebfed8970ff9849346732",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": null,
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "not_supported",
+        "status": 501,
+        "type": "not_supported_error",
+        "message": "This server does not support image input for decisions. For a model that supports it, start it with `--mmproj`"
+      }
+    },
+    "server": {
+      "status": 501,
+      "agrees": true
+    }
+  }
+}

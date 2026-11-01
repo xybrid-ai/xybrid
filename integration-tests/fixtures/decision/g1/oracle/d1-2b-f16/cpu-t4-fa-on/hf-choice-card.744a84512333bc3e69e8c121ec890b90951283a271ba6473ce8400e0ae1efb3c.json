@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "hf-choice-card",
+  "source_file": "hf-choice-card.json",
+  "case_file_sha256": "77b229212525b62d1311193de375fa74625764fd2e962d87808cfeae16916cea",
+  "request_sha256": "744a84512333bc3e69e8c121ec890b90951283a271ba6473ce8400e0ae1efb3c",
+  "inputs_sha256": "396668482bdcb15687b9f21dc5d298d42c7ae5b635bb3975418d8432378de55d",
+  "inputs": {
+    "request_sha256": "744a84512333bc3e69e8c121ec890b90951283a271ba6473ce8400e0ae1efb3c",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "team",
+          "type": "choice",
+          "keys": ["billing", "shipping", "technical"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "team",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nWhich team should handle this?\n\nOptions:\nA Charges, refunds, invoices\nB Delivery and parcels\nC App or site faults\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 28327, 2909, 1252, 9435, 532, 64929, 13314, 833, 41, 120315, 20, 52966, 91, 20, 60326, 1363, 207, 42, 57615, 309, 18830, 1205, 207, 43, 4634, 432, 2974, 49521, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 63,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "team",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "billing",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "shipping",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "technical",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x412c9fde", "0x40daf78f", "0x411da32a", "0x40bc2f68", "0x40ffb516", "0x40843469"]
+      ],
+      "scores": [
+        ["0x412c9fde", "0x411da32a", "0x40ffb516"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "team": {
+          "type": "choice",
+          "choice": "billing",
+          "probabilities": {
+            "billing": 0.61735926150386289,
+            "shipping": 0.30645317070402589,
+            "technical": 0.076187567792111319
+          },
+          "confidence": 0.61735926150386289
+        }
+      },
+      "usage": {
+        "input_tokens": 64,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

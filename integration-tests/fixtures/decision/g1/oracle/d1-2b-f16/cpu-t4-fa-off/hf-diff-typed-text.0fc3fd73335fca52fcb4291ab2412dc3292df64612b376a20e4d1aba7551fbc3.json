@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-typed-text",
+  "source_file": "hf-diff-typed-text.json",
+  "case_file_sha256": "601dae9159b41600f6c21a6d2a907629db98fd687d7e1c90682f32b475849db1",
+  "request_sha256": "0fc3fd73335fca52fcb4291ab2412dc3292df64612b376a20e4d1aba7551fbc3",
+  "inputs_sha256": "351afbe9c3fdbd4a57185c028da76e9d2f5b9f2f8475a3a998f25e6f3d5d6c9c",
+  "inputs": {
+    "request_sha256": "0fc3fd73335fca52fcb4291ab2412dc3292df64612b376a20e4d1aba7551fbc3",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": null,
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "invalid_argument",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "questions.payee: \"type\" must be one of: choice, score, noul"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  }
+}

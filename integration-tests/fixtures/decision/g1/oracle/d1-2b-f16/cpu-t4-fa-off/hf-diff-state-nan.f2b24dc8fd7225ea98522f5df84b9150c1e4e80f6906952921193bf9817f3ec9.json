@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-state-nan",
+  "source_file": "hf-diff-state-nan.json",
+  "case_file_sha256": "05353572bdf16df297bdcf67cb786ad3b25140d461b0fc34fd49a5874bbf030a",
+  "request_sha256": "f2b24dc8fd7225ea98522f5df84b9150c1e4e80f6906952921193bf9817f3ec9",
+  "inputs_sha256": "9df2e3bb48b4e22befce09d3dd36944c8271678326b73cde89e8620df920cfb9",
+  "inputs": {
+    "request_sha256": "f2b24dc8fd7225ea98522f5df84b9150c1e4e80f6906952921193bf9817f3ec9",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": null,
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "common_json_error",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "[json.exception.parse_error.101] parse error at line 1, column 22: syntax error while parsing value - invalid literal; last read: '\"amount\": N'"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  }
+}

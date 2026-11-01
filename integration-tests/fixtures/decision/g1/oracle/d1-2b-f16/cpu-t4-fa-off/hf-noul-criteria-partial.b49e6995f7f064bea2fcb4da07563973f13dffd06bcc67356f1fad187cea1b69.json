@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "hf-noul-criteria-partial",
+  "source_file": "hf-noul-criteria-partial.json",
+  "case_file_sha256": "eb59576e146bb3032ad1caddd14d6945b9d29bde6e0542b5afae7f8d6c4722d0",
+  "request_sha256": "b49e6995f7f064bea2fcb4da07563973f13dffd06bcc67356f1fad187cea1b69",
+  "inputs_sha256": "e1dcc6392ac7b357defe02281f132b465db434dc9c19dac43d9a531b18cbaf89",
+  "inputs": {
+    "request_sha256": "b49e6995f7f064bea2fcb4da07563973f13dffd06bcc67356f1fad187cea1b69",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "legal",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "legal",
+          "prompt": "<|startoftext|><|im_start|>user\nIf this is not fixed by Friday I will talk to my lawyer.\n\n\nQUESTION:\nIs this a legal threat?\nYes: The message threatens legal action\nNo: None\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2882, 532, 355, 513, 8666, 467, 15511, 358, 687, 3931, 310, 1226, 23248, 64673, 63509, 833, 4439, 532, 267, 6288, 5359, 1283, 12447, 34, 440, 5781, 56610, 6288, 3771, 207, 4547, 34, 10856, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 51,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "legal",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40a208bb", "0x4124029e", "0x408a4670", "0x41252f11", "0x4080f6f6"]
+      ],
+      "scores": [
+        ["0x4124029e", "0x41252f11"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "legal": {
+          "type": "noul",
+          "noul": 0.48629176302221677
+        }
+      },
+      "usage": {
+        "input_tokens": 52,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

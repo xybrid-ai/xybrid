@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "hf-noul-criteria",
+  "source_file": "hf-noul-criteria.json",
+  "case_file_sha256": "8a24d6c0eb4870a0d951c4791fdda4d049b211d8398c02d260704cc972c53a07",
+  "request_sha256": "e7e73ef9cab43e78f46eea2165edb1e2a35c175ede3afda32535ea4e470fa351",
+  "inputs_sha256": "c62c056be5cc52d989095e37123bbc47a0e13c172541b9c4bb1b05e350d64e33",
+  "inputs": {
+    "request_sha256": "e7e73ef9cab43e78f46eea2165edb1e2a35c175ede3afda32535ea4e470fa351",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "damaged",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "damaged",
+          "prompt": "<|startoftext|><|im_start|>user\nOrder 5521 arrived with the box crushed, but the vase inside is intact.\n\n\nQUESTION:\nDid the item arrive damaged?\nYes: The product itself is broken or unusable\nNo: Only the packaging is damaged, or nothing is\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 17708, 229, 32967, 25, 10922, 415, 278, 5876, 37668, 20, 702, 278, 346, 645, 5161, 355, 25352, 64673, 63509, 833, 20435, 278, 8187, 16552, 14572, 1283, 12447, 34, 440, 2045, 4341, 355, 11193, 432, 13098, 607, 207, 4547, 34, 10504, 278, 25384, 355, 14572, 20, 432, 5799, 355, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 66,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "damaged",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x400bfe4b", "0x40eb70d6", "0x408f7584", "0x4135e710", "0x40a6fbda"]
+      ],
+      "scores": [
+        ["0x40eb70d6", "0x4135e710"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "damaged": {
+          "type": "noul",
+          "noul": 0.04745311810368965
+        }
+      },
+      "usage": {
+        "input_tokens": 67,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

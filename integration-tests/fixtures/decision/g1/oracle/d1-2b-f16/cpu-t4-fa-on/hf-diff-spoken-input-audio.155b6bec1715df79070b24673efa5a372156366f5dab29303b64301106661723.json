@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-spoken-input-audio",
+  "source_file": "hf-diff-spoken-input-audio.json",
+  "case_file_sha256": "567977ee4e911cbd1aabfb18319a122099ae57ee9b1f52f77826f4b248cc16ff",
+  "request_sha256": "155b6bec1715df79070b24673efa5a372156366f5dab29303b64301106661723",
+  "inputs_sha256": "bec804f1683c47290db3d56b628eb07b3529feac5203ff51020f825adfc7f78d",
+  "inputs": {
+    "request_sha256": "155b6bec1715df79070b24673efa5a372156366f5dab29303b64301106661723",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": null,
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "invalid_argument",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "questions.refund: spoken instructions need a model with audio input"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  }
+}

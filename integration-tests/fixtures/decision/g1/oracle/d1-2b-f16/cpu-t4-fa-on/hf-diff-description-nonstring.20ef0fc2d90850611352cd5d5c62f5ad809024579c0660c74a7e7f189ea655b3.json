@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-description-nonstring",
+  "source_file": "hf-diff-description-nonstring.json",
+  "case_file_sha256": "e80c473dd182bcccff1ffc5f5491bd0f0dbeee6f458bd4ca58858d85f8592dd5",
+  "request_sha256": "20ef0fc2d90850611352cd5d5c62f5ad809024579c0660c74a7e7f189ea655b3",
+  "inputs_sha256": "f3730a1bf43212ac28ba79c829e5b6c3ff2b6ffb8f4b6f1dc44099c6d27928d6",
+  "inputs": {
+    "request_sha256": "20ef0fc2d90850611352cd5d5c62f5ad809024579c0660c74a7e7f189ea655b3",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "action",
+          "type": "choice",
+          "keys": ["refund", "ignore", "escalate"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "action",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nWhat should the agent do?\n\nOptions:\nA {\"action\": \"refund\", \"max_eur\": 100}\nB true\nC 3.5\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 2992, 1252, 278, 10879, 611, 64929, 13314, 833, 41, 36579, 2908, 6380, 496, 1390, 855, 1377, 496, 8207, 71, 4405, 6380, 229, 1595, 604, 42, 2846, 207, 43, 229, 27, 22, 29, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 67,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "action",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "refund",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "ignore",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "escalate",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x415af616", "0x410b70aa", "0x40ebbebf", "0x400663f9", "0x40be62ce", "0x3f33c57c"]
+      ],
+      "scores": [
+        ["0x415af616", "0x40ebbebf", "0x40be62ce"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "action": {
+          "type": "choice",
+          "choice": "refund",
+          "probabilities": {
+            "refund": 0.98818644624328078,
+            "ignore": 0.0087735300364389906,
+            "escalate": 0.0030400237202803755
+          },
+          "confidence": 0.98818644624328078
+        }
+      },
+      "usage": {
+        "input_tokens": 68,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

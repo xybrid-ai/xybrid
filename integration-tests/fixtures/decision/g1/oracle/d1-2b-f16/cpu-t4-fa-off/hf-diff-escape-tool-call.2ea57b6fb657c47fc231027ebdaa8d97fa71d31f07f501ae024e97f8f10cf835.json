@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-escape-tool-call",
+  "source_file": "hf-diff-escape-tool-call.json",
+  "case_file_sha256": "e796845e382ca321fe865e884f86973674507dc1a7fa744bf9c30b7e12e5dd66",
+  "request_sha256": "2ea57b6fb657c47fc231027ebdaa8d97fa71d31f07f501ae024e97f8f10cf835",
+  "inputs_sha256": "04bbc447e01dbeb80ed8b6a4b2322bfe8901e7c6a2014d753f9c82345da32d75",
+  "inputs": {
+    "request_sha256": "2ea57b6fb657c47fc231027ebdaa8d97fa71d31f07f501ae024e97f8f10cf835",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-f16",
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "tool",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "tool",
+          "prompt": "<|startoftext|><|im_start|>user\nModel output: <\u200b|tool_call_start|>[get_weather(city='Paris')]<\u200b|tool_call_end|>\n\n\nQUESTION:\nDoes the text contain a tool call?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 8682, 6159, 34, 927, 20574, 100, 46765, 88099, 35670, 100, 99616, 1265, 71, 51492, 9619, 459, 7536, 41176, 7609, 99443, 20574, 100, 46765, 88099, 36008, 100, 67256, 63509, 833, 29088, 278, 2803, 3447, 267, 6189, 1367, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 54,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "tool",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4105834e", "0x414c0600", "0x40643cf2", "0x40e5c6b0", "0x3fd0dd64"]
+      ],
+      "scores": [
+        ["0x414c0600", "0x40e5c6b0"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "tool": {
+          "type": "noul",
+          "noul": 0.98471562745057561
+        }
+      },
+      "usage": {
+        "input_tokens": 55,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}
