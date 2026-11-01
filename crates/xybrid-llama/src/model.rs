@@ -165,7 +165,10 @@ impl LlamaModel {
     /// byte-level vocabulary splits across tokens survives. Bytes that cannot
     /// be UTF-8 become U+FFFD. A character the tokens leave unfinished at the
     /// end (the budget ran out between its bytes) has no text and is dropped,
-    /// as the streaming callback never receives one either.
+    /// as the streaming callback never receives one either. In `generate_raw`,
+    /// which keeps the final EOG token, a character left unfinished directly
+    /// before it decodes as `�` followed by the EOG text instead, because the
+    /// EOG's bytes follow it in the same call.
     pub fn detokenize(&self, tokens: &[i32]) -> LlamaResult<String> {
         let mut bytes = Vec::new();
         let mut buf = vec![0u8; 256];

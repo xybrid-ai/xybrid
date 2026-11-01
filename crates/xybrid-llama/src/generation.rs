@@ -108,7 +108,11 @@ where
     // A token's piece is raw bytes: decoding it alone dropped any character
     // a byte-level vocabulary splits across tokens. The callback gets each
     // character once its last byte arrives, and "" for a token that only
-    // started one.
+    // started one. The piece arrives as a C string from the native loop's
+    // 1023-byte buffer, so a longer piece arrives empty and a NUL byte ends
+    // one early, while `LlamaModel::detokenize` reads every piece whole. No
+    // real vocabulary has such pieces; carrying the piece's length instead
+    // would take a native change.
     let piece = if token_text.is_null() {
         &[][..]
     } else {

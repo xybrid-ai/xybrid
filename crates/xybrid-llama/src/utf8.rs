@@ -4,8 +4,12 @@
 //! character across tokens: qwen3 writes "🙂" as several tokens, none of them
 //! UTF-8 on its own. Decoding each piece by itself dropped such characters;
 //! [`Utf8Decoder`] carries the leading bytes of an unfinished character over
-//! to the next piece instead, so the streaming callback and
-//! [`crate::LlamaModel::detokenize`] see the same text.
+//! to the next piece instead. The streaming callback and
+//! [`crate::LlamaModel::detokenize`] decode the same way, so they see the same
+//! text for every real vocabulary. They do not read the same bytes by
+//! construction, though: the stream gets each piece through a 1023-byte,
+//! NUL-terminated callback buffer (see `streaming_trampoline`), and
+//! `detokenize` reads pieces whole.
 
 use std::borrow::Cow;
 
