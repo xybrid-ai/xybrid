@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "id": "hf-score-borderline",
+  "source_file": "hf-score-borderline.json",
+  "case_file_sha256": "408d9d2d888f09cf6c6b36dfc0c73e36f912e9563f0cffa66f2a1d6aebac9549",
+  "request_sha256": "82d2b5e1281143781d03962bdf4508c3aa7c9b382417a6dac5cc62bf92fc3599",
+  "inputs_sha256": "76bd06a1b6497c0f75a1fc1f4625acdf606811c910ff881bd1ef19effb9754af",
+  "inputs": {
+    "request_sha256": "82d2b5e1281143781d03962bdf4508c3aa7c9b382417a6dac5cc62bf92fc3599",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "urgency",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "urgency",
+          "prompt": "<|startoftext|><|im_start|>user\nThe package is a day late. Not a big deal, but I need it before the weekend.\n\n\nQUESTION:\nHow urgent is this ticket?\n\n0 low\n1 medium\n2 high\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 597, 12942, 355, 267, 1784, 4518, 22, 4023, 267, 3413, 6097, 20, 702, 358, 1094, 435, 1575, 278, 20182, 64673, 63509, 833, 3522, 30648, 355, 532, 29936, 64929, 24, 2419, 207, 25, 8057, 207, 26, 1068, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 58,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "urgency",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x411ffd86", "0x41408acc", "0x410b67b3"]
+      ],
+      "scores": [
+        ["0x411ffd86", "0x41408acc", "0x410b67b3"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "urgency": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": "low",
+            "1": "medium",
+            "2": "high"
+          },
+          "probabilities": {
+            "0": 0.1677857452928298,
+            "1": 0.76809870603058417,
+            "2": 0.064115548676585921
+          },
+          "confidence": 0.76809870603058417
+        }
+      },
+      "usage": {
+        "input_tokens": 59,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

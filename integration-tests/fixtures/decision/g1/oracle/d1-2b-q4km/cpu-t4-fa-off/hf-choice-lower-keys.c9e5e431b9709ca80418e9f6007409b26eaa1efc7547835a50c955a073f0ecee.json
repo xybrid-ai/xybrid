@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "hf-choice-lower-keys",
+  "source_file": "hf-choice-lower-keys.json",
+  "case_file_sha256": "157670a00ff6c20cb2c5c561fd06f1fbbaf29e4850851e144aeb0ed2ec726cf6",
+  "request_sha256": "c9e5e431b9709ca80418e9f6007409b26eaa1efc7547835a50c955a073f0ecee",
+  "inputs_sha256": "97bdef72e3a439318c37762764f247d76c27bdac0257d08d23fa757441e5c565",
+  "inputs": {
+    "request_sha256": "c9e5e431b9709ca80418e9f6007409b26eaa1efc7547835a50c955a073f0ecee",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "category",
+          "type": "choice",
+          "keys": ["x", "y", "z"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "category",
+          "prompt": "<|startoftext|><|im_start|>user\nCustomer: the app logs me out every time I switch to another app and come back.\n\n\nQUESTION:\nPick the category.\n\nOptions:\nx Sign-in or session problems\ny Payments\nz Shipping\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 65285, 34, 278, 994, 35076, 622, 729, 1472, 893, 358, 9410, 310, 2271, 994, 309, 2242, 1391, 64673, 63509, 833, 94741, 278, 10818, 63908, 13314, 833, 96, 10808, 3585, 432, 9764, 3274, 207, 97, 123419, 207, 98, 1450, 10967, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 57,
+          "select": [96, 2552, 97, 382, 98, 556]
+        }
+      ],
+      "answers": [
+        {
+          "question": "category",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "x",
+              "code": "x",
+              "range": [0, 2]
+            },
+            {
+              "key": "y",
+              "code": "y",
+              "range": [2, 4]
+            },
+            {
+              "key": "z",
+              "code": "z",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4143f551", "0x40f47f50", "0x409cb081", "0xbd3805c0", "0x4076c824", "0xbf63e6e8"]
+      ],
+      "scores": [
+        ["0x4143f551", "0x409cb081", "0x4076c824"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "category": {
+          "type": "choice",
+          "choice": "x",
+          "probabilities": {
+            "x": 0.99405017103369242,
+            "y": 0.0040771949668708994,
+            "z": 0.0018726339994365093
+          },
+          "confidence": 0.99405017103369242
+        }
+      },
+      "usage": {
+        "input_tokens": 58,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

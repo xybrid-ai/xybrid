@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-duplicate-keys",
+  "source_file": "hf-diff-duplicate-keys.json",
+  "case_file_sha256": "15f42b05cfd995e3c809d1320b7d3b095330e3d001c9c307ffc15d31c4a75c06",
+  "request_sha256": "d2531d4541e0232b1e8ac8291a43d3f9dc41ca13cd422144d87b856ec48f0209",
+  "inputs_sha256": "048481f5c3c13279571f35f2c1a16aa3f55ef091c1211f3c22364f3902196078",
+  "inputs": {
+    "request_sha256": "d2531d4541e0232b1e8ac8291a43d3f9dc41ca13cd422144d87b856ec48f0209",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "open",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "open",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"status\": \"closed\",\n  \"owner\": \"ana\"\n}\n\n\nQUESTION:\nIs the ticket still open?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 18747, 6380, 496, 21049, 6107, 229, 496, 27616, 6380, 496, 1967, 1110, 64024, 63509, 833, 4439, 278, 29936, 2009, 2213, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 41,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "open",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x400b05de", "0x40b61f74", "0x411d09fd", "0x4159e7fa", "0x40cd9a9e"]
+      ],
+      "scores": [
+        ["0x40b61f74", "0x4159e7fa"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "open": {
+          "type": "noul",
+          "noul": 0.0026573221840090824
+        }
+      },
+      "usage": {
+        "input_tokens": 42,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-choice-256",
+  "source_file": "hf-diff-choice-256.json",
+  "case_file_sha256": "97a904e3ddf7274a2aa6d2f632e08962e1faf0d1360c60dff90dbb5fbe99080a",
+  "request_sha256": "cde7434d86d7a49c772dda7df59c6729959989c685e8c2ad466c53474099638f",
+  "inputs_sha256": "8cb804e923c13317556bf1e7032d55bada70cfece60fb85b89d202659b4aa973",
+  "inputs": {
+    "request_sha256": "cde7434d86d7a49c772dda7df59c6729959989c685e8c2ad466c53474099638f",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "invalid_argument",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "questions.value: too many options (256), this model supports at most 255"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  }
+}

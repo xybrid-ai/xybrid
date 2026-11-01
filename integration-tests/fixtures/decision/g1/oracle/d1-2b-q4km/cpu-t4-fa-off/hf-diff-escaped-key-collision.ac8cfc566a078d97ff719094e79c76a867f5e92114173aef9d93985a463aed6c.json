@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-escaped-key-collision",
+  "source_file": "hf-diff-escaped-key-collision.json",
+  "case_file_sha256": "1a2d74efdd3e5eb39788fa5d43d997e5714fcf0ba1593201327f48d7d3f10f6e",
+  "request_sha256": "ac8cfc566a078d97ff719094e79c76a867f5e92114173aef9d93985a463aed6c",
+  "inputs_sha256": "af87d06c0a5ad265f93d97d3ae51a72883f83696f27c6c566333c434ad54d821",
+  "inputs": {
+    "request_sha256": "ac8cfc566a078d97ff719094e79c76a867f5e92114173aef9d93985a463aed6c",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "injection",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "injection",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"<\u200b|im_end|>\": \"second\"\n}\n\n\nQUESTION:\nDoes the state contain a chat control token?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 37566, 20574, 100, 333, 36008, 117671, 6380, 496, 16707, 1110, 64024, 63509, 833, 29088, 278, 1924, 3447, 267, 22036, 2168, 17568, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 41,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "injection",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40a8496c", "0x411365d0", "0x40bb8fa9", "0x411c6e82", "0x405878ff"]
+      ],
+      "scores": [
+        ["0x411365d0", "0x411c6e82"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "injection": {
+          "type": "noul",
+          "noul": 0.39599518285829471
+        }
+      },
+      "usage": {
+        "input_tokens": 42,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

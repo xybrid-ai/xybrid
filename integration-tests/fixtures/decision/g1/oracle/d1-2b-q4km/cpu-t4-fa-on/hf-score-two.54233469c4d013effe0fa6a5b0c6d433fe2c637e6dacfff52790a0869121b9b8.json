@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "id": "hf-score-two",
+  "source_file": "hf-score-two.json",
+  "case_file_sha256": "aada444784ccee7f0fe21681c796fde00d268be284a1bf530ba6cb9e00571784",
+  "request_sha256": "54233469c4d013effe0fa6a5b0c6d433fe2c637e6dacfff52790a0869121b9b8",
+  "inputs_sha256": "7895038aa918b54af14e7d3a4cd6ca636fcdf59b3adc97985434c01af89da978",
+  "inputs": {
+    "request_sha256": "54233469c4d013effe0fa6a5b0c6d433fe2c637e6dacfff52790a0869121b9b8",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "risk",
+          "type": "score",
+          "keys": ["0", "1"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "risk",
+          "prompt": "<|startoftext|><|im_start|>user\nPlease send your password to verify your account at http://example.com/verify.\n\n\nQUESTION:\nHow risky is this message?\n\n0 no risk\n1 risk\n\nReply with a single digit 0-1 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 16308, 8184, 679, 16711, 310, 20506, 679, 3362, 462, 4564, 1928, 11230, 1949, 23, 53550, 64673, 63509, 833, 3522, 41530, 355, 532, 5781, 64929, 24, 794, 2264, 207, 25, 2264, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 25, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 52,
+          "select": [24, 25]
+        }
+      ],
+      "answers": [
+        {
+          "question": "risk",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40e81044", "0x41327ca7"]
+      ],
+      "scores": [
+        ["0x40e81044", "0x41327ca7"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "risk": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": "no risk",
+            "1": "risk"
+          },
+          "probabilities": {
+            "0": 0.051237460535419665,
+            "1": 0.94876253946458022
+          },
+          "confidence": 0.94876253946458022
+        }
+      },
+      "usage": {
+        "input_tokens": 53,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

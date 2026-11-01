@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-state-big-integer",
+  "source_file": "hf-diff-state-big-integer.json",
+  "case_file_sha256": "cb902c89ecbca95f390b105bb554799d805c2a40689713a4d75e402d9bce6d48",
+  "request_sha256": "0d708e8faa8377adaf9136086bf59a9ea0e34f7b40064396002bdc188f464b24",
+  "inputs_sha256": "9a842db4c8cc623d600d9da128986dfab06f5c7be9522cfcad29ffd2d7662f70",
+  "inputs": {
+    "request_sha256": "0d708e8faa8377adaf9136086bf59a9ea0e34f7b40064396002bdc188f464b24",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "valid",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "valid",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"order_id\": -1,\n  \"customer_id\": -9223372036854775808,\n  \"trace\": 1.2345678901234568e+29\n}\n\n\nQUESTION:\nDoes the order have an order id?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 3166, 6089, 6380, 640, 25, 920, 229, 496, 95142, 6089, 6380, 640, 25680, 26689, 12350, 25416, 32357, 27952, 32, 920, 229, 496, 98252, 6380, 229, 25, 22, 20651, 32673, 24518, 9792, 25677, 32, 77, 19, 1734, 207, 64024, 63509, 833, 29088, 278, 2064, 551, 401, 2064, 3446, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 68,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "valid",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40e87959", "0x411f4d86", "0x40ef9852", "0x41299784", "0x409202aa"]
+      ],
+      "scores": [
+        ["0x411f4d86", "0x41299784"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "valid": {
+          "type": "noul",
+          "noul": 0.38205555293886373
+        }
+      },
+      "usage": {
+        "input_tokens": 69,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

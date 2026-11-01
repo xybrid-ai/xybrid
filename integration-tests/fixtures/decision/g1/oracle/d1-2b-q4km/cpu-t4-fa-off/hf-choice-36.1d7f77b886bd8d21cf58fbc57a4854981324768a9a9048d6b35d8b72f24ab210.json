@@ -1,0 +1,305 @@
+{
+  "schema_version": 1,
+  "id": "hf-choice-36",
+  "source_file": "hf-choice-36.json",
+  "case_file_sha256": "6f16ae518c2302c7f40c6e1daac2f815c6972a6e7c649a01728a1a37c4bc9193",
+  "request_sha256": "1d7f77b886bd8d21cf58fbc57a4854981324768a9a9048d6b35d8b72f24ab210",
+  "inputs_sha256": "e0a29d21d9a56426de4ae21cf13737c4a8de6a670bd4ab948f78e17387fc0dd4",
+  "inputs": {
+    "request_sha256": "1d7f77b886bd8d21cf58fbc57a4854981324768a9a9048d6b35d8b72f24ab210",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "department",
+          "type": "choice",
+          "keys": ["appliances", "automotive", "baby", "beauty", "books", "cameras", "clothing", "computers", "crafts", "electronics", "furniture", "garden", "grocery", "hardware", "health", "jewelry", "kitchen", "lighting", "music", "office", "pets", "phones", "shoes", "sports", "toys", "travel", "video_games", "bedding", "candy", "cleaning", "fabrics", "luggage", "outdoor", "party", "pharmacy", "watches"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "department",
+          "prompt": "<|startoftext|><|im_start|>user\nI need a new strap for my wristwatch.\n\n\nQUESTION:\nWhich department sells this?\n\nOptions:\nA Appliances department\nB Automotive department\nC Baby department\nD Beauty department\nE Books department\nF Cameras department\nG Clothing department\nH Computers department\nI Crafts department\nJ Electronics department\nK Furniture department\nL Garden department\nM Grocery department\nN Hardware department\nO Health department\nP Jewelry department\nQ Kitchen department\nR Lighting department\nS Music department\nT Office department\nU Pets department\nV Phones department\nW Shoes department\nX Sports department\nY Toys department\nZ Travel department\nAA Video games department\nAB Bedding department\nAC Candy department\nAD Cleaning department\nAE Fabrics department\nAF Luggage department\nAG Outdoor department\nAH Party department\nAI Pharmacy department\n00 Watches department\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 1094, 267, 860, 112503, 374, 1226, 36680, 12895, 64673, 63509, 833, 28327, 11221, 53142, 532, 64929, 13314, 833, 41, 35674, 22098, 11221, 207, 42, 4168, 49195, 11221, 207, 43, 23431, 11221, 207, 44, 44564, 11221, 207, 45, 13963, 11221, 207, 46, 25421, 301, 11221, 207, 47, 1475, 8857, 11221, 207, 48, 61325, 11221, 207, 49, 38787, 91, 11221, 207, 50, 53208, 11221, 207, 51, 55348, 11260, 11221, 207, 52, 17059, 11221, 207, 53, 7933, 92219, 11221, 207, 54, 12112, 2622, 11221, 207, 55, 3594, 11221, 207, 56, 4825, 307, 657, 11221, 207, 57, 54486, 11221, 207, 58, 11612, 299, 11221, 207, 59, 8563, 11221, 207, 60, 9522, 11221, 207, 61, 372, 1307, 11221, 207, 62, 1706, 2118, 11221, 207, 63, 1450, 10619, 11221, 207, 64, 15664, 11221, 207, 65, 2488, 763, 11221, 207, 66, 26095, 11221, 207, 6713, 14976, 5715, 11221, 207, 5193, 378, 14630, 11221, 207, 2843, 340, 23227, 11221, 207, 3875, 7824, 14072, 11221, 207, 28527, 14151, 8230, 11221, 207, 10593, 402, 20521, 546, 11221, 207, 5157, 59536, 11221, 207, 51133, 8050, 11221, 207, 22348, 1706, 34413, 11221, 207, 555, 23121, 2039, 11221, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 204,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407, 46, 410, 47, 417, 48, 403, 49, 358, 50, 461, 51, 483, 52, 402, 53, 356, 54, 427, 55, 480, 56, 372, 57, 1392, 58, 408, 59, 325, 60, 336, 61, 502, 62, 518, 63, 422, 64, 1549, 65, 766, 66, 895, 6713, 27196, 5193, 19033, 2843, 13677, 3875, 7437, 28527, 42605, 10593, 23398, 5157, 14321, 51133, 48643, 22348, 13508, 555]
+        }
+      ],
+      "answers": [
+        {
+          "question": "department",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "appliances",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "automotive",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "baby",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "beauty",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "books",
+              "code": "E",
+              "range": [8, 10]
+            },
+            {
+              "key": "cameras",
+              "code": "F",
+              "range": [10, 12]
+            },
+            {
+              "key": "clothing",
+              "code": "G",
+              "range": [12, 14]
+            },
+            {
+              "key": "computers",
+              "code": "H",
+              "range": [14, 16]
+            },
+            {
+              "key": "crafts",
+              "code": "I",
+              "range": [16, 18]
+            },
+            {
+              "key": "electronics",
+              "code": "J",
+              "range": [18, 20]
+            },
+            {
+              "key": "furniture",
+              "code": "K",
+              "range": [20, 22]
+            },
+            {
+              "key": "garden",
+              "code": "L",
+              "range": [22, 24]
+            },
+            {
+              "key": "grocery",
+              "code": "M",
+              "range": [24, 26]
+            },
+            {
+              "key": "hardware",
+              "code": "N",
+              "range": [26, 28]
+            },
+            {
+              "key": "health",
+              "code": "O",
+              "range": [28, 30]
+            },
+            {
+              "key": "jewelry",
+              "code": "P",
+              "range": [30, 32]
+            },
+            {
+              "key": "kitchen",
+              "code": "Q",
+              "range": [32, 34]
+            },
+            {
+              "key": "lighting",
+              "code": "R",
+              "range": [34, 36]
+            },
+            {
+              "key": "music",
+              "code": "S",
+              "range": [36, 38]
+            },
+            {
+              "key": "office",
+              "code": "T",
+              "range": [38, 40]
+            },
+            {
+              "key": "pets",
+              "code": "U",
+              "range": [40, 42]
+            },
+            {
+              "key": "phones",
+              "code": "V",
+              "range": [42, 44]
+            },
+            {
+              "key": "shoes",
+              "code": "W",
+              "range": [44, 46]
+            },
+            {
+              "key": "sports",
+              "code": "X",
+              "range": [46, 48]
+            },
+            {
+              "key": "toys",
+              "code": "Y",
+              "range": [48, 50]
+            },
+            {
+              "key": "travel",
+              "code": "Z",
+              "range": [50, 52]
+            },
+            {
+              "key": "video_games",
+              "code": "AA",
+              "range": [52, 54]
+            },
+            {
+              "key": "bedding",
+              "code": "AB",
+              "range": [54, 56]
+            },
+            {
+              "key": "candy",
+              "code": "AC",
+              "range": [56, 58]
+            },
+            {
+              "key": "cleaning",
+              "code": "AD",
+              "range": [58, 60]
+            },
+            {
+              "key": "fabrics",
+              "code": "AE",
+              "range": [60, 62]
+            },
+            {
+              "key": "luggage",
+              "code": "AF",
+              "range": [62, 64]
+            },
+            {
+              "key": "outdoor",
+              "code": "AG",
+              "range": [64, 66]
+            },
+            {
+              "key": "party",
+              "code": "AH",
+              "range": [66, 68]
+            },
+            {
+              "key": "pharmacy",
+              "code": "AI",
+              "range": [68, 70]
+            },
+            {
+              "key": "watches",
+              "code": "00",
+              "range": [70, 71]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40306e94", "0xc0032ec4", "0x404fba46", "0xc0005b1a", "0x4007d080", "0xc0359d53", "0x4085f92a", "0x3d5b9e80", "0x404e93a5", "0xbfc5faf4", "0x40487038", "0xbfa757ce", "0x40cec2cc", "0x401f48b4", "0x403c3b12", "0xbfe593d1", "0x40a5bb86", "0x3f6a5823", "0x40b64f7e", "0x4004dfd8", "0x402422c0", "0xbfaf876e", "0x3fedbd74", "0xc037fcc2", "0x401f664d", "0xc01cd4a0", "0x408a7694", "0x3eb02836", "0x404bc57e", "0xbf245ca0", "0x410fe5e6", "0x40ab68c2", "0x402a13d2", "0xbf0c6644", "0x40217d03", "0xbfeafecd", "0x40109081", "0xc0237fc2", "0x403a3b08", "0xbfd99cda", "0x40187e3c", "0xc0058135", "0x4080ef0a", "0xbee7d7e7", "0x40cb92d4", "0x4025b921", "0x404c8e93", "0xbf0886ae", "0x404a7443", "0xbec01270", "0x403a8e2e", "0xbf6782ab", "0x40940430", "0x40019932", "0x400db620", "0xbf5d153a", "0x400261b5", "0xbe4c2b50", "0x4047237d", "0x3c0f5280", "0x40a21f9f", "0x404c6cb3", "0x4019b6ad", "0x3e8fd348", "0x4088f66f", "0x3fed2e36", "0x404547a6", "0x3e94acd0", "0x409b314e", "0x400f19a2", "0x413a2842"]
+      ],
+      "scores": [
+        ["0x40306e94", "0x404fba46", "0x4007d080", "0x4085f92a", "0x404e93a5", "0x40487038", "0x40cec2cc", "0x403c3b12", "0x40a5bb86", "0x40b64f7e", "0x402422c0", "0x3fedbd74", "0x401f664d", "0x408a7694", "0x404bc57e", "0x410fe5e6", "0x402a13d2", "0x40217d03", "0x40109081", "0x403a3b08", "0x40187e3c", "0x4080ef0a", "0x40cb92d4", "0x404c8e93", "0x404a7443", "0x403a8e2e", "0x40940430", "0x400db620", "0x400261b5", "0x4047237d", "0x40a21f9f", "0x4019b6ad", "0x4088f66f", "0x404547a6", "0x409b314e", "0x413a2842"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "department": {
+          "type": "choice",
+          "choice": "watches",
+          "probabilities": {
+            "appliances": 0.0010358859343673349,
+            "automotive": 0.0014931510712183598,
+            "baby": 0.00064449864825635351,
+            "beauty": 0.0030175187617772167,
+            "books": 0.0014732084621025317,
+            "cameras": 0.0013712560075180204,
+            "clothing": 0.016530547738066961,
+            "computers": 0.0011889897102120191,
+            "crafts": 0.0063377842516101129,
+            "electronics": 0.0093361621524590942,
+            "furniture": 0.00089726758294200206,
+            "garden": 0.00052874629138472795,
+            "grocery": 0.00084896782664197834,
+            "hardware": 0.0033512957534067743,
+            "health": 0.0014257074669212482,
+            "jewelry": 0.10980424024458786,
+            "kitchen": 0.00096176638452006669,
+            "lighting": 0.00086993980668116568,
+            "music": 0.00071386960635368266,
+            "office": 0.0011615274588410395,
+            "pets": 0.00078315577189547354,
+            "phones": 0.0026823127865113435,
+            "shoes": 0.015344128972133839,
+            "sports": 0.0014388511569708136,
+            "toys": 0.0014039334309218698,
+            "travel": 0.0011659434399778326,
+            "video_games": 0.0041894471848386303,
+            "bedding": 0.00069046676774098942,
+            "candy": 0.00060486226571631935,
+            "cleaning": 0.0013505909174384742,
+            "fabrics": 0.00582524182571927,
+            "luggage": 0.00079440275609377715,
+            "outdoor": 0.0032358267859991193,
+            "party": 0.0013215776284565179,
+            "pharmacy": 0.0049542743321849712,
+            "watches": 0.79122265281753212
+          },
+          "confidence": 0.79122265281753212
+        }
+      },
+      "usage": {
+        "input_tokens": 205,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

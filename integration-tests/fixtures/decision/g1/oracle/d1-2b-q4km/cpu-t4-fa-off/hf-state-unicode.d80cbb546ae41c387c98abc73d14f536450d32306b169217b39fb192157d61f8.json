@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "id": "hf-state-unicode",
+  "source_file": "hf-state-unicode.json",
+  "case_file_sha256": "6021afe84c67d7557025bf29a171d29b24d4b67827a9304d1e9f0c0e94dbdc8c",
+  "request_sha256": "d80cbb546ae41c387c98abc73d14f536450d32306b169217b39fb192157d61f8",
+  "inputs_sha256": "8fccd6fb2ccbdc98fbe03fc8dea3f891c762aa6a3325e67e293e92195db82cf9",
+  "inputs": {
+    "request_sha256": "d80cbb546ae41c387c98abc73d14f536450d32306b169217b39fb192157d61f8",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "language",
+          "type": "choice",
+          "keys": ["fr", "ja", "es", "mixed"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "language",
+          "prompt": "<|startoftext|><|im_start|>user\nBonjour, je n'ai pas re\u00e7u mon colis \ud83d\udce6. \u6ce8\u6587\u756a\u53f7\u306f 8841 \u3067\u3059\u3002 \u00bfPueden ayudarme?\n\n\nQUESTION:\nWhich language is the message written in?\n\nOptions:\nA French\nB Japanese\nC Spanish\nD Several languages\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 34432, 12642, 20, 1749, 316, 11624, 2194, 45632, 1271, 974, 282, 88457, 108, 22, 229, 31616, 46676, 924, 229, 26020, 25, 229, 2050, 646, 14042, 56, 2185, 270, 21980, 48701, 39, 7, 63509, 833, 28327, 3368, 355, 278, 5781, 4484, 296, 64929, 13314, 833, 41, 4770, 207, 42, 7314, 207, 43, 8140, 207, 44, 17356, 9745, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 74,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "language",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "fr",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "ja",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "es",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "mixed",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4111e9e6", "0x40b2b069", "0x40ae65f9", "0x3fb4f971", "0x41079f72", "0x40a267ac", "0x4129771e", "0x40f43b2e"]
+      ],
+      "scores": [
+        ["0x4111e9e6", "0x40ae65f9", "0x41079f72", "0x4129771e"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "language": {
+          "type": "choice",
+          "choice": "mixed",
+          "probabilities": {
+            "fr": 0.21328378418040933,
+            "ja": 0.013718512652993167,
+            "es": 0.13185553850690335,
+            "mixed": 0.6411421646596942
+          },
+          "confidence": 0.6411421646596942
+        }
+      },
+      "usage": {
+        "input_tokens": 75,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

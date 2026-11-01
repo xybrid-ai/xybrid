@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "id": "hf-choice-one",
+  "source_file": "hf-choice-one.json",
+  "case_file_sha256": "cb780a32ce0c307231fd4db7c8c955af14ca897408c1fa53b482c2551eb791d5",
+  "request_sha256": "edacbba1ed969b69b0023a9d4fc9e8388b072a7d88a22c91f7d3ac743d7992a4",
+  "inputs_sha256": "5270389efb51567fcae4a913741bec5b1788e14a43c833d7b91b72a03b8b39c3",
+  "inputs": {
+    "request_sha256": "edacbba1ed969b69b0023a9d4fc9e8388b072a7d88a22c91f7d3ac743d7992a4",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "queue",
+          "type": "choice",
+          "keys": ["general"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "queue",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nWhich queue?\n\nOptions:\nA General support\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 28327, 27337, 64929, 13314, 833, 41, 5024, 1757, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 43,
+          "select": [41, 334]
+        }
+      ],
+      "answers": [
+        {
+          "question": "queue",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "general",
+              "code": "A",
+              "range": [0, 2]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4112696e", "0x40aa8318"]
+      ],
+      "scores": [
+        ["0x4112696e"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "queue": {
+          "type": "choice",
+          "choice": "general",
+          "probabilities": {
+            "general": 1.0
+          },
+          "confidence": 1.0
+        }
+      },
+      "usage": {
+        "input_tokens": 44,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

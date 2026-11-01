@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "hf-state-json-object",
+  "source_file": "hf-state-json-object.json",
+  "case_file_sha256": "9fe1e0d43d894aca6decbf923fa5cb3c3be87dc6995260e12152f0741085e879",
+  "request_sha256": "5f350bb7170be353170bd9dca9e184e1321eb2e9b2e2c2681052604444885b07",
+  "inputs_sha256": "ac7ff5c7e8d243f42fdf1eaabf2d5262d81014bc26679f603eb609b3fb1d0352",
+  "inputs": {
+    "request_sha256": "5f350bb7170be353170bd9dca9e184e1321eb2e9b2e2c2681052604444885b07",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "need",
+          "type": "choice",
+          "keys": ["refund", "delivery", "account"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "need",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"ticket\": {\n    \"id\": 4471,\n    \"priority\": null,\n    \"tags\": [\n      \"refund\",\n      \"duplicate charge\"\n    ],\n    \"amount_eur\": 59.9,\n    \"verified\": true\n  },\n  \"customer\": {\n    \"name\": \"Zo\u00eb \u00c5ngstr\u00f6m\",\n    \"tier\": \"gold\",\n    \"since\": 2019\n  },\n  \"messages\": [\n    {\n      \"from\": \"customer\",\n      \"text\": \"Charged twice for order 4471.\"\n    },\n    {\n      \"from\": \"agent\",\n      \"text\": \"Looking into it.\"\n    }\n  ],\n  \"meta\": {},\n  \"attachments\": [],\n  \"balance\": -0.0,\n  \"ratio\": 1e-05,\n  \"limit\": 1e+16\n}\n\n\nQUESTION:\nWhat does the customer need?\n\nOptions:\nA Money back for the duplicate charge\nB Help with a missing parcel\nC Changes to the account\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 99489, 6380, 827, 360, 496, 332, 6380, 229, 30963, 25, 920, 360, 496, 98336, 6380, 3495, 920, 360, 496, 30356, 6380, 19843, 733, 496, 1390, 855, 6107, 733, 496, 574, 19006, 7285, 1110, 360, 40439, 360, 496, 50008, 71, 4405, 6380, 229, 5098, 22, 33, 920, 360, 496, 420, 1940, 6380, 2846, 207, 229, 10016, 229, 496, 95142, 6380, 827, 360, 496, 2554, 6380, 496, 105707, 6785, 21501, 881, 36068, 6107, 360, 496, 71946, 6380, 496, 53665, 6107, 360, 496, 27649, 6380, 229, 523, 33, 207, 229, 10016, 229, 496, 97198, 6380, 19843, 360, 827, 733, 496, 5890, 6380, 496, 95142, 6107, 733, 496, 1384, 6380, 496, 1934, 960, 290, 10625, 374, 2064, 229, 30963, 25, 1917, 360, 10016, 360, 827, 733, 496, 5890, 6380, 496, 22870, 6107, 733, 496, 1384, 6380, 496, 41296, 918, 435, 1917, 360, 1130, 229, 40439, 229, 496, 18891, 6380, 66126, 229, 496, 37604, 1166, 6380, 66447, 229, 496, 28984, 6380, 640, 24, 22, 24, 920, 229, 496, 53120, 6380, 229, 25, 77, 21, 3153, 920, 229, 496, 34935, 6380, 229, 25, 77, 19, 942, 207, 64024, 63509, 833, 2992, 1676, 278, 13107, 1094, 64929, 13314, 833, 41, 28251, 1391, 374, 278, 48505, 7285, 207, 42, 18024, 415, 267, 9643, 60525, 207, 43, 33517, 310, 278, 3362, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 233,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "need",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "refund",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "delivery",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "account",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4163ef9d", "0x410db916", "0x40af5c82", "0xbf1b9fcf", "0x40d0a627", "0x3f61b299"]
+      ],
+      "scores": [
+        ["0x4163ef9d", "0x40af5c82", "0x40d0a627"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "need": {
+          "type": "choice",
+          "choice": "refund",
+          "probabilities": {
+            "refund": 0.99549765328757778,
+            "delivery": 0.0014173043389384373,
+            "account": 0.003085042373483803
+          },
+          "confidence": 0.99549765328757778
+        }
+      },
+      "usage": {
+        "input_tokens": 234,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

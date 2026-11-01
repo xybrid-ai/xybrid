@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "id": "hf-state-null",
+  "source_file": "hf-state-null.json",
+  "case_file_sha256": "f0239e3aa093fcef48b0aa15f470e82c62321c0e76c69426e082630fdfba90e3",
+  "request_sha256": "ad8698d528516155c47193ae29ce15b019d0f3f4a04c3ce8ead94dd4cfee32a7",
+  "inputs_sha256": "2464d9a797f5dd676464a2cf4ed9087f56ebb5f1dc9b6e46f8df4cc48c78c9e2",
+  "inputs": {
+    "request_sha256": "ad8698d528516155c47193ae29ce15b019d0f3f4a04c3ce8ead94dd4cfee32a7",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "formality",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "formality",
+          "prompt": "<|startoftext|><|im_start|>user\nHow formal is the greeting 'Dear Sir or Madam'?\n\n0 casual\n1 neutral\n2 formal\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 3522, 9384, 355, 278, 2080, 10642, 951, 116037, 9777, 432, 5122, 330, 15, 64929, 24, 20821, 207, 25, 12786, 207, 26, 9384, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 44,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "formality",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40c08170", "0x410a7b6c", "0x4146549e"]
+      ],
+      "scores": [
+        ["0x40c08170", "0x410a7b6c", "0x4146549e"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "formality": {
+          "type": "score",
+          "score": 2.0,
+          "legend": {
+            "0": "casual",
+            "1": "neutral",
+            "2": "formal"
+          },
+          "probabilities": {
+            "0": 0.0079266737530736195,
+            "1": 0.05703790921655618,
+            "2": 0.93503541703037019
+          },
+          "confidence": 0.93503541703037019
+        }
+      },
+      "usage": {
+        "input_tokens": 45,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

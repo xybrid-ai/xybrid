@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "id": "hf-choice-key-fallback",
+  "source_file": "hf-choice-key-fallback.json",
+  "case_file_sha256": "c04a15b5b9ccf346949f737c32732bffe110944d791ffa5df49760fbd0b27002",
+  "request_sha256": "99d96bdca327fcceb8d1fceecca68ec1ffe08dd9bd3a992e2662acf6c8e055c9",
+  "inputs_sha256": "37e48dcc6a449861be2290cd78e3497b38df826786aa6f1f22d1e693581d3fb0",
+  "inputs": {
+    "request_sha256": "99d96bdca327fcceb8d1fceecca68ec1ffe08dd9bd3a992e2662acf6c8e055c9",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "route",
+          "type": "choice",
+          "keys": ["needs_human_review", "auto_close", "escalate_to_tier_2", "wait_for_customer"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "route",
+          "prompt": "<|startoftext|><|im_start|>user\nTicket 8812: the customer reports the same crash for the third time this week and asks to talk to a person.\n\n\nQUESTION:\nWhat should happen to this ticket?\n\nOptions:\nA needs human review\nB auto close\nC Send it to the second support tier\nD wait for customer\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 97286, 229, 25861, 26, 34, 278, 13107, 7443, 278, 1542, 20563, 374, 278, 4475, 893, 532, 2524, 309, 20589, 310, 3931, 310, 267, 1310, 64673, 63509, 833, 2992, 1252, 8111, 310, 532, 29936, 64929, 13314, 833, 41, 3487, 1994, 3701, 207, 42, 9006, 4275, 207, 43, 26494, 435, 310, 278, 1840, 1757, 30881, 207, 44, 6997, 374, 13107, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 76,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "route",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "needs_human_review",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "auto_close",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "escalate_to_tier_2",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "wait_for_customer",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x41384542", "0x40e404d4", "0x40c0ff29", "0x3fa2e4f2", "0x4122b0b8", "0x40bd31a1", "0x40efee7c", "0x4064fc14"]
+      ],
+      "scores": [
+        ["0x41384542", "0x40c0ff29", "0x4122b0b8", "0x40efee7c"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "route": {
+          "type": "choice",
+          "choice": "needs_human_review",
+          "probabilities": {
+            "needs_human_review": 0.69888950195734922,
+            "auto_close": 0.011561450406377944,
+            "escalate_to_tier_2": 0.25493121997412604,
+            "wait_for_customer": 0.034617827662146834
+          },
+          "confidence": 0.69888950195734922
+        }
+      },
+      "usage": {
+        "input_tokens": 77,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-choice-multiple",
+  "source_file": "hf-diff-choice-multiple.json",
+  "case_file_sha256": "dc136e53f57d6623809e01f8b672ef30755355c7855ae460394876a442ce8c20",
+  "request_sha256": "49d4265f010db089bde8bfbd64c4f9161a303f3d95f7357b90f46bca3480de57",
+  "inputs_sha256": "6142e710f60a697993763cba38ea928d037214e9acf58e39d09e986ed9dfc619",
+  "inputs": {
+    "request_sha256": "49d4265f010db089bde8bfbd64c4f9161a303f3d95f7357b90f46bca3480de57",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "topics",
+          "type": "choice",
+          "keys": ["billing", "delivery", "login"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "topics",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nWhich topics does the message raise?\n\nOptions:\nA Payments and charges\nB Shipping and parcels\nC Signing in to the account\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 28327, 11051, 1676, 278, 5781, 9419, 64929, 13314, 833, 41, 123419, 309, 16119, 207, 42, 1450, 10967, 309, 18830, 1205, 207, 43, 10808, 299, 296, 310, 278, 3362, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 63,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "topics",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "billing",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "delivery",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "login",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4127c7e1", "0x40c08be7", "0x413d1aa2", "0x40e9a200", "0x40999592", "0xbd04baa0"]
+      ],
+      "scores": [
+        ["0x4127c7e1", "0x413d1aa2", "0x40999592"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "topics": {
+          "type": "choice",
+          "choice": "delivery",
+          "probabilities": {
+            "billing": 0.26860124942638253,
+            "delivery": 0.72757551194873171,
+            "login": 0.0038232386248857183
+          },
+          "confidence": 0.72757551194873171
+        }
+      },
+      "usage": {
+        "input_tokens": 64,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "hf-choice-ambiguous",
+  "source_file": "hf-choice-ambiguous.json",
+  "case_file_sha256": "9e1215ef31f4f1f945a55529fc009eefafa7b29705db3a9c2f13e9ae5378e055",
+  "request_sha256": "9d77afccc3068820a4e2e14b38128ec823396970be7a4141c0b4f34a5600c770",
+  "inputs_sha256": "3f82c34dbd62f74e2e461640903d39f0472b02b8c22b8bebea4668f044d719b8",
+  "inputs": {
+    "request_sha256": "9d77afccc3068820a4e2e14b38128ec823396970be7a4141c0b4f34a5600c770",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "team",
+          "type": "choice",
+          "keys": ["billing", "shipping", "technical"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "team",
+          "prompt": "<|startoftext|><|im_start|>user\nThe invoice charges me for express delivery, but the parcel came by standard post, and the app crashed when I tried to report it.\n\n\nQUESTION:\nWhich team should handle this?\n\nOptions:\nA Charges, refunds, invoices\nB Delivery and parcels\nC App or site faults\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 597, 121004, 16119, 622, 374, 4442, 11245, 20, 702, 278, 60525, 3509, 467, 4053, 1874, 20, 309, 278, 994, 51563, 902, 358, 8710, 310, 1811, 435, 64673, 63509, 833, 28327, 2909, 1252, 9435, 532, 64929, 13314, 833, 41, 120315, 20, 52966, 91, 20, 60326, 1363, 207, 42, 57615, 309, 18830, 1205, 207, 43, 4634, 432, 2974, 49521, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 75,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "team",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "billing",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "shipping",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "technical",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x410223da", "0x408a900a", "0x412bee68", "0x40e1e310", "0x4112ff24", "0x40b4dede"]
+      ],
+      "scores": [
+        ["0x410223da", "0x412bee68", "0x4112ff24"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "team": {
+          "type": "choice",
+          "choice": "shipping",
+          "probabilities": {
+            "billing": 0.097576932142463879,
+            "shipping": 0.68790528264801187,
+            "technical": 0.21451778520952439
+          },
+          "confidence": 0.68790528264801187
+        }
+      },
+      "usage": {
+        "input_tokens": 76,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-questions-empty",
+  "source_file": "hf-diff-questions-empty.json",
+  "case_file_sha256": "c9e4759df00bbf37155a47f3b53c2200c781a479cad3fb2b8d0bf7ee5b62be40",
+  "request_sha256": "3e13013c767393144abdd458a113ae22c042d36d40837d8c34f6b2a31ac7939e",
+  "inputs_sha256": "455252736fd559954962c3982f5889ca7a7d1624afb2647b6d904adc7f236b96",
+  "inputs": {
+    "request_sha256": "3e13013c767393144abdd458a113ae22c042d36d40837d8c34f6b2a31ac7939e",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "invalid_argument",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "\"questions\" must be a non-empty object"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  }
+}

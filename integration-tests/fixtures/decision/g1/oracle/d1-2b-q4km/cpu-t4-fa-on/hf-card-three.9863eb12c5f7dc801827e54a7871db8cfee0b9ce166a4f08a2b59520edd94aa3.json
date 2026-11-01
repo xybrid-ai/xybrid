@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "id": "hf-card-three",
+  "source_file": "hf-card-three.json",
+  "case_file_sha256": "a22352f9ea46c0c2e7409ad2dcf1f2034074f30f21cce39ef6b06c361a4dd56c",
+  "request_sha256": "9863eb12c5f7dc801827e54a7871db8cfee0b9ce166a4f08a2b59520edd94aa3",
+  "inputs_sha256": "901a7dbbc9c1be6f766d97923e365eb4f28e633057f94e242dcb155ea922eedd",
+  "inputs": {
+    "request_sha256": "9863eb12c5f7dc801827e54a7871db8cfee0b9ce166a4f08a2b59520edd94aa3",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "refund",
+          "type": "noul",
+          "keys": ["true", "false"]
+        },
+        {
+          "id": "team",
+          "type": "choice",
+          "keys": ["billing", "shipping", "technical"]
+        },
+        {
+          "id": "urgency",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "refund",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nIs the customer asking for a refund?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 4439, 278, 13107, 13564, 374, 267, 52966, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 42,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        },
+        {
+          "question": "team",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nWhich team should handle this?\n\nOptions:\nA Charges, refunds, invoices\nB Delivery and parcels\nC App or site faults\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 28327, 2909, 1252, 9435, 532, 64929, 13314, 833, 41, 120315, 20, 52966, 91, 20, 60326, 1363, 207, 42, 57615, 309, 18830, 1205, 207, 43, 4634, 432, 2974, 49521, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 63,
+          "select": [41, 334, 42, 378, 43, 340]
+        },
+        {
+          "question": "urgency",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nHow urgent is this ticket?\n\n0 low\n1 medium\n2 high\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 3522, 30648, 355, 532, 29936, 64929, 24, 2419, 207, 25, 8057, 207, 26, 1068, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 53,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "refund",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "team",
+          "type": "choice",
+          "pass": 1,
+          "groups": [
+            {
+              "key": "billing",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "shipping",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "technical",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "urgency",
+          "type": "score",
+          "pass": 2,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x412f3cba", "0x4175bd03", "0x40537a1e", "0x40e77df8", "0x3fb9d722"],
+        ["0x412c6aca", "0x40d8a5e6", "0x4120196d", "0x40bf3d8e", "0x40f46cae", "0x40701360"],
+        ["0x411ca2ba", "0x413a9797", "0x4119711d"]
+      ],
+      "scores": [
+        ["0x4175bd03", "0x40e77df8"],
+        ["0x412c6aca", "0x4120196d", "0x40f46cae"],
+        ["0x411ca2ba", "0x413a9797", "0x4119711d"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "refund": {
+          "type": "noul",
+          "noul": 0.99770533089049485
+        },
+        "team": {
+          "type": "choice",
+          "choice": "billing",
+          "probabilities": {
+            "billing": 0.60310895680397836,
+            "shipping": 0.33915413537885003,
+            "technical": 0.057736907817171612
+          },
+          "confidence": 0.60310895680397836
+        },
+        "urgency": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": "low",
+            "1": "medium",
+            "2": "high"
+          },
+          "probabilities": {
+            "0": 0.16902402103632327,
+            "1": 0.68538715329095845,
+            "2": 0.14558882567271833
+          },
+          "confidence": 0.68538715329095845
+        }
+      },
+      "usage": {
+        "input_tokens": 161,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

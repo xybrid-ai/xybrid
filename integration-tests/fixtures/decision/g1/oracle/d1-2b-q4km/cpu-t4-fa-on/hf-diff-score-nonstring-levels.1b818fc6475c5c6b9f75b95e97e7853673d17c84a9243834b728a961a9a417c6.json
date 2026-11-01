@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "id": "hf-diff-score-nonstring-levels",
+  "source_file": "hf-diff-score-nonstring-levels.json",
+  "case_file_sha256": "9d6687e3041813c822e69f53ddf98aaa65a7993c615439aa96c72f2b5258add2",
+  "request_sha256": "1b818fc6475c5c6b9f75b95e97e7853673d17c84a9243834b728a961a9a417c6",
+  "inputs_sha256": "eeb3cab9a7725dc199da100f4cce89cebe50a73166bbb84493fb7c4423b00be7",
+  "inputs": {
+    "request_sha256": "1b818fc6475c5c6b9f75b95e97e7853673d17c84a9243834b728a961a9a417c6",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-on",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "urgency",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "urgency",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice and my parcel never arrived. Please refund one charge.\n\n\nQUESTION:\nHow urgent is this ticket?\n\n0 low\n1 null\n2 {\"label\": \"high\"}\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 309, 1226, 60525, 2966, 10922, 22, 13330, 52966, 734, 7285, 64673, 63509, 833, 3522, 30648, 355, 532, 29936, 64929, 24, 2419, 207, 25, 3495, 207, 26, 36579, 2782, 6380, 496, 17255, 10, 63894, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 58,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "urgency",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x412b603a", "0x4128e783", "0x41274a91"]
+      ],
+      "scores": [
+        ["0x412b603a", "0x4128e783", "0x41274a91"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "urgency": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": "low",
+            "1": null,
+            "2": {
+              "label": "high"
+            }
+          },
+          "probabilities": {
+            "0": 0.36803301017235623,
+            "1": 0.32788770872046441,
+            "2": 0.30407928110717936
+          },
+          "confidence": 0.36803301017235623
+        }
+      },
+      "usage": {
+        "input_tokens": 59,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}
