@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "artifacts": {
+    "d1-2b-q4km": {
+      "repo": "LiquidAI/d1-2B-GGUF",
+      "revision": "e968f6575f0d4fad928312d7af15cad90fd365c0",
+      "file": "d1-2B-Q4_K_M.gguf",
+      "bytes": 1099629888,
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "url": "https://huggingface.co/LiquidAI/d1-2B-GGUF/resolve/e968f6575f0d4fad928312d7af15cad90fd365c0/d1-2B-Q4_K_M.gguf",
+      "role": "primary on-device artifact; the upstream oracle's observations (cases/)"
+    },
+    "d1-2b-bf16": {
+      "repo": "LiquidAI/d1-2B-GGUF",
+      "revision": "e968f6575f0d4fad928312d7af15cad90fd365c0",
+      "file": "d1-2B-BF16.gguf",
+      "bytes": 3466628416,
+      "sha256": "f785c92583aa83ad2ecccd88d222a5b6b81ba1e66cb1465e7747eb9f857c67c2",
+      "url": "https://huggingface.co/LiquidAI/d1-2B-GGUF/resolve/e968f6575f0d4fad928312d7af15cad90fd365c0/d1-2B-BF16.gguf",
+      "role": "G1 artifact"
+    },
+    "d1-2b-f16": {
+      "repo": "LiquidAI/d1-2B-GGUF",
+      "revision": "e968f6575f0d4fad928312d7af15cad90fd365c0",
+      "file": "d1-2B-F16.gguf",
+      "bytes": 3466628416,
+      "sha256": "1a2dd38813021e76036e8f3a3f45c9f7a793d7997d6d7e89bf00f9d77e2e52dc",
+      "url": "https://huggingface.co/LiquidAI/d1-2B-GGUF/resolve/e968f6575f0d4fad928312d7af15cad90fd365c0/d1-2B-F16.gguf",
+      "role": "unquantized GGUF"
+    },
+    "d1-2b-q8": {
+      "repo": "LiquidAI/d1-2B-GGUF",
+      "revision": "e968f6575f0d4fad928312d7af15cad90fd365c0",
+      "file": "d1-2B-Q8_0.gguf",
+      "bytes": 1846240576,
+      "sha256": "073313d92b53b0ac8193db6e906cb3c78a98183d244b15b7b8f5426115c6738c",
+      "url": "https://huggingface.co/LiquidAI/d1-2B-GGUF/resolve/e968f6575f0d4fad928312d7af15cad90fd365c0/d1-2B-Q8_0.gguf",
+      "role": "quantized GGUF"
+    },
+    "d1-2b-mmproj-q8": {
+      "repo": "LiquidAI/d1-2B-GGUF",
+      "revision": "e968f6575f0d4fad928312d7af15cad90fd365c0",
+      "file": "mmproj-d1-2B-Q8_0.gguf",
+      "bytes": 203031584,
+      "sha256": "62cc6d74fd1e5b1d6b48518566bf4c0cfd2468079a0c096ea323b74eed01e0d1",
+      "url": "https://huggingface.co/LiquidAI/d1-2B-GGUF/resolve/e968f6575f0d4fad928312d7af15cad90fd365c0/mmproj-d1-2B-Q8_0.gguf",
+      "role": "vision projector, for media (O2); unused by the text profile"
+    },
+    "d1-2b-hf": {
+      "repo": "LiquidAI/d1-2B",
+      "revision": "10e7671d44e4b37700020b1eed3f594c5f2af0b4",
+      "file": "model.safetensors",
+      "format": "safetensors, bf16",
+      "bytes": 3836417920,
+      "sha256": "b5e573687315e82ea80f4f7dd8d76b5cec3b6ee97e3509fd0493cfebb203719f",
+      "url": "https://huggingface.co/LiquidAI/d1-2B/resolve/10e7671d44e4b37700020b1eed3f594c5f2af0b4/model.safetensors",
+      "role": "G1 reference (LiquidAI custom d1 forward, set_size = 1)"
+    }
+  },
+  "settings": {
+    "cpu-t4-fa-off": {
+      "backend": "cpu",
+      "threads": 4,
+      "flash_attn": false,
+      "token_budget": 4096,
+      "n_ctx": 4096,
+      "n_batch": 4096,
+      "n_ubatch": 4096,
+      "n_seq_max": 1,
+      "n_outputs_max": 1
+    },
+    "cpu-t4-fa-on": {
+      "backend": "cpu",
+      "threads": 4,
+      "flash_attn": true,
+      "token_budget": 4096,
+      "n_ctx": 4096,
+      "n_batch": 4096,
+      "n_ubatch": 4096,
+      "n_seq_max": 1,
+      "n_outputs_max": 1
+    }
+  }
+}

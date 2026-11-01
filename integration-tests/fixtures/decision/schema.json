@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/xybrid-ai/xybrid/integration-tests/fixtures/decision/schema.json",
+  "title": "xybrid decision conformance case, schema version 1",
+  "description": "One file per case in cases/<id>.json. README.md next to this file defines the semantics; this schema defines the shape.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "profile", "title", "covers", "artifact", "settings", "request_text", "upstream", "xybrid"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": {
+      "description": "The file name without .json.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "profile": { "const": "lfm3-d1/text/v1" },
+    "title": { "description": "What the case pins, in one sentence.", "type": "string", "minLength": 1 },
+    "covers": {
+      "description": "Coverage tags, from the list in README.md.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "notes": { "description": "Why xybrid's expectation differs from upstream, or what else to know.", "type": "string" },
+    "artifact": {
+      "description": "Artifact id from artifacts.json: the GGUF whose template, vocabulary and metadata prepare the request.",
+      "type": "string"
+    },
+    "metadata": {
+      "description": "Edits applied to the artifact's GGUF metadata. The oracle writes them into a metadata-only GGUF and loads its vocabulary only, so such a case never runs the model.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "set": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "pattern": "^(f32|str):" }
+        },
+        "remove": { "type": "array", "items": { "type": "string" } },
+        "token_types": {
+          "description": "Token id (decimal string) to llama token type (1 normal, 3 control, 4 user-defined, ...).",
+          "type": "object",
+          "additionalProperties": { "type": "integer" }
+        }
+      }
+    },
+    "settings": {
+      "description": "Settings id from artifacts.json under which upstream.evaluate ran the model; null when the case never runs the model (synthetic scores, metadata edits, refusals before evaluation).",
+      "type": ["string", "null"]
+    },
+    "request_text": { "description": "The request body, exactly as sent.", "type": "string" },
+    "has_media": {
+      "description": "format_answer() ran with has_media = true, as if media were sent (the media temperature override). Default false.",
+      "type": "boolean"
+    },
+    "upstream": { "$ref": "#/$defs/upstream" },
+    "xybrid": { "$ref": "#/$defs/xybrid" }
+  },
+  "$defs": {
+    "f32": {
+      "description": "An f32 as its IEEE-754 bit pattern.",
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{8}$"
+    },
+    "f64": {
+      "description": "An f64 printed with 17 significant digits (%.17g); a non-finite value as a string.",
+      "oneOf": [
+        { "type": "number" },
+        { "enum": ["NaN", "Infinity", "-Infinity"] }
+      ]
+    },
+    "token": { "type": "integer", "minimum": 0 },
+    "refusal": {
+      "description": "Upstream stopped the request. status and type are llama-server's answer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exception", "status", "type", "message"],
+      "properties": {
+        "question": { "description": "Id of the question being processed, if one was.", "type": "string" },
+        "exception": {
+          "enum": ["invalid_argument", "common_json_error", "runtime_error", "logic_error", "exception", "not_supported", "slot"]
+        },
+        "status": { "enum": [400, 500, 501] },
+        "type": { "enum": ["invalid_request_error", "server_error", "not_supported_error", "exceed_context_size_error"] },
+        "message": { "type": "string" }
+      }
+    },
+    "refused": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["refusal"],
+      "properties": { "refusal": { "$ref": "#/$defs/refusal" } }
+    },
+    "upstream": {
+      "description": "What the pinned upstream routines did, stage by stage. Stages run in order; after a refusal, later stages are absent.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "load": {
+          "description": "Present only when upstream could not set the model up (server_decision_context::init threw): llama-server would not start.",
+          "$ref": "#/$defs/refused"
+        },
+        "parse": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["questions"],
+              "properties": {
+                "questions": {
+                  "description": "Questions in request order, options in model order: choice in criteria order, score \"0\"..\"n-1\", noul \"true\" then \"false\".",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["id", "type", "keys"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "type": { "enum": ["choice", "noul", "score"] },
+                      "keys": { "type": "array", "items": { "type": "string" } }
+                    }
+                  }
+                }
+              }
+            },
+            { "$ref": "#/$defs/refused" }
+          ]
+        },
+        "prepare": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["passes", "answers"],
+              "properties": {
+                "passes": {
+                  "description": "One model evaluation each, in order.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["question", "prompt", "token_ids", "output_index", "select"],
+                    "properties": {
+                      "question": { "type": "string" },
+                      "prompt": { "description": "The rendered prompt, exact.", "type": "string" },
+                      "token_ids": { "type": "array", "items": { "$ref": "#/$defs/token" }, "minItems": 1 },
+                      "output_index": { "description": "Position whose logits are read: the last prompt token.", "type": "integer", "minimum": 0 },
+                      "select": { "description": "Label tokens whose logits are read, all groups concatenated.", "type": "array", "items": { "$ref": "#/$defs/token" } }
+                    }
+                  }
+                },
+                "answers": {
+                  "description": "How each question's answer is read from its pass, in request order.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["question", "type", "pass", "groups", "temperature", "temperature_f32"],
+                    "properties": {
+                      "question": { "type": "string" },
+                      "type": { "enum": ["choice", "noul", "score"] },
+                      "pass": { "type": "integer", "minimum": 0 },
+                      "groups": {
+                        "description": "One per option, in model order. range is a half-open interval of select.",
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["key", "code", "range"],
+                          "properties": {
+                            "key": { "description": "The option key as requested, unescaped.", "type": "string" },
+                            "code": { "description": "The label text: the choice code shown in the prompt, or the key for noul and score.", "type": "string" },
+                            "range": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 2, "maxItems": 2 }
+                          }
+                        }
+                      },
+                      "temperature": {
+                        "description": "The metadata string the temperature was read from, as llama_model_meta_val_str returns it; null when no key applies (T = 1).",
+                        "type": ["string", "null"]
+                      },
+                      "temperature_f32": { "$ref": "#/$defs/f32" }
+                    }
+                  }
+                }
+              }
+            },
+            { "$ref": "#/$defs/refused" }
+          ]
+        },
+        "evaluate": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source", "raw_scores", "scores"],
+              "properties": {
+                "source": {
+                  "description": "model: the logits of a forward pass on the artifact under settings; synthetic: given, to test the answer arithmetic.",
+                  "enum": ["model", "synthetic"]
+                },
+                "raw_scores": {
+                  "description": "Per pass, the logits of its select tokens, in select order.",
+                  "type": "array",
+                  "items": { "type": "array", "items": { "$ref": "#/$defs/f32" } }
+                },
+                "scores": {
+                  "description": "Per pass, the max of each group: what format_answer receives.",
+                  "type": "array",
+                  "items": { "type": "array", "items": { "$ref": "#/$defs/f32" } }
+                }
+              }
+            },
+            { "$ref": "#/$defs/refused" }
+          ]
+        },
+        "finalize": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["answers", "usage"],
+              "properties": {
+                "answers": {
+                  "description": "The SystemOne answers object, in request order. Computed f64 values (probabilities, confidence, noul, score) use the f64 encoding; legend values are the request's JSON values as upstream serializes them.",
+                  "type": "object",
+                  "additionalProperties": { "$ref": "#/$defs/answer" }
+                },
+                "usage": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["input_tokens", "output_tokens"],
+                  "properties": {
+                    "input_tokens": { "type": "integer", "minimum": 0 },
+                    "output_tokens": { "const": 0 }
+                  }
+                }
+              }
+            },
+            { "$ref": "#/$defs/refused" }
+          ]
+        },
+        "server": {
+          "description": "The stock llama-server's answer to request_text under settings, as a black-box check of the stages above. Absent when the case cannot be sent to it (synthetic scores, metadata edits, has_media).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "agrees"],
+          "properties": {
+            "status": { "type": "integer" },
+            "agrees": {
+              "description": "true when the server's answers and usage equal finalize, or its error equals the refusal (status, type, message).",
+              "type": "boolean"
+            },
+            "body": { "description": "The server's body, kept only when it does not agree." }
+          }
+        }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "required": ["type"],
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "required": ["type", "choice", "probabilities", "confidence"],
+          "properties": {
+            "type": { "const": "choice" },
+            "choice": { "type": "string" },
+            "probabilities": { "type": "object", "additionalProperties": { "$ref": "#/$defs/f64" } },
+            "confidence": { "$ref": "#/$defs/f64" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["type", "noul"],
+          "properties": {
+            "type": { "const": "noul" },
+            "noul": { "$ref": "#/$defs/f64" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["type", "score", "legend", "probabilities", "confidence"],
+          "properties": {
+            "type": { "const": "score" },
+            "score": { "$ref": "#/$defs/f64" },
+            "legend": { "type": "object" },
+            "probabilities": { "type": "object", "additionalProperties": { "$ref": "#/$defs/f64" } },
+            "confidence": { "$ref": "#/$defs/f64" }
+          }
+        }
+      ]
+    },
+    "expectation": {
+      "oneOf": [
+        {
+          "description": "match: reproduce upstream's observation of this stage exactly, from upstream's inputs to the stage. reference: (evaluate) upstream's logits are the numeric reference, exact only under G2 conditions. given: (evaluate) the scores are synthetic, use them as the readout. not_reached: an earlier stage refuses. out_of_scope: xybrid has no counterpart in this profile.",
+          "enum": ["match", "reference", "given", "not_reached", "out_of_scope"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["refuse"],
+          "properties": {
+            "refuse": {
+              "description": "xybrid refuses at this stage, with an error of this kind (README.md).",
+              "enum": [
+                "invalid_json", "duplicate_key", "unknown_field", "missing_state", "invalid_questions",
+                "invalid_question", "missing_instructions", "invalid_question_type", "invalid_criteria",
+                "level_count", "too_many_options", "empty_question_id", "empty_option_key",
+                "media_unsupported", "spoken_instructions", "json_too_deep", "number_out_of_range",
+                "escaped_key_collision", "no_single_token_label", "budget_exceeded", "non_finite_scores",
+                "unsupported_metadata", "invalid_metadata"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "xybrid": {
+      "description": "What xybrid must do, stage by stage. The first refusal ends the run: later stages are not_reached.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parse", "prepare", "evaluate", "finalize"],
+      "properties": {
+        "load": { "$ref": "#/$defs/expectation" },
+        "parse": { "$ref": "#/$defs/expectation" },
+        "prepare": { "$ref": "#/$defs/expectation" },
+        "evaluate": { "$ref": "#/$defs/expectation" },
+        "finalize": { "$ref": "#/$defs/expectation" }
+      }
+    }
+  }
+}
