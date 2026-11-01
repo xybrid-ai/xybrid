@@ -91,6 +91,8 @@ dependencies {
 
 Releases 0.16.0 and later require Android 10 (API 29): set `minSdk = 29` or higher in your app's `defaultConfig`, or the build fails at the manifest merge.
 
+Downloading models from the registry needs network access, and the SDK declares no permissions: add `<uses-permission android:name="android.permission.INTERNET" />` to your app's `AndroidManifest.xml`.
+
 **Run inference**
 
 ```kotlin

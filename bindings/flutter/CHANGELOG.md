@@ -4,6 +4,7 @@
 
 ## 0.16.0
 
+* Changed: precompiled native libraries now use llama.cpp v0.8.0.
 * Fixed: registry resolution sends runtime OS compatibility information and
   retains backend/OS refusal diagnostics, including with telemetry disabled.
 * Fixed: Android builds support Gradle 9 / AGP 9 and copy `libc++_shared.so`

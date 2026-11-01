@@ -15,7 +15,7 @@ Or add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.6.0
+  xybrid_flutter: ^0.16.0
 ```
 
 <details>
@@ -28,7 +28,7 @@ dependencies:
   xybrid_flutter:
     git:
       url: https://github.com/xybrid-ai/xybrid.git
-      ref: main
+      ref: master
       path: bindings/flutter
 ```
 
@@ -381,7 +381,7 @@ use_precompiled_binaries: false
 A full example app with 8 demo screens (TTS, ASR, LLM chat, pipelines, device info) is available:
 
 ```sh
-https://github.com/xybrid-ai/xybrid/tree/main/examples/flutter
+https://github.com/xybrid-ai/xybrid/tree/master/examples/flutter
 ```
 
 ## API Reference
