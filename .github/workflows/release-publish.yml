@@ -17,21 +17,31 @@ name: "Release: Publish"
 # Either way, the workflow:
 #
 #   1. Resolves the tag + version + commit SHA from whichever trigger fired.
-#   2. Retargets the draft release at the PR's merge commit and publishes
+#   2. Checks the draft's XybridFFI-<tag>.xcframework.zip against the
+#      checksums the merge commit pins (Package.swift and the React Native
+#      package.json) while it is still a draft. release-prep recreates the
+#      draft after pushing its checksum commit, so a PR merged in between
+#      finds an older zip; the job then fails with nothing public (no tag,
+#      no packages). release-prep can only recreate the draft while
+#      release/<tag> exists. If the merge deleted it, push release/<tag>
+#      again from master and merge the new release PR. Otherwise let
+#      release-prep finish, then re-run the failed jobs. The error says which.
+#   3. Retargets the draft release at the PR's merge commit and publishes
 #      it — GitHub atomically creates the git tag v<version> at the merge
 #      commit and flips the asset URLs from collaborator-only to public.
-#      (Skipped in workflow_dispatch mode if the release is already
-#      published, which is the typical recovery scenario.)
-#   3. Verifies the published tag's Package.swift checksum matches the
-#      now-public xcframework zip (sanity belt).
-#   4. Publishes the language packages: crates.io and Maven Central run on
+#      (Steps 2 and 3 are skipped in workflow_dispatch mode if the release
+#      is already published, which is the typical recovery scenario.)
+#   4. Verifies the published tag's Package.swift checksum and React Native
+#      pin match the now-public xcframework zip (sanity belt). Every job that
+#      publishes a package needs this one.
+#   5. Publishes the language packages: crates.io and Maven Central run on
 #      either trigger, and npm packages once NPM_PUBLISH_ENABLED (React Native)
 #      or NPM_WEB_PUBLISH_ENABLED (Web) is set. pub.dev (publish-flutter) only runs on
 #      workflow_dispatch-from-tag — pub.dev's OIDC binding rejects
 #      pull_request / branch-ref tokens — so on the merge path
 #      dispatch-flutter-publish re-fires this workflow against the new tag
 #      (needs the RELEASE_PAT secret; otherwise it prints a one-liner).
-#   5. Updates the legacy `swift` branch with the URL-based Package.swift
+#   6. Updates the legacy `swift` branch with the URL-based Package.swift
 #      (planned to be deprecated once consumers move to `from: "<version>"`).
 #
 # If a release PR is closed without merging, the pull_request trigger
@@ -66,12 +76,13 @@ env:
 
 jobs:
   # =========================================================================
-  # Tag, publish the draft release. This is the irreversible step.
+  # Tag, publish the draft release. This is the irreversible step, so it
+  # first checks the draft's XCFramework against the merge commit's pins.
   # =========================================================================
   publish-release:
     name: Publish GitHub release
     permissions:
-      contents: write   # gh release edit --draft=false to publish the release
+      contents: write   # download the draft's assets; gh release edit --draft=false to publish it
     # Run on workflow_dispatch always; on pull_request only when the release
     # PR actually merged.
     if: |
@@ -137,6 +148,44 @@ jobs:
           echo "already_published=${ALREADY_PUBLISHED}"  >> "$GITHUB_OUTPUT"
           echo "Tag: ${TAG} | Version: ${VERSION} | SHA: ${MERGE_SHA} | already_published: ${ALREADY_PUBLISHED}"
 
+      # SPM and the React Native pod download this zip from the tag and
+      # reject it unless it matches the checksum the tag pins. release-prep
+      # pushes the checksum commit, then deletes and recreates the draft with
+      # the new zip, so a PR merged in between finds the previous zip here.
+      # Both scripts read the pins next to them: run the merge commit's copies.
+      # release-prep creates the draft with --target release/<tag>, and this
+      # repository deletes that branch on merge; without it, cut the release
+      # again.
+      - name: Verify the draft's XCFramework against the merge commit
+        if: steps.meta.outputs.already_published == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          MERGE_SHA: ${{ steps.meta.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          ZIP="XybridFFI-${TAG}.xcframework.zip"
+          RERUN="gh run rerun ${GITHUB_RUN_ID} --failed"
+          if git ls-remote --exit-code --heads origin "release/${TAG}" > /dev/null; then
+            NEXT="Let release-prep's run on release/${TAG} recreate the draft (re-run its failed jobs if it stopped), then re-run this job: ${RERUN}"
+          else
+            NEXT="The merge deleted release/${TAG}, so release-prep cannot recreate the draft. Cut the release again from an up-to-date master (git fetch origin && git push origin origin/master:refs/heads/release/${TAG}), then merge the Release ${TAG} PR that release-prep opens"
+          fi
+          HELD="Nothing was published and no tag was created: the release is still a draft."
+          if ! gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern "$ZIP" --dir "$RUNNER_TEMP/draft"; then
+            echo "::error::Could not download ${ZIP} from the ${TAG} draft. ${HELD} After a network error, re-run this job: ${RERUN}. If the draft has no such zip: ${NEXT}."
+            exit 1
+          fi
+          git checkout --quiet --detach "$MERGE_SHA"
+          ok=true
+          ./bindings/apple/scripts/sync-spm-checksum.sh --check "$RUNNER_TEMP/draft/$ZIP" || ok=false
+          ./bindings/react-native/scripts/pin-ios-checksum.sh --check "$RUNNER_TEMP/draft/$ZIP" || ok=false
+          if [ "$ok" != true ]; then
+            echo "::error::The ${TAG} draft's ${ZIP} is not the zip ${MERGE_SHA} pins in Package.swift and bindings/react-native/package.json. The PR likely merged before release-prep recreated the draft. ${HELD} ${NEXT}."
+            exit 1
+          fi
+
       - name: Retarget draft to merge commit and publish
         # Only run when there's a draft to publish (i.e. not the recovery
         # path where someone already published it manually).
@@ -155,13 +204,15 @@ jobs:
 
   # =========================================================================
   # Sanity check: the published manifest's checksum matches the published
-  # asset. If this ever fires, something is fundamentally broken upstream.
+  # asset. publish-release checked the draft's zip before tagging, unless
+  # the release was already published when a recovery dispatch started; this
+  # checks the public asset at the tag. Every job that publishes a package
+  # needs it.
   # =========================================================================
   verify-spm-checksum:
     name: Verify SPM checksum
-    # Skip on the flutter_only auto re-dispatch (pub.dev-only run). Still runs
-    # on the merge path and on a manual full-recovery dispatch.
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.flutter_only }}
+    # No `if:`: publish-flutter needs this job on the flutter_only
+    # re-dispatch too, and a skipped need skips the job that needs it.
     needs: [publish-release]
     runs-on: ubuntu-latest
     steps:
@@ -175,7 +226,9 @@ jobs:
         run: |
           set -euo pipefail
           URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/XybridFFI-${TAG}.xcframework.zip"
-          curl -fsSL -o /tmp/x.zip "$URL"
+          # Every package publisher waits for this job, so ride out a
+          # transient error instead of holding them all back.
+          curl -fsSL --retry 5 --retry-delay 10 --retry-all-errors -o /tmp/x.zip "$URL"
           ./bindings/apple/scripts/sync-spm-checksum.sh --check /tmp/x.zip
           ./bindings/react-native/scripts/pin-ios-checksum.sh --check /tmp/x.zip
 
@@ -197,7 +250,7 @@ jobs:
     # Skip on the flutter_only auto re-dispatch (pub.dev-only run). Still runs
     # on the merge path and on a manual full-recovery dispatch.
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.flutter_only }}
-    needs: [publish-release]
+    needs: [publish-release, verify-spm-checksum]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -293,7 +346,7 @@ jobs:
   # =========================================================================
   publish-flutter:
     name: Publish Flutter to pub.dev
-    needs: [publish-release]
+    needs: [publish-release, verify-spm-checksum]
     # Only the workflow_dispatch-from-tag context can satisfy pub.dev's OIDC
     # binding (see comment above). On the pull_request merge path this job is
     # skipped and dispatch-flutter-publish re-fires the workflow from the tag.
@@ -385,6 +438,10 @@ jobs:
   # =========================================================================
   dispatch-unity-natives:
     name: Dispatch Unity native bundles from tag
+    # Not gated on verify-spm-checksum: build-unity builds from the tag's
+    # source and never reads the XybridFFI zip, and OpenUPM serves the Unity
+    # package from the tag either way, so holding back the bundles would only
+    # leave that version without natives.
     needs:
       - publish-release
     if: github.event_name == 'pull_request'
@@ -437,7 +494,7 @@ jobs:
     # re-deploying an already-published version. Runs on the merge path and on
     # a manual full-recovery dispatch.
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.flutter_only }}
-    needs: [publish-release]
+    needs: [publish-release, verify-spm-checksum]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -598,7 +655,7 @@ jobs:
   publish-web-npm:
     name: Publish Web SDK (npm)
     if: ${{ vars.NPM_WEB_PUBLISH_ENABLED == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.flutter_only) }}
-    needs: [publish-release]
+    needs: [publish-release, verify-spm-checksum]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -680,7 +737,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.flutter_only }}
     permissions:
       contents: write   # force-pushes the swift distribution branch
-    needs: [publish-release]
+    needs: [publish-release, verify-spm-checksum]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
