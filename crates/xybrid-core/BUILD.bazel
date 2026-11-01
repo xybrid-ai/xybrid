@@ -184,12 +184,19 @@ _CORE_INTEGRATION_TESTS = {
         "@crates//:image",
         "@crates//:serde_json",
     ],
+    "lfm3_smoke": [
+        ":xybrid-core",
+        "@crates//:image",
+        "@crates//:serde_json",
+    ],
 }
 
-# vlm_lfm2_smoke opens with `#![cfg(feature = "llm-llamacpp")]`; without the
-# feature the file compiles to an EMPTY binary that still reports success. The
-# library target above already builds with llm-llamacpp, so this lines up.
+# vlm_lfm2_smoke and lfm3_smoke open with `#![cfg(feature = "llm-llamacpp")]`;
+# without the feature the file compiles to an EMPTY binary that still reports
+# success. The library target above already builds with llm-llamacpp, so this
+# lines up.
 _CORE_TEST_FEATURES = {
+    "lfm3_smoke": ["llm-llamacpp"],
     "vlm_lfm2_smoke": ["llm-llamacpp"],
 }
 
@@ -201,6 +208,7 @@ _CORE_TEST_DATA = {
     "mobilenet_vision_parity": ["//integration-tests:model_metadata_fixtures"],
     "tts_integration": ["//integration-tests:model_metadata_fixtures"],
     "tts_smoke": ["//integration-tests:model_metadata_fixtures"],
+    "lfm3_smoke": ["//integration-tests:model_metadata_fixtures"],
     "vlm_lfm2_smoke": ["//integration-tests:model_metadata_fixtures"],
 }
 

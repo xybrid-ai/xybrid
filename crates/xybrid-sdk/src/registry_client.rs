@@ -116,7 +116,12 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
 /// Backends that pick which file the registry serves (`requires_backends`).
 /// Sent as `?backends=` because telemetry opt-out drops the header; only
 /// artifact-selecting names go here, never the full feature list.
-const ARTIFACT_BACKENDS: &[&str] = &["asr-whispercpp-coreml", "zzz-phonon-31m"];
+const ARTIFACT_BACKENDS: &[&str] = &[
+    "asr-whispercpp-coreml",
+    "llamacpp-lfm3",
+    "llamacpp-lfm3vl",
+    "zzz-phonon-31m",
+];
 
 /// URL for `GET /v1/models/{mask}/resolve`.
 ///
@@ -3682,6 +3687,21 @@ mod tests {
         assert_eq!(
             resolve_url("http://r", "phonon-31m-en", "android-arm64", &features, None),
             "http://r/v1/models/phonon-31m-en/resolve?platform=android-arm64&backends=zzz-phonon-31m"
+        );
+    }
+
+    #[test]
+    fn resolve_url_sends_the_lfm3_backends_but_not_llm_llamacpp() {
+        let features = [
+            "llamacpp-lfm3",
+            "llamacpp-lfm3vl",
+            "llm-llamacpp",
+            "llm-llamacpp-vision",
+            "vision",
+        ];
+        assert_eq!(
+            resolve_url("http://r", "lfm3-vl-2b", "android-arm64", &features, None),
+            "http://r/v1/models/lfm3-vl-2b/resolve?platform=android-arm64&backends=llamacpp-lfm3,llamacpp-lfm3vl"
         );
     }
 

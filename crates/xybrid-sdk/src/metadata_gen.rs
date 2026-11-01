@@ -971,13 +971,31 @@ fn build_metadata(
             })
             .and_then(|projector| {
                 read_gguf_metadata(&cache_dir.join(&projector.filename))
-                    .filter(|info| info.projector_type.as_deref() == Some("qwen3vl_merger"))
+                    .filter(|info| {
+                        matches!(
+                            info.projector_type.as_deref(),
+                            Some("qwen3vl_merger" | "lfm3vl")
+                        )
+                    })
                     .map(|info| (projector, info))
             })
             .map_or_else(
                 || build_gguf_metadata(model_id, model_id, primary, &task, card, gguf_info),
-                |(projector, projector_info)| {
-                    build_qwen3vl_metadata(model_id, primary, projector, gguf_info, &projector_info)
+                |(projector, projector_info)| match projector_info.projector_type.as_deref() {
+                    Some("lfm3vl") => build_lfm3vl_metadata(
+                        model_id,
+                        primary,
+                        projector,
+                        gguf_info,
+                        &projector_info,
+                    ),
+                    _ => build_qwen3vl_metadata(
+                        model_id,
+                        primary,
+                        projector,
+                        gguf_info,
+                        &projector_info,
+                    ),
                 },
             ),
         ModelFormat::Onnx => build_onnx_metadata(
@@ -1224,8 +1242,110 @@ fn build_qwen3vl_metadata(
             preprocessing_preset: VisionPreprocessingPreset::SigLip,
             image_size,
             patch_size: Some(patch_size),
+            max_image_tokens: None,
         }),
         description: Some(format!("{} (auto-generated Qwen3VL GGUF)", model_id)),
+        metadata,
+        voices: None,
+        max_chunk_chars: None,
+        trim_trailing_samples: None,
+    }
+}
+
+/// Metadata for a GGUF language model paired with an LFM3-VL projector
+/// (`lfm3vl`).
+///
+/// The projector reads images at native resolution, up to 4,096 tokens each,
+/// so one photo would fill the 4,096-token operational context. The image
+/// budget is capped at 1,024 tokens (about one megapixel). Sampling follows
+/// LiquidAI's recommendation for LFM3; thinking stays off because the
+/// metadata does not set `reasoning`.
+fn build_lfm3vl_metadata(
+    model_id: &str,
+    primary: &ModelFileInfo,
+    projector: &ModelFileInfo,
+    gguf_info: Option<&GgufInfo>,
+    projector_info: &GgufInfo,
+) -> ModelMetadata {
+    const DEFAULT_CONTEXT_LENGTH: usize = 4096;
+    const MAX_IMAGE_TOKENS: usize = 1024;
+
+    let max_context_length = gguf_info
+        .and_then(|info| info.context_length)
+        .and_then(|value| usize::try_from(value).ok());
+    let image_size = projector_info
+        .image_size
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(512);
+    let patch_size = projector_info
+        .patch_size
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(16);
+    let architecture = gguf_info
+        .and_then(|info| info.architecture.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let quantization = gguf_info
+        .and_then(|info| info.quantization.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "task".to_string(),
+        serde_json::Value::String("vlm".to_string()),
+    );
+    metadata.insert(
+        "architecture".to_string(),
+        serde_json::Value::String(architecture),
+    );
+    metadata.insert(
+        "vision_architecture".to_string(),
+        serde_json::Value::String("lfm3vl".to_string()),
+    );
+    metadata.insert(
+        "backend".to_string(),
+        serde_json::Value::String("llamacpp".to_string()),
+    );
+    metadata.insert(
+        "context_length".to_string(),
+        serde_json::json!(DEFAULT_CONTEXT_LENGTH),
+    );
+    if let Some(max_context_length) = max_context_length {
+        metadata.insert(
+            "max_context_length".to_string(),
+            serde_json::json!(max_context_length),
+        );
+    }
+    metadata.insert(
+        "quantization".to_string(),
+        serde_json::Value::String(quantization),
+    );
+    metadata.insert("auto_generated".to_string(), serde_json::Value::Bool(true));
+
+    ModelMetadata {
+        model_id: model_id.to_string(),
+        version: "1.0".to_string(),
+        execution_template: ExecutionTemplate::VisionLanguage {
+            model_file: primary.filename.clone(),
+            chat_template: None,
+            context_length: DEFAULT_CONTEXT_LENGTH,
+            generation_params: Some(GenerationParams {
+                temperature: Some(0.1),
+                top_k: Some(50),
+                repetition_penalty: Some(1.1),
+                ..Default::default()
+            }),
+        },
+        preprocessing: Vec::new(),
+        postprocessing: Vec::new(),
+        files: vec![primary.filename.clone(), projector.filename.clone()],
+        vision_encoder: Some(VisionEncoderConfig {
+            file: projector.filename.clone(),
+            preprocessing_preset: VisionPreprocessingPreset::SigLip,
+            image_size,
+            patch_size: Some(patch_size),
+            max_image_tokens: Some(MAX_IMAGE_TOKENS),
+        }),
+        description: Some(format!("{} (auto-generated LFM3-VL GGUF)", model_id)),
         metadata,
         voices: None,
         max_chunk_chars: None,
@@ -2388,6 +2508,93 @@ mod tests {
                 .get("architecture")
                 .and_then(|value| value.as_str()),
             Some("qwen35")
+        );
+    }
+
+    /// An LFM3-VL repo (language GGUF plus `lfm3vl` projector) gets the
+    /// projector loaded and its image budget capped; without the cap one
+    /// photo would fill the context.
+    #[test]
+    fn generate_metadata_emits_capped_vision_language_for_lfm3vl_projector_pair() {
+        let dir = TempDir::new().unwrap();
+
+        let language_path = dir.path().join("LFM3-VL-2B-QAD-Q4_0.gguf");
+        let mut language = std::fs::File::create(language_path).unwrap();
+        language.write_all(b"GGUF").unwrap();
+        language.write_all(&3u32.to_le_bytes()).unwrap();
+        language.write_all(&0u64.to_le_bytes()).unwrap();
+        language.write_all(&2u64.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut language, "general.architecture");
+        language.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut language, "lfm3");
+        write_gguf_test_string(&mut language, "lfm3.context_length");
+        language.write_all(&GGUF_TYPE_UINT32.to_le_bytes()).unwrap();
+        language.write_all(&128_000u32.to_le_bytes()).unwrap();
+        drop(language);
+
+        let projector_path = dir.path().join("mmproj-LFM3-VL-2B-Q8_0.gguf");
+        let mut projector = std::fs::File::create(projector_path).unwrap();
+        projector.write_all(b"GGUF").unwrap();
+        projector.write_all(&3u32.to_le_bytes()).unwrap();
+        projector.write_all(&0u64.to_le_bytes()).unwrap();
+        projector.write_all(&3u64.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut projector, "clip.projector_type");
+        projector
+            .write_all(&GGUF_TYPE_STRING.to_le_bytes())
+            .unwrap();
+        write_gguf_test_string(&mut projector, "lfm3vl");
+        write_gguf_test_string(&mut projector, "clip.vision.image_size");
+        projector
+            .write_all(&GGUF_TYPE_UINT32.to_le_bytes())
+            .unwrap();
+        projector.write_all(&512u32.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut projector, "clip.vision.patch_size");
+        projector
+            .write_all(&GGUF_TYPE_UINT32.to_le_bytes())
+            .unwrap();
+        projector.write_all(&16u32.to_le_bytes()).unwrap();
+        drop(projector);
+
+        let (metadata, _) = generate_metadata(dir.path(), "LiquidAI/LFM3-VL-2B-GGUF").unwrap();
+
+        metadata.validate().unwrap();
+        assert!(matches!(
+            metadata.execution_template,
+            xybrid_core::execution::ExecutionTemplate::VisionLanguage {
+                ref model_file,
+                ref generation_params,
+                context_length: 4096,
+                ..
+            } if model_file == "LFM3-VL-2B-QAD-Q4_0.gguf"
+                && generation_params
+                    == &Some(GenerationParams {
+                        temperature: Some(0.1),
+                        top_k: Some(50),
+                        repetition_penalty: Some(1.1),
+                        ..Default::default()
+                    })
+        ));
+        let encoder = metadata
+            .vision_encoder
+            .as_ref()
+            .expect("the projector is loaded as the vision encoder");
+        assert_eq!(encoder.file, "mmproj-LFM3-VL-2B-Q8_0.gguf");
+        assert_eq!(encoder.image_size, 512);
+        assert_eq!(encoder.patch_size, Some(16));
+        assert_eq!(encoder.max_image_tokens, Some(1024));
+        assert_eq!(
+            metadata
+                .metadata
+                .get("vision_architecture")
+                .and_then(|value| value.as_str()),
+            Some("lfm3vl")
+        );
+        assert_eq!(
+            metadata
+                .metadata
+                .get("max_context_length")
+                .and_then(|value| value.as_u64()),
+            Some(128_000)
         );
     }
 

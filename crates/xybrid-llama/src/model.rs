@@ -227,6 +227,17 @@ impl LlamaModel {
         unsafe { ffi::vocab_is_eog(self.as_ptr(), token) }
     }
 
+    /// True when tokenizing with `add_special` prepends the BOS token.
+    ///
+    /// Reads the GGUF `tokenizer.ggml.add_bos_token` flag. When it is
+    /// unset (LFM3), the BOS token only reaches the model if the prompt
+    /// text carries it, which is how the model's chat template renders
+    /// `bos_token`.
+    pub fn adds_bos(&self) -> bool {
+        // SAFETY: the handle keeps the model pointer live.
+        unsafe { ffi::vocab_get_add_bos(self.as_ptr()) }
+    }
+
     /// Vocabulary size.
     pub fn n_vocab(&self) -> usize {
         // SAFETY: the handle keeps the model pointer live.
@@ -292,6 +303,7 @@ impl LlamaModel {
 //   - llama_token_bos_c             : read-only
 //   - llama_token_eos_c             : read-only
 //   - llama_vocab_is_eog_c          : read-only
+//   - llama_vocab_get_add_bos_c     : read-only
 //   - llama_model_chat_template_c   : read-only (returns interior C string)
 //   - llama_n_vocab_c               : read-only
 //   - llama_model_is_recurrent_c    : read-only

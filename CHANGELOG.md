@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **LFM3 (llama.cpp backend):** LiquidAI's LFM3 1.7B and LFM3-VL 2B GGUFs
+  load and run, with thinking switched by the metadata `reasoning` flag, tool
+  calling and image input (see the [reasoning](docs/content/docs/guides/reasoning.mdx),
+  [tool calling](docs/content/docs/guides/tool-calling.mdx) and
+  [vision](docs/content/docs/guides/vision-models.mdx) guides). The integration
+  fixtures `lfm3-1.7b` and `lfm3-vl-2b` pin LiquidAI's quantization-aware Q4_0
+  builds. LFM3-Audio 2B and LFM3-Omni 2B are not supported: they need
+  llama.cpp's audio input and speech generation, which xybrid does not wrap.
+- **LFM3 tool calling (llama.cpp backend):** tool-bearing requests to LFM3
+  models parse their `<tool_call><function=…><parameter=…>` calls into
+  `tool_calls`. LFM3 writes every argument as text, and each one is typed
+  against the tool's JSON Schema the way llama.cpp types it: a `string`
+  parameter keeps `75001` as text, an `integer` one gets `75001`.
+  `Envelope::tool_results` continuations replay the call and each result as
+  LFM3's own `tool` turn, and streaming suppresses LFM3 call blocks like the
+  other families'. Qwen 3.5 writes the same notation, so its calls parse too,
+  but its continuations are rejected: xybrid implements LFM3's tool-result
+  framing, not Qwen 3.5's. Rust callers can type the arguments with
+  `tool_call::parse_tool_calls_with_tools`.
+- **Vision (llama.cpp):** `vision_encoder.max_image_tokens` in
+  `model_metadata.json` caps how many tokens one image becomes; the vision
+  encoder scales larger images down to fit. Native-resolution encoders need it:
+  LFM3-VL 2B turns a 12-megapixel photo into about 4,000 tokens, which alone
+  fills a 4,096-token context and takes minutes to encode on a CPU. Without the
+  field each encoder keeps its own limit, so existing bundles are unchanged.
+  Loading `LiquidAI/LFM3-VL-2B-GGUF` from Hugging Face now loads its vision
+  projector too (it ran text-only), with a 1,024-token image cap and LiquidAI's
+  recommended sampling.
+- **`llamacpp-lfm3` and `llamacpp-lfm3vl` registry backends.** Every
+  `llm-llamacpp` build reports `llamacpp-lfm3`, and every
+  `llm-llamacpp-vision` build also reports `llamacpp-lfm3vl`. `resolve` sends
+  both in its `&backends=` query even when telemetry is opted out, so the
+  registry can serve the LFM3 models only to builds that run them. 0.15.0
+  builds report `llm-llamacpp` but cannot load LFM3.
+
+### Fixed
+
+- **llama.cpp backend:** LFM3 chat prompts render through the model's own chat
+  template. llama.cpp's built-in matcher reads LFM3's template as plain ChatML
+  and drops the thinking state every assistant turn opens with (`<think>` to
+  reason, `<think></think>` to answer directly), so the model reasoned without
+  an opening tag and sometimes answered a question nobody asked. The `reasoning`
+  flag in the model metadata picks the state.
+- **llama.cpp backend:** prompts rendered through a model's chat template now
+  start with BOS when its vocabulary leaves BOS to the template (LFM3's
+  GGUFs set `tokenizer.ggml.add_bos_token` to false), as llama.cpp's own chat
+  path does. Vocabularies that add BOS themselves are unchanged.
+- **llama.cpp backend:** reasoning models no longer get a doubled think block
+  in tool-bearing prompts. The template render asked for thinking off, so
+  templates such as Qwen 3.5's closed an empty think block that priming then
+  reopened (`<think>\n\n</think>\n\n<think>\n`); it now asks for thinking on
+  when the model's `reasoning` flag is set. gemma-4 still renders with
+  thinking off.
+
 ## [0.16.0] - 2026-10-30
 
 ### Added

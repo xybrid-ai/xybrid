@@ -1854,7 +1854,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -1967,7 +1967,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2078,7 +2078,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2147,7 +2147,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2170,6 +2170,9 @@ impl TemplateExecutor {
             let vision_encoder_path = Path::new(&self.base_path).join(&vision_encoder.file);
             llm_config =
                 llm_config.with_vision_encoder(vision_encoder_path.to_string_lossy().to_string());
+            if let Some(tokens) = vision_encoder.max_image_tokens {
+                llm_config = llm_config.with_max_image_tokens(tokens);
+            }
         }
         llm_config
     }
@@ -2296,7 +2299,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             registered_image_preprocess_ms,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2444,7 +2447,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             registered_image_preprocess_ms,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2560,7 +2563,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2710,7 +2713,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -3712,10 +3715,11 @@ fn insert_image_preprocess_metric(
 /// current span. `image_preprocess_ms` is `None` for text-only paths and carries
 /// the vision timing for multimodal paths (the insert is a no-op when `None`).
 ///
-/// `tools_requested` is true when the request's `GenerationConfig.tools` was
-/// non-empty: the output text is then scanned for tool-call blocks (both the
-/// LFM2 and gemma-4 protocols) and any parsed calls ride the metadata
-/// side-channel as a `tool_calls` JSON array (same channel as `finish_reason`). The text itself stays intact —
+/// `tools` are the request's `GenerationConfig.tools`. When there are any,
+/// the output text is scanned for tool-call blocks (every supported
+/// protocol, LFM3 arguments typed against these tools' schemas) and any
+/// parsed calls ride the metadata side-channel as a `tool_calls` JSON array
+/// (same channel as `finish_reason`). The text itself stays intact —
 /// callers strip the blocks for display via `tool_call::strip_tool_calls`.
 /// Malformed blocks are untrusted model output and simply parse to nothing.
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -3724,7 +3728,7 @@ fn build_llm_response_envelope(
     backend_name: &str,
     cached_prefix: Option<usize>,
     image_preprocess_ms: Option<u32>,
-    tools_requested: bool,
+    tools: &[crate::gateway::Tool],
 ) -> Envelope {
     let mut response_metadata = std::collections::HashMap::new();
     response_metadata.insert(
@@ -3744,8 +3748,9 @@ fn build_llm_response_envelope(
     mirror_llm_metrics_to_span(&output, backend_name, cached_prefix);
 
     let mut emitted_tool_calls = false;
-    if tools_requested {
-        let calls = crate::runtime_adapter::tool_call::parse_tool_calls(&output.text);
+    if !tools.is_empty() {
+        let calls =
+            crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(&output.text, tools);
         if !calls.is_empty() {
             emitted_tool_calls = true;
             response_metadata.insert(
@@ -3901,6 +3906,20 @@ mod tests {
             image_preprocess_ms: None,
             reasoning_content: None,
         }
+    }
+
+    /// The tools a tool-bearing request offers in the envelope tests.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn requested_tools() -> Vec<crate::gateway::Tool> {
+        vec![crate::gateway::Tool::function(
+            "get_temperature",
+            "Current temperature of a room",
+            serde_json::json!({
+                "type": "object",
+                "properties": {"room": {"type": "string"}},
+                "required": ["room"]
+            }),
+        )]
     }
 
     fn test_model_metadata(execution_template: ExecutionTemplate) -> ModelMetadata {
@@ -4161,7 +4180,7 @@ mod tests {
     #[test]
     fn build_llm_response_envelope_text_path_omits_image_metric() {
         let env =
-            build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, None, false);
+            build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, None, &[]);
         match &env.kind {
             EnvelopeKind::Text(t) => assert_eq!(t, "hello"),
             _ => panic!("expected a text envelope"),
@@ -4188,7 +4207,7 @@ mod tests {
             "llamacpp",
             None,
             Some(42),
-            false,
+            &[],
         );
         assert_eq!(
             env.metadata.get("image_preprocess_ms").map(String::as_str),
@@ -4204,7 +4223,7 @@ mod tests {
         output.text =
             "checking<|tool_call_start|>[get_temperature(room=\"kitchen\")]<|tool_call_end|>"
                 .to_string();
-        let env = build_llm_response_envelope(output, "llamacpp", None, None, true);
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, &requested_tools());
 
         let raw = env
             .metadata
@@ -4227,12 +4246,33 @@ mod tests {
         }
     }
 
+    /// LFM3 writes argument values as raw text; the envelope types them with
+    /// the request's schemas, so a string parameter keeps digits as text.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_llm_response_envelope_types_lfm3_arguments_with_the_request_tools() {
+        let mut output = sample_generation_output(7);
+        output.text = "<tool_call>\n<function=get_temperature>\n<parameter=room>\n12\n</parameter>\n</function>\n</tool_call>".to_string();
+
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, &requested_tools());
+
+        let calls: Vec<crate::gateway::ToolCall> =
+            serde_json::from_str(env.metadata.get("tool_calls").expect("tool_calls stamped"))
+                .unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.arguments, r#"{"room":"12"}"#);
+        assert_eq!(
+            env.metadata.get("finish_reason").map(String::as_str),
+            Some("tool_calls")
+        );
+    }
+
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn build_llm_response_envelope_omits_tool_calls_when_none_emitted() {
         let mut output = sample_generation_output(7);
         output.finish_reason = "length".to_string();
-        let env = build_llm_response_envelope(output, "llamacpp", None, None, true);
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, &requested_tools());
         assert!(
             !env.metadata.contains_key("tool_calls"),
             "a tools-bearing request whose output has no call block stamps nothing"
@@ -4584,7 +4624,7 @@ mod tests {
         output.text =
             "prose<|tool_call_start|>[get_temperature(room=\"kitchen\")]<|tool_call_end|>"
                 .to_string();
-        let env = build_llm_response_envelope(output, "llamacpp", None, None, false);
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, &[]);
         assert!(
             !env.metadata.contains_key("tool_calls"),
             "tool-call parsing only runs when the request offered tools"
@@ -4733,6 +4773,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::Gemma3Vision,
                 image_size: 896,
                 patch_size: Some(14),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4853,6 +4894,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4932,6 +4974,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5006,6 +5049,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5066,6 +5110,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5149,6 +5194,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5241,6 +5287,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: bundle_metadata,
@@ -5356,6 +5403,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::Gemma3Vision,
                 image_size: 896,
                 patch_size: Some(14),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5522,6 +5570,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 2,
                 patch_size: Some(1),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5736,6 +5785,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::Gemma3Vision,
                 image_size: 896,
                 patch_size: Some(14),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5762,6 +5812,21 @@ mod tests {
             config.vision_encoder_path.as_deref(),
             Some("/models/mmproj.gguf")
         );
+        assert_eq!(config.max_image_tokens, None);
+
+        let mut capped = metadata;
+        capped
+            .vision_encoder
+            .as_mut()
+            .expect("fixture declares a vision encoder")
+            .max_image_tokens = Some(1024);
+        let config = executor.vision_language_llm_config(
+            &capped,
+            "/models/model.gguf".to_string(),
+            Some("chat_template.json"),
+            8192,
+        );
+        assert_eq!(config.max_image_tokens, Some(1024));
     }
 
     #[test]

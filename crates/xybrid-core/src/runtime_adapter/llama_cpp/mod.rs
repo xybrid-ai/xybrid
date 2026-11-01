@@ -486,12 +486,19 @@ impl LlamaCppBackend {
         let warmup = false;
         let n_threads = config.n_threads;
         let flash_attn = config.flash_attn;
+        let max_image_tokens = config.max_image_tokens;
 
         self.with_mtmd_context_loaded_with(
             mmproj_path,
             |path| {
                 xybrid_llama::MtmdContext::from_file(
-                    path, model, use_gpu, warmup, n_threads, flash_attn,
+                    path,
+                    model,
+                    use_gpu,
+                    warmup,
+                    n_threads,
+                    flash_attn,
+                    max_image_tokens,
                 )
                 .map_err(AdapterError::from)
             },
@@ -1163,7 +1170,7 @@ impl LlmBackend for LlamaCppBackend {
             let text = clean.trim().to_string();
 
             let parsed_tool_calls = if suppress_tools {
-                crate::runtime_adapter::tool_call::parse_tool_calls(&text)
+                crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(&text, &config.tools)
             } else {
                 Vec::new()
             };
@@ -1344,7 +1351,7 @@ impl LlmBackend for LlamaCppBackend {
             // fine but is not a tool call.
             let saw_tool_call_block = filter.saw_tool_call_block();
             let parsed_tool_calls = if suppress_tools {
-                crate::runtime_adapter::tool_call::parse_tool_calls(&text)
+                crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(&text, &config.tools)
             } else {
                 Vec::new()
             };
@@ -1790,7 +1797,7 @@ impl LlmBackend for LlamaCppBackend {
             // will report, and a complete-but-unparseable block is not a
             // tool call.
             let parsed_tool_calls = if suppress_tools {
-                crate::runtime_adapter::tool_call::parse_tool_calls(&text)
+                crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(&text, &config.tools)
             } else {
                 Vec::new()
             };

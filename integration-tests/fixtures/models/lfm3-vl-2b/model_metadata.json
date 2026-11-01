@@ -1,0 +1,44 @@
+{
+  "model_id": "lfm3-vl-2b",
+  "version": "1.0",
+  "description": "Liquid LFM3-VL 2B vision-language model for edge inference.",
+  "execution_template": {
+    "type": "VisionLanguage",
+    "model_file": "LFM3-VL-2B-QAD-Q4_0.gguf",
+    "context_length": 4096,
+    "generation_params": {
+      "max_tokens": 512,
+      "temperature": 0.1,
+      "top_k": 50,
+      "repetition_penalty": 1.1
+    }
+  },
+  "vision_encoder": {
+    "file": "mmproj-LFM3-VL-2B-Q8_0.gguf",
+    "preprocessing_preset": "siglip",
+    "image_size": 512,
+    "patch_size": 16,
+    "max_image_tokens": 1024
+  },
+  "preprocessing": [],
+  "postprocessing": [],
+  "files": [
+    "LFM3-VL-2B-QAD-Q4_0.gguf",
+    "mmproj-LFM3-VL-2B-Q8_0.gguf"
+  ],
+  "metadata": {
+    "task": "vlm",
+    "architecture": "lfm3",
+    "vision_architecture": "lfm3vl",
+    "backend": "llamacpp",
+    "context_length": 128000,
+    "license_name": "LFM Open License v1.0",
+    "chat_format": "chatml",
+    "quantization": "q4_0",
+    "source_repo": "LiquidAI/LFM3-VL-2B-GGUF",
+    "source_revision": "7c3b4a43c9023e80bf234fec5e826a3365c8dda8",
+    "sha256": "621c455376cb96a20891697deb9975c6fb47dd5ea98ed3ad1f3b7e8f24f0b1e6",
+    "ram_minimum_mb": 2048,
+    "ram_recommended_mb": 3072
+  }
+}
