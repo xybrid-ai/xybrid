@@ -48,9 +48,11 @@
 //!   `null`, nothing, or an object describing `"true"` and `"false"`, either
 //!   or both. A description is text or JSON; `null` is no description.
 //!
-//! Content (the state, instructions, descriptions) is read as written: key
-//! order and number spelling kept (`1` and `1.0` differ), through
-//! [`OrderedJson::parse`], never `serde_json::Value`.
+//! Content (the state, instructions, descriptions) is read through
+//! [`OrderedJson::parse`], never `serde_json::Value`: text as written, and
+//! in JSON, member order and integer/float identity are preserved (`1` and
+//! `1.0` differ) while JSON whitespace and numeric spelling are normalized
+//! (`1E2` is read as the float `100.0`).
 //!
 //! # Refusals and their order
 //!
@@ -120,7 +122,8 @@
 //! Members come in llama.cpp's order (`format_answer`), answers in request
 //! order, probabilities in option or level order. `legend` gives each
 //! level's description back as the JSON value it was in the request (`null`
-//! when absent), key order and number spelling kept. `input_tokens` counts
+//! when absent): member order and integer/float identity preserved, JSON
+//! whitespace and numeric spelling normalized. `input_tokens` counts
 //! the tokens of every pass; `confidence` is `null` for a protocol that
 //! defines none (LFM3 d1 always does).
 //!

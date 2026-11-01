@@ -207,14 +207,18 @@ each answer from the model without generating text. `--decision` takes such a
 request in the JSON shape that llama.cpp's server answers at `/v1/systemone`
 (SystemOne, subset v1: the text profile of LiquidAI's LFM3 d1), from a file or
 from stdin with `-`. It needs a model (`--model-file`, `--model`,
-`--directory`, `--huggingface` or `--bundle`) and takes no input flag: the
-request holds the input.
+`--directory`, `--huggingface` or `--bundle`), and takes `--target`,
+`--dry-run` and `--output` besides. It cannot be combined with `--config`,
+`--pipeline`, `--policy`, `--input-text`, `--input-audio`, `--input-image`,
+`--choice`, `--voice`, `--max-tokens`, `--show-reasoning`,
+`--speculative-cloud`, `--trace` or `--trace-export`: the request holds the
+input, and none of the others applies to a decision run.
 
 <Callout type="warn">
 This build checks decision requests but cannot run them yet. A valid request
 ends with `decision models are not supported by this build yet`, before any
 model is opened. `--dry-run` checks the request alone and succeeds when it is
-valid; the model is not checked.
+valid; the model is not checked. Neither writes `--output`.
 </Callout>
 
 ```bash
@@ -258,8 +262,10 @@ cat request.json | xybrid run --model-file d1-2B-Q4_K_M.gguf --decision - --dry-
   description.
 - `model` is accepted and ignored.
 
-Text and JSON reach the model as written: object keys in their order, and
-numbers as spelled (`1` and `1.0` differ).
+Text reaches the model as written. In JSON, member order and integer/float
+identity are preserved (`1` and `1.0` differ), while JSON whitespace and the
+spelling of numbers are normalized (`1E2` is read as the float `100.0`, `2.50`
+as `2.5`).
 
 ### Refusals
 
@@ -296,7 +302,8 @@ request.
 
 ### Response
 
-The response follows llama.cpp's, member by member; `--output` saves it:
+Once a build runs decision models, the response is printed, and saved by
+`--output`. It follows llama.cpp's, member by member:
 
 ```json
 {
@@ -346,7 +353,9 @@ other builds and settings move the last digits.
   first on a tie); `score` LFM3 d1's median level, the first whose cumulative
   probability reaches one half.
 - `probabilities` come in option or level order; `legend` gives each level's
-  description back as the request had it (`null` for none).
+  description back as the request had it (`null` for none), with the same
+  member order and integer/float identity, and normalized whitespace and
+  number spelling.
 - `confidence` is LFM3 d1's highest probability.
 - The probabilities follow the temperature the model's publisher set: they
   rank the answers the model weighed, and are not calibrated chances of being
