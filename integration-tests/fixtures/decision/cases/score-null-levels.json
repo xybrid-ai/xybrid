@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "id": "score-null-levels",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Null level descriptions print as null, and the legend keeps null",
+  "covers": ["score-null-level"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"How urgent is this?\", \"criteria\": [null, \"Today\", null]}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nHow urgent is this?\n\n0 null\n1 Today\n2 null\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 3522, 30648, 355, 532, 64929, 24, 3495, 207, 25, 10767, 207, 26, 3495, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 50,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x412e64e2", "0x411d3f38", "0x41263722"]
+      ],
+      "scores": [
+        ["0x412e64e2", "0x411d3f38", "0x41263722"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": null,
+            "1": "Today",
+            "2": null
+          },
+          "probabilities": {
+            "0": 0.46924501708290212,
+            "1": 0.21056543130090763,
+            "2": 0.32018955161619028
+          },
+          "confidence": 0.46924501708290212
+        }
+      },
+      "usage": {
+        "input_tokens": 51,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

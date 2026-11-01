@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "parse-spoken-instructions",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Audio instructions need an audio model",
+  "covers": ["media", "refusal-parse"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": {\"type\": \"input_audio\", \"input_audio\": {\"data\": \"UklGRg==\", \"format\": \"wav\"}}}}}",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "invalid_argument",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "questions.q: spoken instructions need a model with audio input"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "spoken_instructions"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "id": "math-temperature-bucket-fallback",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Without its bucket key a question falls back to the type temperature",
+  "covers": ["math-temperature-bucket"],
+  "artifact": "d1-2b-q4km",
+  "metadata": {
+    "set": {
+      "lfm3.decision.temperature.choice.3_5": "f32:2.0"
+    }
+  },
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"two\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"option_000\": \"Option number 0\", \"option_001\": \"Option number 1\"}}, \"four\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"option_000\": \"Option number 0\", \"option_001\": \"Option number 1\", \"option_002\": \"Option number 2\", \"option_003\": \"Option number 3\"}}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "two",
+          "type": "choice",
+          "keys": ["option_000", "option_001"]
+        },
+        {
+          "id": "four",
+          "type": "choice",
+          "keys": ["option_000", "option_001", "option_002", "option_003"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "two",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA Option number 0\nB Option number 1\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 41, 31921, 1579, 229, 24, 207, 42, 31921, 1579, 229, 25, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 51,
+          "select": [41, 334, 42, 378]
+        },
+        {
+          "question": "four",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA Option number 0\nB Option number 1\nC Option number 2\nD Option number 3\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 41, 31921, 1579, 229, 24, 207, 42, 31921, 1579, 229, 25, 207, 43, 31921, 1579, 229, 26, 207, 44, 31921, 1579, 229, 27, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 63,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "two",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "option_000",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "option_001",
+              "code": "B",
+              "range": [2, 4]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "four",
+          "type": "choice",
+          "pass": 1,
+          "groups": [
+            {
+              "key": "option_000",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "option_001",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "option_002",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "option_003",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "2.000000",
+          "temperature_f32": "0x40000000"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "synthetic",
+      "raw_scores": [
+        ["0x3f800000", "0x00000000", "0x00000000", "0xbf800000"],
+        ["0x3f800000", "0x00000000", "0x00000000", "0xbf800000", "0xbf800000", "0xc0000000", "0x3f000000", "0xbf000000"]
+      ],
+      "scores": [
+        ["0x3f800000", "0x00000000"],
+        ["0x3f800000", "0x00000000", "0xbf800000", "0x3f000000"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "two": {
+          "type": "choice",
+          "choice": "option_000",
+          "probabilities": {
+            "option_000": 0.67868181453607002,
+            "option_001": 0.32131818546392998
+          },
+          "confidence": 0.67868181453607002
+        },
+        "four": {
+          "type": "choice",
+          "choice": "option_000",
+          "probabilities": {
+            "option_000": 0.36321227909840342,
+            "option_001": 0.22029938325728377,
+            "option_002": 0.13361833026132661,
+            "option_003": 0.28287000738298623
+          },
+          "confidence": 0.36321227909840342
+        }
+      },
+      "usage": {
+        "input_tokens": 116,
+        "output_tokens": 0
+      }
+    }
+  },
+  "xybrid": {
+    "load": "match",
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "given",
+    "finalize": "match"
+  }
+}

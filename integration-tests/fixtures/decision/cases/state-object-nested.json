@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "id": "state-object-nested",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A nested object state, keys in request order (not sorted), rendered with tojson(indent=2)",
+  "covers": ["state-object", "json-order", "json-literals", "json-unicode"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": {\"zeta\": \"last letter first\", \"ticket\": {\"id\": 4471, \"items\": [{\"sku\": \"B-2\", \"qty\": 2, \"price\": 19.99}, {\"sku\": \"A-1\", \"qty\": 1, \"price\": 5.0}], \"customer\": {\"name\": \"Zo\u00eb \u00c5ngstr\u00f6m\", \"tier\": \"pro\"}}, \"alpha\": [true, false, null], \"empty_object\": {}, \"empty_array\": [], \"note\": \"Charged twice.\"}, \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"zeta\": \"last letter first\",\n  \"ticket\": {\n    \"id\": 4471,\n    \"items\": [\n      {\n        \"sku\": \"B-2\",\n        \"qty\": 2,\n        \"price\": 19.99\n      },\n      {\n        \"sku\": \"A-1\",\n        \"qty\": 1,\n        \"price\": 5.0\n      }\n    ],\n    \"customer\": {\n      \"name\": \"Zo\u00eb \u00c5ngstr\u00f6m\",\n      \"tier\": \"pro\"\n    }\n  },\n  \"alpha\": [\n    true,\n    false,\n    null\n  ],\n  \"empty_object\": {},\n  \"empty_array\": [],\n  \"note\": \"Charged twice.\"\n}\n\n\nQUESTION:\nIs the customer asking for a refund?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 17736, 6380, 496, 9175, 7126, 1008, 6107, 229, 496, 99489, 6380, 827, 360, 496, 332, 6380, 229, 30963, 25, 920, 360, 496, 25706, 6380, 19843, 733, 827, 463, 496, 37516, 6380, 496, 42, 21, 26, 6107, 463, 496, 89, 1436, 6380, 229, 26, 920, 463, 496, 50862, 6380, 229, 412, 22, 2461, 207, 733, 10016, 733, 827, 463, 496, 37516, 6380, 496, 41, 21, 25, 6107, 463, 496, 89, 1436, 6380, 229, 25, 920, 463, 496, 50862, 6380, 229, 29, 22, 24, 207, 733, 1130, 360, 40439, 360, 496, 95142, 6380, 827, 733, 496, 2554, 6380, 496, 105707, 6785, 21501, 881, 36068, 6107, 733, 496, 71946, 6380, 496, 908, 1110, 360, 1130, 229, 10016, 229, 496, 3862, 6380, 19843, 360, 2846, 920, 360, 4330, 920, 360, 3495, 207, 229, 40439, 229, 496, 16232, 33343, 6380, 66126, 229, 496, 16232, 32590, 6380, 66447, 229, 496, 14700, 6380, 496, 1934, 960, 290, 10625, 1917, 64024, 63509, 833, 4439, 278, 13107, 13564, 374, 267, 52966, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 183,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40dfe56c", "0x41124d78", "0x40c89d68", "0x4104bb8d", "0x40330140"]
+      ],
+      "scores": [
+        ["0x41124d78", "0x4104bb8d"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "noul",
+          "noul": 0.65343215651190434
+        }
+      },
+      "usage": {
+        "input_tokens": 184,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}
