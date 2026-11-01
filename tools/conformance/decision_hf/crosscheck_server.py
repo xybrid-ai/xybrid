@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Send the cases to a running llama-server and compare its answers with the HF reference's (stdlib only).
 
-    crosscheck_server.py --url http://127.0.0.1:8089 --hf OBSERVATIONS --temperature 1.337398 --out FILE CASE...
+    crosscheck_server.py --url http://127.0.0.1:8089 --hf OBSERVATIONS --temperature 1.3373980522155762 \
+        --artifact d1-2b-f16 --settings cpu-t4-fa-off --label 'what ran' --out FILE CASE...
 
 For each case the exact `request_text` goes to `POST /v1/systemone`; the status and body are kept. Where both
 references answered, per question: whether the answer agrees (choice, median level, yes/no at one half), the largest
@@ -10,11 +11,15 @@ T * log(p_i / p_top) recovers its max-pooled logit differences s_i - s_top exact
 server used, `--temperature`), which compare with the reference's `hf.evaluate.scores` (raw logits, max-pooled) and
 are independent of either temperature. Options whose server probability underflowed to 0 are skipped. This is a
 black-box cross-check of the difference matrix and a G1 feasibility measurement, not the upstream oracle.
+
+The output records what it was computed from: the artifact and settings ids the server ran (as given), this script's
+sha256, and the sha256 of every HF observation it compared, which provenance.py checks against the committed files.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import struct
@@ -85,7 +90,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--url", default="http://127.0.0.1:8089")
     parser.add_argument("--hf", type=Path, required=True, help="the HF reference's observation directory")
     parser.add_argument("--temperature", type=float, required=True, help="the server's effective temperature")
-    parser.add_argument("--label", default="", help="what the server ran (artifact, settings), recorded as given")
+    parser.add_argument("--artifact", required=True, help="the artifact id of the GGUF the server ran")
+    parser.add_argument("--settings", required=True, help="the settings id the server ran under")
+    parser.add_argument("--label", default="", help="how the server was built and started, recorded as given")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--timeout", type=float, default=600.0)
     args = parser.parse_args(argv)
@@ -94,12 +101,15 @@ def main(argv: list[str] | None = None) -> int:
     for path in args.cases:
         files.extend(sorted(path.glob("*.json")) if path.is_dir() else [path])
     results = []
+    compared: dict[str, str] = {}
     for path in files:
         case = json.loads(path.read_text(encoding="utf-8"))
         status, body, seconds = post(args.url.rstrip("/") + "/v1/systemone", case["request_text"], args.timeout)
         entry: dict[str, Any] = {"case": case["id"], "status": status, "seconds": round(seconds, 2), "body": body}
         hf_path = args.hf / f"{case['id']}.json"
         hf = json.loads(hf_path.read_text(encoding="utf-8")) if hf_path.is_file() else None
+        if hf is not None:
+            compared[case["id"]] = hashlib.sha256(hf_path.read_bytes()).hexdigest()
         hf_final = (hf or {}).get("hf", {}).get("finalize")
         if status == 200 and isinstance(body, dict) and hf_final and "answers" in hf_final:
             entry["same_usage"] = body["usage"]["input_tokens"] == hf_final["usage"]["input_tokens"]
@@ -128,7 +138,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"{case['id']:34s} {status:3d} {summary}", flush=True)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    document = {"server": args.label, "temperature": args.temperature, "cases": results}
+    document = {
+        "server": args.label,
+        "artifact": args.artifact,
+        "settings": args.settings,
+        "temperature": args.temperature,
+        "recipe": {"crosscheck_server.py": hashlib.sha256(Path(__file__).resolve().read_bytes()).hexdigest()},
+        "observations": compared,
+        "cases": results,
+    }
     args.out.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return 0
 

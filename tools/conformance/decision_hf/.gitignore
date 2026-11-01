@@ -1,0 +1,4 @@
+# The HF reference's downloads, builds and runs (clean.sh removes them): the
+# pinned snapshot, the remote-code module cache, the GGUFs and llama-server
+# build of the cross-checks, run logs. XYBRID_DECISION_HF_CACHE moves it.
+/.cache/

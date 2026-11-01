@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 # Fetch the pinned LiquidAI/d1-2B snapshot the HF reference runner reads.
 #
-#   tools/conformance/decision_hf/download.sh
+#   tools/conformance/decision_hf/download.sh [--no-weights]
 #
 # Every file pins.json lists is fetched from its immutable URL
 # (https://huggingface.co/<repo>/resolve/<revision>/<file>) into
-# $XYBRID_DECISION_HF_CACHE/snapshots/<revision>/d1-2B/ (default:
-# <repo>/target/decision-hf) and kept only if its size and sha256 match the
-# pin. A file already there that matches is not fetched again. Needs curl and
-# jq. Prints the snapshot directory. About 3.9 GB, almost all of it the
-# bfloat16 weights. See README.md.
+# $XYBRID_DECISION_HF_CACHE/snapshots/<revision>/d1-2B/ (default: .cache/ in
+# this folder, which clean.sh removes) and kept only if its size and sha256
+# match the pin. A file already there that matches is not fetched again.
+# About 3.9 GB, almost all of it the bfloat16 weights; --no-weights fetches
+# every file but model.safetensors (33 files, about 18 MB), all that the
+# weight-free synthetic_median.py needs. Needs curl and jq. Prints the snapshot
+# directory. See README.md.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
 PINS="$HERE/pins.json"
-CACHE="${XYBRID_DECISION_HF_CACHE:-$REPO_ROOT/target/decision-hf}"
+CACHE="${XYBRID_DECISION_HF_CACHE:-$HERE/.cache}"
+WEIGHTS=model.safetensors
 
 die() {
     echo "download: $*" >&2
@@ -34,6 +36,13 @@ size_file() {
     wc -c <"$1" | tr -d ' '
 }
 
+skip=""
+case "${1:-}" in
+    "") ;;
+    --no-weights) skip="$WEIGHTS" ;;
+    *) die "usage: download.sh [--no-weights]" ;;
+esac
+
 command -v curl >/dev/null || die "curl is required"
 command -v jq >/dev/null || die "jq is required"
 
@@ -50,6 +59,7 @@ while IFS=$'\t' read -r name bytes sha; do
     case "$name" in
         "" | */* | .*) die "unsafe file name in pins.json: $name" ;;
     esac
+    [ "$name" != "$skip" ] || continue
     path="$dest/$name"
     if [ -f "$path" ] && [ "$(size_file "$path")" = "$bytes" ] && [ "$(sha256_file "$path")" = "$sha" ]; then
         continue
@@ -69,5 +79,5 @@ while IFS=$'\t' read -r name bytes sha; do
     fetched=$((fetched + 1))
 done < <(jq -r '.files | to_entries[] | [.key, (.value.bytes | tostring), .value.sha256] | @tsv' "$PINS")
 
-echo "download: $repo@$revision verified ($fetched fetched)" >&2
+echo "download: $repo@$revision verified${skip:+ without $skip} ($fetched fetched)" >&2
 echo "$dest"

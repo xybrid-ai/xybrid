@@ -28,11 +28,18 @@ Numerics: eval and inference mode, deterministic algorithms, a fixed thread coun
 checkpoint stores bfloat16 weights; `--precision f32` (the default) keeps them in bfloat16 between uses and gives each
 decoder layer, the embeddings, the final norm and the LM head exact float32 copies of their own parameters for the
 duration of their forward, so every operation runs in float32 on the values a float32 load holds, within 8 GB.
-`--precision f32-load` is the model card's CPU recipe (`from_pretrained(dtype=torch.float32)`, about 9 GB); the two
-give bit-identical outputs (README.md, "Precision"). `--precision bf16` runs the bfloat16 forward, for comparison.
+`--check-f32-parity` proves it during the run: every module call is replayed on a float32 copy of the module and
+must return the same bytes from float32 inputs, and every hooked module must be verified at least once, or the run
+fails. `--precision f32-load` is the model card's CPU recipe (`from_pretrained(dtype=torch.float32)`, about 9 GB, too
+large for this machine); `--precision bf16` runs the bfloat16 forward, for comparison.
 
 `--set-size default` runs each request in one call at the checkpoint's own set size (16 questions packed after one
 state), the reference's default serving mode, for the packing row of DIFFERENCES.md.
+
+A run writes its observations only once every case has run and the proof (if asked for) holds; any broken invariant
+exits 1 with nothing written. `--run-log` records what the observations were made from, as it stood when the run
+started (the pins, the verified snapshot files, the lock, the recipe sources `RECIPE`, the request digests) and the
+digest of every observation written; provenance.py carries those identities and refuses any that no longer hold.
 
 Usage: README.md. Run it through run.sh, which supplies the pinned environment.
 """
@@ -41,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import dataclasses
 import hashlib
 import json
 import math
@@ -58,7 +66,13 @@ REPO_ROOT = HERE.parents[2]
 PINS = HERE / "pins.json"
 REQUIREMENTS = HERE / "requirements.txt"
 FIXTURES = REPO_ROOT / "integration-tests/fixtures/decision/hf"
-DEFAULT_CACHE = REPO_ROOT / "target/decision-hf"
+# Snapshot, module cache, runs: git-ignored here and declared by clean.sh.
+DEFAULT_CACHE = HERE / ".cache"
+# The sources whose bytes decide an observation's bytes besides the pins and the lock: every run log records their
+# sha256 at run time, and provenance.py refuses observations whose recorded sources differ from the current ones.
+RECIPE = ("run_reference.py", "run.sh")
+# The one pinned file a weight-free entry point (synthetic_median.py) neither needs nor verifies.
+WEIGHTS = "model.safetensors"
 # The coordinator's settings ids (cpu-t4-fa-off, ...) name llama.cpp contexts; these name the reference's runs and
 # are defined in the fixtures' provenance.json.
 SETTINGS_ID = "hf-cpu-{precision}-t{threads}"
@@ -152,13 +166,22 @@ def sha256_file(path: Path) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def verify_snapshot(snapshot: Path, pins: dict) -> list[dict[str, str]]:
-    """Refuse unless every pinned file is in `snapshot` with its size and sha256, and no unpinned code is."""
+def recipe(names: tuple[str, ...]) -> dict[str, str]:
+    """The sha256 of each of this folder's `names`: a run's recipe, recorded when the run starts."""
+    return {name: sha256_file(HERE / name) for name in names}
+
+
+def verify_snapshot(snapshot: Path, pins: dict, without: tuple[str, ...] = ()) -> list[dict[str, str]]:
+    """Refuse unless every pinned file but `without` is in `snapshot` with its size and sha256, and no unpinned code
+    is. Model inference verifies all of them; a weight-free entry point passes `without=(WEIGHTS,)`."""
     verified = []
     for name, pin in sorted(pins["files"].items()):
+        if name in without:
+            continue
         path = snapshot / name
         if not path.is_file():
-            raise SystemExit(f"{path} is missing: run download.sh")
+            hint = " (download.sh --no-weights fetches all but the weights)" if without else ""
+            raise SystemExit(f"{path} is missing: run download.sh{hint}")
         if path.stat().st_size != pin["bytes"]:
             raise SystemExit(f"{path} has {path.stat().st_size} bytes, pinned {pin['bytes']}")
         actual = sha256_file(path)
@@ -295,13 +318,15 @@ class Float32Compute:
 
 
 class ParityCheck:
-    """Proves `Float32Compute` equals a float32 load, module by module, on real inputs.
+    """Proves `Float32Compute` equals a float32 load, module by module, on real inputs, or stops the run.
 
-    Every module `Float32Compute` covers records the inputs and output of each call; `verify` replays the call on a
-    float32 deep copy of the module (`copy.deepcopy(module).to(torch.float32)`: exactly the parameters a float32 load
-    holds) and requires a bit-identical output, and every floating input to be float32. The modules chain (embedding,
-    each decoder layer, final norm, LM head), so equal outputs from equal inputs make the whole forward equal to a
-    float32 load's. A float32 load itself (about 9 GB) does not fit this machine's 8 GB."""
+    Every module `Float32Compute` covers records the inputs and the output of each call. `verify` replays each
+    recorded call on a float32 deep copy of the module (`copy.deepcopy(module).to(torch.float32)`: exactly the
+    parameters a float32 load holds) and raises `RunnerError` unless every floating input tensor is float32 and the
+    replay returns the recorded output's structure (types, lengths, keys), dtypes and shapes with the same bytes.
+    `require_coverage` raises unless at least one call was verified and every hooked module at least once. The
+    modules chain (embedding, each decoder layer, final norm, LM head), so equal outputs from equal inputs make the
+    whole forward a float32 load's. A float32 load itself (about 9 GB) does not fit this machine's 8 GB."""
 
     HOOKS = (
         "_forward_pre_hooks",
@@ -313,10 +338,12 @@ class ParityCheck:
 
     def __init__(self, torch_module, modules: list) -> None:
         self.torch = torch_module
+        self.modules = list(modules)
         self.pending: dict[int, tuple] = {}
         self.records: list[tuple] = []
-        self.results = {"calls": 0, "bit_identical": 0, "max_abs_diff": 0.0, "non_float32_inputs": 0}
-        for module in modules:
+        self.verified: set[int] = set()
+        self.calls = 0
+        for module in self.modules:
             module.register_forward_pre_hook(self.before, with_kwargs=True)
             module.register_forward_hook(self.after, with_kwargs=True)
 
@@ -326,6 +353,11 @@ class ParityCheck:
     def after(self, module, args, kwargs, output) -> None:
         recorded_args, recorded_kwargs = self.pending.pop(id(module))
         self.records.append((module, recorded_args, recorded_kwargs, output))
+
+    def discard(self) -> None:
+        """Forget the calls of a forward that raised: they reach no observation."""
+        self.pending.clear()
+        self.records.clear()
 
     def float32_copy(self, module):
         saved = {name: getattr(module, name) for name in self.HOOKS if hasattr(module, name)}
@@ -338,25 +370,95 @@ class ParityCheck:
                 setattr(module, name, hooks)
         return clone.to(self.torch.float32)
 
-    def verify(self) -> None:
+    def require_float32(self, value: Any, where: str) -> None:
+        """Every floating tensor in `value` (tuples, lists, dicts, dataclasses, walked) is float32."""
         torch = self.torch
-        tensors = lambda value: [value] if torch.is_tensor(value) else [t for t in value if torch.is_tensor(t)]
-        for module, args, kwargs, output in self.records:
-            for value in [*args, *kwargs.values()]:
-                if torch.is_tensor(value) and value.is_floating_point() and value.dtype != torch.float32:
-                    self.results["non_float32_inputs"] += 1
+        if torch.is_tensor(value):
+            if value.is_floating_point() and value.dtype != torch.float32:
+                raise RunnerError(f"float32 parity: {where} is {value.dtype}, not float32")
+        elif isinstance(value, (tuple, list)):
+            for i, item in enumerate(value):
+                self.require_float32(item, f"{where}[{i}]")
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                self.require_float32(item, f"{where}[{key!r}]")
+        elif dataclasses.is_dataclass(value) and not isinstance(value, type):
+            for field in dataclasses.fields(value):
+                self.require_float32(getattr(value, field.name), f"{where}.{field.name}")
+
+    def bits(self, tensor):
+        return tensor.detach().contiguous().reshape(-1).view(self.torch.uint8)
+
+    def compare(self, recorded: Any, again: Any, where: str) -> None:
+        """Raise unless `again` has `recorded`'s structure and every tensor in it the same dtype, shape and bytes."""
+        torch = self.torch
+        if torch.is_tensor(recorded) or torch.is_tensor(again):
+            if not (torch.is_tensor(recorded) and torch.is_tensor(again)):
+                raise RunnerError(f"float32 parity: {where}: {type(recorded).__name__} recorded, "
+                                  f"{type(again).__name__} replayed")
+            if recorded.dtype != again.dtype or recorded.shape != again.shape:
+                raise RunnerError(f"float32 parity: {where}: {recorded.dtype} {tuple(recorded.shape)} recorded, "
+                                  f"{again.dtype} {tuple(again.shape)} replayed")
+            a, b = self.bits(recorded), self.bits(again)
+            if not torch.equal(a, b):
+                raise RunnerError(f"float32 parity: {where}: {int((a != b).sum())} of {a.numel()} bytes differ")
+            return
+        if isinstance(recorded, (tuple, list, dict)) or isinstance(again, (tuple, list, dict)):
+            if type(recorded) is not type(again) or len(recorded) != len(again):
+                raise RunnerError(f"float32 parity: {where}: {type(recorded).__name__} of {len(recorded)} recorded, "
+                                  f"{type(again).__name__} of {len(again)} replayed")
+            if isinstance(recorded, dict):
+                if list(recorded) != list(again):
+                    raise RunnerError(
+                        f"float32 parity: {where}: keys {list(recorded)} recorded, {list(again)} replayed"
+                    )
+                for key in recorded:
+                    self.compare(recorded[key], again[key], f"{where}[{key!r}]")
+            else:
+                for i in range(len(recorded)):
+                    self.compare(recorded[i], again[i], f"{where}[{i}]")
+            return
+        if recorded != again:
+            raise RunnerError(f"float32 parity: {where}: {recorded!r} recorded, {again!r} replayed")
+
+    def verify(self) -> None:
+        """Replay every call recorded since the last `verify`; raise `RunnerError` at the first difference."""
+        torch = self.torch
+        if self.pending:
+            raise RunnerError("float32 parity: a hooked module started a call that never returned")
+        records, self.records = self.records, []
+        for module, args, kwargs, output in records:
+            name = type(module).__name__
+            self.require_float32(args, f"{name} args")
+            self.require_float32(kwargs, f"{name} kwargs")
             clone = self.float32_copy(module)
             with torch.inference_mode():
                 again = clone(*args, **kwargs)
-            pairs = list(zip(tensors(output), tensors(again)))
-            self.results["calls"] += 1
-            if pairs and all(a.shape == b.shape and torch.equal(a, b) for a, b in pairs):
-                self.results["bit_identical"] += 1
-            else:
-                diff = max((float((a - b).abs().max()) for a, b in pairs if a.shape == b.shape), default=math.inf)
-                self.results["max_abs_diff"] = max(self.results["max_abs_diff"], diff)
+            self.compare(output, again, f"{name} output")
+            self.calls += 1
+            self.verified.add(id(module))
             del clone, again
-        self.records.clear()
+
+    def require_coverage(self) -> dict[str, int]:
+        """The proof's coverage, if it is a proof: at least one call verified, every hooked module at least once."""
+        if self.pending or self.records:
+            raise RunnerError("float32 parity: recorded module calls were never verified")
+        if self.calls == 0:
+            raise RunnerError("float32 parity: no module call was verified")
+        unseen = [type(m).__name__ for m in self.modules if id(m) not in self.verified]
+        if unseen:
+            raise RunnerError(f"float32 parity: {len(unseen)} of {len(self.modules)} hooked modules never ran")
+        return self.results()
+
+    def results(self) -> dict[str, int]:
+        # every verified call was bit-identical with float32 inputs: anything else raised
+        return {
+            "calls": self.calls,
+            "bit_identical": self.calls,
+            "non_float32_inputs": 0,
+            "modules_hooked": len(self.modules),
+            "modules_verified": len(self.verified),
+        }
 
 
 class Capture:
@@ -490,17 +592,28 @@ class Reference:
             self.peak_anon_gib = max(self.peak_anon_gib, anon)
 
     def call(self, state: Any, questions: dict, set_size: int | None) -> tuple[dict, float]:
+        """`system_one`, then, with `--check-f32-parity`, the proof of every module call it made. A proof failure is
+        a `RunnerError`, never a refusal by the reference, so it ends the run before any observation is written."""
         self.capture.clear()
         started = time.perf_counter()
         try:
             result = self.model.system_one(state, questions, set_size=set_size)
+        except BaseException:
+            if self.parity is not None:
+                self.parity.discard()  # a forward that raised reaches no observation
+            raise
         finally:
             if self.compute is not None:
                 self.compute.restore_all()
         seconds = time.perf_counter() - started
         self.note_memory()
         if self.parity is not None:
-            self.parity.verify()
+            try:
+                self.parity.verify()
+            except RunnerError:
+                raise
+            except Exception as error:  # the replay itself failed: no proof
+                raise RunnerError(f"float32 parity: replaying a module call failed: {error!r}") from error
         return result, seconds
 
     # ------------------------------------------------------------------ stages
@@ -790,13 +903,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--check-f32-parity",
         action="store_true",
-        help="replay every module of every forward as its float32 copy and require bit-identical outputs",
+        help="replay every module call of every forward as its float32 copy; any difference, a non-float32 input or "
+        "a module never verified fails the run (exit 1) before anything is written",
     )
     args = parser.parse_args(argv)
 
     packed = args.set_size == "default"
     if args.out is None:
         args.out = FIXTURES / ("packed" if packed else "observations")
+    # What can change an observation's bytes, as it stands when the run starts (the run log records it).
+    inputs = {
+        "pins_sha256": sha256_file(PINS),
+        "requirements_sha256": sha256_file(REQUIREMENTS),
+        "recipe": recipe(RECIPE),
+    }
     pins = json.loads(PINS.read_text(encoding="utf-8"))
     if args.snapshot is None:
         args.snapshot = args.cache / "snapshots" / pins["revision"] / "d1-2B"
@@ -805,53 +925,71 @@ def main(argv: list[str] | None = None) -> int:
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):
         os.environ[var] = str(args.threads)
-    verified = verify_snapshot(args.snapshot, pins)
+    inputs["snapshot_files"] = verify_snapshot(args.snapshot, pins)
     files = case_files(args.cases)
     if not files:
         raise SystemExit("no case files")
 
-    reference = Reference(args, pins)
-    reference.note_memory()
-    args.out.mkdir(parents=True, exist_ok=True)
+    # Observations stay in memory until every case ran and the parity proof (if asked for) holds: a failed run
+    # writes nothing, and exits nonzero.
+    written: list[tuple[str, str]] = []
+    requests: dict[str, str] = {}
     timings = []
-    for path in files:
-        case = json.loads(path.read_text(encoding="utf-8"))
-        started = time.perf_counter()
-        observation = reference.run_packed(case) if packed else reference.run_case(case)
-        seconds = time.perf_counter() - started
-        (args.out / f"{case['id']}.json").write_text(dumps(observation), encoding="utf-8")
-        status = status_of(observation)
-        tokens = observation["hf"].get("finalize", {}).get("usage", {}).get("input_tokens")
-        timings.append({"case": case["id"], "seconds": round(seconds, 2), "input_tokens": tokens, "status": status})
-        print(f"{case['id']:34s} {status:20s} tokens={tokens!s:>6s} {seconds:7.1f}s", flush=True)
+    try:
+        reference = Reference(args, pins)
+        reference.note_memory()
+        for path in files:
+            case = json.loads(path.read_text(encoding="utf-8"))
+            started = time.perf_counter()
+            observation = reference.run_packed(case) if packed else reference.run_case(case)
+            seconds = time.perf_counter() - started
+            written.append((case["id"], dumps(observation)))
+            requests[case["id"]] = observation["request_text_sha256"]
+            status = status_of(observation)
+            tokens = observation["hf"].get("finalize", {}).get("usage", {}).get("input_tokens")
+            timings.append({"case": case["id"], "seconds": round(seconds, 2), "input_tokens": tokens, "status": status})
+            print(f"{case['id']:34s} {status:20s} tokens={tokens!s:>6s} {seconds:7.1f}s", flush=True)
+        parity = reference.parity.require_coverage() if reference.parity is not None else None
+        if recipe(RECIPE) != inputs["recipe"] or sha256_file(PINS) != inputs["pins_sha256"]:
+            raise RunnerError("the recipe or the pins changed during the run")
+    except RunnerError as error:
+        print(f"run_reference: {error}; no observation written", file=sys.stderr)
+        return 1
 
+    args.out.mkdir(parents=True, exist_ok=True)
+    outputs = {}
+    for case_id, text in written:
+        (args.out / f"{case_id}.json").write_text(text, encoding="utf-8")
+        outputs[case_id] = sha256_bytes(text.encode("utf-8"))
     peak_gib = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20
     print(
         f"model load {reference.load_seconds:.1f}s, peak RSS {peak_gib:.2f} GiB "
         f"(anonymous {reference.peak_anon_gib:.2f} GiB at most between calls)",
         flush=True,
     )
-    if reference.parity is not None:
-        print(f"float32 parity: {reference.parity.results}", flush=True)
+    if parity is not None:
+        print(f"float32 parity: {parity}", flush=True)
     if args.run_log:
+        settings = SETTINGS_ID.format(precision=args.precision, threads=args.threads) + ("-packed" if packed else "")
         log = {
             "reference": {"artifact": pins["artifact"], "repo": pins["repo"], "revision": pins["revision"]},
-            "snapshot_files": verified,
+            "inputs": {**inputs, "requests": requests},
+            "outputs": outputs,
             "code_imported": reference.code,
             "environment": {
-                "requirements_sha256": sha256_file(REQUIREMENTS),
+                "requirements_sha256": inputs["requirements_sha256"],
                 "versions": reference.versions,
                 "torch_parallel": reference.torch.__config__.parallel_info().splitlines()[:6],
                 "cpu_capability": reference.torch.backends.cpu.get_cpu_capability(),
             },
             "numerics": {
-                "settings": SETTINGS_ID.format(precision=args.precision, threads=args.threads)
-                + ("-packed" if packed else ""),
+                "settings": settings,
                 "precision": args.precision,
                 "threads": args.threads,
                 "set_size": "default (the checkpoint's d1_set_size)" if packed else 1,
                 "deterministic_algorithms": True,
                 "mode": "eval, inference_mode",
+                "float32_parity_gate": parity is not None,
             },
             "hardware": hardware(),
             "model_load_seconds": round(reference.load_seconds, 2),
@@ -859,8 +997,8 @@ def main(argv: list[str] | None = None) -> int:
             "peak_anon_gib_between_calls": round(reference.peak_anon_gib, 2),
             "cases": timings,
         }
-        if reference.parity is not None:
-            log["float32_parity"] = reference.parity.results
+        if parity is not None:
+            log["float32_parity"] = parity
         args.run_log.parent.mkdir(parents=True, exist_ok=True)
         args.run_log.write_text(json.dumps(log, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return 0

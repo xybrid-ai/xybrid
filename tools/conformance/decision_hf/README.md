@@ -25,32 +25,41 @@ platform (the lock pins CPU-only torch for it).
 
 ```bash
 tools/conformance/decision_hf/download.sh   # the pinned snapshot, size and sha256 checked (3.9 GB)
-tools/conformance/decision_hf/run.sh integration-tests/fixtures/decision/hf/cases
+tools/conformance/decision_hf/run.sh --check-f32-parity integration-tests/fixtures/decision/hf/cases
 # any case files in the decision case schema, e.g. the upstream oracle's:
 tools/conformance/decision_hf/run.sh --out /tmp/hf-obs integration-tests/fixtures/decision/cases
 ```
 
 `download.sh` fetches every file `pins.json` lists from its immutable URL
-(`resolve/<revision>`) into `$XYBRID_DECISION_HF_CACHE/snapshots/<revision>/d1-2B/`
-(default `target/decision-hf`), keeping only files whose size and sha256 match.
-`run.sh` builds the pinned environment (Python 3.12 with `requirements.txt`,
-through uv; on Linux it points uv at the PyTorch CPU index), runs offline, and
-hands its arguments to `run_reference.py`:
+(`resolve/<revision>`) into `$XYBRID_DECISION_HF_CACHE/snapshots/<revision>/d1-2B/`,
+keeping only files whose size and sha256 match. The default cache is `.cache/`
+in this folder: git ignores it, and `clean.sh` (run by the root `clean.sh`)
+removes it with the module cache, the cross-checks' GGUFs and llama.cpp build,
+and the run logs. A cache moved with `XYBRID_DECISION_HF_CACHE` is yours to
+clean. `run.sh` builds the pinned environment (Python 3.12 with
+`requirements.txt`, through uv; on Linux it points uv at the PyTorch CPU index),
+runs offline, and hands its arguments to `run_reference.py`:
 
 | Option | Default | Meaning |
 |---|---|---|
 | `CASE...` | | case files, or directories of them |
 | `--out DIR` | `integration-tests/fixtures/decision/hf/observations` (`…/packed` with `--set-size default`) | one `<id>.json` observation per case |
-| `--run-log FILE` | none | environment, hardware, per-case seconds and tokens, model load time, peak memory |
+| `--run-log FILE` | none | what the observations were made from, recorded when the run starts (pins, verified snapshot files, lock, recipe sources, request digests), the digest of every observation written, the parity coverage, environment, hardware, timings and memory |
 | `--threads N` | 1 | torch threads; the committed observations use 1 (see Precision) |
 | `--precision` | `f32` | `f32`: float32 forward over the bf16 weights. `f32-load`: the model card's `dtype=torch.float32` (about 9 GB). `bf16`: the bfloat16 forward |
 | `--set-size` | `1` | `default`: the checkpoint's own set size (16), every question of a request packed after one state |
-| `--check-f32-parity` | off | replay every module of every forward as its float32 copy; report bit-identity |
+| `--check-f32-parity` | off | replay every module call of every forward on its float32 copy; any byte that differs, any floating input that is not float32, or a hooked module never verified fails the run (exit 1, nothing written) |
 
-It reads only `id` and `request_text` from a case, so it takes the upstream
-oracle's cases and this folder's alike. A run of the 46 committed cases takes
-about 7 minutes on 4 vCPUs at one thread: most questions take 5 to 9 s, and
-the 3,605-token case takes 86 s.
+The runner reads only `id` and `request_text` from a case, so it takes the
+upstream oracle's cases and this folder's alike. It writes its observations
+only once every case has run and the parity proof (when asked for) holds: any
+broken invariant exits 1 with nothing written. A run of the 46 committed cases
+takes about 7 minutes on 4 vCPUs at one thread: most questions take 5 to 9 s,
+and the 3,605-token case takes 86 s. The parity proof roughly doubles that.
+
+`synthetic_median.py` (the score-median cases) needs no weights:
+`download.sh --no-weights` fetches the 33 other pinned files (about 18 MB) and
+`run.sh synthetic_median.py` verifies exactly those.
 
 ## What an observation holds
 
@@ -139,13 +148,24 @@ parameters for the duration of its forward, and a forward hook swaps the
 bfloat16 data back. The hooked modules cover every text-model parameter, and
 the media encoders are guarded so that they never run.
 
-That this is a float32 load's forward is checked, not assumed.
-`--check-f32-parity` records each hooked module's inputs and output during
-real forwards. It then replays the call on a float32 deep copy of the module,
-the parameters a float32 load holds, and requires a bit-identical output and
-float32 inputs. On six cases (162 module calls) all 162 were bit-identical,
-with no non-float32 input. The modules chain, so the whole forward is a
-float32 load's. The numbers are in `hf/provenance.json` under `verification`.
+That this is a float32 load's forward is checked, not assumed, and the check
+fails closed. `--check-f32-parity` records each hooked module's inputs and
+output during real forwards, then replays every call on a float32 deep copy of
+the module, the parameters a float32 load holds. The run stops (exit 1, nothing
+written) if:
+
+- a floating input is not float32;
+- the replay's output differs from the recorded one in structure (types,
+  lengths, keys), dtype, shape or a single byte;
+- the run verified no call, or left a hooked module unverified.
+
+The modules chain, so a passing proof makes the whole forward a float32
+load's. The committed observation and packed runs ran under it; their
+coverage is in `hf/provenance.json` under `verification.float32_parity`, and
+`provenance.py` refuses an observation run without a passing proof.
+`run.sh tests` holds the gate's regression tests (a changed output, one
+flipped bit, an extra output, a bfloat16 input, an empty or partial proof, and
+a failed run writing nothing). They use torch, not the weights.
 
 Determinism:
 
@@ -167,40 +187,86 @@ Settings ids name these runs (the coordinator's `cpu-t4-fa-off` and
 
 ## Regenerate the committed fixtures
 
-Only when the pins, the environment, the runner or a case changes. Building
-`llama-server` (for the cross-checks) takes about 15 minutes; everything else
-about 40.
+Only when the pins, the environment, a recipe source or a case changes:
+`provenance.py --check` names what changed. Building `llama-server` for the
+cross-checks takes about 15 minutes; everything else about an hour, most of it
+the gated observation run and the bf16 comparison.
 
 ```bash
-H=tools/conformance/decision_hf FIX=integration-tests/fixtures/decision/hf RUNS=target/decision-hf/runs
-python3 $H/make_cases.py                                         # cases/ (stdlib)
-$H/run.sh --run-log $RUNS/observations.run.json $FIX/cases       # observations/
-$H/run.sh --set-size default --run-log $RUNS/packed.run.json \
-    $FIX/cases/hf-diff-packing.json $FIX/cases/hf-card-three.json  # packed/
-$H/run.sh synthetic_median.py                                    # synthetic/median.json
-# verification runs, written under $RUNS, compared with compare_observations.py --json:
-#   --check-f32-parity (parity.run.json, repeat.compare.json), --threads 4 (threads.compare.json),
-#   --precision bf16 (bf16.compare.json), and observations/ vs packed/ (packed.compare.json)
-cmake -S vendor/llama-cpp -B target/decision-hf/llama-build -DCMAKE_BUILD_TYPE=Release \
+H=tools/conformance/decision_hf FIX=integration-tests/fixtures/decision/hf RUNS=$H/.cache/runs
+python3 -B $H/make_cases.py                                                   # cases/
+$H/run.sh --check-f32-parity --run-log $RUNS/observations.run.json $FIX/cases  # observations/
+$H/run.sh --check-f32-parity --set-size default --run-log $RUNS/packed.run.json \
+    $FIX/cases/hf-diff-packing.json $FIX/cases/hf-card-three.json             # packed/
+$H/run.sh synthetic_median.py --run-log $RUNS/synthetic.run.json              # synthetic/median.json
+# verification runs, under $RUNS, then compared with the committed observations:
+$H/run.sh --out $RUNS/repeat --run-log $RUNS/repeat.run.json <a few cases>
+$H/run.sh --threads 4 --out $RUNS/threads --run-log $RUNS/threads.run.json <a few cases>
+$H/run.sh --precision bf16 --out $RUNS/bf16 --run-log $RUNS/bf16.run.json <the hf-* cases>
+for v in repeat threads bf16; do
+    python3 -B $H/compare_observations.py $FIX/observations $RUNS/$v --json $RUNS/$v.compare.json
+done
+python3 -B $H/compare_observations.py $FIX/observations $FIX/packed --json $RUNS/packed.compare.json
+# cross-checks (crosscheck/<artifact>.<settings>.json): llama-server from vendor/llama-cpp
+cmake -S vendor/llama-cpp -B $H/.cache/llama-build -DCMAKE_BUILD_TYPE=Release \
     -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF
-cmake --build target/decision-hf/llama-build -j 3 --target llama-server
-# for each GGUF and settings (crosscheck/<artifact>.<settings>.json):
-target/decision-hf/llama-build/bin/llama-server -m <gguf> -t 4 -c 4096 -b 4096 -ub 4096 -fa off -np 1 --port 8089 &
-python3 $H/crosscheck_server.py --url http://127.0.0.1:8089 --hf $FIX/observations \
-    --temperature 1.3373980522155762 --label '<what ran>' --out $FIX/crosscheck/<artifact>.<settings>.json <cases>
-python3 $H/provenance.py --update --runs $RUNS                   # provenance.json
-python3 $H/provenance.py --check
+cmake --build $H/.cache/llama-build -j 3 --target llama-server
+$H/.cache/llama-build/bin/llama-server -m $H/.cache/gguf/d1-2B-F16.gguf \
+    -t 4 -c 4096 -b 4096 -ub 4096 -fa off -np 1 --port 8089 &
+python3 -B $H/crosscheck_server.py --url http://127.0.0.1:8089 --hf $FIX/observations \
+    --temperature 1.3373980522155762 --artifact d1-2b-f16 --settings cpu-t4-fa-off \
+    --label '<how the server was built and started>' --out $FIX/crosscheck/d1-2b-f16.cpu-t4-fa-off.json $FIX/cases
+# stop it; likewise d1-2b-bf16 (cpu-t4-fa-off on every case, cpu-t4-fa-on) and d1-2b-q4km on the hf-* cases
+python3 -B $H/provenance.py --update --runs $RUNS --llama-build $H/.cache/llama-build
+python3 -B $H/provenance.py --check
+$H/run.sh tests
 ```
 
 The GGUFs are the coordinator's pinned artifacts
 (`integration-tests/fixtures/decision/artifacts.json`), downloaded from their
-`url` and checked against their `sha256`. `lock.sh` relocks
-`requirements.in`; relocking changes `provenance.json`'s environment digest,
-so regenerate after it.
+`url` into `$H/.cache/gguf/` and checked against their `sha256`. `lock.sh`
+relocks `requirements.in`; a relock changes the lock's digest, so
+`provenance.py` refuses the old observations until they are regenerated.
+
+## Provenance
+
+Every committed file records, or is bound to, what made it:
+
+- **Run logs.** Each producer records its inputs when it starts. A
+  `run_reference.py` run log has the pins, the snapshot files it verified, the
+  lock, the settings, its recipe (`run_reference.py`, `run.sh`), the digest of
+  each request it read, and the digest of each observation it wrote.
+  `synthetic_median.py --run-log` records the same over its weight-free subset.
+- **Outputs.** `crosscheck_server.py` and `compare_observations.py --json` write
+  their own sha256 and the digests of the observations they compared into
+  their output.
+- **`provenance.py --update`** carries those identities into `provenance.json`
+  and never substitutes what is on disk for what a run recorded. It refuses
+  (exit 1, nothing written) if:
+  - any recorded pin, snapshot file, lock, setting or recipe source differs
+    from the current one;
+  - a committed observation is not the bytes its run wrote, or came from
+    another request than its case's;
+  - an observation or packed run has no passing parity proof;
+  - a comparison or cross-check was computed from other observations or by
+    another version of its script;
+  - `make_cases.py --check` fails: the cases must be byte for byte what it
+    generates, valid against `../schema.json`, with `artifact` and `settings`
+    ids from `../artifacts.json`.
+- **`provenance.py --check`** needs no run logs. It recomputes every file
+  digest and the pins, lock and recipe digests, including `make_cases.py` and
+  `provenance.py` itself (recorded at `--update`, as the writer). It also
+  re-binds observations to requests and cross-checks to observations, checks
+  the recorded parity proofs, and reruns `make_cases.py --check`. A change to
+  any recipe source, such as the float32 hooks, fails it until the fixtures are
+  regenerated.
+- **Tests.** `tests/test_provenance.py` holds these refusals (standard library:
+  `python3 -B -m unittest discover -s tools/conformance/decision_hf/tests -p test_provenance.py`).
 
 ## G1 on this hardware
 
-G1 is feasible here, with two adjustments to the plan.
+G1 is feasible here. Two conclusions shaped the plan: the first is now contract
+C10, the second is the method P11 applies.
 
 - **The reference runs.** The `set_size = 1` float32 forward fits the 8 GiB
   machine and is bit-reproducible at one thread. A question takes a median of
@@ -223,21 +289,26 @@ G1 is feasible here, with two adjustments to the plan.
   both sides answer show gaps from 0.055 (single against double quotes in
   object instructions) to 7.9, and different token counts wherever the prompt
   length changes. 0.055 is 17 times F16's noise but only twice BF16's.
-- **Adjustment 1: use `d1-2b-f16` as the G1 artifact on CPU.** ggml rounds a
-  matmul's activations to the weight type: bf16 (8 significant bits) for the
-  BF16 GGUF, f16 (11) for the F16 GGUF. F16 therefore tracks the float32
-  reference about 8× more tightly, and a cap of a few times its noise (around
-  0.01 to 0.02 in gap) still catches every prompt difference measured here.
-  BF16 bounds would have to sit near the smallest prompt-induced gap.
-- **Adjustment 2: compare logit gaps or logits, not log-probabilities or
-  probabilities at the publisher temperature.** The temperatures differ by
-  3.0e-7 relative, which is enough to flip a median at a boundary
-  (`hf/synthetic/median.json`), and the reference reads log-probabilities
-  where upstream reads logits. Leave the `hf-diff-*` cases out of the numeric
-  comparison, since their prompts differ by design. Report winner and median
-  disagreements separately. Include the threshold-sensitive cases
-  (`hf-choice-ambiguous`, `hf-score-borderline`, `hf-choice-27`) and cases the
-  bounds were not fitted on.
+- **`d1-2b-f16` is the G1 artifact (contract C10).** ggml rounds a matmul's
+  activations to the weight type: bf16 (8 significant bits) for the BF16 GGUF,
+  f16 (11) for the F16 GGUF. F16 therefore tracks the float32 reference about
+  8× more tightly. A cap of a few times its noise (around 0.01 to 0.02 in gap)
+  still catches every prompt difference measured here. That proposed cap is
+  for F16 only: BF16 bounds would have to sit near the smallest prompt-induced
+  gap. Every case here names `d1-2b-f16` as its `artifact`, and the BF16 and
+  Q4_K_M cross-checks are reports.
+- **For P11: the comparison method.**
+  - Compare logits or logit gaps, not log-probabilities or probabilities at
+    the publisher temperature. The temperatures differ by 3.0e-7 relative,
+    enough to flip a median at a boundary (`hf/synthetic/median.json`), and
+    the reference reads log-probabilities where upstream reads logits.
+  - Leave the `hf-diff-*` cases out of the numeric bounds: their prompts
+    differ by design.
+  - Report discrete winner and median disagreements separately from the
+    numeric bounds.
+  - Include the threshold-sensitive cases (`hf-choice-ambiguous`,
+    `hf-score-borderline`, `hf-choice-27`) and cases the bounds were not
+    fitted on.
 
 The measurements are the cross-check files under `hf/crosscheck/`, summarized
 in `DIFFERENCES.md` section 6. They are a black-box check through the stock
@@ -251,16 +322,19 @@ server. G1 proper compares the upstream oracle's `raw_scores` with
 | `pins.json` | The snapshot: repo, revision, every file's size and sha256 |
 | `download.sh` | Fetches and checks the pinned snapshot |
 | `requirements.in`, `requirements.txt`, `lock.sh` | The environment: direct pins, the full lock (Linux x86_64, CPU torch), how to relock it |
-| `run.sh` | Runs `run_reference.py` (or `synthetic_median.py`) in that environment |
+| `run.sh` | Runs `run_reference.py`, `synthetic_median.py` or the tests in that environment |
 | `run_reference.py` | The runner |
 | `make_cases.py` | Writes `hf/cases/` (stdlib) |
 | `synthetic_median.py` | The score-median cases of `DIFFERENCES.md` 1.3 and 1.5 |
 | `compare_observations.py` | Compares two observation sets (stdlib) |
 | `crosscheck_server.py` | Sends cases to a running `llama-server` and compares (stdlib) |
 | `provenance.py` | Writes and checks `hf/provenance.json` (stdlib) |
+| `tests/` | The parity gate's tests (`test_parity.py`: torch, no weights) and the provenance refusals (`test_provenance.py`: stdlib); `run.sh tests` runs both |
+| `clean.sh`, `.gitignore` | The folder's outputs, `.cache/` (and any bytecode), ignored by git and removed by `clean.sh` |
 | `DIFFERENCES.md` | The reference-difference matrix |
 
-Every output goes to `target/decision-hf/` (snapshot, module cache, runs,
-llama.cpp build) or to `integration-tests/fixtures/decision/hf/`, and `run.sh`
-writes no bytecode here. The root `clean.sh` owns `target/`, so this folder
-needs no `clean.sh` of its own.
+Everything this folder produces goes to `.cache/` here (snapshot, module
+cache, GGUFs, llama.cpp build, run logs) or to
+`integration-tests/fixtures/decision/hf/`. `run.sh` runs Python with `-B`, so
+no bytecode lands next to the scripts. `clean.sh --apply` (or the root
+`clean.sh`) removes `.cache/`.
