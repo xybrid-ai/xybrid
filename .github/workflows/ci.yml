@@ -199,6 +199,19 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - run: python3 tools/scripts/gen_workflow_index.py --check
 
+  # The READMEs' and docs pages' install snippets are version pins
+  # (tools/scripts/install_pins.py), and they are edited in docs-only PRs, which
+  # skip the tooling tests. A second or so, so it runs on every PR like the
+  # workflow index: a stale, reshaped or unregistered snippet fails here, not
+  # at the next release cut.
+  version-sync:
+    name: Version sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - run: bash tools/scripts/version-sync.sh --check
+      - run: python3 -m unittest discover -s tools/scripts/tests -p test_install_pins.py
+
   clippy:
     name: Clippy
     needs: tooling-changes
@@ -578,7 +591,7 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, workflow-index, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, web]
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, workflow-index, version-sync, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, web]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Verify required job results
