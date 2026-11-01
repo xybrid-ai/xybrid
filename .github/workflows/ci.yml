@@ -304,6 +304,13 @@ jobs:
           key: ${{ matrix.cache-key }}
       - name: Check vision build without model artifacts
         run: cargo check -p xybrid-sdk --features ${{ matrix.features }}
+      # The llama.cpp exception boundary under MSVC's exception model: the
+      # Linux llm-llamacpp lane's fault tests (no model needed; the
+      # address-space cases are Linux-only), on the cmake build above (the
+      # same xybrid-llama-sys features).
+      - name: Test the llama.cpp exception boundary on MSVC
+        if: matrix.name == 'windows'
+        run: cargo test -p xybrid-llama --features vision --lib fault_tests
 
   # Linux only. Windows cannot build ggml's `vulkan-shaders-gen` under cargo's
   # OUT_DIR: the nested CMake ExternalProject blows past MAX_PATH and MSBuild's
