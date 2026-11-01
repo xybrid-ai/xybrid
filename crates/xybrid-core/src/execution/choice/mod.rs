@@ -78,8 +78,8 @@ pub mod onnx;
 mod tests;
 
 use crate::execution::template::{
-    ByteFieldSpec, ByteOverflow, ChoiceScorerSpec, ExecutionTemplate, ModelMetadata,
-    OnnxByteOptionScorerSpec,
+    ByteFieldSpec, ByteOverflow, ChoiceScorerSpec, ExecutionTemplate, GgufDecisionSpec,
+    ModelMetadata, OnnxByteOptionScorerSpec,
 };
 use crate::ir::{Choice, ChoiceRequest, Envelope, EnvelopeKind};
 use crate::runtime_adapter::AdapterError;
@@ -282,6 +282,9 @@ fn unsupported(model_id: &str, capability: impl Into<String>, hint: &str) -> Ada
 ///   text context with no choice kind inside it (non-empty for a byte
 ///   scorer), candidates that pass [`effective_candidates`], and every
 ///   `Reject` field within its `max_len`.
+/// - A [`GgufDecision`](ChoiceScorerSpec::GgufDecision) scorer answers
+///   decision requests, whose runtime this build does not have yet, so it
+///   refuses a [`ChoiceRequest`] too.
 ///
 /// Conversation history is checked separately, with [`ensure_no_choice_kinds`].
 ///
@@ -313,7 +316,12 @@ pub fn validate_choice_request(
         ));
     };
     validate_scorer_spec(scorer)?;
-    check_request(scorer, request)?;
+    match scorer {
+        ChoiceScorerSpec::OnnxByteOptionScorer(onnx) => check_request(onnx, request)?,
+        ChoiceScorerSpec::GgufDecision(_) => {
+            return Err(gguf_decision_unsupported(&metadata.model_id))
+        }
+    }
     Ok(())
 }
 
@@ -348,7 +356,7 @@ pub(crate) fn choice_kind_not_runtime_input() -> AdapterError {
     ))
 }
 
-fn check_request(spec: &ChoiceScorerSpec, request: &ChoiceRequest) -> ChoiceResult<()> {
+fn check_request(onnx: &OnnxByteOptionScorerSpec, request: &ChoiceRequest) -> ChoiceResult<()> {
     let context = request.context();
     if context.kind.contains_choice_kind() {
         return Err(ChoiceError::NestedChoiceKind);
@@ -358,13 +366,9 @@ fn check_request(spec: &ChoiceScorerSpec, request: &ChoiceRequest) -> ChoiceResu
             kind: context.kind_str(),
         });
     };
-    match spec {
-        ChoiceScorerSpec::OnnxByteOptionScorer(onnx) => {
-            let candidates =
-                effective_candidates(request.choices(), &onnx.fixed_choices, onnx.max_choices)?;
-            encode::check_fields(onnx, text, &candidates)
-        }
-    }
+    let candidates =
+        effective_candidates(request.choices(), &onnx.fixed_choices, onnx.max_choices)?;
+    encode::check_fields(onnx, text, &candidates)
 }
 
 /// One member of E: a candidate and whether it is a fixed choice.
@@ -445,13 +449,83 @@ pub fn effective_candidates<'a>(
 /// ids, no more of them than `max_choices` and none too long for a `Reject`
 /// field; a finite, positive `scoring_temperature` when set.
 ///
+/// For [`ChoiceScorerSpec::GgufDecision`]: a non-empty model file; a
+/// `token_budget` of at least 1 and at most
+/// [`GgufDecisionSpec::MAX_TOKEN_BUDGET`], or
+/// [`GgufDecisionSpec::MAX_TOKEN_BUDGET_WITHOUT_FLASH_ATTN`] with flash
+/// attention off; `max_questions` within `1..=`[`GgufDecisionSpec::MAX_QUESTIONS`],
+/// `max_options` within `1..=`[`GgufDecisionSpec::MAX_OPTIONS`], and
+/// `max_total_tokens` from `token_budget` to
+/// [`GgufDecisionSpec::MAX_TOTAL_TOKENS`]. The GGUF itself is checked at
+/// load, by [`admit_gguf`](crate::gguf::admit_gguf).
+///
 /// # Errors
 ///
 /// [`ChoiceError::InvalidSpec`] naming the first failing field.
 pub fn validate_scorer_spec(spec: &ChoiceScorerSpec) -> ChoiceResult<()> {
     match spec {
         ChoiceScorerSpec::OnnxByteOptionScorer(onnx) => validate_onnx_spec(onnx),
+        ChoiceScorerSpec::GgufDecision(gguf) => validate_gguf_decision_spec(gguf),
     }
+}
+
+fn validate_gguf_decision_spec(spec: &GgufDecisionSpec) -> ChoiceResult<()> {
+    let invalid = |reason: String| Err(ChoiceError::InvalidSpec(reason));
+
+    if spec.model_file.is_empty() {
+        return invalid("model_file is empty".into());
+    }
+    let max_budget = if spec.flash_attn {
+        GgufDecisionSpec::MAX_TOKEN_BUDGET
+    } else {
+        GgufDecisionSpec::MAX_TOKEN_BUDGET_WITHOUT_FLASH_ATTN
+    };
+    if spec.token_budget == 0 {
+        return invalid("token_budget is 0; at least 1".into());
+    }
+    if spec.token_budget > max_budget {
+        let flash_attn = if spec.flash_attn { "on" } else { "off" };
+        return invalid(format!(
+            "token_budget is {} with flash attention {flash_attn}; at most {max_budget}",
+            spec.token_budget
+        ));
+    }
+    for (field, value, max) in [
+        (
+            "max_questions",
+            spec.max_questions,
+            GgufDecisionSpec::MAX_QUESTIONS,
+        ),
+        (
+            "max_options",
+            spec.max_options,
+            GgufDecisionSpec::MAX_OPTIONS,
+        ),
+    ] {
+        if !(1..=max).contains(&value) {
+            return invalid(format!("{field} is {value}; between 1 and {max}"));
+        }
+    }
+    let max_total = GgufDecisionSpec::MAX_TOTAL_TOKENS;
+    if !(spec.token_budget..=max_total).contains(&spec.max_total_tokens) {
+        return invalid(format!(
+            "max_total_tokens is {}; between token_budget ({}) and {max_total}",
+            spec.max_total_tokens, spec.token_budget
+        ));
+    }
+    Ok(())
+}
+
+/// The refusal for a request to a
+/// [`GgufDecision`](ChoiceScorerSpec::GgufDecision) scorer, whose runtime
+/// this build does not have yet.
+pub(crate) fn gguf_decision_unsupported(model_id: &str) -> AdapterError {
+    unsupported(
+        model_id,
+        "choice requests",
+        "a GgufDecision scorer answers decision requests through llama.cpp, which this build \
+         does not run yet",
+    )
 }
 
 pub(crate) fn validate_onnx_spec(spec: &OnnxByteOptionScorerSpec) -> ChoiceResult<()> {

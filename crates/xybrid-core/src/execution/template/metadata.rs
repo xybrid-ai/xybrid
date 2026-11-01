@@ -247,15 +247,17 @@ pub enum ExecutionTemplate {
         seed: Option<u64>,
     },
 
-    /// A decision model: scores one context against a closed list of
-    /// candidates in a single forward pass, without generating text.
+    /// A decision model: scores a closed list of candidates without
+    /// generating text.
     ///
-    /// Accepts only an
+    /// An `OnnxByteOptionScorer` scores one context against its candidates
+    /// in a single forward pass. It accepts only an
     /// [`EnvelopeKind::ChoiceRequest`](crate::ir::EnvelopeKind::ChoiceRequest)
     /// through a batch run and answers with
     /// [`EnvelopeKind::ChoiceScores`](crate::ir::EnvelopeKind::ChoiceScores).
     /// The scores are relative preferences among the offered candidates, not
-    /// calibrated probabilities of being correct.
+    /// calibrated probabilities of being correct. A `GgufDecision` scorer
+    /// answers decision questions; this build refuses every request to it.
     ChoiceScorer {
         /// How the scorer encodes the request and which output holds the
         /// candidate logits.
@@ -803,10 +805,10 @@ pub fn backend_label_from_template(
         // The template fixes the runtime to the pinned zzz engine slice; no
         // hint participates.
         ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. } => Some("zzz"),
-        // The only registered scorer kind is an ONNX byte scorer; a new kind
-        // states its own runtime here.
+        // Each scorer kind fixes its runtime; no hint participates.
         ExecutionTemplate::ChoiceScorer { scorer } => match scorer {
             ChoiceScorerSpec::OnnxByteOptionScorer(_) => Some("ort"),
+            ChoiceScorerSpec::GgufDecision(_) => Some("llamacpp"),
         },
         ExecutionTemplate::CoreMl { .. }
         | ExecutionTemplate::TfLite { .. }
