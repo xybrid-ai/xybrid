@@ -9,7 +9,7 @@ pub mod choice;
 pub mod envelope;
 
 pub use choice::{Choice, ChoiceRequest, ChoiceScore, ChoiceScores};
-pub use envelope::{AudioSamples, Envelope, EnvelopeKind, ToolCallResult};
+pub use envelope::{AudioSamples, Envelope, EnvelopeKind, PhonemeTiming, ToolCallResult};
 pub use envelope::{
     ImageDimensions, ImageFormat, ImagePlane, ImageSource, ImageSummary, ImageSummarySource,
     ImageValidationLimits, PixelFormat, RawImageRef, YuvColorInfo, YuvColorMatrix, YuvColorRange,

@@ -4,7 +4,10 @@ Reproduces every input of the choice-scoring conformance suite: the
 CUA-S1-FORMS ONNX export, the Qwen3.5-0.8B GGUF conversions, the reference
 goldens and the fake ONNX scorers. The committed results live in
 [`integration-tests/fixtures/choice/`](../../integration-tests/fixtures/choice),
-pinned by `provenance.json` there.
+pinned by `provenance.json` there. Three TTS tools that reuse the same pinned
+environment live here too: two that add a duration output to a real model, and
+one that writes the committed fake TTS fixtures. See
+[TTS duration output](#tts-duration-output).
 
 The scripts need PyTorch, ONNX and Transformers, so they live outside
 `tools/scripts`, whose stdlib-only unittest run must never import them. Each
@@ -107,7 +110,7 @@ torch as the `+cpu` build the `==` pin accepts.
 
 | Environment | Used by |
 |---|---|
-| `forms` | `export_forms_onnx.py`, `gen_forms_goldens.py`, `gen_fake_scorers.py` |
+| `forms` | `export_forms_onnx.py`, `gen_forms_goldens.py`, `gen_fake_scorers.py`, `expose_tts_duration.py`, `verify_tts_duration.py`, `gen_fake_tts.py` |
 | `labels` | `gen_label_goldens.py` |
 | `convert` | `convert_gguf.sh` (compatible pins for the Qwen fixture converter) |
 
@@ -225,3 +228,84 @@ harness against exactly the archives and system libraries cargo reports for
 llama.cpp: a downloaded or staged natives slice, or a source build. Pass the
 features you test with, such as `build.sh bindings,vision`. It needs `python3`
 and writes `target/llama-harness/llama_harness`.
+
+## TTS duration output
+
+The SDK reports per-phoneme timings for an ONNX TTS model that declares a
+per-token `duration` output (see
+[`TTSAudioEncode`](../../docs/sdk/MODEL_METADATA.md#ttsaudioencode)). Stock
+Kokoro-82M computes those durations but keeps them inside its graph.
+`expose_tts_duration.py` adds the output and `verify_tts_duration.py` proves
+the audio did not change. They work on paths you pass them; nothing they write
+is a committed fixture. The third tool, `gen_fake_tts.py`, writes the committed
+fixtures the SDK tests load; see [Fake TTS fixtures](#fake-tts-fixtures).
+
+```bash
+SRC=path/to/kokoro-82m          # stock model directory: model.onnx, tokens.txt, voices.bin, ...
+DST=path/to/kokoro-82m-timed
+forms() { uv run --no-project --python 3.12 --with-requirements tools/conformance/requirements-forms.txt python "$@"; }
+
+forms tools/conformance/expose_tts_duration.py "$SRC/model.onnx" "$DST/model.onnx"
+forms tools/conformance/verify_tts_duration.py "$SRC/model.onnx" "$DST/model.onnx" "$SRC/tokens.txt"
+```
+
+`expose_tts_duration.py` finds the duration tensor by structure, not by name:
+the single INT64 `Cast` whose output feeds a `Gather` that feeds the `CumSum`
+building the alignment (`/encoder/Cast_output_0` in the Kokoro-82M v1.0
+export). It refuses a model that does not have exactly one output, that
+already uses the name `duration`, or where that search finds anything other
+than one tensor. It appends an `Identity` output named `duration` (INT64,
+`[1, sequence_length]`), and after saving it checks that the outputs are the
+original one followed by `duration` and that the initializers hash the same as
+before. It
+also records `xybrid.duration_*` model properties for reference; the SDK does
+not read them and finds the output by its name.
+
+`verify_tts_duration.py` runs both models in ONNX Runtime 1.23.2 (the version
+xybrid ships) on three Misaki phoneme strings at speeds 0.8, 1.0 and 1.25,
+with one thread and with the default thread count, and a fixed seeded style
+vector. It builds token ids as the `Phonemize` step does: pad 0, one id per
+phoneme character from `tokens.txt`, pad 0. It fails unless `audio` is
+byte-identical between the two models and `duration` has shape
+`[1, len(tokens)]` with every value at least 1. It feeds inputs by Kokoro's
+names (`tokens`, `style`, `speed`).
+
+It also prints the waveform length over `600 × sum(duration)`;
+`--frame-samples` changes the 600 (on `expose_tts_duration.py` the same flag
+only sets the recorded property). For Kokoro-82M that ratio is exactly 1 at
+every speed: one frame is 600 samples, 25 ms at 24 kHz. The SDK does not rely
+on it; it scales durations to the waveform it gets.
+
+To use the result, copy the rest of `$SRC` into `$DST` and give its
+`model_metadata.json` a new `model_id`, as
+[`MODEL_METADATA.md`](../../docs/sdk/MODEL_METADATA.md#ttsaudioencode)
+describes.
+
+### Fake TTS fixtures
+
+`gen_fake_tts.py` writes the two tiny models in
+[`integration-tests/fixtures/tts/fake/`](../../integration-tests/fixtures/tts/fake)
+that `integration-tests/tests/tts_phoneme_timings.rs` runs through the SDK:
+`with_duration/` declares a `duration` output before `audio`, and
+`without_duration/` is the same graph with `audio` only, so both must return
+the same audio. Each directory also holds the `tokens.txt`,
+`misaki/us_gold.json` and `model_metadata.json` the test needs to run offline.
+Regenerate them only when the fakes deliberately change, in the `forms`
+environment:
+
+```bash
+forms() { uv run --no-project --python 3.12 --with-requirements tools/conformance/requirements-forms.txt python "$@"; }
+
+forms tools/conformance/gen_fake_tts.py        # --out DIR writes somewhere else
+git status --short integration-tests/fixtures/tts/fake
+```
+
+The models are built with the ONNX helper API, so their bytes depend on the
+pinned `onnx` (1.23.0); another `onnx` version can write different bytes. In
+the pinned environment, regenerating reproduces the committed files byte for
+byte (checked on macOS arm64). Before writing, the script runs both models in
+the pinned ONNX Runtime and checks the durations, the waveform and that the
+two models' audio is byte-identical, then prints each file's sha256. Unlike the
+choice fakes, these files are not pinned by a `provenance.json`, so review the
+diff before committing, and keep the constants `tts_phoneme_timings.rs` copies
+from the script (`FRAME_SAMPLES`, the base frame counts) in step with it.

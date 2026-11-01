@@ -462,6 +462,82 @@ named `waveform` (preferred) or `audio`. KittenTTS 0.8, for example, also
 returns per-phoneme `duration`. A TTS model with several outputs and neither
 name fails to run.
 
+#### Optional `duration` output (phoneme timings)
+
+An ONNX TTS model can also return how long each input token lasts. When it
+does, the result reports when each phoneme is spoken in the returned audio,
+which is what lip sync and word highlighting need. Nothing in
+`model_metadata.json` turns this on: the SDK reads the first output named
+`duration`, `durations` or `pred_dur`, in that order, next to the waveform.
+A model with a single output has no duration output, since that output is the
+waveform.
+
+- **Shape.** One value per token id the model was fed, pads included, as
+  `[1, N]` or `[N]`. Values are whole frames: INT64 (Kokoro's type) or INT32;
+  float32 values are rounded.
+- **Unit.** The SDK does not assume a frame size. It scales the durations to
+  the length of the waveform the model returned, before any truncation, so a
+  phoneme's edges fall at `round(samples × running total / total)`. For
+  Kokoro-82M one frame is exactly 600 samples (25 ms at 24 kHz).
+- **Time origin.** Times are seconds from the first sample of the returned
+  audio. Leading silence removed by `apply_postprocessing` is subtracted, and
+  spans past the kept audio (trimmed trailing silence, `trim_trailing_samples`)
+  are cut short or dropped. Long text synthesized in chunks has each chunk's
+  spans moved to where that chunk starts in the crossfaded audio, and the
+  overlap at a join is cut, so spans never overlap.
+- **Entries.** One per token that `Phonemize` produced from the text, named by
+  its symbol in the tokens file: phoneme characters, stress marks (`ˈ`, `ˌ`),
+  spaces and punctuation. Padding (`add_padding`) and `silence_tokens` are not
+  listed, so there can be gaps between entries. The end pad is not listed
+  either: when it is audible, the silence trim keeps it and the audio runs on
+  after the last entry. KittenTTS 0.8 leaves up to about 0.1 s there (its
+  Micro and Mini end pads carry the release of the last sound); Kokoro-82M's
+  end pad is silent and trimmed, so its last entry ends with the audio.
+- **Alignment.** The times are the model's own alignment, not measured from
+  the audio. Kokoro-82M's entries run about 45 ms behind the audible speech at
+  speed 1.0, and its first phoneme after the leading pad drifts with speed:
+  late below 1.0 (up to about 0.3 s at 0.5), slightly early above it.
+  Mid-utterance entries stay within a few tens of milliseconds at any speed.
+  Lip sync usually starts each mouth shape a little early anyway; an app that
+  needs the first phoneme exact can snap it to the audio's onset.
+- **No timings.** If the duration output cannot be read as numbers, has a
+  different length than the token ids, or sums to zero, the run returns its
+  audio without timings. A model without a duration output returns the same
+  audio bytes as before and no `phoneme_timings` key.
+
+The timings ride in the audio envelope's metadata under `phoneme_timings` as a
+JSON array:
+
+```json
+[{"phoneme":"h","start":0.0125,"end":0.05},{"phoneme":"ə","start":0.05,"end":0.1}]
+```
+
+Rust reads them with `InferenceResult::phoneme_timings()` and Unity with
+`InferenceResult.PhonemeTimings`; see
+[Phoneme timings](API_REFERENCE.md#phoneme-timings-tts). Streaming synthesis,
+the zzz engine templates (`ZzzPhonon`, `ZzzEmbed`), codec TTS (NeuTTS) and
+runs answered by the cloud report none.
+
+**Adding the output to Kokoro.** Stock Kokoro-82M keeps its durations inside
+the graph and declares only `audio`.
+[`tools/conformance/expose_tts_duration.py`](../../tools/conformance/expose_tts_duration.py)
+finds that tensor by its structure (the single INT64 `Cast` feeding the
+`Gather` → `CumSum` that builds the alignment) and adds an `Identity` output
+named `duration` over it. Existing nodes, weights and initializers are left
+untouched, so the audio stays byte-identical:
+
+```bash
+uv run --no-project --python 3.12 --with-requirements tools/conformance/requirements-forms.txt \
+  python tools/conformance/expose_tts_duration.py kokoro-82m/model.onnx kokoro-82m-timed/model.onnx
+```
+
+Copy the rest of the model directory next to the new `model.onnx` and leave
+`model_file`, `preprocessing` and `postprocessing` as they are. Give the copy
+its own `model_id` (for example `kokoro-82m-timed`): `.xyb` bundles are
+extracted into a cache keyed by `model_id`, so a repacked bundle that keeps
+the old id loads the old, untimed model. To confirm the audio did not change,
+see [TTS duration output](../../tools/conformance/README.md#tts-duration-output).
+
 ### `WhisperDecode`
 
 Decodes Whisper token IDs to text using a HuggingFace tokenizer.

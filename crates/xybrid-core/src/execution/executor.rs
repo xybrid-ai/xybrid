@@ -180,15 +180,25 @@ use crate::runtime_adapter::llm::LlmRuntimeAdapter;
 
 use super::modes::{
     execute_autoregressive_stage, execute_bert_inference, execute_single_shot_stage,
-    execute_tts_inference, execute_whisper_decoder_stage, tts_waveform_output,
+    execute_tts_inference, execute_whisper_decoder_stage, tts_duration_output, tts_waveform_output,
 };
 use super::path::{file_identity, FileIdentity};
 use super::postprocessing;
 use super::preprocessing;
 use super::session_cache::OnnxSessionCache;
 use super::tokenizer_cache::TokenizerCache;
+use super::tts_timing::{self, PhonemeSpan};
 use super::types::{ExecutorResult, PreprocessedData, RawOutputs};
 use super::voice_loader::TtsVoiceLoader;
+
+/// One synthesized TTS chunk, before postprocessing.
+struct SynthesizedChunk {
+    /// The waveform, trailing artifact samples already cut off.
+    audio: Vec<f32>,
+    /// The chunk's phonemes as sample spans on `audio`, when the model
+    /// reported token durations that match its phoneme ids.
+    spans: Option<Vec<PhonemeSpan>>,
+}
 
 /// A choice scorer's ONNX session and the spec bound to it, reused across
 /// runs. Keyed by the model file's path and `(len, mtime)`, and also by the
@@ -2875,15 +2885,29 @@ impl TemplateExecutor {
         }
     }
 
-    /// Run postprocessing steps from metadata.
+    /// Run postprocessing steps from metadata and convert the result to an
+    /// envelope.
     fn run_postprocessing(
         &mut self,
         metadata: &ModelMetadata,
         outputs: RawOutputs,
     ) -> ExecutorResult<Envelope> {
+        self.run_postprocessing_raw(metadata, outputs)?
+            .to_envelope()
+    }
+
+    /// Run postprocessing steps from metadata, returning the last step's raw
+    /// output (`outputs` itself when there are no steps). Callers that need
+    /// more than the envelope, such as the TTS batch path reading the range of
+    /// samples `TTSAudioEncode` kept, convert it themselves.
+    fn run_postprocessing_raw(
+        &mut self,
+        metadata: &ModelMetadata,
+        outputs: RawOutputs,
+    ) -> ExecutorResult<RawOutputs> {
         if metadata.postprocessing.is_empty() {
             debug!(target: "xybrid_core", "No postprocessing steps configured");
-            return outputs.to_envelope();
+            return Ok(outputs);
         }
 
         info!(
@@ -2922,7 +2946,7 @@ impl TemplateExecutor {
         }
 
         debug!(target: "xybrid_core", "Postprocessing complete");
-        data.to_envelope()
+        Ok(data)
     }
 
     /// Get or load an ONNX session.
@@ -3091,13 +3115,19 @@ impl TemplateExecutor {
         // identical for every chunk, so load it once here.
         let session = self.onnx_session_cache.get_or_build(model_path)?;
         let waveform_output = tts_waveform_output(session.output_names())?;
+        let duration_output = tts_duration_output(session.output_names(), waveform_output);
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
 
         let mut audio_chunks: Vec<Vec<f32>> = Vec::new();
+        // Spans of each pushed chunk, in `audio_chunks` order. Timings are
+        // reported only when every chunk was timed, so that when present they
+        // cover the whole clip rather than stopping partway through.
+        let mut timed_chunks: Option<Vec<Vec<PhonemeSpan>>> =
+            duration_output.map(|_| Vec::with_capacity(chunks.len()));
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(target: "xybrid_core", "TTS: Processing chunk {}/{}: {} chars", i + 1, chunks.len(), chunk.len());
-            let chunk_audio = self.synthesize_chunk(
+            let synthesized = self.synthesize_chunk(
                 &session,
                 metadata,
                 input,
@@ -3105,29 +3135,45 @@ impl TemplateExecutor {
                 &voice_embedding,
                 speed,
                 waveform_output,
+                duration_output,
             )?;
             // Inference always yields a waveform; guard the degenerate empty case
             // so it can't enter the crossfade (matches the pre-refactor skip).
-            if chunk_audio.is_empty() {
+            if synthesized.audio.is_empty() {
                 continue;
             }
-            audio_chunks.push(chunk_audio);
+            audio_chunks.push(synthesized.audio);
+            timed_chunks = match (timed_chunks, synthesized.spans) {
+                (Some(mut all), Some(spans)) => {
+                    all.push(spans);
+                    Some(all)
+                }
+                _ => None,
+            };
         }
 
         // Concatenate chunks with crossfading
-        let all_audio =
-            postprocessing::audio::crossfade_audio_chunks(&audio_chunks, CROSSFADE_SAMPLES);
+        let (all_audio, starts) = postprocessing::audio::crossfade_audio_chunks_with_starts(
+            &audio_chunks,
+            CROSSFADE_SAMPLES,
+        );
 
         debug!(target: "xybrid_core", "TTS: Total audio samples: {}", all_audio.len());
 
-        // Convert concatenated audio to envelope, keyed by the waveform output's
-        // name. The postprocessing will handle conversion to bytes
-        let mut combined_outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
-        let audio_array = ndarray::Array1::from_vec(all_audio).into_dyn();
-        combined_outputs.insert(waveform_output.to_string(), audio_array);
+        // Move each chunk's spans to where the chunk starts in the joined audio.
+        let spans = timed_chunks.map(|per_chunk| {
+            per_chunk
+                .into_iter()
+                .zip(starts)
+                .flat_map(|(mut spans, start)| {
+                    tts_timing::shift(&mut spans, start);
+                    spans
+                })
+                .collect()
+        });
 
-        // Run postprocessing on combined audio
-        self.run_postprocessing(metadata, RawOutputs::TensorMap(combined_outputs))
+        // Postprocessing turns the joined waveform into PCM bytes.
+        self.finish_tts_batch(metadata, waveform_output, all_audio, spans)
     }
 
     /// Execute TTS for a single (short) text input.
@@ -3141,6 +3187,7 @@ impl TemplateExecutor {
         // the graph load + Level-3 optimization (the dominant short-TTS latency).
         let session = self.onnx_session_cache.get_or_build(model_path)?;
         let waveform_output = tts_waveform_output(session.output_names())?;
+        let duration_output = tts_duration_output(session.output_names(), waveform_output);
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
         let text = match &input.kind {
@@ -3154,7 +3201,7 @@ impl TemplateExecutor {
 
         // The whole (short) text is one chunk; the synthesis body is shared with
         // the chunked/streaming paths via synthesize_chunk.
-        let audio = self.synthesize_chunk(
+        let synthesized = self.synthesize_chunk(
             &session,
             metadata,
             input,
@@ -3162,16 +3209,63 @@ impl TemplateExecutor {
             &voice_embedding,
             speed,
             waveform_output,
+            duration_output,
         )?;
 
-        // Wrap the already-trimmed waveform for postprocessing (mirrors the
-        // chunked path's single-tensor map keyed by the waveform output's name).
+        self.finish_tts_batch(
+            metadata,
+            waveform_output,
+            synthesized.audio,
+            synthesized.spans,
+        )
+    }
+
+    /// Postprocess a batch TTS waveform (one chunk, or the crossfaded chunks
+    /// of a long text) into the audio envelope.
+    ///
+    /// The waveform goes through postprocessing as a single-tensor map keyed
+    /// by the waveform output's name. When `spans` (phoneme sample spans on
+    /// that waveform) are given and `TTSAudioEncode` reports which samples it
+    /// kept, they become [`PhonemeTiming`](crate::ir::PhonemeTiming)s on the
+    /// returned PCM, stored as JSON under
+    /// [`Envelope::PHONEME_TIMINGS_METADATA_KEY`]. Otherwise, or when no
+    /// phoneme is left once the audio is trimmed, the envelope is exactly what
+    /// [`Self::run_postprocessing`] returns.
+    fn finish_tts_batch(
+        &mut self,
+        metadata: &ModelMetadata,
+        waveform_output: &str,
+        audio: Vec<f32>,
+        spans: Option<Vec<PhonemeSpan>>,
+    ) -> ExecutorResult<Envelope> {
         let mut outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
         outputs.insert(
             waveform_output.to_string(),
             ndarray::Array1::from_vec(audio).into_dyn(),
         );
-        self.run_postprocessing(metadata, RawOutputs::TensorMap(outputs))
+        let raw = self.run_postprocessing_raw(metadata, RawOutputs::TensorMap(outputs))?;
+        match (raw, spans) {
+            (RawOutputs::TtsAudio { pcm, kept }, Some(spans)) => {
+                let sample_rate = Self::tts_output_sample_rate(metadata);
+                let timings = tts_timing::finish(spans, kept, sample_rate);
+                debug!(
+                    target: "xybrid_core",
+                    "TTS: {} phoneme timing(s) over {} PCM samples",
+                    timings.len(),
+                    pcm.len() / 2
+                );
+                // The same envelope `RawOutputs::to_envelope` builds, without
+                // copying the PCM.
+                let mut envelope = Envelope::new(EnvelopeKind::Audio(pcm));
+                if let Some(json) = tts_timing::metadata_json(&timings) {
+                    envelope
+                        .metadata
+                        .insert(Envelope::PHONEME_TIMINGS_METADATA_KEY.to_string(), json);
+                }
+                Ok(envelope)
+            }
+            (raw, _) => raw.to_envelope(),
+        }
     }
 
     /// Resolve Phonon template defaults and request overrides before opening or reusing a session.
@@ -3360,6 +3454,11 @@ impl TemplateExecutor {
     /// edge-fade) is left to the caller — the batch and streaming paths differ
     /// there. Shared by `execute_tts_single` / `_chunked` / `_streaming` so the
     /// synthesis body lives in one place instead of being copy-pasted three ways.
+    ///
+    /// With a `duration_output` (picked by `tts_duration_output`), the chunk's
+    /// phonemes also come back as sample spans on the returned waveform. They
+    /// are `None` without one, or when the model's durations do not match the
+    /// phoneme ids; the audio is the same either way.
     fn synthesize_chunk(
         &mut self,
         session: &ONNXSession,
@@ -3369,7 +3468,8 @@ impl TemplateExecutor {
         voice_embedding: &[f32],
         speed: f32,
         waveform_output: &str,
-    ) -> ExecutorResult<Vec<f32>> {
+        duration_output: Option<&str>,
+    ) -> ExecutorResult<SynthesizedChunk> {
         let chunk_input = Envelope {
             kind: crate::ir::EnvelopeKind::Text(chunk.to_string()),
             metadata: input.metadata.clone(),
@@ -3378,19 +3478,40 @@ impl TemplateExecutor {
         let phoneme_ids = preprocessed
             .as_phoneme_ids()
             .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
-        let waveform = execute_tts_inference(
+        let inference = execute_tts_inference(
             session,
             phoneme_ids,
             voice_embedding.to_vec(),
             speed,
             waveform_output,
+            duration_output,
         )?;
-        let mut audio: Vec<f32> = waveform.iter().copied().collect();
+        let mut audio: Vec<f32> = inference.waveform.iter().copied().collect();
+        // Durations describe the waveform as the model returned it, before the
+        // trailing artifact samples are cut off.
+        let raw_len = audio.len();
         let trim_count = metadata.trim_trailing_samples.unwrap_or(0);
         if trim_count > 0 && audio.len() > trim_count {
             audio.truncate(audio.len() - trim_count);
         }
-        Ok(audio)
+
+        let spans = match (inference.durations, preprocessed.as_phoneme_symbols()) {
+            (Some(durations), Some(symbols)) => {
+                let spans = tts_timing::chunk_spans(symbols, &durations, raw_len, audio.len());
+                if spans.is_none() {
+                    debug!(
+                        target: "xybrid_core",
+                        "TTS: {} duration(s) for {} phoneme id(s) over {} samples do not describe the waveform; no phoneme timings",
+                        durations.len(),
+                        symbols.len(),
+                        raw_len
+                    );
+                }
+                spans
+            }
+            _ => None,
+        };
+        Ok(SynthesizedChunk { audio, spans })
     }
 
     /// Check if this model is a TTS model (has Phonemize preprocessing).
@@ -3576,15 +3697,19 @@ impl TemplateExecutor {
                 break;
             }
             debug!(target: "xybrid_core", "TTS stream: chunk {}/{} ({} chars)", i + 1, chunks.len(), chunk.len());
-            let chunk_audio = self.synthesize_chunk(
-                &session,
-                metadata,
-                input,
-                chunk,
-                &voice_embedding,
-                speed,
-                waveform_output,
-            )?;
+            // Streamed chunks carry no phoneme timings, so durations are not read.
+            let chunk_audio = self
+                .synthesize_chunk(
+                    &session,
+                    metadata,
+                    input,
+                    chunk,
+                    &voice_embedding,
+                    speed,
+                    waveform_output,
+                    None,
+                )?
+                .audio;
             if chunk_audio.is_empty() {
                 continue; // degenerate empty inference output — skip (pre-refactor behavior)
             }
@@ -5795,6 +5920,139 @@ mod tests {
     fn test_get_runtime_not_found() {
         let executor = TemplateExecutor::new("/test");
         assert!(executor.get_runtime("nonexistent").is_none());
+    }
+
+    // ============================================================================
+    // TTS batch finish (phoneme timings) Tests
+    // ============================================================================
+
+    /// A 220 Hz tone at 24 kHz between `lead` and `tail` silent samples.
+    fn padded_tone(lead: usize, voiced: usize, tail: usize) -> Vec<f32> {
+        let step = 2.0 * std::f32::consts::PI * 220.0 / 24_000.0;
+        let mut samples = vec![0.0; lead];
+        samples.extend((0..voiced).map(|i| 0.5 * (i as f32 * step).sin()));
+        samples.extend(vec![0.0; tail]);
+        samples
+    }
+
+    fn tts_encode_metadata() -> ModelMetadata {
+        ModelMetadata::onnx("test-tts", "1.0", "model.onnx").with_postprocessing(
+            super::super::template::PostprocessingStep::TTSAudioEncode {
+                sample_rate: 24_000,
+                apply_postprocessing: true,
+                trim_trailing_silence: false,
+            },
+        )
+    }
+
+    fn span(symbol: char, start: usize, end: usize) -> PhonemeSpan {
+        PhonemeSpan { symbol, start, end }
+    }
+
+    #[test]
+    fn tts_batch_without_spans_is_the_plain_postprocessed_audio() {
+        let metadata = tts_encode_metadata();
+        let audio = padded_tone(4800, 12_000, 7200);
+        let mut executor = TemplateExecutor::with_base_path("/models");
+
+        let mut outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
+        outputs.insert(
+            "audio".to_string(),
+            ndarray::Array1::from_vec(audio.clone()).into_dyn(),
+        );
+        let plain = executor
+            .run_postprocessing(&metadata, RawOutputs::TensorMap(outputs))
+            .unwrap();
+        let finished = executor
+            .finish_tts_batch(&metadata, "audio", audio, None)
+            .unwrap();
+
+        assert!(matches!(plain.kind, EnvelopeKind::Audio(_)));
+        assert_eq!(finished.kind, plain.kind);
+        assert!(!finished
+            .metadata
+            .contains_key(Envelope::PHONEME_TIMINGS_METADATA_KEY));
+    }
+
+    #[test]
+    fn tts_batch_maps_spans_onto_the_trimmed_pcm() {
+        let metadata = tts_encode_metadata();
+        let audio = padded_tone(4800, 12_000, 7200);
+        let (_, kept) = crate::phonemizer::postprocess_tts_audio_with_range(&audio, 24_000);
+        assert!(kept.start > 2400 && kept.end < audio.len(), "{kept:?}");
+
+        let spans = vec![
+            span('x', 0, 2400), // in the leading silence: trimmed off
+            span('a', 4800, 10_800),
+            span('b', 10_800, 16_800),
+            span('y', 22_000, 24_000), // in the trailing silence: trimmed off
+        ];
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        let envelope = executor
+            .finish_tts_batch(&metadata, "audio", audio, Some(spans))
+            .unwrap();
+
+        let EnvelopeKind::Audio(pcm) = &envelope.kind else {
+            panic!("expected audio, got {:?}", envelope.kind);
+        };
+        assert_eq!(pcm.len() / 2, kept.len());
+        let timings: Vec<crate::ir::PhonemeTiming> = serde_json::from_str(
+            envelope
+                .metadata
+                .get(Envelope::PHONEME_TIMINGS_METADATA_KEY)
+                .expect("phoneme timings"),
+        )
+        .unwrap();
+        let seconds = |sample: usize| ((sample - kept.start) as f64 / 24_000.0) as f32;
+        assert_eq!(
+            timings,
+            vec![
+                crate::ir::PhonemeTiming {
+                    phoneme: "a".to_string(),
+                    start: seconds(4800),
+                    end: seconds(10_800),
+                },
+                crate::ir::PhonemeTiming {
+                    phoneme: "b".to_string(),
+                    start: seconds(10_800),
+                    end: seconds(16_800),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn tts_batch_reports_no_timings_when_none_survive_the_trim() {
+        let metadata = tts_encode_metadata();
+        let audio = padded_tone(4800, 12_000, 7200);
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        let envelope = executor
+            .finish_tts_batch(&metadata, "audio", audio, Some(vec![span('x', 0, 2400)]))
+            .unwrap();
+
+        assert!(matches!(envelope.kind, EnvelopeKind::Audio(_)));
+        assert!(!envelope
+            .metadata
+            .contains_key(Envelope::PHONEME_TIMINGS_METADATA_KEY));
+    }
+
+    #[test]
+    fn tts_batch_without_an_audio_encode_step_reports_no_timings() {
+        // No TTSAudioEncode: there is no PCM for timings to describe.
+        let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx");
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        let envelope = executor
+            .finish_tts_batch(
+                &metadata,
+                "audio",
+                padded_tone(0, 2400, 0),
+                Some(vec![span('a', 0, 2400)]),
+            )
+            .unwrap();
+
+        assert!(!envelope
+            .metadata
+            .contains_key(Envelope::PHONEME_TIMINGS_METADATA_KEY));
     }
 
     // ============================================================================

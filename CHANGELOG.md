@@ -26,6 +26,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine's fourteen notice files (its runtime terms and the upstream licenses)
   under `assets/xybrid/zzz/`. Android merges library assets into the APK, so
   every app that ships the SDK carries them.
+- **Phoneme timings from ONNX TTS models, for lip sync.** When an ONNX TTS
+  model declares a per-token duration output (named `duration`, `durations`
+  or `pred_dur`), the result now says when each phoneme is spoken: the
+  phoneme and its start and end, in seconds from the first sample of the
+  returned audio. Silence trimming and the crossfades between long-text
+  chunks are already accounted for, and pads and silence tokens are left out.
+  Rust reads them with `InferenceResult::phoneme_timings()` and Unity with
+  `InferenceResult.PhonemeTimings` and `HasPhonemeTimings`. Kotlin, Swift and
+  Python have no typed field yet: they parse the `phoneme_timings` JSON entry
+  of the result envelope's metadata. Dart results carry no metadata, so Dart
+  gets no timings. KittenTTS 0.8 already declares `duration`. Stock Kokoro-82M
+  does not; `tools/conformance/expose_tts_duration.py` adds the output to its
+  ONNX graph without changing the audio (see
+  [`TTSAudioEncode`](docs/sdk/MODEL_METADATA.md#ttsaudioencode)). A model
+  without such an output returns the same audio as before and no new metadata
+  key. Streaming TTS, the zzz speech engines (Phonon, Kitten TTS 2), codec TTS
+  (NeuTTS) and runs answered by the cloud report no timings.
 
 ### Changed
 

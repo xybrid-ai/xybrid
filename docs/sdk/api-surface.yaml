@@ -654,6 +654,23 @@ classes:
         # actually writes reads the same in every language.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
         since: "0.7.0"
+      phonemeTimings:
+        type: "List<PhonemeTiming>"
+        # When each phoneme is spoken in audioBytes, for lip sync. Filled by
+        # ONNX TTS models that declare a `duration` / `durations` / `pred_dur`
+        # output (MODEL_METADATA.md, TTSAudioEncode); empty otherwise, and for
+        # streaming TTS, zzz engines, codec TTS and cloud results. Rides in the
+        # result envelope's `phoneme_timings` metadata entry (a JSON array), so
+        # Kotlin, Swift and Python can parse that until they get the typed
+        # field; Dart results carry no metadata. Rust:
+        # InferenceResult::phoneme_timings().
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+        since: "0.17.0"
+      hasPhonemeTimings:
+        type: bool
+        # Convenience over `phonemeTimings.isEmpty`, like hasToolCalls.
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+        since: "0.17.0"
       audioAsWav:
         type: "Uint8List?"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -705,6 +722,28 @@ classes:
       latencyMs:
         type: int
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  PhonemeTiming:
+    type: data
+    section: "7. Result Types"
+    # One entry of XybridResult.phonemeTimings. start/end are seconds from the
+    # first sample of the returned audio (after silence trimming and chunk
+    # crossfades). Entries are in order, never overlap and stay inside the
+    # audio; pads and silence tokens are not listed. Rust:
+    # xybrid_core::ir::PhonemeTiming (also xybrid_sdk::ir), serialized as
+    # {"phoneme","start","end"} in the `phoneme_timings` metadata entry.
+    csharp_name: PhonemeTiming
+    since: "0.17.0"
+    properties:
+      phoneme:
+        type: String
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+      start:
+        type: double
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+      end:
+        type: double
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: implemented }
 
   PipelineResult:
     type: data

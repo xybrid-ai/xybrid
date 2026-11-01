@@ -1209,6 +1209,25 @@ pub struct ToolCallResult {
     pub content: serde_json::Value,
 }
 
+/// When one phoneme is spoken in a synthesized TTS clip.
+///
+/// A TTS result carries a JSON array of these under
+/// [`Envelope::PHONEME_TIMINGS_METADATA_KEY`] when the model reports how long
+/// each input token lasts. Times are seconds from the first PCM sample of the
+/// returned audio, after silence trimming and chunk crossfades, so they line
+/// up with the bytes the caller plays. Spans are in order, never overlap, and
+/// stay within the clip; padding and silence tokens are left out.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PhonemeTiming {
+    /// The phoneme symbol, as the model's tokens file spells it (one IPA or
+    /// Misaki character, a stress mark, a space or a punctuation mark).
+    pub phoneme: String,
+    /// Start of the phoneme, in seconds from the start of the audio.
+    pub start: f32,
+    /// End of the phoneme, in seconds from the start of the audio.
+    pub end: f32,
+}
+
 impl Envelope {
     /// Metadata key for storing the local unique ID.
     pub const LOCAL_ID_METADATA_KEY: &'static str = "xybrid.local_id";
@@ -1221,6 +1240,10 @@ impl Envelope {
     /// Metadata key carrying the parsed tool calls (JSON array of gateway
     /// `ToolCall`) on an LLM response envelope whose request offered tools.
     pub const TOOL_CALLS_METADATA_KEY: &'static str = "tool_calls";
+    /// Metadata key carrying per-phoneme timings (JSON array of
+    /// [`PhonemeTiming`]) on a TTS audio envelope. Present only when the model
+    /// reports token durations and at least one phoneme was timed.
+    pub const PHONEME_TIMINGS_METADATA_KEY: &'static str = "phoneme_timings";
     /// Metadata key carrying an ASR runtime's auto-detected language code.
     pub const DETECTED_LANGUAGE_METADATA_KEY: &'static str = "detected_language";
 
