@@ -7,6 +7,7 @@
 //! |------|------|
 //! | [`DecisionModelFacts`] | What a model's GGUF header says the protocol needs: its profile, temperatures and [`DecisionLimits`] |
 //! | [`ProfileRules`] | The profile's ceilings (options, levels, JSON depths), for a capability view |
+//! | [`SYSTEMONE_TEMPLATE`], [`SYSTEMONE_TEMPLATE_SHA256`] | The one `systemone` template this build renders, and its sha256 |
 //! | [`DecisionVocab`] | The model's tokenizer and control-token spellings (`llama::LlamaVocab` with `llm-llamacpp`) |
 //! | `prepare` (`llm-llamacpp`) | Checks a whole request, renders and tokenizes one pass per question, allocates labels: a [`DecisionPlan`] |
 //! | [`finish`] | Reads each question's answer from its pass's readout, in `f64` |
@@ -104,9 +105,39 @@ use crate::ir::decision::{DecisionError, DecisionRequest, DecisionUsage, Decisio
 use facts::Temperatures;
 use plan::{AnswerPlan, RequestDigest};
 
+/// The pinned `systemone` template, byte for byte.
+///
+/// It is LiquidAI's d1-2B-GGUF @ `e968f657`, written by
+/// `conversion/lfm3.py:153-157` from the LFM2 d1 prompt plus
+/// `<think></think>`, and [`SYSTEMONE_TEMPLATE_SHA256`] is its sha256. A
+/// header passes [`DecisionModelFacts::new`] only if its template is these
+/// bytes, so the renderer renders this constant.
+pub const SYSTEMONE_TEMPLATE: &str = concat!(
+    "<|startoftext|><|im_start|>user\n",
+    r"{% for image in images %}{{ image }}{% endfor %}{% if state is not none %}",
+    r"{% if state is string %}{{ state }}{% else %}{{ state | tojson(indent=2) }}{% endif %}",
+    r"{{ '\n\n\nQUESTION:\n' }}{% endif %}",
+    r"{{ instructions if instructions is string else instructions | tojson }}",
+    r"{% if type == 'choice' %}{{ '\n\nOptions:\n' }}{% for o in options %}{{ o.label }} ",
+    r"{% if o.description %}",
+    r"{{ o.description if o.description is string else o.description | tojson }}{% else %}",
+    r"{{ o.key | replace('_', ' ') }}{% endif %}{% if not loop.last %}{{ '\n' }}{% endif %}",
+    r"{% endfor %}{{ '\n\nReply with the option code only.' }}{% elif type == 'noul' %}",
+    r"{% set ns = namespace(criteria=false) %}{% for o in options %}",
+    r"{% if o.description is not none %}{% set ns.criteria = true %}{% endif %}{% endfor %}",
+    r"{% if ns.criteria %}{% for o in options %}",
+    r"{{ '\nYes: ' if o.key == 'true' else '\nNo: ' }}{% if o.description is none %}None",
+    r"{% else %}{{ o.description if o.description is string else o.description | tojson }}",
+    r"{% endif %}{% endfor %}{% endif %}{{ '\n\nReply with yes or no only.' }}{% else %}",
+    r"{{ '\n\n' }}{% for o in options %}{{ o.key }} ",
+    r"{{ o.description if o.description is string else o.description | tojson }}{{ '\n' }}",
+    r"{% endfor %}{{ '\nReply with a single digit 0-' }}{{ options | length - 1 }}",
+    r"{{ ' only.' }}{% endif %}{{ '<|im_end|>\n<|im_start|>assistant\n' }}<think></think>",
+);
+
 /// The sha256 of the one `tokenizer.chat_template.systemone` template this
-/// build renders: 1,380 bytes, shared by d1-2B and d1-omni-2B, ending in
-/// `<think></think>`.
+/// build renders ([`SYSTEMONE_TEMPLATE`]): 1,380 bytes, shared by d1-2B and
+/// d1-omni-2B, ending in `<think></think>`.
 pub const SYSTEMONE_TEMPLATE_SHA256: &str =
     "ee5fc62461a9bbbcb8389c57f4cd2cd694ccb0dec19521576bd1419049490d8b";
 

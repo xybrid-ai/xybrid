@@ -3,8 +3,9 @@
 
 use std::collections::HashMap;
 
-use crate::execution::decision::facts::SYSTEMONE_TEMPLATE;
-use crate::execution::decision::{DecisionLimits, DecisionModelFacts, DecisionVocab, Token};
+use crate::execution::decision::{
+    DecisionLimits, DecisionModelFacts, DecisionVocab, Token, SYSTEMONE_TEMPLATE,
+};
 use crate::gguf::{DecisionProfileId, GgufHeader, GgufLimits};
 use crate::ir::decision::DecisionError;
 

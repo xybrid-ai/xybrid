@@ -2,10 +2,10 @@
 //! GGUF header.
 
 use super::fake::{d1_header, D1_TEMPERATURE_BITS};
-use crate::execution::decision::facts::{sha256_hex, SYSTEMONE_TEMPLATE};
+use crate::execution::decision::facts::sha256_hex;
 use crate::execution::decision::protocol::check;
 use crate::execution::decision::{
-    DecisionLimits, DecisionModelFacts, ProfileRules, SYSTEMONE_TEMPLATE_SHA256,
+    DecisionLimits, DecisionModelFacts, ProfileRules, SYSTEMONE_TEMPLATE, SYSTEMONE_TEMPLATE_SHA256,
 };
 use crate::gguf::DecisionProfileId;
 use crate::ir::decision::{

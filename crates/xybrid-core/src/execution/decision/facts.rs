@@ -20,34 +20,6 @@ const SYSTEMONE_TEMPLATE_KEY: &str = "tokenizer.chat_template.systemone";
 /// the profile's architecture (`server-decision.cpp:58`).
 const LFM3_TEMPERATURE_PREFIX: &str = "lfm3.decision.temperature.";
 
-/// The pinned `systemone` template, byte for byte ([`SYSTEMONE_TEMPLATE_SHA256`];
-/// LiquidAI's d1-2B-GGUF @ `e968f657`, written by `conversion/lfm3.py:153-157`
-/// from the LFM2 d1 prompt plus `<think></think>`). A header passes
-/// [`read`] only if its template is these bytes, so the renderer renders
-/// this constant.
-pub(super) const SYSTEMONE_TEMPLATE: &str = concat!(
-    "<|startoftext|><|im_start|>user\n",
-    r"{% for image in images %}{{ image }}{% endfor %}{% if state is not none %}",
-    r"{% if state is string %}{{ state }}{% else %}{{ state | tojson(indent=2) }}{% endif %}",
-    r"{{ '\n\n\nQUESTION:\n' }}{% endif %}",
-    r"{{ instructions if instructions is string else instructions | tojson }}",
-    r"{% if type == 'choice' %}{{ '\n\nOptions:\n' }}{% for o in options %}{{ o.label }} ",
-    r"{% if o.description %}",
-    r"{{ o.description if o.description is string else o.description | tojson }}{% else %}",
-    r"{{ o.key | replace('_', ' ') }}{% endif %}{% if not loop.last %}{{ '\n' }}{% endif %}",
-    r"{% endfor %}{{ '\n\nReply with the option code only.' }}{% elif type == 'noul' %}",
-    r"{% set ns = namespace(criteria=false) %}{% for o in options %}",
-    r"{% if o.description is not none %}{% set ns.criteria = true %}{% endif %}{% endfor %}",
-    r"{% if ns.criteria %}{% for o in options %}",
-    r"{{ '\nYes: ' if o.key == 'true' else '\nNo: ' }}{% if o.description is none %}None",
-    r"{% else %}{{ o.description if o.description is string else o.description | tojson }}",
-    r"{% endif %}{% endfor %}{% endif %}{{ '\n\nReply with yes or no only.' }}{% else %}",
-    r"{{ '\n\n' }}{% for o in options %}{{ o.key }} ",
-    r"{{ o.description if o.description is string else o.description | tojson }}{{ '\n' }}",
-    r"{% endfor %}{{ '\nReply with a single digit 0-' }}{{ options | length - 1 }}",
-    r"{{ ' only.' }}{% endif %}{{ '<|im_end|>\n<|im_start|>assistant\n' }}<think></think>",
-);
-
 /// One temperature, as llama.cpp's decision server holds it.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Temperature {

@@ -29,8 +29,8 @@ use minijinja::value::{Enumerator, Kwargs, Object, ObjectRepr, Value};
 use minijinja::{AutoEscape, Environment, Error, ErrorKind};
 
 use super::escape::Escaped;
-use super::facts::SYSTEMONE_TEMPLATE;
 use super::json::{to_json, JsonStyle};
+use super::SYSTEMONE_TEMPLATE;
 
 const TEMPLATE_NAME: &str = "systemone";
 
