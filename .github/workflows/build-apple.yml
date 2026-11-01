@@ -166,60 +166,42 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
 
       - name: Run Swift unit tests (iOS Simulator)
-        # The generic build above can't execute tests (no bootable device), so
-        # create a simulator from the installed iOS runtime and test by UDID.
-        # GitHub runner images can ship a runtime without a pre-created device
-        # matching a fixed marketing name/OS pair. Timeout guards against a
-        # simulator/test hang.
+        # The generic build above can't execute tests (no bootable device).
+        # Don't target a pre-created device by name/OS: hosted macOS runners
+        # sometimes report none of the image's simulators while CoreSimulator
+        # rebuilds its caches (actions/runner-images#12862, #12948), and a fixed
+        # pair breaks whenever the image moves its runtimes. Instead wait for an
+        # available iOS runtime, create an iPhone that runtime supports, and test
+        # it by UDID. Timeout guards against a simulator/test hang.
         timeout-minutes: 10
-        env:
-          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
         run: |
           set -euo pipefail
-          RUNTIME_ID="$(
-            xcrun simctl list runtimes --json | python3 -c '
-          import json, sys
-          runtimes = json.load(sys.stdin).get("runtimes", [])
-          candidates = [
-              runtime for runtime in runtimes
-              if runtime.get("isAvailable", True)
-              and (
-                  runtime.get("platform") == "iOS"
-                  or "iOS" in runtime.get("name", "")
-                  or "iOS" in runtime.get("identifier", "")
-              )
-          ]
-          if not candidates:
-              raise SystemExit("no available iOS simulator runtime")
-          candidates.sort(
-              key=lambda runtime: tuple(
-                  int(part) if part.isdigit() else 0
-                  for part in runtime.get("version", "0").split(".")
-              )
-          )
-          print(candidates[-1]["identifier"])
-          '
-          )"
-          DEVICE_TYPE="$(
-            xcrun simctl list devicetypes --json | python3 -c '
-          import json, re, sys
-          devices = json.load(sys.stdin).get("devicetypes", [])
-          iphones = [
-              device for device in devices
-              if device.get("name", "").startswith("iPhone")
-          ]
-          if not iphones:
-              raise SystemExit("no iPhone simulator device type")
-          def key(device):
-              nums = [int(part) for part in re.findall(r"\d+", device.get("name", ""))]
-              return (nums or [0], device.get("name", ""))
-          iphones.sort(key=key)
-          print(iphones[-1]["identifier"])
-          '
-          )"
+          # Prints "<runtime id> <device type id>": the newest available iOS
+          # runtime and the newest iPhone it supports.
+          pick_simulator() {
+            python3 - <<'PY'
+          import json, subprocess, sys
+          listing = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "runtimes", "--json"]))
+          runtimes = [r for r in listing["runtimes"] if r.get("platform") == "iOS" and r.get("isAvailable")]
+          runtimes.sort(key=lambda r: [int(part) for part in r["version"].split(".")], reverse=True)
+          for runtime in runtimes:
+              # supportedDeviceTypes lists the newest models first.
+              iphones = [d for d in runtime.get("supportedDeviceTypes", []) if d.get("productFamily") == "iPhone"]
+              if iphones:
+                  print(f"Using {iphones[0]['name']} on {runtime['name']}", file=sys.stderr)
+                  print(runtime["identifier"], iphones[0]["identifier"])
+                  sys.exit()
+          sys.exit("no available iOS simulator runtime with an iPhone device type")
+          PY
+          }
+          for attempt in 1 2 3 4 5 6; do
+            if PICK="$(pick_simulator)"; then break; fi
+            if [ "$attempt" -eq 6 ]; then xcrun simctl list runtimes >&2 || true; exit 1; fi
+            echo "Retrying in 20s (attempt $attempt/6)" >&2
+            sleep 20
+          done
+          read -r RUNTIME_ID DEVICE_TYPE <<<"$PICK"
           SIM_ID="$(xcrun simctl create "Xybrid CI iPhone" "$DEVICE_TYPE" "$RUNTIME_ID")"
-          trap 'xcrun simctl shutdown "$SIM_ID" >/dev/null 2>&1 || true; xcrun simctl delete "$SIM_ID" >/dev/null 2>&1 || true' EXIT
-          xcrun simctl boot "$SIM_ID"
           xcrun simctl bootstatus "$SIM_ID" -b
           xcodebuild test \
             -scheme Xybrid \
