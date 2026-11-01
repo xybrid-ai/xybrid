@@ -110,10 +110,10 @@ jobs:
           #     boltffi's xcframework sets include_macos=false, so aarch64-apple-
           #     darwin / x86_64 are not consumed and are not published here). ---
           - target: aarch64-apple-ios
-            runner: macos-14
+            runner: macos-15
             needs-ndk: false
           - target: aarch64-apple-ios-sim
-            runner: macos-14
+            runner: macos-15
             needs-ndk: false
           # --- Linux (host build; consumed by the Flutter linux leg) ---
           - target: x86_64-unknown-linux-gnu
@@ -129,10 +129,10 @@ jobs:
             runner: ubuntu-24.04-arm
             needs-ndk: false
           - target: aarch64-apple-darwin
-            runner: macos-14
+            runner: macos-15
             needs-ndk: false
           - target: x86_64-apple-darwin
-            runner: macos-14
+            runner: macos-15
             needs-ndk: false
           - target: x86_64-pc-windows-msvc
             runner: windows-latest

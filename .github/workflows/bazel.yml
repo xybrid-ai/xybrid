@@ -521,7 +521,7 @@ jobs:
   bazel-macos-metal:
     name: Bazel macOS Metal lane (mixed execution)
     if: github.event_name != 'pull_request'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     env:
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}

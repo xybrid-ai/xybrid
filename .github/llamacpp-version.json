@@ -1,10 +1,10 @@
 {
-  "tag": "v0.7.0",
-  "commit": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
-  "sdk_base_version": "0.13.1",
+  "tag": "v0.8.0",
+  "commit": "8642541b255bfb5dc39cd351a178be09013a55d6",
+  "sdk_base_version": "0.15.0",
   "update_kind": "minor",
   "sdk_release": {
     "version": "0.16.0",
-    "commit": "620d2225cc436ab0b001e3200e590e3b286ef9ab"
+    "commit": "8642541b255bfb5dc39cd351a178be09013a55d6"
   }
 }

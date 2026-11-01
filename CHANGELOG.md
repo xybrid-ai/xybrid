@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **llama.cpp:** update to [v0.8.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.8.0) (commit `8642541b255bfb5dc39cd351a178be09013a55d6`).
+
 - **Breaking (Android, React Native):** `ai.xybrid:xybrid-kotlin` and
   `@xybrid/react-native` now require Android 10 (API 29); their `minSdk` was 24.
   The AAR's arm64-v8a natives are now built against API 29. An app with a lower
