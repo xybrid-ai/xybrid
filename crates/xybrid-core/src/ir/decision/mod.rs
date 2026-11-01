@@ -67,11 +67,11 @@
 //! State, question ids, option keys, instructions, descriptions and every
 //! part of a JSON value are caller content. `Debug` on every type here
 //! prints kinds, lengths, counts and model numbers only, and every
-//! [`DecisionError`] message names byte offsets, positions, counts and
-//! limits only, except [`DecisionError::Runtime`], which passes a runtime
-//! error through. A format's own deserialization errors (serde_json quoting
-//! an unexpected value, say) are outside that promise too; the boundary that
-//! decodes envelopes must withhold them.
+//! [`DecisionError`] (its message, its `Debug`, and the `AdapterError` it
+//! converts into) names byte offsets, positions, counts and limits only. A
+//! format's own deserialization errors (serde_json quoting an unexpected
+//! value, say) are outside that promise; the boundary that decodes envelopes
+//! must withhold them.
 //!
 //! # Compatibility
 //!
