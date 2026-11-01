@@ -17,3 +17,9 @@ crates/llama-cpp-sys/wrapper.h -text
 # both out exactly as committed: no CRLF conversion under core.autocrlf.
 integration-tests/fixtures/decision/** -text
 tools/conformance/decision/** -text
+
+# The HF reference's tooling is hashed byte for byte too: pins.json and
+# requirements.txt, and every recipe source (run_reference.py, make_cases.py,
+# provenance.py, ...) whose sha256 its runs and provenance.json record. A
+# converted checkout would fail provenance.py --check. No CRLF conversion.
+tools/conformance/decision_hf/** -text
