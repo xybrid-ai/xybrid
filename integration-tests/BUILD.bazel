@@ -81,6 +81,23 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# Decision conformance cases (LFM3 d1) and what they were made from: the case
+# files, the artifact and oracle manifests and the README the inline decision
+# tests read (xybrid-core's execution/decision/tests). The HF reference
+# observations under fixtures/decision/hf/ are not among them.
+filegroup(
+    name = "decision_fixtures",
+    srcs = glob(
+        [
+            "fixtures/decision/*.json",
+            "fixtures/decision/README.md",
+            "fixtures/decision/cases/*.json",
+        ],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)
+
 # Reference embeddings for embedding_parity, written by
 # tools/scripts/gen_embedding_goldens.py from the model's own ONNX graph.
 filegroup(
