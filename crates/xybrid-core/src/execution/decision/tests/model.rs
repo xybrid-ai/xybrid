@@ -110,11 +110,15 @@ fn edited_spellings(case: &Case, model: &LlamaModel, vocab: &LlamaVocab<'_>) -> 
         .map(|(id, kind)| (id.parse().expect("a token id"), int(kind)))
         .collect();
     for id in 0..model.n_vocab() as Token {
-        let text = model.token_text(id).unwrap_or_default();
+        let text = model
+            .token_text(id)
+            .expect("a token's text")
+            .expect("a token of the vocabulary");
         let control_now = match edited.iter().find(|(edited, _)| *edited == id) {
             Some(&(_, kind)) => kind == 3,
             None => model
                 .token_attr(id)
+                .expect("a token's attributes")
                 .is_some_and(|attr| attr.intersects(xybrid_llama::TokenAttr::CONTROL)),
         };
         if control_now && text.len() >= 2 {
@@ -151,7 +155,7 @@ fn d1_2b_facts_and_vocabulary_are_the_oracles() {
 
     // The vocabulary's CONTROL spellings are the oracle's, and the ones the
     // header's arrays give (which the variant test reads).
-    let vocab = LlamaVocab::new(model);
+    let vocab = LlamaVocab::new(model).expect("d1-2B's vocabulary");
     let spellings = vocab.control_spellings();
     assert_eq!(spellings.len(), 124);
     assert_eq!(header_control_spellings(&header), spellings);
@@ -339,7 +343,7 @@ fn check_case(case: &Case, facts: &DecisionModelFacts, vocab: &dyn DecisionVocab
 #[test]
 fn every_case_prepares_as_upstream_on_d1_2b() {
     let Some((_, model)) = d1_2b() else { return };
-    let vocab = LlamaVocab::new(model);
+    let vocab = LlamaVocab::new(model).expect("d1-2B's vocabulary");
     let mut checked = std::collections::BTreeMap::<&str, usize>::new();
     for case in cases::all() {
         if case.expect("prepare").as_deref() == Some("not_reached")
@@ -441,7 +445,7 @@ fn metadata_variants_built_by_the_oracle() {
     let Some((base, model)) = d1_2b() else { return };
     let Some(oracle) = oracle() else { return };
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let vocab = LlamaVocab::new(model);
+    let vocab = LlamaVocab::new(model).expect("d1-2B's vocabulary");
     let mut checked = std::collections::BTreeMap::<&str, usize>::new();
     for case in cases::all() {
         if case.at(&["metadata"]).is_none() {

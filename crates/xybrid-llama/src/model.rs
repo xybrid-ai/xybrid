@@ -151,7 +151,11 @@ impl LlamaModel {
                 parse_special,
             )
         };
-        // A probe returns the negated count (INT32_MIN past int32_t).
+        // INT32_MIN is a failure (llama.cpp's, or the shim's for an
+        // exception); otherwise a probe returns the negated count.
+        if probe == i32::MIN {
+            return Err(LlamaError::TokenizationFailed);
+        }
         let required = probe.unsigned_abs() as usize;
         if required == 0 {
             return Ok(Vec::new());

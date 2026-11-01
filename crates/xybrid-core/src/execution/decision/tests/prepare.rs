@@ -349,18 +349,33 @@ fn tojson_takes_the_templates_arguments_and_refuses_the_rest() {
     env.add_filter("tojson", tojson);
     let value = to_value(&Arc::new(Escaped::Object(vec![
         ("b".into(), Arc::new(Escaped::Float(1.0))),
-        ("a".into(), Arc::new(Escaped::Array(vec![Arc::new(Escaped::Int(2))]))),
+        (
+            "a".into(),
+            Arc::new(Escaped::Array(vec![Arc::new(Escaped::Int(2))])),
+        ),
     ])));
     let render = |source: &str| {
-        env.render_str(source, minijinja::context! { x => value.clone(), n => 0.5, t => true })
+        env.render_str(
+            source,
+            minijinja::context! { x => value.clone(), n => 0.5, t => true },
+        )
     };
-    assert_eq!(render("{{ x | tojson }}").unwrap(), r#"{"b": 1.0, "a": [2]}"#);
+    assert_eq!(
+        render("{{ x | tojson }}").unwrap(),
+        r#"{"b": 1.0, "a": [2]}"#
+    );
     assert_eq!(
         render("{{ x | tojson(indent=2) }}").unwrap(),
         "{\n  \"b\": 1.0,\n  \"a\": [\n    2\n  ]\n}"
     );
-    assert_eq!(render("{{ x | tojson(indent=none, ensure_ascii=false, sort_keys=false) }}").unwrap(), r#"{"b": 1.0, "a": [2]}"#);
-    assert_eq!(render("{{ n | tojson }} {{ t | tojson }} {{ missing | tojson }}").unwrap(), "0.5 true null");
+    assert_eq!(
+        render("{{ x | tojson(indent=none, ensure_ascii=false, sort_keys=false) }}").unwrap(),
+        r#"{"b": 1.0, "a": [2]}"#
+    );
+    assert_eq!(
+        render("{{ n | tojson }} {{ t | tojson }} {{ missing | tojson }}").unwrap(),
+        "0.5 true null"
+    );
     for refused in [
         "{{ x | tojson(separators=[',', ':']) }}",
         "{{ x | tojson(ensure_ascii=true) }}",
@@ -375,4 +390,3 @@ fn tojson_takes_the_templates_arguments_and_refuses_the_rest() {
         assert!(render(refused).is_err(), "{refused}");
     }
 }
-

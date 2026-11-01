@@ -204,8 +204,7 @@ impl DecisionLimits {
 /// against [`SYSTEMONE_TEMPLATE_SHA256`], and each temperature is the value
 /// llama.cpp reads (its six-decimal metadata string read back, see
 /// [`effective_f32`](crate::gguf::effective_f32)). The caller checks that
-/// the loaded model matches the header
-/// ([`verify_native_metadata`](crate::gguf)).
+/// the loaded model matches the header (`gguf::verify_native_load`).
 #[derive(Debug, Clone)]
 pub struct DecisionModelFacts {
     profile: DecisionProfileId,

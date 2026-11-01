@@ -664,6 +664,9 @@ pub enum DecisionError {
         /// Position of the question.
         question: usize,
     },
+    /// Reading the model's vocabulary (a token's attributes or text) failed.
+    #[error("reading the model's vocabulary failed")]
+    VocabularyFailed,
 }
 
 /// The model id an [`AdapterError::UnsupportedModelCapability`] names when
@@ -728,6 +731,7 @@ impl DecisionError {
             Self::InvalidAnswer(_)
             | Self::RenderFailed
             | Self::TokenizationFailed
+            | Self::VocabularyFailed
             | Self::ReadoutCount { .. }
             | Self::ReadoutLength { .. } => return None,
         })
@@ -742,8 +746,8 @@ impl DecisionError {
     /// - Invalid decision metadata is [`AdapterError::RuntimeError`], the
     ///   category of a model that fails to load.
     /// - An answer the model's output cannot make, non-finite scores, a
-    ///   readout of the wrong shape, and a failed render or tokenization are
-    ///   [`AdapterError::InferenceFailed`].
+    ///   readout of the wrong shape, and a failed render, tokenization or
+    ///   vocabulary read are [`AdapterError::InferenceFailed`].
     /// - Every other refusal is about the request, budgets included:
     ///   [`AdapterError::InvalidInput`].
     ///
@@ -774,7 +778,8 @@ impl DecisionError {
             | Self::ReadoutCount { .. }
             | Self::ReadoutLength { .. }
             | Self::RenderFailed
-            | Self::TokenizationFailed => AdapterError::InferenceFailed(self.to_string()),
+            | Self::TokenizationFailed
+            | Self::VocabularyFailed => AdapterError::InferenceFailed(self.to_string()),
             _ => AdapterError::InvalidInput(self.to_string()),
         }
     }
@@ -1028,6 +1033,7 @@ mod tests {
                 found: 4,
             },
             DecisionError::NonFiniteScores { question: 3 },
+            DecisionError::VocabularyFailed,
         ]);
         refusals
     }
@@ -1113,6 +1119,7 @@ mod tests {
             DecisionError::ReadoutCount { .. } => "ReadoutCount",
             DecisionError::ReadoutLength { .. } => "ReadoutLength",
             DecisionError::NonFiniteScores { .. } => "NonFiniteScores",
+            DecisionError::VocabularyFailed => "VocabularyFailed",
         };
         name.to_string()
     }
@@ -1137,9 +1144,9 @@ mod tests {
         let refusals = every_refusal();
         let names: std::collections::BTreeSet<String> = refusals.iter().map(variant).collect();
         // 13 JSON syntax kinds, 3 JSON ceilings, 12 request refusals, 15
-        // answer invariants and 19 protocol refusals and failures: every one,
+        // answer invariants and 20 protocol refusals and failures: every one,
         // each once.
-        assert_eq!(names.len(), 62, "{names:#?}");
+        assert_eq!(names.len(), 63, "{names:#?}");
         assert_eq!(refusals.len(), names.len());
 
         for error in refusals {
@@ -1503,6 +1510,7 @@ mod tests {
                 Some("non_finite_scores"),
                 "InferenceFailed",
             ),
+            (DecisionError::VocabularyFailed, None, "InferenceFailed"),
         ]
     }
 

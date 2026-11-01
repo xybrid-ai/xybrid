@@ -21,18 +21,34 @@ impl<'m> LlamaVocab<'m> {
     /// The vocabulary of `model`: the texts of its CONTROL tokens of 2 bytes
     /// or more, in token-id order, as `init_quoted_spellings(CONTROL, 2)`
     /// collects them (`tools/server/server-decision.cpp:213-221`).
-    pub fn new(model: &'m LlamaModel) -> Self {
-        let control = (0..model.n_vocab())
-            .filter_map(|id| {
-                let id = Token::try_from(id).ok()?;
-                let attr = model.token_attr(id)?;
-                if !attr.intersects(TokenAttr::CONTROL) {
-                    return None;
-                }
-                model.token_text(id).filter(|text| text.len() >= 2)
-            })
-            .collect();
-        Self { model, control }
+    ///
+    /// # Errors
+    ///
+    /// [`DecisionError::VocabularyFailed`] when llama.cpp cannot report a
+    /// token's attributes or text: a failure is never read as "not a
+    /// CONTROL token".
+    pub fn new(model: &'m LlamaModel) -> Result<Self, DecisionError> {
+        let mut control = Vec::new();
+        for id in 0..model.n_vocab() {
+            let id = Token::try_from(id).map_err(|_| DecisionError::VocabularyFailed)?;
+            let attr = model
+                .token_attr(id)
+                .ok()
+                .flatten()
+                .ok_or(DecisionError::VocabularyFailed)?;
+            if !attr.intersects(TokenAttr::CONTROL) {
+                continue;
+            }
+            let text = model
+                .token_text(id)
+                .ok()
+                .flatten()
+                .ok_or(DecisionError::VocabularyFailed)?;
+            if text.len() >= 2 {
+                control.push(text);
+            }
+        }
+        Ok(Self { model, control })
     }
 }
 
