@@ -313,10 +313,11 @@ def log_tail(work, name):
 
 
 def make_variant(binary, base, metadata, work):
+    """A metadata-only copy of `base` with the edits: (path, None), or (None, why it could not be made)."""
     key = hashlib.sha256((str(base) + json.dumps(metadata, sort_keys=True)).encode()).hexdigest()[:16]
     path = work / f"variant-{key}.gguf"
     if path.exists():
-        return path
+        return path, None
     cmd = [str(binary), "variant", "--base", str(base), "--output", str(path)]
     for k, v in sorted(metadata.get("set", {}).items()):
         cmd += ["--set", f"{k}={v}"]
@@ -324,8 +325,12 @@ def make_variant(binary, base, metadata, work):
         cmd += ["--remove", k]
     for token, ttype in sorted(metadata.get("token_types", {}).items()):
         cmd += ["--token-type", f"{token}={ttype}"]
-    subprocess.run(cmd, check=True, env=tool_env())
-    return path
+    result = subprocess.run(cmd, capture_output=True, text=True, env=tool_env())
+    if result.returncode != 0:
+        path.unlink(missing_ok=True)
+        lines = (result.stderr or result.stdout).strip().splitlines()
+        return None, lines[-1] if lines else f"decision-oracle variant exited {result.returncode}"
+    return path, None
 
 
 def free_port():
@@ -415,12 +420,21 @@ def expand_synthetic(job, prepared):
 def run_jobs(jobs, model, settings_id, settings, bin_dir, work):
     """Every job through the oracle, and the sendable ones through the server.
 
-    Returns ({id: result or {"error": message}}, the model's facts, {id: (status, body)}).
+    Returns ({id: (result, facts) or ({"error": message}, None)}, the model's facts,
+    {id: (status, body)} or None if no request went to the server, {id: metadata variant path}).
     """
     oracle_bin, server_bin = bin_dir / "decision-oracle", bin_dir / "llama-server"
     args = settings_args(settings)
 
-    variants = {job.id: make_variant(oracle_bin, model, job.metadata, work) for job in jobs if job.metadata}
+    variants, refused = {}, {}
+    for job in jobs:
+        if job.metadata:
+            path, err = make_variant(oracle_bin, model, job.metadata, work)
+            if err is None:
+                variants[job.id] = path
+            else:
+                refused[job.id] = f"its metadata variant cannot be built: {err}"
+    jobs = [j for j in jobs if j.id not in refused]
 
     # synthetic scores per option need each pass's group sizes: a prepare-only run first
     prepared, groups = {}, {}
@@ -440,7 +454,7 @@ def run_jobs(jobs, model, settings_id, settings, bin_dir, work):
         key = ("variant", str(variants[job.id])) if job.id in variants else ("model", str(model))
         runs.setdefault(key, []).append(job)
     stamped = binary_identity(oracle_bin)
-    results, facts = {}, None
+    results, facts = {jid: ({"error": msg}, None) for jid, msg in refused.items()}, None
     for (kind, target), group in runs.items():
         model_args = ["--", "-m", target] + args if kind == "model" else ["--vocab-only", target]
         name = "model" if kind == "model" else f"variant-{Path(target).stem}"
@@ -480,7 +494,7 @@ def run_jobs(jobs, model, settings_id, settings, bin_dir, work):
 
     sendable = [j for j in jobs if j.sendable() and "error" not in results[j.id][0]]
     server = ask_server(server_bin, model, args, [{"id": j.id, "request_text": j.request_text} for j in sendable], work) if sendable else None
-    return results, facts, server
+    return results, facts, server, variants
 
 
 #
@@ -639,11 +653,21 @@ def platform_record():
     return {"system": platform.system(), "machine": platform.machine(), "cpu": cpu, "libc": " ".join(platform.libc_ver())}
 
 
-def run_record(identity, problems, settings_id, settings, facts, server):
+def collector_record(problems, dev):
+    """Official only from executables that can produce official observations, and never from --dev."""
+    return {"official": not problems and not dev, "developer_run": dev, "problems": problems}
+
+
+def recipe_hashes():
+    """The sha256 of every file that makes an observation: the compiled sources and the Python driver."""
+    return {p: sha256_file(HERE / p) for p in RECIPE}
+
+
+def run_record(identity, problems, dev, settings_id, settings, facts, server):
     """Who made the observations: the collector, the build, the settings as they ran, the platform."""
     devices = [{"name": d["name"], "type": d["type"]} for d in facts["devices"]] if facts else None
     return {
-        "collector": {"official": not problems, "problems": problems},
+        "collector": collector_record(problems, dev),
         "build": recorded_identity(identity),
         "settings": {settings_id: {
             "llama_server_args": settings_args(settings),
@@ -663,7 +687,7 @@ def oracle_record(facts, record):
         "schema_version": 1,
         "llama_cpp": {"commit": commit, "path": record["build"]["llama_cpp_dir"],
                       "routines": "tools/server/server-decision.cpp, linked unmodified from the server-context library"},
-        "oracle": {"tool": "tools/conformance/decision", "sources": {p: sha256_file(HERE / p) for p in RECIPE}},
+        "oracle": {"tool": "tools/conformance/decision", "sources": recipe_hashes()},
         "collector": record["collector"],
         "build": record["build"],
         "settings": record["settings"],
@@ -733,7 +757,7 @@ def generate(args, artifacts, identity, problems, bin_dir, work):
     jobs = [Job(c.id, c.request_text, c.metadata, c.has_media,
                 [[f32_hex(x) for x in t] for t in c.select_logits] if c.select_logits is not None else None, c.synthetic)
             for c in defs]
-    results, facts, server = run_jobs(jobs, model, args.settings, settings, bin_dir, work)
+    results, facts, server, _ = run_jobs(jobs, model, args.settings, settings, bin_dir, work)
 
     docs, disagreements = {}, []
     for case in defs:
@@ -751,7 +775,7 @@ def generate(args, artifacts, identity, problems, bin_dir, work):
     if not args.only:
         if facts is None:
             die("no case ran on the model")
-        record = oracle_record(facts, run_record(identity, problems, args.settings, settings, facts, server))
+        record = oracle_record(facts, run_record(identity, problems, args.dev, args.settings, settings, facts, server))
 
     out_dir = Path(args.out) if args.out else FIXTURES
     cases_dir = out_dir / "cases"
@@ -779,9 +803,9 @@ def generate(args, artifacts, identity, problems, bin_dir, work):
             print("stale: " + ", ".join(stale), file=sys.stderr)
             status = 1
         elif status == 0:
-            print(f"{len(docs)} cases match the committed files" + (" (developer run)" if problems else ""))
+            print(f"{len(docs)} cases match the committed files" + (" (developer run)" if problems or args.dev else ""))
     else:
-        if problems and out_dir.resolve() == FIXTURES.resolve():
+        if (problems or args.dev) and out_dir.resolve() == FIXTURES.resolve():
             die("a developer run does not write the committed fixtures: pass --out")
         cases_dir.mkdir(parents=True, exist_ok=True)
         if not args.only:
@@ -799,73 +823,246 @@ def generate(args, artifacts, identity, problems, bin_dir, work):
 # collect: any directory of case files, on any artifact
 #
 
-def collect(args, artifacts, identity, problems, bin_dir, work):
-    if not args.out:
-        die("--collect needs --out")
-    settings = artifacts["settings"][args.settings]
-    model = resolve_model(args, artifacts, args.artifact)
-    out_dir = Path(args.out)
-    if out_dir.resolve() in (FIXTURES.resolve(), (FIXTURES / "cases").resolve()):
-        die("--collect writes observations, not the committed fixtures: pick another --out")
+CASE_ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+METADATA_KEY = re.compile(r"[A-Za-z0-9_.\-]+")
+F32_BITS = re.compile(r"0x[0-9a-f]{8}")
+PROFILE = "lfm3-d1/text/v1"
 
-    entries, jobs = [], []
-    for path in sorted(Path(args.collect).glob("*.json")):
+
+class CaseFileError(ValueError):
+    """Why the collector refuses a case file: it gets an error receipt and never runs."""
+
+
+def unique_keys(pairs):
+    """object_pairs_hook for the case envelope: no key twice. request_text is a string here, so the
+    duplicate keys inside a request, which are test data, stay as they are."""
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise CaseFileError(f"the case file has the key {key!r} twice")
+        obj[key] = value
+    return obj
+
+
+def no_constant(name):
+    raise CaseFileError(f"the case file holds {name}, which is not JSON")
+
+
+def check_metadata(metadata):
+    """The metadata edits the oracle's variant command takes, typed."""
+    if not isinstance(metadata, dict) or not metadata or set(metadata) - {"set", "remove", "token_types"}:
+        raise CaseFileError("metadata must be a non-empty object of set, remove and token_types")
+    sets = metadata.get("set", {})
+    if not isinstance(sets, dict):
+        raise CaseFileError("metadata.set must be an object")
+    for key, value in sets.items():
+        if not METADATA_KEY.fullmatch(key) or not isinstance(value, str) or not value.startswith(("f32:", "str:")):
+            raise CaseFileError("metadata.set must map GGUF keys to f32:<number> or str:<text>")
+        if value.startswith("f32:"):
+            try:
+                float(value[4:])
+            except ValueError:
+                raise CaseFileError(f"metadata.set.{key} is not an f32 number")
+    remove = metadata.get("remove", [])
+    if not isinstance(remove, list) or not all(isinstance(k, str) and METADATA_KEY.fullmatch(k) for k in remove):
+        raise CaseFileError("metadata.remove must be a list of GGUF keys")
+    types = metadata.get("token_types", {})
+    if not isinstance(types, dict) or not all(re.fullmatch(r"[0-9]+", k) and isinstance(v, int) and not isinstance(v, bool)
+                                               for k, v in types.items()):
+        raise CaseFileError("metadata.token_types must map token ids to integer token types")
+
+
+def read_case_file(path):
+    """A schema-v1 case file, reduced to what the collector consumes, every part of it typed and checked.
+
+    Raises CaseFileError. The request text is kept verbatim: malformed or duplicate-key requests are
+    test data, only the envelope around them must be sound.
+    """
+    try:
+        raw = path.read_bytes()
+    except OSError as e:
+        raise CaseFileError(f"cannot read it: {e.strerror or e}")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise CaseFileError("it is not UTF-8")
+    try:
+        case = json.loads(text, object_pairs_hook=unique_keys, parse_constant=no_constant)
+    except CaseFileError:
+        raise
+    except ValueError as e:
+        raise CaseFileError(f"it is not JSON: {e}")
+    if not isinstance(case, dict):
+        raise CaseFileError(f"its root is a JSON {type(case).__name__}, not an object")
+    if type(case.get("schema_version")) is not int or case["schema_version"] != 1:
+        raise CaseFileError("schema_version must be the integer 1")
+    if case.get("profile") != PROFILE:
+        raise CaseFileError(f"profile must be {PROFILE}")
+    case_id = case.get("id")
+    if not isinstance(case_id, str) or not CASE_ID.fullmatch(case_id):
+        raise CaseFileError("id must match ^[a-z0-9]+(-[a-z0-9]+)*$")
+    request = case.get("request_text")
+    if not isinstance(request, str):
+        raise CaseFileError("request_text must be a string")
+    try:
+        request_bytes = request.encode("utf-8")
+    except UnicodeEncodeError:
+        raise CaseFileError("request_text holds a lone surrogate, so it has no bytes to send")
+    has_media = case.get("has_media", False)
+    if not isinstance(has_media, bool):
+        raise CaseFileError("has_media must be a boolean")
+    metadata = case.get("metadata")
+    if metadata is not None:
+        check_metadata(metadata)
+    upstream = case.get("upstream", {})
+    if not isinstance(upstream, dict):
+        raise CaseFileError("upstream must be an object")
+    evaluate = upstream.get("evaluate", {})
+    if not isinstance(evaluate, dict) or not isinstance(evaluate.get("source", ""), str):
+        raise CaseFileError("upstream.evaluate must be an object whose source is a string")
+    logits = None
+    if evaluate.get("source") == "synthetic":
+        logits = evaluate.get("raw_scores")
+        if not isinstance(logits, list) or not all(isinstance(t, list) and all(isinstance(x, str) and F32_BITS.fullmatch(x) for x in t)
+                                                   for t in logits):
+            raise CaseFileError("synthetic upstream.evaluate.raw_scores must be lists of f32 bit patterns")
+    return {"id": case_id, "file_sha256": hashlib.sha256(raw).hexdigest(), "request_text": request,
+            "request_sha256": hashlib.sha256(request_bytes).hexdigest(), "metadata": metadata, "has_media": has_media,
+            "select_logits": logits}
+
+
+def load_corpus(directory, only=None, expect=None):
+    """Every *.json of a corpus directory: (receipt entries, the cases to run).
+
+    Fails closed: a missing or empty corpus, an --only id that is not a valid case file there, and a
+    count other than --expect-cases (every case file, or the --only ids) stop the run before anything
+    runs. A file that is not a sound schema-v1 case, and every file sharing an id with another, gets
+    an error receipt and is never run.
+    """
+    corpus = Path(directory)
+    if not corpus.is_dir():
+        die(f"--collect {directory}: no such directory")
+    paths = sorted(corpus.glob("*.json"))
+    if not paths:
+        die(f"--collect {directory}: no *.json case file")
+    declared = len(set(only)) if only else len(paths)
+    if expect is not None and declared != expect:
+        die(f"--collect {directory}: {declared} {'cases named by --only' if only else 'case files'}, --expect-cases is {expect}")
+    entries, cases = [], []
+    for path in paths:
         entry = {"file": path.name}
         try:
-            case = json.loads(path.read_text(encoding="utf-8"))
-            if case.get("schema_version") != 1 or not isinstance(case.get("id"), str) or not isinstance(case.get("request_text"), str):
-                raise ValueError("not a schema-v1 case: schema_version 1, id and request_text are required")
-            if args.only and case["id"] not in args.only:
-                continue
-            entry["id"] = case["id"]
-            entry["request_sha256"] = hashlib.sha256(case["request_text"].encode("utf-8")).hexdigest()
-            ev = case.get("upstream", {}).get("evaluate", {})
-            logits = ev.get("raw_scores") if ev.get("source") == "synthetic" else None
-            if case.get("metadata") and logits is None and "load" not in case.get("upstream", {}):
-                # a metadata-only GGUF has no tensors: without synthetic scores the case can only be prepared
-                entry["note"] = "metadata edits and no synthetic scores: prepared, not evaluated"
-            jobs.append(Job(case["id"], case["request_text"], case.get("metadata"), bool(case.get("has_media")), logits))
-        except (ValueError, UnicodeEncodeError) as e:
-            entry.update({"status": "error", "error": str(e)})
+            case = read_case_file(path)
+        except CaseFileError as e:
+            try:
+                entry["file_sha256"] = sha256_file(path)
+            except OSError:
+                pass
+            entry.update({"status": "invalid", "error": str(e)})
+        else:
+            entry.update({"id": case["id"], "file_sha256": case["file_sha256"], "request_sha256": case["request_sha256"]})
+            cases.append((entry, case))
         entries.append(entry)
-    ids = [j.id for j in jobs]
-    if len(ids) != len(set(ids)):
-        die("two case files share an id")
-    if args.only and set(args.only) - set(ids):
-        die(f"--only names cases that are not in {args.collect}: {sorted(set(args.only) - set(ids))}")
 
-    results, facts, server = run_jobs(jobs, model, args.settings, settings, bin_dir, work) if jobs else ({}, None, None)
+    counts = {}
+    for _, case in cases:
+        counts[case["id"]] = counts.get(case["id"], 0) + 1
+    for entry, case in cases:
+        if counts[case["id"]] > 1:
+            entry.update({"status": "invalid", "error": f"{counts[case['id']]} case files have the id {case['id']}"})
+    cases = [(e, c) for e, c in cases if "status" not in e]
+
+    if only:
+        missing = sorted(set(only) - {c["id"] for _, c in cases})
+        if missing:
+            die(f"--only names cases that {directory} does not hold as valid case files: {missing}")
+        for entry, case in cases:
+            if case["id"] not in only:
+                entry["status"] = "not_selected"
+        cases = [(e, c) for e, c in cases if c["id"] in only]
+    if not cases and not any(e.get("status") == "invalid" for e in entries):
+        die(f"--collect {directory}: no case selected")
+    return entries, cases
+
+
+def check_out_dir(out, corpus):
+    """--out must be a new or empty directory, apart from the corpus and the committed fixtures."""
+    out = Path(out).resolve()
+    if out == Path(corpus).resolve():
+        die("--out cannot be the corpus directory")
+    if out == FIXTURES.resolve() or FIXTURES.resolve() in out.parents:
+        die("--collect writes observations, not the committed fixtures: pick an --out outside them")
+    if out.exists() and (not out.is_dir() or any(out.iterdir())):
+        die(f"--out {out} must be a new or empty directory")
+    return out
+
+
+def contained(out_dir, name):
+    """The path of an output file, which must lie directly in --out."""
+    path = (out_dir / name).resolve()
+    if path.parent != out_dir:
+        die(f"{name!r} would be written outside --out")
+    return path
+
+
+def case_inputs(case, artifact_id, artifact, variant):
+    """Everything about a case that can change its observation, canonical: what a receipt binds."""
+    return {
+        "request_sha256": case["request_sha256"],
+        "has_media": case["has_media"],
+        "metadata": case["metadata"],
+        "select_logits": case["select_logits"],
+        "model": {"artifact": artifact_id, "sha256": artifact["sha256"],
+                  "variant_sha256": sha256_file(variant) if variant is not None else None},
+    }
+
+
+def canonical_sha256(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
+
+
+def collect(args, artifacts, entries, cases, out_dir, identity, problems, bin_dir, work):
+    settings = artifacts["settings"][args.settings]
+    artifact = artifacts["artifacts"][args.artifact]
+    model = resolve_model(args, artifacts, args.artifact)
+    jobs = [Job(c["id"], c["request_text"], c["metadata"], c["has_media"], c["select_logits"]) for _, c in cases]
+    results, facts, server, variants = run_jobs(jobs, model, args.settings, settings, bin_dir, work) if jobs else ({}, None, None, {})
+
+    recipe = recipe_hashes()
+    collector = collector_record(problems, args.dev)
     out_dir.mkdir(parents=True, exist_ok=True)
-    failed = 0
-    for entry in entries:
-        if "id" not in entry:
-            failed += 1
-            continue
-        result, case_facts = results[entry["id"]]
+    for entry, case in cases:
+        inputs = case_inputs(case, args.artifact, artifact, variants.get(case["id"]))
+        entry.update({"inputs_sha256": canonical_sha256(inputs), "inputs": inputs})
+        result, case_facts = results[case["id"]]
         if "error" in result:
             entry.update({"status": "error", "error": result["error"]})
-            failed += 1
             continue
         upstream = build_upstream(result, case_facts or facts)
-        if server and entry["id"] in server:
-            upstream["server"] = server_block(upstream, server[entry["id"]])
-            if not upstream["server"]["agrees"]:
-                failed += 1
-        name = f"{entry['id']}.{entry['request_sha256']}.json"
-        doc = {"schema_version": 1, "id": entry["id"], "request_sha256": entry["request_sha256"], "source_file": entry["file"],
-               "artifact": args.artifact, "settings": settings_used(upstream, args.settings), "upstream": upstream}
-        (out_dir / name).write_text(dump(doc) + "\n", encoding="utf-8")
-        entry.update({"status": "observed", "observation": name})
-        if "server" in upstream:
+        if server and case["id"] in server:
+            upstream["server"] = server_block(upstream, server[case["id"]])
             entry["server_agrees"] = upstream["server"]["agrees"]
-    art = artifacts["artifacts"][args.artifact]
-    summary = {"schema_version": 1, "cases_dir": str(args.collect),
-               "artifact": {"id": args.artifact, "file": art["file"], "bytes": art["bytes"], "sha256": art["sha256"]}}
-    summary.update(run_record(identity, problems, args.settings, settings, facts, server))
+        name = f"{case['id']}.{case['request_sha256']}.json"
+        doc = {"schema_version": 1, "id": case["id"], "source_file": entry["file"], "case_file_sha256": case["file_sha256"],
+               "request_sha256": case["request_sha256"], "inputs_sha256": entry["inputs_sha256"], "inputs": inputs,
+               "artifact": args.artifact, "settings": settings_used(upstream, args.settings), "collector": collector,
+               "build_fingerprint": identity["fingerprint"], "recipe_sha256": canonical_sha256(recipe), "upstream": upstream}
+        contained(out_dir, name).write_text(dump(doc) + "\n", encoding="utf-8")
+        entry.update({"status": "observed", "observation": name})
+
+    failed = [e for e in entries if e.get("status") in ("invalid", "error") or e.get("server_agrees") is False]
+    selected = [e for e in entries if e.get("status") != "not_selected"]
+    summary = {"schema_version": 1, "status": "complete" if not failed else "incomplete",
+               "corpus": {"dir": str(args.collect), "files": len(entries), "selected": len(selected),
+                          "expected": args.expect_cases, "only": sorted(args.only) if args.only else None},
+               "artifact": {"id": args.artifact, "file": artifact["file"], "bytes": artifact["bytes"], "sha256": artifact["sha256"]},
+               "recipe": recipe, "recipe_sha256": canonical_sha256(recipe)}
+    summary.update(run_record(identity, problems, args.dev, args.settings, settings, facts, server))
     summary["cases"] = entries
-    (out_dir / "collection.json").write_text(dump(summary) + "\n", encoding="utf-8")
+    contained(out_dir, "collection.json").write_text(dump(summary) + "\n", encoding="utf-8")
     observed = sum(1 for e in entries if e.get("status") == "observed")
-    print(f"{observed} observed, {failed} failed or disagreeing, of {len(entries)} case files; see {out_dir / 'collection.json'}")
+    print(f"{observed} observed, {len(failed)} invalid, failed or disagreeing, of {len(selected)} selected case files; "
+          f"see {out_dir / 'collection.json'}")
     return 1 if failed else 0
 
 
@@ -877,6 +1074,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--check", action="store_true", help="write nothing; fail unless a fresh run gives the committed files")
     ap.add_argument("--collect", metavar="DIR", help="run the schema-v1 case files of DIR instead of cases.py; needs --out")
+    ap.add_argument("--expect-cases", type=int, metavar="N", help="--collect: fail unless exactly N case files are selected")
     ap.add_argument("--artifact", default=ARTIFACT, help=f"artifact id of artifacts.json for --collect (default {ARTIFACT})")
     ap.add_argument("--model", help="the artifact's GGUF (default: integration-tests/fixtures/models/<artifact>/<file>)")
     ap.add_argument("--download", action="store_true", help="download the GGUF if it is missing")
@@ -888,6 +1086,21 @@ def main():
     ap.add_argument("--keep-work", action="store_true", help="keep the oracle's inputs, outputs and logs")
     args = ap.parse_args()
 
+    # the run's inputs first: a wrong argument or corpus fails before anything runs
+    if args.collect is not None:
+        if args.check:
+            die("--collect and --check do not combine: --check compares the case set, --collect writes observations")
+        if not args.out:
+            die("--collect needs --out")
+        if args.expect_cases is not None and args.expect_cases < 1:
+            die("--expect-cases must be positive")
+        entries, cases = load_corpus(args.collect, args.only, args.expect_cases)
+        out_dir = check_out_dir(args.out, args.collect)
+    elif args.artifact != ARTIFACT:
+        die(f"the case set is observed on {ARTIFACT}; --artifact goes with --collect")
+    elif args.expect_cases is not None:
+        die("--expect-cases goes with --collect")
+
     bin_dir = Path(args.build) / "bin"
     for b in (bin_dir / "decision-oracle", bin_dir / "llama-server"):
         if not b.exists():
@@ -895,15 +1108,15 @@ def main():
     artifacts = json.loads((FIXTURES / "artifacts.json").read_text())
     if args.settings not in artifacts["settings"]:
         die(f"settings {args.settings} is not in artifacts.json")
-    if args.collect is None and args.artifact != ARTIFACT:
-        die(f"the case set is observed on {ARTIFACT}; --artifact goes with --collect")
+    if args.artifact not in artifacts["artifacts"]:
+        die(f"artifact {args.artifact} is not in artifacts.json")
     identity, problems = build_identity(bin_dir, args.dev)
 
     work = HERE / "work" / f"run-{os.getpid()}"
     work.mkdir(parents=True)
     try:
         if args.collect is not None:
-            return collect(args, artifacts, identity, problems, bin_dir, work)
+            return collect(args, artifacts, entries, cases, out_dir, identity, problems, bin_dir, work)
         return generate(args, artifacts, identity, problems, bin_dir, work)
     finally:
         if args.keep_work:
