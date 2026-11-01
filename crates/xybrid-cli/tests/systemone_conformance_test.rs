@@ -312,8 +312,8 @@ fn every_case_parses_or_refuses_as_expected() {
             }
             (expected, Err(error)) if expected.starts_with("refuse:") => {
                 census.refused += 1;
-                let kind = error.kind().map(RefusalKind::as_str);
-                if kind != expected.strip_prefix("refuse:") {
+                let kind = error.kind().as_str();
+                if Some(kind) != expected.strip_prefix("refuse:") {
                     failures.push(format!("{}: refused as {kind:?}: {error}", case.id));
                 }
                 // Content-free: no string of the request in the message.
@@ -396,6 +396,8 @@ fn the_parse_kinds_are_the_fixture_kinds() {
     ] {
         assert!(kinds.contains(&kind.as_str()), "{kind}");
     }
+    // `RefusalKind::RequestTooLarge` is the transport's own kind, for its
+    // ceilings: no case reaches one, so the schema need not name it.
     // Every kind a case expects at parse is one the transport has.
     for case in cases() {
         if let Some(kind) = case

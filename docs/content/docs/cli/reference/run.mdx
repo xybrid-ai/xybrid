@@ -286,13 +286,13 @@ content:
 | `empty_question_id`, `empty_option_key` | An id or option key that is the empty string |
 | `json_too_deep` | JSON content (state, instructions, a description) nested more than 128 levels deep |
 | `number_out_of_range` | A number beyond the 64-bit float range (`1e400`), or an integer from 9223372036854775808 to 18446744073709551615, which the model would read wrapped to a negative number (larger integers are read as floats, as llama.cpp reads them) |
+| `request_too_large` | A request larger than 8 MiB, with more than 131,072 JSON values, or with more than 65,536 in one piece of content |
 
 llama.cpp's server ignores unknown fields and keeps the last of repeated keys;
 `xybrid` refuses both, so nothing in a request is silently dropped. A request
-is also refused when it is larger than 8 MiB, holds more than 131,072 JSON
-values (or more than 65,536 in one piece of content), or asks more than 16
-questions. LFM3 d1 has lower limits of its own (nesting, a token budget per
-question), checked when it prepares the request.
+that asks more than 16 questions is refused too. LFM3 d1 has lower limits of
+its own (nesting, a token budget per question), checked when it prepares the
+request.
 
 ### Response
 

@@ -14,7 +14,8 @@ use std::fs;
 use std::io::Read;
 use std::path::Path;
 use xybrid_cli::systemone::{
-    parse_request, render_response, RequestError, RequestLimits, DEFAULT_MAX_BODY_BYTES,
+    parse_request, render_response, RefusalKind, RequestError, RequestLimits,
+    DEFAULT_MAX_BODY_BYTES,
 };
 use xybrid_core::ir::decision::{validate_structure, StructuralLimits};
 use xybrid_core::ir::{DecisionQuestionKind, DecisionRequest, Decisions};
@@ -171,9 +172,11 @@ fn is_stdin(path: &Path) -> bool {
 /// reading past it.
 fn read_request(path: &Path, max: usize) -> Result<Vec<u8>> {
     let too_large = || {
-        anyhow::anyhow!(
-            "decision request refused: the request is larger than {max} bytes, the most that is \
-             read"
+        anyhow::anyhow!("the request is larger than {max} bytes, the most that is read").context(
+            format!(
+                "decision request refused ({})",
+                RefusalKind::RequestTooLarge
+            ),
         )
     };
     let limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
@@ -201,11 +204,11 @@ fn read_request(path: &Path, max: usize) -> Result<Vec<u8>> {
     Ok(body)
 }
 
-/// A parse refusal, named by its fixture kind when it has one.
+/// A parse refusal, named by its kind. A ceiling names no position.
 fn refusal(error: RequestError) -> anyhow::Error {
     let context = match error.kind() {
-        Some(kind) => format!("decision request refused ({kind}; positions count from 0)"),
-        None => "decision request refused".to_string(),
+        RefusalKind::RequestTooLarge => format!("decision request refused ({})", error.kind()),
+        kind => format!("decision request refused ({kind}; positions count from 0)"),
     };
     anyhow::Error::new(error).context(context)
 }
@@ -284,9 +287,10 @@ mod tests {
         fs::write(&path, b"0123456789").unwrap();
         assert_eq!(read_request(&path, 10).unwrap(), b"0123456789");
         let error = read_request(&path, 9).unwrap_err();
-        assert!(
-            error.to_string().contains("larger than 9 bytes"),
-            "{error:#}"
+        assert_eq!(
+            format!("{error:#}"),
+            "decision request refused (request_too_large): the request is larger than 9 bytes, \
+             the most that is read"
         );
         let missing = read_request(&dir.path().join("missing.json"), 10).unwrap_err();
         assert!(
@@ -308,7 +312,8 @@ mod tests {
         let error = refusal(RequestError::TooManyValues { max: 4 });
         assert_eq!(
             format!("{error:#}"),
-            "decision request refused: the request holds more than 4 JSON values"
+            "decision request refused (request_too_large): the request holds more than 4 JSON \
+             values"
         );
     }
 

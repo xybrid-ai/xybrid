@@ -155,7 +155,9 @@ pub enum CriteriaShape {
 ///
 /// Code matches kinds, never messages. These are the kinds a request can
 /// be refused with at parse; the fixtures' later kinds (`budget_exceeded`,
-/// `non_finite_scores`, ...) belong to the runtime.
+/// `non_finite_scores`, ...) belong to the runtime. One kind is the
+/// transport's own and in no fixture: [`RefusalKind::RequestTooLarge`], for
+/// its ceilings on what one request may make it read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RefusalKind {
     /// `invalid_json`: the body is not one JSON value.
@@ -194,6 +196,10 @@ pub enum RefusalKind {
     JsonTooDeep,
     /// `number_out_of_range`: a number the model cannot read faithfully.
     NumberOutOfRange,
+    /// `request_too_large`: more bytes or JSON values than the transport
+    /// reads ([`RequestLimits`], and the value ceiling of one piece of
+    /// content). The transport's own kind: no fixture case reaches it.
+    RequestTooLarge,
 }
 
 impl RefusalKind {
@@ -218,6 +224,7 @@ impl RefusalKind {
             Self::SpokenInstructions => "spoken_instructions",
             Self::JsonTooDeep => "json_too_deep",
             Self::NumberOutOfRange => "number_out_of_range",
+            Self::RequestTooLarge => "request_too_large",
         }
     }
 }
@@ -233,7 +240,7 @@ impl fmt::Display for RefusalKind {
 /// Messages name byte offsets, positions (counting from 0), counts and the
 /// subset's own field names only: never a question id, an option key, a
 /// field the caller made up, or any part of the content.
-/// [`RequestError::kind`] names the refusal as the decision fixtures do.
+/// [`RequestError::kind`] names every refusal's [`RefusalKind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestError {
     /// The body is longer than the transport reads.
@@ -355,15 +362,15 @@ pub enum RequestError {
 }
 
 impl RequestError {
-    /// The refusal's kind, as the decision fixtures name it. `None` for
-    /// the transport's own ceilings ([`RequestError::TooLarge`],
-    /// [`RequestError::TooManyValues`],
-    /// [`RequestError::ContentTooManyValues`]), which the fixtures do not
-    /// name.
-    pub fn kind(&self) -> Option<RefusalKind> {
-        Some(match self {
-            Self::TooLarge { .. } | Self::TooManyValues { .. } => return None,
-            Self::ContentTooManyValues { .. } => return None,
+    /// The refusal's kind: as the decision fixtures name it, or
+    /// [`RefusalKind::RequestTooLarge`] for the transport's own ceilings
+    /// ([`RequestError::TooLarge`], [`RequestError::TooManyValues`],
+    /// [`RequestError::ContentTooManyValues`]).
+    pub fn kind(&self) -> RefusalKind {
+        match self {
+            Self::TooLarge { .. }
+            | Self::TooManyValues { .. }
+            | Self::ContentTooManyValues { .. } => RefusalKind::RequestTooLarge,
             Self::NotUtf8 { .. } | Self::InvalidJson { .. } | Self::InvalidContent(_) => {
                 RefusalKind::InvalidJson
             }
@@ -386,7 +393,7 @@ impl RequestError {
             Self::EmptyQuestionId { .. } => RefusalKind::EmptyQuestionId,
             Self::EmptyOptionKey { .. } => RefusalKind::EmptyOptionKey,
             Self::TooDeep(_) => RefusalKind::JsonTooDeep,
-        })
+        }
     }
 
     /// The refusal for a body that is not JSON the transport reads.
@@ -930,9 +937,9 @@ mod tests {
         parse(text).expect_err(text)
     }
 
-    /// The fixture name of `error`'s kind, or `"-"` for a ceiling.
+    /// The name of `error`'s kind.
     fn kind(error: RequestError) -> &'static str {
-        error.kind().map_or("-", RefusalKind::as_str)
+        error.kind().as_str()
     }
 
     fn json(text: &str) -> OrderedJson {
@@ -1546,7 +1553,7 @@ mod tests {
                 max: 65_536
             }
         );
-        assert_eq!(refused(&one(&state, NOUL)).kind(), None);
+        assert_eq!(kind(refused(&one(&state, NOUL))), "request_too_large");
     }
 
     #[test]
@@ -1581,7 +1588,7 @@ mod tests {
     }
 
     #[test]
-    fn every_refusal_has_a_fixture_kind_but_the_ceilings() {
+    fn every_refusal_has_a_kind_and_only_the_ceilings_have_the_transports() {
         // The parse-stage kinds of the fixtures' README.
         let names = [
             "invalid_json",
@@ -1646,21 +1653,20 @@ mod tests {
             RequestError::ContentTooManyValues { at, max: 1 },
             RequestError::InvalidContent(at),
         ] {
-            match error.kind() {
-                Some(kind) => {
-                    assert!(names.contains(&kind.as_str()), "{error:?}");
-                    assert_eq!(kind.to_string(), kind.as_str());
-                }
-                None => assert!(
-                    matches!(
-                        error,
-                        RequestError::TooLarge { .. }
-                            | RequestError::TooManyValues { .. }
-                            | RequestError::ContentTooManyValues { .. }
-                    ),
-                    "{error:?}"
-                ),
+            let kind = error.kind();
+            let ceiling = matches!(
+                error,
+                RequestError::TooLarge { .. }
+                    | RequestError::TooManyValues { .. }
+                    | RequestError::ContentTooManyValues { .. }
+            );
+            if ceiling {
+                assert_eq!(kind, RefusalKind::RequestTooLarge, "{error:?}");
+                assert_eq!(kind.as_str(), "request_too_large");
+            } else {
+                assert!(names.contains(&kind.as_str()), "{error:?}");
             }
+            assert_eq!(kind.to_string(), kind.as_str());
             assert!(!error.to_string().is_empty());
         }
     }

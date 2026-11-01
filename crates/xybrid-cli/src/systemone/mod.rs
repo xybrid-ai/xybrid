@@ -58,7 +58,8 @@
 //!
 //! 1. **The body**, as JSON: at most 8 MiB and 131,072 values (the
 //!    transport's ceilings, set well above what the defaults of
-//!    `validate_structure` accept); UTF-8; one JSON value under
+//!    `validate_structure` accept: `request_too_large`, the one kind no
+//!    fixture names); UTF-8; one JSON value under
 //!    [`OrderedJson::parse`]'s grammar (`invalid_json`); no number beyond
 //!    the `f64` range (`number_out_of_range`, as `1e400`); then no object
 //!    anywhere that repeats a key (`duplicate_key`; llama.cpp keeps the
@@ -92,8 +93,8 @@
 //!    (`json_too_deep`), an integer above `i64::MAX` (`number_out_of_range`:
 //!    llama.cpp's template engine reads it wrapped to a negative number;
 //!    integers beyond `u64::MAX` are floats there, and stay floats here), or
-//!    more than 65,536 values in one piece (a ceiling, like those of step
-//!    1, with no fixture kind).
+//!    more than 65,536 values in one piece (`request_too_large`, a ceiling
+//!    like those of step 1).
 //!
 //! The protocol's own limits come later, when the model's protocol prepares
 //! the request: LFM3 d1 caps the state and instructions at 127 levels and
