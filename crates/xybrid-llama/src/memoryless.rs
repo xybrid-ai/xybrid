@@ -408,6 +408,9 @@ fn select_logits(row: &[f32], select: &[i32]) -> Vec<f32> {
         .collect()
 }
 
+#[cfg(all(test, target_os = "linux"))]
+mod measure;
+
 #[cfg(test)]
 mod tests {
     use super::*;
