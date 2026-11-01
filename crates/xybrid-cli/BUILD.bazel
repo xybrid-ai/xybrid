@@ -81,6 +81,10 @@ _CLI_INTEGRATION_TESTS = {
         "@crates//:serde_json",
         "@crates//:tempfile",
     ],
+    # `run --decision` refusing before any model opens; spawns the CLI only.
+    "decision_cli_test": [
+        "@crates//:tempfile",
+    ],
     "init_json_test": [
         "@crates//:serde_json",
         "@crates//:tempfile",

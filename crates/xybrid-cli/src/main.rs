@@ -24,6 +24,12 @@
 //! | `pack` | Create a model bundle |
 //! | `bundle` | Fetch and bundle a registry model |
 
+#![expect(
+    clippy::large_enum_variant,
+    reason = "`Commands` is parsed once per process: `run` carrying more flags than the other \
+              subcommands costs nothing, and boxing them would only move clap's fields"
+)]
+
 mod commands;
 #[allow(dead_code)]
 mod tracing_viz;
@@ -214,12 +220,36 @@ enum Commands {
         )]
         choices: Vec<Choice>,
 
+        /// A decision request in SystemOne JSON for a decision model to
+        /// answer; `-` reads it from stdin. The request holds the state and
+        /// the questions, so no input flag goes with it. Needs a model flag
+        #[arg(
+            long = "decision",
+            value_name = "FILE",
+            conflicts_with_all = [
+                "config",
+                "pipeline",
+                "policy",
+                "input_text",
+                "input_audio",
+                "input_images",
+                "choices",
+                "voice",
+                "max_tokens",
+                "show_reasoning",
+                "speculative_cloud",
+                "trace",
+                "trace_export",
+            ]
+        )]
+        decision: Option<PathBuf>,
+
         /// Voice ID for TTS models (e.g., "af_bella", "am_adam")
         #[arg(long, value_name = "VOICE")]
         voice: Option<String>,
 
         /// Output file path for saving results (audio: .wav, text: .txt,
-        /// choice scores: .json)
+        /// choice scores and decision responses: .json)
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
 
@@ -601,6 +631,7 @@ fn run_command(cli: Cli) -> Result<()> {
             input_text,
             input_images,
             choices,
+            decision,
             voice,
             output,
             target,
@@ -610,6 +641,29 @@ fn run_command(cli: Cli) -> Result<()> {
             trace_export,
             speculative_cloud,
         } => {
+            if let Some(request) = decision {
+                let model = commands::decision::ModelRef::from_flags(
+                    model.as_deref(),
+                    target.as_deref(),
+                    model_file.as_deref(),
+                    directory.as_deref(),
+                    huggingface.as_deref(),
+                    bundle.as_deref(),
+                )
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "--decision needs a model: --model-file, --model, --directory, \
+                         --huggingface or --bundle"
+                    )
+                })?;
+                return commands::decision::handle_decision_run(commands::decision::DecisionRun {
+                    request: &request,
+                    model,
+                    output: output.as_deref(),
+                    dry_run,
+                });
+            }
+
             if trace {
                 tracing_viz::reset_collector();
             }
@@ -1001,6 +1055,73 @@ mod tests {
             args.extend_from_slice(extra);
             let Err(err) = Cli::try_parse_from(&args) else {
                 panic!("{extra:?} must conflict with --choice");
+            };
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::ArgumentConflict,
+                "{extra:?}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn run_takes_a_decision_request_with_a_model_flag() {
+        for model in [
+            &["--model-file", "d1.gguf"][..],
+            &["--model", "d1-2b", "--target", "onnx"],
+            &["--directory", "d1"],
+            &["--huggingface", "LiquidAI/d1-2B-GGUF"],
+            &["--bundle", "d1.xyb"],
+        ] {
+            let mut args = vec!["xybrid", "run", "--decision", "request.json"];
+            args.extend_from_slice(model);
+            args.extend_from_slice(&["--dry-run", "--output", "response.json"]);
+            let cli = Cli::try_parse_from(&args)
+                .unwrap_or_else(|err| panic!("{model:?} should take --decision: {err}"));
+            let Commands::Run {
+                decision,
+                dry_run,
+                output,
+                ..
+            } = cli.command
+            else {
+                panic!("expected run command");
+            };
+            assert_eq!(decision, Some(PathBuf::from("request.json")));
+            assert!(dry_run);
+            assert_eq!(output, Some(PathBuf::from("response.json")));
+        }
+    }
+
+    #[test]
+    fn decision_conflicts_with_inputs_and_generation_flags() {
+        let cases: [&[&str]; 13] = [
+            &["--config", "pipeline.yml"],
+            &["--pipeline", "hiiipe"],
+            &["--model-file", "m.gguf", "--policy", "policy.yml"],
+            &["--model-file", "m.gguf", "--input-text", "ctx"],
+            &["--model-file", "m.gguf", "--input-audio", "speech.wav"],
+            &["--model-file", "m.gguf", "--input-image", "page.png"],
+            &[
+                "--model-file",
+                "m.gguf",
+                "--input-text",
+                "ctx",
+                "--choice",
+                "a=b",
+            ],
+            &["--model-file", "m.gguf", "--voice", "af_bella"],
+            &["--model-file", "m.gguf", "--max-tokens", "8"],
+            &["--model-file", "m.gguf", "--show-reasoning"],
+            &["--model", "m", "--speculative-cloud"],
+            &["--model-file", "m.gguf", "--trace"],
+            &["--model-file", "m.gguf", "--trace-export", "trace.json"],
+        ];
+        for extra in cases {
+            let mut args = vec!["xybrid", "run", "--decision", "request.json"];
+            args.extend_from_slice(extra);
+            let Err(err) = Cli::try_parse_from(&args) else {
+                panic!("{extra:?} must conflict with --decision");
             };
             assert_eq!(
                 err.kind(),

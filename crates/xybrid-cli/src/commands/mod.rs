@@ -5,6 +5,7 @@
 //! | Module | Commands |
 //! |--------|----------|
 //! | [`run`] | `run` - Execute pipelines, bundles, and models |
+//! | [`decision`] | `run --decision` - Answer a SystemOne decision request |
 //! | [`repl`] | `repl` - Interactive REPL mode |
 //! | [`models`] | `models list`, `models info`, `models voices` |
 //! | [`cache`] | `cache list`, `cache status`, `cache clear` |
@@ -19,6 +20,7 @@
 
 pub mod bundle;
 pub mod cache;
+pub mod decision;
 pub mod fetch;
 pub mod init;
 pub mod models;
