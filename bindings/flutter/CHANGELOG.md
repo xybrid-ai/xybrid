@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+* Breaking: the plugin declares the platform minimums its precompiled libraries
+  are built for: iOS 16.0 (was 13.0), macOS 14.0 (was 10.15) and Android 9,
+  API 28 (`minSdkVersion` was 21). An app that targets an older version now
+  fails at build time, in `pod install` or the Android manifest merge, instead
+  of when it loads the native library on an older device. Raise the app's
+  minimums: `minSdk = 28` in `defaultConfig` of `android/app/build.gradle.kts`
+  (Flutter's default, `flutter.minSdkVersion`, is lower);
+  `platform :ios, '16.0'` in `ios/Podfile` and an iOS Deployment Target of 16.0
+  for the Runner target; `platform :osx, '14.0'` in `macos/Podfile` and a macOS
+  Deployment Target of 14.0. The libraries themselves are unchanged.
+
 ## 0.16.0
 
 * Changed: precompiled native libraries now use llama.cpp v0.8.0.

@@ -439,6 +439,10 @@ jobs:
       # full shipped feature surface, and the iOS slices must be the right
       # platform (device vs simulator). Mach-O symbols carry a leading
       # underscore; LC_BUILD_VERSION platform: 1=macOS, 2=iOS, 7=iOS-sim.
+      # No object may need a newer OS than its podspec's s.platform, or an app
+      # at the declared minimum builds and then cannot load the library. The
+      # macOS floor is hermetic-llvm's default (no --macos_minimum_os), so an
+      # llvm bump can raise it; this is the check that notices.
       - name: Verify Flutter darwin payloads
         run: |
           set -euo pipefail
@@ -463,6 +467,13 @@ jobs:
           check_lib aarch64-apple-darwin 1
           check_lib aarch64-apple-ios 2
           check_lib aarch64-apple-ios-sim 7
+          python3 tools/scripts/verify_apple_min_os.py \
+            --podspec bindings/flutter/macos/xybrid_flutter.podspec \
+            prebuilt/aarch64-apple-darwin/libxybrid_flutter_ffi.a
+          python3 tools/scripts/verify_apple_min_os.py \
+            --podspec bindings/flutter/ios/xybrid_flutter.podspec \
+            prebuilt/aarch64-apple-ios/libxybrid_flutter_ffi.a \
+            prebuilt/aarch64-apple-ios-sim/libxybrid_flutter_ffi.a
 
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
 
