@@ -15,14 +15,16 @@
 //! | `model::every_case_prepares_as_upstream_on_d1_2b` | `llm-llamacpp`, d1-2B | `prepare` with the real tokenizer: everything upstream observed |
 //! | `model::metadata_variants_built_by_the_oracle` | `llm-llamacpp`, d1-2B, `decision-oracle` | the metadata cases on the oracle's own variant GGUFs |
 //!
-//! Exact `f64` agreement needs the `exp` the observations were made with
-//! (glibc on Linux x86-64, the fixtures' platform); elsewhere answers are
-//! held within 64 ulps, and discrete answers exactly.
+//! An answer's `f64`s are held as [`parity`](super::parity) says: bit for bit
+//! in the reference environment the fixtures were observed in (Linux x86-64,
+//! glibc 2.34, FMA and AVX2), measured and reported elsewhere; zeros, ties
+//! and order exactly everywhere, as keys, choices and score levels are.
 
 use std::collections::BTreeMap;
 
 use super::cases::{self, f32_of, f64_of, int, items, Case, Fixture};
 use super::fake::{d1_header, GgufWriter};
+use super::parity::F64Parity;
 use crate::execution::decision::facts::Temperature;
 use crate::execution::decision::plan::{AnswerPlan, FinalizeRule, LabelGroup};
 use crate::execution::decision::{
@@ -32,32 +34,6 @@ use crate::gguf::DecisionProfileId;
 use crate::ir::decision::{
     DecisionAnswer, DecisionError, DecisionOrigin, DecisionRequest, Decisions,
 };
-
-/// Whether `f64` results must equal the fixtures bit for bit here.
-const EXACT_F64: bool = cfg!(all(
-    target_os = "linux",
-    target_env = "gnu",
-    target_arch = "x86_64"
-));
-
-/// `expected` and `actual` agree: bit for bit where [`EXACT_F64`]; elsewhere
-/// (another libm's `exp`) within 64 ulps, or both below `1e-290`.
-pub(super) fn assert_f64(expected: f64, actual: f64, what: &str) {
-    if EXACT_F64 {
-        assert_eq!(
-            expected.to_bits(),
-            actual.to_bits(),
-            "{what}: expected {expected:?}, got {actual:?}"
-        );
-    } else {
-        let ulps = (expected.to_bits() as i64 - actual.to_bits() as i64).unsigned_abs();
-        let tiny = expected.abs() < 1e-290 && actual.abs() < 1e-290;
-        assert!(
-            ulps <= 64 || tiny,
-            "{what}: expected {expected:?}, got {actual:?}"
-        );
-    }
-}
 
 /// How many cases expect `outcome` (`"match"`, `"refuse"` for any refusal,
 /// `"not_reached"`, …) at `stage`.
@@ -246,10 +222,15 @@ pub(super) fn upstream_readouts(case: &Case) -> Vec<Vec<f32>> {
 }
 
 /// `decisions` are upstream's `finalize` of `case`: the answer of every
-/// question (its value, every probability in order, the confidence), each
-/// option's raw score (the group maxima upstream's `format_answer` was
-/// given), and the usage.
-pub(super) fn assert_upstream_answers(case: &Case, plan: &DecisionPlan, decisions: &Decisions) {
+/// question (its value, every probability in order, the confidence, the
+/// `f64`s as `parity` holds them), each option's raw score (the group maxima
+/// upstream's `format_answer` was given), and the usage.
+pub(super) fn assert_upstream_answers(
+    case: &Case,
+    plan: &DecisionPlan,
+    decisions: &Decisions,
+    parity: &mut F64Parity,
+) {
     let id = &case.id;
     let expected = case
         .at(&["upstream", "finalize", "answers"])
@@ -276,7 +257,7 @@ pub(super) fn assert_upstream_answers(case: &Case, plan: &DecisionPlan, decision
                 entry.key()
             );
         }
-        assert_answer(&what, expected, answer);
+        assert_answer(&what, expected, answer, parity);
     }
     let usage = decisions.usage();
     assert_eq!(
@@ -296,71 +277,76 @@ pub(super) fn assert_upstream_answers(case: &Case, plan: &DecisionPlan, decision
 
 /// One SystemOne answer against a [`DecisionAnswer`]: compared through
 /// independently parsed `f64`s and discrete values, never through
-/// `DecisionAnswer` deserialization.
-fn assert_answer(what: &str, expected: &Fixture, answer: &DecisionAnswer) {
-    let kind = expected.get("type").and_then(Fixture::as_str);
-    let probabilities = |expected: &Fixture| {
-        let listed = expected
-            .get("probabilities")
-            .and_then(Fixture::as_object)
-            .expect("probabilities");
-        assert_eq!(listed.len(), answer.distribution().len(), "{what}");
-        for ((key, p), entry) in listed.iter().zip(answer.distribution()) {
-            assert_eq!(entry.key(), key, "{what}: option order");
-            assert_f64(f64_of(p), entry.probability(), &format!("{what}: p({key})"));
-        }
+/// `DecisionAnswer` deserialization. Keys, their order, the choice and the
+/// score level are exact everywhere; the `f64`s go to `parity`.
+fn assert_answer(what: &str, expected: &Fixture, answer: &DecisionAnswer, parity: &mut F64Parity) {
+    let number = |key: &str| {
+        f64_of(
+            expected
+                .get(key)
+                .unwrap_or_else(|| panic!("{what}: no {key}")),
+        )
     };
-    let confidence = |expected: &Fixture| {
-        let value = f64_of(expected.get("confidence").expect("confidence"));
-        assert_f64(
-            value,
-            answer.confidence().expect("a confidence"),
-            &format!("{what}: confidence"),
-        );
-    };
-    match kind {
-        Some("choice") => {
-            assert_eq!(
-                answer.value().as_choice(),
-                expected.get("choice").and_then(Fixture::as_str),
-                "{what}: choice"
-            );
-            probabilities(expected);
-            confidence(expected);
+    // The answer's f64s: (name, upstream's, xybrid's).
+    let mut values = Vec::new();
+    match expected.get("type").and_then(Fixture::as_str) {
+        Some(kind @ ("choice" | "score")) => {
+            let listed = expected
+                .get("probabilities")
+                .and_then(Fixture::as_object)
+                .expect("probabilities");
+            assert_eq!(listed.len(), answer.distribution().len(), "{what}");
+            for ((key, p), entry) in listed.iter().zip(answer.distribution()) {
+                assert_eq!(entry.key(), key, "{what}: option order");
+                values.push((format!("p({key})"), f64_of(p), entry.probability()));
+            }
+            values.push((
+                "confidence".to_string(),
+                number("confidence"),
+                answer.confidence().expect("a confidence"),
+            ));
+            if kind == "choice" {
+                assert_eq!(
+                    answer.value().as_choice(),
+                    expected.get("choice").and_then(Fixture::as_str),
+                    "{what}: choice"
+                );
+            } else {
+                let (level, statistic) = answer.value().as_score().expect("a score answer");
+                assert_eq!(
+                    statistic,
+                    crate::ir::decision::ScoreStatistic::Median,
+                    "{what}"
+                );
+                // A level, selected rather than computed: exact everywhere.
+                assert_eq!(
+                    level.to_bits(),
+                    number("score").to_bits(),
+                    "{what}: score level {level}"
+                );
+            }
         }
         Some("noul") => {
-            let p_yes = answer.value().as_yes_no().expect("a yes/no answer");
-            assert_f64(
-                f64_of(expected.get("noul").unwrap()),
-                p_yes,
-                &format!("{what}: noul"),
-            );
-            assert_eq!(answer.confidence(), None, "{what}: no confidence");
             let keys: Vec<&str> = answer.distribution().iter().map(|e| e.key()).collect();
             assert_eq!(keys, ["true", "false"], "{what}");
-        }
-        Some("score") => {
-            let (value, statistic) = answer.value().as_score().expect("a score answer");
+            assert_eq!(answer.confidence(), None, "{what}: no confidence");
+            let p_yes = answer.value().as_yes_no().expect("a yes/no answer");
             assert_eq!(
-                statistic,
-                crate::ir::decision::ScoreStatistic::Median,
-                "{what}"
+                p_yes.to_bits(),
+                answer.distribution()[0].probability().to_bits(),
+                "{what}: the answer is p(true)"
             );
-            assert_f64(
-                f64_of(expected.get("score").unwrap()),
-                value,
-                &format!("{what}: score"),
-            );
-            probabilities(expected);
-            confidence(expected);
+            values.push(("noul".to_string(), number("noul"), p_yes));
         }
         other => panic!("{what}: type {other:?}"),
     }
+    parity.answer(what, &values);
 }
 
 #[test]
 fn every_case_finalizes_as_upstream() {
     let mut checked = BTreeMap::<String, usize>::new();
+    let mut parity = F64Parity::new();
     for case in cases::all() {
         let expectation = case.expect("finalize").unwrap();
         if expectation == "not_reached" {
@@ -381,7 +367,7 @@ fn every_case_finalizes_as_upstream() {
             None => {
                 assert_eq!(expectation, "match", "{}", case.id);
                 let decisions = result.unwrap_or_else(|error| panic!("{}: {error}", case.id));
-                assert_upstream_answers(&case, &plan, &decisions);
+                assert_upstream_answers(&case, &plan, &decisions, &mut parity);
                 *checked.entry("match".into()).or_default() += 1;
             }
             Some(kind) => {
@@ -406,6 +392,7 @@ fn every_case_finalizes_as_upstream() {
             "{outcome}: {checked:?}"
         );
     }
+    parity.report("every_case_finalizes_as_upstream");
 }
 
 // ---------------------------------------------------------------------------

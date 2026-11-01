@@ -24,6 +24,7 @@ use super::conformance::{
     first_difference, tail_from, upstream_codes, upstream_readouts, PROTOCOL_KINDS_AT_PARSE,
 };
 use super::fake::d1_facts;
+use super::parity::F64Parity;
 use crate::execution::decision::facts::sha256_hex;
 use crate::execution::decision::llama::LlamaVocab;
 use crate::execution::decision::prepare::prepare;
@@ -281,7 +282,12 @@ fn assert_upstream_plan(case: &Case, plan: &DecisionPlan, prompts: &[String]) {
 /// the plan or the refusal, then (when upstream finalized it) the answers
 /// `finish` reads from upstream's raw scores with xybrid's own plan.
 /// Returns what was checked.
-fn check_case(case: &Case, facts: &DecisionModelFacts, vocab: &dyn DecisionVocab) -> &'static str {
+fn check_case(
+    case: &Case,
+    facts: &DecisionModelFacts,
+    vocab: &dyn DecisionVocab,
+    parity: &mut F64Parity,
+) -> &'static str {
     let parse = case.expect("parse").unwrap();
     if let Some(kind) = parse.strip_prefix("refuse:") {
         if !PROTOCOL_KINDS_AT_PARSE.contains(&kind) {
@@ -341,7 +347,7 @@ fn check_case(case: &Case, facts: &DecisionModelFacts, vocab: &dyn DecisionVocab
         Some("match") => {
             let decisions = finish(&request, &plan, upstream_readouts(case))
                 .unwrap_or_else(|error| panic!("{}: {error}", case.id));
-            assert_upstream_answers(case, &plan, &decisions);
+            assert_upstream_answers(case, &plan, &decisions, parity);
         }
         Some(refusal) if refusal.starts_with("refuse:") => {
             let error = finish(&request, &plan, upstream_readouts(case)).unwrap_err();
@@ -365,6 +371,7 @@ fn every_case_prepares_as_upstream_on_d1_2b() {
     let Some((_, model)) = d1_2b() else { return };
     let vocab = LlamaVocab::new(Arc::clone(model)).expect("d1-2B's vocabulary");
     let mut checked = std::collections::BTreeMap::<&str, usize>::new();
+    let mut parity = F64Parity::new();
     for case in cases::all() {
         if case.expect("prepare").as_deref() == Some("not_reached")
             && !case
@@ -381,9 +388,9 @@ fn every_case_prepares_as_upstream_on_d1_2b() {
                 tokenizer: &vocab,
                 control: edited_spellings(&case, model, &vocab),
             };
-            check_case(&case, &facts, &variant)
+            check_case(&case, &facts, &variant, &mut parity)
         } else {
-            check_case(&case, &facts, &vocab)
+            check_case(&case, &facts, &vocab, &mut parity)
         };
         *checked.entry(outcome).or_default() += 1;
     }
@@ -400,6 +407,7 @@ fn every_case_prepares_as_upstream_on_d1_2b() {
         "{checked:?}"
     );
     assert_eq!(checked.get("parse refusal"), Some(&7), "{checked:?}");
+    parity.report("every_case_prepares_as_upstream_on_d1_2b");
 }
 
 /// The `decision-oracle` binary, from `XYBRID_DECISION_ORACLE`.
@@ -476,6 +484,7 @@ fn metadata_variants_built_by_the_oracle() {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let vocab = LlamaVocab::new(Arc::clone(model)).expect("d1-2B's vocabulary");
     let mut checked = std::collections::BTreeMap::<&str, usize>::new();
+    let mut parity = F64Parity::new();
     for case in cases::all() {
         if case.at(&["metadata"]).is_none() {
             continue;
@@ -503,10 +512,11 @@ fn metadata_variants_built_by_the_oracle() {
             tokenizer: &vocab,
             control: header_control_spellings(&header),
         };
-        let outcome = check_case(&case, &facts, &variant_vocab);
+        let outcome = check_case(&case, &facts, &variant_vocab, &mut parity);
         *checked.entry(outcome).or_default() += 1;
     }
     eprintln!("metadata_variants_built_by_the_oracle: {checked:?}");
     assert_eq!(checked.get("load refusal"), Some(&3), "{checked:?}");
     assert_eq!(checked.get("prepared"), Some(&8), "{checked:?}");
+    parity.report("metadata_variants_built_by_the_oracle");
 }

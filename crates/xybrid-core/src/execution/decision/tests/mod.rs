@@ -12,6 +12,7 @@ mod json;
 mod labels;
 #[cfg(feature = "llm-llamacpp")]
 mod model;
+mod parity;
 #[cfg(feature = "llm-llamacpp")]
 mod prepare;
 mod protocol;
