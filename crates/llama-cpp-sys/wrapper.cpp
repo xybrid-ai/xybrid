@@ -499,6 +499,16 @@ int32_t llama_context_facts_c(const llama_context* ctx, llama_xybrid_context_fac
     });
 }
 
+int32_t llama_set_abort_callback_c(llama_context* ctx, llama_xybrid_abort_callback callback, void* data) {
+    return guarded<int32_t>(__func__, LLAMA_XYBRID_FAILED, [&]() -> int32_t {
+        if (!ctx) {
+            return LLAMA_XYBRID_FAILED;
+        }
+        llama_set_abort_callback(ctx, callback, data);
+        return 0;
+    });
+}
+
 void llama_free_c(llama_context* ctx) {
     if (ctx) {
         llama_free(ctx);

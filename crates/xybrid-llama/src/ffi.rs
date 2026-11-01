@@ -167,6 +167,24 @@ pub(crate) unsafe fn context_facts(ctx: *const c_void) -> Option<sys::llama_xybr
     (sys::llama_context_facts_c(ctx, &mut facts) == 0).then_some(facts)
 }
 
+/// Registers `callback` (with `data`) as the function llama.cpp's CPU
+/// backend asks, between graph nodes, whether to stop. `false` when the
+/// guarded call failed.
+///
+/// # Safety
+///
+/// `ctx` must be a live context pointer, and `data` must stay valid for
+/// `callback` until the context is freed. `callback` must not unwind.
+pub(crate) unsafe fn set_abort_callback(
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(*mut c_void) -> bool,
+    data: *mut c_void,
+) -> bool {
+    #[cfg(test)]
+    record_native_call();
+    sys::llama_set_abort_callback_c(ctx, Some(callback), data) == 0
+}
+
 /// Makes the next call of the guarded shim `shim` throw `std::bad_alloc`
 /// inside its exception boundary, as an allocation failure in llama.cpp
 /// would.

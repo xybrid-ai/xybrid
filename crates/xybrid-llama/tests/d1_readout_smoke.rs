@@ -21,6 +21,7 @@
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use xybrid_llama::{
     backend_init, LlamaContext, LlamaError, LlamaModel, MemorylessContext, MemorylessParams,
@@ -310,6 +311,50 @@ fn the_budget_is_an_exact_boundary() {
                 .unwrap()
         ),
         "the budget does not change the logits"
+    );
+}
+
+/// A long readout stops soon after its cancel handle is used (a full
+/// 2,048-token pass takes tens of seconds on four threads), and the context
+/// reads like a fresh one once the request is cleared.
+#[test]
+fn a_long_readout_can_be_cancelled_from_another_thread() {
+    let Some(model) = model() else { return };
+    let prompt = prompt_tokens(model);
+    let long: Vec<i32> = prompt.iter().copied().cycle().take(2048).collect();
+    let a = label_token(model, "A");
+    let mut ctx = readout_context(model, 2048);
+    let cancel = ctx.cancel_handle();
+
+    let started = Instant::now();
+    let worker = std::thread::spawn(move || {
+        let result = ctx.read_last(&long, &[a]);
+        (ctx, result)
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    cancel.cancel();
+    let (mut ctx, result) = worker.join().expect("the readout thread");
+    let elapsed = started.elapsed();
+    println!("a 2048-token readout cancelled after 300 ms returned after {elapsed:?}");
+    assert!(matches!(result, Err(LlamaError::Cancelled)), "{result:?}");
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "the readout stopped after {elapsed:?}"
+    );
+
+    assert!(matches!(
+        ctx.read_last(&prompt, &[a]),
+        Err(LlamaError::Cancelled)
+    ));
+    ctx.clear_cancel();
+    assert_eq!(
+        bits(&ctx.read_last(&prompt, &[a]).unwrap()),
+        bits(
+            &readout_context(model, 2048)
+                .read_last(&prompt, &[a])
+                .unwrap()
+        ),
+        "a cancelled context reads like a fresh one"
     );
 }
 

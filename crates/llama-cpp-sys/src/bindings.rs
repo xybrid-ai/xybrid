@@ -1143,6 +1143,15 @@ unsafe extern "C" {
         out: *mut llama_xybrid_context_facts,
     ) -> i32;
 }
+pub type llama_xybrid_abort_callback =
+    ::std::option::Option<unsafe extern "C" fn(data: *mut ::std::os::raw::c_void) -> bool>;
+unsafe extern "C" {
+    pub fn llama_set_abort_callback_c(
+        ctx: *mut ::std::os::raw::c_void,
+        callback: llama_xybrid_abort_callback,
+        data: *mut ::std::os::raw::c_void,
+    ) -> i32;
+}
 unsafe extern "C" {
     pub fn llama_get_logits_ith_c(ctx: *mut ::std::os::raw::c_void, i: i32) -> *mut f32;
 }

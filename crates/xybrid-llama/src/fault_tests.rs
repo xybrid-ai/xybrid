@@ -54,6 +54,7 @@ const STUB_CASES: &[(&str, &str, &str)] = &[
 const MODEL_CASES: &[(&str, &str)] = &[
     ("readout_context", "Err(ContextCreationFailed("),
     ("readout_facts", "Err(Internal("),
+    ("readout_cancel_check", "Err(Internal("),
     ("read_last_logits", "Err(Internal("),
     ("read_last_decode", "Err(DecodeFailed { code: -1000,"),
     #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
@@ -158,6 +159,10 @@ fn model_case(case: &str) -> String {
         }
         "readout_facts" => {
             ffi::fail_next_native_call("llama_context_facts_c");
+            format!("{:?}", MemorylessContext::new(&model, params).map(|_| ()))
+        }
+        "readout_cancel_check" => {
+            ffi::fail_next_native_call("llama_set_abort_callback_c");
             format!("{:?}", MemorylessContext::new(&model, params).map(|_| ()))
         }
         "read_last_logits" => {

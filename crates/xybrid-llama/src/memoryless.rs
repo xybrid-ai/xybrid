@@ -33,6 +33,7 @@
 //! absent).
 
 use std::ffi::{c_int, c_void};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::context::ContextFacts;
@@ -116,6 +117,10 @@ pub struct MemorylessContext {
     budget: usize,
     n_vocab: usize,
     facts: ContextFacts,
+    /// Set by a [`ReadoutCancel`]; llama.cpp's abort callback reads it, so
+    /// it must outlive the native context (fields drop after
+    /// [`Drop::drop`]).
+    cancel: Arc<AtomicBool>,
     /// The model this context reads. Fields drop after [`Drop::drop`] frees
     /// the native context, so the model outlives it.
     _model: Arc<ModelHandle>,
@@ -183,11 +188,20 @@ impl MemorylessContext {
             budget: usize::try_from(params.token_budget).expect("a u32 fits usize"),
             n_vocab,
             facts: EMPTY_FACTS,
+            cancel: Arc::new(AtomicBool::new(false)),
             _model: Arc::clone(model.handle()),
         };
         // SAFETY: ptr is the live context created above.
         context.facts = unsafe { ContextFacts::read(ptr) }?;
         check_facts(&context.facts, params.token_budget)?;
+        let flag = Arc::as_ptr(&context.cancel).cast_mut().cast::<c_void>();
+        // SAFETY: the context is live; the flag lives in `context.cancel`,
+        // which outlives the native context, and the callback only loads it.
+        if !unsafe { ffi::set_abort_callback(ptr, cancel_requested, flag) } {
+            return Err(ffi::native_failure(
+                "registering the readout's cancel check",
+            ));
+        }
         Ok(context)
     }
 
@@ -200,6 +214,7 @@ impl MemorylessContext {
             budget,
             n_vocab,
             facts: EMPTY_FACTS,
+            cancel: Arc::new(AtomicBool::new(false)),
             _model: Arc::clone(model.handle()),
         }
     }
@@ -218,15 +233,24 @@ impl MemorylessContext {
     /// only ever read from the evaluation this call made, so a failure
     /// never returns an earlier row.
     ///
+    /// A [`ReadoutCancel`] (see [`Self::cancel_handle`]) stops it: before
+    /// it starts, or between two of llama.cpp's graph nodes on the CPU
+    /// backend (other backends finish the pass first).
+    ///
     /// # Errors
     ///
     /// [`LlamaError::InvalidInput`], before any native call, when `tokens`
     /// is empty or longer than the budget, `select` is empty, or an id in
-    /// either is outside the vocabulary. [`LlamaError::DecodeFailed`] when
+    /// either is outside the vocabulary. [`LlamaError::Cancelled`] when the
+    /// context's cancel handle was used (before any native call when it was
+    /// used before this call started). [`LlamaError::DecodeFailed`] when
     /// llama.cpp fails to evaluate the prompt, and [`LlamaError::Internal`]
     /// when it returns no logits for the last token.
     pub fn read_last(&mut self, tokens: &[i32], select: &[i32]) -> LlamaResult<Vec<f32>> {
         check_readout(tokens, select, self.budget, self.n_vocab)?;
+        if self.cancel.load(Ordering::Relaxed) {
+            return Err(LlamaError::Cancelled);
+        }
         let mut batch = TokenBatch::new(tokens.len());
         batch.set(tokens, 0, true);
         // SAFETY: the context is live. The batch holds at most the budget of
@@ -234,6 +258,10 @@ impl MemorylessContext {
         // the vocabulary, positions from 0, and exactly one output, which
         // the context's cap allows.
         let code = unsafe { ffi::decode(self.ptr, &mut batch) };
+        // llama.cpp reports an evaluation its abort callback stopped as 2.
+        if code == 2 && self.cancel.load(Ordering::Relaxed) {
+            return Err(LlamaError::Cancelled);
+        }
         if code != 0 {
             return Err(LlamaError::DecodeFailed {
                 code,
@@ -273,6 +301,53 @@ impl MemorylessContext {
     pub fn facts(&self) -> ContextFacts {
         self.facts
     }
+
+    /// A handle that cancels this context's readouts from any thread.
+    ///
+    /// Using it stops the running readout (on the CPU backend, between two
+    /// graph nodes) and refuses every later one with
+    /// [`LlamaError::Cancelled`], until [`Self::clear_cancel`].
+    pub fn cancel_handle(&self) -> ReadoutCancel {
+        ReadoutCancel {
+            flag: Arc::clone(&self.cancel),
+        }
+    }
+
+    /// Clears a cancel request, so the context reads again.
+    pub fn clear_cancel(&mut self) {
+        self.cancel.store(false, Ordering::Relaxed);
+    }
+}
+
+/// Cancels the readouts of one [`MemorylessContext`], from any thread.
+///
+/// Cheap to clone; every clone cancels the same context. Using it after the
+/// context is gone does nothing.
+#[derive(Debug, Clone)]
+pub struct ReadoutCancel {
+    flag: Arc<AtomicBool>,
+}
+
+impl ReadoutCancel {
+    /// Stops the context's running readout, if any, and refuses later ones
+    /// until the context clears the request.
+    pub fn cancel(&self) {
+        self.flag.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether a cancel is pending.
+    pub fn is_cancelled(&self) -> bool {
+        self.flag.load(Ordering::Relaxed)
+    }
+}
+
+/// llama.cpp's abort callback: whether the readout's cancel flag is set.
+///
+/// # Safety
+///
+/// `data` must point at the context's live `AtomicBool`.
+unsafe extern "C" fn cancel_requested(data: *mut c_void) -> bool {
+    (*data.cast::<AtomicBool>()).load(Ordering::Relaxed)
 }
 
 impl Drop for MemorylessContext {
@@ -574,6 +649,41 @@ mod tests {
         );
         drop(ctx);
         assert!(handle.upgrade().is_none(), "the last owner frees the model");
+    }
+
+    #[test]
+    fn a_cancelled_context_refuses_before_any_native_call_until_cleared() {
+        let model = LlamaModel::test_stub();
+        let mut ctx = MemorylessContext::test_stub(&model, 4, 10);
+        let cancel = ctx.cancel_handle();
+        assert!(!cancel.is_cancelled());
+        cancel.clone().cancel();
+        assert!(
+            cancel.is_cancelled(),
+            "every clone cancels the same context"
+        );
+
+        let calls = ffi::native_calls();
+        assert!(matches!(
+            ctx.read_last(&[1, 2], &[0]),
+            Err(LlamaError::Cancelled)
+        ));
+        assert!(
+            matches!(ctx.read_last(&[], &[0]), Err(LlamaError::InvalidInput(_))),
+            "input checks come first"
+        );
+        assert_eq!(ffi::native_calls(), calls, "no native call was made");
+
+        ctx.clear_cancel();
+        assert!(!cancel.is_cancelled());
+        drop(ctx);
+        cancel.cancel(); // the context is gone: nothing to stop
+    }
+
+    #[test]
+    fn the_cancel_handle_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<ReadoutCancel>();
     }
 
     #[test]

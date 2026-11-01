@@ -19,7 +19,8 @@
 //!   manipulation and per-sequence state snapshot methods
 //! - [`MemorylessContext`] / [`MemorylessParams`] — a context without memory
 //!   for one-shot readouts of decision models (LFM3 d1): one sequence, one
-//!   output row, an explicit token budget
+//!   output row, an explicit token budget; [`ReadoutCancel`] stops its
+//!   readouts from another thread
 //! - [`ContextFacts`] — the sizes, memory and attention llama.cpp actually
 //!   gave a context
 //! - [`TokenAttr`] — a vocabulary entry's attributes, from
@@ -98,7 +99,7 @@ pub use generation::{format_chat, generate_streaming, generate_with_stops, Strea
 #[cfg(feature = "bindings")]
 pub use log_control::{get_verbosity, set_verbosity};
 #[cfg(feature = "bindings")]
-pub use memoryless::{MemorylessContext, MemorylessParams};
+pub use memoryless::{MemorylessContext, MemorylessParams, ReadoutCancel};
 #[cfg(feature = "bindings")]
 pub use model::{LlamaModel, TokenAttr};
 #[cfg(feature = "bindings")]

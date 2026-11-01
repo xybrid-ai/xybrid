@@ -207,6 +207,14 @@ struct llama_xybrid_context_facts {
 int32_t llama_context_facts_c(
     const XYBRID_LLAMA_CONTEXT* ctx, struct llama_xybrid_context_facts* out);
 
+/* Registers the callback llama.cpp calls between graph nodes while it
+   evaluates a batch; when it returns true the evaluation stops and
+   llama_decode returns 2. Only the CPU backend calls it. data is passed back
+   as is and must outlive the context. Guarded: 0, or LLAMA_XYBRID_FAILED. */
+typedef bool (*llama_xybrid_abort_callback)(void* data);
+int32_t llama_set_abort_callback_c(
+    XYBRID_LLAMA_CONTEXT* ctx, llama_xybrid_abort_callback callback, void* data);
+
 /* The logits row of batch entry i from the last decode, owned by the context
    until its next decode. Guarded; NULL on failure. Only pass an entry the
    last successful decode flagged for output: for any other, llama.cpp
