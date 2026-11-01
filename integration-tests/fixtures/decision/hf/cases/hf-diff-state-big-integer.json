@@ -8,7 +8,7 @@
     "divergence"
   ],
   "notes": "Integers past int64 in a JSON state: the reference prints every digit; llama.cpp's template reads an unsigned one as int64 (2^64-1 prints -1) and a larger one as a double. Upstream renders 2^64-1 as -1 and 2^63 as -2^63 (int64 wrap), the 30-digit integer as a double; xybrid refuses the request. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": {\"order_id\": 18446744073709551615, \"customer_id\": 9223372036854775808, \"trace\": 123456789012345678901234567890}, \"questions\": {\"valid\": {\"type\": \"noul\", \"instructions\": \"Does the order have an order id?\"}}}",
   "upstream": {},

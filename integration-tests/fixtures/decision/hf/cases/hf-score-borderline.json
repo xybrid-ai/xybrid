@@ -7,7 +7,7 @@
     "state-string"
   ],
   "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": \"The package is a day late. Not a big deal, but I need it before the weekend.\", \"questions\": {\"urgency\": {\"type\": \"score\", \"instructions\": \"How urgent is this ticket?\", \"criteria\": [\"low\", \"medium\", \"high\"]}}}",
   "upstream": {},

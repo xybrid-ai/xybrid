@@ -2,10 +2,11 @@
 """Write the HF reference's request cases (integration-tests/fixtures/decision/hf/cases/).
 
 Each file is a case in the decision case schema, version 1 (integration-tests/fixtures/decision/schema.json and its
-README.md): the exact `request_text`, a title, coverage tags, the GGUF counterpart of the HF reference
-(`d1-2b-bf16`, the G1 artifact) and the settings its upstream evaluation would use. `upstream` is empty: the upstream
-oracle (tools/conformance/decision) fills it. `xybrid` holds the expectations these requests imply under that
-README's rules; they are proposals for the shared case set, to review there. Two groups:
+README.md): the exact `request_text`, a title, coverage tags, the GGUF counterpart of the HF reference for G1
+(`d1-2b-f16`, the G1 artifact contract C10 chose; the BF16 GGUF's cross-checks are reports) and the settings its
+upstream evaluation would use. `upstream` is empty: the upstream oracle (tools/conformance/decision) fills it.
+`xybrid` holds the expectations these requests imply under that README's rules; they are proposals for the shared
+case set, to review there. Two groups:
 
 - `hf-*`: requests inside the domain where the reference and llama.cpp's server should build the same prompt, so
   their numbers are G1 material (choice, yes/no and score; string, JSON, null and empty states; 27 and 36 options);
@@ -30,8 +31,8 @@ OUT = DECISION / "hf/cases"
 SCHEMA = DECISION / "schema.json"
 ARTIFACTS = DECISION / "artifacts.json"
 PROFILE = "lfm3-d1/text/v1"
-# The upstream evaluation of these cases, for G1: the GGUF, under the coordinator's CPU settings.
-ARTIFACT = "d1-2b-bf16"
+# The upstream evaluation of these cases, for G1 (contract C10): the F16 GGUF, under the coordinator's CPU settings.
+ARTIFACT = "d1-2b-f16"
 SETTINGS = "cpu-t4-fa-off"
 
 TICKET = "I was charged twice and my parcel never arrived. Please refund one charge."

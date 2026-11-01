@@ -8,7 +8,7 @@
     "state-messages"
   ],
   "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": [{\"role\": \"customer\", \"content\": \"Hi, my card was declined.\"}, {\"role\": \"agent\", \"content\": \"Which card?\"}, {\"role\": \"customer\", \"content\": \"The Visa ending 4242. It has funds, and it works everywhere else.\"}], \"questions\": {\"resolved\": {\"type\": \"noul\", \"instructions\": \"Is the customer's problem resolved?\"}}}",
   "upstream": {},

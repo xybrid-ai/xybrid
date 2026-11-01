@@ -7,7 +7,7 @@
     "score-10-levels"
   ],
   "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": \"The hotel was clean and the staff friendly, but the room was tiny and the breakfast was cold. Decent value for one night.\", \"questions\": {\"rating\": {\"type\": \"score\", \"instructions\": \"How positive is this review?\", \"criteria\": [\"terrible\", \"very bad\", \"bad\", \"poor\", \"mediocre\", \"fair\", \"good\", \"very good\", \"excellent\", \"perfect\"]}}}",
   "upstream": {},

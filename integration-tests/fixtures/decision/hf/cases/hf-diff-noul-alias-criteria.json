@@ -9,7 +9,7 @@
     "divergence"
   ],
   "notes": "Yes/no criteria under yes/no instead of true/false: the reference prints Yes: None / No: None; llama.cpp (lfm3-d1) reads only true/false and prints nothing. Upstream (lfm3-d1) reads only true/false and ignores the other keys; xybrid refuses them. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": \"I was charged twice and my parcel never arrived. Please refund one charge.\", \"questions\": {\"refund\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\", \"criteria\": {\"yes\": \"The customer wants money back\", \"no\": \"Anything else\"}}}}",
   "upstream": {},

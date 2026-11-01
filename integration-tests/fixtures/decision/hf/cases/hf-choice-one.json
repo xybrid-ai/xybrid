@@ -7,7 +7,7 @@
     "choice-one-option"
   ],
   "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": \"I was charged twice and my parcel never arrived. Please refund one charge.\", \"questions\": {\"queue\": {\"type\": \"choice\", \"instructions\": \"Which queue?\", \"criteria\": {\"general\": \"General support\"}}}}",
   "upstream": {},

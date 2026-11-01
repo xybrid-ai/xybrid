@@ -7,7 +7,7 @@
     "multi-question"
   ],
   "notes": "Five questions over one state: the reference's default packs them into one sequence (set attention, 16 a set); llama.cpp, and this runner's set_size=1, read each alone. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": \"I was charged twice and my parcel never arrived. Please refund one charge.\", \"questions\": {\"refund\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}, \"team\": {\"type\": \"choice\", \"instructions\": \"Which team should handle this?\", \"criteria\": {\"billing\": \"Charges, refunds, invoices\", \"shipping\": \"Delivery and parcels\", \"technical\": \"App or site faults\"}}, \"urgency\": {\"type\": \"score\", \"instructions\": \"How urgent is this ticket?\", \"criteria\": [\"low\", \"medium\", \"high\"]}, \"angry\": {\"type\": \"noul\", \"instructions\": \"Is the customer angry?\"}, \"language\": {\"type\": \"choice\", \"instructions\": \"Which language is the ticket in?\", \"criteria\": {\"en\": \"English\", \"fr\": \"French\", \"de\": \"German\"}}}}",
   "upstream": {},

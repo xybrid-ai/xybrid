@@ -8,7 +8,7 @@
     "choice-order"
   ],
   "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": \"The invoice charges me for express delivery, but the parcel came by standard post, and the app crashed when I tried to report it.\", \"questions\": {\"team\": {\"type\": \"choice\", \"instructions\": \"Which team should handle this?\", \"criteria\": {\"billing\": \"Charges, refunds, invoices\", \"shipping\": \"Delivery and parcels\", \"technical\": \"App or site faults\"}}}}",
   "upstream": {},

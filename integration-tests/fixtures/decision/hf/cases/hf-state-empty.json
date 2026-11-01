@@ -7,7 +7,7 @@
     "state-empty"
   ],
   "notes": "Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": \"\", \"questions\": {\"enough\": {\"type\": \"noul\", \"instructions\": \"Is there enough information to answer a question?\"}}}",
   "upstream": {},

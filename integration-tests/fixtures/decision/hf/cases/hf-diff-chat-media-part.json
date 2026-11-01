@@ -9,7 +9,7 @@
     "refusal-parse"
   ],
   "notes": "An image part inside a chat-message state: llama.cpp takes it out of the state and loads it as media; the reference renders the JSON as it is. Upstream takes the part out of the state and refuses the request without an mmproj (501). Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": null,
   "request_text": "{\"state\": [{\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"See the attached receipt.\"}, {\"type\": \"image_url\", \"image_url\": {\"url\": \"data:image/png;base64,iVBORw0KGgo=\"}}]}], \"questions\": {\"receipt\": {\"type\": \"noul\", \"instructions\": \"Does the customer mention a receipt?\"}}}",
   "upstream": {},

@@ -7,7 +7,7 @@
     "choice-letter-keys"
   ],
   "notes": "Single-letter keys with surrounding spaces: the reference strips them and uses the letters as codes; llama.cpp needs exactly one byte, so it codes them A..C. Written by tools/conformance/decision_hf/make_cases.py: upstream is left for the upstream oracle to fill, and the xybrid expectations are proposals.",
-  "artifact": "d1-2b-bf16",
+  "artifact": "d1-2b-f16",
   "settings": "cpu-t4-fa-off",
   "request_text": "{\"state\": \"The capital of France is Paris.\", \"questions\": {\"capital\": {\"type\": \"choice\", \"instructions\": \"Which city is the capital?\", \"criteria\": {\" a\": \"Paris\", \"b \": \"Lyon\", \"c\": \"Marseille\"}}}}",
   "upstream": {},
