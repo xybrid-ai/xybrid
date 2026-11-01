@@ -313,6 +313,37 @@ pub(crate) unsafe fn tokenize_into(
     )
 }
 
+/// One tokenization pass over `text`'s bytes, passed with their length:
+/// llama.cpp copies exactly `text.len()` bytes, so no NUL terminator is
+/// needed and a NUL byte is text.
+///
+/// # Safety
+///
+/// `model` must be a live model, `text.len()` must fit a `c_int`, and
+/// `out_tokens` must be writable for `capacity` `i32` elements (or null with
+/// `capacity == 0`, the sizing probe). Returns the token count, or its
+/// negation when `capacity` is too small.
+pub(crate) unsafe fn tokenize_bytes(
+    model: *const c_void,
+    text: &[u8],
+    out_tokens: *mut i32,
+    capacity: c_int,
+    add_special: bool,
+    parse_special: bool,
+) -> c_int {
+    #[cfg(test)]
+    record_native_call();
+    sys::llama_tokenize_c(
+        model,
+        text.as_ptr().cast::<c_char>(),
+        text.len() as c_int,
+        out_tokens,
+        capacity,
+        add_special,
+        parse_special,
+    )
+}
+
 /// Detokenize a single token into `buf`.
 ///
 /// # Safety
