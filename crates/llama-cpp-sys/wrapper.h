@@ -59,15 +59,21 @@ extern "C" {
    count, attribute bits). A failure is never reported as an absence. */
 #define LLAMA_XYBRID_ABSENT (-1) /* no such key, template or token */
 #define LLAMA_XYBRID_FAILED (-2) /* llama.cpp raised an exception, or an argument was NULL */
+#define LLAMA_XYBRID_REFUSED (-3) /* llama.cpp refused the request and changed nothing */
 /* llama_decode_c's status when llama.cpp raised an exception; none of
    llama_decode's own statuses. */
 #define LLAMA_XYBRID_DECODE_EXCEPTION (-1000)
 
-/* Fault injection for tests: the next call of the guarded shim named
-   `shim_name` (e.g. "llama_decode_c") throws std::bad_alloc inside its
-   exception boundary, as an allocation failure inside llama.cpp would. NULL
-   disarms. Nothing calls this outside tests. */
-void llama_xybrid_fail_next_c(const char* shim_name);
+/* Fault injection for tests: after `skip` more calls of the guarded shim
+   named `shim_name` (e.g. "llama_decode_c"), the next one, on any thread,
+   throws std::bad_alloc inside its exception boundary, as an allocation
+   failure inside llama.cpp would. One-shot and process-wide: each call of
+   the shim takes its turn atomically, so exactly one fails; arming again
+   replaces an arm not yet consumed, and NULL disarms. Returns whether a shim
+   is now armed: false for NULL, and for a name that is not a guarded shim
+   (which disarms too). Nothing calls this outside tests, which arm it in a
+   process of their own. */
+bool llama_xybrid_fail_next_c(const char* shim_name, uint32_t skip);
 
 /* Backend lifecycle */
 void llama_backend_init_c(void);
@@ -78,8 +84,18 @@ void llama_backend_free_c(void);
 void llama_log_set_verbosity_c(int level);
 int  llama_log_get_verbosity_c(void);
 
-/* Model lifecycle */
-XYBRID_LLAMA_MODEL* llama_load_model_from_file_c(const char* path_model, int n_gpu_layers);
+/* Model lifecycle. Guarded: llama_load_model_from_file_c returns 0 and sets
+   *out_model to the model, or to NULL when llama.cpp could not load the
+   file (it reports its own exceptions this way), and LLAMA_XYBRID_FAILED,
+   with *out_model NULL, when an exception escaped llama.cpp or an argument
+   was NULL. Free the model with llama_free_model_c. */
+int32_t llama_load_model_from_file_c(
+    const char* path_model, int n_gpu_layers, XYBRID_LLAMA_MODEL** out_model);
+/* Loads only the vocabulary and the metadata of the GGUF at path_model, on
+   the CPU: no tensor is read, no device is used, and the file may have no
+   tensors at all. The model tokenizes but no context can run it. Guarded,
+   with llama_load_model_from_file_c's statuses. */
+int32_t llama_load_model_vocab_only_c(const char* path_model, XYBRID_LLAMA_MODEL** out_model);
 void  llama_free_model_c(XYBRID_LLAMA_MODEL* model);
 
 /* Context lifecycle */
@@ -90,9 +106,15 @@ XYBRID_LLAMA_CONTEXT* llama_new_context_with_model_c(
     int n_batch,
     bool flash_attn);
 void  llama_free_c(XYBRID_LLAMA_CONTEXT* ctx);
-/* Guarded; an exception leaves the memory as llama.cpp left it. */
-void  llama_kv_cache_clear_c(XYBRID_LLAMA_CONTEXT* ctx);
-/* Guarded: 0, -1 when the context has no memory, LLAMA_XYBRID_FAILED. */
+/* Clear the whole memory (KV cache and recurrent state). Guarded: 0, -1 when
+   the context has no memory, LLAMA_XYBRID_FAILED (the memory is then in
+   whatever state llama.cpp left it). */
+int32_t llama_kv_cache_clear_c(XYBRID_LLAMA_CONTEXT* ctx);
+/* Drop positions [p_keep, end) of sequence seq_id. Guarded: 0, -1 when the
+   context has no memory, LLAMA_XYBRID_REFUSED, changing nothing, for a seq_id
+   outside [0, n_seq_max) and when llama.cpp cannot remove that part (a
+   recurrent state), LLAMA_XYBRID_FAILED (the memory is then in whatever
+   state llama.cpp left it). */
 int   llama_kv_cache_seq_rm_c(XYBRID_LLAMA_CONTEXT* ctx, int seq_id, int p_keep);
 
 /* Per-sequence state snapshots (KV cache plus recurrent state). Each returns
@@ -180,9 +202,11 @@ int32_t llama_vocab_get_text_c(const XYBRID_LLAMA_MODEL* model, int32_t token, c
 
 /* A context for one-shot readouts: one sequence, the given context, batch and
    microbatch sizes, at most n_outputs_max outputs (0 = n_batch, llama.cpp's
-   default) and one per sequence, no embeddings, and the model's own attention
-   type. Guarded; returns NULL on failure. Whether it has memory is the
-   model's choice: check it. */
+   default) and one per sequence, no embeddings, the model's own attention
+   type, and no op offload: every operation runs where its weights are (op
+   offload would move large-batch operations on host weights to a Metal,
+   CUDA or Vulkan device even with no GPU layers). Guarded; returns NULL on
+   failure. Whether it has memory is the model's choice: check it. */
 XYBRID_LLAMA_CONTEXT* llama_new_readout_context_c(
     XYBRID_LLAMA_MODEL* model,
     uint32_t n_ctx,
@@ -191,6 +215,17 @@ XYBRID_LLAMA_CONTEXT* llama_new_readout_context_c(
     uint32_t n_outputs_max,
     int n_threads,
     bool flash_attn);
+/* The parameters llama_new_readout_context_c creates its context with, for
+   tests: llama.cpp has no accessor for most of them, op_offload among them.
+   Cannot fail. */
+void llama_xybrid_readout_params_c(
+    uint32_t n_ctx,
+    uint32_t n_batch,
+    uint32_t n_ubatch,
+    uint32_t n_outputs_max,
+    int n_threads,
+    bool flash_attn,
+    struct llama_context_params* out);
 
 /* The sizes and attention a context actually got, which can differ from the
    ones requested. has_memory is false when llama.cpp runs the model without

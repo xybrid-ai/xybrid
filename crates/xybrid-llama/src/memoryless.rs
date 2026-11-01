@@ -33,7 +33,7 @@
 //! absent).
 
 use std::ffi::{c_int, c_void};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::context::ContextFacts;
@@ -62,6 +62,18 @@ const CAUSAL_KEY: &str = "lfm3.attention.causal";
 const TEMPLATE_NAME: &str = "systemone";
 
 /// What [`MemorylessContext::new`] builds.
+///
+/// Whatever the parameters, the context runs every operation where its
+/// weights are: it turns llama.cpp's op offload off. With it on (llama.cpp's
+/// default, which the chat contexts keep), ggml's scheduler moves a
+/// large-batch operation on weights in host memory to a GPU backend that asks
+/// for it, as Metal, CUDA and Vulkan do, even for a model loaded with no GPU
+/// layers: a whole-prompt readout is exactly such a batch. So a model loaded
+/// with `n_gpu_layers = 0` is read on the CPU, as far as llama.cpp's
+/// scheduler goes: no other pass moves an operation from host memory to a
+/// device. That is necessary, not shown sufficient, on an accelerator build:
+/// the context still creates the backends of the model's devices (llama.cpp
+/// does for every context), and placement there has not been measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MemorylessParams {
     token_budget: u32,
@@ -117,10 +129,10 @@ pub struct MemorylessContext {
     budget: usize,
     n_vocab: usize,
     facts: ContextFacts,
-    /// Set by a [`ReadoutCancel`]; llama.cpp's abort callback reads it, so
-    /// it must outlive the native context (fields drop after
+    /// Shared with every [`ReadoutCancel`]; llama.cpp's abort callback reads
+    /// it, so it must outlive the native context (fields drop after
     /// [`Drop::drop`]).
-    cancel: Arc<AtomicBool>,
+    cancel: Arc<CancelState>,
     /// The model this context reads. Fields drop after [`Drop::drop`] frees
     /// the native context, so the model outlives it.
     _model: Arc<ModelHandle>,
@@ -140,6 +152,8 @@ impl MemorylessContext {
     ///
     /// # Errors
     ///
+    /// [`LlamaError::VocabOnly`], before anything else, for a model from
+    /// [`LlamaModel::load_vocab_only`];
     /// [`LlamaError::InvalidInput`] for a budget of zero or above
     /// [`MemorylessParams::MAX_TOKEN_BUDGET`], a thread count beyond a C
     /// `int`, a model outside the profile, or a context without the
@@ -158,6 +172,7 @@ impl MemorylessContext {
         params: MemorylessParams,
         n_outputs_max: u32,
     ) -> LlamaResult<Self> {
+        model.ensure_runnable()?;
         let (sizes, n_threads) = readout_sizes(params, n_outputs_max)?;
         ensure_profile(model)?;
         let n_vocab = model.n_vocab();
@@ -188,16 +203,16 @@ impl MemorylessContext {
             budget: usize::try_from(params.token_budget).expect("a u32 fits usize"),
             n_vocab,
             facts: EMPTY_FACTS,
-            cancel: Arc::new(AtomicBool::new(false)),
+            cancel: Arc::new(CancelState::default()),
             _model: Arc::clone(model.handle()),
         };
         // SAFETY: ptr is the live context created above.
         context.facts = unsafe { ContextFacts::read(ptr) }?;
         check_facts(&context.facts, params.token_budget)?;
-        let flag = Arc::as_ptr(&context.cancel).cast_mut().cast::<c_void>();
-        // SAFETY: the context is live; the flag lives in `context.cancel`,
+        let state = Arc::as_ptr(&context.cancel).cast_mut().cast::<c_void>();
+        // SAFETY: the context is live; the state lives in `context.cancel`,
         // which outlives the native context, and the callback only loads it.
-        if !unsafe { ffi::set_abort_callback(ptr, cancel_requested, flag) } {
+        if !unsafe { ffi::set_abort_callback(ptr, cancel_requested, state) } {
             return Err(ffi::native_failure(
                 "registering the readout's cancel check",
             ));
@@ -214,7 +229,7 @@ impl MemorylessContext {
             budget,
             n_vocab,
             facts: EMPTY_FACTS,
-            cancel: Arc::new(AtomicBool::new(false)),
+            cancel: Arc::new(CancelState::default()),
             _model: Arc::clone(model.handle()),
         }
     }
@@ -233,58 +248,62 @@ impl MemorylessContext {
     /// only ever read from the evaluation this call made, so a failure
     /// never returns an earlier row.
     ///
-    /// A [`ReadoutCancel`] (see [`Self::cancel_handle`]) stops it: before
-    /// it starts, or between two of llama.cpp's graph nodes on the CPU
-    /// backend (other backends finish the pass first).
+    /// A [`ReadoutCancel`] (see [`Self::cancel_handle`]) stops it. Once the
+    /// arguments are checked, a readout ends at the first of:
+    ///
+    /// - a failure, returned as its own error, even when a cancel was
+    ///   requested meanwhile;
+    /// - a cancel request seen at a checkpoint: before the pass starts, when
+    ///   llama.cpp returns from it, and after the result is copied, the
+    ///   readout's completion point. During the pass, llama.cpp's CPU
+    ///   backend also checks between two graph nodes and stops (other
+    ///   backends finish the pass first; its result is still not returned).
+    ///
+    /// A cancel requested after the completion point leaves the result as
+    /// it is.
+    ///
+    /// How soon a cancel during the pass returns has no fixed bound: the
+    /// node running at that moment finishes first, and one node is a
+    /// whole-batch matrix product, so the wait grows with the prompt's
+    /// length and shrinks with more threads (see `measure::cancel_latency`).
     ///
     /// # Errors
     ///
     /// [`LlamaError::InvalidInput`], before any native call, when `tokens`
     /// is empty or longer than the budget, `select` is empty, or an id in
     /// either is outside the vocabulary. [`LlamaError::Cancelled`] when the
-    /// context's cancel handle was used (before any native call when it was
-    /// used before this call started). [`LlamaError::DecodeFailed`] when
-    /// llama.cpp fails to evaluate the prompt, and [`LlamaError::Internal`]
-    /// when it returns no logits for the last token.
+    /// context's cancel handle was used before the readout completed (before
+    /// any native call when it was used before this call started).
+    /// [`LlamaError::DecodeFailed`] when llama.cpp fails to evaluate the
+    /// prompt, and [`LlamaError::Internal`] when it returns no logits for
+    /// the last token.
     pub fn read_last(&mut self, tokens: &[i32], select: &[i32]) -> LlamaResult<Vec<f32>> {
         check_readout(tokens, select, self.budget, self.n_vocab)?;
-        if self.cancel.load(Ordering::Relaxed) {
-            return Err(LlamaError::Cancelled);
-        }
-        let mut batch = TokenBatch::new(tokens.len());
-        batch.set(tokens, 0, true);
-        // SAFETY: the context is live. The batch holds at most the budget of
-        // tokens, which the microbatch fits (checked at creation), ids inside
-        // the vocabulary, positions from 0, and exactly one output, which
-        // the context's cap allows.
-        let code = unsafe { ffi::decode(self.ptr, &mut batch) };
-        // llama.cpp reports an evaluation its abort callback stopped as 2.
-        if code == 2 && self.cancel.load(Ordering::Relaxed) {
-            return Err(LlamaError::Cancelled);
-        }
-        if code != 0 {
-            return Err(LlamaError::DecodeFailed {
-                code,
-                n_past_in: 0,
-                detail: format!(
-                    "{} on a {}-token readout",
-                    ffi::decode_failure(code),
-                    tokens.len()
-                ),
-            });
-        }
+        let (ptr, n_vocab) = (self.ptr, self.n_vocab);
         let last = i32::try_from(tokens.len() - 1).expect("the budget fits an i32");
-        // SAFETY: the decode above succeeded and flagged entry `last`, the
-        // prompt's last token, for output.
-        let row = unsafe { ffi::logits_ith(self.ptr, last) };
-        if row.is_null() {
-            return Err(ffi::native_failure("reading the last token's logits"));
-        }
-        // SAFETY: the row holds n_vocab floats, the vocabulary of the model
-        // this context reads, and stays valid until the next decode; the
-        // slice does not outlive this call.
-        let row = unsafe { std::slice::from_raw_parts(row, self.n_vocab) };
-        Ok(select_logits(row, select))
+        readout(
+            || self.cancel.current_is_cancelled(),
+            tokens.len(),
+            select,
+            || {
+                let mut batch = TokenBatch::new(tokens.len());
+                batch.set(tokens, 0, true);
+                // SAFETY: the context is live. The batch holds at most the
+                // budget of tokens, which the microbatch fits (checked at
+                // creation), ids inside the vocabulary, positions from 0, and
+                // exactly one output, which the context's cap allows.
+                unsafe { ffi::decode(ptr, &mut batch) }
+            },
+            || {
+                // SAFETY: the pass succeeded and flagged entry `last`, the
+                // prompt's last token, for output.
+                let row = unsafe { ffi::logits_ith(ptr, last) };
+                // SAFETY: a row holds n_vocab floats, the vocabulary of the
+                // model this context reads, and stays valid until the next
+                // decode; `readout` copies from it before returning.
+                (!row.is_null()).then(|| unsafe { std::slice::from_raw_parts(row, n_vocab) })
+            },
+        )
     }
 
     /// The most tokens one readout may evaluate.
@@ -302,52 +321,158 @@ impl MemorylessContext {
         self.facts
     }
 
-    /// A handle that cancels this context's readouts from any thread.
+    /// A handle that cancels the context's current request from any thread.
     ///
-    /// Using it stops the running readout (on the CPU backend, between two
-    /// graph nodes) and refuses every later one with
-    /// [`LlamaError::Cancelled`], until [`Self::clear_cancel`].
+    /// A request is every readout from one [`Self::clear_cancel`] (or the
+    /// context's creation) to the next. Using the handle stops the running
+    /// readout (on the CPU backend, once the graph node running then
+    /// finishes: see [`Self::read_last`]) and refuses every later one of the
+    /// same request with [`LlamaError::Cancelled`].
+    /// Once the context starts its next request, the handle (and every
+    /// clone) does nothing to it: take a new one.
     pub fn cancel_handle(&self) -> ReadoutCancel {
         ReadoutCancel {
-            flag: Arc::clone(&self.cancel),
+            state: Arc::clone(&self.cancel),
+            request: self.cancel.current.load(Ordering::Relaxed),
         }
     }
 
-    /// Clears a cancel request, so the context reads again.
+    /// Starts the next request: a cancel of an earlier one no longer
+    /// refuses readouts, and handles taken before cannot cancel the new
+    /// one. Call it between requests, cancelled or not.
     pub fn clear_cancel(&mut self) {
-        self.cancel.store(false, Ordering::Relaxed);
+        self.cancel.current.fetch_add(1, Ordering::Relaxed);
     }
 }
 
-/// Cancels the readouts of one [`MemorylessContext`], from any thread.
+/// The cancel state a context shares with its handles, by request number.
+#[derive(Debug, Default)]
+struct CancelState {
+    /// The current request; [`MemorylessContext::clear_cancel`] starts the
+    /// next.
+    current: AtomicU64,
+    /// One more than the newest cancelled request (0: none). Only grows, so
+    /// a handle of an earlier request cannot reach a later one, and two
+    /// cancels never undo each other.
+    cancelled_below: AtomicU64,
+}
+
+impl CancelState {
+    fn current_is_cancelled(&self) -> bool {
+        self.is_cancelled(self.current.load(Ordering::Relaxed))
+    }
+
+    fn is_cancelled(&self, request: u64) -> bool {
+        self.cancelled_below.load(Ordering::Relaxed) > request
+    }
+
+    fn cancel(&self, request: u64) {
+        self.cancelled_below
+            .fetch_max(request + 1, Ordering::Relaxed);
+    }
+}
+
+/// Cancels one request of a [`MemorylessContext`], from any thread: the one
+/// current when the handle was taken ([`MemorylessContext::cancel_handle`]).
 ///
-/// Cheap to clone; every clone cancels the same context. Using it after the
-/// context is gone does nothing.
+/// Cheap to clone; every clone cancels the same request. Using it once the
+/// context has moved to a later request, or is gone, does nothing.
 #[derive(Debug, Clone)]
 pub struct ReadoutCancel {
-    flag: Arc<AtomicBool>,
+    state: Arc<CancelState>,
+    request: u64,
 }
 
 impl ReadoutCancel {
-    /// Stops the context's running readout, if any, and refuses later ones
-    /// until the context clears the request.
+    /// Stops the context's running readout, if it belongs to this handle's
+    /// request, and refuses that request's later readouts.
     pub fn cancel(&self) {
-        self.flag.store(true, Ordering::Relaxed);
+        self.state.cancel(self.request);
     }
 
-    /// Whether a cancel is pending.
+    /// Whether this handle's request is over by a cancel: its own, or one
+    /// of a later request of the context (which only starts once this one
+    /// is over).
     pub fn is_cancelled(&self) -> bool {
-        self.flag.load(Ordering::Relaxed)
+        self.state.is_cancelled(self.request)
     }
 }
 
-/// llama.cpp's abort callback: whether the readout's cancel flag is set.
+/// One readout's control flow around its two native steps: `pass` evaluates
+/// the prompt and returns llama.cpp's status, `row` reads the last token's
+/// logits. A failure ends it as it happens; `cancelled` is checked before the
+/// pass, when it returns, and after the result is copied (the completion
+/// point). See [`MemorylessContext::read_last`].
+fn readout<'row>(
+    cancelled: impl Fn() -> bool,
+    n_tokens: usize,
+    select: &[i32],
+    pass: impl FnOnce() -> c_int,
+    row: impl FnOnce() -> Option<&'row [f32]>,
+) -> LlamaResult<Vec<f32>> {
+    if cancelled() {
+        return Err(LlamaError::Cancelled);
+    }
+    let code = pass();
+    // llama.cpp reports a pass its abort callback stopped as 2: the cancel
+    // itself, not a failure.
+    if code == 2 && cancelled() {
+        return Err(LlamaError::Cancelled);
+    }
+    if code != 0 {
+        return Err(LlamaError::DecodeFailed {
+            code,
+            n_past_in: 0,
+            detail: format!(
+                "{} on a {n_tokens}-token readout",
+                ffi::decode_failure(code)
+            ),
+        });
+    }
+    // A backend that does not check for a cancel during the pass finishes
+    // it; a cancel requested meanwhile still wins.
+    if cancelled() {
+        return Err(LlamaError::Cancelled);
+    }
+    let row = row().ok_or_else(|| ffi::native_failure("reading the last token's logits"))?;
+    let logits = select_logits(row, select);
+    if cancelled() {
+        return Err(LlamaError::Cancelled);
+    }
+    Ok(logits)
+}
+
+/// llama.cpp's abort callback: whether the current request is cancelled.
 ///
 /// # Safety
 ///
-/// `data` must point at the context's live `AtomicBool`.
+/// `data` must point at the context's live [`CancelState`].
 unsafe extern "C" fn cancel_requested(data: *mut c_void) -> bool {
-    (*data.cast::<AtomicBool>()).load(Ordering::Relaxed)
+    (*data.cast::<CancelState>()).current_is_cancelled()
+}
+
+/// For tests, an abort callback that cancels the current request whenever
+/// llama.cpp calls it and never stops the pass: a backend that does not
+/// stop.
+///
+/// # Safety
+///
+/// As [`cancel_requested`].
+#[cfg(test)]
+unsafe extern "C" fn cancel_without_stopping(data: *mut c_void) -> bool {
+    let state = &*data.cast::<CancelState>();
+    state.cancel(state.current.load(Ordering::Relaxed));
+    false
+}
+
+#[cfg(test)]
+impl MemorylessContext {
+    /// Registers [`cancel_without_stopping`] in place of the real check.
+    fn cancel_during_the_pass_without_stopping(&mut self) {
+        let state = Arc::as_ptr(&self.cancel).cast_mut().cast::<c_void>();
+        // SAFETY: as for the real callback in `create`.
+        assert!(unsafe { ffi::set_abort_callback(self.ptr, cancel_without_stopping, state) });
+    }
 }
 
 impl Drop for MemorylessContext {
@@ -494,6 +619,122 @@ mod measure;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_models::staged_d1;
+    use std::cell::Cell;
+    use std::sync::atomic::AtomicBool;
+
+    const ROW: [f32; 4] = [0.5, -1.0, 2.0, 0.0];
+
+    /// Runs the readout's control flow with its native steps injected, no
+    /// model needed: `pass` gets the cancel flag and returns llama.cpp's
+    /// status, and the row step requests a cancel when `cancel_in_row`.
+    /// Returns the result and whether the row was read.
+    fn injected(
+        cancelled_first: bool,
+        pass: impl FnOnce(&AtomicBool) -> c_int,
+        cancel_in_row: bool,
+    ) -> (LlamaResult<Vec<f32>>, bool) {
+        let cancel = AtomicBool::new(cancelled_first);
+        let row_read = Cell::new(false);
+        let result = readout(
+            || cancel.load(Ordering::Relaxed),
+            3,
+            &[2, 0],
+            || pass(&cancel),
+            || {
+                row_read.set(true);
+                if cancel_in_row {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                Some(&ROW[..])
+            },
+        );
+        (result, row_read.get())
+    }
+
+    fn cancel_then(status: c_int) -> impl FnOnce(&AtomicBool) -> c_int {
+        move |cancel| {
+            cancel.store(true, Ordering::Relaxed);
+            status
+        }
+    }
+
+    #[test]
+    fn an_uncancelled_readout_returns_the_selection() {
+        let (result, row_read) = injected(false, |_| 0, false);
+        assert_eq!(result.unwrap(), [2.0, 0.5]);
+        assert!(row_read);
+    }
+
+    #[test]
+    fn a_cancel_before_the_pass_skips_it() {
+        let (result, row_read) = injected(true, |_| panic!("the pass must not run"), false);
+        assert!(matches!(result, Err(LlamaError::Cancelled)));
+        assert!(!row_read);
+    }
+
+    /// A backend that does not stop between nodes finishes the pass; its
+    /// result is not returned.
+    #[test]
+    fn a_pass_finished_after_a_cancel_returns_no_result() {
+        let (result, row_read) = injected(false, cancel_then(0), false);
+        assert!(matches!(result, Err(LlamaError::Cancelled)));
+        assert!(!row_read, "nothing is read after the cancel");
+    }
+
+    #[test]
+    fn a_pass_llama_cpp_stopped_for_a_cancel_is_cancelled() {
+        let (result, _) = injected(false, cancel_then(2), false);
+        assert!(matches!(result, Err(LlamaError::Cancelled)));
+        let (result, _) = injected(false, |_| 2, false);
+        assert!(
+            matches!(result, Err(LlamaError::DecodeFailed { code: 2, .. })),
+            "a stop nobody requested is a failure"
+        );
+    }
+
+    #[test]
+    fn a_failure_during_a_cancel_is_still_the_failure() {
+        let (result, _) = injected(false, cancel_then(-3), false);
+        assert!(matches!(
+            result,
+            Err(LlamaError::DecodeFailed { code: -3, .. })
+        ));
+    }
+
+    #[test]
+    fn a_cancel_while_the_output_is_read_returns_no_result() {
+        let (result, row_read) = injected(false, |_| 0, true);
+        assert!(matches!(result, Err(LlamaError::Cancelled)));
+        assert!(row_read);
+    }
+
+    #[test]
+    fn a_missing_row_is_an_error() {
+        let result = readout(|| false, 3, &[0], || 0, || None);
+        assert!(matches!(result, Err(LlamaError::Internal(_))));
+    }
+
+    /// On the real model with a backend that requests a cancel during the
+    /// pass and never stops it: llama.cpp finishes (status 0), and the
+    /// readout still returns no result.
+    #[test]
+    fn a_real_pass_that_does_not_stop_for_a_cancel_returns_no_result() {
+        let Some(path) = staged_d1() else { return };
+        crate::backend_init();
+        let model = LlamaModel::load(path.to_str().unwrap(), 0).expect("load d1-2B");
+        let mut ctx = MemorylessContext::new(&model, MemorylessParams::new(256, 4, false))
+            .expect("a context");
+        let prompt = model
+            .tokenize_special("<|startoftext|><|im_start|>user\nHello", false)
+            .expect("tokenize");
+        assert!(ctx.read_last(&prompt, &[0]).is_ok());
+        ctx.cancel_during_the_pass_without_stopping();
+        assert!(matches!(
+            ctx.read_last(&prompt, &[0]),
+            Err(LlamaError::Cancelled)
+        ));
+    }
 
     fn facts(n: u32) -> ContextFacts {
         ContextFacts {
@@ -652,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn a_cancelled_context_refuses_before_any_native_call_until_cleared() {
+    fn a_cancelled_request_refuses_before_any_native_call() {
         let model = LlamaModel::test_stub();
         let mut ctx = MemorylessContext::test_stub(&model, 4, 10);
         let cancel = ctx.cancel_handle();
@@ -660,24 +901,90 @@ mod tests {
         cancel.clone().cancel();
         assert!(
             cancel.is_cancelled(),
-            "every clone cancels the same context"
+            "every clone cancels the same request"
         );
 
         let calls = ffi::native_calls();
-        assert!(matches!(
-            ctx.read_last(&[1, 2], &[0]),
-            Err(LlamaError::Cancelled)
-        ));
+        for _ in 0..2 {
+            assert!(matches!(
+                ctx.read_last(&[1, 2], &[0]),
+                Err(LlamaError::Cancelled)
+            ));
+        }
         assert!(
             matches!(ctx.read_last(&[], &[0]), Err(LlamaError::InvalidInput(_))),
             "input checks come first"
         );
         assert_eq!(ffi::native_calls(), calls, "no native call was made");
-
-        ctx.clear_cancel();
-        assert!(!cancel.is_cancelled());
         drop(ctx);
         cancel.cancel(); // the context is gone: nothing to stop
+    }
+
+    /// llama.cpp has no accessor for `op_offload`, and on a CPU build it
+    /// changes nothing (there is no device to offload to), so this reads the
+    /// parameters the readout context is created with.
+    #[test]
+    fn a_readout_context_offloads_no_operation() {
+        let (sizes, n_threads) =
+            readout_sizes(MemorylessParams::new(4096, 4, true), OUTPUT_CAP).unwrap();
+        let params = ffi::readout_params(sizes, n_threads, true);
+        assert!(!params.op_offload, "no operation moves to a GPU backend");
+        assert_eq!(
+            (params.n_ctx, params.n_batch, params.n_ubatch),
+            (4096, 4096, 4096)
+        );
+        assert_eq!(
+            (
+                params.n_seq_max,
+                params.n_outputs_max,
+                params.n_outputs_max_per_seq
+            ),
+            (1, 1, 1)
+        );
+        assert!(!params.embeddings);
+        assert_eq!(
+            params.flash_attn_type,
+            llama_cpp_sys::bindings::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_ENABLED
+        );
+        assert_eq!((params.n_threads, params.n_threads_batch), (4, 4));
+    }
+
+    /// The stub has no native context: a readout that is not refused as
+    /// cancelled reaches the decode shim, which fails it (-1).
+    #[test]
+    fn a_handle_of_an_earlier_request_cannot_cancel_the_next() {
+        let model = LlamaModel::test_stub();
+        let mut ctx = MemorylessContext::test_stub(&model, 4, 10);
+        let reached_the_pass = |ctx: &mut MemorylessContext| match ctx.read_last(&[1, 2], &[0]) {
+            Err(LlamaError::DecodeFailed { code: -1, .. }) => true,
+            Err(LlamaError::Cancelled) => false,
+            other => panic!("{other:?}"),
+        };
+        let first = ctx.cancel_handle();
+        first.cancel();
+        assert!(!reached_the_pass(&mut ctx));
+
+        ctx.clear_cancel();
+        assert!(reached_the_pass(&mut ctx), "the next request reads");
+        first.cancel();
+        first.clone().cancel();
+        assert!(
+            reached_the_pass(&mut ctx),
+            "a stale handle and its clones do nothing"
+        );
+
+        let second = ctx.cancel_handle();
+        assert!(!second.is_cancelled());
+        second.cancel();
+        assert!(!reached_the_pass(&mut ctx));
+        first.cancel();
+        assert!(second.is_cancelled(), "nothing undoes a cancel");
+
+        ctx.clear_cancel();
+        let third = ctx.cancel_handle();
+        second.cancel();
+        assert!(!third.is_cancelled());
+        assert!(reached_the_pass(&mut ctx));
     }
 
     #[test]

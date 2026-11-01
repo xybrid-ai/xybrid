@@ -1,5 +1,8 @@
 //! The scanner's and the classification rule's test vectors, then checks
-//! against LiquidAI's d1-2B GGUF when it is staged.
+//! against LiquidAI's d1-2B GGUF when it is staged, and against a second,
+//! ordinary GGUF named by `XYBRID_OTHER_GGUF` (stories260K: see
+//! `integration-tests/README.md`). Each skips without its model, unless
+//! `XYBRID_REQUIRE_MODELS` is set, which makes a missing one a failure.
 
 use super::native::{compare_native, scalar_projection};
 use super::testing::{d1_builder, gguf_string, GgufBuilder, D1_TEMPERATURE};
@@ -900,6 +903,77 @@ fn a_same_size_edit_in_place_is_caught_by_the_header_digest() {
     ));
 }
 
+/// The cheap check is one `stat`: it sees a new time, another file in the
+/// path's place, a file that is gone, and is advisory: a same-size edit in
+/// place with the time put back passes it, where the full check fails.
+#[test]
+fn the_cheap_check_compares_size_time_and_identity_without_reading() {
+    use std::time::Duration;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("model.gguf");
+    let original = d1_builder().build();
+    std::fs::write(&path, &original).unwrap();
+    let header = GgufHeader::read_file(&path).unwrap();
+    let stamp = header.file_stamp().expect("read from a file");
+    assert!(header.file_unchanged_cheap(&path).unwrap());
+    assert!(stamp.matches_stat(&std::fs::metadata(&path).unwrap()));
+    #[cfg(unix)]
+    assert!(stamp.identity().is_some());
+
+    let modified = stamp.modified().expect("a modification time");
+    let set_time = |file: &std::path::Path, time| {
+        std::fs::File::options()
+            .write(true)
+            .open(file)
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+    };
+    let at = original
+        .windows(11)
+        .position(|w| w == b"{{ state }}")
+        .unwrap();
+    let mut edited = original.clone();
+    edited[at..at + 11].copy_from_slice(b"{{ STATE }}");
+    std::fs::write(&path, &edited).unwrap();
+    set_time(&path, modified);
+    assert!(
+        header.file_unchanged_cheap(&path).unwrap(),
+        "advisory: it reads nothing"
+    );
+    assert!(matches!(
+        header.verify_file_unchanged(&path),
+        Err(GgufError::FileChanged {
+            what: "its header bytes"
+        })
+    ));
+
+    std::fs::write(&path, &original).unwrap();
+    set_time(&path, modified + Duration::from_secs(10));
+    assert!(!header.file_unchanged_cheap(&path).unwrap(), "a new time");
+    set_time(&path, modified);
+    assert!(header.file_unchanged_cheap(&path).unwrap());
+
+    #[cfg(unix)]
+    {
+        let next = dir.path().join("next.gguf");
+        std::fs::write(&next, &original).unwrap();
+        set_time(&next, modified);
+        std::fs::rename(&next, &path).unwrap();
+        assert!(
+            !header.file_unchanged_cheap(&path).unwrap(),
+            "another file, same size and time"
+        );
+    }
+
+    std::fs::remove_file(&path).unwrap();
+    assert!(!header.file_unchanged_cheap(&path).unwrap(), "gone");
+    assert!(matches!(
+        read(&original).unwrap().file_unchanged_cheap(&path),
+        Err(GgufError::NoFileStamp)
+    ));
+}
+
 #[test]
 fn the_stamp_records_the_file_and_the_header_bytes() {
     use sha2::{Digest, Sha256};
@@ -974,6 +1048,24 @@ mod published {
         None
     }
 
+    /// The second, ordinary GGUF from `XYBRID_OTHER_GGUF`, or `None` (with a
+    /// note) when it is not set.
+    ///
+    /// # Panics
+    ///
+    /// When `XYBRID_REQUIRE_MODELS` is set and `XYBRID_OTHER_GGUF` is not.
+    pub(super) fn other_gguf() -> Option<PathBuf> {
+        if let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") {
+            return Some(PathBuf::from(path));
+        }
+        let reason = "XYBRID_OTHER_GGUF is not set (an ordinary GGUF such as stories260K)";
+        if std::env::var_os("XYBRID_REQUIRE_MODELS").is_some() {
+            panic!("XYBRID_REQUIRE_MODELS is set but {reason}");
+        }
+        eprintln!("Skipping test: {reason}");
+        None
+    }
+
     pub(super) fn sha256_hex(bytes: &[u8]) -> String {
         Sha256::digest(bytes)
             .iter()
@@ -1028,12 +1120,7 @@ mod published {
     /// variable to check its readout context refuses it).
     #[test]
     fn an_ordinary_gguf_is_not_a_decision_model() {
-        let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") else {
-            eprintln!(
-                "Skipping test: set XYBRID_OTHER_GGUF to a GGUF that is not a decision model"
-            );
-            return;
-        };
+        let Some(path) = other_gguf() else { return };
         let header = GgufHeader::read_file(&path).expect("read the header");
         assert_eq!(
             classify(&header).unwrap(),
@@ -1086,10 +1173,7 @@ mod published {
     #[cfg(feature = "llm-llamacpp")]
     #[test]
     fn a_model_swapped_before_the_native_load_is_refused() {
-        let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") else {
-            eprintln!("Skipping test: set XYBRID_OTHER_GGUF to a small ordinary GGUF");
-            return;
-        };
+        let Some(path) = other_gguf() else { return };
         let source = std::fs::read(&path).expect("read the GGUF");
         let scanned = rewritten(&source, |b| b.f32("xybrid.test.value", 1.5));
         let retyped = rewritten(&source, |b| b.str("xybrid.test.value", "1.500000"));
@@ -1139,10 +1223,7 @@ mod published {
     #[cfg(feature = "llm-llamacpp")]
     #[test]
     fn many_metadata_keys_are_checked_in_linear_time() {
-        let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") else {
-            eprintln!("Skipping test: set XYBRID_OTHER_GGUF to a small ordinary GGUF");
-            return;
-        };
+        let Some(path) = other_gguf() else { return };
         let original = std::fs::read(&path).expect("read the GGUF");
         let dir = tempfile::tempdir().unwrap();
         xybrid_llama::backend_init();
@@ -1207,5 +1288,325 @@ mod published {
             .expect("a Supported model gets a readout context");
         assert!(!context.facts().has_memory);
         assert!(!context.facts().causal_attn);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Vocabulary-only loads of tensor-free GGUFs (llama.cpp, `llm-llamacpp`)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "llm-llamacpp")]
+mod vocab_only {
+    use std::path::Path;
+
+    use xybrid_llama::{
+        LlamaContext, LlamaError, LlamaModel, MemorylessContext, MemorylessParams, TokenAttr,
+    };
+
+    use super::published::staged_d1;
+    use super::*;
+
+    /// GPT-2's byte-level alphabet: the character each byte is written as in
+    /// a BPE vocabulary. In the vocabulary below, token `b` is byte `b`.
+    fn byte_alphabet() -> Vec<String> {
+        let mut unprintable = 0;
+        (0u32..256)
+            .map(|byte| {
+                let printable = (33..=126).contains(&byte)
+                    || (161..=172).contains(&byte)
+                    || (174..=255).contains(&byte);
+                let code = if printable {
+                    byte
+                } else {
+                    unprintable += 1;
+                    255 + unprintable
+                };
+                char::from_u32(code).expect("a character").to_string()
+            })
+            .collect()
+    }
+
+    /// `ĠA`, a space then `A`, merged from the two byte tokens.
+    const SPACE_A: i32 = 256;
+    const PAD: i32 = 257;
+    const BOS: i32 = 258;
+    const IM_START: i32 = 259;
+    const IM_END: i32 = 260;
+    const TEMPLATE: &str = "<|startoftext|><|im_start|>user\n{{ state }}<|im_end|>";
+
+    /// An LFM3 d1 GGUF with no tensors and a vocabulary of its own: the 256
+    /// byte tokens, `ĠA`, and four control tokens. `control` marks more
+    /// tokens as control tokens, as a variant's `--token-type ID=3` does.
+    fn tensor_free_decision_gguf(control: &[i32]) -> GgufBuilder {
+        let mut tokens = byte_alphabet();
+        tokens.push("ĠA".to_string());
+        tokens
+            .extend(["<|pad|>", "<|startoftext|>", "<|im_start|>", "<|im_end|>"].map(String::from));
+        let types: Vec<i32> = (0..tokens.len() as i32)
+            .map(|id| {
+                if id >= PAD || control.contains(&id) {
+                    3
+                } else {
+                    1
+                }
+            })
+            .collect();
+        let tokens: Vec<&str> = tokens.iter().map(String::as_str).collect();
+        let temperature = f32::from_bits(D1_TEMPERATURE);
+        GgufBuilder::new()
+            .str("general.architecture", "lfm3")
+            .bool("lfm3.attention.causal", false)
+            .str("lfm3.decision.type", "lfm3-d1")
+            .f32("lfm3.decision.temperature.noul", temperature)
+            .f32("lfm3.decision.temperature.choice", temperature)
+            .f32("lfm3.decision.temperature.score", temperature)
+            .str("tokenizer.ggml.model", "gpt2")
+            .str("tokenizer.ggml.pre", "lfm2")
+            .str_array("tokenizer.ggml.tokens", &tokens)
+            .i32_array("tokenizer.ggml.token_type", &types)
+            .str_array("tokenizer.ggml.merges", &["Ġ A"])
+            .u32("tokenizer.ggml.bos_token_id", BOS as u32)
+            .u32("tokenizer.ggml.eos_token_id", IM_END as u32)
+            .u32("tokenizer.ggml.padding_token_id", PAD as u32)
+            .bool("tokenizer.ggml.add_bos_token", false)
+            .str("tokenizer.chat_template.systemone", TEMPLATE)
+            .str_array("tokenizer.chat_templates", &["systemone"])
+    }
+
+    /// Scans the file, loads it vocabulary-only and checks the load against
+    /// the scan: the flow a decision vocabulary follows.
+    fn scan_and_load(file: &Path) -> (GgufHeader, LlamaModel) {
+        let header = GgufHeader::read_file(file).expect("scan the header");
+        let model = LlamaModel::load_vocab_only(file.to_str().expect("a UTF-8 path"))
+            .expect("load the vocabulary");
+        verify_native_load(file, &header, &model).expect("llama.cpp loaded what was scanned");
+        (header, model)
+    }
+
+    fn written(dir: &Path, name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let file = dir.join(name);
+        std::fs::write(&file, bytes).unwrap();
+        file
+    }
+
+    fn refuses_every_context(model: &LlamaModel) {
+        assert!(model.is_vocab_only());
+        assert!(matches!(
+            LlamaContext::new(model, 512, 1, 512, false),
+            Err(LlamaError::VocabOnly)
+        ));
+        assert!(matches!(
+            MemorylessContext::new(model, MemorylessParams::new(256, 1, false)),
+            Err(LlamaError::VocabOnly)
+        ));
+    }
+
+    fn is_control(model: &LlamaModel, token: i32) -> bool {
+        model
+            .token_attr(token)
+            .expect("readable")
+            .expect("in the vocabulary")
+            .contains(TokenAttr::CONTROL)
+    }
+
+    /// Needs no model: the GGUF is built here.
+    #[test]
+    fn a_tensor_free_decision_gguf_loads_vocabulary_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = written(
+            dir.path(),
+            "d1.gguf",
+            &tensor_free_decision_gguf(&[]).build(),
+        );
+        let (header, model) = scan_and_load(&file);
+        assert!(header.tensors().is_empty());
+        assert_eq!(classify(&header).unwrap(), D1);
+        refuses_every_context(&model);
+
+        assert_eq!(model.n_vocab(), 261);
+        assert_eq!(model.token_bos(), BOS);
+        assert!(!model.adds_bos());
+        assert!((PAD..=IM_END).all(|token| is_control(&model, token)));
+        assert!(!is_control(&model, SPACE_A) && !is_control(&model, 65));
+        assert_eq!(
+            model.token_text(IM_START).unwrap().as_deref(),
+            Some(&b"<|im_start|>"[..])
+        );
+        assert_eq!(
+            model.token_text(32).unwrap().as_deref(),
+            Some("Ġ".as_bytes()),
+            "a space, byte-level"
+        );
+
+        let prompt = "<|startoftext|><|im_start|>user\nA A<|im_end|>";
+        assert_eq!(
+            model.tokenize_special(prompt, false).unwrap(),
+            [BOS, IM_START, 117, 115, 101, 114, 10, 65, SPACE_A, IM_END]
+        );
+        let as_text = model.tokenize(prompt, false).unwrap();
+        assert!(
+            as_text.iter().all(|&token| token < PAD),
+            "without special-token parsing a spelling is text: {as_text:?}"
+        );
+        assert_eq!(
+            model.named_chat_template("systemone").unwrap().as_deref(),
+            Some(TEMPLATE)
+        );
+        assert_eq!(
+            model.meta_str("lfm3.decision.type").unwrap().as_deref(),
+            Some("lfm3-d1")
+        );
+    }
+
+    /// The three kinds of edit P3a's variants make: a key set, a key removed,
+    /// and a token marked as a control token, whose text then parses to it.
+    #[test]
+    fn an_edited_tensor_free_variant_loads_with_its_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let edited = tensor_free_decision_gguf(&[SPACE_A])
+            .without("lfm3.decision.temperature.choice")
+            .f32("lfm3.decision.temperature.choice", 0.5)
+            .without("lfm3.decision.temperature.score")
+            .build();
+        let (_, model) = scan_and_load(&written(dir.path(), "variant.gguf", &edited));
+        refuses_every_context(&model);
+        assert_eq!(
+            model
+                .meta_str("lfm3.decision.temperature.choice")
+                .unwrap()
+                .as_deref(),
+            Some("0.500000")
+        );
+        assert_eq!(
+            model.meta_str("lfm3.decision.temperature.score").unwrap(),
+            None
+        );
+        assert!(is_control(&model, SPACE_A));
+        assert_eq!(model.tokenize_special("ĠA", false).unwrap(), [SPACE_A]);
+
+        let original = written(
+            dir.path(),
+            "d1.gguf",
+            &tensor_free_decision_gguf(&[]).build(),
+        );
+        let (_, original) = scan_and_load(&original);
+        assert_ne!(original.tokenize_special("ĠA", false).unwrap(), [SPACE_A]);
+    }
+
+    /// A tensor-free variant of the real d1-2B, as `decision-oracle variant`
+    /// writes one (escape-overlap-variant's recipe, `|>` made a control
+    /// token, plus a temperature set): d1's vocabulary with the edit.
+    #[test]
+    fn a_tensor_free_variant_of_d1_loads_vocabulary_only() {
+        const PIPE_GT: usize = 117_671;
+        let Some(path) = staged_d1() else { return };
+        let header = GgufHeader::read_file(&path).expect("read the d1-2B header");
+        let Some(GgufValue::Array(GgufArray::I32(types))) = header.get("tokenizer.ggml.token_type")
+        else {
+            panic!("d1-2B's token types are an i32 array");
+        };
+        let mut types = types.clone();
+        types[PIPE_GT] = 3;
+        let variant = GgufBuilder::from_header(&header)
+            .without_tensors()
+            .without("tokenizer.ggml.token_type")
+            .i32_array("tokenizer.ggml.token_type", &types)
+            .without("lfm3.decision.temperature.choice")
+            .f32("lfm3.decision.temperature.choice", 0.5)
+            .build();
+        let dir = tempfile::tempdir().unwrap();
+        let (scanned, variant) = scan_and_load(&written(dir.path(), "variant.gguf", &variant));
+        assert!(scanned.tensors().is_empty());
+        assert_eq!(classify(&scanned).unwrap(), D1);
+        refuses_every_context(&variant);
+
+        let d1 = LlamaModel::load_vocab_only(path.to_str().expect("a UTF-8 path"))
+            .expect("load d1-2B's vocabulary");
+        let n_vocab = i32::try_from(d1.n_vocab()).unwrap();
+        assert_eq!(variant.n_vocab(), d1.n_vocab());
+        let pipe_gt = i32::try_from(PIPE_GT).unwrap();
+        let controls = |model: &LlamaModel| (0..n_vocab).filter(|&t| is_control(model, t)).count();
+        assert_eq!((controls(&d1), controls(&variant)), (124, 125));
+        assert!(is_control(&variant, pipe_gt) && !is_control(&d1, pipe_gt));
+        assert_eq!(
+            variant.token_text(pipe_gt).unwrap().as_deref(),
+            Some(&b"|>"[..])
+        );
+        assert_eq!(variant.tokenize_special("|>", false).unwrap(), [pipe_gt]);
+        let prompt =
+            "<|startoftext|><|im_start|>user\nWhich team handles a double charge?<|im_end|>";
+        assert_eq!(
+            variant.tokenize_special(prompt, false).unwrap(),
+            d1.tokenize_special(prompt, false).unwrap()
+        );
+        assert_eq!(
+            variant
+                .meta_str("lfm3.decision.temperature.choice")
+                .unwrap()
+                .as_deref(),
+            Some("0.500000")
+        );
+    }
+
+    /// Even vocabulary-only, llama.cpp checks that every tensor's data lies
+    /// inside the file: a header cut from a model, its tensor entries kept,
+    /// is refused, where the same metadata without them loads.
+    #[test]
+    fn a_header_cut_from_a_model_with_its_tensor_entries_is_refused() {
+        let Some(path) = staged_d1() else { return };
+        let header = GgufHeader::read_file(&path).expect("read the d1-2B header");
+        let cut = std::fs::read(&path).expect("read d1-2B")
+            [..usize::try_from(header.header_bytes()).unwrap()]
+            .to_vec();
+        let dir = tempfile::tempdir().unwrap();
+        let file = written(dir.path(), "cut.gguf", &cut);
+        assert_eq!(
+            GgufHeader::read_file(&file)
+                .expect("the scan reads only the header")
+                .tensors()
+                .len(),
+            header.tensors().len()
+        );
+        assert!(matches!(
+            LlamaModel::load_vocab_only(file.to_str().unwrap()),
+            Err(LlamaError::LoadFailed(_))
+        ));
+        let without = GgufBuilder::from_header(&header).without_tensors().build();
+        scan_and_load(&written(dir.path(), "metadata.gguf", &without));
+    }
+
+    /// Every GGUF in `XYBRID_DECISION_VARIANTS`, a directory of P3a's
+    /// `decision-oracle variant` output (its recipes are in
+    /// `tools/conformance/decision/cases.py` on P3a's branch), loads
+    /// vocabulary-only and checks against its scan. A cross-check run by
+    /// hand: skips without the directory.
+    #[test]
+    fn decision_oracle_variants_load_vocabulary_only() {
+        let Some(dir) = std::env::var_os("XYBRID_DECISION_VARIANTS") else {
+            eprintln!(
+                "Skipping test: set XYBRID_DECISION_VARIANTS to decision-oracle variant output"
+            );
+            return;
+        };
+        let mut files: Vec<_> = std::fs::read_dir(&dir)
+            .expect("list the variants")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|file| file.extension().is_some_and(|ext| ext == "gguf"))
+            .collect();
+        files.sort();
+        assert!(!files.is_empty(), "no .gguf in {dir:?}");
+        for file in &files {
+            let (header, model) = scan_and_load(file);
+            assert!(header.tensors().is_empty(), "{file:?} has tensors");
+            refuses_every_context(&model);
+            eprintln!(
+                "{}: {} keys, {} tokens, {:?}",
+                file.display(),
+                header.metadata().len(),
+                model.n_vocab(),
+                classify(&header)
+            );
+        }
     }
 }

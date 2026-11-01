@@ -16,6 +16,7 @@ pub const LLAMA_STATE_SEQ_FLAGS_ON_DEVICE: u32 = 2;
 pub const LLAMA_DRY_MAX_SEQ_BREAKERS: u32 = 64;
 pub const LLAMA_XYBRID_ABSENT: i32 = -1;
 pub const LLAMA_XYBRID_FAILED: i32 = -2;
+pub const LLAMA_XYBRID_REFUSED: i32 = -3;
 pub const LLAMA_XYBRID_DECODE_EXCEPTION: i32 = -1000;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -955,7 +956,7 @@ pub struct mtmd_helper_gen_audio_inp {
     pub out_type: mtmd_helper_gen_audio_outtype,
 }
 unsafe extern "C" {
-    pub fn llama_xybrid_fail_next_c(shim_name: *const ::std::os::raw::c_char);
+    pub fn llama_xybrid_fail_next_c(shim_name: *const ::std::os::raw::c_char, skip: u32) -> bool;
 }
 unsafe extern "C" {
     pub fn llama_backend_init_c();
@@ -973,7 +974,14 @@ unsafe extern "C" {
     pub fn llama_load_model_from_file_c(
         path_model: *const ::std::os::raw::c_char,
         n_gpu_layers: ::std::os::raw::c_int,
-    ) -> *mut ::std::os::raw::c_void;
+        out_model: *mut *mut ::std::os::raw::c_void,
+    ) -> i32;
+}
+unsafe extern "C" {
+    pub fn llama_load_model_vocab_only_c(
+        path_model: *const ::std::os::raw::c_char,
+        out_model: *mut *mut ::std::os::raw::c_void,
+    ) -> i32;
 }
 unsafe extern "C" {
     pub fn llama_free_model_c(model: *mut ::std::os::raw::c_void);
@@ -991,7 +999,7 @@ unsafe extern "C" {
     pub fn llama_free_c(ctx: *mut ::std::os::raw::c_void);
 }
 unsafe extern "C" {
-    pub fn llama_kv_cache_clear_c(ctx: *mut ::std::os::raw::c_void);
+    pub fn llama_kv_cache_clear_c(ctx: *mut ::std::os::raw::c_void) -> i32;
 }
 unsafe extern "C" {
     pub fn llama_kv_cache_seq_rm_c(
@@ -1126,6 +1134,17 @@ unsafe extern "C" {
         n_threads: ::std::os::raw::c_int,
         flash_attn: bool,
     ) -> *mut ::std::os::raw::c_void;
+}
+unsafe extern "C" {
+    pub fn llama_xybrid_readout_params_c(
+        n_ctx: u32,
+        n_batch: u32,
+        n_ubatch: u32,
+        n_outputs_max: u32,
+        n_threads: ::std::os::raw::c_int,
+        flash_attn: bool,
+        out: *mut llama_context_params,
+    );
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

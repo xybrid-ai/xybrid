@@ -92,7 +92,7 @@ mod runtime {
                     "prompt exceeds context budget".into(),
                 ));
             }
-            context.kv_cache_clear();
+            context.kv_cache_clear()?;
             self.prompt_tokens = tokens.len();
             self.generated_tokens = 0;
             let generated_tokens = &mut self.generated_tokens;

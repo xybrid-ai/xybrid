@@ -120,7 +120,7 @@ fn lfm2_350m_two_turns_does_not_fail_with_decode_error() {
     // path that broke pre-INF-162 — the buggy code skipped the
     // full-clear and tried position-based truncation, then `llama_decode`
     // returned non-zero on the diverging recurrent state.
-    ctx.kv_cache_clear();
+    ctx.kv_cache_clear().expect("clear the memory");
     let turn2_prompt = "<|im_start|>user\nAnd 3+3?<|im_end|>\n<|im_start|>assistant\n";
     let turn2_tokens = model
         .tokenize_special(turn2_prompt, true)

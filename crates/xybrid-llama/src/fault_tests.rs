@@ -9,22 +9,34 @@
 //! Most cases arm the shim's fault hook (`llama_xybrid_fail_next_c`), which
 //! throws `std::bad_alloc` inside the named shim's exception boundary; on a
 //! model or context with no native handle the hook fires before anything
-//! is read, so they need no model. The others need the staged d1 model:
-//! paths that only reach the shim on a real model, and two real allocation
-//! failures inside llama.cpp, provoked with an address-space limit.
+//! is read, so they need no model. The others are real allocation failures
+//! inside llama.cpp, provoked with an address-space limit (Linux, 64-bit):
+//! in the loader's copy of a path, which needs no model, and in metadata
+//! lookups on the staged d1 model; and the paths that only reach their shim
+//! on a real model, which need it too.
 
 use crate::context::LlamaContext;
+use crate::error::LlamaError;
 use crate::ffi;
 use crate::memoryless::{MemorylessContext, MemorylessParams};
 use crate::model::LlamaModel;
-use crate::test_models::{run_test_in_child, staged_d1};
+use crate::test_models::{other_gguf, run_test_in_child, staged_d1};
 
 const CASE_ENV: &str = "XYBRID_FAULT_CASE";
 const CHILD: &str = "fault_tests::fault_case";
 
+/// A path the hook fails the loader on before it is opened.
+const NO_FILE: &str = "/nonexistent/xybrid-fault-test.gguf";
+
 /// Cases on handles with no native model or context: (case, the shim the
 /// hook fails, the start of the error the call must return).
 const STUB_CASES: &[(&str, &str, &str)] = &[
+    ("load", "llama_load_model_from_file_c", "Err(Internal("),
+    (
+        "load_vocab_only",
+        "llama_load_model_vocab_only_c",
+        "Err(Internal(",
+    ),
     ("meta_str", "llama_model_meta_val_str_c", "Err(Internal("),
     ("meta_count", "llama_model_meta_count_c", "Err(Internal("),
     ("meta_values", "llama_model_meta_lookup_c", "Err(Internal("),
@@ -38,9 +50,16 @@ const STUB_CASES: &[(&str, &str, &str)] = &[
     ("has_encoder", "llama_model_has_encoder_c", "Err(Internal("),
     ("tokenize", "llama_tokenize_c", "Err(TokenizationFailed)"),
     ("facts", "llama_context_facts_c", "Err(Internal("),
+    // A failed reset leaves the context refusing to run: see UNUSABLE_AFTER.
+    ("kv_cache_clear", "llama_kv_cache_clear_c", "Err(Internal("),
+    (
+        "kv_cache_seq_rm",
+        "llama_kv_cache_seq_rm_c",
+        "Err(Internal(",
+    ),
     (
         "score_final_position",
-        "llama_kv_cache_seq_rm_c",
+        "llama_kv_cache_clear_c",
         "Err(Internal(",
     ),
     (
@@ -48,7 +67,30 @@ const STUB_CASES: &[(&str, &str, &str)] = &[
         "llama_decode_c",
         "Err(DecodeFailed { code: -1000,",
     ),
+    // One arm fails one call, whichever thread makes it: on a null context
+    // the others return the shim's -1, not the exception's -1000.
+    (
+        "decode_once_across_threads",
+        "llama_decode_c",
+        "1 of 8 calls threw",
+    ),
 ];
+
+/// The stub cases whose failure is a reset of the memory: the report goes on
+/// with the next call on the same context, which must be refused.
+const UNUSABLE_AFTER: &[&str] = &["kv_cache_clear", "kv_cache_seq_rm", "score_final_position"];
+
+/// Real allocation failures that need no model: (case, the start of the
+/// error the call must return).
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+const MEMORY_CASES: &[(&str, &str)] = &[
+    ("load_out_of_memory", "Err(Internal("),
+    ("load_vocab_only_out_of_memory", "Err(Internal("),
+];
+
+/// The scorer's opening and closing clears failing, on a causal model with
+/// memory (`XYBRID_OTHER_GGUF`).
+const OTHER_MODEL_CASES: &[&str] = &["score_opening_clear", "score_closing_clear"];
 
 /// Cases on the real d1 model.
 const MODEL_CASES: &[(&str, &str)] = &[
@@ -82,8 +124,52 @@ fn run_case(case: &str) -> String {
 }
 
 #[test]
+fn the_fault_hook_arms_only_guarded_shims() {
+    let unknown = std::ffi::CString::new("llama_no_such_shim_c").unwrap();
+    // SAFETY: the hook only reads the name during the call. Disarming here
+    // is harmless: only child processes arm it.
+    assert!(!unsafe { llama_cpp_sys::bindings::llama_xybrid_fail_next_c(unknown.as_ptr(), 0) });
+    assert!(!unsafe { llama_cpp_sys::bindings::llama_xybrid_fail_next_c(std::ptr::null(), 0) });
+}
+
+#[test]
 fn an_exception_in_any_guarded_shim_is_an_error() {
     for &(case, _, expected) in STUB_CASES {
+        let report = run_case(case);
+        assert!(report.starts_with(expected), "{case}: {report}");
+        if UNUSABLE_AFTER.contains(&case) {
+            assert!(
+                report.ends_with(", then Err(ContextUnusable)"),
+                "{case}: the context refuses the next call: {report}"
+            );
+        }
+    }
+}
+
+/// The scorer's two clears failing on a causal model with memory. Needs a
+/// GGUF other than d1, which has none: set `XYBRID_OTHER_GGUF` (stories260K,
+/// say).
+#[test]
+fn a_failed_clear_around_scoring_is_an_error_until_a_clear_succeeds() {
+    if other_gguf().is_none() {
+        return;
+    }
+    for &case in OTHER_MODEL_CASES {
+        let report = run_case(case);
+        assert!(report.starts_with("Err(Internal("), "{case}: {report}");
+        assert!(
+            report.ends_with(
+                "; then Err(ContextUnusable); clear Ok(()); empty again: true; scores again: true"
+            ),
+            "{case}: {report}"
+        );
+    }
+}
+
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+#[test]
+fn allocation_failures_without_a_model_are_errors() {
+    for &(case, expected) in MEMORY_CASES {
         let report = run_case(case);
         assert!(report.starts_with(expected), "{case}: {report}");
     }
@@ -114,15 +200,37 @@ fn fault_case() {
     };
     let report = match STUB_CASES.iter().find(|(name, _, _)| *name == case) {
         Some(&(_, shim, _)) => stub_case(&case, shim),
+        #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+        None if MEMORY_CASES.iter().any(|(name, _)| *name == case) => memory_case(&case),
+        None if OTHER_MODEL_CASES.contains(&case.as_str()) => other_model_case(&case),
         None => model_case(&case),
     };
     println!("\nFAULT {case}: {report}");
+}
+
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+fn memory_case(case: &str) -> String {
+    match case {
+        "load_out_of_memory" => {
+            // llama.cpp copies the path into a std::string before its own
+            // exception handling starts.
+            let path = format!("/nonexistent/{}", "p".repeat(LARGE));
+            out_of_address_space(|| format!("{:?}", LlamaModel::load(&path, 0).map(|_| ())))
+        }
+        "load_vocab_only_out_of_memory" => {
+            let path = format!("/nonexistent/{}", "p".repeat(LARGE));
+            out_of_address_space(|| format!("{:?}", LlamaModel::load_vocab_only(&path).map(|_| ())))
+        }
+        other => panic!("unknown case {other}"),
+    }
 }
 
 fn stub_case(case: &str, shim: &str) -> String {
     let model = LlamaModel::test_stub();
     ffi::fail_next_native_call(shim);
     match case {
+        "load" => format!("{:?}", LlamaModel::load(NO_FILE, 0).map(|_| ())),
+        "load_vocab_only" => format!("{:?}", LlamaModel::load_vocab_only(NO_FILE).map(|_| ())),
         "meta_str" => format!("{:?}", model.meta_str("lfm3.decision.type")),
         "meta_count" => format!("{:?}", model.meta_count()),
         "meta_values" => format!("{:?}", model.meta_values(&["general.architecture"])),
@@ -132,16 +240,78 @@ fn stub_case(case: &str, shim: &str) -> String {
         "has_encoder" => format!("{:?}", model.has_encoder()),
         "tokenize" => format!("{:?}", model.tokenize_special("<|im_start|>user", false)),
         "facts" => format!("{:?}", LlamaContext::test_stub(&model).facts()),
-        "score_final_position" => format!(
-            "{:?}",
-            LlamaContext::test_stub(&model).score_final_position(&[1, 2], &[0])
-        ),
+        "kv_cache_clear" => {
+            let ctx = LlamaContext::test_stub(&model);
+            let cleared = ctx.kv_cache_clear();
+            format!("{cleared:?}, then {:?}", ctx.kv_cache_seq_rm(0, 0))
+        }
+        "kv_cache_seq_rm" => {
+            let ctx = LlamaContext::test_stub(&model);
+            let trimmed = ctx.kv_cache_seq_rm(0, 4);
+            let saved = ctx.state_seq_save(0).map(|snapshot| snapshot.size_bytes());
+            format!("{trimmed:?}, then {saved:?}")
+        }
+        "score_final_position" => {
+            let ctx = LlamaContext::test_stub(&model);
+            let scored = ctx.score_final_position(&[1, 2], &[0]);
+            format!("{scored:?}, then {:?}", ctx.kv_cache_seq_rm(0, 0))
+        }
         "read_last" => format!(
             "{:?}",
             MemorylessContext::test_stub(&model, 8, 10).read_last(&[1, 2, 3], &[0])
         ),
+        "decode_once_across_threads" => {
+            const THREADS: usize = 8;
+            let start = std::sync::Barrier::new(THREADS);
+            let threw = std::thread::scope(|scope| {
+                let calls: Vec<_> = (0..THREADS)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            let mut ctx = MemorylessContext::test_stub(&model, 8, 10);
+                            start.wait();
+                            ctx.read_last(&[1, 2, 3], &[0])
+                        })
+                    })
+                    .collect();
+                calls
+                    .into_iter()
+                    .map(|call| call.join().expect("a readout thread"))
+                    .filter(|result| {
+                        matches!(result, Err(LlamaError::DecodeFailed { code: -1000, .. }))
+                    })
+                    .count()
+            });
+            format!("{threw} of {THREADS} calls threw")
+        }
         other => panic!("unknown case {other}"),
     }
+}
+
+/// One of the scorer's clears failing (the opening one, or the closing one
+/// after a successful scoring), then what the context does next.
+fn other_model_case(case: &str) -> String {
+    let path = other_gguf().expect("the parent checked the GGUF is set");
+    crate::backend_init();
+    let model = LlamaModel::load(path.to_str().expect("a UTF-8 path"), 0).expect("load the GGUF");
+    let ctx = LlamaContext::new(&model, 128, 1, 32, false).expect("a context");
+    let prompt = model.tokenize("Once upon a time", true).expect("tokenize");
+    let labels = [prompt[prompt.len() - 1]];
+    let empty = ctx.state_seq_save(0).expect("a snapshot").size_bytes();
+    let skip = match case {
+        "score_opening_clear" => 0,
+        "score_closing_clear" => 1,
+        other => panic!("unknown case {other}"),
+    };
+    ffi::fail_native_call_after("llama_kv_cache_clear_c", skip);
+    let failed = ctx.score_final_position(&prompt, &labels);
+    let refused = ctx.state_seq_save(0).map(|snapshot| snapshot.size_bytes());
+    let cleared = ctx.kv_cache_clear();
+    let size = ctx.state_seq_save(0).expect("a snapshot").size_bytes();
+    let again = ctx.score_final_position(&prompt, &labels).is_ok();
+    format!(
+        "{failed:?}; then {refused:?}; clear {cleared:?}; empty again: {}; scores again: {again}",
+        size == empty
+    )
 }
 
 fn model_case(case: &str) -> String {

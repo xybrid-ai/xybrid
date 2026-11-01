@@ -7,9 +7,11 @@
 //! whole row, so callers never hold a pointer into native memory.
 //!
 //! The context's memory (the KV cache and, on hybrid models, the recurrent
-//! state) is cleared at the start of every call and again on every return, a
-//! refused request included: each prompt is scored from a clean state, and
-//! nothing it leaves behind reaches the next generation.
+//! state) is cleared at the start of every call and again before it returns,
+//! a refused request included: each prompt is scored from a clean state, and
+//! nothing it leaves behind reaches the next generation. A clear that fails
+//! is the call's error, whatever the prompt's outcome, and leaves the context
+//! refusing to run until a clear succeeds.
 
 use std::ffi::c_int;
 
@@ -35,8 +37,9 @@ impl LlamaContext {
     /// The prompt is decoded in chunks of at most llama.cpp's own batch size
     /// for this context, with output requested for the final token only: the
     /// way generation prefills. The context's memory is cleared first and
-    /// again on every return, a refused request included, so any cached
-    /// prefix is gone afterwards.
+    /// again before every return, a refused request included, so any cached
+    /// prefix is gone afterwards. The opening clear also recovers a context
+    /// an earlier failed clear left unusable.
     ///
     /// Where the prompt is cut changes llama.cpp's arithmetic, so scores
     /// compare exactly only between runs that cut it at the same points: a
@@ -62,21 +65,34 @@ impl LlamaContext {
     /// llama.cpp fails to
     /// decode a chunk, and [`LlamaError::Internal`] when it returns no
     /// logits, a row without a finite log-sum-exp, or a non-finite logit for
-    /// a requested label.
+    /// a requested label. [`LlamaError::Internal`] too when llama.cpp fails
+    /// while clearing the memory, before scoring or after it: a result is
+    /// then discarded, and until [`LlamaContext::kv_cache_clear`] succeeds
+    /// the context returns [`LlamaError::ContextUnusable`] from every call
+    /// that runs it.
     pub fn score_final_position(
         &self,
         tokens: &[i32],
         label_ids: &[i32],
     ) -> LlamaResult<FinalLogits> {
-        // SAFETY: the context is live.
-        if !unsafe { ffi::clear_memory(self.as_ptr()) }? {
+        if !self.clear_memory()? {
             return Err(LlamaError::InvalidInput(
                 "the context has no memory: llama.cpp runs this model as an encoder, \
                  which has no next-token row to score"
                     .to_string(),
             ));
         }
-        let _clear_on_exit = ClearOnDrop(self);
+        let unwinding = UnusableOnUnwind(self);
+        let scored = self.score_from_empty(tokens, label_ids);
+        drop(unwinding);
+        // The closing clear decides the outcome: what the prompt left in the
+        // memory must not reach the next call.
+        self.clear_memory()?;
+        scored
+    }
+
+    /// The scoring itself, on a context whose memory was just cleared.
+    fn score_from_empty(&self, tokens: &[i32], label_ids: &[i32]) -> LlamaResult<FinalLogits> {
         if !self.facts()?.causal_attn {
             return Err(LlamaError::InvalidInput(
                 "the context uses non-causal attention, which needs the whole prompt in one \
@@ -112,13 +128,15 @@ impl LlamaContext {
     }
 }
 
-/// Clears the context's memory when dropped, so every return path leaves it
-/// empty.
-struct ClearOnDrop<'a>(&'a LlamaContext);
+/// Marks the context unusable when scoring unwinds: a panic between the two
+/// clears would otherwise leave the prompt in its memory for the next call.
+struct UnusableOnUnwind<'a>(&'a LlamaContext);
 
-impl Drop for ClearOnDrop<'_> {
+impl Drop for UnusableOnUnwind<'_> {
     fn drop(&mut self) {
-        self.0.kv_cache_clear();
+        if std::thread::panicking() {
+            self.0.mark_unusable();
+        }
     }
 }
 

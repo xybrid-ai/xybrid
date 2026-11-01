@@ -133,6 +133,14 @@ impl GgufBuilder {
         self.array(key, 6, items.len() as u64, &payload)
     }
 
+    /// Drops every tensor entry: a metadata-only GGUF, as P3a's
+    /// `decision-oracle variant` writes them.
+    pub(super) fn without_tensors(mut self) -> Self {
+        self.tensors.clear();
+        self.n_tensors = 0;
+        self
+    }
+
     /// A tensor entry with raw fields: `dims` are written as stored.
     pub(super) fn tensor(mut self, name: &str, dims: &[u64], ggml_type: u32, offset: u64) -> Self {
         self.tensors.extend(gguf_string(name.as_bytes()));

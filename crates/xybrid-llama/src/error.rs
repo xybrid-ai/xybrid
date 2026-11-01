@@ -25,8 +25,10 @@ pub enum LlamaError {
     #[error("invalid input: {0}")]
     InvalidInput(String),
 
-    /// `llama_load_model_from_file_c` returned a null pointer for the given
-    /// path. The string captures the model path the caller passed.
+    /// llama.cpp could not load the model at the given path
+    /// (`llama_load_model_from_file_c`, or the vocabulary-only loader,
+    /// returned no model). The string captures the model path the caller
+    /// passed.
     #[error("failed to load model from {0}")]
     LoadFailed(String),
 
@@ -87,11 +89,23 @@ pub enum LlamaError {
     #[error("internal llama.cpp error: {0}")]
     Internal(String),
 
-    /// A readout stopped because its context's cancel handle was used
-    /// (`MemorylessContext::cancel_handle`). The context can read again
-    /// once the request is cleared.
+    /// A readout stopped because the handle of its request was used
+    /// (`MemorylessContext::cancel_handle`). The context reads again in its
+    /// next request (`MemorylessContext::clear_cancel`).
     #[error("the readout was cancelled")]
     Cancelled,
+
+    /// A clear or trim of the context's memory failed, so what the memory
+    /// holds is unknown: the context refuses to run, or to touch its
+    /// memory, until `LlamaContext::kv_cache_clear` succeeds.
+    #[error("the context's memory could not be reset; clear it again before using the context")]
+    ContextUnusable,
+
+    /// The model came from `LlamaModel::load_vocab_only`: it has its
+    /// vocabulary and metadata but no tensors, so no context is created
+    /// for it.
+    #[error("the model was loaded vocabulary-only and cannot run")]
+    VocabOnly,
 }
 
 /// Result alias used throughout the safe wrappers.
