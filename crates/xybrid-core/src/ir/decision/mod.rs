@@ -67,11 +67,11 @@
 //! State, question ids, option keys, instructions, descriptions and every
 //! part of a JSON value are caller content. `Debug` on every type here
 //! prints kinds, lengths, counts and model numbers only, and every
-//! [`DecisionError`] message names byte offsets, positions, counts and
-//! limits only, except [`DecisionError::Runtime`], which passes a runtime
-//! error through. A format's own deserialization errors (serde_json quoting
-//! an unexpected value, say) are outside that promise too; the boundary that
-//! decodes envelopes must withhold them.
+//! [`DecisionError`] (its message, its `Debug`, and the `AdapterError` it
+//! converts into) names byte offsets, positions, counts and limits only. A
+//! format's own deserialization errors (serde_json quoting an unexpected
+//! value, say) are outside that promise; the boundary that decodes envelopes
+//! must withhold them.
 //!
 //! # Compatibility
 //!
@@ -98,10 +98,14 @@
 //! - **JSON.** Every struct refuses unknown fields, so a decoder built
 //!   before a field was added rejects data that has it: deliberate, so that
 //!   nothing is silently dropped. Enums use serde's default external
-//!   tagging, and an old decoder refuses a new variant. `f64` fields
-//!   round-trip through serde_json exactly only if its float parsing is
-//!   exact (its `float_roundtrip` feature, off in this workspace);
-//!   [`DecisionAnswer`] decoding allows for that.
+//!   tagging, and an old decoder refuses a new variant. The `f64` fields of
+//!   an answer (probabilities, `p_yes`, score values, confidences) are
+//!   decimal strings with the shortest digits that read back as the same
+//!   `f64`, read back with a correctly rounded parser, so they round-trip
+//!   bit for bit even through serde_json, whose own float parsing is
+//!   best-effort without its `float_roundtrip` feature (off in this
+//!   workspace). Decoding, in every format, checks exactly what
+//!   [`DecisionAnswer::new`] checks.
 //! - **`OrderedJson` in serde.** In every format it is one string holding
 //!   its compact JSON text, which keeps key order and number identity
 //!   exactly and works in formats that cannot carry an ordered map
