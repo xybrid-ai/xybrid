@@ -344,6 +344,12 @@ impl LlamaCppBackend {
     /// (which will be `[prefix; new_tail; generated_tokens]` after the
     /// generation runs). Records `last_prefix_hit` for the telemetry
     /// accessor [`Self::last_cached_prefix_len`].
+    ///
+    /// A failed clear or trim leaves the native cache unknown, and the
+    /// context then refuses to run until a full clear succeeds. So an error
+    /// forgets the cached prefix, and the next call takes the full-clear
+    /// path, which is the recovery; a trim the context refuses for an
+    /// earlier failure falls back to that full clear at once.
     fn prepare_kv_cache_and_get_tail(
         &self,
         model: &xybrid_llama::LlamaModel,
@@ -374,10 +380,7 @@ impl LlamaCppBackend {
         // per-turn re-prefill of the full conversation — correct, just
         // not the prefix-reuse optimisation.
         if model.has_recurrent_state() {
-            context.kv_cache_clear()?;
-            state.cached_tokens = new_tokens.to_vec();
-            state.last_prefix_hit = Some(0);
-            return Ok((new_tokens.to_vec(), 0));
+            return full_clear(context, &mut state, new_tokens);
         }
 
         let n_ctx = context.n_ctx();
@@ -391,17 +394,23 @@ impl LlamaCppBackend {
         let would_overflow =
             generation_would_overflow_context(prefix_len, new_tokens.len(), max_new_tokens, n_ctx);
         if prefix_len == 0 || would_overflow {
-            context.kv_cache_clear()?;
-            state.cached_tokens = new_tokens.to_vec();
-            state.last_prefix_hit = Some(0);
-            return Ok((new_tokens.to_vec(), 0));
+            return full_clear(context, &mut state, new_tokens);
         }
 
         // Truncate the cache to the prefix. seq_id = 0 because the
         // wrapper's batch.seq_id[..][0] = 0 path uses a single sequence;
         // when we add multi-sequence support the seq_id needs to flow
         // through prepare too.
-        context.kv_cache_seq_rm(0, prefix_len)?;
+        match context.kv_cache_seq_rm(0, prefix_len) {
+            Ok(()) => {}
+            Err(xybrid_llama::LlamaError::ContextUnusable) => {
+                return full_clear(context, &mut state, new_tokens);
+            }
+            Err(error) => {
+                *state = KvCacheState::default();
+                return Err(error.into());
+            }
+        }
         let tail = new_tokens[prefix_len..].to_vec();
         state.cached_tokens = new_tokens.to_vec();
         state.last_prefix_hit = Some(prefix_len);
@@ -768,6 +777,23 @@ fn record_only(
 ) -> Result<(), crate::runtime_adapter::llm::StreamingError> {
     tel.record_chunk();
     Ok(())
+}
+
+/// Full-clears the native cache for a re-prefill of all of `new_tokens`
+/// from position 0. A failed clear forgets the cached prefix as well, so the
+/// next call clears again instead of trimming a cache in an unknown state.
+fn full_clear(
+    context: &xybrid_llama::LlamaContext,
+    state: &mut KvCacheState,
+    new_tokens: &[i32],
+) -> LlmResult<(Vec<i32>, usize)> {
+    if let Err(error) = context.kv_cache_clear() {
+        *state = KvCacheState::default();
+        return Err(error.into());
+    }
+    state.cached_tokens = new_tokens.to_vec();
+    state.last_prefix_hit = Some(0);
+    Ok((new_tokens.to_vec(), 0))
 }
 
 /// Longest-common-prefix length between the cached tokens and the new
@@ -1509,8 +1535,8 @@ impl LlmBackend for LlamaCppBackend {
                 } else {
                     None
                 };
-                context.kv_cache_clear()?;
                 self.clear_cached_prefix_state();
+                context.kv_cache_clear()?;
                 xybrid_trace::add_metadata("tokens_in", summary.helper_total_tokens.to_string());
                 let n_batch = context.n_batch();
                 let new_n_past = xybrid_llama::mtmd_helper_eval_chunks(
@@ -1688,8 +1714,8 @@ impl LlmBackend for LlamaCppBackend {
                     None
                 };
 
-                context.kv_cache_clear()?;
                 self.clear_cached_prefix_state();
+                context.kv_cache_clear()?;
                 xybrid_trace::add_metadata("tokens_in", summary.helper_total_tokens.to_string());
                 let n_batch = context.n_batch();
                 let new_n_past = xybrid_llama::mtmd_helper_eval_chunks(
@@ -2218,6 +2244,121 @@ mod tests {
             }
             other => panic!("expected packed RGB payload, got {other:?}"),
         }
+    }
+
+    const KV_RECOVERY_CHILD_ENV: &str = "XYBRID_KV_RECOVERY_CHILD";
+
+    /// The second, ordinary GGUF from `XYBRID_OTHER_GGUF` (stories260K: see
+    /// `integration-tests/README.md`), or `None` (with a note).
+    ///
+    /// # Panics
+    ///
+    /// When `XYBRID_REQUIRE_MODELS` is set and `XYBRID_OTHER_GGUF` is not.
+    fn other_gguf() -> Option<String> {
+        if let Some(path) = std::env::var_os("XYBRID_OTHER_GGUF") {
+            return Some(path.to_string_lossy().into_owned());
+        }
+        let reason = "XYBRID_OTHER_GGUF is not set (a causal GGUF such as stories260K)";
+        if std::env::var_os("XYBRID_REQUIRE_MODELS").is_some() {
+            panic!("XYBRID_REQUIRE_MODELS is set but {reason}");
+        }
+        eprintln!("Skipping test: {reason}");
+        None
+    }
+
+    /// A failed trim or clear does not leave a conversation stuck: the next
+    /// turn clears and runs. In a child process, because the native fault
+    /// hook is process-wide. Needs a causal GGUF with memory.
+    #[test]
+    fn a_failed_trim_or_clear_recovers_on_the_next_turn() {
+        if other_gguf().is_none() {
+            return;
+        }
+        let exe = std::env::current_exe().expect("this test binary");
+        let output = std::process::Command::new(exe)
+            .args([
+                "--exact",
+                "runtime_adapter::llama_cpp::tests::kv_recovery_child",
+                "--nocapture",
+                "--test-threads",
+                "1",
+            ])
+            .env(KV_RECOVERY_CHILD_ENV, "1")
+            .output()
+            .expect("run the child");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(stdout.contains("KV RECOVERY ok"), "{stdout}");
+    }
+
+    /// The child of [`a_failed_trim_or_clear_recovers_on_the_next_turn`]
+    /// (returns at once in a normal test run).
+    #[test]
+    fn kv_recovery_child() {
+        if std::env::var_os(KV_RECOVERY_CHILD_ENV).is_none() {
+            return;
+        }
+        let path = other_gguf().expect("the parent checked the GGUF is set");
+        let mut backend = LlamaCppBackend::new().unwrap();
+        backend
+            .load(&LlmConfig::new(path).with_context_length(256))
+            .expect("load the GGUF");
+        let model = backend.model.as_ref().expect("a model");
+        let guard = backend.context.lock().unwrap();
+        let context = guard.as_ref().expect("a context");
+        let fail_next = |shim: &str| {
+            let name = std::ffi::CString::new(shim).unwrap();
+            // SAFETY: the hook only reads the name during the call.
+            let armed =
+                unsafe { llama_cpp_sys::bindings::llama_xybrid_fail_next_c(name.as_ptr(), 0) };
+            assert!(armed, "{shim} is a guarded shim");
+        };
+        let prepare =
+            |tokens: &[i32]| backend.prepare_kv_cache_and_get_tail(model, context, tokens, 4);
+        let turn = |tokens: &[i32]| {
+            let (tail, n_past) = prepare(tokens)?;
+            xybrid_llama::generate_streaming(
+                context,
+                model,
+                &tail,
+                4,
+                0.0,
+                1.0,
+                0.0,
+                0,
+                1.0,
+                &[],
+                None,
+                |_, _| Ok(()),
+                n_past,
+            )?;
+            LlmResult::Ok(n_past)
+        };
+        let cached = || backend.kv_state.lock().unwrap().cached_tokens.clone();
+        let mut tokens = model.tokenize("Once upon a time", true).unwrap();
+        assert_eq!(turn(&tokens).expect("the first turn"), 0);
+
+        // The trim of the second turn fails inside llama.cpp: the turn fails
+        // and the prefix is forgotten, so the next attempt clears and runs.
+        tokens.extend(model.tokenize(" there was", false).unwrap());
+        fail_next("llama_kv_cache_seq_rm_c");
+        let failed = prepare(&tokens).expect_err("the trim fails");
+        assert!(failed.to_string().contains("trimming"), "{failed}");
+        assert!(cached().is_empty(), "the failed trim forgets the prefix");
+        assert_eq!(turn(&tokens).expect("the next turn runs"), 0);
+        assert_eq!(cached(), tokens);
+
+        // A clear failed elsewhere and the prefix is still recorded: the trim
+        // is refused for the unusable context, and the turn clears instead.
+        fail_next("llama_kv_cache_clear_c");
+        assert!(context.kv_cache_clear().is_err());
+        tokens.extend(model.tokenize(" a cat", false).unwrap());
+        assert_eq!(turn(&tokens).expect("the turn clears and runs"), 0);
+        println!("\nKV RECOVERY ok");
     }
 
     #[test]
