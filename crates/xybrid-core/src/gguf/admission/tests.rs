@@ -797,8 +797,9 @@ fn messages_quote_the_file_s_facts_cut_short() {
 fn refusals_repeat_the_model_id_escaped_and_cut_short() {
     fn check(error: &AdapterError) {
         if let AdapterError::UnsupportedModelCapability { model_id, .. } = error {
+            // The documented bound: 128 characters of up to ten each, and `…`.
             assert!(
-                model_id.chars().count() <= MAX_LABEL_CHARS + 1,
+                model_id.chars().count() <= 10 * MAX_LABEL_CHARS + 1,
                 "{model_id}"
             );
         }
@@ -810,7 +811,7 @@ fn refusals_repeat_the_model_id_escaped_and_cut_short() {
         }
         for text in texts {
             let start: String = text.chars().take(200).collect();
-            assert!(text.len() < 1024, "{} bytes: {start}", text.len());
+            assert!(text.len() < 2048, "{} bytes: {start}", text.len());
             assert!(
                 !text.contains(['\n', '\r', '\t', '\u{1b}', '\u{7}']),
                 "a raw control character in {text:?}"
@@ -819,6 +820,11 @@ fn refusals_repeat_the_model_id_escaped_and_cut_short() {
     }
 
     let long_id = format!("{}\n\u{1b}[31mtail", "x".repeat(131_072));
+    // The cut falls on the escape character: cutting the escaped text would
+    // have split its `\u{1b}`.
+    let split = format!("{}\u{1b}tail", "x".repeat(MAX_LABEL_CHARS - 1));
+    // Every character escapes to its widest form.
+    let widest = "\u{10ffff}".repeat(200);
     let empty = tempfile::tempdir().unwrap();
     let mut media = decision();
     media.files.push("mmproj.gguf".to_string());
@@ -826,7 +832,12 @@ fn refusals_repeat_the_model_id_escaped_and_cut_short() {
         "file": "mmproj.gguf", "preprocessing_preset": "siglip", "image_size": 512,
     }))
     .unwrap();
-    for id in [long_id.as_str(), "bad\nid\u{1b}[0m\t'quoted'\\\u{7}"] {
+    for id in [
+        long_id.as_str(),
+        split.as_str(),
+        widest.as_str(),
+        "bad\nid\u{1b}[0m\t'quoted'\\\u{7}",
+    ] {
         let named = |mut metadata: ModelMetadata| {
             metadata.model_id = id.to_string();
             metadata
@@ -854,6 +865,12 @@ fn refusals_repeat_the_model_id_escaped_and_cut_short() {
     assert_eq!(label("plain-id_1.0"), "plain-id_1.0");
     assert_eq!(label("a\nb'c"), "a\\nb\\'c");
     assert_eq!(label(&"é".repeat(200)), format!("{}…", "é".repeat(128)));
+    assert_eq!(
+        label(&split),
+        format!("{}\\u{{1b}}…", "x".repeat(MAX_LABEL_CHARS - 1)),
+        "the escape is whole"
+    );
+    assert_eq!(label(&widest).chars().count(), 1281);
 }
 
 #[test]

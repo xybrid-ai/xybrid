@@ -78,7 +78,7 @@ const MAX_QUOTED_CHARS: usize = 64;
 /// an error includes.
 const MAX_DETAIL_CHARS: usize = 256;
 
-/// Characters of a model id an error repeats, once escaped.
+/// Characters of a model id an error repeats, counted before escaping.
 const MAX_LABEL_CHARS: usize = 128;
 
 /// What [`admit_gguf`] admitted.
@@ -345,16 +345,18 @@ fn bounded(text: &str) -> String {
 }
 
 /// The model id as an error repeats it, in its message and in its
-/// `model_id` field: control characters, quotes and backslashes escaped,
-/// cut to [`MAX_LABEL_CHARS`]. Metadata is not trusted to be short or
-/// printable.
+/// `model_id` field: its first [`MAX_LABEL_CHARS`] characters with control
+/// characters, quotes and backslashes escaped, then `…` when it was longer.
+/// Metadata is not trusted to be short or printable.
+///
+/// The id is cut before it is escaped, so no escape is ever split. An
+/// escape takes at most ten characters (`\u{10ffff}`), so a label is at
+/// most 1,281 characters: 128 characters of up to ten each, and `…`.
 fn label(text: &str) -> String {
-    let mut escaped = text.escape_debug();
-    let mut out: String = escaped.by_ref().take(MAX_LABEL_CHARS).collect();
-    if escaped.next().is_some() {
-        out.push('…');
+    match text.char_indices().nth(MAX_LABEL_CHARS) {
+        None => text.escape_debug().to_string(),
+        Some((end, _)) => format!("{}…", text[..end].escape_debug()),
     }
-    out
 }
 
 #[cfg(test)]

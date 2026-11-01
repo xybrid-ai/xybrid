@@ -919,16 +919,18 @@ fn bounded(text: &str) -> String {
     }
 }
 
-/// A model id or file name as an error repeats it: control characters,
-/// quotes and backslashes escaped, cut to 128 characters. Neither is
-/// trusted to be short or printable.
+/// A model id or file name as an error repeats it: its first 128
+/// characters with control characters, quotes and backslashes escaped, then
+/// `…` when it was longer. Neither is trusted to be short or printable.
+///
+/// The text is cut before it is escaped, so no escape is ever split. An
+/// escape takes at most ten characters (`\u{10ffff}`), so a label is at
+/// most 1,281 characters: 128 characters of up to ten each, and `…`.
 fn label(text: &str) -> String {
-    let mut escaped = text.escape_debug();
-    let mut out: String = escaped.by_ref().take(128).collect();
-    if escaped.next().is_some() {
-        out.push('…');
+    match text.char_indices().nth(128) {
+        None => text.escape_debug().to_string(),
+        Some((end, _)) => format!("{}…", text[..end].escape_debug()),
     }
-    out
 }
 
 // ============================================================================
@@ -4074,7 +4076,7 @@ mod tests {
             }
             for text in texts {
                 let start: String = text.chars().take(200).collect();
-                assert!(text.len() < 1024, "{} bytes: {start}", text.len());
+                assert!(text.len() < 2048, "{} bytes: {start}", text.len());
                 assert!(
                     !text.contains(['\n', '\r', '\t', '\u{1b}', '\u{7}']),
                     "a raw control character in {text:?}"
@@ -4086,13 +4088,24 @@ mod tests {
             .str("lfm3.decision.type", "lfm3-d1-omni");
         let crowded = (4..4100).fold(lfm3_chat(), |gguf, i| gguf.u32(&format!("filler.{i}"), i));
         let long_id = format!("{}\n\u{1b}[31mtail", "x".repeat(131_072));
-        for id in [long_id.as_str(), "bad\nid\u{1b}[0m\t'quoted'\\\u{7}"] {
+        // The cut falls on the escape character: cutting the escaped text
+        // would have split its `\u{1b}`.
+        let split = format!("{}\u{1b}tail", "x".repeat(127));
+        // Every character escapes to its widest form.
+        let widest = "\u{10ffff}".repeat(200);
+        for id in [
+            long_id.as_str(),
+            split.as_str(),
+            widest.as_str(),
+            "bad\nid\u{1b}[0m\t'quoted'\\\u{7}",
+        ] {
             for gguf in [&omni, &crowded] {
                 let dir = TempDir::new().unwrap();
                 gguf.write(&dir.path().join("model.gguf"));
                 let error = inspect_and_generate(dir.path(), "", Some(id)).unwrap_err();
                 if let SdkError::UnsupportedModelCapability { model_id, .. } = &error {
-                    assert!(model_id.chars().count() <= 129, "{model_id}");
+                    // 128 characters of up to ten each, and `…`.
+                    assert!(model_id.chars().count() <= 1281, "{model_id}");
                 } else {
                     panic!("expected a capability refusal, got {error:?}");
                 }
@@ -4116,6 +4129,12 @@ mod tests {
         assert_eq!(label("plain-id_1.0"), "plain-id_1.0");
         assert_eq!(label("a\nb'c"), "a\\nb\\'c");
         assert_eq!(label(&"é".repeat(200)), format!("{}…", "é".repeat(128)));
+        assert_eq!(
+            label(&split),
+            format!("{}\\u{{1b}}…", "x".repeat(127)),
+            "the escape is whole"
+        );
+        assert_eq!(label(&widest).chars().count(), 1281);
     }
 
     #[test]
