@@ -17,6 +17,17 @@ ids, output index, selected tokens and label groups must be identical on both si
 expectations (the refusal stage and class, or the exact fields that differ), so the allowlist cannot go stale. Any
 missing, extra or mismatched record fails the run.
 
+A generated corpus (the held-out set) is also bound to its generation record, make_heldout.py's generation.json:
+- the recipe and seed frozen with the bounds;
+- these request bytes;
+- a measuring tool and vocabulary recorded without local state: the tool is the build that collected every oracle
+  observation, and the vocabulary is a pinned artifact's;
+- an allowlist that is exactly its cases and questions;
+- every pass of every oracle collection as long as measured, each targeted slot exactly its target.
+Once bounds are frozen, the comparator and the recipe must be the ones they were frozen with. These checks compare no
+number: they are `compare.py integrity`. Every subcommand that computes a number runs them first and refuses, comparing
+nothing, unless they pass.
+
 The metric is the anchored gap error (AGE), in logits. For a question with groups g, s_g is a group's maximum selected
 raw logit on each side (upstream's reduction), w the reference winner (first maximum), and
 
@@ -35,8 +46,12 @@ apart and never gated. The oracle's own answers must be reproduced from its scor
 
 Subcommands:
 
+  compare.py integrity  every check that compares no number, over every corpus and side; prints identities and
+                      failures only
   compare.py gate     every corpus present against g1/bounds.json; exit 1 on any failure
-  compare.py freeze   g1/bounds.json from the representative set (refused once it, or held-out data, exists)
+  compare.py freeze   g1/bounds.json from the representative set (refused once it, or held-out data, exists). It
+                      records this comparator's sha256 and the held-out recipe's file, sha256 and seed, which later
+                      runs must match
   compare.py revalidate  after a regeneration that changed an identity: every corpus must pass under the frozen
                       bounds, then the new identities are recorded in g1/bounds.json; nothing is refitted
   compare.py drift    G3's report: d1-2b-q4km against d1-2b-f16 per setting, and Flash Attention drift
@@ -52,6 +67,7 @@ import decimal
 import hashlib
 import json
 import math
+import re
 import struct
 import subprocess
 import sys
@@ -285,6 +301,10 @@ COLLECTION_FILE = "collection.json"
 # The HF reference's run log (run_reference.py --run-log), next to held-out observations; the representative
 # observations are bound by tools/conformance/decision_hf's provenance.json instead.
 HF_RUN_LOG = "run.json"
+# A generated corpus's record (make_heldout.py), next to its cases directory; and the two files the freeze binds.
+GENERATION_FILE = "generation.json"
+COMPARATOR = Path(__file__).resolve()
+HELDOUT_RECIPE = HERE / "make_heldout.py"
 
 
 class Observation:
@@ -988,9 +1008,13 @@ def hf_reference_math(view: QuestionView, temperature: float) -> Optional[Dict[s
 
 def compare_corpus(corpus: Corpus, cand: Dict[str, Observation], ref: Dict[str, Observation],
                    cand_temperature: Tuple, ref_temperature: Tuple, bound: Optional[float], run: Run, label: str,
-                   self_check: bool = False, reference_math: bool = False) -> Dict[str, Any]:
+                   self_check: bool = False, reference_math: bool = False, metrics: bool = True) -> Dict[str, Any]:
+    """Question by question, the checks and then the comparison. Without `metrics` only the checks run (structure,
+    the identity of what both sides evaluated, the self-check): no gap, probability or answer of the two sides is
+    compared."""
     T = upstream_temperature()
     questions, reference_math_rows = [], []
+    checked = 0
     for case_id in sorted(corpus.included):
         if case_id not in cand or case_id not in ref:
             continue  # reported by the join
@@ -1018,7 +1042,8 @@ def compare_corpus(corpus: Corpus, cand: Dict[str, Observation], ref: Dict[str, 
                 run.failures.append(f"{label}: {case_id}/{qid}: the two sides evaluated different things: "
                                     + ", ".join(differ))
                 continue
-            row = {"case": case_id, "question": qid, **compare_question(cv, rv, bound, T)}
+            checked += 1
+            row = {"case": case_id, "question": qid, **compare_question(cv, rv, bound, T)} if metrics else None
             if self_check:
                 for view, side in ((cv, "candidate"), (rv, "reference")):
                     if side == "reference" and reference_math:
@@ -1027,14 +1052,16 @@ def compare_corpus(corpus: Corpus, cand: Dict[str, Observation], ref: Dict[str, 
                     if problems:
                         run.failures.append(f"{label}: {case_id}/{qid}: upstream's arithmetic on the {side}'s "
                                             f"scores does not reproduce its answer: {', '.join(problems)}")
+            if not metrics:
+                continue
             if reference_math:
                 diff = hf_reference_math(rv, T)
                 if diff is not None:
                     reference_math_rows.append({"case": case_id, "question": qid, "type": rv.type, **diff})
             questions.append(row)
     expected = sum(len(q) for q in corpus.included.values())
-    if len(questions) != expected:
-        run.failures.append(f"{label}: compared {len(questions)} questions, the allowlist includes {expected}")
+    if checked != expected:
+        run.failures.append(f"{label}: compared {checked} questions, the allowlist includes {expected}")
     return {"questions": questions, "reference_math": reference_math_rows}
 
 
@@ -1131,7 +1158,7 @@ class Context:
 
 
 def evaluate_g1(ctx: Context, bounds: Optional[Dict[str, float]], run: Run,
-                only: Optional[Iterable[str]] = None) -> Dict[str, Any]:
+                only: Optional[Iterable[str]] = None, metrics: bool = True) -> Dict[str, Any]:
     artifacts = ctx.artifacts()
     for path in ctx.allowlist_paths + [ctx.artifacts_path]:
         if path.is_file():
@@ -1149,6 +1176,9 @@ def evaluate_g1(ctx: Context, bounds: Optional[Dict[str, float]], run: Run,
         run.identities[f"{corpus.name}/hf"] = fingerprint
         for path in sorted(corpus.cases_dir.glob("*.json")) + sorted(corpus.hf_dir.glob("*.json")):
             run.digest(path)
+        generation = corpus.cases_dir.parent / GENERATION_FILE
+        if corpus.name != "representative" and generation.is_file():
+            run.digest(generation)
         per_setting = {}
         for settings in SETTINGS:
             directory = corpus.oracle_path(F16, settings)
@@ -1169,7 +1199,9 @@ def evaluate_g1(ctx: Context, bounds: Optional[Dict[str, float]], run: Run,
             bound = None if bounds is None else bounds[settings]
             label = f"{corpus.name} {F16}/{settings} vs HF"
             result = compare_corpus(corpus, oracle, hf, NATIVE_TEMPERATURE, HF_TEMPERATURE, bound, run, label,
-                                    self_check=True, reference_math=True)
+                                    self_check=True, reference_math=True, metrics=metrics)
+            if not metrics:
+                continue
             summary = summarize(result["questions"], bound)
             if bound is not None:
                 for q in summary["over_bound"]:
@@ -1187,6 +1219,194 @@ def frozen_identities(run: Run) -> Dict[str, Optional[str]]:
     return {key: value for key, value in run.identities.items() if key.startswith("representative/")}
 
 
+def g1_identities(identities: Dict[str, Optional[str]]) -> Dict[str, Optional[str]]:
+    """The identities G1's numbers depend on: the HF reference's and d1-2b-f16's (not the drift report's Q4)."""
+    return {key: value for key, value in identities.items() if f"/{Q4}/" not in key}
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Integrity before numbers
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+REFUSED = "the integrity checks failed; nothing was compared"
+
+
+def recipe_seed(path: Path) -> int:
+    """The held-out recipe's literal seed (`SEED = 0x...` in make_heldout.py), read without running the recipe."""
+    match = re.search(r"(?m)^SEED = (0x[0-9A-Fa-f]+)$", path.read_text(encoding="utf-8"))
+    if match is None:
+        raise Failure(f"{rel(path)}: no literal SEED")
+    return int(match.group(1), 16)
+
+
+def frozen_with() -> Dict[str, Any]:
+    """What the freeze binds every later run to: this comparator, and the held-out recipe with its seed."""
+    return {
+        "comparator": {"file": rel(COMPARATOR), "sha256": sha256_file(COMPARATOR)},
+        "heldout_recipe": {"file": rel(HELDOUT_RECIPE), "sha256": sha256_file(HELDOUT_RECIPE),
+                           "seed": recipe_seed(HELDOUT_RECIPE)},
+    }
+
+
+def is_sha256(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def check_generation(corpus: Corpus, cases: Dict[str, Case], recipe: Optional[Dict[str, Any]],
+                     artifacts: Dict[str, Any], run: Run) -> List[str]:
+    """A generated corpus against its generation record (make_heldout.py's generation.json, next to its cases). The
+    record must name the recipe and seed frozen with the bounds, and these request bytes. Its measuring tool and
+    vocabulary must be recorded without local state: the tool is the build that collected every oracle observation,
+    and the vocabulary is a pinned artifact's. The allowlist must be exactly its cases and questions. Every pass of
+    every oracle collection must be as long as measured, and each targeted slot exactly its target."""
+    path = corpus.cases_dir.parent / GENERATION_FILE
+    where = rel(path)
+    if not path.is_file():
+        return [f"{where}: missing (make_heldout.py writes it next to the cases)"]
+    run.digest(path)
+    record = load_json(path)
+    failures = []
+    if record.get("schema_version") != 1:
+        failures.append(f"{where}: schema_version must be 1")
+    if recipe is None:
+        failures.append(f"{where}: held-out data without a recipe frozen with the bounds (compare.py freeze first)")
+    elif record.get("recipe") != {k: recipe.get(k) for k in ("file", "sha256", "seed")}:
+        failures.append(f"{where}: made by recipe {record.get('recipe')}, not the one frozen with the bounds {recipe}")
+    measured = record.get("measured_with") or {}
+    tool = measured.get("tool")
+    if not isinstance(tool, str) or not tool or "\\" in tool or Path(tool).is_absolute() or ".." in Path(tool).parts:
+        failures.append(f"{where}: the measuring tool is recorded as {tool!r}, not a repository path or a file name")
+    if not is_sha256(measured.get("tool_sha256")):
+        failures.append(f"{where}: no sha256 of the measuring tool")
+    identity = measured.get("tool_identity")
+    if not isinstance(identity, dict) or not identity.get("fingerprint") or "llama_cpp_dir" in identity:
+        failures.append(f"{where}: no stamped identity of the measuring tool without local state")
+        identity = None
+    pinned = {artifacts["artifacts"][a].get("file"): artifacts["artifacts"][a].get("sha256") for a in (F16, Q4)
+              if a in artifacts["artifacts"]}
+    vocab = measured.get("vocab")
+    if vocab not in pinned or measured.get("vocab_sha256") != pinned[vocab]:
+        failures.append(f"{where}: prompt lengths measured on {vocab!r} ({measured.get('vocab_sha256')}), not a "
+                        f"pinned {F16} or {Q4} file")
+    calls = measured.get("calls")
+    if not isinstance(calls, int) or isinstance(calls, bool) or calls < 1:
+        failures.append(f"{where}: no measurement count")
+    entries = record.get("cases")
+    if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+        return failures + [f"{where}: no case records"]
+    if [e.get("id") for e in entries] != sorted(cases):
+        failures.append(f"{where}: the generated cases are not the corpus's case files")
+    if corpus.excluded or corpus.included != {e.get("id"): e.get("questions") for e in entries}:
+        failures.append(f"{corpus.name}: the allowlist is not the generation's (every generated case and question "
+                        f"included, none excluded)")
+    lengths: Dict[str, List[int]] = {}
+    for e in entries:
+        case_id, passes, target = e.get("id"), e.get("pass_tokens"), e.get("target_tokens")
+        case = cases.get(case_id)
+        if case is not None and e.get("request_text_sha256") != case.sha:
+            failures.append(f"{where}: {case_id}: generated other request bytes than its case file holds")
+        questions = e.get("questions")
+        if not (isinstance(passes, list) and isinstance(questions, list) and passes and len(passes) == len(questions)
+                and all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in passes)):
+            failures.append(f"{where}: {case_id}: pass lengths {passes!r} for questions {questions!r}")
+            continue
+        lengths[case_id] = passes
+        if target is None:
+            if e.get("measured_tokens") is not None:
+                failures.append(f"{where}: {case_id}: a measured length without a target")
+        elif e.get("measured_tokens") != target or passes[0] != target:
+            failures.append(f"{where}: {case_id}: measured {e.get('measured_tokens')} and {passes[0]} tokens, the "
+                            f"target is {target}")
+    for artifact in (F16, Q4):
+        for settings in SETTINGS:
+            directory = corpus.oracle_path(artifact, settings)
+            if not (directory / COLLECTION_FILE).is_file():
+                continue  # the collection checks report it
+            label = f"{corpus.name} {artifact}/{settings}"
+            build = load_json(directory / COLLECTION_FILE).get("build") or {}
+            if identity is not None and build.get("fingerprint") != identity.get("fingerprint"):
+                failures.append(f"{label}: collected by build {build.get('fingerprint')}, but the prompt lengths were "
+                                f"measured by build {identity.get('fingerprint')}")
+            side = load_dir(directory, "oracle")
+            for case_id, want in sorted(lengths.items()):
+                obs = side.get(case_id)
+                if obs is None:
+                    continue  # the join reports it
+                prepare, finalize = obs.stages.get("prepare"), obs.stages.get("finalize")
+                passes = prepare.get("passes") if isinstance(prepare, dict) else None
+                got = [len(p.get("token_ids") or []) for p in passes] if isinstance(passes, list) else None
+                usage = ((finalize.get("usage") or {}) if isinstance(finalize, dict) else {}).get("input_tokens")
+                if got != want or usage != sum(want):
+                    failures.append(f"{label}: {case_id}: passes of {got} tokens (usage {usage}), the generation "
+                                    f"measured {want}")
+    return failures
+
+
+def check_integrity(ctx: Context) -> Run:
+    """Every check that compares no number, over every corpus and side present. They cover:
+    - the allowlists and the case files;
+    - the HF run identity: its provenance, or a held-out run log with its float32 parity proof and numerics tuple;
+    - each oracle collection, d1-2b-f16 and d1-2b-q4km under both settings;
+    - the identity of what both sides evaluated, and the oracle's own answers;
+    - a generated corpus's generation record;
+    - once bounds are frozen, the comparator and recipe they were frozen with.
+    Everything that computes a number runs this first and refuses unless it passes."""
+    run = Run()
+    bounds_doc: Optional[Dict[str, Any]] = None
+    try:
+        if ctx.bounds_path.is_file():
+            bounds_doc = load_json(ctx.bounds_path)
+            run.digest(ctx.bounds_path)
+    except Failure as error:
+        run.failures.append(str(error))
+    for evaluate in (lambda: evaluate_g1(ctx, None, run, metrics=False),
+                     lambda: evaluate_drift(ctx, run, metrics=False)):
+        try:
+            evaluate()
+        except Failure as error:
+            run.failures.append(str(error))
+    recipe = None
+    if bounds_doc is not None:
+        where = rel(ctx.bounds_path)
+        frozen = bounds_doc.get("frozen_with") or {}
+        comparator, recipe = frozen.get("comparator") or {}, frozen.get("heldout_recipe") or {}
+        if comparator.get("sha256") != sha256_file(COMPARATOR):
+            run.failures.append(f"{where}: frozen with compare.py {comparator.get('sha256')}, this one is "
+                                f"{sha256_file(COMPARATOR)} (the comparator that evaluates must be the frozen one)")
+        if recipe.get("sha256") != sha256_file(HELDOUT_RECIPE):
+            run.failures.append(f"{where}: frozen with make_heldout.py {recipe.get('sha256')}, the tree's is "
+                                f"{sha256_file(HELDOUT_RECIPE)} (a change to the recipe is a new held-out set)")
+    try:
+        artifacts = ctx.artifacts()
+        for corpus in ctx.corpora():
+            if corpus.name != "representative":
+                run.failures.extend(check_generation(corpus, load_cases(corpus.cases_dir), recipe, artifacts, run))
+    except Failure as error:
+        run.failures.append(str(error))
+    run.failures = list(dict.fromkeys(run.failures))  # both evaluations check the d1-2b-f16 sides
+    return run
+
+
+def cmd_integrity(ctx: Context, out: Path) -> int:
+    """The integrity checks alone, run before any number is read. It prints identities and failures, never a gap, a
+    probability or an answer."""
+    run = check_integrity(ctx)
+    for key, value in sorted(run.identities.items()):
+        print(f"identity {key}: {value}")
+    if ctx.bounds_path.is_file():
+        try:
+            refused = identity_mismatches(load_json(ctx.bounds_path), g1_identities(run.identities))
+            print("identities the frozen bounds accept:", "all of G1's" if not refused else
+                  f"all of G1's but {', '.join(refused)} (the gate refuses those; see compare.py revalidate)")
+        except Failure:
+            pass  # already a failure
+    for failure in run.failures:
+        print(f"FAIL {failure}")
+    print("integrity:", "passed" if not run.failures else "FAILED")
+    return 1 if run.failures else 0
+
+
 def cmd_gate(ctx: Context, out: Path) -> int:
     run = Run()
     try:
@@ -1195,16 +1415,25 @@ def cmd_gate(ctx: Context, out: Path) -> int:
     except (Failure, KeyError, TypeError, ValueError) as error:
         print(f"compare.py gate: no frozen bounds ({error}); freeze them first", file=sys.stderr)
         return 1
+    # Nothing is compared unless every integrity check passes on computations the bounds hold for: those they were
+    # frozen on, or revalidated on without a refit.
+    checked = check_integrity(ctx)
+    checked.identities = g1_identities(checked.identities)
+    for key in identity_mismatches(bounds_doc, checked.identities):
+        checked.failures.append(f"{key}: a computation identity other than the one the bounds were frozen on "
+                                f"(regenerate and run compare.py revalidate; the bounds are never refitted)")
+    if checked.failures:
+        report = gate_report({}, bounds, checked)
+        report["refused"] = REFUSED
+        write_report(out / "report.json", report)
+        print_summary(report)
+        return 1
     run.digest(ctx.bounds_path)
     try:
         results = evaluate_g1(ctx, bounds, run)
     except Failure as error:
         run.failures.append(str(error))
         results = {}
-    # The bounds hold for the computations they were frozen on, or revalidated on without a refit.
-    for key in identity_mismatches(bounds_doc, run.identities):
-        run.failures.append(f"{key}: a computation identity other than the one the bounds were frozen on "
-                            f"(regenerate and run compare.py revalidate; the bounds are never refitted)")
     report = gate_report(results, bounds, run)
     write_report(out / "report.json", report)
     print_summary(report)
@@ -1262,7 +1491,8 @@ def print_summary(report: Dict[str, Any]):
                 print(f"  HF's own answers vs upstream arithmetic on HF's scores: {len(diffs)} differences")
     for failure in report.get("failures", []):
         print(f"FAIL {failure}")
-    print("G1 gate:", "passed" if report.get("passed") else "FAILED")
+    print("G1 gate:", "passed" if report.get("passed") else
+          f"refused: {report['refused']}" if report.get("refused") else "FAILED")
 
 
 def clipped_bound(max_age: float) -> decimal.Decimal:
@@ -1283,6 +1513,12 @@ def cmd_freeze(ctx: Context, out: Path) -> int:
         return 1
     if (ctx.g1 / "heldout").exists():
         print("compare.py freeze: held-out data exists; the bounds must be frozen before it", file=sys.stderr)
+        return 1
+    checked = check_integrity(ctx)
+    if checked.failures:
+        for failure in checked.failures:
+            print(f"FAIL {failure}")
+        print(f"compare.py freeze: refused: {REFUSED}")
         return 1
     run = Run()
     try:
@@ -1358,6 +1594,7 @@ def cmd_freeze(ctx: Context, out: Path) -> int:
         "identity": frozen_identities(run),
         "inputs": dict(sorted(run.inputs.items())),
         "tool": {"compare.py": sha256_file(Path(__file__))},
+        "frozen_with": frozen_with(),
     }
     ctx.bounds_path.write_text(json.dumps(doc, indent=2, ensure_ascii=True, allow_nan=False) + "\n",
                                encoding="utf-8")
@@ -1365,11 +1602,14 @@ def cmd_freeze(ctx: Context, out: Path) -> int:
         o = observed[settings]
         print(f"{settings}: max AGE {o['max_age']!r} at {o['max_age_at']} -> bound {bounds[settings]} "
               f"(headroom {o['headroom']})")
+    stamp = doc["frozen_with"]
+    print(f"frozen with compare.py {stamp['comparator']['sha256']} and make_heldout.py "
+          f"{stamp['heldout_recipe']['sha256']} (seed {stamp['heldout_recipe']['seed']:#x})")
     print(f"wrote {rel(ctx.bounds_path)} (sha256 {sha256_file(ctx.bounds_path)})")
     return 0
 
 
-def evaluate_drift(ctx: Context, run: Run) -> Dict[str, Any]:
+def evaluate_drift(ctx: Context, run: Run, metrics: bool = True) -> Dict[str, Any]:
     """G3's report: Q4 against F16 per setting, and Flash Attention drift per artifact. Report only."""
     artifacts = ctx.artifacts()
     out: Dict[str, Any] = {}
@@ -1395,7 +1635,9 @@ def evaluate_drift(ctx: Context, run: Run) -> Dict[str, Any]:
         for what, cand, ref in pairs:
             label = f"{corpus.name} {cand[0]}/{cand[1]} vs {ref[0]}/{ref[1]}"
             result = compare_corpus(corpus, sides[cand], sides[ref], NATIVE_TEMPERATURE, NATIVE_TEMPERATURE, None,
-                                    run, label, self_check=True)
+                                    run, label, self_check=True, metrics=metrics)
+            if not metrics:
+                continue
             comparisons[what] = {
                 "candidate": f"{cand[0]}/{cand[1]}", "reference": f"{ref[0]}/{ref[1]}",
                 "summary": round_summary(summarize(result["questions"], None)),
@@ -1406,12 +1648,18 @@ def evaluate_drift(ctx: Context, run: Run) -> Dict[str, Any]:
 
 
 def cmd_drift(ctx: Context, out: Path) -> int:
-    run = Run()
-    try:
-        results = evaluate_drift(ctx, run)
-    except Failure as error:
-        run.failures.append(str(error))
-        results = {}
+    run = check_integrity(ctx)
+    refused = bool(run.failures)
+    results: Dict[str, Any] = {}
+    if refused:
+        run.identities = {key: value for key, value in run.identities.items() if not key.endswith("/hf")}
+    else:
+        run = Run()
+        try:
+            results = evaluate_drift(ctx, run)
+        except Failure as error:
+            run.failures.append(str(error))
+            results = {}
     report = {
         "schema": SCHEMA,
         "what": "G3's drift report: d1-2b-q4km against d1-2b-f16 through the upstream oracle under the same settings, "
@@ -1426,6 +1674,8 @@ def cmd_drift(ctx: Context, out: Path) -> int:
         "failures": run.failures,
         "corpora": results,
     }
+    if refused:
+        report["refused"] = REFUSED
     write_report(out / "q4-drift.json", report)
     for name, comparisons in results.items():
         for what, entry in comparisons.items():
@@ -1434,6 +1684,8 @@ def cmd_drift(ctx: Context, out: Path) -> int:
                   f"({s.get('max_age_at')}), discrete changes {s.get('discrete_changes')}, max |dp| {s.get('max_p_abs')}")
     for failure in run.failures:
         print(f"FAIL {failure}")
+    if refused:
+        print(f"G3 drift report: refused: {REFUSED}")
     return 1 if run.failures else 0
 
 
@@ -1464,6 +1716,12 @@ def cmd_revalidate(ctx: Context, out: Path) -> int:
         bounds = {s: float(bounds_doc["bounds"][s]) for s in SETTINGS}
     except (Failure, KeyError, TypeError, ValueError) as error:
         print(f"compare.py revalidate: no frozen bounds ({error})", file=sys.stderr)
+        return 1
+    checked = check_integrity(ctx)
+    if checked.failures:
+        for failure in checked.failures:
+            print(f"FAIL {failure}")
+        print(f"compare.py revalidate: refused: {REFUSED}")
         return 1
     run = Run()
     try:
@@ -1525,12 +1783,12 @@ def cmd_check(ctx: Context, out: Path) -> int:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=("gate", "freeze", "revalidate", "drift", "check"))
+    parser.add_argument("command", choices=("integrity", "gate", "freeze", "revalidate", "drift", "check"))
     parser.add_argument("--out", default=str(OUT), help="where reports are written (default: %(default)s)")
     args = parser.parse_args(argv)
     ctx = Context()
-    command = {"gate": cmd_gate, "freeze": cmd_freeze, "revalidate": cmd_revalidate, "drift": cmd_drift,
-               "check": cmd_check}[args.command]
+    command = {"integrity": cmd_integrity, "gate": cmd_gate, "freeze": cmd_freeze, "revalidate": cmd_revalidate,
+               "drift": cmd_drift, "check": cmd_check}[args.command]
     try:
         return command(ctx, Path(args.out))
     except Failure as error:

@@ -1,8 +1,9 @@
 """Tests for compare.py: the metric, the certificate, the freeze, and every integrity rule as a mutation test.
 
 A synthetic corpus is written to a temporary tree in the layouts compare.py reads (case files, HF observations with
-their run log, oracle collections with their collection.json), with real pins, lock and recipe digests so that the
-identity checks run for real. Each mutation test breaks one thing and checks that the gate fails for that reason.
+their run log, both artifacts' oracle collections with their collection.json, and for the held-out tests a generated
+corpus with its generation record), with real pins, lock and recipe digests so that the identity checks run for real.
+Each mutation test breaks one thing and checks that the gate fails, or refuses, for that reason.
 
 Run: python3 -m unittest discover -s tools/conformance/decision_g1/tests
 """
@@ -11,6 +12,7 @@ import copy
 import importlib.util
 import json
 import math
+import re
 import shutil
 import struct
 import sys
@@ -53,6 +55,8 @@ QUESTIONS = {
                   ("one", "choice", ["only"], ["A"], 2, [3.0, 1.0])],
 }
 EXCLUDED = {"syn-refused": "upstream_refuses", "syn-different": "prompt_differs"}
+INCLUDED = {"syn-choice": ["team"], "syn-multi": ["yes", "one"], "syn-score": ["level"]}
+PASS_TOKENS = 3  # every synthetic pass: prepare_block's three token ids
 RECIPE_FILES = ("CMakeLists.txt", "identity.cmake", "oracle.cpp", "test_access.h", "build.sh", "cases.py", "oracle.py")
 
 
@@ -126,8 +130,9 @@ class Tree:
                    "upstream": {}, "xybrid": {}}
             self.write(self.cases / f"{case_id}.json", doc)
         self.write_hf()
-        for settings in cmp.SETTINGS:
-            self.write_oracle(settings, 0.0 if equal else perturb)
+        for artifact in (cmp.F16, cmp.Q4):
+            for settings in cmp.SETTINGS:
+                self.write_oracle(settings, 0.0 if equal else perturb, artifact)
         self.write_allowlist()
         self.ctx = cmp.Context(fixtures=self.fixtures, root=self.tmp)
         self.out = self.tmp / "out"
@@ -170,10 +175,10 @@ class Tree:
         }
         self.write(self.hf / "run.json", self.run_log)
 
-    def write_oracle(self, settings, perturb):
-        directory = self.oracle / cmp.F16 / settings
+    def write_oracle(self, settings, perturb, artifact=cmp.F16):
+        directory = self.oracle / artifact / settings
         artifacts = json.loads((self.fixtures / "artifacts.json").read_text())
-        art, st = artifacts["artifacts"][cmp.F16], artifacts["settings"][settings]
+        art, st = artifacts["artifacts"][artifact], artifacts["settings"][settings]
         recipe = {name: cmp.sha256_file(cmp.ORACLE_TOOL / name) for name in RECIPE_FILES}
         collector = {"official": True, "problems": []}
         build = {"fingerprint": "f" * 64, "llama_cpp_dir": "/x",
@@ -194,11 +199,11 @@ class Tree:
                 up = stages(case_id, "oracle", perturb)
                 ran = settings
             inputs = {"request_sha256": sha, "has_media": False, "metadata": None, "select_logits": None,
-                      "model": {"artifact": cmp.F16, "sha256": art["sha256"], "variant_sha256": None}}
+                      "model": {"artifact": artifact, "sha256": art["sha256"], "variant_sha256": None}}
             file_sha = cmp.sha256_file(self.cases / f"{case_id}.json")
             doc = {"schema_version": 1, "id": case_id, "source_file": f"{case_id}.json",
                    "case_file_sha256": file_sha, "request_sha256": sha, "inputs_sha256": cmp.canonical_digest(inputs),
-                   "inputs": inputs, "artifact": cmp.F16, "settings": ran, "collector": collector,
+                   "inputs": inputs, "artifact": artifact, "settings": ran, "collector": collector,
                    "build_fingerprint": build["fingerprint"], "recipe_sha256": cmp.canonical_digest(recipe),
                    "upstream": up}
             name = f"{case_id}.{sha}.json"
@@ -211,7 +216,7 @@ class Tree:
             "status": "complete",
             "corpus": {"dir": str(self.cases), "files": len(self.ids), "selected": len(self.ids),
                        "expected": len(self.ids), "only": None},
-            "artifact": {"id": cmp.F16, "file": art["file"], "bytes": art["bytes"], "sha256": art["sha256"]},
+            "artifact": {"id": artifact, "file": art["file"], "bytes": art["bytes"], "sha256": art["sha256"]},
             "recipe": recipe,
             "recipe_sha256": cmp.canonical_digest(recipe),
             "collector": collector,
@@ -264,6 +269,56 @@ class Tree:
 
     def cleanup(self):
         shutil.rmtree(self.tmp)
+
+
+def add_held_out(t, targets=None):
+    """A generated corpus as make_heldout.py and the collections leave it next to frozen bounds. It holds:
+    - the included synthetic cases only, every question included and none excluded;
+    - a generation record made by the frozen recipe;
+    - the HF run log;
+    - both artifacts' collections, copied from the representative ones, which hold the same requests."""
+    heldout = t.g1 / "heldout"
+    ids = sorted(INCLUDED)
+    for name, src in (("cases", t.cases), ("hf", t.hf)):
+        (heldout / name).mkdir(parents=True)
+        for case_id in ids:
+            shutil.copy(src / f"{case_id}.json", heldout / name / f"{case_id}.json")
+    log = copy.deepcopy(t.run_log)
+    log["inputs"]["requests"] = {c: t.sha(c) for c in ids}
+    log["outputs"] = {c: cmp.sha256_file(heldout / "hf" / f"{c}.json") for c in ids}
+    t.write(heldout / "hf" / "run.json", log)
+    for artifact in (cmp.F16, cmp.Q4):
+        for settings in cmp.SETTINGS:
+            src, dst = t.oracle / artifact / settings, heldout / "oracle" / artifact / settings
+            dst.mkdir(parents=True)
+            for case_id in ids:
+                shutil.copy(src / f"{case_id}.{t.sha(case_id)}.json", dst)
+            record = json.loads((src / "collection.json").read_text())
+            record["corpus"].update({"dir": str(heldout / "cases"), "files": len(ids), "selected": len(ids),
+                                     "expected": len(ids)})
+            record["cases"] = [e for e in record["cases"] if e["id"] in ids]
+            t.write(dst / "collection.json", record)
+    recipe = json.loads(t.ctx.bounds_path.read_text())["frozen_with"]["heldout_recipe"]
+    vocab = json.loads((t.fixtures / "artifacts.json").read_text())["artifacts"][cmp.Q4]
+    targets = targets or {}
+    t.write(heldout / "generation.json", {
+        "schema_version": 1,
+        "what": "a synthetic generation record",
+        "recipe": dict(recipe),
+        "cases": [{"id": c, "topic": "test", "questions": INCLUDED[c], "request_text_sha256": t.sha(c),
+                   "target_tokens": targets.get(c), "measured_tokens": targets.get(c),
+                   "pass_tokens": [PASS_TOKENS] * len(INCLUDED[c])} for c in ids],
+        "measured_with": {"tool": "tools/conformance/decision/build/bin/decision-oracle", "tool_sha256": "e" * 64,
+                          "tool_identity": {"identity_version": 1, "fingerprint": "f" * 64},
+                          "vocab": vocab["file"], "vocab_sha256": vocab["sha256"], "calls": 7},
+    })
+    spec = {"cases": str((heldout / "cases").relative_to(t.tmp)), "hf": str((heldout / "hf").relative_to(t.tmp)),
+            "oracle": str((heldout / "oracle").relative_to(t.tmp)),
+            "counts": {"cases": len(ids), "included_cases": len(ids),
+                       "included_questions": sum(len(q) for q in INCLUDED.values()), "excluded_cases": 0},
+            "included": {c: INCLUDED[c] for c in ids}, "excluded": {}}
+    t.write(heldout / "allowlist.json", {"schema_version": 1, "corpora": {"heldout": spec}})
+    return heldout
 
 
 class Quiet(unittest.TestCase):
@@ -348,6 +403,24 @@ class FreezeTest(Quiet):
         self.assertEqual(float(cmp.clipped_bound(0.0100)), 0.02)  # clipped: 2x
         self.assertEqual(cmp.headroom_record(0.009, cmp.clipped_bound(0.009))["ratio"], 2.22222)
 
+    def test_the_freeze_records_the_comparator_and_the_held_out_recipe(self):
+        t = self.frozen_tree()
+        stamp = json.loads(t.ctx.bounds_path.read_text())["frozen_with"]
+        self.assertEqual(stamp, {
+            "comparator": {"file": "tools/conformance/decision_g1/compare.py",
+                           "sha256": cmp.sha256_file(cmp.COMPARATOR)},
+            "heldout_recipe": {"file": "tools/conformance/decision_g1/make_heldout.py",
+                               "sha256": cmp.sha256_file(cmp.HELDOUT_RECIPE), "seed": 0x5EED6011D1},
+        })
+
+    def test_the_freeze_refuses_unless_every_integrity_check_passes(self):
+        t = self.tree()
+        shutil.rmtree(t.oracle / cmp.Q4 / "cpu-t4-fa-on")
+        self.assertEqual(t.freeze(), 1)
+        self.assertFalse(t.ctx.bounds_path.exists())
+        self.assertIn(cmp.REFUSED, self.buffer.getvalue())
+        self.assertNotIn("max AGE", self.buffer.getvalue())
+
     def test_a_question_above_the_bound_fails_the_gate(self):
         t = self.frozen_tree()
         for settings in cmp.SETTINGS:
@@ -369,19 +442,7 @@ class FreezeTest(Quiet):
 
 class RevalidationTest(Quiet):
     def held_out(self, t):
-        """A second corpus shaped like the first, as the held-out set is."""
-        allow = json.loads((t.g1 / "allowlist.json").read_text())
-        spec = copy.deepcopy(allow["corpora"]["representative"])
-        heldout = t.g1 / "heldout"
-        for name in ("cases", "hf", "oracle"):
-            src = t.tmp / spec[name]
-            shutil.copytree(src, heldout / name)
-            spec[name] = str((heldout / name).relative_to(t.tmp))
-        record = heldout / "oracle" / cmp.F16
-        for settings in cmp.SETTINGS:
-            t.edit(record / settings / "collection.json",
-                   lambda d: d["corpus"].update({"dir": str(heldout / "cases")}))
-        t.write(heldout / "allowlist.json", {"schema_version": 1, "corpora": {"heldout": spec}})
+        add_held_out(t)
 
     def rebuilt(self, t, compiler):
         for corpus_dir in (t.oracle, t.g1 / "heldout" / "oracle"):
@@ -429,6 +490,177 @@ class RevalidationTest(Quiet):
             t.edit(t.oracle / cmp.F16 / settings / "collection.json",
                    lambda d: d["build"]["build"].update({"cxx_compiler": "GNU 12.1.0"}))
         self.assertEqual(cmp.cmd_revalidate(t.ctx, t.out), 1)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# A generated corpus: integrity before numbers
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+class HeldOutTest(Quiet):
+    """A generated corpus's record is checked before anything is compared. Every command that computes a number
+    refuses, comparing nothing, unless the integrity checks pass."""
+
+    def held_out_tree(self, targets=None):
+        t = self.frozen_tree()
+        add_held_out(t, targets)
+        return t
+
+    def generation(self, t):
+        return t.g1 / "heldout" / cmp.GENERATION_FILE
+
+    def assert_refused(self, t, fragment):
+        """integrity fails for this reason; gate, drift and revalidate refuse it and compare nothing."""
+        start = len(self.buffer.getvalue())
+        self.assertEqual(cmp.cmd_integrity(t.ctx, t.out), 1)
+        self.assertIn(fragment, self.buffer.getvalue()[start:])
+        self.assert_gate_fails(t, fragment)
+        report = t.report()
+        self.assertEqual((report["corpora"], report["refused"]), ({}, cmp.REFUSED))
+        self.assertEqual(cmp.cmd_drift(t.ctx, t.out), 1)
+        drift = json.loads((t.out / "q4-drift.json").read_text())
+        self.assertEqual((drift["corpora"], drift["refused"]), ({}, cmp.REFUSED))
+        before = t.ctx.bounds_path.read_text()
+        self.assertEqual(cmp.cmd_revalidate(t.ctx, t.out), 1)
+        self.assertEqual(t.ctx.bounds_path.read_text(), before)
+        self.assertNotIn("max AGE", self.buffer.getvalue()[start:])
+
+    def test_a_generated_corpus_passes_integrity_the_gate_and_the_drift_report(self):
+        t = self.held_out_tree({"syn-choice": PASS_TOKENS})
+        self.assertEqual(cmp.cmd_integrity(t.ctx, t.out), 0, self.buffer.getvalue())
+        self.assertEqual(t.gate(), 0, t.report()["failures"])
+        self.assertEqual(set(t.report()["corpora"]), {"representative", "heldout"})
+        inputs = {k.split(f"{t.tmp}/")[-1] for k in t.report()["inputs"]}
+        self.assertIn("integration-tests/fixtures/decision/g1/heldout/generation.json", inputs)
+        self.assertEqual(cmp.cmd_drift(t.ctx, t.out), 0, self.buffer.getvalue())
+
+    def test_integrity_prints_identities_and_no_result(self):
+        t = self.held_out_tree()
+        start = len(self.buffer.getvalue())
+        self.assertEqual(cmp.cmd_integrity(t.ctx, t.out), 0)
+        printed = self.buffer.getvalue()[start:]
+        for key in ("heldout/hf", f"heldout/{cmp.F16}/cpu-t4-fa-on", f"heldout/{cmp.Q4}/cpu-t4-fa-off",
+                    "representative/hf"):
+            self.assertIn(f"identity {key}: ", printed)
+        self.assertIn("identities the frozen bounds accept: all of G1's", printed)
+        self.assertTrue(printed.endswith("integrity: passed\n"), printed)
+        # No gap, probability or answer: none of the gate's numbers for the same tree, and no decimal number at all.
+        self.assertEqual(t.gate(), 0)
+        numbers = set()
+        for per_setting in t.report()["corpora"].values():
+            for entry in per_setting.values():
+                numbers.update(v for v in entry["summary"].values() if isinstance(v, float))
+                for row in entry["questions"]:
+                    numbers.update(row[k] for k in ("age", "p_max_abs", "raw_max_abs") if k in row)
+                    numbers.update(v for v in row["answer"].values() if isinstance(v, float))
+        self.assertTrue(numbers)
+        for number in numbers:
+            self.assertNotIn(repr(number), printed)
+        self.assertIsNone(re.search(r"\d\.\d", printed), printed)
+        for word in ("AGE", "probabilit", "answer", "max"):
+            self.assertNotIn(word, printed)
+
+    def test_a_failed_parity_proof_refuses_before_any_comparison(self):
+        t = self.held_out_tree()
+        t.edit(t.g1 / "heldout" / "hf" / "run.json", lambda d: d["float32_parity"].update({"bit_identical": 9}))
+        self.assert_refused(t, "no passing float32 parity proof")
+
+    def test_another_numerics_tuple_refuses_before_any_comparison(self):
+        t = self.held_out_tree()
+        t.edit(t.g1 / "heldout" / "hf" / "run.json", lambda d: d["numerics"].update({"precision": "bf16"}))
+        self.assert_refused(t, "numerics")
+
+    def test_a_comparator_other_than_the_frozen_one(self):
+        t = self.held_out_tree()
+        t.edit(t.ctx.bounds_path, lambda d: d["frozen_with"]["comparator"].update({"sha256": "0" * 64}))
+        self.assert_refused(t, "the comparator that evaluates must be the frozen one")
+
+    def test_a_recipe_other_than_the_frozen_one(self):
+        t = self.held_out_tree()
+        t.edit(t.ctx.bounds_path, lambda d: d["frozen_with"]["heldout_recipe"].update({"sha256": "0" * 64}))
+        self.assert_refused(t, "a change to the recipe is a new held-out set")
+
+    def test_a_generation_by_another_recipe(self):
+        t = self.held_out_tree()
+        t.edit(self.generation(t), lambda d: d["recipe"].update({"sha256": "0" * 64}))
+        self.assert_refused(t, "not the one frozen with the bounds")
+
+    def test_a_generation_with_another_seed(self):
+        t = self.held_out_tree()
+        t.edit(self.generation(t), lambda d: d["recipe"].update({"seed": d["recipe"]["seed"] + 1}))
+        self.assert_refused(t, "not the one frozen with the bounds")
+
+    def test_a_measuring_tool_recorded_with_a_local_path(self):
+        t = self.held_out_tree()
+        t.edit(self.generation(t), lambda d: d["measured_with"].update(
+            {"tool": "/home/someone/xybrid/tools/conformance/decision/build/bin/decision-oracle"}))
+        self.assert_refused(t, "not a repository path or a file name")
+
+    def test_a_tool_identity_that_keeps_its_local_directory(self):
+        t = self.held_out_tree()
+        t.edit(self.generation(t), lambda d: d["measured_with"]["tool_identity"].update(
+            {"llama_cpp_dir": "/home/someone/xybrid/vendor/llama-cpp"}))
+        self.assert_refused(t, "no stamped identity of the measuring tool without local state")
+
+    def test_a_measuring_tool_without_an_identity(self):
+        t = self.held_out_tree()
+        t.edit(self.generation(t), lambda d: d["measured_with"].pop("tool_identity"))
+        self.assert_refused(t, "no stamped identity of the measuring tool without local state")
+
+    def test_lengths_measured_by_another_build(self):
+        t = self.held_out_tree()
+        t.edit(self.generation(t), lambda d: d["measured_with"]["tool_identity"].update({"fingerprint": "0" * 64}))
+        self.assert_refused(t, "but the prompt lengths were measured by build")
+
+    def test_lengths_measured_on_another_vocabulary(self):
+        t = self.held_out_tree()
+        t.edit(self.generation(t), lambda d: d["measured_with"].update({"vocab_sha256": "0" * 64}))
+        self.assert_refused(t, "not a pinned")
+
+    def test_a_record_without_a_measurement_count(self):
+        t = self.held_out_tree()
+        t.edit(self.generation(t), lambda d: d["measured_with"].update({"calls": 0}))
+        self.assert_refused(t, "no measurement count")
+
+    def test_a_generation_of_other_request_bytes(self):
+        t = self.held_out_tree()
+        t.edit(self.generation(t), lambda d: d["cases"][2].update({"request_text_sha256": "0" * 64}))
+        self.assert_refused(t, "syn-score: generated other request bytes")
+
+    def test_a_target_the_generation_missed(self):
+        t = self.held_out_tree({"syn-choice": PASS_TOKENS})
+        t.edit(self.generation(t), lambda d: d["cases"][0].update({"target_tokens": PASS_TOKENS + 1}))
+        self.assert_refused(t, f"syn-choice: measured {PASS_TOKENS} and {PASS_TOKENS} tokens, the target is "
+                               f"{PASS_TOKENS + 1}")
+
+    def test_a_target_the_collections_do_not_reach(self):
+        t = self.held_out_tree({"syn-choice": PASS_TOKENS + 1})  # generated at 4 tokens, observed at 3
+        t.edit(self.generation(t), lambda d: d["cases"][0].update({"pass_tokens": [PASS_TOKENS + 1]}))
+        self.assert_refused(t, f"syn-choice: passes of [{PASS_TOKENS}] tokens (usage {PASS_TOKENS}), the generation "
+                               f"measured [{PASS_TOKENS + 1}]")
+
+    def test_an_exclusion_in_a_generated_corpus(self):
+        t = self.held_out_tree()
+
+        def exclude(doc):
+            spec = doc["corpora"]["heldout"]
+            spec["included"].pop("syn-score")
+            spec["excluded"]["syn-score"] = {"kind": "hf_refuses", "stage": "parse", "exception": "x", "reason": "x"}
+            spec["counts"].update({"included_cases": 2, "included_questions": 3, "excluded_cases": 1})
+        t.edit(t.g1 / "heldout" / "allowlist.json", exclude)
+        self.assert_refused(t, "the allowlist is not the generation's")
+
+    def test_a_generated_corpus_without_its_record(self):
+        t = self.held_out_tree()
+        self.generation(t).unlink()
+        self.assert_refused(t, "missing (make_heldout.py writes it next to the cases)")
+
+    def test_held_out_data_without_frozen_bounds(self):
+        t = self.held_out_tree()
+        t.ctx.bounds_path.unlink()
+        self.assertEqual(cmp.cmd_integrity(t.ctx, t.out), 1)
+        self.assertIn("held-out data without a recipe frozen with the bounds", self.buffer.getvalue())
+        self.assertEqual(t.gate(), 1)
 
 
 # ---------------------------------------------------------------------------------------------------------------------

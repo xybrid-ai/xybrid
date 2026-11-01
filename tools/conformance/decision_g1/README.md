@@ -19,7 +19,7 @@ gate.
 
 | File | Role |
 |---|---|
-| `compare.py` | The gate: joins, identity checks, the metric, the freeze, the drift report (stdlib) |
+| `compare.py` | The gate: joins, integrity and identity checks, the metric, the freeze, the drift report (stdlib) |
 | `make_heldout.py` | The held-out recipe: 40 fixed slots, a literal seed, deterministic padding (stdlib) |
 | `tests/` | Unit and mutation tests of both |
 | `clean.sh` | Lists or removes `out/` (reports) and bytecode |
@@ -47,6 +47,27 @@ selected tokens and label groups must be identical on both sides, and each
 side's temperature must be its own reference's (`0x3fab2fdc` for llama.cpp,
 calibration.json's float64 for HF). Envelopes with duplicate keys are refused.
 
+**The held-out set is bound to its generation record** (`heldout/generation.json`,
+written by `make_heldout.py`). The record must hold:
+- the recipe and seed frozen with the bounds, and these request bytes;
+- the measuring tool, recorded without local state: its repository path,
+  sha256 and stamped build identity, which must be the build that collected
+  every oracle observation;
+- the vocabulary, recorded the same way: a pinned artifact's file and sha256;
+- the measurement count.
+
+The allowlist must be exactly the generated cases and questions, none
+excluded. Every pass of every held-out collection (both artifacts, both
+settings) must be as long as measured, and each targeted slot exactly its
+target.
+
+**Integrity before numbers.** These checks compare no number, and they are
+`compare.py integrity`, which prints identities and failures only. `gate`,
+`freeze`, `drift` and `revalidate` run them first. Unless they pass, the
+command refuses and compares nothing: a refused report holds the failures and
+no corpus. The gate also refuses, before comparing, any computation identity
+the bounds were not frozen or revalidated on.
+
 **The domain** is `g1/allowlist.json`: explicit inclusions, and exclusions that
 name what they expect (the refusal's stage, exception and status, or the exact
 fields that differ); a stale entry fails. It replaces the blanket `hf-diff-`
@@ -71,7 +92,11 @@ before any held-out request existed, by the clipped-headroom rule
 AGE, refused unless `M_s <= 0.010` and every changed answer is consistent. They
 bind the computation identities they were frozen on: observations from another
 build, artifact, platform or reference environment fail the gate until they are
-revalidated, never refitted. Changing the cap or the rule is a new experiment.
+revalidated, never refitted. They also record (`frozen_with`) this comparator's
+sha256 and the held-out recipe's file, sha256 and seed. Every later run must
+use that comparator and that recipe, so the comparator that evaluates the
+held-out set is the frozen one. Changing the cap or the rule is a new
+experiment.
 
 ## Running it
 
@@ -81,6 +106,7 @@ revalidated, never refitted. Changing the cap or the rule is a new experiment.
 python3 tools/conformance/decision/oracle.py --collect integration-tests/fixtures/decision/hf/cases \
     --expect-cases 46 --artifact d1-2b-f16 --settings cpu-t4-fa-off --out /tmp/g1/d1-2b-f16/cpu-t4-fa-off
 cp -r /tmp/g1/d1-2b-f16/cpu-t4-fa-off integration-tests/fixtures/decision/g1/oracle/d1-2b-f16/
+python3 tools/conformance/decision_g1/compare.py integrity  # identities and integrity only, never a number
 python3 tools/conformance/decision_g1/compare.py freeze   # once, before any held-out request exists
 python3 tools/conformance/decision_g1/compare.py gate     # exit 1 on any failure; out/report.json
 python3 tools/conformance/decision_g1/compare.py drift    # G3 report: Q4 vs F16, FA on vs off
@@ -100,6 +126,7 @@ tools/conformance/decision_hf/run.sh --check-f32-parity \
     --out integration-tests/fixtures/decision/g1/heldout/hf integration-tests/fixtures/decision/g1/heldout/cases
 # then oracle.py --collect on g1/heldout/cases (--expect-cases 40) for each artifact and settings, copied into
 # g1/heldout/oracle/<artifact>/<settings>/
+python3 tools/conformance/decision_g1/compare.py integrity  # must pass before any held-out number is read
 ```
 
 Every heavy step runs alone on an 8 GB machine: the HF forward peaks near
