@@ -30,21 +30,23 @@ the stages themselves.
 
 "gap" below is the largest difference of max-pooled logit differences
 (s_i − s_top) between the two sides. The server returns probabilities only,
-so its gaps are recovered as T·log(p_i/p_top). On the shared-domain cases the
-F16 GGUF stays within 0.0033 of HF (the BF16 GGUF within 0.027; section 6), so
-larger gaps on a case mean different prompts, not numerics.
+so its gaps are recovered as T·log(p_i/p_top). Where both sides read the same
+prompt (the pilot cases and C16's two `hf-diff-*` additions; section 6) the F16
+GGUF stays within 0.0036 of HF (the BF16 GGUF within 0.027), so larger gaps on
+a case mean different prompts, not numerics. Which cases bound G1 is P11's
+allowlist (contract C16), not these names.
 
 ## 1. Every request: evaluation and numerics
 
 | # | Topic | HF | upstream | Case | Observed |
 |---|---|---|---|---|---|
-| 1.1 | **Question packing** | Serves `d1_attention: "set"` with `d1_set_size: 16` (`config.json:118-120`): up to 16 questions after one state in one sequence (`runner.py:164-174`, `attention.py:1-21`). Full-attention layers let the state see every question; the short-convolution and sliding-window layers carry earlier questions into later ones. | One pass per question, never batched: lfm3 d1 sets `no_batching` (`server-decision.cpp:1236-1237`). | `hf-diff-packing` (5 questions), `hf-card-three` | HF packed vs alone (`hf/packed/`): logits move up to 1.36, probabilities up to 0.113; usage 178 vs 254 tokens. HF alone vs upstream: gap 0.0036, the shared-domain noise. G1 must use the `set_size = 1` observations only. |
+| 1.1 | **Question packing** | Serves `d1_attention: "set"` with `d1_set_size: 16` (`config.json:118-120`): up to 16 questions after one state in one sequence (`runner.py:164-174`, `attention.py:1-21`). Full-attention layers let the state see every question; the short-convolution and sliding-window layers carry earlier questions into later ones. | One pass per question, never batched: lfm3 d1 sets `no_batching` (`server-decision.cpp:1236-1237`). | `hf-diff-packing` (5 questions), `hf-card-three` | HF packed vs alone (`hf/packed/`): logits move up to 1.36, probabilities up to 0.113; usage 178 vs 254 tokens. HF alone vs upstream: gap 0.0036, numerical noise; read from `observations/`, it is in P11's allowlist (C16). G1 must use the `set_size = 1` observations only. |
 | 1.2 | **Readout quantity** | Reads the vocabulary log-softmax at the answer slot in float32 (logits − logsumexp, `runner.py:357-358`) and max-pools log-probabilities (`prompt.py:392`). | Reads the raw logits of the label tokens and max-pools them (`send_decision`, `server-context.cpp:2526-2546`). | every case | The shift is the same for every token at the slot, so the winners and the option softmax agree up to float32 rounding of `logit − lse` (measured ≤ 9.5e-7). On the 44 evaluated questions, softmaxing the log-probability maxima instead of the logit maxima moves a probability by at most 1.9e-9. The observations carry both: `hf.evaluate` holds raw logits (upstream's quantity), `detail.evaluate.raw_logprobs` what HF softmaxes. |
 | 1.3 | **Temperature value** | `calibration.json` `default` 1.337398453966105 as an f64, for every type (`temperatures` is empty; `calibration.py:60-61`). | The GGUF stores f32 `0x3fab2fdf` (1.3373984098, the nearest f32). Upstream reads it through `llama_model_meta_val_str` (`std::to_string`, so "1.337398") and `strtof`, giving `0x3fab2fdc` (1.3373980522) (`server-decision.cpp:58-73`). | every case; `hf/synthetic/median.json` `end_to_end` | Relative difference 3.0e-7. On the 44 evaluated questions it moves a probability by at most 1.5e-7, but near one half it flips a discrete answer: the synthetic scores `[0, -6, 0.0149775...]` give median level 1 (HF, p₂ = 0.4999999955) against level 2 (upstream's rule, p₂ = 0.5000000001). G1 compares logit gaps, which no temperature enters. |
 | 1.4 | **Softmax operation order** | `exp(s/T − max(s/T))` with numpy's vectorized `exp`, f64 (`prompt.py:393-395`). | `exp((s − max)/T)` with glibc `exp`, f64 (`server-decision.cpp:1681-1687`). | every case | Last-bit differences. Exact answer arithmetic is checked against upstream by the oracle (G0), not by G1. |
 | 1.5 | **Score median** | Renormalizes as it accumulates: `mass += p / sum(p)` (`api.py:67-78`). | Accumulates `p` as it is (`server-decision.cpp:1731-1740`). | `hf/synthetic/median.json` `renormalization` | Differs only when the probabilities do not sum to exactly 1 and the cumulative mass sits within about 1e-16 of one half. Three float64-score cases from HF's own `readouts` show it (renormalized and plain rules give different levels), and two hand-built vectors fall on either side (levels 2 vs 1 and 1 vs 2). A float32 score step moves the mass by about 1e-7, so model logits almost never land there. |
-| 1.6 | **Forward precision** | Float32 throughout (PyTorch, MKL), over the checkpoint's bf16 weights widened exactly (README.md, "Precision"). | ggml on the CPU rounds each matmul's activations to the weight type: bf16 for the BF16 GGUF, f16 for the F16 GGUF (`ggml/src/ggml-cpu/ggml-cpu.c:222-227, 395-399`). | the shared-domain cases | F16 GGUF (the G1 artifact) vs HF: gap ≤ 0.0033, \|Δp\| ≤ 0.00049. BF16 GGUF vs HF (a report): gap ≤ 0.027, \|Δp\| ≤ 0.0042. HF's own bf16 forward moves logits by up to 0.11. Section 6. |
-| 1.7 | **Usage** | `input_tokens` sums each sequence's tokens; packed, the state counts once (`runner.py:192-194`). | Sums every pass's tokens (`server-context.cpp:6674`). | every case | Equal at `set_size = 1` on all 24 shared-domain cases. |
+| 1.6 | **Forward precision** | Float32 throughout (PyTorch, MKL), over the checkpoint's bf16 weights widened exactly (README.md, "Precision"). | ggml on the CPU rounds each matmul's activations to the weight type: bf16 for the BF16 GGUF, f16 for the F16 GGUF (`ggml/src/ggml-cpu/ggml-cpu.c:222-227, 395-399`). | the pilot cases (section 6) | F16 GGUF (the G1 artifact) vs HF: gap ≤ 0.0033, \|Δp\| ≤ 0.00049. BF16 GGUF vs HF (a report): gap ≤ 0.027, \|Δp\| ≤ 0.0042. HF's own bf16 forward moves logits by up to 0.11. Section 6. |
+| 1.7 | **Usage** | `input_tokens` sums each sequence's tokens; packed, the state counts once (`runner.py:192-194`). | Sums every pass's tokens (`server-context.cpp:6674`). | every case | Equal at `set_size = 1` on all 24 pilot cases and C16's two additions. |
 
 ## 2. Prompt construction
 
@@ -80,8 +82,8 @@ larger gaps on a case mean different prompts, not numerics.
 
 ## 5. Checked and in agreement
 
-On these the HF observation and the server agree at the shared-domain noise
-level (gap ≤ 0.0033 on F16) with equal token counts, so the prompts and
+On these the HF observation and the server agree at the numerical noise
+level (gap ≤ 0.0036 on F16) with equal token counts, so the prompts and
 tokenizations are the same:
 
 - Prompt layout for text, JSON object, JSON array, null and empty states
@@ -106,10 +108,12 @@ tokenizations are the same:
 
 ## 6. Numbers behind the G1 note
 
-The shared-domain cases (`hf-*` without `hf-diff-*`: 24 cases, 26 questions)
-were sent to the stock `llama-server` (`hf/crosscheck/`) and compared with the
-HF observations (`hf-cpu-f32-t1`). `d1-2b-f16` is the G1 artifact (contract
-C10); the other rows are reports:
+The pilot cases (`hf-*` without `hf-diff-*`: 24 cases, 26 questions) were sent
+to the stock `llama-server` (`hf/crosscheck/`) and compared with the HF
+observations (`hf-cpu-f32-t1`). They are a historical selection by name, kept
+as these summaries were first made: the G1 allowlist is P11's (contract C16),
+not this subset. `d1-2b-f16` is the G1 artifact (contract C10); the other rows
+are reports:
 
 | upstream artifact, settings | role | max \|Δp\| | max gap | answers that differ | equal token counts | server seconds a case: median; 3,605 tokens |
 |---|---|---|---|---|---|---|
@@ -118,13 +122,18 @@ C10); the other rows are reports:
 | `d1-2b-bf16`, `cpu-t4-fa-on` | report | 0.0031 | 0.031 | 0 of 26 | 24 of 24 | 2.2; 137 |
 | `d1-2b-q4km`, `cpu-t4-fa-off` | report (G3) | 0.097 | 0.87 | 0 of 26 | 24 of 24 | 1.4; 109 |
 
+C16's allowlist also takes `hf-diff-packing` (from `observations/`) and
+`hf-diff-duplicate-keys` (reference to reference). With them (26 cases, 32
+questions) `d1-2b-f16` gives a largest gap of 0.0036 and \|Δp\| of 0.00049, and
+BF16 0.027 and 0.0042, still with every answer and token count equal.
+
 The answers and gaps above are identical across two runs of these binaries.
 The server timings are not: the same long pass took 124 to 159 s in an
 earlier run on this shared 4-vCPU machine. At one thread, the reference takes
 a median of about 6 s a question without the parity proof and 18 s with it,
 and 86 s and 216 s for the 3,605-token case.
 
-The difference cases on `d1-2b-f16`, where both sides answered (the BF16 run
+The `hf-diff-*` cases on `d1-2b-f16`, where both sides answered (the BF16 run
 gives each gap within a few percent):
 
 | Case | equal token counts | max \|Δp\| | gap | same answer |
@@ -137,10 +146,10 @@ gives each gap within a few percent):
 | `hf-diff-description-nonstring` | yes | 0.005 | 0.64 | yes |
 | `hf-diff-noul-null-criteria`, `hf-diff-noul-alias-criteria` | no (51, 43) | 0.0012 | 0.59 | yes |
 | `hf-diff-state-big-integer` | no (74, 69) | 0.66 | 7.9 | **no** |
-| `hf-diff-duplicate-keys` (agreement) | yes | < 0.00001 | 0.0007 | yes |
-| `hf-diff-packing` at `set_size = 1` (agreement) | yes | 0.0005 | 0.0036 | yes |
+| `hf-diff-duplicate-keys` (agreement; in C16's allowlist) | yes | < 0.00001 | 0.0007 | yes |
+| `hf-diff-packing` at `set_size = 1` (agreement; in C16's allowlist) | yes | 0.0005 | 0.0036 | yes |
 
 So the F16 GGUF is the right G1 counterpart on CPU: ggml rounds a matmul's
 activations to the weight type (row 1.6). The smallest prompt-induced gap here
-(0.053, a quote style) is 16 times F16's numerical noise, but only twice
-BF16's.
+(0.053, a quote style) is about 15 times F16's numerical noise (0.0036), but
+only twice BF16's.

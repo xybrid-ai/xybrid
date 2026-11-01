@@ -82,7 +82,7 @@ VERSIONED = ("python", "torch", "transformers", "tokenizers", "numpy", "safetens
 COMPARISONS = {
     "repeat": "a second hf-cpu-f32-t1 run of a subset of the cases",
     "threads": "a subset of the cases at 4 threads instead of 1",
-    "bf16": "the shared-domain cases with the bfloat16 forward instead",
+    "bf16": "the pilot cases (hf-* without hf-diff-*) except hf-state-long, with the bfloat16 forward instead",
     "packed": "the multi-question cases packed at the checkpoint's set size instead of alone",
 }
 
@@ -324,7 +324,8 @@ def check_crosscheck(path: Path) -> dict[str, Any]:
 
 
 def crosscheck_summary(document: dict) -> dict[str, Any]:
-    """The shared-domain numbers of one cross-check (hf-* cases without hf-diff-*)."""
+    """One cross-check's numbers on the pilot cases (hf-* without hf-diff-*): the historical subset these summaries
+    were first made on, kept as it was, not P11's G1 allowlist (contract C16)."""
     cases = [c for c in document["cases"] if not c["case"].startswith("hf-diff-")]
     questions = [q for c in cases for q in c.get("questions", {}).values()]
     return {
@@ -334,8 +335,10 @@ def crosscheck_summary(document: dict) -> dict[str, Any]:
         "temperature": document["temperature"],
         "recipe": document["recipe"],
         "cases": len(document["cases"]),
-        "shared_cases": len(cases),
-        "shared_questions": len(questions),
+        "pilot": "the numbers below: hf-* without hf-diff-*, a historical selection by name, not P11's G1 allowlist "
+        "(contract C16)",
+        "pilot_cases": len(cases),
+        "pilot_questions": len(questions),
         "equal_token_counts": sum(bool(c.get("same_usage")) for c in cases),
         "answers_that_differ": sum(not q["same_answer"] for q in questions),
         "max_abs_probability": max((q["max_abs_p"] for q in questions), default=0.0),
@@ -513,7 +516,8 @@ def update(runs: Path, build: Path | None) -> None:
             "what": (
                 "the stock llama-server answering the same requests, compared with the observations: a black-box "
                 "check of DIFFERENCES.md and a G1 feasibility measurement, not the upstream oracle. The G1 "
-                "counterpart is d1-2b-f16; the BF16 and Q4_K_M files are reports"
+                "counterpart is d1-2b-f16; the BF16 and Q4_K_M files are reports. Each summary counts the historical "
+                "pilot cases, not P11's G1 allowlist (contract C16)"
             ),
             "build": llama_build(build),
             "artifacts": "integration-tests/fixtures/decision/artifacts.json (each GGUF checked against its sha256)",

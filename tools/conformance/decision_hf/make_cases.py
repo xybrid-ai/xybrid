@@ -6,11 +6,15 @@ README.md): the exact `request_text`, a title, coverage tags, the GGUF counterpa
 (`d1-2b-f16`, the G1 artifact contract C10 chose; the BF16 GGUF's cross-checks are reports) and the settings its
 upstream evaluation would use. `upstream` is empty: the upstream oracle (tools/conformance/decision) fills it.
 `xybrid` holds the expectations these requests imply under that README's rules; they are proposals for the shared
-case set, to review there. Two groups:
+case set, to review there. Two groups, named for why each case was written:
 
-- `hf-*`: requests inside the domain where the reference and llama.cpp's server should build the same prompt, so
-  their numbers are G1 material (choice, yes/no and score; string, JSON, null and empty states; 27 and 36 options);
-- `hf-diff-*`: one small request per row of DIFFERENCES.md, where the two references are known to disagree.
+- `hf-*`: requests inside the domain where the reference and llama.cpp's server should build the same prompt
+  (choice, yes/no and score; string, JSON, null and empty states; 27 and 36 options);
+- `hf-diff-*`: one small request per row of DIFFERENCES.md, where the two references are known to disagree, or
+  agree where xybrid's profile does not (duplicate keys).
+
+Which cases bound G1 is P11's semantic allowlist (contract C16), not these names: it also takes `hf-diff-packing`
+(read at `set_size = 1`) and `hf-diff-duplicate-keys` (reference to reference; xybrid refuses it).
 
 Stdlib only; deterministic. Run it after editing a case, then rerun the reference on the changed cases.
 `--check` writes nothing: it fails unless every case file is byte for byte what this script generates, validates

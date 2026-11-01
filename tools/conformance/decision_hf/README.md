@@ -191,7 +191,7 @@ Determinism:
   7.3e-7, with no answer changes. The settings id pins one thread, and this is
   the reference's own floor.
 - **bf16 forward.** It moves logits by up to 0.11 and probabilities by up to
-  0.010 on the shared-domain cases, with no answer changes.
+  0.010 on the pilot cases (below), with no answer changes.
 
 Settings ids name these runs (the coordinator's `cpu-t4-fa-off` and
 `cpu-t4-fa-on` name llama.cpp contexts). An id stands for every value a run
@@ -221,7 +221,7 @@ $H/run.sh synthetic_median.py --run-log $RUNS/synthetic.run.json              # 
 # verification runs, under $RUNS, then compared with the committed observations:
 $H/run.sh --out $RUNS/repeat --run-log $RUNS/repeat.run.json <a few cases>
 $H/run.sh --threads 4 --out $RUNS/threads --run-log $RUNS/threads.run.json <a few cases>
-$H/run.sh --precision bf16 --out $RUNS/bf16 --run-log $RUNS/bf16.run.json <the hf-* cases>
+$H/run.sh --precision bf16 --out $RUNS/bf16 --run-log $RUNS/bf16.run.json <the pilot cases>
 for v in repeat threads bf16; do
     python3 -B $H/compare_observations.py $FIX/observations $RUNS/$v --json $RUNS/$v.compare.json
 done
@@ -235,7 +235,7 @@ $H/.cache/llama-build/bin/llama-server -m $H/.cache/gguf/d1-2B-F16.gguf \
 python3 -B $H/crosscheck_server.py --url http://127.0.0.1:8089 --hf $FIX/observations \
     --temperature 1.3373980522155762 --artifact d1-2b-f16 --settings cpu-t4-fa-off \
     --label '<how the server was built and started>' --out $FIX/crosscheck/d1-2b-f16.cpu-t4-fa-off.json $FIX/cases
-# stop it; likewise d1-2b-bf16 (cpu-t4-fa-off on every case, cpu-t4-fa-on) and d1-2b-q4km on the hf-* cases
+# stop it; likewise d1-2b-bf16 (cpu-t4-fa-off on every case, cpu-t4-fa-on) and d1-2b-q4km on the pilot cases
 python3 -B $H/provenance.py --update --runs $RUNS --llama-build $H/.cache/llama-build
 python3 -B $H/provenance.py --check
 $H/run.sh tests
@@ -306,22 +306,28 @@ C10, the second is the method P11 applies.
   for the 3,605-token case, at a peak of 7.3 GB resident. Four threads are about
   1.9× faster but not bit-identical to one, so fixtures keep one thread. A full
   float32 load does not fit; the parity proof stands in for it.
-- **The shared domain agrees.** On the 24 shared-domain cases (26 questions),
-  the stock `llama-server` (v0.8.0, `cpu-t4-fa-off`) and the reference
+- **The pilot cases agree.** The cross-checks were first summarized on 24
+  pilot cases (26 questions): `hf-*` without `hf-diff-*`, a selection by name
+  that is historical, not the G1 allowlist (P11's, contract C16; below). On
+  them the stock `llama-server` (v0.8.0, `cpu-t4-fa-off`) and the reference
   tokenize every prompt to the same length and agree on every answer,
   including the 3,605-token case. The largest gap (difference of max-pooled
   logit differences) is 0.0033 for `d1-2b-f16` and 0.027 for `d1-2b-bf16`. The
   largest probability difference is 0.00049 and 0.0042. Flash attention on
   leaves BF16 in the same range (0.031). `d1-2b-q4km` drifts by up to 0.87 in
   gap and 0.097 in probability, still with no answer change: G3's report, not
-  G1's. On this CPU the server takes about 2 s a short question but 2 to 3
-  minutes for the 3,605-token case on BF16 and F16 (124 to 173 s across two
-  runs; 83 to 109 s on Q4_K_M). That matters for the measured budgets of P2
-  and G3.
-- **Prompt differences stand out, against F16.** The difference cases that
-  both sides answer show gaps from 0.053 (single against double quotes in
-  object instructions) to 7.9, and different token counts wherever the prompt
-  length changes. 0.053 is 16 times F16's noise but only twice BF16's.
+  G1's. With C16's two `hf-diff-*` cases added (26 cases, 32 questions),
+  `d1-2b-f16` still tokenizes alike and agrees on every answer; its largest
+  gap becomes 0.0036 (`hf-diff-packing`) and its largest probability
+  difference stays 0.00049 (BF16: 0.027 and 0.0042). On this CPU the server
+  takes about 2 s a short question but 2 to 3 minutes for the 3,605-token case
+  on BF16 and F16 (124 to 173 s across two runs; 83 to 109 s on Q4_K_M). That
+  matters for the measured budgets of P2 and G3.
+- **Prompt differences stand out, against F16.** The cases whose prompts
+  differ, where both sides answer, show gaps from 0.053 (single against double
+  quotes in object instructions) to 7.9, and different token counts wherever
+  the prompt length changes. 0.053 is about 15 times F16's noise (0.0036) but
+  only twice BF16's.
 - **`d1-2b-f16` is the G1 artifact (contract C10).** ggml rounds a matmul's
   activations to the weight type: bf16 (8 significant bits) for the BF16 GGUF,
   f16 (11) for the F16 GGUF. F16 therefore tracks the float32 reference about
@@ -335,8 +341,15 @@ C10, the second is the method P11 applies.
     the publisher temperature. The temperatures differ by 3.0e-7 relative,
     enough to flip a median at a boundary (`hf/synthetic/median.json`), and
     the reference reads log-probabilities where upstream reads logits.
-  - Leave the `hf-diff-*` cases out of the numeric bounds: their prompts
-    differ by design.
+  - Which cases bound G1 is P11's semantic allowlist (contract C16), not a
+    name prefix: `hf-*` and `hf-diff-*` say why a case was written, not
+    whether it is in the allowlist. C16 includes `hf-diff-packing`, read from
+    `observations/` (`set_size = 1`: each question alone, as upstream reads
+    it; `packed/` holds the difference), and `hf-diff-duplicate-keys` as
+    reference-to-reference evidence (both references keep the last value),
+    which xybrid still refuses at parse by design. The 24-case pilot subset
+    in `hf/crosscheck/`, `provenance.json` and `DIFFERENCES.md` section 6 is
+    historical: a summary, not the allowlist.
   - Report discrete winner and median disagreements separately from the
     numeric bounds.
   - Include the threshold-sensitive cases (`hf-choice-ambiguous`,
