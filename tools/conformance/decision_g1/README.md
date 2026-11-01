@@ -107,10 +107,22 @@ Every heavy step runs alone on an 8 GB machine: the HF forward peaks near
 
 The oracle's identity records the llama.cpp commit; `compare.py` refuses
 observations whose commit is not the tree's `vendor/llama-cpp` gitlink, with a
-"regenerate" message. A llama.cpp update therefore fails G1 loudly until the
-oracle observations are collected again (`oracle.py --collect`, both settings,
-representative and held-out) and the gate passes on them under the **same**
-frozen bounds, recorded as a revalidation; the bounds are not refitted. The HF
-observations do not depend on llama.cpp and stay. The llama.cpp update
-automation should therefore treat G1 as a required regeneration step of the
-update PR, not something to waive.
+"regenerate" message, and the gate refuses any computation identity the bounds
+were not frozen or revalidated on. A llama.cpp update therefore fails G1 loudly
+until:
+
+1. the oracle observations are collected again (`oracle.py --collect`, both
+   settings, representative and held-out; the HF observations do not depend on
+   llama.cpp and stay);
+2. `compare.py revalidate` passes: every corpus is evaluated under the
+   **same** frozen bounds and, only if all of it passes, the new identities are
+   appended to `bounds.json` as a revalidation. The bounds are never refitted;
+   a failure is investigated like any G1 failure.
+
+For the update automation (`llamacpp-update.yml`,
+`docs/development/llamacpp-updates.md`): the decision conformance check belongs
+with the checks release preparation waits on, so an update PR stays blocked
+until a maintainer regenerates the observations (about an hour on a 4-vCPU,
+16 GB runner, through the manual regeneration workflow) and commits them with
+the revalidation. As with the choice-conformance provenance, never edit digests
+or identities by hand to make the check green.

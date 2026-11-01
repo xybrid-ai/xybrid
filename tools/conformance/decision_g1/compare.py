@@ -37,6 +37,8 @@ Subcommands:
 
   compare.py gate     every corpus present against g1/bounds.json; exit 1 on any failure
   compare.py freeze   g1/bounds.json from the representative set (refused once it, or held-out data, exists)
+  compare.py revalidate  after a regeneration that changed an identity: every corpus must pass under the frozen
+                      bounds, then the new identities are recorded in g1/bounds.json; nothing is refitted
   compare.py drift    G3's report: d1-2b-q4km against d1-2b-f16 per setting, and Flash Attention drift
   compare.py check    recompute the committed g1/report.json and g1/q4-drift.json; exit 1 on any difference
 
@@ -1159,13 +1161,10 @@ def cmd_gate(ctx: Context, out: Path) -> int:
     except Failure as error:
         run.failures.append(str(error))
         results = {}
-    # The bounds hold for the computations they were frozen on. Every corpus's identity must equal the frozen one.
-    frozen = bounds_doc.get("identity") or {}
-    for key, value in sorted(run.identities.items()):
-        corpus, _, rest = key.partition("/")
-        expected = frozen.get(f"representative/{rest}")
-        if value is None or value != expected:
-            run.failures.append(f"{key}: a computation identity other than the one the bounds were frozen on")
+    # The bounds hold for the computations they were frozen on, or revalidated on without a refit.
+    for key in identity_mismatches(bounds_doc, run.identities):
+        run.failures.append(f"{key}: a computation identity other than the one the bounds were frozen on "
+                            f"(regenerate and run compare.py revalidate; the bounds are never refitted)")
     report = gate_report(results, bounds, run)
     write_report(out / "report.json", report)
     print_summary(report)
@@ -1398,6 +1397,73 @@ def cmd_drift(ctx: Context, out: Path) -> int:
     return 1 if run.failures else 0
 
 
+def accepted_identities(bounds_doc: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The identity sets the bounds hold for: the frozen one, then every recorded revalidation's."""
+    sets = [bounds_doc.get("identity") or {}]
+    sets += [entry.get("identity") or {} for entry in bounds_doc.get("revalidations") or []]
+    return sets
+
+
+def identity_mismatches(bounds_doc: Dict[str, Any], identities: Dict[str, Optional[str]]) -> List[str]:
+    """The run's identity keys (corpus/side) whose computation no accepted identity set names."""
+    out = []
+    for key, value in sorted(identities.items()):
+        _, _, rest = key.partition("/")
+        accepted = {s.get(f"representative/{rest}") for s in accepted_identities(bounds_doc)}
+        if value is None or value not in accepted:
+            out.append(key)
+    return out
+
+
+def cmd_revalidate(ctx: Context, out: Path) -> int:
+    """After a regeneration that changed a computation identity (a llama.cpp update, a rebuilt oracle, another
+    reference environment): every corpus must pass under the frozen bounds, unchanged; then the new identities are
+    appended to bounds.json as a revalidation. Nothing is refitted."""
+    try:
+        bounds_doc = load_json(ctx.bounds_path)
+        bounds = {s: float(bounds_doc["bounds"][s]) for s in SETTINGS}
+    except (Failure, KeyError, TypeError, ValueError) as error:
+        print(f"compare.py revalidate: no frozen bounds ({error})", file=sys.stderr)
+        return 1
+    run = Run()
+    try:
+        results = evaluate_g1(ctx, bounds, run)
+    except Failure as error:
+        run.failures.append(str(error))
+        results = {}
+    changed = identity_mismatches(bounds_doc, run.identities)
+    if run.failures:
+        for failure in run.failures:
+            print(f"FAIL {failure}")
+        print("compare.py revalidate: refused: the regenerated observations fail the gate under the frozen bounds")
+        return 1
+    if not changed:
+        print("compare.py revalidate: every identity is already accepted; nothing to revalidate")
+        return 1
+    if set(results) != {c.name for c in ctx.corpora()} or "heldout" not in results:
+        print("compare.py revalidate: refused: a revalidation needs the representative and held-out corpora")
+        return 1
+    entry = {
+        "identity": {f"representative/{key.partition('/')[2]}": value for key, value in sorted(run.identities.items())
+                     if key.startswith("representative/")},
+        "changed": changed,
+        "summary": {name: {s: round_summary(summarize(v["questions"], bounds[s])) for s, v in per.items()}
+                    for name, per in results.items()},
+        "inputs": canonical_digest(run.inputs),
+        "tool": {"compare.py": sha256_file(Path(__file__))},
+    }
+    held = {key.partition("/")[2]: value for key, value in run.identities.items() if key.startswith("heldout/")}
+    rep = {key.partition("/")[2]: value for key, value in run.identities.items() if key.startswith("representative/")}
+    if held != rep:
+        print("compare.py revalidate: refused: the corpora were evaluated by different computations")
+        return 1
+    bounds_doc.setdefault("revalidations", []).append(entry)
+    ctx.bounds_path.write_text(json.dumps(bounds_doc, indent=2, ensure_ascii=True, allow_nan=False) + "\n",
+                               encoding="utf-8")
+    print(f"revalidated {', '.join(changed)} under the frozen bounds {bounds}; wrote {rel(ctx.bounds_path)}")
+    return 0
+
+
 def cmd_check(ctx: Context, out: Path) -> int:
     """Recompute the committed reports from the committed data; fail on any difference."""
     failures = []
@@ -1419,11 +1485,12 @@ def cmd_check(ctx: Context, out: Path) -> int:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=("gate", "freeze", "drift", "check"))
+    parser.add_argument("command", choices=("gate", "freeze", "revalidate", "drift", "check"))
     parser.add_argument("--out", default=str(OUT), help="where reports are written (default: %(default)s)")
     args = parser.parse_args(argv)
     ctx = Context()
-    command = {"gate": cmd_gate, "freeze": cmd_freeze, "drift": cmd_drift, "check": cmd_check}[args.command]
+    command = {"gate": cmd_gate, "freeze": cmd_freeze, "revalidate": cmd_revalidate, "drift": cmd_drift,
+               "check": cmd_check}[args.command]
     try:
         return command(ctx, Path(args.out))
     except Failure as error:

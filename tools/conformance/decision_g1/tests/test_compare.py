@@ -352,6 +352,70 @@ class FreezeTest(Quiet):
         self.assert_gate_fails(t, "AGE above the bound")
 
 
+class RevalidationTest(Quiet):
+    def held_out(self, t):
+        """A second corpus shaped like the first, as the held-out set is."""
+        allow = json.loads((t.g1 / "allowlist.json").read_text())
+        spec = copy.deepcopy(allow["corpora"]["representative"])
+        heldout = t.g1 / "heldout"
+        for name in ("cases", "hf", "oracle"):
+            src = t.tmp / spec[name]
+            shutil.copytree(src, heldout / name)
+            spec[name] = str((heldout / name).relative_to(t.tmp))
+        record = heldout / "oracle" / cmp.F16
+        for settings in cmp.SETTINGS:
+            t.edit(record / settings / "collection.json",
+                   lambda d: d.update({"cases_dir": str(heldout / "cases")}))
+        t.write(heldout / "allowlist.json", {"schema_version": 1, "corpora": {"heldout": spec}})
+
+    def rebuilt(self, t, compiler):
+        for corpus_dir in (t.oracle, t.g1 / "heldout" / "oracle"):
+            for settings in cmp.SETTINGS:
+                t.edit(corpus_dir / cmp.F16 / settings / "collection.json",
+                       lambda d: d["build"]["build"].update({"cxx_compiler": compiler}))
+
+    def test_a_rebuilt_oracle_fails_until_revalidated_and_the_bounds_stay(self):
+        t = self.frozen_tree()
+        self.held_out(t)
+        self.assertEqual(t.gate(), 0, t.report()["failures"])
+        frozen = json.loads(t.ctx.bounds_path.read_text())["bounds"]
+        self.rebuilt(t, "GNU 12.1.0")
+        self.assert_gate_fails(t, "a computation identity other than the one the bounds were frozen on")
+        self.assertEqual(cmp.cmd_revalidate(t.ctx, t.out), 0, self.buffer.getvalue())
+        doc = json.loads(t.ctx.bounds_path.read_text())
+        self.assertEqual(doc["bounds"], frozen, "a revalidation never refits")
+        self.assertEqual(len(doc["revalidations"]), 1)
+        self.assertEqual(t.gate(), 0, t.report()["failures"])
+        self.assertEqual(cmp.cmd_revalidate(t.ctx, t.out), 1, "nothing left to revalidate")
+
+    def test_a_revalidation_that_fails_the_bounds_is_refused(self):
+        t = self.frozen_tree()
+        self.held_out(t)
+        self.rebuilt(t, "GNU 12.1.0")
+        bound = json.loads(t.ctx.bounds_path.read_text())["bounds"]["cpu-t4-fa-off"]
+
+        def lift(doc):
+            ev = doc["upstream"]["evaluate"]
+            raw = [cmp.f32(b) for b in ev["raw_scores"][0]]
+            raw[4] = f32(raw[4] + 10 * bound)
+            ev["raw_scores"][0] = [cmp.f32_bits(x) for x in raw]
+            ev["scores"][0] = [cmp.f32_bits(max(raw[i:i + 2])) for i in (0, 2, 4)]
+            doc["upstream"]["finalize"]["answers"]["team"] = answer_for(
+                "choice", ["billing", "shipping", "technical"], [max(raw[i:i + 2]) for i in (0, 2, 4)])
+        t.edit(t.g1 / "heldout" / "oracle" / cmp.F16 / "cpu-t4-fa-off" / f"syn-choice.{t.sha('syn-choice')}.json",
+               lift)
+        before = t.ctx.bounds_path.read_text()
+        self.assertEqual(cmp.cmd_revalidate(t.ctx, t.out), 1)
+        self.assertEqual(t.ctx.bounds_path.read_text(), before)
+
+    def test_a_revalidation_needs_the_held_out_corpus(self):
+        t = self.frozen_tree()
+        for settings in cmp.SETTINGS:
+            t.edit(t.oracle / cmp.F16 / settings / "collection.json",
+                   lambda d: d["build"]["build"].update({"cxx_compiler": "GNU 12.1.0"}))
+        self.assertEqual(cmp.cmd_revalidate(t.ctx, t.out), 1)
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Mutations: each integrity rule fails for its own reason
 # ---------------------------------------------------------------------------------------------------------------------
