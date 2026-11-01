@@ -1029,6 +1029,16 @@ private object Native {
     @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_default_endpoint(): ByteArray?
     @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_flush(): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_shutdown(): Unit
+    @JvmStatic external fun boltffi_function_xybrid_bolt_decision_spike_echo_request(request: java.nio.ByteBuffer, __boltffi_request_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_decision_spike_request_outline(request: java.nio.ByteBuffer, __boltffi_request_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_decision_spike_decide(request: java.nio.ByteBuffer, __boltffi_request_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_decision_spike_decide_bits(request: java.nio.ByteBuffer, __boltffi_request_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_decision_spike_verify_decisions(request: java.nio.ByteBuffer, __boltffi_request_len: Int, decisions: java.nio.ByteBuffer, __boltffi_decisions_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_decision_spike_probe_optional_list(probe: java.nio.ByteBuffer, __boltffi_probe_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_decision_spike_probe_nesting(probe: java.nio.ByteBuffer, __boltffi_probe_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_decision_spike_probe_json(json_text: java.nio.ByteBuffer, __boltffi_json_text_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_decision_spike_probe_json_echo(value: java.nio.ByteBuffer, __boltffi_value_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_decision_spike_probe_payload(payload: java.nio.ByteBuffer, __boltffi_payload_len: Int): ByteArray?
     @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe(`receiver`: Long): Long
     @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_pop_batch(subscription: Long, max_count: Long): ByteArray?
     @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_wait(subscription: Long, timeout_milliseconds: Int): Int
@@ -2250,6 +2260,498 @@ data class XybridPartialResult(
 
 
 /**
+ * One choice option. The key may affect inference.
+ */
+data class XybridDecisionOption(
+    val key: String,
+    val description: XybridDecisionContent?
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.key) + 1 + (this.description?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.key)
+        writer.writeOptionalValue(this.description, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridDecisionOption {
+            return XybridDecisionOption(
+                reader.readString(),
+                reader.readOptionalValue({ reader -> XybridDecisionContent.fromReader(reader) })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridDecisionOption {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * One score level; level `i` has key `"i"`.
+ */
+data class XybridDecisionLevel(
+    val description: XybridDecisionContent?
+) {
+    internal fun wireSize(): Int {
+        return 1 + (this.description?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeOptionalValue(this.description, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridDecisionLevel {
+            return XybridDecisionLevel(
+                reader.readOptionalValue({ reader -> XybridDecisionContent.fromReader(reader) })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridDecisionLevel {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * One question.
+ */
+data class XybridDecisionQuestion(
+    val id: String,
+    val instructions: XybridDecisionInstructions?,
+    val kind: XybridDecisionQuestionKind
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.id) + 1 + (this.instructions?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0) + this.kind.wireSize()
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.id)
+        writer.writeOptionalValue(this.instructions, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        this.kind.writeTo(writer)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridDecisionQuestion {
+            return XybridDecisionQuestion(
+                reader.readString(),
+                reader.readOptionalValue({ reader -> XybridDecisionInstructions.fromReader(reader) }),
+                XybridDecisionQuestionKind.fromReader(reader)
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridDecisionQuestion {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * A state and the questions asked about it, in order.
+ */
+data class XybridDecisionRequest(
+    val state: XybridDecisionContent?,
+    val questions: List<XybridDecisionQuestion>
+) {
+    internal fun wireSize(): Int {
+        return 1 + (this.state?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0) + 4 + this.questions.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() }
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeOptionalValue(this.state, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        writer.writeSequence(this.questions, this.questions.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridDecisionRequest {
+            return XybridDecisionRequest(
+                reader.readOptionalValue({ reader -> XybridDecisionContent.fromReader(reader) }),
+                reader.readSequence({ reader -> XybridDecisionQuestion.fromReader(reader) })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridDecisionRequest {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * One key of an answer's distribution.
+ */
+data class XybridDecisionScore(
+    val key: String,
+    /**
+     * `-inf` is valid when another key is finite.
+     */
+    val rawScore: Float,
+    val probability: Double,
+    val origin: XybridDecisionOrigin
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.key) + 4 + 8 + 4
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.key)
+        writer.writeF32(this.rawScore)
+        writer.writeF64(this.probability)
+        writer.writeI32(this.origin.value)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridDecisionScore {
+            return XybridDecisionScore(
+                reader.readString(),
+                reader.readF32(),
+                reader.readF64(),
+                XybridDecisionOrigin.fromValue(reader.readI32())
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridDecisionScore {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * One question's answer.
+ */
+data class XybridDecisionAnswer(
+    val questionId: String,
+    val distribution: List<XybridDecisionScore>,
+    val value: XybridDecisionValue,
+    val confidence: Double?
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.questionId) + 4 + this.distribution.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() } + this.value.wireSize() + 1 + (this.confidence?.let { __boltffi_value_0 -> 8 } ?: 0)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.questionId)
+        writer.writeSequence(this.distribution, this.distribution.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        this.value.writeTo(writer)
+        writer.writeOptionalValue(this.confidence, { writer, __boltffi_value_0 -> writer.writeF64(__boltffi_value_0) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridDecisionAnswer {
+            return XybridDecisionAnswer(
+                reader.readString(),
+                reader.readSequence({ reader -> XybridDecisionScore.fromReader(reader) }),
+                XybridDecisionValue.fromReader(reader),
+                reader.readOptionalValue({ reader -> reader.readF64() })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridDecisionAnswer {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Content-free work counters.
+ */
+data class XybridDecisionUsage(
+    val passes: UInt,
+    val evaluatedTokens: ULong
+) {
+    internal fun wireSize(): Int {
+        return 4 + 8
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeU32(this.passes)
+        writer.writeU64(this.evaluatedTokens)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridDecisionUsage {
+            return XybridDecisionUsage(
+                reader.readU32(),
+                reader.readU64()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridDecisionUsage {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Every answer, in request order.
+ */
+data class XybridDecisions(
+    val answers: List<XybridDecisionAnswer>,
+    val usage: XybridDecisionUsage
+) {
+    internal fun wireSize(): Int {
+        return 4 + this.answers.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() } + this.usage.wireSize()
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeSequence(this.answers, this.answers.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        this.usage.writeTo(writer)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridDecisions {
+            return XybridDecisions(
+                reader.readSequence({ reader -> XybridDecisionAnswer.fromReader(reader) }),
+                XybridDecisionUsage.fromReader(reader)
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridDecisions {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Probe: `Vec<Option<data enum>>` and `Vec<Option<String>>`, the shape a
+ * bare `levels: Vec<Option<DecisionContent>>` would need.
+ */
+data class XybridProbeOptionalList(
+    val levels: List<XybridDecisionContent?>,
+    val labels: List<String?>
+) {
+    internal fun wireSize(): Int {
+        return 4 + this.levels.sumOf { __boltffi_value_0 -> (1 + (__boltffi_value_0?.let { __boltffi_value_1 -> __boltffi_value_1.wireSize() } ?: 0)).toInt() } + 4 + this.labels.sumOf { __boltffi_value_0 -> (1 + (__boltffi_value_0?.let { __boltffi_value_1 -> 4 + Utf8Codec.maxBytes(__boltffi_value_1) } ?: 0)).toInt() }
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeSequence(this.levels, this.levels.size, { writer, __boltffi_value_0 -> writer.writeOptionalValue(__boltffi_value_0, { writer, __boltffi_value_1 -> __boltffi_value_1.writeTo(writer) }) })
+        writer.writeSequence(this.labels, this.labels.size, { writer, __boltffi_value_0 -> writer.writeOptionalValue(__boltffi_value_0, { writer, __boltffi_value_1 -> writer.writeString(__boltffi_value_1) }) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridProbeOptionalList {
+            return XybridProbeOptionalList(
+                reader.readSequence({ reader -> reader.readOptionalValue({ reader -> XybridDecisionContent.fromReader(reader) }) }),
+                reader.readSequence({ reader -> reader.readOptionalValue({ reader -> reader.readString() }) })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridProbeOptionalList {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Probe: nested lists (per-pass score rows) and an optional record.
+ */
+data class XybridProbeNesting(
+    val rawScores: List<FloatArray>,
+    val probabilities: List<DoubleArray>,
+    val usage: XybridDecisionUsage?
+) {
+    internal fun wireSize(): Int {
+        return 4 + this.rawScores.sumOf { __boltffi_value_0 -> (4 + __boltffi_value_0.size * 4).toInt() } + 4 + this.probabilities.sumOf { __boltffi_value_0 -> (4 + __boltffi_value_0.size * 8).toInt() } + 1 + (this.usage?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeSequence(this.rawScores, this.rawScores.size, { writer, __boltffi_value_0 -> writer.writeFloatArray(__boltffi_value_0) })
+        writer.writeSequence(this.probabilities, this.probabilities.size, { writer, __boltffi_value_0 -> writer.writeDoubleArray(__boltffi_value_0) })
+        writer.writeOptionalValue(this.usage, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridProbeNesting {
+            return XybridProbeNesting(
+                reader.readSequence({ reader -> reader.readFloatArray() }),
+                reader.readSequence({ reader -> reader.readDoubleArray() }),
+                reader.readOptionalValue({ reader -> XybridDecisionUsage.fromReader(reader) })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridProbeNesting {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * One entry of a [`XybridProbeJson::Map`], in document order.
+ */
+data class XybridProbeJsonEntry(
+    val key: String,
+    val value: XybridProbeJson
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.key) + this.value.wireSize()
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.key)
+        this.value.writeTo(writer)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridProbeJsonEntry {
+            return XybridProbeJsonEntry(
+                reader.readString(),
+                XybridProbeJson.fromReader(reader)
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridProbeJsonEntry {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
  * Errors surfaced across the FFI boundary. Variants mirror
  * [`facade::Error`] — the facade owns the SDK→FFI translation; this enum
  * only re-decorates it for the BoltFFI generator (proc macros must live
@@ -2876,6 +3378,522 @@ sealed class XybridVadMode {
         }
 
         internal fun fromByteArray(bytes: ByteArray): XybridVadMode {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Text, or a non-string JSON value carried as JSON text.
+ *
+ * The JSON text is parsed in Rust by the order-preserving parser, so object
+ * order and `1` vs `1.0` survive; never build it from a host dictionary.
+ */
+sealed class XybridDecisionContent {
+    internal abstract fun wireSize(): Int
+
+    internal abstract fun writeTo(writer: WireWriter)
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+
+    /**
+     * Named `value`, not `text`: C# rejects a positional record member that
+     * shares its variant's name (CS8866).
+     */
+    data class Text(
+        val value: String
+    ) : XybridDecisionContent() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + Utf8Codec.maxBytes(this.value)
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(0.toUInt())
+            writer.writeString(this.value)
+        }
+    }
+    data class Json(
+        val jsonText: String
+    ) : XybridDecisionContent() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + Utf8Codec.maxBytes(this.jsonText)
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(1.toUInt())
+            writer.writeString(this.jsonText)
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridDecisionContent {
+            val tag = reader.readU32()
+            return when (tag) {
+                0.toUInt() -> Text(reader.readString())
+                1.toUInt() -> Json(reader.readString())
+                else -> throw IllegalArgumentException("unknown XybridDecisionContent tag: $tag")
+            }
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridDecisionContent {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * How a question is put to the model.
+ */
+sealed class XybridDecisionInstructions {
+    internal abstract fun wireSize(): Int
+
+    internal abstract fun writeTo(writer: WireWriter)
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+
+    data class Content(
+        val value: ai.xybrid.XybridDecisionContent
+    ) : XybridDecisionInstructions() {
+        internal override fun wireSize(): Int {
+            return 4 + this.value.wireSize()
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(0.toUInt())
+            this.value.writeTo(writer)
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridDecisionInstructions {
+            val tag = reader.readU32()
+            return when (tag) {
+                0.toUInt() -> Content(ai.xybrid.XybridDecisionContent.fromReader(reader))
+                else -> throw IllegalArgumentException("unknown XybridDecisionInstructions tag: $tag")
+            }
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridDecisionInstructions {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * The question types.
+ */
+sealed class XybridDecisionQuestionKind {
+    internal abstract fun wireSize(): Int
+
+    internal abstract fun writeTo(writer: WireWriter)
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+
+    data class Choice(
+        val options: List<ai.xybrid.XybridDecisionOption>
+    ) : XybridDecisionQuestionKind() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + this.options.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() }
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(0.toUInt())
+            writer.writeSequence(this.options, this.options.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        }
+    }
+    data class YesNo(
+        val yes: ai.xybrid.XybridDecisionContent?,
+        val no: ai.xybrid.XybridDecisionContent?
+    ) : XybridDecisionQuestionKind() {
+        internal override fun wireSize(): Int {
+            return 4 + 1 + (this.yes?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0) + 1 + (this.no?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(1.toUInt())
+            writer.writeOptionalValue(this.yes, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+            writer.writeOptionalValue(this.no, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        }
+    }
+    data class Score(
+        val levels: List<ai.xybrid.XybridDecisionLevel>
+    ) : XybridDecisionQuestionKind() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + this.levels.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() }
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(2.toUInt())
+            writer.writeSequence(this.levels, this.levels.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridDecisionQuestionKind {
+            val tag = reader.readU32()
+            return when (tag) {
+                0.toUInt() -> Choice(reader.readSequence({ reader -> ai.xybrid.XybridDecisionOption.fromReader(reader) }))
+                1.toUInt() -> YesNo(reader.readOptionalValue({ reader -> ai.xybrid.XybridDecisionContent.fromReader(reader) }), reader.readOptionalValue({ reader -> ai.xybrid.XybridDecisionContent.fromReader(reader) }))
+                2.toUInt() -> Score(reader.readSequence({ reader -> ai.xybrid.XybridDecisionLevel.fromReader(reader) }))
+                else -> throw IllegalArgumentException("unknown XybridDecisionQuestionKind tag: $tag")
+            }
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridDecisionQuestionKind {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Where a scored key came from.
+ */
+enum class XybridDecisionOrigin(val value: Int) {
+    CALLER(0),
+    FIXED(1);
+
+    companion object {
+        fun fromValue(value: Int): XybridDecisionOrigin =
+            entries.first { it.value == value }
+    }
+}
+
+
+/**
+ * Which statistic a score answer reports.
+ */
+enum class XybridScoreStatistic(val value: Int) {
+    MEDIAN(0),
+    EXPECTED(1);
+
+    companion object {
+        fun fromValue(value: Int): XybridScoreStatistic =
+            entries.first { it.value == value }
+    }
+}
+
+
+/**
+ * The answer's value.
+ */
+sealed class XybridDecisionValue {
+    internal abstract fun wireSize(): Int
+
+    internal abstract fun writeTo(writer: WireWriter)
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+
+    data class Choice(
+        val key: String
+    ) : XybridDecisionValue() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + Utf8Codec.maxBytes(this.key)
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(0.toUInt())
+            writer.writeString(this.key)
+        }
+    }
+    data class YesNo(
+        val pYes: Double
+    ) : XybridDecisionValue() {
+        internal override fun wireSize(): Int {
+            return 4 + 8
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(1.toUInt())
+            writer.writeF64(this.pYes)
+        }
+    }
+    data class Score(
+        val value: Double,
+        val statistic: ai.xybrid.XybridScoreStatistic
+    ) : XybridDecisionValue() {
+        internal override fun wireSize(): Int {
+            return 4 + 8 + 4
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(2.toUInt())
+            writer.writeF64(this.value)
+            writer.writeI32(this.statistic.value)
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridDecisionValue {
+            val tag = reader.readU32()
+            return when (tag) {
+                0.toUInt() -> Choice(reader.readString())
+                1.toUInt() -> YesNo(reader.readF64())
+                2.toUInt() -> Score(reader.readF64(), ai.xybrid.XybridScoreStatistic.fromValue(reader.readI32()))
+                else -> throw IllegalArgumentException("unknown XybridDecisionValue tag: $tag")
+            }
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridDecisionValue {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Probe: a recursive JSON tree, the alternative to carrying JSON as text.
+ */
+sealed class XybridProbeJson {
+    internal abstract fun wireSize(): kotlin.Int
+
+    internal abstract fun writeTo(writer: WireWriter)
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+
+    object Null : XybridProbeJson() {
+        internal override fun wireSize(): kotlin.Int {
+            return 4
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(0.toUInt())
+        }
+    }
+    data class Bool(
+        val value: Boolean
+    ) : XybridProbeJson() {
+        internal override fun wireSize(): kotlin.Int {
+            return 4 + 1
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(1.toUInt())
+            writer.writeBool(this.value)
+        }
+    }
+    data class Int(
+        val value: Long
+    ) : XybridProbeJson() {
+        internal override fun wireSize(): kotlin.Int {
+            return 4 + 8
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(2.toUInt())
+            writer.writeI64(this.value)
+        }
+    }
+    data class Uint(
+        val value: ULong
+    ) : XybridProbeJson() {
+        internal override fun wireSize(): kotlin.Int {
+            return 4 + 8
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(3.toUInt())
+            writer.writeU64(this.value)
+        }
+    }
+    data class Float(
+        val value: Double
+    ) : XybridProbeJson() {
+        internal override fun wireSize(): kotlin.Int {
+            return 4 + 8
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(4.toUInt())
+            writer.writeF64(this.value)
+        }
+    }
+    data class Text(
+        val value: String
+    ) : XybridProbeJson() {
+        internal override fun wireSize(): kotlin.Int {
+            return 4 + 4 + Utf8Codec.maxBytes(this.value)
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(5.toUInt())
+            writer.writeString(this.value)
+        }
+    }
+    data class List(
+        val items: List<ai.xybrid.XybridProbeJson>
+    ) : XybridProbeJson() {
+        internal override fun wireSize(): kotlin.Int {
+            return 4 + 4 + this.items.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() }
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(6.toUInt())
+            writer.writeSequence(this.items, this.items.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        }
+    }
+    data class Map(
+        val entries: List<ai.xybrid.XybridProbeJsonEntry>
+    ) : XybridProbeJson() {
+        internal override fun wireSize(): kotlin.Int {
+            return 4 + 4 + this.entries.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() }
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(7.toUInt())
+            writer.writeSequence(this.entries, this.entries.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridProbeJson {
+            val tag = reader.readU32()
+            return when (tag) {
+                0.toUInt() -> Null
+                1.toUInt() -> Bool(reader.readBool())
+                2.toUInt() -> Int(reader.readI64())
+                3.toUInt() -> Uint(reader.readU64())
+                4.toUInt() -> Float(reader.readF64())
+                5.toUInt() -> Text(reader.readString())
+                6.toUInt() -> List(reader.readSequence({ reader -> ai.xybrid.XybridProbeJson.fromReader(reader) }))
+                7.toUInt() -> Map(reader.readSequence({ reader -> ai.xybrid.XybridProbeJsonEntry.fromReader(reader) }))
+                else -> throw IllegalArgumentException("unknown XybridProbeJson tag: $tag")
+            }
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridProbeJson {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Probe: records directly inside data-enum variants — how
+ * `XybridEnvelopeKind` would carry a request and a result.
+ */
+sealed class XybridProbePayload {
+    internal abstract fun wireSize(): Int
+
+    internal abstract fun writeTo(writer: WireWriter)
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+
+    data class DecisionRequest(
+        val request: ai.xybrid.XybridDecisionRequest
+    ) : XybridProbePayload() {
+        internal override fun wireSize(): Int {
+            return 4 + this.request.wireSize()
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(0.toUInt())
+            this.request.writeTo(writer)
+        }
+    }
+    data class DecisionResult(
+        val decisions: ai.xybrid.XybridDecisions
+    ) : XybridProbePayload() {
+        internal override fun wireSize(): Int {
+            return 4 + this.decisions.wireSize()
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(1.toUInt())
+            this.decisions.writeTo(writer)
+        }
+    }
+    object Nothing : XybridProbePayload() {
+        internal override fun wireSize(): Int {
+            return 4
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(2.toUInt())
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridProbePayload {
+            val tag = reader.readU32()
+            return when (tag) {
+                0.toUInt() -> DecisionRequest(ai.xybrid.XybridDecisionRequest.fromReader(reader))
+                1.toUInt() -> DecisionResult(ai.xybrid.XybridDecisions.fromReader(reader))
+                2.toUInt() -> Nothing
+                else -> throw IllegalArgumentException("unknown XybridProbePayload tag: $tag")
+            }
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridProbePayload {
             val reader = WireReader(bytes)
             return fromReader(reader)
         }
@@ -4447,4 +5465,177 @@ fun telemetryFlush() {
  */
 fun telemetryShutdown() {
     Native.boltffi_function_xybrid_bolt_telemetry_shutdown()
+}
+
+/**
+ * Spike: FFI request -> facade -> IR (JSON parsed, nulls normalized,
+ * structure checked) -> facade -> FFI.
+ */
+fun decisionSpikeEchoRequest(request: XybridDecisionRequest): XybridDecisionRequest {
+    val __boltffi_request_wire = WireWriterPool.acquire(request.wireSize())
+    val __boltffi_request_writer = __boltffi_request_wire.writer
+    request.writeTo(__boltffi_request_writer)
+    try {
+        val __boltffi_result = try { Native.boltffi_function_xybrid_bolt_decision_spike_echo_request(__boltffi_request_wire.directBuffer(), __boltffi_request_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return XybridDecisionRequest.fromReader(__boltffi_reader)
+    } finally {
+        __boltffi_request_wire.close()
+    }
+}
+
+/**
+ * Spike: what the Rust IR saw, one line per item in request order, so a
+ * foreign test can check order against what it sent rather than against a
+ * codec that might be wrong symmetrically.
+ */
+fun decisionSpikeRequestOutline(request: XybridDecisionRequest): List<String> {
+    val __boltffi_request_wire = WireWriterPool.acquire(request.wireSize())
+    val __boltffi_request_writer = __boltffi_request_wire.writer
+    request.writeTo(__boltffi_request_writer)
+    try {
+        val __boltffi_result = try { Native.boltffi_function_xybrid_bolt_decision_spike_request_outline(__boltffi_request_wire.directBuffer(), __boltffi_request_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readSequence({ __boltffi_reader -> __boltffi_reader.readString() })
+    } finally {
+        __boltffi_request_wire.close()
+    }
+}
+
+/**
+ * Spike: run the stub engine (d1 probability math on synthetic scores) and
+ * return the result through the FFI records.
+ */
+fun decisionSpikeDecide(request: XybridDecisionRequest): XybridDecisions {
+    val __boltffi_request_wire = WireWriterPool.acquire(request.wireSize())
+    val __boltffi_request_writer = __boltffi_request_wire.writer
+    request.writeTo(__boltffi_request_writer)
+    try {
+        val __boltffi_result = try { Native.boltffi_function_xybrid_bolt_decision_spike_decide(__boltffi_request_wire.directBuffer(), __boltffi_request_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return XybridDecisions.fromReader(__boltffi_reader)
+    } finally {
+        __boltffi_request_wire.close()
+    }
+}
+
+/**
+ * Spike: the bit patterns of every float [`decision_spike_decide`] returns,
+ * as `a<i>.s<j>.raw=<hex8>`, `a<i>.s<j>.p=<hex16>`, `a<i>.value=…`,
+ * `a<i>.confidence=…` lines, so a foreign test can check what it decoded.
+ */
+fun decisionSpikeDecideBits(request: XybridDecisionRequest): List<String> {
+    val __boltffi_request_wire = WireWriterPool.acquire(request.wireSize())
+    val __boltffi_request_writer = __boltffi_request_wire.writer
+    request.writeTo(__boltffi_request_writer)
+    try {
+        val __boltffi_result = try { Native.boltffi_function_xybrid_bolt_decision_spike_decide_bits(__boltffi_request_wire.directBuffer(), __boltffi_request_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readSequence({ __boltffi_reader -> __boltffi_reader.readString() })
+    } finally {
+        __boltffi_request_wire.close()
+    }
+}
+
+/**
+ * Spike: compare a result the foreign side re-encoded with the stub
+ * engine's own output, bit for bit. `None` means identical; otherwise the
+ * path of the first difference.
+ */
+fun decisionSpikeVerifyDecisions(request: XybridDecisionRequest, decisions: XybridDecisions): String? {
+    val __boltffi_request_wire = WireWriterPool.acquire(request.wireSize())
+    val __boltffi_request_writer = __boltffi_request_wire.writer
+    request.writeTo(__boltffi_request_writer)
+    val __boltffi_decisions_wire = WireWriterPool.acquire(decisions.wireSize())
+    val __boltffi_decisions_writer = __boltffi_decisions_wire.writer
+    decisions.writeTo(__boltffi_decisions_writer)
+    try {
+        val __boltffi_result = try { Native.boltffi_function_xybrid_bolt_decision_spike_verify_decisions(__boltffi_request_wire.directBuffer(), __boltffi_request_wire.size(), __boltffi_decisions_wire.directBuffer(), __boltffi_decisions_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> __boltffi_reader.readString() })
+    } finally {
+        __boltffi_request_wire.close()
+        __boltffi_decisions_wire.close()
+    }
+}
+
+/**
+ * Probe echo for [`XybridProbeOptionalList`].
+ */
+fun decisionSpikeProbeOptionalList(probe: XybridProbeOptionalList): XybridProbeOptionalList {
+    val __boltffi_probe_wire = WireWriterPool.acquire(probe.wireSize())
+    val __boltffi_probe_writer = __boltffi_probe_wire.writer
+    probe.writeTo(__boltffi_probe_writer)
+    try {
+        val __boltffi_result = Native.boltffi_function_xybrid_bolt_decision_spike_probe_optional_list(__boltffi_probe_wire.directBuffer(), __boltffi_probe_wire.size()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return XybridProbeOptionalList.fromReader(__boltffi_reader)
+    } finally {
+        __boltffi_probe_wire.close()
+    }
+}
+
+/**
+ * Probe echo for [`XybridProbeNesting`]; floats come back bit for bit.
+ */
+fun decisionSpikeProbeNesting(probe: XybridProbeNesting): XybridProbeNesting {
+    val __boltffi_probe_wire = WireWriterPool.acquire(probe.wireSize())
+    val __boltffi_probe_writer = __boltffi_probe_wire.writer
+    probe.writeTo(__boltffi_probe_writer)
+    try {
+        val __boltffi_result = Native.boltffi_function_xybrid_bolt_decision_spike_probe_nesting(__boltffi_probe_wire.directBuffer(), __boltffi_probe_wire.size()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return XybridProbeNesting.fromReader(__boltffi_reader)
+    } finally {
+        __boltffi_probe_wire.close()
+    }
+}
+
+/**
+ * Probe: parse JSON text with the order-preserving parser and return it as
+ * a [`XybridProbeJson`] tree.
+ */
+fun decisionSpikeProbeJson(jsonText: String): XybridProbeJson {
+    val __boltffi_jsonText_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(jsonText))
+    val __boltffi_jsonText_writer = __boltffi_jsonText_wire.writer
+    __boltffi_jsonText_writer.writeString(jsonText)
+    try {
+        val __boltffi_result = try { Native.boltffi_function_xybrid_bolt_decision_spike_probe_json(__boltffi_jsonText_wire.directBuffer(), __boltffi_jsonText_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return XybridProbeJson.fromReader(__boltffi_reader)
+    } finally {
+        __boltffi_jsonText_wire.close()
+    }
+}
+
+/**
+ * Probe echo for [`XybridProbeJson`].
+ */
+fun decisionSpikeProbeJsonEcho(value: XybridProbeJson): XybridProbeJson {
+    val __boltffi_value_wire = WireWriterPool.acquire(value.wireSize())
+    val __boltffi_value_writer = __boltffi_value_wire.writer
+    value.writeTo(__boltffi_value_writer)
+    try {
+        val __boltffi_result = Native.boltffi_function_xybrid_bolt_decision_spike_probe_json_echo(__boltffi_value_wire.directBuffer(), __boltffi_value_wire.size()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return XybridProbeJson.fromReader(__boltffi_reader)
+    } finally {
+        __boltffi_value_wire.close()
+    }
+}
+
+/**
+ * Probe echo for [`XybridProbePayload`].
+ */
+fun decisionSpikeProbePayload(payload: XybridProbePayload): XybridProbePayload {
+    val __boltffi_payload_wire = WireWriterPool.acquire(payload.wireSize())
+    val __boltffi_payload_writer = __boltffi_payload_wire.writer
+    payload.writeTo(__boltffi_payload_writer)
+    try {
+        val __boltffi_result = Native.boltffi_function_xybrid_bolt_decision_spike_probe_payload(__boltffi_payload_wire.directBuffer(), __boltffi_payload_wire.size()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return XybridProbePayload.fromReader(__boltffi_reader)
+    } finally {
+        __boltffi_payload_wire.close()
+    }
 }

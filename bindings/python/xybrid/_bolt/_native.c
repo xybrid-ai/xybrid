@@ -266,6 +266,26 @@ typedef void (*boltffi_python_boltffi_function_xybrid_bolt_telemetry_flush_fn)(v
 static boltffi_python_boltffi_function_xybrid_bolt_telemetry_flush_fn boltffi_python_boltffi_function_xybrid_bolt_telemetry_flush = NULL;
 typedef void (*boltffi_python_boltffi_function_xybrid_bolt_telemetry_shutdown_fn)(void);
 static boltffi_python_boltffi_function_xybrid_bolt_telemetry_shutdown_fn boltffi_python_boltffi_function_xybrid_bolt_telemetry_shutdown = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_function_xybrid_bolt_decision_spike_echo_request_fn)(const uint8_t *, uintptr_t, FfiBuf_u8 *);
+static boltffi_python_boltffi_function_xybrid_bolt_decision_spike_echo_request_fn boltffi_python_boltffi_function_xybrid_bolt_decision_spike_echo_request = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_function_xybrid_bolt_decision_spike_request_outline_fn)(const uint8_t *, uintptr_t, FfiBuf_u8 *);
+static boltffi_python_boltffi_function_xybrid_bolt_decision_spike_request_outline_fn boltffi_python_boltffi_function_xybrid_bolt_decision_spike_request_outline = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_fn)(const uint8_t *, uintptr_t, FfiBuf_u8 *);
+static boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_fn boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_bits_fn)(const uint8_t *, uintptr_t, FfiBuf_u8 *);
+static boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_bits_fn boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_bits = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_function_xybrid_bolt_decision_spike_verify_decisions_fn)(const uint8_t *, uintptr_t, const uint8_t *, uintptr_t, FfiBuf_u8 *);
+static boltffi_python_boltffi_function_xybrid_bolt_decision_spike_verify_decisions_fn boltffi_python_boltffi_function_xybrid_bolt_decision_spike_verify_decisions = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list_fn)(const uint8_t *, uintptr_t);
+static boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list_fn boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_nesting_fn)(const uint8_t *, uintptr_t);
+static boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_nesting_fn boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_nesting = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_fn)(const uint8_t *, uintptr_t, FfiBuf_u8 *);
+static boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_fn boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo_fn)(const uint8_t *, uintptr_t);
+static boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo_fn boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_payload_fn)(const uint8_t *, uintptr_t);
+static boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_payload_fn boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_payload = NULL;
 typedef uint64_t (*boltffi_python_boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe_fn)(uint64_t);
 static boltffi_python_boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe_fn boltffi_python_boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_stream_xybrid_bolt_xybrid_download_progress_pop_batch_fn)(uint64_t, uintptr_t);
@@ -440,6 +460,16 @@ static void boltffi_python_clear_symbols(void) {
     boltffi_python_boltffi_function_xybrid_bolt_telemetry_default_endpoint = NULL;
     boltffi_python_boltffi_function_xybrid_bolt_telemetry_flush = NULL;
     boltffi_python_boltffi_function_xybrid_bolt_telemetry_shutdown = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_echo_request = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_request_outline = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_bits = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_verify_decisions = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_nesting = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_payload = NULL;
     boltffi_python_boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe = NULL;
     boltffi_python_boltffi_stream_xybrid_bolt_xybrid_download_progress_pop_batch = NULL;
     boltffi_python_boltffi_stream_xybrid_bolt_xybrid_download_progress_wait = NULL;
@@ -1787,6 +1817,106 @@ static int boltffi_python_bind_symbols(void) {
         return 0;
     }
 #ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_echo_request = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_echo_request_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_echo_request");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_echo_request = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_echo_request_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_echo_request");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_echo_request == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_decision_spike_echo_request");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_request_outline = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_request_outline_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_request_outline");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_request_outline = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_request_outline_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_request_outline");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_request_outline == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_decision_spike_request_outline");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_decide");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_decide");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_decision_spike_decide");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_bits = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_bits_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_decide_bits");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_bits = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_bits_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_decide_bits");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_bits == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_decision_spike_decide_bits");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_verify_decisions = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_verify_decisions_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_verify_decisions");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_verify_decisions = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_verify_decisions_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_verify_decisions");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_verify_decisions == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_decision_spike_verify_decisions");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_probe_optional_list");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_probe_optional_list");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_decision_spike_probe_optional_list");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_nesting = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_nesting_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_probe_nesting");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_nesting = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_nesting_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_probe_nesting");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_nesting == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_decision_spike_probe_nesting");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_probe_json");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_probe_json");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_decision_spike_probe_json");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_probe_json_echo");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_probe_json_echo");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_decision_spike_probe_json_echo");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_payload = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_payload_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_probe_payload");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_payload = (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_payload_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_decision_spike_probe_payload");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_payload == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_decision_spike_probe_payload");
+        return 0;
+    }
+#ifdef _WIN32
     boltffi_python_boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe = (boltffi_python_boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe");
 #else
     boltffi_python_boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe = (boltffi_python_boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe_fn)dlsym(boltffi_python_library_handle, "boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe");
@@ -2223,6 +2353,30 @@ static PyObject *boltffi_python_decode_read_0ced92fe29cab88b(const uint8_t *ptr,
     return boltffi_python_decode_wire_codec("read_0ced92fe29cab88b", ptr, len);
 }
 
+static PyObject *boltffi_python_decode_read_741d46c121af681a(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_741d46c121af681a", ptr, len);
+}
+
+static PyObject *boltffi_python_decode_read_f407f6e27a865a5e(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_f407f6e27a865a5e", ptr, len);
+}
+
+static PyObject *boltffi_python_decode_read_9402a2ead0bc16ef(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_9402a2ead0bc16ef", ptr, len);
+}
+
+static PyObject *boltffi_python_decode_read_b4129ed1ce1ae13c(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_b4129ed1ce1ae13c", ptr, len);
+}
+
+static PyObject *boltffi_python_decode_read_a8e5b6ca5245770d(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_a8e5b6ca5245770d", ptr, len);
+}
+
+static PyObject *boltffi_python_decode_read_48e062d2a87b339e(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_48e062d2a87b339e", ptr, len);
+}
+
 
 static int boltffi_python_encode_write_c26bffea5b1b16cc(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
     return boltffi_python_encode_wire_codec("write_c26bffea5b1b16cc", value, out_wire, out_ptr, out_len);
@@ -2338,6 +2492,34 @@ static int boltffi_python_encode_write_c0b19b1465c99138(PyObject *value, PyObjec
 
 static int boltffi_python_encode_write_b4a023e995953df2(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
     return boltffi_python_encode_wire_codec("write_b4a023e995953df2", value, out_wire, out_ptr, out_len);
+}
+
+static int boltffi_python_encode_write_0adb8cf56ff02348(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_0adb8cf56ff02348", value, out_wire, out_ptr, out_len);
+}
+
+static int boltffi_python_encode_write_4d2a900a5017d146(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_4d2a900a5017d146", value, out_wire, out_ptr, out_len);
+}
+
+static int boltffi_python_encode_write_48c7bea24142ddd0(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_48c7bea24142ddd0", value, out_wire, out_ptr, out_len);
+}
+
+static int boltffi_python_encode_write_28b7c2bb43e41383(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_28b7c2bb43e41383", value, out_wire, out_ptr, out_len);
+}
+
+static int boltffi_python_encode_write_47f048575c1bef4a(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_47f048575c1bef4a", value, out_wire, out_ptr, out_len);
+}
+
+static int boltffi_python_encode_write_e5bef6a1c8fbd767(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_e5bef6a1c8fbd767", value, out_wire, out_ptr, out_len);
+}
+
+static int boltffi_python_encode_write_5575f35c6303f6c5(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_5575f35c6303f6c5", value, out_wire, out_ptr, out_len);
 }
 
 
@@ -5483,6 +5665,763 @@ done:
 }
 
 
+static PyObject *boltffi_python_xybrid_decision_option_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decision_option(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decision_option() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_decision_option_type, args[0], "XybridDecisionOption")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
+static int boltffi_python_wire_xybrid_decision_option(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_decision_option_type, "XybridDecisionOption")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridDecisionOption._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridDecisionOption wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_option(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_decision_option_type, "XybridDecisionOption")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_decision_option_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+
+static PyObject *boltffi_python_xybrid_decision_level_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decision_level(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decision_level() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_decision_level_type, args[0], "XybridDecisionLevel")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
+static int boltffi_python_wire_xybrid_decision_level(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_decision_level_type, "XybridDecisionLevel")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridDecisionLevel._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridDecisionLevel wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_level(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_decision_level_type, "XybridDecisionLevel")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_decision_level_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+
+static PyObject *boltffi_python_xybrid_decision_question_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decision_question(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decision_question() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_decision_question_type, args[0], "XybridDecisionQuestion")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
+static int boltffi_python_wire_xybrid_decision_question(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_decision_question_type, "XybridDecisionQuestion")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridDecisionQuestion._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridDecisionQuestion wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_question(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_decision_question_type, "XybridDecisionQuestion")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_decision_question_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+
+static PyObject *boltffi_python_xybrid_decision_request_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decision_request(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decision_request() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_decision_request_type, args[0], "XybridDecisionRequest")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
+static int boltffi_python_wire_xybrid_decision_request(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_decision_request_type, "XybridDecisionRequest")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridDecisionRequest._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridDecisionRequest wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_request(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_decision_request_type, "XybridDecisionRequest")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_decision_request_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+
+static PyObject *boltffi_python_xybrid_decision_score_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decision_score(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decision_score() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_decision_score_type, args[0], "XybridDecisionScore")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
+static int boltffi_python_wire_xybrid_decision_score(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_decision_score_type, "XybridDecisionScore")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridDecisionScore._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridDecisionScore wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_score(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_decision_score_type, "XybridDecisionScore")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_decision_score_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+
+static PyObject *boltffi_python_xybrid_decision_answer_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decision_answer(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decision_answer() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_decision_answer_type, args[0], "XybridDecisionAnswer")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
+static int boltffi_python_wire_xybrid_decision_answer(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_decision_answer_type, "XybridDecisionAnswer")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridDecisionAnswer._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridDecisionAnswer wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_answer(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_decision_answer_type, "XybridDecisionAnswer")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_decision_answer_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+
+static PyObject *boltffi_python_xybrid_decision_usage_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decision_usage(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decision_usage() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_decision_usage_type, args[0], "XybridDecisionUsage")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
+static int boltffi_python_wire_xybrid_decision_usage(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    uint8_t *bytes = NULL;
+    uintptr_t wire_len = 0;
+    boltffi_python_wire_writer writer = {0};
+    int ok = 0;
+    PyObject *passes_value = NULL;
+    PyObject *evaluated_tokens_value = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_decision_usage_type, "XybridDecisionUsage")) {
+        goto done;
+    }
+    passes_value = boltffi_python_get_record_field(value, "XybridDecisionUsage", "passes");
+    if (passes_value == NULL) {
+        goto done;
+    }
+    evaluated_tokens_value = boltffi_python_get_record_field(value, "XybridDecisionUsage", "evaluated_tokens");
+    if (evaluated_tokens_value == NULL) {
+        goto done;
+    }
+    {
+        PyObject *field_value = passes_value;
+        if (!boltffi_python_wire_add(&wire_len, 4)) {
+            goto done;
+        }
+    }
+    {
+        PyObject *field_value = evaluated_tokens_value;
+        if (!boltffi_python_wire_add(&wire_len, 8)) {
+            goto done;
+        }
+    }
+    wire = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)wire_len);
+    if (wire == NULL) {
+        goto done;
+    }
+    bytes = (uint8_t *)PyBytes_AS_STRING(wire);
+    writer.ptr = bytes;
+    writer.len = wire_len;
+    writer.offset = 0;
+    {
+        PyObject *field_value = passes_value;
+        uint32_t parsed = 0;
+        if (!boltffi_python_parse_u32(field_value, &parsed)) {
+            goto done;
+        }
+        if (!boltffi_python_wire_writer_u32(&writer, (uint32_t)parsed)) {
+            goto done;
+        }
+    }
+    {
+        PyObject *field_value = evaluated_tokens_value;
+        uint64_t parsed = 0;
+        if (!boltffi_python_parse_u64(field_value, &parsed)) {
+            goto done;
+        }
+        if (!boltffi_python_wire_writer_u64(&writer, (uint64_t)parsed)) {
+            goto done;
+        }
+    }
+    if (writer.offset != writer.len) {
+        PyErr_SetString(PyExc_RuntimeError, "wire writer produced wrong byte count");
+        goto done;
+    }
+    *out_wire = wire;
+    *out_ptr = bytes;
+    *out_len = wire_len;
+    wire = NULL;
+    ok = 1;
+done:
+    Py_XDECREF(wire);
+    Py_XDECREF(passes_value);
+    Py_XDECREF(evaluated_tokens_value);
+    return ok;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_usage_read(boltffi_python_wire_reader *reader) {
+    PyObject *result = NULL;
+    PyObject *values[2] = {0};
+    {
+        uint32_t decoded = 0;
+        uint32_t bytes = 0;
+        if (!boltffi_python_wire_reader_u32(reader, &bytes)) {
+            goto done;
+        }
+        decoded = bytes;
+        values[0] = boltffi_python_box_u32(decoded);
+        if (values[0] == NULL) {
+            goto done;
+        }
+    }
+    {
+        uint64_t decoded = 0;
+        uint64_t bytes = 0;
+        if (!boltffi_python_wire_reader_u64(reader, &bytes)) {
+            goto done;
+        }
+        decoded = bytes;
+        values[1] = boltffi_python_box_u64(decoded);
+        if (values[1] == NULL) {
+            goto done;
+        }
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_decision_usage_type, "XybridDecisionUsage")) {
+        goto done;
+    }
+    result = PyObject_Vectorcall(boltffi_python_xybrid_decision_usage_type, values, 2, NULL);
+done:
+    Py_XDECREF(values[0]);
+    Py_XDECREF(values[1]);
+    return result;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_usage(FfiBuf_u8 buffer) {
+    PyObject *result = NULL;
+    boltffi_python_wire_reader reader = {0};
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    reader.ptr = buffer.ptr;
+    reader.len = buffer.len;
+    reader.offset = 0;
+    result = boltffi_python_decode_owned_xybrid_decision_usage_read(&reader);
+    if (result != NULL && reader.offset != reader.len) {
+        Py_CLEAR(result);
+        PyErr_SetString(PyExc_ValueError, "trailing BoltFFI wire bytes");
+    }
+done:
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+
+static PyObject *boltffi_python_xybrid_decisions_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decisions(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decisions() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_decisions_type, args[0], "XybridDecisions")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
+static int boltffi_python_wire_xybrid_decisions(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_decisions_type, "XybridDecisions")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridDecisions._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridDecisions wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decisions(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_decisions_type, "XybridDecisions")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_decisions_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+
+static PyObject *boltffi_python_xybrid_probe_optional_list_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_probe_optional_list(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_probe_optional_list() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_probe_optional_list_type, args[0], "XybridProbeOptionalList")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
+static int boltffi_python_wire_xybrid_probe_optional_list(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_probe_optional_list_type, "XybridProbeOptionalList")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridProbeOptionalList._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridProbeOptionalList wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_probe_optional_list(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_probe_optional_list_type, "XybridProbeOptionalList")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_probe_optional_list_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+
+static PyObject *boltffi_python_xybrid_probe_nesting_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_probe_nesting(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_probe_nesting() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_probe_nesting_type, args[0], "XybridProbeNesting")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
+static int boltffi_python_wire_xybrid_probe_nesting(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_probe_nesting_type, "XybridProbeNesting")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridProbeNesting._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridProbeNesting wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_probe_nesting(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_probe_nesting_type, "XybridProbeNesting")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_probe_nesting_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+
+static PyObject *boltffi_python_xybrid_probe_json_entry_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_probe_json_entry(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_probe_json_entry() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_probe_json_entry_type, args[0], "XybridProbeJsonEntry")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
+static int boltffi_python_wire_xybrid_probe_json_entry(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_probe_json_entry_type, "XybridProbeJsonEntry")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridProbeJsonEntry._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridProbeJsonEntry wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_probe_json_entry(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_probe_json_entry_type, "XybridProbeJsonEntry")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_probe_json_entry_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+
 
 static int boltffi_python_wire_vec_xybrid_tool_result(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
     typedef struct {
@@ -6845,6 +7784,596 @@ static PyObject *boltffi_python_decode_owned_xybrid_vad_mode(FfiBuf_u8 buffer) {
         goto done;
     }
     result = PyObject_CallMethod(boltffi_python_xybrid_vad_mode_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+static PyObject *boltffi_python_xybrid_decision_content_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decision_content(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decision_content() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_decision_content_type, args[0], "XybridDecisionContent")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static int boltffi_python_wire_xybrid_decision_content(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_decision_content_type, "XybridDecisionContent")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridDecisionContent._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridDecisionContent wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_content(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_decision_content_type, "XybridDecisionContent")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_decision_content_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+static PyObject *boltffi_python_xybrid_decision_instructions_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decision_instructions(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decision_instructions() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_decision_instructions_type, args[0], "XybridDecisionInstructions")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static int boltffi_python_wire_xybrid_decision_instructions(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_decision_instructions_type, "XybridDecisionInstructions")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridDecisionInstructions._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridDecisionInstructions wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_instructions(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_decision_instructions_type, "XybridDecisionInstructions")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_decision_instructions_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+static PyObject *boltffi_python_xybrid_decision_question_kind_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decision_question_kind(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decision_question_kind() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_decision_question_kind_type, args[0], "XybridDecisionQuestionKind")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static int boltffi_python_wire_xybrid_decision_question_kind(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_decision_question_kind_type, "XybridDecisionQuestionKind")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridDecisionQuestionKind._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridDecisionQuestionKind wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_question_kind(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_decision_question_kind_type, "XybridDecisionQuestionKind")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_decision_question_kind_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+static PyObject *boltffi_python_xybrid_decision_origin_members_by_wire_tag[2] = {NULL};
+static const char *boltffi_python_xybrid_decision_origin_member_names[2] = {
+    "CALLER",
+    "FIXED"
+};
+static const ___XybridDecisionOrigin boltffi_python_xybrid_decision_origin_member_native_values[2] = {
+    0,
+    1
+};
+static boltffi_python_c_style_enum_registration boltffi_python_xybrid_decision_origin_registration = {
+    NULL,
+    2,
+    boltffi_python_xybrid_decision_origin_members_by_wire_tag,
+};
+
+static PyObject *boltffi_python_load_xybrid_decision_origin_member(PyObject *type_object, Py_ssize_t member_index) {
+    PyObject *native_value = NULL;
+    PyObject *member = NULL;
+    native_value = boltffi_python_box_i32(boltffi_python_xybrid_decision_origin_member_native_values[member_index]);
+    member = boltffi_python_load_c_style_enum_member(
+        type_object,
+        "XybridDecisionOrigin",
+        boltffi_python_xybrid_decision_origin_member_names[member_index],
+        native_value
+    );
+    Py_XDECREF(native_value);
+    return member;
+}
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decision_origin(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decision_origin() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_c_style_enum_registration(
+        &boltffi_python_xybrid_decision_origin_registration,
+        args[0],
+        "XybridDecisionOrigin",
+        boltffi_python_load_xybrid_decision_origin_member
+    )) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static int boltffi_python_parse_xybrid_decision_origin(PyObject *value, ___XybridDecisionOrigin *out) {
+    if (!boltffi_python_expect_enum_instance(value, &boltffi_python_xybrid_decision_origin_registration, "XybridDecisionOrigin")) {
+        return 0;
+    }
+    return boltffi_python_parse_i32(value, out);
+}
+
+static int boltffi_python_xybrid_decision_origin_native_to_wire_tag(___XybridDecisionOrigin value, int32_t *out) {
+    switch (value) {
+        case 0:
+            *out = 0;
+            return 1;
+        case 1:
+            *out = 1;
+            return 1;
+        default:
+            PyErr_SetString(PyExc_ValueError, "invalid XybridDecisionOrigin value");
+            return 0;
+    }
+}
+
+static int boltffi_python_wire_xybrid_decision_origin(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    ___XybridDecisionOrigin native_value = 0;
+    uint8_t bytes[4] = {0};
+    if (!boltffi_python_parse_xybrid_decision_origin(value, &native_value)) {
+        return 0;
+    }
+    boltffi_python_write_u32_le(bytes, (uint32_t)native_value);
+    return boltffi_python_wire_fixed(bytes, 4, out_wire, out_ptr, out_len);
+}
+
+static PyObject *boltffi_python_box_xybrid_decision_origin_from_wire_tag(int32_t wire_tag) {
+    switch (wire_tag) {
+        case 0:
+            return boltffi_python_box_registered_enum_member(
+                &boltffi_python_xybrid_decision_origin_registration,
+                0,
+                "XybridDecisionOrigin"
+            );
+        case 1:
+            return boltffi_python_box_registered_enum_member(
+                &boltffi_python_xybrid_decision_origin_registration,
+                1,
+                "XybridDecisionOrigin"
+            );
+        default:
+            PyErr_SetString(PyExc_RuntimeError, "native enum wire tag is invalid");
+            return NULL;
+    }
+}
+
+static PyObject *boltffi_python_box_xybrid_decision_origin(___XybridDecisionOrigin value) {
+    int32_t wire_tag = 0;
+    if (!boltffi_python_xybrid_decision_origin_native_to_wire_tag(value, &wire_tag)) {
+        return NULL;
+    }
+    return boltffi_python_box_xybrid_decision_origin_from_wire_tag(wire_tag);
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_origin(FfiBuf_u8 buffer) {
+    PyObject *result = NULL;
+    ___XybridDecisionOrigin native_value = 0;
+    if (!boltffi_python_validate_owned_fixed_buffer(buffer, 4)) {
+        goto done;
+    }
+    native_value = (___XybridDecisionOrigin)boltffi_python_read_u32_le(buffer.ptr);
+    result = boltffi_python_box_xybrid_decision_origin(native_value);
+done:
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+static PyObject *boltffi_python_xybrid_score_statistic_members_by_wire_tag[2] = {NULL};
+static const char *boltffi_python_xybrid_score_statistic_member_names[2] = {
+    "MEDIAN",
+    "EXPECTED"
+};
+static const ___XybridScoreStatistic boltffi_python_xybrid_score_statistic_member_native_values[2] = {
+    0,
+    1
+};
+static boltffi_python_c_style_enum_registration boltffi_python_xybrid_score_statistic_registration = {
+    NULL,
+    2,
+    boltffi_python_xybrid_score_statistic_members_by_wire_tag,
+};
+
+static PyObject *boltffi_python_load_xybrid_score_statistic_member(PyObject *type_object, Py_ssize_t member_index) {
+    PyObject *native_value = NULL;
+    PyObject *member = NULL;
+    native_value = boltffi_python_box_i32(boltffi_python_xybrid_score_statistic_member_native_values[member_index]);
+    member = boltffi_python_load_c_style_enum_member(
+        type_object,
+        "XybridScoreStatistic",
+        boltffi_python_xybrid_score_statistic_member_names[member_index],
+        native_value
+    );
+    Py_XDECREF(native_value);
+    return member;
+}
+
+static PyObject *boltffi_python_wrapper_register_xybrid_score_statistic(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_score_statistic() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_c_style_enum_registration(
+        &boltffi_python_xybrid_score_statistic_registration,
+        args[0],
+        "XybridScoreStatistic",
+        boltffi_python_load_xybrid_score_statistic_member
+    )) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static int boltffi_python_parse_xybrid_score_statistic(PyObject *value, ___XybridScoreStatistic *out) {
+    if (!boltffi_python_expect_enum_instance(value, &boltffi_python_xybrid_score_statistic_registration, "XybridScoreStatistic")) {
+        return 0;
+    }
+    return boltffi_python_parse_i32(value, out);
+}
+
+static int boltffi_python_xybrid_score_statistic_native_to_wire_tag(___XybridScoreStatistic value, int32_t *out) {
+    switch (value) {
+        case 0:
+            *out = 0;
+            return 1;
+        case 1:
+            *out = 1;
+            return 1;
+        default:
+            PyErr_SetString(PyExc_ValueError, "invalid XybridScoreStatistic value");
+            return 0;
+    }
+}
+
+static int boltffi_python_wire_xybrid_score_statistic(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    ___XybridScoreStatistic native_value = 0;
+    uint8_t bytes[4] = {0};
+    if (!boltffi_python_parse_xybrid_score_statistic(value, &native_value)) {
+        return 0;
+    }
+    boltffi_python_write_u32_le(bytes, (uint32_t)native_value);
+    return boltffi_python_wire_fixed(bytes, 4, out_wire, out_ptr, out_len);
+}
+
+static PyObject *boltffi_python_box_xybrid_score_statistic_from_wire_tag(int32_t wire_tag) {
+    switch (wire_tag) {
+        case 0:
+            return boltffi_python_box_registered_enum_member(
+                &boltffi_python_xybrid_score_statistic_registration,
+                0,
+                "XybridScoreStatistic"
+            );
+        case 1:
+            return boltffi_python_box_registered_enum_member(
+                &boltffi_python_xybrid_score_statistic_registration,
+                1,
+                "XybridScoreStatistic"
+            );
+        default:
+            PyErr_SetString(PyExc_RuntimeError, "native enum wire tag is invalid");
+            return NULL;
+    }
+}
+
+static PyObject *boltffi_python_box_xybrid_score_statistic(___XybridScoreStatistic value) {
+    int32_t wire_tag = 0;
+    if (!boltffi_python_xybrid_score_statistic_native_to_wire_tag(value, &wire_tag)) {
+        return NULL;
+    }
+    return boltffi_python_box_xybrid_score_statistic_from_wire_tag(wire_tag);
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_score_statistic(FfiBuf_u8 buffer) {
+    PyObject *result = NULL;
+    ___XybridScoreStatistic native_value = 0;
+    if (!boltffi_python_validate_owned_fixed_buffer(buffer, 4)) {
+        goto done;
+    }
+    native_value = (___XybridScoreStatistic)boltffi_python_read_u32_le(buffer.ptr);
+    result = boltffi_python_box_xybrid_score_statistic(native_value);
+done:
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+static PyObject *boltffi_python_xybrid_decision_value_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_decision_value(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_decision_value() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_decision_value_type, args[0], "XybridDecisionValue")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static int boltffi_python_wire_xybrid_decision_value(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_decision_value_type, "XybridDecisionValue")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridDecisionValue._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridDecisionValue wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_decision_value(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_decision_value_type, "XybridDecisionValue")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_decision_value_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+static PyObject *boltffi_python_xybrid_probe_json_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_probe_json(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_probe_json() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_probe_json_type, args[0], "XybridProbeJson")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static int boltffi_python_wire_xybrid_probe_json(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_probe_json_type, "XybridProbeJson")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridProbeJson._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridProbeJson wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_probe_json(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_probe_json_type, "XybridProbeJson")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_probe_json_type, "_boltffi_from_wire", "O", wire);
+done:
+    Py_XDECREF(wire);
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+static PyObject *boltffi_python_xybrid_probe_payload_type = NULL;
+
+static PyObject *boltffi_python_wrapper_register_xybrid_probe_payload(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_register_xybrid_probe_payload() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (!boltffi_python_store_registered_type(&boltffi_python_xybrid_probe_payload_type, args[0], "XybridProbePayload")) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static int boltffi_python_wire_xybrid_probe_payload(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    PyObject *wire = NULL;
+    if (!boltffi_python_expect_type_instance(value, boltffi_python_xybrid_probe_payload_type, "XybridProbePayload")) {
+        return 0;
+    }
+    wire = PyObject_CallMethod(value, "_boltffi_wire", NULL);
+    if (wire == NULL) {
+        return 0;
+    }
+    if (!PyBytes_Check(wire)) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_TypeError, "XybridProbePayload._boltffi_wire() must return bytes");
+        return 0;
+    }
+    if (PyBytes_GET_SIZE(wire) > PY_SSIZE_T_MAX) {
+        Py_DECREF(wire);
+        PyErr_SetString(PyExc_OverflowError, "XybridProbePayload wire payload is too large");
+        return 0;
+    }
+    *out_wire = wire;
+    *out_ptr = (const uint8_t *)PyBytes_AS_STRING(wire);
+    *out_len = (uintptr_t)PyBytes_GET_SIZE(wire);
+    return 1;
+}
+
+static PyObject *boltffi_python_decode_owned_xybrid_probe_payload(FfiBuf_u8 buffer) {
+    PyObject *wire = NULL;
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    wire = PyBytes_FromStringAndSize((const char *)buffer.ptr, (Py_ssize_t)buffer.len);
+    if (wire == NULL) {
+        goto done;
+    }
+    if (!boltffi_python_expect_registered_type(boltffi_python_xybrid_probe_payload_type, "XybridProbePayload")) {
+        goto done;
+    }
+    result = PyObject_CallMethod(boltffi_python_xybrid_probe_payload_type, "_boltffi_from_wire", "O", wire);
 done:
     Py_XDECREF(wire);
     boltffi_python_release_owned_buffer(buffer);
@@ -9322,6 +10851,17 @@ static void boltffi_python_release_host_state(void) {
     Py_CLEAR(boltffi_python_xybrid_cache_status_type);
     Py_CLEAR(boltffi_python_xybrid_streaming_config_type);
     Py_CLEAR(boltffi_python_xybrid_partial_result_type);
+    Py_CLEAR(boltffi_python_xybrid_decision_option_type);
+    Py_CLEAR(boltffi_python_xybrid_decision_level_type);
+    Py_CLEAR(boltffi_python_xybrid_decision_question_type);
+    Py_CLEAR(boltffi_python_xybrid_decision_request_type);
+    Py_CLEAR(boltffi_python_xybrid_decision_score_type);
+    Py_CLEAR(boltffi_python_xybrid_decision_answer_type);
+    Py_CLEAR(boltffi_python_xybrid_decision_usage_type);
+    Py_CLEAR(boltffi_python_xybrid_decisions_type);
+    Py_CLEAR(boltffi_python_xybrid_probe_optional_list_type);
+    Py_CLEAR(boltffi_python_xybrid_probe_nesting_type);
+    Py_CLEAR(boltffi_python_xybrid_probe_json_entry_type);
     Py_CLEAR(boltffi_python_xybrid_error_type);
     Py_CLEAR(boltffi_python_xybrid_envelope_kind_type);
     boltffi_python_clear_c_style_enum_registration(&boltffi_python_xybrid_message_role_registration);
@@ -9333,6 +10873,14 @@ static void boltffi_python_release_host_state(void) {
     boltffi_python_clear_c_style_enum_registration(&boltffi_python_xybrid_cache_entry_location_registration);
     boltffi_python_clear_c_style_enum_registration(&boltffi_python_xybrid_thermal_state_registration);
     Py_CLEAR(boltffi_python_xybrid_vad_mode_type);
+    Py_CLEAR(boltffi_python_xybrid_decision_content_type);
+    Py_CLEAR(boltffi_python_xybrid_decision_instructions_type);
+    Py_CLEAR(boltffi_python_xybrid_decision_question_kind_type);
+    boltffi_python_clear_c_style_enum_registration(&boltffi_python_xybrid_decision_origin_registration);
+    boltffi_python_clear_c_style_enum_registration(&boltffi_python_xybrid_score_statistic_registration);
+    Py_CLEAR(boltffi_python_xybrid_decision_value_type);
+    Py_CLEAR(boltffi_python_xybrid_probe_json_type);
+    Py_CLEAR(boltffi_python_xybrid_probe_payload_type);
 
     Py_CLEAR(boltffi_python_wire_codecs);
 
@@ -10120,6 +11668,325 @@ done:
 }
 
 
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_echo_request(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *request_wire = NULL;
+    const uint8_t *request_ptr = NULL;
+    uintptr_t request_len = 0;
+    FfiBuf_u8 return_success;
+    FfiBuf_u8 return_error = {0};
+    PyObject *error = NULL;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "decision_spike_echo_request() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_echo_request == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_raw(args[0], &request_wire, &request_ptr, &request_len)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_function_xybrid_bolt_decision_spike_echo_request(request_ptr, request_len, &return_success);
+    if (return_error.len != 0) {
+        error = boltffi_python_decode_owned_raw_wire(return_error);
+        if (error != NULL) {
+            PyErr_SetObject(PyExc_RuntimeError, error);
+        }
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(return_success);
+done:
+    Py_XDECREF(request_wire);
+    Py_XDECREF(error);
+    return result;
+}
+
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_request_outline(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *request_wire = NULL;
+    const uint8_t *request_ptr = NULL;
+    uintptr_t request_len = 0;
+    FfiBuf_u8 return_success;
+    FfiBuf_u8 return_error = {0};
+    PyObject *error = NULL;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "decision_spike_request_outline() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_request_outline == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_raw(args[0], &request_wire, &request_ptr, &request_len)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_function_xybrid_bolt_decision_spike_request_outline(request_ptr, request_len, &return_success);
+    if (return_error.len != 0) {
+        error = boltffi_python_decode_owned_raw_wire(return_error);
+        if (error != NULL) {
+            PyErr_SetObject(PyExc_RuntimeError, error);
+        }
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(return_success);
+done:
+    Py_XDECREF(request_wire);
+    Py_XDECREF(error);
+    return result;
+}
+
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_decide(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *request_wire = NULL;
+    const uint8_t *request_ptr = NULL;
+    uintptr_t request_len = 0;
+    FfiBuf_u8 return_success;
+    FfiBuf_u8 return_error = {0};
+    PyObject *error = NULL;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "decision_spike_decide() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_raw(args[0], &request_wire, &request_ptr, &request_len)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide(request_ptr, request_len, &return_success);
+    if (return_error.len != 0) {
+        error = boltffi_python_decode_owned_raw_wire(return_error);
+        if (error != NULL) {
+            PyErr_SetObject(PyExc_RuntimeError, error);
+        }
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(return_success);
+done:
+    Py_XDECREF(request_wire);
+    Py_XDECREF(error);
+    return result;
+}
+
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_decide_bits(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *request_wire = NULL;
+    const uint8_t *request_ptr = NULL;
+    uintptr_t request_len = 0;
+    FfiBuf_u8 return_success;
+    FfiBuf_u8 return_error = {0};
+    PyObject *error = NULL;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "decision_spike_decide_bits() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_bits == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_raw(args[0], &request_wire, &request_ptr, &request_len)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_function_xybrid_bolt_decision_spike_decide_bits(request_ptr, request_len, &return_success);
+    if (return_error.len != 0) {
+        error = boltffi_python_decode_owned_raw_wire(return_error);
+        if (error != NULL) {
+            PyErr_SetObject(PyExc_RuntimeError, error);
+        }
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(return_success);
+done:
+    Py_XDECREF(request_wire);
+    Py_XDECREF(error);
+    return result;
+}
+
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_verify_decisions(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *request_wire = NULL;
+    const uint8_t *request_ptr = NULL;
+    uintptr_t request_len = 0;
+    PyObject *decisions_wire = NULL;
+    const uint8_t *decisions_ptr = NULL;
+    uintptr_t decisions_len = 0;
+    FfiBuf_u8 return_success;
+    FfiBuf_u8 return_error = {0};
+    PyObject *error = NULL;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 2) {
+        PyErr_Format(PyExc_TypeError, "decision_spike_verify_decisions() takes 2 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_verify_decisions == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_raw(args[0], &request_wire, &request_ptr, &request_len)) {
+        goto done;
+    }
+    if (!boltffi_python_wire_raw(args[1], &decisions_wire, &decisions_ptr, &decisions_len)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_function_xybrid_bolt_decision_spike_verify_decisions(request_ptr, request_len, decisions_ptr, decisions_len, &return_success);
+    if (return_error.len != 0) {
+        error = boltffi_python_decode_owned_raw_wire(return_error);
+        if (error != NULL) {
+            PyErr_SetObject(PyExc_RuntimeError, error);
+        }
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(return_success);
+done:
+    Py_XDECREF(request_wire);
+    Py_XDECREF(decisions_wire);
+    Py_XDECREF(error);
+    return result;
+}
+
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *probe_wire = NULL;
+    const uint8_t *probe_ptr = NULL;
+    uintptr_t probe_len = 0;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "decision_spike_probe_optional_list() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_raw(args[0], &probe_wire, &probe_ptr, &probe_len)) {
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list(probe_ptr, probe_len));
+done:
+    Py_XDECREF(probe_wire);
+    return result;
+}
+
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_probe_nesting(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *probe_wire = NULL;
+    const uint8_t *probe_ptr = NULL;
+    uintptr_t probe_len = 0;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "decision_spike_probe_nesting() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_nesting == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_raw(args[0], &probe_wire, &probe_ptr, &probe_len)) {
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_nesting(probe_ptr, probe_len));
+done:
+    Py_XDECREF(probe_wire);
+    return result;
+}
+
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_probe_json(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *json_text_wire = NULL;
+    const uint8_t *json_text_ptr = NULL;
+    uintptr_t json_text_len = 0;
+    FfiBuf_u8 return_success;
+    FfiBuf_u8 return_error = {0};
+    PyObject *error = NULL;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "decision_spike_probe_json() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_string(args[0], &json_text_wire, &json_text_ptr, &json_text_len)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json(json_text_ptr, json_text_len, &return_success);
+    if (return_error.len != 0) {
+        error = boltffi_python_decode_owned_raw_wire(return_error);
+        if (error != NULL) {
+            PyErr_SetObject(PyExc_RuntimeError, error);
+        }
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(return_success);
+done:
+    Py_XDECREF(json_text_wire);
+    Py_XDECREF(error);
+    return result;
+}
+
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *value_wire = NULL;
+    const uint8_t *value_ptr = NULL;
+    uintptr_t value_len = 0;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "decision_spike_probe_json_echo() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_raw(args[0], &value_wire, &value_ptr, &value_len)) {
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo(value_ptr, value_len));
+done:
+    Py_XDECREF(value_wire);
+    return result;
+}
+
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_probe_payload(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *payload_wire = NULL;
+    const uint8_t *payload_ptr = NULL;
+    uintptr_t payload_len = 0;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "decision_spike_probe_payload() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_payload == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_raw(args[0], &payload_wire, &payload_ptr, &payload_len)) {
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(boltffi_python_boltffi_function_xybrid_bolt_decision_spike_probe_payload(payload_ptr, payload_len));
+done:
+    Py_XDECREF(payload_wire);
+    return result;
+}
+
+
 
 static PyObject *boltffi_python_stream_wrapper_boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
     uint64_t subscription = 0;
@@ -10510,6 +12377,17 @@ static PyMethodDef boltffi_python_methods[] = {
     {"_register_xybrid_cache_status", (PyCFunction)boltffi_python_wrapper_register_xybrid_cache_status, METH_FASTCALL, NULL},
     {"_register_xybrid_streaming_config", (PyCFunction)boltffi_python_wrapper_register_xybrid_streaming_config, METH_FASTCALL, NULL},
     {"_register_xybrid_partial_result", (PyCFunction)boltffi_python_wrapper_register_xybrid_partial_result, METH_FASTCALL, NULL},
+    {"_register_xybrid_decision_option", (PyCFunction)boltffi_python_wrapper_register_xybrid_decision_option, METH_FASTCALL, NULL},
+    {"_register_xybrid_decision_level", (PyCFunction)boltffi_python_wrapper_register_xybrid_decision_level, METH_FASTCALL, NULL},
+    {"_register_xybrid_decision_question", (PyCFunction)boltffi_python_wrapper_register_xybrid_decision_question, METH_FASTCALL, NULL},
+    {"_register_xybrid_decision_request", (PyCFunction)boltffi_python_wrapper_register_xybrid_decision_request, METH_FASTCALL, NULL},
+    {"_register_xybrid_decision_score", (PyCFunction)boltffi_python_wrapper_register_xybrid_decision_score, METH_FASTCALL, NULL},
+    {"_register_xybrid_decision_answer", (PyCFunction)boltffi_python_wrapper_register_xybrid_decision_answer, METH_FASTCALL, NULL},
+    {"_register_xybrid_decision_usage", (PyCFunction)boltffi_python_wrapper_register_xybrid_decision_usage, METH_FASTCALL, NULL},
+    {"_register_xybrid_decisions", (PyCFunction)boltffi_python_wrapper_register_xybrid_decisions, METH_FASTCALL, NULL},
+    {"_register_xybrid_probe_optional_list", (PyCFunction)boltffi_python_wrapper_register_xybrid_probe_optional_list, METH_FASTCALL, NULL},
+    {"_register_xybrid_probe_nesting", (PyCFunction)boltffi_python_wrapper_register_xybrid_probe_nesting, METH_FASTCALL, NULL},
+    {"_register_xybrid_probe_json_entry", (PyCFunction)boltffi_python_wrapper_register_xybrid_probe_json_entry, METH_FASTCALL, NULL},
     {"_register_xybrid_error", (PyCFunction)boltffi_python_wrapper_register_xybrid_error, METH_FASTCALL, NULL},
     {"_register_xybrid_envelope_kind", (PyCFunction)boltffi_python_wrapper_register_xybrid_envelope_kind, METH_FASTCALL, NULL},
     {"_register_xybrid_message_role", (PyCFunction)boltffi_python_wrapper_register_xybrid_message_role, METH_FASTCALL, NULL},
@@ -10521,6 +12399,14 @@ static PyMethodDef boltffi_python_methods[] = {
     {"_register_xybrid_cache_entry_location", (PyCFunction)boltffi_python_wrapper_register_xybrid_cache_entry_location, METH_FASTCALL, NULL},
     {"_register_xybrid_thermal_state", (PyCFunction)boltffi_python_wrapper_register_xybrid_thermal_state, METH_FASTCALL, NULL},
     {"_register_xybrid_vad_mode", (PyCFunction)boltffi_python_wrapper_register_xybrid_vad_mode, METH_FASTCALL, NULL},
+    {"_register_xybrid_decision_content", (PyCFunction)boltffi_python_wrapper_register_xybrid_decision_content, METH_FASTCALL, NULL},
+    {"_register_xybrid_decision_instructions", (PyCFunction)boltffi_python_wrapper_register_xybrid_decision_instructions, METH_FASTCALL, NULL},
+    {"_register_xybrid_decision_question_kind", (PyCFunction)boltffi_python_wrapper_register_xybrid_decision_question_kind, METH_FASTCALL, NULL},
+    {"_register_xybrid_decision_origin", (PyCFunction)boltffi_python_wrapper_register_xybrid_decision_origin, METH_FASTCALL, NULL},
+    {"_register_xybrid_score_statistic", (PyCFunction)boltffi_python_wrapper_register_xybrid_score_statistic, METH_FASTCALL, NULL},
+    {"_register_xybrid_decision_value", (PyCFunction)boltffi_python_wrapper_register_xybrid_decision_value, METH_FASTCALL, NULL},
+    {"_register_xybrid_probe_json", (PyCFunction)boltffi_python_wrapper_register_xybrid_probe_json, METH_FASTCALL, NULL},
+    {"_register_xybrid_probe_payload", (PyCFunction)boltffi_python_wrapper_register_xybrid_probe_payload, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_download_release", (PyCFunction)boltffi_python_callable_wrapper_boltffi_release_class_xybrid_bolt_xybrid_download, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_download_from_registry", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_download_from_registry, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_download_from_registry_with_platform", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_download_from_registry_with_platform, METH_FASTCALL, NULL},
@@ -10657,6 +12543,16 @@ static PyMethodDef boltffi_python_methods[] = {
     {"telemetry_default_endpoint", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_telemetry_default_endpoint, METH_FASTCALL, NULL},
     {"telemetry_flush", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_telemetry_flush, METH_FASTCALL, NULL},
     {"telemetry_shutdown", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_telemetry_shutdown, METH_FASTCALL, NULL},
+    {"decision_spike_echo_request", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_echo_request, METH_FASTCALL, NULL},
+    {"decision_spike_request_outline", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_request_outline, METH_FASTCALL, NULL},
+    {"decision_spike_decide", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_decide, METH_FASTCALL, NULL},
+    {"decision_spike_decide_bits", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_decide_bits, METH_FASTCALL, NULL},
+    {"decision_spike_verify_decisions", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_verify_decisions, METH_FASTCALL, NULL},
+    {"decision_spike_probe_optional_list", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_probe_optional_list, METH_FASTCALL, NULL},
+    {"decision_spike_probe_nesting", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_probe_nesting, METH_FASTCALL, NULL},
+    {"decision_spike_probe_json", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_probe_json, METH_FASTCALL, NULL},
+    {"decision_spike_probe_json_echo", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_probe_json_echo, METH_FASTCALL, NULL},
+    {"decision_spike_probe_payload", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_decision_spike_probe_payload, METH_FASTCALL, NULL},
     {NULL, NULL, 0, NULL}
 };
 

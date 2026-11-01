@@ -144,6 +144,38 @@ typedef int32_t ___XybridThermalState;
 typedef uint32_t ___XybridVadMode;
 #define XYBRID_VAD_MODE_OFF ((___XybridVadMode)0)
 #define XYBRID_VAD_MODE_ENABLED ((___XybridVadMode)1)
+typedef uint32_t ___XybridDecisionContent;
+#define XYBRID_DECISION_CONTENT_TEXT ((___XybridDecisionContent)0)
+#define XYBRID_DECISION_CONTENT_JSON ((___XybridDecisionContent)1)
+typedef uint32_t ___XybridDecisionInstructions;
+#define XYBRID_DECISION_INSTRUCTIONS_CONTENT ((___XybridDecisionInstructions)0)
+typedef uint32_t ___XybridDecisionQuestionKind;
+#define XYBRID_DECISION_QUESTION_KIND_CHOICE ((___XybridDecisionQuestionKind)0)
+#define XYBRID_DECISION_QUESTION_KIND_YES_NO ((___XybridDecisionQuestionKind)1)
+#define XYBRID_DECISION_QUESTION_KIND_SCORE ((___XybridDecisionQuestionKind)2)
+typedef int32_t ___XybridDecisionOrigin;
+#define XYBRID_DECISION_ORIGIN_CALLER ((___XybridDecisionOrigin)0)
+#define XYBRID_DECISION_ORIGIN_FIXED ((___XybridDecisionOrigin)1)
+typedef int32_t ___XybridScoreStatistic;
+#define XYBRID_SCORE_STATISTIC_MEDIAN ((___XybridScoreStatistic)0)
+#define XYBRID_SCORE_STATISTIC_EXPECTED ((___XybridScoreStatistic)1)
+typedef uint32_t ___XybridDecisionValue;
+#define XYBRID_DECISION_VALUE_CHOICE ((___XybridDecisionValue)0)
+#define XYBRID_DECISION_VALUE_YES_NO ((___XybridDecisionValue)1)
+#define XYBRID_DECISION_VALUE_SCORE ((___XybridDecisionValue)2)
+typedef uint32_t ___XybridProbeJson;
+#define XYBRID_PROBE_JSON_NULL ((___XybridProbeJson)0)
+#define XYBRID_PROBE_JSON_BOOL ((___XybridProbeJson)1)
+#define XYBRID_PROBE_JSON_INT ((___XybridProbeJson)2)
+#define XYBRID_PROBE_JSON_UINT ((___XybridProbeJson)3)
+#define XYBRID_PROBE_JSON_FLOAT ((___XybridProbeJson)4)
+#define XYBRID_PROBE_JSON_TEXT ((___XybridProbeJson)5)
+#define XYBRID_PROBE_JSON_LIST ((___XybridProbeJson)6)
+#define XYBRID_PROBE_JSON_MAP ((___XybridProbeJson)7)
+typedef uint32_t ___XybridProbePayload;
+#define XYBRID_PROBE_PAYLOAD_DECISION_REQUEST ((___XybridProbePayload)0)
+#define XYBRID_PROBE_PAYLOAD_DECISION_RESULT ((___XybridProbePayload)1)
+#define XYBRID_PROBE_PAYLOAD_NOTHING ((___XybridProbePayload)2)
 void boltffi_release_class_xybrid_bolt_xybrid_download(uint64_t handle);
 uint64_t boltffi_init_class_xybrid_bolt_xybrid_download_from_registry(const uint8_t *id_ptr, uintptr_t id_len);
 uint64_t boltffi_init_class_xybrid_bolt_xybrid_download_from_registry_with_platform(const uint8_t *id_ptr, uintptr_t id_len, const uint8_t *platform_ptr, uintptr_t platform_len);
@@ -265,6 +297,16 @@ bool boltffi_function_xybrid_bolt_is_auto_release_enabled(void);
 FfiBuf_u8 boltffi_function_xybrid_bolt_telemetry_default_endpoint(void);
 void boltffi_function_xybrid_bolt_telemetry_flush(void);
 void boltffi_function_xybrid_bolt_telemetry_shutdown(void);
+FfiBuf_u8 boltffi_function_xybrid_bolt_decision_spike_echo_request(const uint8_t *request_ptr, uintptr_t request_len, FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_decision_spike_request_outline(const uint8_t *request_ptr, uintptr_t request_len, FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_decision_spike_decide(const uint8_t *request_ptr, uintptr_t request_len, FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_decision_spike_decide_bits(const uint8_t *request_ptr, uintptr_t request_len, FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_decision_spike_verify_decisions(const uint8_t *request_ptr, uintptr_t request_len, const uint8_t *decisions_ptr, uintptr_t decisions_len, FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_decision_spike_probe_optional_list(const uint8_t *probe_ptr, uintptr_t probe_len);
+FfiBuf_u8 boltffi_function_xybrid_bolt_decision_spike_probe_nesting(const uint8_t *probe_ptr, uintptr_t probe_len);
+FfiBuf_u8 boltffi_function_xybrid_bolt_decision_spike_probe_json(const uint8_t *json_text_ptr, uintptr_t json_text_len, FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_decision_spike_probe_json_echo(const uint8_t *value_ptr, uintptr_t value_len);
+FfiBuf_u8 boltffi_function_xybrid_bolt_decision_spike_probe_payload(const uint8_t *payload_ptr, uintptr_t payload_len);
 uint64_t boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe(uint64_t receiver);
 FfiBuf_u8 boltffi_stream_xybrid_bolt_xybrid_download_progress_pop_batch(uint64_t subscription, uintptr_t max_count);
 WaitResult boltffi_stream_xybrid_bolt_xybrid_download_progress_wait(uint64_t subscription, uint32_t timeout_milliseconds);

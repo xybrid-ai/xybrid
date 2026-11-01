@@ -865,6 +865,263 @@ public struct XybridPartialResult: Hashable, Equatable, Sendable {
     }
 }
 
+/// One choice option. The key may affect inference.
+public struct XybridDecisionOption: Hashable, Equatable, Sendable {
+    public var key: String
+    public var description: XybridDecisionContent?
+
+    public init(key: String, description: XybridDecisionContent?) {
+        self.key = key
+        self.description = description
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionOption {
+        XybridDecisionOption(key: reader.readString(), description: reader.readOptional { reader in XybridDecisionContent.decode(from: &reader) })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.key)
+        writer.writeOptional(self.description) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// One score level; level `i` has key `"i"`.
+public struct XybridDecisionLevel: Hashable, Equatable, Sendable {
+    public var description: XybridDecisionContent?
+
+    public init(description: XybridDecisionContent?) {
+        self.description = description
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionLevel {
+        XybridDecisionLevel(description: reader.readOptional { reader in XybridDecisionContent.decode(from: &reader) })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeOptional(self.description) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// One question.
+public struct XybridDecisionQuestion: Hashable, Equatable, Sendable {
+    public var id: String
+    public var instructions: XybridDecisionInstructions?
+    public var kind: XybridDecisionQuestionKind
+
+    public init(id: String, instructions: XybridDecisionInstructions?, kind: XybridDecisionQuestionKind) {
+        self.id = id
+        self.instructions = instructions
+        self.kind = kind
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionQuestion {
+        XybridDecisionQuestion(id: reader.readString(), instructions: reader.readOptional { reader in XybridDecisionInstructions.decode(from: &reader) }, kind: XybridDecisionQuestionKind.decode(from: &reader))
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.id)
+        writer.writeOptional(self.instructions) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        self.kind.encode(to: &writer)
+    }
+}
+
+/// A state and the questions asked about it, in order.
+public struct XybridDecisionRequest: Hashable, Equatable, Sendable {
+    public var state: XybridDecisionContent?
+    public var questions: [XybridDecisionQuestion]
+
+    public init(state: XybridDecisionContent?, questions: [XybridDecisionQuestion]) {
+        self.state = state
+        self.questions = questions
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionRequest {
+        XybridDecisionRequest(state: reader.readOptional { reader in XybridDecisionContent.decode(from: &reader) }, questions: reader.readArray { reader in XybridDecisionQuestion.decode(from: &reader) })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeOptional(self.state) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        writer.writeArray(self.questions) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// One key of an answer's distribution.
+public struct XybridDecisionScore: Hashable, Equatable, Sendable {
+    public var key: String
+    /// `-inf` is valid when another key is finite.
+    public var rawScore: Float
+    public var probability: Double
+    public var origin: XybridDecisionOrigin
+
+    public init(
+        key: String,
+        rawScore: Float,
+        probability: Double,
+        origin: XybridDecisionOrigin
+    ) {
+        self.key = key
+        self.rawScore = rawScore
+        self.probability = probability
+        self.origin = origin
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionScore {
+        XybridDecisionScore(
+            key: reader.readString(),
+            rawScore: reader.readF32(),
+            probability: reader.readF64(),
+            origin: XybridDecisionOrigin(rawValue: reader.readI32())!
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.key)
+        writer.writeF32(self.rawScore)
+        writer.writeF64(self.probability)
+        writer.writeI32(self.origin.rawValue)
+    }
+}
+
+/// One question's answer.
+public struct XybridDecisionAnswer: Hashable, Equatable, Sendable {
+    public var questionId: String
+    public var distribution: [XybridDecisionScore]
+    public var value: XybridDecisionValue
+    public var confidence: Double?
+
+    public init(
+        questionId: String,
+        distribution: [XybridDecisionScore],
+        value: XybridDecisionValue,
+        confidence: Double?
+    ) {
+        self.questionId = questionId
+        self.distribution = distribution
+        self.value = value
+        self.confidence = confidence
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionAnswer {
+        XybridDecisionAnswer(
+            questionId: reader.readString(),
+            distribution: reader.readArray { reader in XybridDecisionScore.decode(from: &reader) },
+            value: XybridDecisionValue.decode(from: &reader),
+            confidence: reader.readOptional { reader in reader.readF64() }
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.questionId)
+        writer.writeArray(self.distribution) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        self.value.encode(to: &writer)
+        writer.writeOptional(self.confidence) { writer, boltffiValue0 in writer.writeF64(boltffiValue0) }
+    }
+}
+
+/// Content-free work counters.
+public struct XybridDecisionUsage: Hashable, Equatable, Sendable {
+    public var passes: UInt32
+    public var evaluatedTokens: UInt64
+
+    public init(passes: UInt32, evaluatedTokens: UInt64) {
+        self.passes = passes
+        self.evaluatedTokens = evaluatedTokens
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionUsage {
+        XybridDecisionUsage(passes: reader.readU32(), evaluatedTokens: reader.readU64())
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeU32(self.passes)
+        writer.writeU64(self.evaluatedTokens)
+    }
+}
+
+/// Every answer, in request order.
+public struct XybridDecisions: Hashable, Equatable, Sendable {
+    public var answers: [XybridDecisionAnswer]
+    public var usage: XybridDecisionUsage
+
+    public init(answers: [XybridDecisionAnswer], usage: XybridDecisionUsage) {
+        self.answers = answers
+        self.usage = usage
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisions {
+        XybridDecisions(answers: reader.readArray { reader in XybridDecisionAnswer.decode(from: &reader) }, usage: XybridDecisionUsage.decode(from: &reader))
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeArray(self.answers) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        self.usage.encode(to: &writer)
+    }
+}
+
+/// Probe: `Vec<Option<data enum>>` and `Vec<Option<String>>`, the shape a
+/// bare `levels: Vec<Option<DecisionContent>>` would need.
+public struct XybridProbeOptionalList: Hashable, Equatable, Sendable {
+    public var levels: [XybridDecisionContent?]
+    public var labels: [String?]
+
+    public init(levels: [XybridDecisionContent?], labels: [String?]) {
+        self.levels = levels
+        self.labels = labels
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridProbeOptionalList {
+        XybridProbeOptionalList(levels: reader.readArray { reader in reader.readOptional { reader in XybridDecisionContent.decode(from: &reader) } }, labels: reader.readArray { reader in reader.readOptional { reader in reader.readString() } })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeArray(self.levels) { writer, boltffiValue0 in writer.writeOptional(boltffiValue0) { writer, boltffiValue1 in boltffiValue1.encode(to: &writer) } }
+        writer.writeArray(self.labels) { writer, boltffiValue0 in writer.writeOptional(boltffiValue0) { writer, boltffiValue1 in writer.writeString(boltffiValue1) } }
+    }
+}
+
+/// Probe: nested lists (per-pass score rows) and an optional record.
+public struct XybridProbeNesting: Hashable, Equatable, Sendable {
+    public var rawScores: [[Float]]
+    public var probabilities: [[Double]]
+    public var usage: XybridDecisionUsage?
+
+    public init(rawScores: [[Float]], probabilities: [[Double]], usage: XybridDecisionUsage?) {
+        self.rawScores = rawScores
+        self.probabilities = probabilities
+        self.usage = usage
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridProbeNesting {
+        XybridProbeNesting(rawScores: reader.readArray { reader in reader.readArray { reader in reader.readF32() } }, probabilities: reader.readArray { reader in reader.readArray { reader in reader.readF64() } }, usage: reader.readOptional { reader in XybridDecisionUsage.decode(from: &reader) })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeArray(self.rawScores) { writer, boltffiValue0 in writer.writeArray(boltffiValue0) { writer, boltffiValue1 in writer.writeF32(boltffiValue1) } }
+        writer.writeArray(self.probabilities) { writer, boltffiValue0 in writer.writeArray(boltffiValue0) { writer, boltffiValue1 in writer.writeF64(boltffiValue1) } }
+        writer.writeOptional(self.usage) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// One entry of a [`XybridProbeJson::Map`], in document order.
+public struct XybridProbeJsonEntry: Hashable, Equatable, Sendable {
+    public var key: String
+    public var value: XybridProbeJson
+
+    public init(key: String, value: XybridProbeJson) {
+        self.key = key
+        self.value = value
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridProbeJsonEntry {
+        XybridProbeJsonEntry(key: reader.readString(), value: XybridProbeJson.decode(from: &reader))
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.key)
+        self.value.encode(to: &writer)
+    }
+}
+
 /// Errors surfaced across the FFI boundary. Variants mirror
 /// [`facade::Error`] — the facade owns the SDK→FFI translation; this enum
 /// only re-decorates it for the BoltFFI generator (proc macros must live
@@ -1234,6 +1491,262 @@ public enum XybridVadMode: Hashable, Equatable, Sendable {
         case let .enabled(modelDir):
             writer.writeU32(1)
             writer.writeString(modelDir)
+        }
+    }
+}
+
+/// Text, or a non-string JSON value carried as JSON text.
+///
+/// The JSON text is parsed in Rust by the order-preserving parser, so object
+/// order and `1` vs `1.0` survive; never build it from a host dictionary.
+public enum XybridDecisionContent: Hashable, Equatable, Sendable {
+    /// Named `value`, not `text`: C# rejects a positional record member that
+    /// shares its variant's name (CS8866).
+    case text(value: String)
+    case json(jsonText: String)
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionContent {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .text(value: reader.readString())
+        case 1:
+            return .json(jsonText: reader.readString())
+        default:
+            fatalError("Invalid XybridDecisionContent tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case let .text(value):
+            writer.writeU32(0)
+            writer.writeString(value)
+        case let .json(jsonText):
+            writer.writeU32(1)
+            writer.writeString(jsonText)
+        }
+    }
+}
+
+/// How a question is put to the model.
+public enum XybridDecisionInstructions: Hashable, Equatable, Sendable {
+    case content(value: XybridDecisionContent)
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionInstructions {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .content(value: XybridDecisionContent.decode(from: &reader))
+        default:
+            fatalError("Invalid XybridDecisionInstructions tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case let .content(value):
+            writer.writeU32(0)
+            value.encode(to: &writer)
+        }
+    }
+}
+
+/// The question types.
+public enum XybridDecisionQuestionKind: Hashable, Equatable, Sendable {
+    case choice(options: [XybridDecisionOption])
+    case yesNo(yes: XybridDecisionContent?, no: XybridDecisionContent?)
+    case score(levels: [XybridDecisionLevel])
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionQuestionKind {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .choice(options: reader.readArray { reader in XybridDecisionOption.decode(from: &reader) })
+        case 1:
+            return .yesNo(yes: reader.readOptional { reader in XybridDecisionContent.decode(from: &reader) }, no: reader.readOptional { reader in XybridDecisionContent.decode(from: &reader) })
+        case 2:
+            return .score(levels: reader.readArray { reader in XybridDecisionLevel.decode(from: &reader) })
+        default:
+            fatalError("Invalid XybridDecisionQuestionKind tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case let .choice(options):
+            writer.writeU32(0)
+            writer.writeArray(options) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        case let .yesNo(yes, no):
+            writer.writeU32(1)
+            writer.writeOptional(yes) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+            writer.writeOptional(no) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        case let .score(levels):
+            writer.writeU32(2)
+            writer.writeArray(levels) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        }
+    }
+}
+
+/// Where a scored key came from.
+public enum XybridDecisionOrigin: Int32, Hashable, Sendable, CaseIterable {
+    case caller = 0
+    case fixed = 1
+
+    @usableFromInline init(fromC c: Int32) {
+        self = XybridDecisionOrigin(rawValue: c)!
+    }
+
+    @usableFromInline var cValue: Int32 {
+        rawValue
+    }
+}
+
+/// Which statistic a score answer reports.
+public enum XybridScoreStatistic: Int32, Hashable, Sendable, CaseIterable {
+    case median = 0
+    case expected = 1
+
+    @usableFromInline init(fromC c: Int32) {
+        self = XybridScoreStatistic(rawValue: c)!
+    }
+
+    @usableFromInline var cValue: Int32 {
+        rawValue
+    }
+}
+
+/// The answer's value.
+public enum XybridDecisionValue: Hashable, Equatable, Sendable {
+    case choice(key: String)
+    case yesNo(pYes: Double)
+    case score(value: Double, statistic: XybridScoreStatistic)
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionValue {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .choice(key: reader.readString())
+        case 1:
+            return .yesNo(pYes: reader.readF64())
+        case 2:
+            return .score(value: reader.readF64(), statistic: XybridScoreStatistic(rawValue: reader.readI32())!)
+        default:
+            fatalError("Invalid XybridDecisionValue tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case let .choice(key):
+            writer.writeU32(0)
+            writer.writeString(key)
+        case let .yesNo(pYes):
+            writer.writeU32(1)
+            writer.writeF64(pYes)
+        case let .score(value, statistic):
+            writer.writeU32(2)
+            writer.writeF64(value)
+            writer.writeI32(statistic.rawValue)
+        }
+    }
+}
+
+/// Probe: a recursive JSON tree, the alternative to carrying JSON as text.
+public enum XybridProbeJson: Hashable, Equatable, Sendable {
+    case null
+    case bool(value: Bool)
+    case int(value: Int64)
+    case uint(value: UInt64)
+    case float(value: Double)
+    case text(value: String)
+    case list(items: [XybridProbeJson])
+    case map(entries: [XybridProbeJsonEntry])
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridProbeJson {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .null
+        case 1:
+            return .bool(value: reader.readBool())
+        case 2:
+            return .int(value: reader.readI64())
+        case 3:
+            return .uint(value: reader.readU64())
+        case 4:
+            return .float(value: reader.readF64())
+        case 5:
+            return .text(value: reader.readString())
+        case 6:
+            return .list(items: reader.readArray { reader in XybridProbeJson.decode(from: &reader) })
+        case 7:
+            return .map(entries: reader.readArray { reader in XybridProbeJsonEntry.decode(from: &reader) })
+        default:
+            fatalError("Invalid XybridProbeJson tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case .null:
+            writer.writeU32(0)
+        case let .bool(value):
+            writer.writeU32(1)
+            writer.writeBool(value)
+        case let .int(value):
+            writer.writeU32(2)
+            writer.writeI64(value)
+        case let .uint(value):
+            writer.writeU32(3)
+            writer.writeU64(value)
+        case let .float(value):
+            writer.writeU32(4)
+            writer.writeF64(value)
+        case let .text(value):
+            writer.writeU32(5)
+            writer.writeString(value)
+        case let .list(items):
+            writer.writeU32(6)
+            writer.writeArray(items) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        case let .map(entries):
+            writer.writeU32(7)
+            writer.writeArray(entries) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        }
+    }
+}
+
+/// Probe: records directly inside data-enum variants — how
+/// `XybridEnvelopeKind` would carry a request and a result.
+public enum XybridProbePayload: Hashable, Equatable, Sendable {
+    case decisionRequest(request: XybridDecisionRequest)
+    case decisionResult(decisions: XybridDecisions)
+    case nothing
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridProbePayload {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .decisionRequest(request: XybridDecisionRequest.decode(from: &reader))
+        case 1:
+            return .decisionResult(decisions: XybridDecisions.decode(from: &reader))
+        case 2:
+            return .nothing
+        default:
+            fatalError("Invalid XybridProbePayload tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case let .decisionRequest(request):
+            writer.writeU32(0)
+            request.encode(to: &writer)
+        case let .decisionResult(decisions):
+            writer.writeU32(1)
+            decisions.encode(to: &writer)
+        case .nothing:
+            writer.writeU32(2)
         }
     }
 }
@@ -2550,6 +3063,154 @@ public func telemetryFlush() {
 /// Shut down the telemetry exporter. Idempotent.
 public func telemetryShutdown() {
     boltffi_function_xybrid_bolt_telemetry_shutdown()
+}
+
+/// Spike: FFI request -> facade -> IR (JSON parsed, nulls normalized,
+/// structure checked) -> facade -> FFI.
+public func decisionSpikeEchoRequest(request: XybridDecisionRequest) throws -> XybridDecisionRequest {
+    let boltffiRequestBytes = boltffiEncode { boltffiRequestWriter in request.encode(to: &boltffiRequestWriter) }
+    return try boltffiRequestBytes.withUnsafeBufferPointer { boltffiRequestBuffer in
+        var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+        let boltffiError = boltffi_function_xybrid_bolt_decision_spike_echo_request(boltffiRequestBuffer.baseAddress!, UInt(boltffiRequestBuffer.count), &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridDecisionRequest.decode(from: &boltffiReader) }
+    }
+}
+
+/// Spike: what the Rust IR saw, one line per item in request order, so a
+/// foreign test can check order against what it sent rather than against a
+/// codec that might be wrong symmetrically.
+public func decisionSpikeRequestOutline(request: XybridDecisionRequest) throws -> [String] {
+    let boltffiRequestBytes = boltffiEncode { boltffiRequestWriter in request.encode(to: &boltffiRequestWriter) }
+    return try boltffiRequestBytes.withUnsafeBufferPointer { boltffiRequestBuffer in
+        var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+        let boltffiError = boltffi_function_xybrid_bolt_decision_spike_request_outline(boltffiRequestBuffer.baseAddress!, UInt(boltffiRequestBuffer.count), &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readArray { boltffiReader in boltffiReader.readString() } }
+    }
+}
+
+/// Spike: run the stub engine (d1 probability math on synthetic scores) and
+/// return the result through the FFI records.
+public func decisionSpikeDecide(request: XybridDecisionRequest) throws -> XybridDecisions {
+    let boltffiRequestBytes = boltffiEncode { boltffiRequestWriter in request.encode(to: &boltffiRequestWriter) }
+    return try boltffiRequestBytes.withUnsafeBufferPointer { boltffiRequestBuffer in
+        var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+        let boltffiError = boltffi_function_xybrid_bolt_decision_spike_decide(boltffiRequestBuffer.baseAddress!, UInt(boltffiRequestBuffer.count), &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridDecisions.decode(from: &boltffiReader) }
+    }
+}
+
+/// Spike: the bit patterns of every float [`decision_spike_decide`] returns,
+/// as `a<i>.s<j>.raw=<hex8>`, `a<i>.s<j>.p=<hex16>`, `a<i>.value=…`,
+/// `a<i>.confidence=…` lines, so a foreign test can check what it decoded.
+public func decisionSpikeDecideBits(request: XybridDecisionRequest) throws -> [String] {
+    let boltffiRequestBytes = boltffiEncode { boltffiRequestWriter in request.encode(to: &boltffiRequestWriter) }
+    return try boltffiRequestBytes.withUnsafeBufferPointer { boltffiRequestBuffer in
+        var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+        let boltffiError = boltffi_function_xybrid_bolt_decision_spike_decide_bits(boltffiRequestBuffer.baseAddress!, UInt(boltffiRequestBuffer.count), &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readArray { boltffiReader in boltffiReader.readString() } }
+    }
+}
+
+/// Spike: compare a result the foreign side re-encoded with the stub
+/// engine's own output, bit for bit. `None` means identical; otherwise the
+/// path of the first difference.
+public func decisionSpikeVerifyDecisions(request: XybridDecisionRequest, decisions: XybridDecisions) throws -> String? {
+    let boltffiRequestBytes = boltffiEncode { boltffiRequestWriter in request.encode(to: &boltffiRequestWriter) }
+    return try boltffiRequestBytes.withUnsafeBufferPointer { boltffiRequestBuffer in
+        let boltffiDecisionsBytes = boltffiEncode { boltffiDecisionsWriter in decisions.encode(to: &boltffiDecisionsWriter) }
+        return try boltffiDecisionsBytes.withUnsafeBufferPointer { boltffiDecisionsBuffer in
+            var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+            let boltffiError = boltffi_function_xybrid_bolt_decision_spike_verify_decisions(
+                boltffiRequestBuffer.baseAddress!,
+                UInt(boltffiRequestBuffer.count),
+                boltffiDecisionsBuffer.baseAddress!,
+                UInt(boltffiDecisionsBuffer.count),
+                &boltffiResult
+            )
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+            defer { boltffi_free_buf(boltffiResult) }
+            return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in boltffiReader.readString() } }
+        }
+    }
+}
+
+/// Probe echo for [`XybridProbeOptionalList`].
+public func decisionSpikeProbeOptionalList(probe: XybridProbeOptionalList) -> XybridProbeOptionalList {
+    let boltffiProbeBytes = boltffiEncode { boltffiProbeWriter in probe.encode(to: &boltffiProbeWriter) }
+    return boltffiProbeBytes.withUnsafeBufferPointer { boltffiProbeBuffer in
+        let boltffiResult = boltffi_function_xybrid_bolt_decision_spike_probe_optional_list(boltffiProbeBuffer.baseAddress!, UInt(boltffiProbeBuffer.count))
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridProbeOptionalList.decode(from: &boltffiReader) }
+    }
+}
+
+/// Probe echo for [`XybridProbeNesting`]; floats come back bit for bit.
+public func decisionSpikeProbeNesting(probe: XybridProbeNesting) -> XybridProbeNesting {
+    let boltffiProbeBytes = boltffiEncode { boltffiProbeWriter in probe.encode(to: &boltffiProbeWriter) }
+    return boltffiProbeBytes.withUnsafeBufferPointer { boltffiProbeBuffer in
+        let boltffiResult = boltffi_function_xybrid_bolt_decision_spike_probe_nesting(boltffiProbeBuffer.baseAddress!, UInt(boltffiProbeBuffer.count))
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridProbeNesting.decode(from: &boltffiReader) }
+    }
+}
+
+/// Probe: parse JSON text with the order-preserving parser and return it as
+/// a [`XybridProbeJson`] tree.
+public func decisionSpikeProbeJson(jsonText: String) throws -> XybridProbeJson {
+    let boltffiJsonTextBytes = boltffiEncode { boltffiJsonTextWriter in boltffiJsonTextWriter.writeString(jsonText) }
+    return try boltffiJsonTextBytes.withUnsafeBufferPointer { boltffiJsonTextBuffer in
+        var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+        let boltffiError = boltffi_function_xybrid_bolt_decision_spike_probe_json(boltffiJsonTextBuffer.baseAddress!, UInt(boltffiJsonTextBuffer.count), &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridProbeJson.decode(from: &boltffiReader) }
+    }
+}
+
+/// Probe echo for [`XybridProbeJson`].
+public func decisionSpikeProbeJsonEcho(value: XybridProbeJson) -> XybridProbeJson {
+    let boltffiValueBytes = boltffiEncode { boltffiValueWriter in value.encode(to: &boltffiValueWriter) }
+    return boltffiValueBytes.withUnsafeBufferPointer { boltffiValueBuffer in
+        let boltffiResult = boltffi_function_xybrid_bolt_decision_spike_probe_json_echo(boltffiValueBuffer.baseAddress!, UInt(boltffiValueBuffer.count))
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridProbeJson.decode(from: &boltffiReader) }
+    }
+}
+
+/// Probe echo for [`XybridProbePayload`].
+public func decisionSpikeProbePayload(payload: XybridProbePayload) -> XybridProbePayload {
+    let boltffiPayloadBytes = boltffiEncode { boltffiPayloadWriter in payload.encode(to: &boltffiPayloadWriter) }
+    return boltffiPayloadBytes.withUnsafeBufferPointer { boltffiPayloadBuffer in
+        let boltffiResult = boltffi_function_xybrid_bolt_decision_spike_probe_payload(boltffiPayloadBuffer.baseAddress!, UInt(boltffiPayloadBuffer.count))
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridProbePayload.decode(from: &boltffiReader) }
+    }
 }
 
 

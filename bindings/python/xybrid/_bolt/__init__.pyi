@@ -342,6 +342,102 @@ class XybridPartialResult:
 
 
 
+@dataclass(frozen=True, slots=True)
+class XybridDecisionOption:
+    """One choice option. The key may affect inference."""
+    key: str
+    description: XybridDecisionContent | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionLevel:
+    """One score level; level `i` has key `"i"`."""
+    description: XybridDecisionContent | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestion:
+    """One question."""
+    id: str
+    instructions: XybridDecisionInstructions | None
+    kind: XybridDecisionQuestionKind
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionRequest:
+    """A state and the questions asked about it, in order."""
+    state: XybridDecisionContent | None
+    questions: list[XybridDecisionQuestion]
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionScore:
+    """One key of an answer's distribution."""
+    key: str
+    raw_score: float
+    """`-inf` is valid when another key is finite."""
+    probability: float
+    origin: XybridDecisionOrigin
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionAnswer:
+    """One question's answer."""
+    question_id: str
+    distribution: list[XybridDecisionScore]
+    value: XybridDecisionValue
+    confidence: float | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionUsage:
+    """Content-free work counters."""
+    passes: int
+    evaluated_tokens: int
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisions:
+    """Every answer, in request order."""
+    answers: list[XybridDecisionAnswer]
+    usage: XybridDecisionUsage
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbeOptionalList:
+    """Probe: `Vec<Option<data enum>>` and `Vec<Option<String>>`, the shape a
+    bare `levels: Vec<Option<DecisionContent>>` would need.
+    """
+    levels: list[XybridDecisionContent | None]
+    labels: list[str | None]
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbeNesting:
+    """Probe: nested lists (per-pass score rows) and an optional record."""
+    raw_scores: list[list[float]]
+    probabilities: list[list[float]]
+    usage: XybridDecisionUsage | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbeJsonEntry:
+    """One entry of a [`XybridProbeJson::Map`], in document order."""
+    key: str
+    value: XybridProbeJson
+
+
+
 
 class XybridError:
     """Errors surfaced across the FFI boundary. Variants mirror
@@ -597,6 +693,171 @@ class XybridVadModeEnabled(XybridVadMode):
     `model.onnx`.
     """
     model_dir: str
+
+
+
+
+class XybridDecisionContent:
+    """Text, or a non-string JSON value carried as JSON text.
+
+    The JSON text is parsed in Rust by the order-preserving parser, so object
+    order and `1` vs `1.0` survive; never build it from a host dictionary.
+    """
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionContentText(XybridDecisionContent):
+    """Named `value`, not `text`: C# rejects a positional record member that
+    shares its variant's name (CS8866).
+    """
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionContentJson(XybridDecisionContent):
+    json_text: str
+
+
+
+
+class XybridDecisionInstructions:
+    """How a question is put to the model."""
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionInstructionsContent(XybridDecisionInstructions):
+    value: XybridDecisionContent
+
+
+
+
+class XybridDecisionQuestionKind:
+    """The question types."""
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestionKindChoice(XybridDecisionQuestionKind):
+    options: list[XybridDecisionOption]
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestionKindYesNo(XybridDecisionQuestionKind):
+    yes: XybridDecisionContent | None
+    no: XybridDecisionContent | None
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestionKindScore(XybridDecisionQuestionKind):
+    levels: list[XybridDecisionLevel]
+
+
+
+
+class XybridDecisionOrigin(IntEnum):
+    """Where a scored key came from."""
+    CALLER = 0
+    FIXED = 1
+
+
+class XybridScoreStatistic(IntEnum):
+    """Which statistic a score answer reports."""
+    MEDIAN = 0
+    EXPECTED = 1
+
+
+class XybridDecisionValue:
+    """The answer's value."""
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionValueChoice(XybridDecisionValue):
+    key: str
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionValueYesNo(XybridDecisionValue):
+    p_yes: float
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionValueScore(XybridDecisionValue):
+    value: float
+    statistic: XybridScoreStatistic
+
+
+
+
+class XybridProbeJson:
+    """Probe: a recursive JSON tree, the alternative to carrying JSON as text."""
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbeJsonNull(XybridProbeJson):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbeJsonBool(XybridProbeJson):
+    value: bool
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbeJsonInt(XybridProbeJson):
+    value: int
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbeJsonUint(XybridProbeJson):
+    value: int
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbeJsonFloat(XybridProbeJson):
+    value: float
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbeJsonText(XybridProbeJson):
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbeJsonList(XybridProbeJson):
+    items: list[XybridProbeJson]
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbeJsonMap(XybridProbeJson):
+    entries: list[XybridProbeJsonEntry]
+
+
+
+
+class XybridProbePayload:
+    """Probe: records directly inside data-enum variants — how
+    `XybridEnvelopeKind` would carry a request and a result.
+    """
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbePayloadDecisionRequest(XybridProbePayload):
+    request: XybridDecisionRequest
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbePayloadDecisionResult(XybridProbePayload):
+    decisions: XybridDecisions
+
+
+@dataclass(frozen=True, slots=True)
+class XybridProbePayloadNothing(XybridProbePayload):
+    pass
 
 
 
@@ -1134,3 +1395,38 @@ def telemetry_flush() -> None:
     """Flush pending telemetry events. Safe before init / after shutdown."""
 def telemetry_shutdown() -> None:
     """Shut down the telemetry exporter. Idempotent."""
+def decision_spike_echo_request(request: XybridDecisionRequest) -> XybridDecisionRequest:
+    """Spike: FFI request -> facade -> IR (JSON parsed, nulls normalized,
+    structure checked) -> facade -> FFI.
+    """
+def decision_spike_request_outline(request: XybridDecisionRequest) -> list[str]:
+    """Spike: what the Rust IR saw, one line per item in request order, so a
+    foreign test can check order against what it sent rather than against a
+    codec that might be wrong symmetrically.
+    """
+def decision_spike_decide(request: XybridDecisionRequest) -> XybridDecisions:
+    """Spike: run the stub engine (d1 probability math on synthetic scores) and
+    return the result through the FFI records.
+    """
+def decision_spike_decide_bits(request: XybridDecisionRequest) -> list[str]:
+    """Spike: the bit patterns of every float [`decision_spike_decide`] returns,
+    as `a<i>.s<j>.raw=<hex8>`, `a<i>.s<j>.p=<hex16>`, `a<i>.value=…`,
+    `a<i>.confidence=…` lines, so a foreign test can check what it decoded.
+    """
+def decision_spike_verify_decisions(request: XybridDecisionRequest, decisions: XybridDecisions) -> str | None:
+    """Spike: compare a result the foreign side re-encoded with the stub
+    engine's own output, bit for bit. `None` means identical; otherwise the
+    path of the first difference.
+    """
+def decision_spike_probe_optional_list(probe: XybridProbeOptionalList) -> XybridProbeOptionalList:
+    """Probe echo for [`XybridProbeOptionalList`]."""
+def decision_spike_probe_nesting(probe: XybridProbeNesting) -> XybridProbeNesting:
+    """Probe echo for [`XybridProbeNesting`]; floats come back bit for bit."""
+def decision_spike_probe_json(json_text: str) -> XybridProbeJson:
+    """Probe: parse JSON text with the order-preserving parser and return it as
+    a [`XybridProbeJson`] tree.
+    """
+def decision_spike_probe_json_echo(value: XybridProbeJson) -> XybridProbeJson:
+    """Probe echo for [`XybridProbeJson`]."""
+def decision_spike_probe_payload(payload: XybridProbePayload) -> XybridProbePayload:
+    """Probe echo for [`XybridProbePayload`]."""

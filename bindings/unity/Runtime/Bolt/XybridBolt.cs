@@ -1094,6 +1094,312 @@ namespace XybridBolt
             => NativeMethods.NativeTelemetryShutdown();
 
         /// <summary>
+        /// Spike: FFI request -&gt; facade -&gt; IR (JSON parsed, nulls normalized,
+        /// structure checked) -&gt; facade -&gt; FFI.
+        /// </summary>
+        public static global::XybridBolt.XybridDecisionRequest DecisionSpikeEchoRequest(global::XybridBolt.XybridDecisionRequest request)
+        {
+            WireWriter requestWriter = new WireWriter();
+            {
+                request.Encode(requestWriter);
+            }
+            byte[] requestBytes = requestWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeDecisionSpikeEchoRequest(requestBytes, (nuint)requestBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridDecisionRequest.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Spike: what the Rust IR saw, one line per item in request order, so a
+        /// foreign test can check order against what it sent rather than against a
+        /// codec that might be wrong symmetrically.
+        /// </summary>
+        public static string[] DecisionSpikeRequestOutline(global::XybridBolt.XybridDecisionRequest request)
+        {
+            WireWriter requestWriter = new WireWriter();
+            {
+                request.Encode(requestWriter);
+            }
+            byte[] requestBytes = requestWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeDecisionSpikeRequestOutline(requestBytes, (nuint)requestBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadArray(reader => resultReader.ReadString());
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Spike: run the stub engine (d1 probability math on synthetic scores) and
+        /// return the result through the FFI records.
+        /// </summary>
+        public static global::XybridBolt.XybridDecisions DecisionSpikeDecide(global::XybridBolt.XybridDecisionRequest request)
+        {
+            WireWriter requestWriter = new WireWriter();
+            {
+                request.Encode(requestWriter);
+            }
+            byte[] requestBytes = requestWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeDecisionSpikeDecide(requestBytes, (nuint)requestBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridDecisions.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Spike: the bit patterns of every float [`decision_spike_decide`] returns,
+        /// as `a&lt;i&gt;.s&lt;j&gt;.raw=&lt;hex8&gt;`, `a&lt;i&gt;.s&lt;j&gt;.p=&lt;hex16&gt;`, `a&lt;i&gt;.value=…`,
+        /// `a&lt;i&gt;.confidence=…` lines, so a foreign test can check what it decoded.
+        /// </summary>
+        public static string[] DecisionSpikeDecideBits(global::XybridBolt.XybridDecisionRequest request)
+        {
+            WireWriter requestWriter = new WireWriter();
+            {
+                request.Encode(requestWriter);
+            }
+            byte[] requestBytes = requestWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeDecisionSpikeDecideBits(requestBytes, (nuint)requestBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadArray(reader => resultReader.ReadString());
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Spike: compare a result the foreign side re-encoded with the stub
+        /// engine's own output, bit for bit. `None` means identical; otherwise the
+        /// path of the first difference.
+        /// </summary>
+        public static string? DecisionSpikeVerifyDecisions(global::XybridBolt.XybridDecisionRequest request, global::XybridBolt.XybridDecisions decisions)
+        {
+            WireWriter requestWriter = new WireWriter();
+            {
+                request.Encode(requestWriter);
+            }
+            byte[] requestBytes = requestWriter.ToArray();
+            WireWriter decisionsWriter = new WireWriter();
+            {
+                decisions.Encode(decisionsWriter);
+            }
+            byte[] decisionsBytes = decisionsWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeDecisionSpikeVerifyDecisions(requestBytes, (nuint)requestBytes.Length, decisionsBytes, (nuint)decisionsBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadU8() == 0 ? default(string?) : resultReader.ReadString();
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Probe echo for [`XybridProbeOptionalList`].
+        /// </summary>
+        public static global::XybridBolt.XybridProbeOptionalList DecisionSpikeProbeOptionalList(global::XybridBolt.XybridProbeOptionalList probe)
+        {
+            WireWriter probeWriter = new WireWriter();
+            {
+                probe.Encode(probeWriter);
+            }
+            byte[] probeBytes = probeWriter.ToArray();
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeDecisionSpikeProbeOptionalList(probeBytes, (nuint)probeBytes.Length);
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridProbeOptionalList.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Probe echo for [`XybridProbeNesting`]; floats come back bit for bit.
+        /// </summary>
+        public static global::XybridBolt.XybridProbeNesting DecisionSpikeProbeNesting(global::XybridBolt.XybridProbeNesting probe)
+        {
+            WireWriter probeWriter = new WireWriter();
+            {
+                probe.Encode(probeWriter);
+            }
+            byte[] probeBytes = probeWriter.ToArray();
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeDecisionSpikeProbeNesting(probeBytes, (nuint)probeBytes.Length);
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridProbeNesting.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Probe: parse JSON text with the order-preserving parser and return it as
+        /// a [`XybridProbeJson`] tree.
+        /// </summary>
+        public static global::XybridBolt.XybridProbeJson DecisionSpikeProbeJson(string jsonText)
+        {
+            WireWriter jsonTextWriter = new WireWriter();
+            {
+                jsonTextWriter.WriteString(jsonText);
+            }
+            byte[] jsonTextBytes = jsonTextWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeDecisionSpikeProbeJson(jsonTextBytes, (nuint)jsonTextBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridProbeJson.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Probe echo for [`XybridProbeJson`].
+        /// </summary>
+        public static global::XybridBolt.XybridProbeJson DecisionSpikeProbeJsonEcho(global::XybridBolt.XybridProbeJson value)
+        {
+            WireWriter valueWriter = new WireWriter();
+            {
+                value.Encode(valueWriter);
+            }
+            byte[] valueBytes = valueWriter.ToArray();
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeDecisionSpikeProbeJsonEcho(valueBytes, (nuint)valueBytes.Length);
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridProbeJson.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Probe echo for [`XybridProbePayload`].
+        /// </summary>
+        public static global::XybridBolt.XybridProbePayload DecisionSpikeProbePayload(global::XybridBolt.XybridProbePayload payload)
+        {
+            WireWriter payloadWriter = new WireWriter();
+            {
+                payload.Encode(payloadWriter);
+            }
+            byte[] payloadBytes = payloadWriter.ToArray();
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeDecisionSpikeProbePayload(payloadBytes, (nuint)payloadBytes.Length);
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridProbePayload.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
         /// Pushed progress updates, closing once the download is terminal.
         ///
         /// Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
@@ -1506,6 +1812,36 @@ namespace XybridBolt
 
         [global::System.Runtime.InteropServices.DllImport(LibName, EntryPoint = "boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_free")]
         internal static extern void NativeXybridStreamingSessionPartialsFree(ulong subscription);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_decision_spike_decide")]
+        internal static extern FfiBuf NativeDecisionSpikeDecide([In] byte[] requestBytes, nuint requestLength, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_decision_spike_decide_bits")]
+        internal static extern FfiBuf NativeDecisionSpikeDecideBits([In] byte[] requestBytes, nuint requestLength, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_decision_spike_echo_request")]
+        internal static extern FfiBuf NativeDecisionSpikeEchoRequest([In] byte[] requestBytes, nuint requestLength, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_decision_spike_probe_json")]
+        internal static extern FfiBuf NativeDecisionSpikeProbeJson([In] byte[] jsonTextBytes, nuint jsonTextLength, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_decision_spike_probe_json_echo")]
+        internal static extern FfiBuf NativeDecisionSpikeProbeJsonEcho([In] byte[] valueBytes, nuint valueLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_decision_spike_probe_nesting")]
+        internal static extern FfiBuf NativeDecisionSpikeProbeNesting([In] byte[] probeBytes, nuint probeLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_decision_spike_probe_optional_list")]
+        internal static extern FfiBuf NativeDecisionSpikeProbeOptionalList([In] byte[] probeBytes, nuint probeLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_decision_spike_probe_payload")]
+        internal static extern FfiBuf NativeDecisionSpikeProbePayload([In] byte[] payloadBytes, nuint payloadLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_decision_spike_request_outline")]
+        internal static extern FfiBuf NativeDecisionSpikeRequestOutline([In] byte[] requestBytes, nuint requestLength, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_decision_spike_verify_decisions")]
+        internal static extern FfiBuf NativeDecisionSpikeVerifyDecisions([In] byte[] requestBytes, nuint requestLength, [In] byte[] decisionsBytes, nuint decisionsLength, out FfiBuf boltffiResultBuffer);
 
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_has_api_key")]
         [return: MarshalAs(UnmanagedType.I1)]

@@ -110,10 +110,12 @@ RECORD_STRUCT_RE = re.compile(
 # XybridToolResult), plus 2 for the live ASR session (XybridStreamingConfig /
 # XybridPartialResult), plus 2 for the pipeline result (XybridPipelineResult /
 # XybridStageResult), plus 2 for model cache management (XybridCacheEntry /
-# XybridCacheStatus).
+# XybridCacheStatus), plus 8 for the P4 decision spike (XybridDecisionOption /
+# Level / Question / Request / Score / Answer / Usage / XybridDecisions) and 3
+# for its shape probes (XybridProbeOptionalList / Nesting / JsonEntry).
 # Bump this deliberately: the count is a tripwire for unreviewed boltffi output
 # drift, not a value to auto-sync.
-EXPECTED_RECORD_STRUCTS = 21
+EXPECTED_RECORD_STRUCTS = 32
 
 
 # --- Transform (g): Unsafe.SizeOf<T>() -> Marshal.SizeOf<T>(). boltffi's wire
