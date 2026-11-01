@@ -8,6 +8,7 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api/context.dart';
+import 'api/decision.dart';
 import 'api/device.dart';
 import 'api/envelope.dart';
 import 'api/model.dart';
@@ -82,7 +83,7 @@ class XybridRustLib extends BaseEntrypoint<XybridRustLibApi,
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -231353907;
+  int get rustContentHash => 744271639;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -351,6 +352,33 @@ abstract class XybridRustLibApi extends BaseApi {
 
   void crateApiSdkClientXybridSdkClientSetSpeculativeCloud(
       {required bool enabled});
+
+  FfiDecisions crateApiDecisionDecisionSpikeDecide(
+      {required FfiDecisionRequest request});
+
+  List<String> crateApiDecisionDecisionSpikeDecideBits(
+      {required FfiDecisionRequest request});
+
+  FfiDecisionRequest crateApiDecisionDecisionSpikeEchoRequest(
+      {required FfiDecisionRequest request});
+
+  FfiProbeJson crateApiDecisionDecisionSpikeProbeJson(
+      {required String jsonText});
+
+  FfiProbeJson crateApiDecisionDecisionSpikeProbeJsonEcho(
+      {required FfiProbeJson value});
+
+  FfiProbeNesting crateApiDecisionDecisionSpikeProbeNesting(
+      {required FfiProbeNesting probe});
+
+  FfiProbeOptionalList crateApiDecisionDecisionSpikeProbeOptionalList(
+      {required FfiProbeOptionalList probe});
+
+  List<String> crateApiDecisionDecisionSpikeRequestOutline(
+      {required FfiDecisionRequest request});
+
+  String? crateApiDecisionDecisionSpikeVerifyDecisions(
+      {required FfiDecisionRequest request, required FfiDecisions decisions});
 
   FfiGenerationConfig crateApiModelFfiGenerationConfigCreative();
 
@@ -2842,11 +2870,237 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
           );
 
   @override
+  FfiDecisions crateApiDecisionDecisionSpikeDecide(
+      {required FfiDecisionRequest request}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_box_autoadd_ffi_decision_request(request, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 88)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_ffi_decisions,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateApiDecisionDecisionSpikeDecideConstMeta,
+      argValues: [request],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDecisionDecisionSpikeDecideConstMeta =>
+      const TaskConstMeta(
+        debugName: "decision_spike_decide",
+        argNames: ["request"],
+      );
+
+  @override
+  List<String> crateApiDecisionDecisionSpikeDecideBits(
+      {required FfiDecisionRequest request}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_box_autoadd_ffi_decision_request(request, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 89)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateApiDecisionDecisionSpikeDecideBitsConstMeta,
+      argValues: [request],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDecisionDecisionSpikeDecideBitsConstMeta =>
+      const TaskConstMeta(
+        debugName: "decision_spike_decide_bits",
+        argNames: ["request"],
+      );
+
+  @override
+  FfiDecisionRequest crateApiDecisionDecisionSpikeEchoRequest(
+      {required FfiDecisionRequest request}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_box_autoadd_ffi_decision_request(request, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 90)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_ffi_decision_request,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateApiDecisionDecisionSpikeEchoRequestConstMeta,
+      argValues: [request],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDecisionDecisionSpikeEchoRequestConstMeta =>
+      const TaskConstMeta(
+        debugName: "decision_spike_echo_request",
+        argNames: ["request"],
+      );
+
+  @override
+  FfiProbeJson crateApiDecisionDecisionSpikeProbeJson(
+      {required String jsonText}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(jsonText, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 91)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_ffi_probe_json,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateApiDecisionDecisionSpikeProbeJsonConstMeta,
+      argValues: [jsonText],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDecisionDecisionSpikeProbeJsonConstMeta =>
+      const TaskConstMeta(
+        debugName: "decision_spike_probe_json",
+        argNames: ["jsonText"],
+      );
+
+  @override
+  FfiProbeJson crateApiDecisionDecisionSpikeProbeJsonEcho(
+      {required FfiProbeJson value}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_box_autoadd_ffi_probe_json(value, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 92)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_ffi_probe_json,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiDecisionDecisionSpikeProbeJsonEchoConstMeta,
+      argValues: [value],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDecisionDecisionSpikeProbeJsonEchoConstMeta =>
+      const TaskConstMeta(
+        debugName: "decision_spike_probe_json_echo",
+        argNames: ["value"],
+      );
+
+  @override
+  FfiProbeNesting crateApiDecisionDecisionSpikeProbeNesting(
+      {required FfiProbeNesting probe}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_box_autoadd_ffi_probe_nesting(probe, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 93)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_ffi_probe_nesting,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiDecisionDecisionSpikeProbeNestingConstMeta,
+      argValues: [probe],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDecisionDecisionSpikeProbeNestingConstMeta =>
+      const TaskConstMeta(
+        debugName: "decision_spike_probe_nesting",
+        argNames: ["probe"],
+      );
+
+  @override
+  FfiProbeOptionalList crateApiDecisionDecisionSpikeProbeOptionalList(
+      {required FfiProbeOptionalList probe}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_box_autoadd_ffi_probe_optional_list(probe, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 94)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_ffi_probe_optional_list,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiDecisionDecisionSpikeProbeOptionalListConstMeta,
+      argValues: [probe],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDecisionDecisionSpikeProbeOptionalListConstMeta =>
+      const TaskConstMeta(
+        debugName: "decision_spike_probe_optional_list",
+        argNames: ["probe"],
+      );
+
+  @override
+  List<String> crateApiDecisionDecisionSpikeRequestOutline(
+      {required FfiDecisionRequest request}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_box_autoadd_ffi_decision_request(request, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 95)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateApiDecisionDecisionSpikeRequestOutlineConstMeta,
+      argValues: [request],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDecisionDecisionSpikeRequestOutlineConstMeta =>
+      const TaskConstMeta(
+        debugName: "decision_spike_request_outline",
+        argNames: ["request"],
+      );
+
+  @override
+  String? crateApiDecisionDecisionSpikeVerifyDecisions(
+      {required FfiDecisionRequest request, required FfiDecisions decisions}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_box_autoadd_ffi_decision_request(request, serializer);
+        sse_encode_box_autoadd_ffi_decisions(decisions, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 96)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_opt_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateApiDecisionDecisionSpikeVerifyDecisionsConstMeta,
+      argValues: [request, decisions],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDecisionDecisionSpikeVerifyDecisionsConstMeta =>
+      const TaskConstMeta(
+        debugName: "decision_spike_verify_decisions",
+        argNames: ["request", "decisions"],
+      );
+
+  @override
   FfiGenerationConfig crateApiModelFfiGenerationConfigCreative() {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 88)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 97)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_generation_config,
@@ -2869,7 +3123,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 89)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 98)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_generation_config,
@@ -2893,7 +3147,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 90, port: port_);
+            funcId: 99, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2916,7 +3170,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(schemaJson, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 91)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 100)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3283,6 +3537,37 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  FfiDecisionContent dco_decode_box_autoadd_ffi_decision_content(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_ffi_decision_content(raw);
+  }
+
+  @protected
+  FfiDecisionInstructions dco_decode_box_autoadd_ffi_decision_instructions(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_ffi_decision_instructions(raw);
+  }
+
+  @protected
+  FfiDecisionRequest dco_decode_box_autoadd_ffi_decision_request(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_ffi_decision_request(raw);
+  }
+
+  @protected
+  FfiDecisionUsage dco_decode_box_autoadd_ffi_decision_usage(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_ffi_decision_usage(raw);
+  }
+
+  @protected
+  FfiDecisions dco_decode_box_autoadd_ffi_decisions(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_ffi_decisions(raw);
+  }
+
+  @protected
   FfiDownloadStatus dco_decode_box_autoadd_ffi_download_status(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_ffi_download_status(raw);
@@ -3299,6 +3584,25 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiMessageRole dco_decode_box_autoadd_ffi_message_role(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_ffi_message_role(raw);
+  }
+
+  @protected
+  FfiProbeJson dco_decode_box_autoadd_ffi_probe_json(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_ffi_probe_json(raw);
+  }
+
+  @protected
+  FfiProbeNesting dco_decode_box_autoadd_ffi_probe_nesting(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_ffi_probe_nesting(raw);
+  }
+
+  @protected
+  FfiProbeOptionalList dco_decode_box_autoadd_ffi_probe_optional_list(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_ffi_probe_optional_list(raw);
   }
 
   @protected
@@ -3399,6 +3703,187 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       modelCount: dco_decode_u_32(arr[2]),
       extractedModelCount: dco_decode_u_32(arr[3]),
       cacheRoot: dco_decode_String(arr[4]),
+    );
+  }
+
+  @protected
+  FfiDecisionAnswer dco_decode_ffi_decision_answer(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return FfiDecisionAnswer(
+      questionId: dco_decode_String(arr[0]),
+      distribution: dco_decode_list_ffi_decision_score(arr[1]),
+      value: dco_decode_ffi_decision_value(arr[2]),
+      confidence: dco_decode_opt_box_autoadd_f_64(arr[3]),
+    );
+  }
+
+  @protected
+  FfiDecisionContent dco_decode_ffi_decision_content(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return FfiDecisionContent_Text(
+          value: dco_decode_String(raw[1]),
+        );
+      case 1:
+        return FfiDecisionContent_Json(
+          jsonText: dco_decode_String(raw[1]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
+  FfiDecisionInstructions dco_decode_ffi_decision_instructions(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return FfiDecisionInstructions_Content(
+          value: dco_decode_box_autoadd_ffi_decision_content(raw[1]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
+  FfiDecisionLevel dco_decode_ffi_decision_level(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    return FfiDecisionLevel(
+      description: dco_decode_opt_box_autoadd_ffi_decision_content(arr[0]),
+    );
+  }
+
+  @protected
+  FfiDecisionOption dco_decode_ffi_decision_option(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FfiDecisionOption(
+      key: dco_decode_String(arr[0]),
+      description: dco_decode_opt_box_autoadd_ffi_decision_content(arr[1]),
+    );
+  }
+
+  @protected
+  FfiDecisionOrigin dco_decode_ffi_decision_origin(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return FfiDecisionOrigin.values[raw as int];
+  }
+
+  @protected
+  FfiDecisionQuestion dco_decode_ffi_decision_question(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FfiDecisionQuestion(
+      id: dco_decode_String(arr[0]),
+      instructions:
+          dco_decode_opt_box_autoadd_ffi_decision_instructions(arr[1]),
+      kind: dco_decode_ffi_decision_question_kind(arr[2]),
+    );
+  }
+
+  @protected
+  FfiDecisionQuestionKind dco_decode_ffi_decision_question_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return FfiDecisionQuestionKind_Choice(
+          options: dco_decode_list_ffi_decision_option(raw[1]),
+        );
+      case 1:
+        return FfiDecisionQuestionKind_YesNo(
+          yes: dco_decode_opt_box_autoadd_ffi_decision_content(raw[1]),
+          no: dco_decode_opt_box_autoadd_ffi_decision_content(raw[2]),
+        );
+      case 2:
+        return FfiDecisionQuestionKind_Score(
+          levels: dco_decode_list_ffi_decision_level(raw[1]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
+  FfiDecisionRequest dco_decode_ffi_decision_request(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FfiDecisionRequest(
+      state: dco_decode_opt_box_autoadd_ffi_decision_content(arr[0]),
+      questions: dco_decode_list_ffi_decision_question(arr[1]),
+    );
+  }
+
+  @protected
+  FfiDecisionScore dco_decode_ffi_decision_score(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return FfiDecisionScore(
+      key: dco_decode_String(arr[0]),
+      rawScore: dco_decode_f_32(arr[1]),
+      probability: dco_decode_f_64(arr[2]),
+      origin: dco_decode_ffi_decision_origin(arr[3]),
+    );
+  }
+
+  @protected
+  FfiDecisionUsage dco_decode_ffi_decision_usage(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FfiDecisionUsage(
+      passes: dco_decode_u_32(arr[0]),
+      evaluatedTokens: dco_decode_u_64(arr[1]),
+    );
+  }
+
+  @protected
+  FfiDecisionValue dco_decode_ffi_decision_value(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return FfiDecisionValue_Choice(
+          key: dco_decode_String(raw[1]),
+        );
+      case 1:
+        return FfiDecisionValue_YesNo(
+          pYes: dco_decode_f_64(raw[1]),
+        );
+      case 2:
+        return FfiDecisionValue_Score(
+          value: dco_decode_f_64(raw[1]),
+          statistic: dco_decode_ffi_score_statistic(raw[2]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
+  FfiDecisions dco_decode_ffi_decisions(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FfiDecisions(
+      answers: dco_decode_list_ffi_decision_answer(arr[0]),
+      usage: dco_decode_ffi_decision_usage(arr[1]),
     );
   }
 
@@ -3532,6 +4017,82 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  FfiProbeJson dco_decode_ffi_probe_json(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return FfiProbeJson_Null();
+      case 1:
+        return FfiProbeJson_Bool(
+          value: dco_decode_bool(raw[1]),
+        );
+      case 2:
+        return FfiProbeJson_Int(
+          value: dco_decode_i_64(raw[1]),
+        );
+      case 3:
+        return FfiProbeJson_Uint(
+          value: dco_decode_u_64(raw[1]),
+        );
+      case 4:
+        return FfiProbeJson_Float(
+          value: dco_decode_f_64(raw[1]),
+        );
+      case 5:
+        return FfiProbeJson_Text(
+          value: dco_decode_String(raw[1]),
+        );
+      case 6:
+        return FfiProbeJson_Seq(
+          items: dco_decode_list_ffi_probe_json(raw[1]),
+        );
+      case 7:
+        return FfiProbeJson_Obj(
+          entries: dco_decode_list_ffi_probe_json_entry(raw[1]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
+  FfiProbeJsonEntry dco_decode_ffi_probe_json_entry(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FfiProbeJsonEntry(
+      key: dco_decode_String(arr[0]),
+      value: dco_decode_ffi_probe_json(arr[1]),
+    );
+  }
+
+  @protected
+  FfiProbeNesting dco_decode_ffi_probe_nesting(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FfiProbeNesting(
+      rawScores: dco_decode_list_list_prim_f_32_strict(arr[0]),
+      probabilities: dco_decode_list_list_prim_f_64_strict(arr[1]),
+      usage: dco_decode_opt_box_autoadd_ffi_decision_usage(arr[2]),
+    );
+  }
+
+  @protected
+  FfiProbeOptionalList dco_decode_ffi_probe_optional_list(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FfiProbeOptionalList(
+      levels: dco_decode_list_opt_box_autoadd_ffi_decision_content(arr[0]),
+      labels: dco_decode_list_opt_String(arr[1]),
+    );
+  }
+
+  @protected
   FfiResourceSnapshot dco_decode_ffi_resource_snapshot(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -3585,6 +4146,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       maxGraceTokens: dco_decode_opt_box_autoadd_u_32(arr[7]),
       frameSessionId: dco_decode_opt_String(arr[8]),
     );
+  }
+
+  @protected
+  FfiScoreStatistic dco_decode_ffi_score_statistic(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return FfiScoreStatistic.values[raw as int];
   }
 
   @protected
@@ -3793,9 +4360,53 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  List<FfiDecisionAnswer> dco_decode_list_ffi_decision_answer(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_ffi_decision_answer).toList();
+  }
+
+  @protected
+  List<FfiDecisionLevel> dco_decode_list_ffi_decision_level(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_ffi_decision_level).toList();
+  }
+
+  @protected
+  List<FfiDecisionOption> dco_decode_list_ffi_decision_option(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_ffi_decision_option).toList();
+  }
+
+  @protected
+  List<FfiDecisionQuestion> dco_decode_list_ffi_decision_question(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_ffi_decision_question)
+        .toList();
+  }
+
+  @protected
+  List<FfiDecisionScore> dco_decode_list_ffi_decision_score(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_ffi_decision_score).toList();
+  }
+
+  @protected
   List<FfiImagePlane> dco_decode_list_ffi_image_plane(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_ffi_image_plane).toList();
+  }
+
+  @protected
+  List<FfiProbeJson> dco_decode_list_ffi_probe_json(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_ffi_probe_json).toList();
+  }
+
+  @protected
+  List<FfiProbeJsonEntry> dco_decode_list_ffi_probe_json_entry(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_ffi_probe_json_entry).toList();
   }
 
   @protected
@@ -3823,6 +4434,37 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  List<Float32List> dco_decode_list_list_prim_f_32_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_list_prim_f_32_strict)
+        .toList();
+  }
+
+  @protected
+  List<Float64List> dco_decode_list_list_prim_f_64_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_list_prim_f_64_strict)
+        .toList();
+  }
+
+  @protected
+  List<String?> dco_decode_list_opt_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_opt_String).toList();
+  }
+
+  @protected
+  List<FfiDecisionContent?>
+      dco_decode_list_opt_box_autoadd_ffi_decision_content(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_opt_box_autoadd_ffi_decision_content)
+        .toList();
+  }
+
+  @protected
   List<double> dco_decode_list_prim_f_32_loose(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as List<double>;
@@ -3832,6 +4474,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   Float32List dco_decode_list_prim_f_32_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as Float32List;
+  }
+
+  @protected
+  Float64List dco_decode_list_prim_f_64_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as Float64List;
   }
 
   @protected
@@ -3879,6 +4527,30 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   double? dco_decode_opt_box_autoadd_f_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_f_64(raw);
+  }
+
+  @protected
+  FfiDecisionContent? dco_decode_opt_box_autoadd_ffi_decision_content(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_ffi_decision_content(raw);
+  }
+
+  @protected
+  FfiDecisionInstructions? dco_decode_opt_box_autoadd_ffi_decision_instructions(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_ffi_decision_instructions(raw);
+  }
+
+  @protected
+  FfiDecisionUsage? dco_decode_opt_box_autoadd_ffi_decision_usage(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_ffi_decision_usage(raw);
   }
 
   @protected
@@ -4283,6 +4955,41 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  FfiDecisionContent sse_decode_box_autoadd_ffi_decision_content(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_ffi_decision_content(deserializer));
+  }
+
+  @protected
+  FfiDecisionInstructions sse_decode_box_autoadd_ffi_decision_instructions(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_ffi_decision_instructions(deserializer));
+  }
+
+  @protected
+  FfiDecisionRequest sse_decode_box_autoadd_ffi_decision_request(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_ffi_decision_request(deserializer));
+  }
+
+  @protected
+  FfiDecisionUsage sse_decode_box_autoadd_ffi_decision_usage(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_ffi_decision_usage(deserializer));
+  }
+
+  @protected
+  FfiDecisions sse_decode_box_autoadd_ffi_decisions(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_ffi_decisions(deserializer));
+  }
+
+  @protected
   FfiDownloadStatus sse_decode_box_autoadd_ffi_download_status(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -4301,6 +5008,27 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_ffi_message_role(deserializer));
+  }
+
+  @protected
+  FfiProbeJson sse_decode_box_autoadd_ffi_probe_json(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_ffi_probe_json(deserializer));
+  }
+
+  @protected
+  FfiProbeNesting sse_decode_box_autoadd_ffi_probe_nesting(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_ffi_probe_nesting(deserializer));
+  }
+
+  @protected
+  FfiProbeOptionalList sse_decode_box_autoadd_ffi_probe_optional_list(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_ffi_probe_optional_list(deserializer));
   }
 
   @protected
@@ -4409,6 +5137,180 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         modelCount: var_modelCount,
         extractedModelCount: var_extractedModelCount,
         cacheRoot: var_cacheRoot);
+  }
+
+  @protected
+  FfiDecisionAnswer sse_decode_ffi_decision_answer(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_questionId = sse_decode_String(deserializer);
+    var var_distribution = sse_decode_list_ffi_decision_score(deserializer);
+    var var_value = sse_decode_ffi_decision_value(deserializer);
+    var var_confidence = sse_decode_opt_box_autoadd_f_64(deserializer);
+    return FfiDecisionAnswer(
+        questionId: var_questionId,
+        distribution: var_distribution,
+        value: var_value,
+        confidence: var_confidence);
+  }
+
+  @protected
+  FfiDecisionContent sse_decode_ffi_decision_content(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_value = sse_decode_String(deserializer);
+        return FfiDecisionContent_Text(value: var_value);
+      case 1:
+        var var_jsonText = sse_decode_String(deserializer);
+        return FfiDecisionContent_Json(jsonText: var_jsonText);
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
+  FfiDecisionInstructions sse_decode_ffi_decision_instructions(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_value =
+            sse_decode_box_autoadd_ffi_decision_content(deserializer);
+        return FfiDecisionInstructions_Content(value: var_value);
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
+  FfiDecisionLevel sse_decode_ffi_decision_level(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_description =
+        sse_decode_opt_box_autoadd_ffi_decision_content(deserializer);
+    return FfiDecisionLevel(description: var_description);
+  }
+
+  @protected
+  FfiDecisionOption sse_decode_ffi_decision_option(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_key = sse_decode_String(deserializer);
+    var var_description =
+        sse_decode_opt_box_autoadd_ffi_decision_content(deserializer);
+    return FfiDecisionOption(key: var_key, description: var_description);
+  }
+
+  @protected
+  FfiDecisionOrigin sse_decode_ffi_decision_origin(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return FfiDecisionOrigin.values[inner];
+  }
+
+  @protected
+  FfiDecisionQuestion sse_decode_ffi_decision_question(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_instructions =
+        sse_decode_opt_box_autoadd_ffi_decision_instructions(deserializer);
+    var var_kind = sse_decode_ffi_decision_question_kind(deserializer);
+    return FfiDecisionQuestion(
+        id: var_id, instructions: var_instructions, kind: var_kind);
+  }
+
+  @protected
+  FfiDecisionQuestionKind sse_decode_ffi_decision_question_kind(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_options = sse_decode_list_ffi_decision_option(deserializer);
+        return FfiDecisionQuestionKind_Choice(options: var_options);
+      case 1:
+        var var_yes =
+            sse_decode_opt_box_autoadd_ffi_decision_content(deserializer);
+        var var_no =
+            sse_decode_opt_box_autoadd_ffi_decision_content(deserializer);
+        return FfiDecisionQuestionKind_YesNo(yes: var_yes, no: var_no);
+      case 2:
+        var var_levels = sse_decode_list_ffi_decision_level(deserializer);
+        return FfiDecisionQuestionKind_Score(levels: var_levels);
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
+  FfiDecisionRequest sse_decode_ffi_decision_request(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_state =
+        sse_decode_opt_box_autoadd_ffi_decision_content(deserializer);
+    var var_questions = sse_decode_list_ffi_decision_question(deserializer);
+    return FfiDecisionRequest(state: var_state, questions: var_questions);
+  }
+
+  @protected
+  FfiDecisionScore sse_decode_ffi_decision_score(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_key = sse_decode_String(deserializer);
+    var var_rawScore = sse_decode_f_32(deserializer);
+    var var_probability = sse_decode_f_64(deserializer);
+    var var_origin = sse_decode_ffi_decision_origin(deserializer);
+    return FfiDecisionScore(
+        key: var_key,
+        rawScore: var_rawScore,
+        probability: var_probability,
+        origin: var_origin);
+  }
+
+  @protected
+  FfiDecisionUsage sse_decode_ffi_decision_usage(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_passes = sse_decode_u_32(deserializer);
+    var var_evaluatedTokens = sse_decode_u_64(deserializer);
+    return FfiDecisionUsage(
+        passes: var_passes, evaluatedTokens: var_evaluatedTokens);
+  }
+
+  @protected
+  FfiDecisionValue sse_decode_ffi_decision_value(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_key = sse_decode_String(deserializer);
+        return FfiDecisionValue_Choice(key: var_key);
+      case 1:
+        var var_pYes = sse_decode_f_64(deserializer);
+        return FfiDecisionValue_YesNo(pYes: var_pYes);
+      case 2:
+        var var_value = sse_decode_f_64(deserializer);
+        var var_statistic = sse_decode_ffi_score_statistic(deserializer);
+        return FfiDecisionValue_Score(
+            value: var_value, statistic: var_statistic);
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
+  FfiDecisions sse_decode_ffi_decisions(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_answers = sse_decode_list_ffi_decision_answer(deserializer);
+    var var_usage = sse_decode_ffi_decision_usage(deserializer);
+    return FfiDecisions(answers: var_answers, usage: var_usage);
   }
 
   @protected
@@ -4562,6 +5464,71 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  FfiProbeJson sse_decode_ffi_probe_json(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        return FfiProbeJson_Null();
+      case 1:
+        var var_value = sse_decode_bool(deserializer);
+        return FfiProbeJson_Bool(value: var_value);
+      case 2:
+        var var_value = sse_decode_i_64(deserializer);
+        return FfiProbeJson_Int(value: var_value);
+      case 3:
+        var var_value = sse_decode_u_64(deserializer);
+        return FfiProbeJson_Uint(value: var_value);
+      case 4:
+        var var_value = sse_decode_f_64(deserializer);
+        return FfiProbeJson_Float(value: var_value);
+      case 5:
+        var var_value = sse_decode_String(deserializer);
+        return FfiProbeJson_Text(value: var_value);
+      case 6:
+        var var_items = sse_decode_list_ffi_probe_json(deserializer);
+        return FfiProbeJson_Seq(items: var_items);
+      case 7:
+        var var_entries = sse_decode_list_ffi_probe_json_entry(deserializer);
+        return FfiProbeJson_Obj(entries: var_entries);
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
+  FfiProbeJsonEntry sse_decode_ffi_probe_json_entry(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_key = sse_decode_String(deserializer);
+    var var_value = sse_decode_ffi_probe_json(deserializer);
+    return FfiProbeJsonEntry(key: var_key, value: var_value);
+  }
+
+  @protected
+  FfiProbeNesting sse_decode_ffi_probe_nesting(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_rawScores = sse_decode_list_list_prim_f_32_strict(deserializer);
+    var var_probabilities = sse_decode_list_list_prim_f_64_strict(deserializer);
+    var var_usage = sse_decode_opt_box_autoadd_ffi_decision_usage(deserializer);
+    return FfiProbeNesting(
+        rawScores: var_rawScores,
+        probabilities: var_probabilities,
+        usage: var_usage);
+  }
+
+  @protected
+  FfiProbeOptionalList sse_decode_ffi_probe_optional_list(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_levels =
+        sse_decode_list_opt_box_autoadd_ffi_decision_content(deserializer);
+    var var_labels = sse_decode_list_opt_String(deserializer);
+    return FfiProbeOptionalList(levels: var_levels, labels: var_labels);
+  }
+
+  @protected
   FfiResourceSnapshot sse_decode_ffi_resource_snapshot(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -4630,6 +5597,14 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         fallbackToCloud: var_fallbackToCloud,
         maxGraceTokens: var_maxGraceTokens,
         frameSessionId: var_frameSessionId);
+  }
+
+  @protected
+  FfiScoreStatistic sse_decode_ffi_score_statistic(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return FfiScoreStatistic.values[inner];
   }
 
   @protected
@@ -4853,6 +5828,71 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  List<FfiDecisionAnswer> sse_decode_list_ffi_decision_answer(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiDecisionAnswer>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ffi_decision_answer(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FfiDecisionLevel> sse_decode_list_ffi_decision_level(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiDecisionLevel>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ffi_decision_level(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FfiDecisionOption> sse_decode_list_ffi_decision_option(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiDecisionOption>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ffi_decision_option(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FfiDecisionQuestion> sse_decode_list_ffi_decision_question(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiDecisionQuestion>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ffi_decision_question(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FfiDecisionScore> sse_decode_list_ffi_decision_score(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiDecisionScore>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ffi_decision_score(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<FfiImagePlane> sse_decode_list_ffi_image_plane(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -4861,6 +5901,32 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     var ans_ = <FfiImagePlane>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_ffi_image_plane(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FfiProbeJson> sse_decode_list_ffi_probe_json(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiProbeJson>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ffi_probe_json(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FfiProbeJsonEntry> sse_decode_list_ffi_probe_json_entry(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiProbeJsonEntry>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ffi_probe_json_entry(deserializer));
     }
     return ans_;
   }
@@ -4918,6 +5984,58 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  List<Float32List> sse_decode_list_list_prim_f_32_strict(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <Float32List>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_list_prim_f_32_strict(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<Float64List> sse_decode_list_list_prim_f_64_strict(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <Float64List>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_list_prim_f_64_strict(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<String?> sse_decode_list_opt_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <String?>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_opt_String(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FfiDecisionContent?>
+      sse_decode_list_opt_box_autoadd_ffi_decision_content(
+          SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiDecisionContent?>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_opt_box_autoadd_ffi_decision_content(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<double> sse_decode_list_prim_f_32_loose(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
@@ -4929,6 +6047,13 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
     return deserializer.buffer.getFloat32List(len_);
+  }
+
+  @protected
+  Float64List sse_decode_list_prim_f_64_strict(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var len_ = sse_decode_i_32(deserializer);
+    return deserializer.buffer.getFloat64List(len_);
   }
 
   @protected
@@ -4998,6 +6123,42 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_f_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  FfiDecisionContent? sse_decode_opt_box_autoadd_ffi_decision_content(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_ffi_decision_content(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  FfiDecisionInstructions? sse_decode_opt_box_autoadd_ffi_decision_instructions(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_ffi_decision_instructions(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  FfiDecisionUsage? sse_decode_opt_box_autoadd_ffi_decision_usage(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_ffi_decision_usage(deserializer));
     } else {
       return null;
     }
@@ -5500,6 +6661,41 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  void sse_encode_box_autoadd_ffi_decision_content(
+      FfiDecisionContent self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_ffi_decision_content(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_ffi_decision_instructions(
+      FfiDecisionInstructions self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_ffi_decision_instructions(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_ffi_decision_request(
+      FfiDecisionRequest self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_ffi_decision_request(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_ffi_decision_usage(
+      FfiDecisionUsage self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_ffi_decision_usage(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_ffi_decisions(
+      FfiDecisions self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_ffi_decisions(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_ffi_download_status(
       FfiDownloadStatus self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -5518,6 +6714,27 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       FfiMessageRole self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_ffi_message_role(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_ffi_probe_json(
+      FfiProbeJson self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_ffi_probe_json(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_ffi_probe_nesting(
+      FfiProbeNesting self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_ffi_probe_nesting(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_ffi_probe_optional_list(
+      FfiProbeOptionalList self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_ffi_probe_optional_list(self, serializer);
   }
 
   @protected
@@ -5618,6 +6835,147 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_u_32(self.modelCount, serializer);
     sse_encode_u_32(self.extractedModelCount, serializer);
     sse_encode_String(self.cacheRoot, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_decision_answer(
+      FfiDecisionAnswer self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.questionId, serializer);
+    sse_encode_list_ffi_decision_score(self.distribution, serializer);
+    sse_encode_ffi_decision_value(self.value, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.confidence, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_decision_content(
+      FfiDecisionContent self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case FfiDecisionContent_Text(value: final value):
+        sse_encode_i_32(0, serializer);
+        sse_encode_String(value, serializer);
+      case FfiDecisionContent_Json(jsonText: final jsonText):
+        sse_encode_i_32(1, serializer);
+        sse_encode_String(jsonText, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_ffi_decision_instructions(
+      FfiDecisionInstructions self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case FfiDecisionInstructions_Content(value: final value):
+        sse_encode_i_32(0, serializer);
+        sse_encode_box_autoadd_ffi_decision_content(value, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_ffi_decision_level(
+      FfiDecisionLevel self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_box_autoadd_ffi_decision_content(
+        self.description, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_decision_option(
+      FfiDecisionOption self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.key, serializer);
+    sse_encode_opt_box_autoadd_ffi_decision_content(
+        self.description, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_decision_origin(
+      FfiDecisionOrigin self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_decision_question(
+      FfiDecisionQuestion self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_opt_box_autoadd_ffi_decision_instructions(
+        self.instructions, serializer);
+    sse_encode_ffi_decision_question_kind(self.kind, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_decision_question_kind(
+      FfiDecisionQuestionKind self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case FfiDecisionQuestionKind_Choice(options: final options):
+        sse_encode_i_32(0, serializer);
+        sse_encode_list_ffi_decision_option(options, serializer);
+      case FfiDecisionQuestionKind_YesNo(yes: final yes, no: final no):
+        sse_encode_i_32(1, serializer);
+        sse_encode_opt_box_autoadd_ffi_decision_content(yes, serializer);
+        sse_encode_opt_box_autoadd_ffi_decision_content(no, serializer);
+      case FfiDecisionQuestionKind_Score(levels: final levels):
+        sse_encode_i_32(2, serializer);
+        sse_encode_list_ffi_decision_level(levels, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_ffi_decision_request(
+      FfiDecisionRequest self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_box_autoadd_ffi_decision_content(self.state, serializer);
+    sse_encode_list_ffi_decision_question(self.questions, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_decision_score(
+      FfiDecisionScore self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.key, serializer);
+    sse_encode_f_32(self.rawScore, serializer);
+    sse_encode_f_64(self.probability, serializer);
+    sse_encode_ffi_decision_origin(self.origin, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_decision_usage(
+      FfiDecisionUsage self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self.passes, serializer);
+    sse_encode_u_64(self.evaluatedTokens, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_decision_value(
+      FfiDecisionValue self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case FfiDecisionValue_Choice(key: final key):
+        sse_encode_i_32(0, serializer);
+        sse_encode_String(key, serializer);
+      case FfiDecisionValue_YesNo(pYes: final pYes):
+        sse_encode_i_32(1, serializer);
+        sse_encode_f_64(pYes, serializer);
+      case FfiDecisionValue_Score(
+          value: final value,
+          statistic: final statistic
+        ):
+        sse_encode_i_32(2, serializer);
+        sse_encode_f_64(value, serializer);
+        sse_encode_ffi_score_statistic(statistic, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_ffi_decisions(FfiDecisions self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_ffi_decision_answer(self.answers, serializer);
+    sse_encode_ffi_decision_usage(self.usage, serializer);
   }
 
   @protected
@@ -5731,6 +7089,62 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  void sse_encode_ffi_probe_json(FfiProbeJson self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case FfiProbeJson_Null():
+        sse_encode_i_32(0, serializer);
+      case FfiProbeJson_Bool(value: final value):
+        sse_encode_i_32(1, serializer);
+        sse_encode_bool(value, serializer);
+      case FfiProbeJson_Int(value: final value):
+        sse_encode_i_32(2, serializer);
+        sse_encode_i_64(value, serializer);
+      case FfiProbeJson_Uint(value: final value):
+        sse_encode_i_32(3, serializer);
+        sse_encode_u_64(value, serializer);
+      case FfiProbeJson_Float(value: final value):
+        sse_encode_i_32(4, serializer);
+        sse_encode_f_64(value, serializer);
+      case FfiProbeJson_Text(value: final value):
+        sse_encode_i_32(5, serializer);
+        sse_encode_String(value, serializer);
+      case FfiProbeJson_Seq(items: final items):
+        sse_encode_i_32(6, serializer);
+        sse_encode_list_ffi_probe_json(items, serializer);
+      case FfiProbeJson_Obj(entries: final entries):
+        sse_encode_i_32(7, serializer);
+        sse_encode_list_ffi_probe_json_entry(entries, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_ffi_probe_json_entry(
+      FfiProbeJsonEntry self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.key, serializer);
+    sse_encode_ffi_probe_json(self.value, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_probe_nesting(
+      FfiProbeNesting self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_list_prim_f_32_strict(self.rawScores, serializer);
+    sse_encode_list_list_prim_f_64_strict(self.probabilities, serializer);
+    sse_encode_opt_box_autoadd_ffi_decision_usage(self.usage, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_probe_optional_list(
+      FfiProbeOptionalList self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_opt_box_autoadd_ffi_decision_content(
+        self.levels, serializer);
+    sse_encode_list_opt_String(self.labels, serializer);
+  }
+
+  @protected
   void sse_encode_ffi_resource_snapshot(
       FfiResourceSnapshot self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -5771,6 +7185,13 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_bool(self.fallbackToCloud, serializer);
     sse_encode_opt_box_autoadd_u_32(self.maxGraceTokens, serializer);
     sse_encode_opt_String(self.frameSessionId, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_score_statistic(
+      FfiScoreStatistic self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -5954,12 +7375,82 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  void sse_encode_list_ffi_decision_answer(
+      List<FfiDecisionAnswer> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ffi_decision_answer(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_ffi_decision_level(
+      List<FfiDecisionLevel> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ffi_decision_level(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_ffi_decision_option(
+      List<FfiDecisionOption> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ffi_decision_option(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_ffi_decision_question(
+      List<FfiDecisionQuestion> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ffi_decision_question(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_ffi_decision_score(
+      List<FfiDecisionScore> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ffi_decision_score(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_ffi_image_plane(
       List<FfiImagePlane> self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_ffi_image_plane(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_ffi_probe_json(
+      List<FfiProbeJson> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ffi_probe_json(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_ffi_probe_json_entry(
+      List<FfiProbeJsonEntry> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ffi_probe_json_entry(item, serializer);
     }
   }
 
@@ -6004,6 +7495,46 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  void sse_encode_list_list_prim_f_32_strict(
+      List<Float32List> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_list_prim_f_32_strict(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_list_prim_f_64_strict(
+      List<Float64List> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_list_prim_f_64_strict(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_opt_String(
+      List<String?> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_opt_String(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_opt_box_autoadd_ffi_decision_content(
+      List<FfiDecisionContent?> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_opt_box_autoadd_ffi_decision_content(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_prim_f_32_loose(
       List<double> self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -6018,6 +7549,14 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putFloat32List(self);
+  }
+
+  @protected
+  void sse_encode_list_prim_f_64_strict(
+      Float64List self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    serializer.buffer.putFloat64List(self);
   }
 
   @protected
@@ -6087,6 +7626,39 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_f_64(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_decision_content(
+      FfiDecisionContent? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_ffi_decision_content(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_decision_instructions(
+      FfiDecisionInstructions? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_ffi_decision_instructions(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_decision_usage(
+      FfiDecisionUsage? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_ffi_decision_usage(self, serializer);
     }
   }
 

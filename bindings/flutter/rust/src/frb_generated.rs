@@ -44,7 +44,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -231353907;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 744271639;
 
 // Section: executor
 
@@ -3663,6 +3663,292 @@ fn wire__crate__api__sdk_client__XybridSdkClient_set_speculative_cloud_impl(
         },
     )
 }
+fn wire__crate__api__decision__decision_spike_decide_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "decision_spike_decide",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_request =
+                <crate::api::decision::FfiDecisionRequest>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::decision::decision_spike_decide(api_request)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__decision__decision_spike_decide_bits_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "decision_spike_decide_bits",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_request =
+                <crate::api::decision::FfiDecisionRequest>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::decision::decision_spike_decide_bits(api_request)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__decision__decision_spike_echo_request_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "decision_spike_echo_request",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_request =
+                <crate::api::decision::FfiDecisionRequest>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::decision::decision_spike_echo_request(api_request)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__decision__decision_spike_probe_json_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "decision_spike_probe_json",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_json_text = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::decision::decision_spike_probe_json(api_json_text)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__decision__decision_spike_probe_json_echo_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "decision_spike_probe_json_echo",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_value = <crate::api::decision::FfiProbeJson>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Result::<_, ()>::Ok(
+                    crate::api::decision::decision_spike_probe_json_echo(api_value),
+                )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__decision__decision_spike_probe_nesting_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "decision_spike_probe_nesting",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_probe = <crate::api::decision::FfiProbeNesting>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Result::<_, ()>::Ok(
+                    crate::api::decision::decision_spike_probe_nesting(api_probe),
+                )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__decision__decision_spike_probe_optional_list_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "decision_spike_probe_optional_list",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_probe =
+                <crate::api::decision::FfiProbeOptionalList>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Result::<_, ()>::Ok(
+                    crate::api::decision::decision_spike_probe_optional_list(api_probe),
+                )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__decision__decision_spike_request_outline_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "decision_spike_request_outline",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_request =
+                <crate::api::decision::FfiDecisionRequest>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::decision::decision_spike_request_outline(api_request)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__decision__decision_spike_verify_decisions_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "decision_spike_verify_decisions",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_request =
+                <crate::api::decision::FfiDecisionRequest>::sse_decode(&mut deserializer);
+            let api_decisions = <crate::api::decision::FfiDecisions>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::decision::decision_spike_verify_decisions(
+                    api_request,
+                    api_decisions,
+                )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__model__ffi_generation_config_creative_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -4134,6 +4420,232 @@ impl SseDecode for crate::api::sdk_client::FfiCacheStatus {
     }
 }
 
+impl SseDecode for crate::api::decision::FfiDecisionAnswer {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_questionId = <String>::sse_decode(deserializer);
+        let mut var_distribution =
+            <Vec<crate::api::decision::FfiDecisionScore>>::sse_decode(deserializer);
+        let mut var_value = <crate::api::decision::FfiDecisionValue>::sse_decode(deserializer);
+        let mut var_confidence = <Option<f64>>::sse_decode(deserializer);
+        return crate::api::decision::FfiDecisionAnswer {
+            question_id: var_questionId,
+            distribution: var_distribution,
+            value: var_value,
+            confidence: var_confidence,
+        };
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiDecisionContent {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_value = <String>::sse_decode(deserializer);
+                return crate::api::decision::FfiDecisionContent::Text { value: var_value };
+            }
+            1 => {
+                let mut var_jsonText = <String>::sse_decode(deserializer);
+                return crate::api::decision::FfiDecisionContent::Json {
+                    json_text: var_jsonText,
+                };
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiDecisionInstructions {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_value =
+                    <crate::api::decision::FfiDecisionContent>::sse_decode(deserializer);
+                return crate::api::decision::FfiDecisionInstructions::Content { value: var_value };
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiDecisionLevel {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_description =
+            <Option<crate::api::decision::FfiDecisionContent>>::sse_decode(deserializer);
+        return crate::api::decision::FfiDecisionLevel {
+            description: var_description,
+        };
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiDecisionOption {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_key = <String>::sse_decode(deserializer);
+        let mut var_description =
+            <Option<crate::api::decision::FfiDecisionContent>>::sse_decode(deserializer);
+        return crate::api::decision::FfiDecisionOption {
+            key: var_key,
+            description: var_description,
+        };
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiDecisionOrigin {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::decision::FfiDecisionOrigin::Caller,
+            1 => crate::api::decision::FfiDecisionOrigin::Fixed,
+            _ => unreachable!("Invalid variant for FfiDecisionOrigin: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiDecisionQuestion {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_instructions =
+            <Option<crate::api::decision::FfiDecisionInstructions>>::sse_decode(deserializer);
+        let mut var_kind =
+            <crate::api::decision::FfiDecisionQuestionKind>::sse_decode(deserializer);
+        return crate::api::decision::FfiDecisionQuestion {
+            id: var_id,
+            instructions: var_instructions,
+            kind: var_kind,
+        };
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiDecisionQuestionKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_options =
+                    <Vec<crate::api::decision::FfiDecisionOption>>::sse_decode(deserializer);
+                return crate::api::decision::FfiDecisionQuestionKind::Choice {
+                    options: var_options,
+                };
+            }
+            1 => {
+                let mut var_yes =
+                    <Option<crate::api::decision::FfiDecisionContent>>::sse_decode(deserializer);
+                let mut var_no =
+                    <Option<crate::api::decision::FfiDecisionContent>>::sse_decode(deserializer);
+                return crate::api::decision::FfiDecisionQuestionKind::YesNo {
+                    yes: var_yes,
+                    no: var_no,
+                };
+            }
+            2 => {
+                let mut var_levels =
+                    <Vec<crate::api::decision::FfiDecisionLevel>>::sse_decode(deserializer);
+                return crate::api::decision::FfiDecisionQuestionKind::Score { levels: var_levels };
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiDecisionRequest {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_state =
+            <Option<crate::api::decision::FfiDecisionContent>>::sse_decode(deserializer);
+        let mut var_questions =
+            <Vec<crate::api::decision::FfiDecisionQuestion>>::sse_decode(deserializer);
+        return crate::api::decision::FfiDecisionRequest {
+            state: var_state,
+            questions: var_questions,
+        };
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiDecisionScore {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_key = <String>::sse_decode(deserializer);
+        let mut var_rawScore = <f32>::sse_decode(deserializer);
+        let mut var_probability = <f64>::sse_decode(deserializer);
+        let mut var_origin = <crate::api::decision::FfiDecisionOrigin>::sse_decode(deserializer);
+        return crate::api::decision::FfiDecisionScore {
+            key: var_key,
+            raw_score: var_rawScore,
+            probability: var_probability,
+            origin: var_origin,
+        };
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiDecisionUsage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_passes = <u32>::sse_decode(deserializer);
+        let mut var_evaluatedTokens = <u64>::sse_decode(deserializer);
+        return crate::api::decision::FfiDecisionUsage {
+            passes: var_passes,
+            evaluated_tokens: var_evaluatedTokens,
+        };
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiDecisionValue {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_key = <String>::sse_decode(deserializer);
+                return crate::api::decision::FfiDecisionValue::Choice { key: var_key };
+            }
+            1 => {
+                let mut var_pYes = <f64>::sse_decode(deserializer);
+                return crate::api::decision::FfiDecisionValue::YesNo { p_yes: var_pYes };
+            }
+            2 => {
+                let mut var_value = <f64>::sse_decode(deserializer);
+                let mut var_statistic =
+                    <crate::api::decision::FfiScoreStatistic>::sse_decode(deserializer);
+                return crate::api::decision::FfiDecisionValue::Score {
+                    value: var_value,
+                    statistic: var_statistic,
+                };
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiDecisions {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_answers =
+            <Vec<crate::api::decision::FfiDecisionAnswer>>::sse_decode(deserializer);
+        let mut var_usage = <crate::api::decision::FfiDecisionUsage>::sse_decode(deserializer);
+        return crate::api::decision::FfiDecisions {
+            answers: var_answers,
+            usage: var_usage,
+        };
+    }
+}
+
 impl SseDecode for crate::api::model::FfiDownloadState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4329,6 +4841,93 @@ impl SseDecode for crate::api::envelope::FfiPixelFormat {
     }
 }
 
+impl SseDecode for crate::api::decision::FfiProbeJson {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                return crate::api::decision::FfiProbeJson::Null;
+            }
+            1 => {
+                let mut var_value = <bool>::sse_decode(deserializer);
+                return crate::api::decision::FfiProbeJson::Bool { value: var_value };
+            }
+            2 => {
+                let mut var_value = <i64>::sse_decode(deserializer);
+                return crate::api::decision::FfiProbeJson::Int { value: var_value };
+            }
+            3 => {
+                let mut var_value = <u64>::sse_decode(deserializer);
+                return crate::api::decision::FfiProbeJson::Uint { value: var_value };
+            }
+            4 => {
+                let mut var_value = <f64>::sse_decode(deserializer);
+                return crate::api::decision::FfiProbeJson::Float { value: var_value };
+            }
+            5 => {
+                let mut var_value = <String>::sse_decode(deserializer);
+                return crate::api::decision::FfiProbeJson::Text { value: var_value };
+            }
+            6 => {
+                let mut var_items =
+                    <Vec<crate::api::decision::FfiProbeJson>>::sse_decode(deserializer);
+                return crate::api::decision::FfiProbeJson::Seq { items: var_items };
+            }
+            7 => {
+                let mut var_entries =
+                    <Vec<crate::api::decision::FfiProbeJsonEntry>>::sse_decode(deserializer);
+                return crate::api::decision::FfiProbeJson::Obj {
+                    entries: var_entries,
+                };
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiProbeJsonEntry {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_key = <String>::sse_decode(deserializer);
+        let mut var_value = <crate::api::decision::FfiProbeJson>::sse_decode(deserializer);
+        return crate::api::decision::FfiProbeJsonEntry {
+            key: var_key,
+            value: var_value,
+        };
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiProbeNesting {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_rawScores = <Vec<Vec<f32>>>::sse_decode(deserializer);
+        let mut var_probabilities = <Vec<Vec<f64>>>::sse_decode(deserializer);
+        let mut var_usage =
+            <Option<crate::api::decision::FfiDecisionUsage>>::sse_decode(deserializer);
+        return crate::api::decision::FfiProbeNesting {
+            raw_scores: var_rawScores,
+            probabilities: var_probabilities,
+            usage: var_usage,
+        };
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiProbeOptionalList {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_levels =
+            <Vec<Option<crate::api::decision::FfiDecisionContent>>>::sse_decode(deserializer);
+        let mut var_labels = <Vec<Option<String>>>::sse_decode(deserializer);
+        return crate::api::decision::FfiProbeOptionalList {
+            levels: var_levels,
+            labels: var_labels,
+        };
+    }
+}
+
 impl SseDecode for crate::api::device::FfiResourceSnapshot {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4403,6 +5002,18 @@ impl SseDecode for crate::api::model::FfiRunOptions {
             fallback_to_cloud: var_fallbackToCloud,
             max_grace_tokens: var_maxGraceTokens,
             frame_session_id: var_frameSessionId,
+        };
+    }
+}
+
+impl SseDecode for crate::api::decision::FfiScoreStatistic {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::decision::FfiScoreStatistic::Median,
+            1 => crate::api::decision::FfiScoreStatistic::Expected,
+            _ => unreachable!("Invalid variant for FfiScoreStatistic: {}", inner),
         };
     }
 }
@@ -4677,6 +5288,76 @@ impl SseDecode for Vec<crate::api::sdk_client::FfiCacheEntry> {
     }
 }
 
+impl SseDecode for Vec<crate::api::decision::FfiDecisionAnswer> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::decision::FfiDecisionAnswer>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::decision::FfiDecisionLevel> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::decision::FfiDecisionLevel>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::decision::FfiDecisionOption> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::decision::FfiDecisionOption>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::decision::FfiDecisionQuestion> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::decision::FfiDecisionQuestion>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::decision::FfiDecisionScore> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::decision::FfiDecisionScore>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::envelope::FfiImagePlane> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4684,6 +5365,34 @@ impl SseDecode for Vec<crate::api::envelope::FfiImagePlane> {
         let mut ans_ = vec![];
         for idx_ in 0..len_ {
             ans_.push(<crate::api::envelope::FfiImagePlane>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::decision::FfiProbeJson> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::decision::FfiProbeJson>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::decision::FfiProbeJsonEntry> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::decision::FfiProbeJsonEntry>::sse_decode(
                 deserializer,
             ));
         }
@@ -4743,6 +5452,54 @@ impl SseDecode for Vec<crate::api::model::FfiToolResult> {
     }
 }
 
+impl SseDecode for Vec<Vec<f32>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<Vec<f32>>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<Vec<f64>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<Vec<f64>>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<Option<String>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<Option<String>>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<Option<crate::api::decision::FfiDecisionContent>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<Option<crate::api::decision::FfiDecisionContent>>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<f32> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4750,6 +5507,18 @@ impl SseDecode for Vec<f32> {
         let mut ans_ = vec![];
         for idx_ in 0..len_ {
             ans_.push(<f32>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<f64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<f64>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -4816,6 +5585,45 @@ impl SseDecode for Option<f64> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<f64>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::decision::FfiDecisionContent> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::decision::FfiDecisionContent>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::decision::FfiDecisionInstructions> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::decision::FfiDecisionInstructions>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::decision::FfiDecisionUsage> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::decision::FfiDecisionUsage>::sse_decode(
+                deserializer,
+            ));
         } else {
             return None;
         }
@@ -5099,7 +5907,7 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        90 => wire__crate__api__sdk_client__init_app_impl(port, ptr, rust_vec_len, data_len),
+        99 => wire__crate__api__sdk_client__init_app_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -5329,15 +6137,52 @@ fn pde_ffi_dispatcher_sync_impl(
             rust_vec_len,
             data_len,
         ),
-        88 => wire__crate__api__model__ffi_generation_config_creative_impl(
+        88 => wire__crate__api__decision__decision_spike_decide_impl(ptr, rust_vec_len, data_len),
+        89 => {
+            wire__crate__api__decision__decision_spike_decide_bits_impl(ptr, rust_vec_len, data_len)
+        }
+        90 => wire__crate__api__decision__decision_spike_echo_request_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        89 => {
+        91 => {
+            wire__crate__api__decision__decision_spike_probe_json_impl(ptr, rust_vec_len, data_len)
+        }
+        92 => wire__crate__api__decision__decision_spike_probe_json_echo_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        93 => wire__crate__api__decision__decision_spike_probe_nesting_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        94 => wire__crate__api__decision__decision_spike_probe_optional_list_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        95 => wire__crate__api__decision__decision_spike_request_outline_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        96 => wire__crate__api__decision__decision_spike_verify_decisions_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        97 => wire__crate__api__model__ffi_generation_config_creative_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        98 => {
             wire__crate__api__model__ffi_generation_config_greedy_impl(ptr, rust_vec_len, data_len)
         }
-        91 => wire__crate__api__model__json_schema_to_gbnf_impl(ptr, rust_vec_len, data_len),
+        100 => wire__crate__api__model__json_schema_to_gbnf_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -5554,6 +6399,313 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::sdk_client::FfiCacheStatus>
     for crate::api::sdk_client::FfiCacheStatus
 {
     fn into_into_dart(self) -> crate::api::sdk_client::FfiCacheStatus {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisionAnswer {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.question_id.into_into_dart().into_dart(),
+            self.distribution.into_into_dart().into_dart(),
+            self.value.into_into_dart().into_dart(),
+            self.confidence.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisionAnswer
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisionAnswer>
+    for crate::api::decision::FfiDecisionAnswer
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisionAnswer {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisionContent {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::api::decision::FfiDecisionContent::Text { value } => {
+                [0.into_dart(), value.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::decision::FfiDecisionContent::Json { json_text } => {
+                [1.into_dart(), json_text.into_into_dart().into_dart()].into_dart()
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisionContent
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisionContent>
+    for crate::api::decision::FfiDecisionContent
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisionContent {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisionInstructions {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::api::decision::FfiDecisionInstructions::Content { value } => {
+                [0.into_dart(), value.into_into_dart().into_dart()].into_dart()
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisionInstructions
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisionInstructions>
+    for crate::api::decision::FfiDecisionInstructions
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisionInstructions {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisionLevel {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [self.description.into_into_dart().into_dart()].into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisionLevel
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisionLevel>
+    for crate::api::decision::FfiDecisionLevel
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisionLevel {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisionOption {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.key.into_into_dart().into_dart(),
+            self.description.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisionOption
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisionOption>
+    for crate::api::decision::FfiDecisionOption
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisionOption {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisionOrigin {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Caller => 0.into_dart(),
+            Self::Fixed => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisionOrigin
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisionOrigin>
+    for crate::api::decision::FfiDecisionOrigin
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisionOrigin {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisionQuestion {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.instructions.into_into_dart().into_dart(),
+            self.kind.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisionQuestion
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisionQuestion>
+    for crate::api::decision::FfiDecisionQuestion
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisionQuestion {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisionQuestionKind {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::api::decision::FfiDecisionQuestionKind::Choice { options } => {
+                [0.into_dart(), options.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::decision::FfiDecisionQuestionKind::YesNo { yes, no } => [
+                1.into_dart(),
+                yes.into_into_dart().into_dart(),
+                no.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::api::decision::FfiDecisionQuestionKind::Score { levels } => {
+                [2.into_dart(), levels.into_into_dart().into_dart()].into_dart()
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisionQuestionKind
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisionQuestionKind>
+    for crate::api::decision::FfiDecisionQuestionKind
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisionQuestionKind {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisionRequest {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.state.into_into_dart().into_dart(),
+            self.questions.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisionRequest
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisionRequest>
+    for crate::api::decision::FfiDecisionRequest
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisionRequest {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisionScore {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.key.into_into_dart().into_dart(),
+            self.raw_score.into_into_dart().into_dart(),
+            self.probability.into_into_dart().into_dart(),
+            self.origin.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisionScore
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisionScore>
+    for crate::api::decision::FfiDecisionScore
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisionScore {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisionUsage {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.passes.into_into_dart().into_dart(),
+            self.evaluated_tokens.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisionUsage
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisionUsage>
+    for crate::api::decision::FfiDecisionUsage
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisionUsage {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisionValue {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::api::decision::FfiDecisionValue::Choice { key } => {
+                [0.into_dart(), key.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::decision::FfiDecisionValue::YesNo { p_yes } => {
+                [1.into_dart(), p_yes.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::decision::FfiDecisionValue::Score { value, statistic } => [
+                2.into_dart(),
+                value.into_into_dart().into_dart(),
+                statistic.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisionValue
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisionValue>
+    for crate::api::decision::FfiDecisionValue
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisionValue {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiDecisions {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.answers.into_into_dart().into_dart(),
+            self.usage.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiDecisions
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiDecisions>
+    for crate::api::decision::FfiDecisions
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiDecisions {
         self
     }
 }
@@ -5825,6 +6977,113 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::envelope::FfiPixelFormat>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiProbeJson {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::api::decision::FfiProbeJson::Null => [0.into_dart()].into_dart(),
+            crate::api::decision::FfiProbeJson::Bool { value } => {
+                [1.into_dart(), value.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::decision::FfiProbeJson::Int { value } => {
+                [2.into_dart(), value.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::decision::FfiProbeJson::Uint { value } => {
+                [3.into_dart(), value.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::decision::FfiProbeJson::Float { value } => {
+                [4.into_dart(), value.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::decision::FfiProbeJson::Text { value } => {
+                [5.into_dart(), value.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::decision::FfiProbeJson::Seq { items } => {
+                [6.into_dart(), items.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::decision::FfiProbeJson::Obj { entries } => {
+                [7.into_dart(), entries.into_into_dart().into_dart()].into_dart()
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiProbeJson
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiProbeJson>
+    for crate::api::decision::FfiProbeJson
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiProbeJson {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiProbeJsonEntry {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.key.into_into_dart().into_dart(),
+            self.value.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiProbeJsonEntry
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiProbeJsonEntry>
+    for crate::api::decision::FfiProbeJsonEntry
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiProbeJsonEntry {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiProbeNesting {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.raw_scores.into_into_dart().into_dart(),
+            self.probabilities.into_into_dart().into_dart(),
+            self.usage.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiProbeNesting
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiProbeNesting>
+    for crate::api::decision::FfiProbeNesting
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiProbeNesting {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiProbeOptionalList {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.levels.into_into_dart().into_dart(),
+            self.labels.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiProbeOptionalList
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiProbeOptionalList>
+    for crate::api::decision::FfiProbeOptionalList
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiProbeOptionalList {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::device::FfiResourceSnapshot {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -5903,6 +7162,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiRunOptions>
     for crate::api::model::FfiRunOptions
 {
     fn into_into_dart(self) -> crate::api::model::FfiRunOptions {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::decision::FfiScoreStatistic {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Median => 0.into_dart(),
+            Self::Expected => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::decision::FfiScoreStatistic
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::decision::FfiScoreStatistic>
+    for crate::api::decision::FfiScoreStatistic
+{
+    fn into_into_dart(self) -> crate::api::decision::FfiScoreStatistic {
         self
     }
 }
@@ -6507,6 +7787,181 @@ impl SseEncode for crate::api::sdk_client::FfiCacheStatus {
     }
 }
 
+impl SseEncode for crate::api::decision::FfiDecisionAnswer {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.question_id, serializer);
+        <Vec<crate::api::decision::FfiDecisionScore>>::sse_encode(self.distribution, serializer);
+        <crate::api::decision::FfiDecisionValue>::sse_encode(self.value, serializer);
+        <Option<f64>>::sse_encode(self.confidence, serializer);
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiDecisionContent {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::api::decision::FfiDecisionContent::Text { value } => {
+                <i32>::sse_encode(0, serializer);
+                <String>::sse_encode(value, serializer);
+            }
+            crate::api::decision::FfiDecisionContent::Json { json_text } => {
+                <i32>::sse_encode(1, serializer);
+                <String>::sse_encode(json_text, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiDecisionInstructions {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::api::decision::FfiDecisionInstructions::Content { value } => {
+                <i32>::sse_encode(0, serializer);
+                <crate::api::decision::FfiDecisionContent>::sse_encode(value, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiDecisionLevel {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<crate::api::decision::FfiDecisionContent>>::sse_encode(
+            self.description,
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiDecisionOption {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.key, serializer);
+        <Option<crate::api::decision::FfiDecisionContent>>::sse_encode(
+            self.description,
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiDecisionOrigin {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::decision::FfiDecisionOrigin::Caller => 0,
+                crate::api::decision::FfiDecisionOrigin::Fixed => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiDecisionQuestion {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <Option<crate::api::decision::FfiDecisionInstructions>>::sse_encode(
+            self.instructions,
+            serializer,
+        );
+        <crate::api::decision::FfiDecisionQuestionKind>::sse_encode(self.kind, serializer);
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiDecisionQuestionKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::api::decision::FfiDecisionQuestionKind::Choice { options } => {
+                <i32>::sse_encode(0, serializer);
+                <Vec<crate::api::decision::FfiDecisionOption>>::sse_encode(options, serializer);
+            }
+            crate::api::decision::FfiDecisionQuestionKind::YesNo { yes, no } => {
+                <i32>::sse_encode(1, serializer);
+                <Option<crate::api::decision::FfiDecisionContent>>::sse_encode(yes, serializer);
+                <Option<crate::api::decision::FfiDecisionContent>>::sse_encode(no, serializer);
+            }
+            crate::api::decision::FfiDecisionQuestionKind::Score { levels } => {
+                <i32>::sse_encode(2, serializer);
+                <Vec<crate::api::decision::FfiDecisionLevel>>::sse_encode(levels, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiDecisionRequest {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<crate::api::decision::FfiDecisionContent>>::sse_encode(self.state, serializer);
+        <Vec<crate::api::decision::FfiDecisionQuestion>>::sse_encode(self.questions, serializer);
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiDecisionScore {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.key, serializer);
+        <f32>::sse_encode(self.raw_score, serializer);
+        <f64>::sse_encode(self.probability, serializer);
+        <crate::api::decision::FfiDecisionOrigin>::sse_encode(self.origin, serializer);
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiDecisionUsage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u32>::sse_encode(self.passes, serializer);
+        <u64>::sse_encode(self.evaluated_tokens, serializer);
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiDecisionValue {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::api::decision::FfiDecisionValue::Choice { key } => {
+                <i32>::sse_encode(0, serializer);
+                <String>::sse_encode(key, serializer);
+            }
+            crate::api::decision::FfiDecisionValue::YesNo { p_yes } => {
+                <i32>::sse_encode(1, serializer);
+                <f64>::sse_encode(p_yes, serializer);
+            }
+            crate::api::decision::FfiDecisionValue::Score { value, statistic } => {
+                <i32>::sse_encode(2, serializer);
+                <f64>::sse_encode(value, serializer);
+                <crate::api::decision::FfiScoreStatistic>::sse_encode(statistic, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiDecisions {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<crate::api::decision::FfiDecisionAnswer>>::sse_encode(self.answers, serializer);
+        <crate::api::decision::FfiDecisionUsage>::sse_encode(self.usage, serializer);
+    }
+}
+
 impl SseEncode for crate::api::model::FfiDownloadState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -6678,6 +8133,76 @@ impl SseEncode for crate::api::envelope::FfiPixelFormat {
     }
 }
 
+impl SseEncode for crate::api::decision::FfiProbeJson {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::api::decision::FfiProbeJson::Null => {
+                <i32>::sse_encode(0, serializer);
+            }
+            crate::api::decision::FfiProbeJson::Bool { value } => {
+                <i32>::sse_encode(1, serializer);
+                <bool>::sse_encode(value, serializer);
+            }
+            crate::api::decision::FfiProbeJson::Int { value } => {
+                <i32>::sse_encode(2, serializer);
+                <i64>::sse_encode(value, serializer);
+            }
+            crate::api::decision::FfiProbeJson::Uint { value } => {
+                <i32>::sse_encode(3, serializer);
+                <u64>::sse_encode(value, serializer);
+            }
+            crate::api::decision::FfiProbeJson::Float { value } => {
+                <i32>::sse_encode(4, serializer);
+                <f64>::sse_encode(value, serializer);
+            }
+            crate::api::decision::FfiProbeJson::Text { value } => {
+                <i32>::sse_encode(5, serializer);
+                <String>::sse_encode(value, serializer);
+            }
+            crate::api::decision::FfiProbeJson::Seq { items } => {
+                <i32>::sse_encode(6, serializer);
+                <Vec<crate::api::decision::FfiProbeJson>>::sse_encode(items, serializer);
+            }
+            crate::api::decision::FfiProbeJson::Obj { entries } => {
+                <i32>::sse_encode(7, serializer);
+                <Vec<crate::api::decision::FfiProbeJsonEntry>>::sse_encode(entries, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiProbeJsonEntry {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.key, serializer);
+        <crate::api::decision::FfiProbeJson>::sse_encode(self.value, serializer);
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiProbeNesting {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<Vec<f32>>>::sse_encode(self.raw_scores, serializer);
+        <Vec<Vec<f64>>>::sse_encode(self.probabilities, serializer);
+        <Option<crate::api::decision::FfiDecisionUsage>>::sse_encode(self.usage, serializer);
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiProbeOptionalList {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<Option<crate::api::decision::FfiDecisionContent>>>::sse_encode(
+            self.levels,
+            serializer,
+        );
+        <Vec<Option<String>>>::sse_encode(self.labels, serializer);
+    }
+}
+
 impl SseEncode for crate::api::device::FfiResourceSnapshot {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -6719,6 +8244,22 @@ impl SseEncode for crate::api::model::FfiRunOptions {
         <bool>::sse_encode(self.fallback_to_cloud, serializer);
         <Option<u32>>::sse_encode(self.max_grace_tokens, serializer);
         <Option<String>>::sse_encode(self.frame_session_id, serializer);
+    }
+}
+
+impl SseEncode for crate::api::decision::FfiScoreStatistic {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::decision::FfiScoreStatistic::Median => 0,
+                crate::api::decision::FfiScoreStatistic::Expected => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
     }
 }
 
@@ -6950,12 +8491,82 @@ impl SseEncode for Vec<crate::api::sdk_client::FfiCacheEntry> {
     }
 }
 
+impl SseEncode for Vec<crate::api::decision::FfiDecisionAnswer> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::decision::FfiDecisionAnswer>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::decision::FfiDecisionLevel> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::decision::FfiDecisionLevel>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::decision::FfiDecisionOption> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::decision::FfiDecisionOption>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::decision::FfiDecisionQuestion> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::decision::FfiDecisionQuestion>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::decision::FfiDecisionScore> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::decision::FfiDecisionScore>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::envelope::FfiImagePlane> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::envelope::FfiImagePlane>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::decision::FfiProbeJson> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::decision::FfiProbeJson>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::decision::FfiProbeJsonEntry> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::decision::FfiProbeJsonEntry>::sse_encode(item, serializer);
         }
     }
 }
@@ -7000,12 +8611,62 @@ impl SseEncode for Vec<crate::api::model::FfiToolResult> {
     }
 }
 
+impl SseEncode for Vec<Vec<f32>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <Vec<f32>>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<Vec<f64>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <Vec<f64>>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<Option<String>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <Option<String>>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<Option<crate::api::decision::FfiDecisionContent>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <Option<crate::api::decision::FfiDecisionContent>>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<f32> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <f32>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<f64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <f64>::sse_encode(item, serializer);
         }
     }
 }
@@ -7066,6 +8727,36 @@ impl SseEncode for Option<f64> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <f64>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::decision::FfiDecisionContent> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::decision::FfiDecisionContent>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::decision::FfiDecisionInstructions> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::decision::FfiDecisionInstructions>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::decision::FfiDecisionUsage> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::decision::FfiDecisionUsage>::sse_encode(value, serializer);
         }
     }
 }

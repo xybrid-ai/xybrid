@@ -8,6 +8,7 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api/context.dart';
+import 'api/decision.dart';
 import 'api/device.dart';
 import 'api/envelope.dart';
 import 'api/model.dart';
@@ -230,6 +231,22 @@ abstract class XybridRustLibApiImplPlatform
   double dco_decode_box_autoadd_f_64(dynamic raw);
 
   @protected
+  FfiDecisionContent dco_decode_box_autoadd_ffi_decision_content(dynamic raw);
+
+  @protected
+  FfiDecisionInstructions dco_decode_box_autoadd_ffi_decision_instructions(
+      dynamic raw);
+
+  @protected
+  FfiDecisionRequest dco_decode_box_autoadd_ffi_decision_request(dynamic raw);
+
+  @protected
+  FfiDecisionUsage dco_decode_box_autoadd_ffi_decision_usage(dynamic raw);
+
+  @protected
+  FfiDecisions dco_decode_box_autoadd_ffi_decisions(dynamic raw);
+
+  @protected
   FfiDownloadStatus dco_decode_box_autoadd_ffi_download_status(dynamic raw);
 
   @protected
@@ -237,6 +254,16 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole dco_decode_box_autoadd_ffi_message_role(dynamic raw);
+
+  @protected
+  FfiProbeJson dco_decode_box_autoadd_ffi_probe_json(dynamic raw);
+
+  @protected
+  FfiProbeNesting dco_decode_box_autoadd_ffi_probe_nesting(dynamic raw);
+
+  @protected
+  FfiProbeOptionalList dco_decode_box_autoadd_ffi_probe_optional_list(
+      dynamic raw);
 
   @protected
   FfiResult dco_decode_box_autoadd_ffi_result(dynamic raw);
@@ -281,6 +308,45 @@ abstract class XybridRustLibApiImplPlatform
   FfiCacheStatus dco_decode_ffi_cache_status(dynamic raw);
 
   @protected
+  FfiDecisionAnswer dco_decode_ffi_decision_answer(dynamic raw);
+
+  @protected
+  FfiDecisionContent dco_decode_ffi_decision_content(dynamic raw);
+
+  @protected
+  FfiDecisionInstructions dco_decode_ffi_decision_instructions(dynamic raw);
+
+  @protected
+  FfiDecisionLevel dco_decode_ffi_decision_level(dynamic raw);
+
+  @protected
+  FfiDecisionOption dco_decode_ffi_decision_option(dynamic raw);
+
+  @protected
+  FfiDecisionOrigin dco_decode_ffi_decision_origin(dynamic raw);
+
+  @protected
+  FfiDecisionQuestion dco_decode_ffi_decision_question(dynamic raw);
+
+  @protected
+  FfiDecisionQuestionKind dco_decode_ffi_decision_question_kind(dynamic raw);
+
+  @protected
+  FfiDecisionRequest dco_decode_ffi_decision_request(dynamic raw);
+
+  @protected
+  FfiDecisionScore dco_decode_ffi_decision_score(dynamic raw);
+
+  @protected
+  FfiDecisionUsage dco_decode_ffi_decision_usage(dynamic raw);
+
+  @protected
+  FfiDecisionValue dco_decode_ffi_decision_value(dynamic raw);
+
+  @protected
+  FfiDecisions dco_decode_ffi_decisions(dynamic raw);
+
+  @protected
   FfiDownloadState dco_decode_ffi_download_state(dynamic raw);
 
   @protected
@@ -314,6 +380,18 @@ abstract class XybridRustLibApiImplPlatform
   FfiPixelFormat dco_decode_ffi_pixel_format(dynamic raw);
 
   @protected
+  FfiProbeJson dco_decode_ffi_probe_json(dynamic raw);
+
+  @protected
+  FfiProbeJsonEntry dco_decode_ffi_probe_json_entry(dynamic raw);
+
+  @protected
+  FfiProbeNesting dco_decode_ffi_probe_nesting(dynamic raw);
+
+  @protected
+  FfiProbeOptionalList dco_decode_ffi_probe_optional_list(dynamic raw);
+
+  @protected
   FfiResourceSnapshot dco_decode_ffi_resource_snapshot(dynamic raw);
 
   @protected
@@ -321,6 +399,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiRunOptions dco_decode_ffi_run_options(dynamic raw);
+
+  @protected
+  FfiScoreStatistic dco_decode_ffi_score_statistic(dynamic raw);
 
   @protected
   FfiStageLatency dco_decode_ffi_stage_latency(dynamic raw);
@@ -379,7 +460,28 @@ abstract class XybridRustLibApiImplPlatform
   List<FfiCacheEntry> dco_decode_list_ffi_cache_entry(dynamic raw);
 
   @protected
+  List<FfiDecisionAnswer> dco_decode_list_ffi_decision_answer(dynamic raw);
+
+  @protected
+  List<FfiDecisionLevel> dco_decode_list_ffi_decision_level(dynamic raw);
+
+  @protected
+  List<FfiDecisionOption> dco_decode_list_ffi_decision_option(dynamic raw);
+
+  @protected
+  List<FfiDecisionQuestion> dco_decode_list_ffi_decision_question(dynamic raw);
+
+  @protected
+  List<FfiDecisionScore> dco_decode_list_ffi_decision_score(dynamic raw);
+
+  @protected
   List<FfiImagePlane> dco_decode_list_ffi_image_plane(dynamic raw);
+
+  @protected
+  List<FfiProbeJson> dco_decode_list_ffi_probe_json(dynamic raw);
+
+  @protected
+  List<FfiProbeJsonEntry> dco_decode_list_ffi_probe_json_entry(dynamic raw);
 
   @protected
   List<FfiStageLatency> dco_decode_list_ffi_stage_latency(dynamic raw);
@@ -394,10 +496,26 @@ abstract class XybridRustLibApiImplPlatform
   List<FfiToolResult> dco_decode_list_ffi_tool_result(dynamic raw);
 
   @protected
+  List<Float32List> dco_decode_list_list_prim_f_32_strict(dynamic raw);
+
+  @protected
+  List<Float64List> dco_decode_list_list_prim_f_64_strict(dynamic raw);
+
+  @protected
+  List<String?> dco_decode_list_opt_String(dynamic raw);
+
+  @protected
+  List<FfiDecisionContent?>
+      dco_decode_list_opt_box_autoadd_ffi_decision_content(dynamic raw);
+
+  @protected
   List<double> dco_decode_list_prim_f_32_loose(dynamic raw);
 
   @protected
   Float32List dco_decode_list_prim_f_32_strict(dynamic raw);
+
+  @protected
+  Float64List dco_decode_list_prim_f_64_strict(dynamic raw);
 
   @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
@@ -421,6 +539,17 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   double? dco_decode_opt_box_autoadd_f_64(dynamic raw);
+
+  @protected
+  FfiDecisionContent? dco_decode_opt_box_autoadd_ffi_decision_content(
+      dynamic raw);
+
+  @protected
+  FfiDecisionInstructions? dco_decode_opt_box_autoadd_ffi_decision_instructions(
+      dynamic raw);
+
+  @protected
+  FfiDecisionUsage? dco_decode_opt_box_autoadd_ffi_decision_usage(dynamic raw);
 
   @protected
   FfiGenerationConfig? dco_decode_opt_box_autoadd_ffi_generation_config(
@@ -637,6 +766,26 @@ abstract class XybridRustLibApiImplPlatform
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
+  FfiDecisionContent sse_decode_box_autoadd_ffi_decision_content(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionInstructions sse_decode_box_autoadd_ffi_decision_instructions(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionRequest sse_decode_box_autoadd_ffi_decision_request(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionUsage sse_decode_box_autoadd_ffi_decision_usage(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisions sse_decode_box_autoadd_ffi_decisions(
+      SseDeserializer deserializer);
+
+  @protected
   FfiDownloadStatus sse_decode_box_autoadd_ffi_download_status(
       SseDeserializer deserializer);
 
@@ -646,6 +795,18 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole sse_decode_box_autoadd_ffi_message_role(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiProbeJson sse_decode_box_autoadd_ffi_probe_json(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiProbeNesting sse_decode_box_autoadd_ffi_probe_nesting(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiProbeOptionalList sse_decode_box_autoadd_ffi_probe_optional_list(
       SseDeserializer deserializer);
 
   @protected
@@ -696,6 +857,53 @@ abstract class XybridRustLibApiImplPlatform
   FfiCacheStatus sse_decode_ffi_cache_status(SseDeserializer deserializer);
 
   @protected
+  FfiDecisionAnswer sse_decode_ffi_decision_answer(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionContent sse_decode_ffi_decision_content(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionInstructions sse_decode_ffi_decision_instructions(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionLevel sse_decode_ffi_decision_level(SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionOption sse_decode_ffi_decision_option(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionOrigin sse_decode_ffi_decision_origin(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionQuestion sse_decode_ffi_decision_question(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionQuestionKind sse_decode_ffi_decision_question_kind(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionRequest sse_decode_ffi_decision_request(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionScore sse_decode_ffi_decision_score(SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionUsage sse_decode_ffi_decision_usage(SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionValue sse_decode_ffi_decision_value(SseDeserializer deserializer);
+
+  @protected
+  FfiDecisions sse_decode_ffi_decisions(SseDeserializer deserializer);
+
+  @protected
   FfiDownloadState sse_decode_ffi_download_state(SseDeserializer deserializer);
 
   @protected
@@ -734,6 +942,20 @@ abstract class XybridRustLibApiImplPlatform
   FfiPixelFormat sse_decode_ffi_pixel_format(SseDeserializer deserializer);
 
   @protected
+  FfiProbeJson sse_decode_ffi_probe_json(SseDeserializer deserializer);
+
+  @protected
+  FfiProbeJsonEntry sse_decode_ffi_probe_json_entry(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiProbeNesting sse_decode_ffi_probe_nesting(SseDeserializer deserializer);
+
+  @protected
+  FfiProbeOptionalList sse_decode_ffi_probe_optional_list(
+      SseDeserializer deserializer);
+
+  @protected
   FfiResourceSnapshot sse_decode_ffi_resource_snapshot(
       SseDeserializer deserializer);
 
@@ -742,6 +964,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiRunOptions sse_decode_ffi_run_options(SseDeserializer deserializer);
+
+  @protected
+  FfiScoreStatistic sse_decode_ffi_score_statistic(
+      SseDeserializer deserializer);
 
   @protected
   FfiStageLatency sse_decode_ffi_stage_latency(SseDeserializer deserializer);
@@ -805,7 +1031,35 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  List<FfiDecisionAnswer> sse_decode_list_ffi_decision_answer(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiDecisionLevel> sse_decode_list_ffi_decision_level(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiDecisionOption> sse_decode_list_ffi_decision_option(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiDecisionQuestion> sse_decode_list_ffi_decision_question(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiDecisionScore> sse_decode_list_ffi_decision_score(
+      SseDeserializer deserializer);
+
+  @protected
   List<FfiImagePlane> sse_decode_list_ffi_image_plane(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiProbeJson> sse_decode_list_ffi_probe_json(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiProbeJsonEntry> sse_decode_list_ffi_probe_json_entry(
       SseDeserializer deserializer);
 
   @protected
@@ -824,10 +1078,29 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  List<Float32List> sse_decode_list_list_prim_f_32_strict(
+      SseDeserializer deserializer);
+
+  @protected
+  List<Float64List> sse_decode_list_list_prim_f_64_strict(
+      SseDeserializer deserializer);
+
+  @protected
+  List<String?> sse_decode_list_opt_String(SseDeserializer deserializer);
+
+  @protected
+  List<FfiDecisionContent?>
+      sse_decode_list_opt_box_autoadd_ffi_decision_content(
+          SseDeserializer deserializer);
+
+  @protected
   List<double> sse_decode_list_prim_f_32_loose(SseDeserializer deserializer);
 
   @protected
   Float32List sse_decode_list_prim_f_32_strict(SseDeserializer deserializer);
+
+  @protected
+  Float64List sse_decode_list_prim_f_64_strict(SseDeserializer deserializer);
 
   @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
@@ -851,6 +1124,18 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionContent? sse_decode_opt_box_autoadd_ffi_decision_content(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionInstructions? sse_decode_opt_box_autoadd_ffi_decision_instructions(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionUsage? sse_decode_opt_box_autoadd_ffi_decision_usage(
+      SseDeserializer deserializer);
 
   @protected
   FfiGenerationConfig? sse_decode_opt_box_autoadd_ffi_generation_config(
@@ -1071,6 +1356,26 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_ffi_decision_content(
+      FfiDecisionContent self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_decision_instructions(
+      FfiDecisionInstructions self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_decision_request(
+      FfiDecisionRequest self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_decision_usage(
+      FfiDecisionUsage self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_decisions(
+      FfiDecisions self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_ffi_download_status(
       FfiDownloadStatus self, SseSerializer serializer);
 
@@ -1081,6 +1386,18 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_box_autoadd_ffi_message_role(
       FfiMessageRole self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_probe_json(
+      FfiProbeJson self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_probe_nesting(
+      FfiProbeNesting self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_probe_optional_list(
+      FfiProbeOptionalList self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_ffi_result(
@@ -1133,6 +1450,57 @@ abstract class XybridRustLibApiImplPlatform
       FfiCacheStatus self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_decision_answer(
+      FfiDecisionAnswer self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_content(
+      FfiDecisionContent self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_instructions(
+      FfiDecisionInstructions self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_level(
+      FfiDecisionLevel self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_option(
+      FfiDecisionOption self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_origin(
+      FfiDecisionOrigin self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_question(
+      FfiDecisionQuestion self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_question_kind(
+      FfiDecisionQuestionKind self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_request(
+      FfiDecisionRequest self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_score(
+      FfiDecisionScore self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_usage(
+      FfiDecisionUsage self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_value(
+      FfiDecisionValue self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decisions(FfiDecisions self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_download_state(
       FfiDownloadState self, SseSerializer serializer);
 
@@ -1175,6 +1543,21 @@ abstract class XybridRustLibApiImplPlatform
       FfiPixelFormat self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_probe_json(FfiProbeJson self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_probe_json_entry(
+      FfiProbeJsonEntry self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_probe_nesting(
+      FfiProbeNesting self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_probe_optional_list(
+      FfiProbeOptionalList self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_resource_snapshot(
       FfiResourceSnapshot self, SseSerializer serializer);
 
@@ -1183,6 +1566,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_ffi_run_options(FfiRunOptions self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_score_statistic(
+      FfiScoreStatistic self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_stage_latency(
@@ -1252,8 +1639,36 @@ abstract class XybridRustLibApiImplPlatform
       List<FfiCacheEntry> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_ffi_decision_answer(
+      List<FfiDecisionAnswer> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_decision_level(
+      List<FfiDecisionLevel> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_decision_option(
+      List<FfiDecisionOption> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_decision_question(
+      List<FfiDecisionQuestion> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_decision_score(
+      List<FfiDecisionScore> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_ffi_image_plane(
       List<FfiImagePlane> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_probe_json(
+      List<FfiProbeJson> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_probe_json_entry(
+      List<FfiProbeJsonEntry> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_ffi_stage_latency(
@@ -1272,12 +1687,31 @@ abstract class XybridRustLibApiImplPlatform
       List<FfiToolResult> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_list_prim_f_32_strict(
+      List<Float32List> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_list_prim_f_64_strict(
+      List<Float64List> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_opt_String(List<String?> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_opt_box_autoadd_ffi_decision_content(
+      List<FfiDecisionContent?> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_prim_f_32_loose(
       List<double> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_f_32_strict(
       Float32List self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_prim_f_64_strict(
+      Float64List self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
@@ -1302,6 +1736,18 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_decision_content(
+      FfiDecisionContent? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_decision_instructions(
+      FfiDecisionInstructions? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_decision_usage(
+      FfiDecisionUsage? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_ffi_generation_config(
