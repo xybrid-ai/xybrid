@@ -1129,6 +1129,17 @@ unsafe extern "C" {
         flash_attn: bool,
     ) -> *mut ::std::os::raw::c_void;
 }
+unsafe extern "C" {
+    pub fn llama_xybrid_readout_params_c(
+        n_ctx: u32,
+        n_batch: u32,
+        n_ubatch: u32,
+        n_outputs_max: u32,
+        n_threads: ::std::os::raw::c_int,
+        flash_attn: bool,
+        out: *mut llama_context_params,
+    );
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct llama_xybrid_context_facts {

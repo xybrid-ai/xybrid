@@ -129,6 +129,30 @@ pub(crate) unsafe fn new_readout_context(
     )
 }
 
+/// The parameters [`new_readout_context`] creates its context with: what
+/// llama.cpp cannot report back from a context, such as `op_offload`.
+#[cfg(test)]
+pub(crate) fn readout_params(
+    sizes: ReadoutSizes,
+    n_threads: c_int,
+    flash_attn: bool,
+) -> sys::llama_context_params {
+    let mut params = std::mem::MaybeUninit::uninit();
+    // SAFETY: the shim writes the whole struct before returning.
+    unsafe {
+        sys::llama_xybrid_readout_params_c(
+            sizes.n_ctx,
+            sizes.n_batch,
+            sizes.n_ubatch,
+            sizes.n_outputs_max,
+            n_threads,
+            flash_attn,
+            params.as_mut_ptr(),
+        );
+        params.assume_init()
+    }
+}
+
 /// The sizes [`new_readout_context`] asks llama.cpp for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ReadoutSizes {

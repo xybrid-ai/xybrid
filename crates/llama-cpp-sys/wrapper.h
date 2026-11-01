@@ -197,9 +197,11 @@ int32_t llama_vocab_get_text_c(const XYBRID_LLAMA_MODEL* model, int32_t token, c
 
 /* A context for one-shot readouts: one sequence, the given context, batch and
    microbatch sizes, at most n_outputs_max outputs (0 = n_batch, llama.cpp's
-   default) and one per sequence, no embeddings, and the model's own attention
-   type. Guarded; returns NULL on failure. Whether it has memory is the
-   model's choice: check it. */
+   default) and one per sequence, no embeddings, the model's own attention
+   type, and no op offload: every operation runs where its weights are (op
+   offload would move large-batch operations on host weights to a Metal,
+   CUDA or Vulkan device even with no GPU layers). Guarded; returns NULL on
+   failure. Whether it has memory is the model's choice: check it. */
 XYBRID_LLAMA_CONTEXT* llama_new_readout_context_c(
     XYBRID_LLAMA_MODEL* model,
     uint32_t n_ctx,
@@ -208,6 +210,17 @@ XYBRID_LLAMA_CONTEXT* llama_new_readout_context_c(
     uint32_t n_outputs_max,
     int n_threads,
     bool flash_attn);
+/* The parameters llama_new_readout_context_c creates its context with, for
+   tests: llama.cpp has no accessor for most of them, op_offload among them.
+   Cannot fail. */
+void llama_xybrid_readout_params_c(
+    uint32_t n_ctx,
+    uint32_t n_batch,
+    uint32_t n_ubatch,
+    uint32_t n_outputs_max,
+    int n_threads,
+    bool flash_attn,
+    struct llama_context_params* out);
 
 /* The sizes and attention a context actually got, which can differ from the
    ones requested. has_memory is false when llama.cpp runs the model without

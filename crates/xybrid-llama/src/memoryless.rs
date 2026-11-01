@@ -62,6 +62,18 @@ const CAUSAL_KEY: &str = "lfm3.attention.causal";
 const TEMPLATE_NAME: &str = "systemone";
 
 /// What [`MemorylessContext::new`] builds.
+///
+/// Whatever the parameters, the context runs every operation where its
+/// weights are: it turns llama.cpp's op offload off. With it on (llama.cpp's
+/// default, which the chat contexts keep), ggml's scheduler moves a
+/// large-batch operation on weights in host memory to a GPU backend that asks
+/// for it, as Metal, CUDA and Vulkan do, even for a model loaded with no GPU
+/// layers: a whole-prompt readout is exactly such a batch. So a model loaded
+/// with `n_gpu_layers = 0` is read on the CPU, as far as llama.cpp's
+/// scheduler goes: no other pass moves an operation from host memory to a
+/// device. That is necessary, not shown sufficient, on an accelerator build:
+/// the context still creates the backends of the model's devices (llama.cpp
+/// does for every context), and placement there has not been measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MemorylessParams {
     token_budget: u32,
@@ -903,6 +915,35 @@ mod tests {
         assert_eq!(ffi::native_calls(), calls, "no native call was made");
         drop(ctx);
         cancel.cancel(); // the context is gone: nothing to stop
+    }
+
+    /// llama.cpp has no accessor for `op_offload`, and on a CPU build it
+    /// changes nothing (there is no device to offload to), so this reads the
+    /// parameters the readout context is created with.
+    #[test]
+    fn a_readout_context_offloads_no_operation() {
+        let (sizes, n_threads) =
+            readout_sizes(MemorylessParams::new(4096, 4, true), OUTPUT_CAP).unwrap();
+        let params = ffi::readout_params(sizes, n_threads, true);
+        assert!(!params.op_offload, "no operation moves to a GPU backend");
+        assert_eq!(
+            (params.n_ctx, params.n_batch, params.n_ubatch),
+            (4096, 4096, 4096)
+        );
+        assert_eq!(
+            (
+                params.n_seq_max,
+                params.n_outputs_max,
+                params.n_outputs_max_per_seq
+            ),
+            (1, 1, 1)
+        );
+        assert!(!params.embeddings);
+        assert_eq!(
+            params.flash_attn_type,
+            llama_cpp_sys::bindings::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_ENABLED
+        );
+        assert_eq!((params.n_threads, params.n_threads_batch), (4, 4));
     }
 
     /// The stub has no native context: a readout that is not refused as

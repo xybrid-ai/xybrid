@@ -497,6 +497,54 @@ llama_context* llama_new_context_with_model_c(
 // and 0 means n_batch of them. The attention type is left to the model, and
 // whether the context gets memory is the model's choice too, so the caller
 // checks both on the result.
+// The parameters of a readout context (llama_new_readout_context_c).
+static llama_context_params readout_params(
+    uint32_t n_ctx,
+    uint32_t n_batch,
+    uint32_t n_ubatch,
+    uint32_t n_outputs_max,
+    int n_threads,
+    bool flash_attn
+) {
+    llama_context_params params = llama_context_default_params();
+    params.n_ctx = n_ctx;
+    params.n_batch = n_batch;
+    params.n_ubatch = n_ubatch;
+    params.n_seq_max = 1;
+    params.n_outputs_max = n_outputs_max;
+    params.n_outputs_max_per_seq = 1;
+    params.embeddings = false;
+    params.attention_type = LLAMA_ATTENTION_TYPE_UNSPECIFIED;
+    params.flash_attn_type = flash_attn ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    // Every operation runs where its weights are. With op_offload, ggml's
+    // scheduler moves a large-batch operation on weights in host memory to a
+    // GPU backend that asks for it (Metal, CUDA and Vulkan do), even for a
+    // model loaded with no GPU layers, and a readout is one large batch. Off,
+    // such a model stays on the CPU as far as the scheduler goes: necessary
+    // for a CPU-only readout, not measured to be sufficient on an
+    // accelerator build (its device backends are still created).
+    params.op_offload = false;
+    int actual_threads = n_threads > 0 ? n_threads : std::thread::hardware_concurrency();
+    if (actual_threads == 0) actual_threads = 4;  // Fallback if detection fails
+    params.n_threads = static_cast<int32_t>(actual_threads);
+    params.n_threads_batch = static_cast<int32_t>(actual_threads);
+    return params;
+}
+
+void llama_xybrid_readout_params_c(
+    uint32_t n_ctx,
+    uint32_t n_batch,
+    uint32_t n_ubatch,
+    uint32_t n_outputs_max,
+    int n_threads,
+    bool flash_attn,
+    llama_context_params* out
+) {
+    if (out) {
+        *out = readout_params(n_ctx, n_batch, n_ubatch, n_outputs_max, n_threads, flash_attn);
+    }
+}
+
 llama_context* llama_new_readout_context_c(
     llama_model* model,
     uint32_t n_ctx,
@@ -510,22 +558,8 @@ llama_context* llama_new_readout_context_c(
         if (!model || n_ctx == 0 || n_batch == 0 || n_ubatch == 0) {
             return nullptr;
         }
-        llama_context_params params = llama_context_default_params();
-        params.n_ctx = n_ctx;
-        params.n_batch = n_batch;
-        params.n_ubatch = n_ubatch;
-        params.n_seq_max = 1;
-        params.n_outputs_max = n_outputs_max;
-        params.n_outputs_max_per_seq = 1;
-        params.embeddings = false;
-        params.attention_type = LLAMA_ATTENTION_TYPE_UNSPECIFIED;
-        params.flash_attn_type = flash_attn ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
-        int actual_threads = n_threads > 0 ? n_threads : std::thread::hardware_concurrency();
-        if (actual_threads == 0) actual_threads = 4;  // Fallback if detection fails
-        params.n_threads = static_cast<int32_t>(actual_threads);
-        params.n_threads_batch = static_cast<int32_t>(actual_threads);
-
-        return llama_init_from_model(model, params);
+        return llama_init_from_model(
+            model, readout_params(n_ctx, n_batch, n_ubatch, n_outputs_max, n_threads, flash_attn));
     });
 }
 
