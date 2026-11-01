@@ -17,10 +17,12 @@
 //!
 //! What a format allocates before a visitor runs is outside what a visitor
 //! can bound. serde_json unescapes a string into a buffer before handing it
-//! over, at most as long as the input itself. bincode reading from an
-//! `io::Read` allocates a string's declared length first: decode from a
-//! byte slice (bincode then hands strings over borrowed) or set bincode's
-//! size limit.
+//! over, at most as long as the input itself. bincode decoding from a byte
+//! slice hands strings over borrowed, so these checks bound it; its
+//! `with_limit` does not, because bincode 1.3.x replaces the limit with
+//! none for slices. bincode decoding from an `io::Read` reads a string's
+//! declared length into its own buffer before any visitor runs, so there
+//! only `with_limit` with `deserialize_from` bounds that allocation.
 
 use super::{
     DecisionAnswer, DecisionLevel, DecisionOption, DecisionQuestion, DecisionScore,

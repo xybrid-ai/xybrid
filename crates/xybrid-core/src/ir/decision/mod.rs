@@ -93,9 +93,18 @@
 //! model, and at or above the default [`StructuralLimits`], so data within
 //! the defaults always decodes (JSON text has room for its compact form,
 //! which can be longer than the text it was parsed from); configured limits
-//! should stay within them. bincode hands strings over borrowed only when
-//! decoding from a byte slice; from an `io::Read` it allocates a string's
-//! declared length first, so set its size limit there.
+//! should stay within them.
+//!
+//! With bincode, how the input arrives decides what bounds allocation:
+//!
+//! - **From a byte slice**, these ceilings do: a declared length is refused
+//!   before anything is reserved, and a string arrives borrowed and is
+//!   measured before it is copied. bincode's own `with_limit` does not apply
+//!   to slices in bincode 1.3.x, which replaces it with no limit, so
+//!   `options.with_limit(n).deserialize(&bytes)` adds no bound of its own.
+//! - **From an `io::Read`**, use `with_limit` with `deserialize_from`:
+//!   bincode reads a string's declared length into its own buffer before
+//!   any visitor runs, so only its limit bounds that allocation.
 //!
 //! # Compatibility
 //!

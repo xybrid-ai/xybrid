@@ -497,9 +497,9 @@ impl Serialize for OrderedJson {
 
 /// Reads the string [`Serialize`] writes and parses it under the decode
 /// ceilings: 2 MiB of text, checked on its length before parsing (bincode
-/// hands it over borrowed, so nothing is copied first), and the default
-/// value ceiling ([`DEFAULT_MAX_JSON_NODES`]). Invalid JSON text is refused
-/// with a content-free message.
+/// decoding from a byte slice hands it over borrowed, so nothing is copied
+/// first), and the default value ceiling ([`DEFAULT_MAX_JSON_NODES`]).
+/// Invalid JSON text is refused with a content-free message.
 ///
 /// 2 MiB, not the 1 MiB default: compact text can be longer than the text a
 /// value was parsed from, and 2 MiB holds the compact text of every value
