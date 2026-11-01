@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "depth-state-empty-at-limit",
   "profile": "lfm3-d1/text/v1",
-  "title": "127 nested empty arrays in the state: an empty innermost array is one level shallower",
+  "title": "A state of 127 nested empty arrays, 127 levels deep: the deepest upstream renders",
   "covers": ["json-depth", "state-array"],
   "artifact": "d1-2b-q4km",
   "settings": "cpu-t4-fa-off",

@@ -234,20 +234,6 @@
         }
       }
     },
-    "d1-2b-q4km": {
-      "description": "LiquidAI d1-2B decision model (LFM3 d1, text state) - Q4_K_M GGUF at the revision the decision conformance cases pin (integration-tests/fixtures/decision/artifacts.json)",
-      "source": "url",
-      "size_mb": 1049,
-      "task": "decision",
-      "feature_gate": "llm-llamacpp",
-      "files": [
-        {
-          "url": "https://huggingface.co/LiquidAI/d1-2B-GGUF/resolve/e968f6575f0d4fad928312d7af15cad90fd365c0/d1-2B-Q4_K_M.gguf",
-          "output": "d1-2B-Q4_K_M.gguf",
-          "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b"
-        }
-      ]
-    },
     "lfm3-vl-2b": {
       "description": "Liquid LFM3-VL 2B - vision-language model with a native-resolution encoder (quantization-aware Q4_0 GGUF + Q8_0 mmproj)",
       "source": "url",
@@ -1106,6 +1092,20 @@
         {
           "output": "Qwen3.5-0.8B-Q4_K_M.gguf",
           "sha256": "3dde4a34fc13354fa15a9931dc29025de48cc5ecd9515224b14e8d1cfbbed684"
+        }
+      ]
+    },
+    "d1-2b-q4km": {
+      "description": "Liquid d1-2B decision model, Q4_K_M GGUF (decision conformance, profile lfm3-d1/text/v1)",
+      "source": "url",
+      "size_mb": 1049,
+      "task": "decision",
+      "feature_gate": "llm-llamacpp",
+      "files": [
+        {
+          "url": "https://huggingface.co/LiquidAI/d1-2B-GGUF/resolve/e968f6575f0d4fad928312d7af15cad90fd365c0/d1-2B-Q4_K_M.gguf",
+          "output": "d1-2B-Q4_K_M.gguf",
+          "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b"
         }
       ]
     }

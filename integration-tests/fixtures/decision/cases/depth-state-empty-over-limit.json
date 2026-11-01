@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "depth-state-empty-over-limit",
   "profile": "lfm3-d1/text/v1",
-  "title": "128 nested empty arrays in the state are refused",
+  "title": "A state of 128 nested empty arrays is refused",
   "covers": ["json-depth", "refusal-prepare"],
   "artifact": "d1-2b-q4km",
   "settings": null,
