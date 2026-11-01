@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-07-choice-8-600-tokens",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 7: choice 8 600 tokens (hr_leave)",
+  "covers": [
+    "state-string",
+    "choice-order"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"A new parent wants to switch to four days a week for six months after their leave ends. (1) The office is closed on public holidays. (2) Leave requests are usually answered within three working days. (3) The team has seven members across two sites. (4) Shift swaps are arranged on a shared calendar. (5) The handbook was updated at the start of the year. (6) Overtime is recorded in the time-tracking tool. (7) Managers review absences once a month. (8) New starters receive their allowance pro rata. (9) The payroll cut-off is the twentieth of each month. (10) Questions can be sent to the people team mailbox. (11) The office is closed on public holidays. (12) Leave requests are usually answered within three working days. (13) The team has seven members across two sites. (14) Shift swaps are arranged on a shared calendar. (15) The handbook was updated at the start of the year. (16) Overtime is recorded in the time-tracking tool. (17) Managers review absences once a month. (18) New starters receive their allowance pro rata. (19) The payroll cut-off is the twentieth of each month. (20) Questions can be sent to the people team mailbox. (21) The office is closed on public holidays. (22) Leave requests are usually answered within three working days. (23) The team has seven members across two sites. (24) Shift swaps are arranged on a shared calendar. (25) The handbook was updated at the start of the year. (26) Overtime is recorded in the time-tracking tool. (27) Managers review absences once a month. (28) New starters receive their allowance pro rata. (29) The payroll cut-off is the twentieth of each month. (30) Questions can be sent to the people team mailbox. (31) The office is closed on public holidays. (32) Leave requests are usually answered within three working days. (33) The team has seven members across two sites. (34) Shift swaps are arranged on a shared calendar. (35) The handbook was updated at the start of the year. (36) Overtime is recorded in the time-tracking tool. (37) Managers review absences once a month. also noted today again later\", \"questions\": {\"answer\": {\"type\": \"choice\", \"instructions\": \"Which policy applies to this request?\", \"criteria\": {\"flexible_work\": \"Changes to hours or working pattern\", \"special_leave\": \"Moving, weddings, bereavement\", \"training\": \"Courses and exams\", \"sick_leave\": \"Absence because of illness\", \"unpaid_leave\": \"Time off without pay\", \"parental_leave\": \"Leave for a new child\", \"annual_leave\": \"Paid holidays from the yearly allowance\", \"not_a_leave_request\": \"Something other than time off\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

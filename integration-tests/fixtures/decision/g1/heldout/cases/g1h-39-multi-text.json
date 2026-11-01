@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-39-multi-text",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 39: multi text (schooling)",
+  "covers": [
+    "state-string",
+    "multi-question"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"A parent asks whether their son can skip the swimming lessons because of an ear infection.\", \"questions\": {\"route\": {\"type\": \"choice\", \"instructions\": \"Who should handle this first?\", \"criteria\": {\"learning_support\": \"Extra help with learning\", \"counsellor\": \"Wellbeing and personal issues\", \"parents\": \"The family\"}}, \"today\": {\"type\": \"noul\", \"instructions\": \"Is a medical reason given?\", \"criteria\": {\"true\": \"Illness or injury is mentioned\", \"false\": \"No medical reason is given\"}}, \"level\": {\"type\": \"score\", \"instructions\": \"How concerning is this situation?\", \"criteria\": [\"not at all\", \"somewhat\", \"extremely\"]}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

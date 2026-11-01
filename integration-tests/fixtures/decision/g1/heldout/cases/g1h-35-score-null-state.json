@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "g1h-35-score-null-state",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 35: score null state (contracts)",
+  "covers": [
+    "state-null"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": null, \"questions\": {\"answer\": {\"type\": \"score\", \"instructions\": \"How risky is this clause for the customer?\", \"criteria\": [\"no risk\", \"moderate\", \"unacceptable\"]}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

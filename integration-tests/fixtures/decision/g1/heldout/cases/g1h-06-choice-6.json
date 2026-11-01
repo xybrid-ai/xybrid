@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-06-choice-6",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 6: choice 6 (code_review)",
+  "covers": [
+    "state-string",
+    "choice-order"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"A new loop reads a file line by line and keeps every line in memory before processing it.\", \"questions\": {\"answer\": {\"type\": \"choice\", \"instructions\": \"What is the main concern in this change?\", \"criteria\": {\"documentation\": \"Docs or changelog out of date\", \"tests\": \"Missing or weak tests\", \"performance\": \"Speed or memory use\", \"api_break\": \"A change that breaks existing users\", \"style\": \"Naming and formatting\", \"error_handling\": \"Errors hidden or mishandled\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

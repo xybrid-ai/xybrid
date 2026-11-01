@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-17-choice-64-tokens",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 17: choice 64 tokens (property)",
+  "covers": [
+    "state-string",
+    "choice-order"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"The doorbell does not ring. also noted today again later here then too still now soon please thanks indeed meanwhile\", \"questions\": {\"answer\": {\"type\": \"choice\", \"instructions\": \"What kind of issue is this?\", \"criteria\": {\"neighbour_dispute\": \"A problem with neighbours\", \"contract\": \"Terms of the lease\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

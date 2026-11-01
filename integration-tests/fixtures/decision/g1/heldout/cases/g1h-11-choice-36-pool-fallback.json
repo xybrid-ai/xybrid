@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-11-choice-36-pool-fallback",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 11: choice 36 pool fallback (travel)",
+  "covers": [
+    "state-string",
+    "choice-pool-fallback"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"A rental car was returned with a full tank, but the company charged a refuelling fee.\", \"questions\": {\"answer\": {\"type\": \"choice\", \"instructions\": \"Which shelf should this jar go on?\", \"criteria\": {\"anise\": \"Shelf for anise\", \"basil\": \"Shelf for basil\", \"bay_leaf\": \"Shelf for bay leaf\", \"caraway\": \"Shelf for caraway\", \"cardamom\": \"Shelf for cardamom\", \"cayenne\": \"Shelf for cayenne\", \"chervil\": \"Shelf for chervil\", \"chives\": \"Shelf for chives\", \"cinnamon\": \"Shelf for cinnamon\", \"clove\": \"Shelf for clove\", \"coriander\": \"Shelf for coriander\", \"cumin\": \"Shelf for cumin\", \"dill\": \"Shelf for dill\", \"fennel\": \"Shelf for fennel\", \"fenugreek\": \"Shelf for fenugreek\", \"galangal\": \"Shelf for galangal\", \"garlic\": \"Shelf for garlic\", \"ginger\": \"Shelf for ginger\", \"juniper\": \"Shelf for juniper\", \"lavender\": \"Shelf for lavender\", \"lemongrass\": \"Shelf for lemongrass\", \"mace\": \"Shelf for mace\", \"marjoram\": \"Shelf for marjoram\", \"mint\": \"Shelf for mint\", \"mustard\": \"Shelf for mustard\", \"nutmeg\": \"Shelf for nutmeg\", \"oregano\": \"Shelf for oregano\", \"paprika\": \"Shelf for paprika\", \"parsley\": \"Shelf for parsley\", \"pepper\": \"Shelf for pepper\", \"rosemary\": \"Shelf for rosemary\", \"saffron\": \"Shelf for saffron\", \"sage\": \"Shelf for sage\", \"sumac\": \"Shelf for sumac\", \"tarragon\": \"Shelf for tarragon\", \"thyme\": \"Shelf for thyme\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

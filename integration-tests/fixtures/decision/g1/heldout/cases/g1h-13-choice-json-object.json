@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-13-choice-json-object",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 13: choice json object (it_incidents)",
+  "covers": [
+    "state-object",
+    "json-order"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": {\"summary\": \"Users in the Berlin office cannot reach the intranet since 08:40, while the public website works.\", \"incident\": {\"status\": \"investigating\", \"id\": 5069, \"tags\": [\"investigating\", \"resolved\"]}, \"history\": [{\"step\": 1, \"note\": \"Logs are kept for thirty days.\"}, {\"step\": 2, \"note\": \"The runbook for this service was reviewed in spring.\"}]}, \"questions\": {\"answer\": {\"type\": \"choice\", \"instructions\": \"Which team should own this incident?\", \"criteria\": {\"application\": \"Bugs in business software\", \"desktop_support\": \"Laptops, printers and accounts\", \"vendor\": \"A third-party service provider\", \"platform\": \"Servers, containers and deployments\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

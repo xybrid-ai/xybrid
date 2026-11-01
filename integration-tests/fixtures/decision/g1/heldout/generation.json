@@ -1,0 +1,638 @@
+{
+  "schema_version": 1,
+  "what": "How G1's held-out cases were generated. No numeric outcome was read.",
+  "recipe": {
+    "file": "tools/conformance/decision_g1/make_heldout.py",
+    "sha256": "806ac31b8b63fb9533a86aa9e32c2d93b3ccc9d897cf1cdcda3389cf95935913",
+    "seed": 407709422033
+  },
+  "cases": [
+    {
+      "id": "g1h-01-choice-2",
+      "topic": "utilities",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "4cbfc24f347521157f2c49a57d62d43253da44c138e70bbaaf636519b6b1e1fe",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        68
+      ]
+    },
+    {
+      "id": "g1h-02-choice-3",
+      "topic": "sports",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "c51fe49ff74321bc33a8c44cf9475732925b2494aad02c032ac0aaa04e90a31e",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        73
+      ]
+    },
+    {
+      "id": "g1h-03-choice-4",
+      "topic": "allergens",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "91e77af40c681a3a5d925ca49ee1bb4dd4c5177567d743062bdc52238c59945f",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        84
+      ]
+    },
+    {
+      "id": "g1h-04-choice-5",
+      "topic": "property",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "5317d2b9c0fcd90b0303870ec26911636f7be572310dd54a02e7a5e5b69b8370",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        83
+      ]
+    },
+    {
+      "id": "g1h-05-choice-ambiguous",
+      "topic": "clinic",
+      "questions": [
+        "service"
+      ],
+      "request_text_sha256": "c4e3dfd2e41322b481529a4e96215bd2d29e2f5983a0b96685c5b1bdd98411ee",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        84
+      ]
+    },
+    {
+      "id": "g1h-06-choice-6",
+      "topic": "code_review",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "ba14412027f5ff4e1e03a2ac150ebf7e4f1dcd606acc3c26b157a9b5495f4a7d",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        97
+      ]
+    },
+    {
+      "id": "g1h-07-choice-8-600-tokens",
+      "topic": "hr_leave",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "b96f9b32c6911ecefaeb1ce4b60b4f35291f275061965eb58c1516e25434cb21",
+      "target_tokens": 600,
+      "measured_tokens": 600,
+      "pass_tokens": [
+        600
+      ]
+    },
+    {
+      "id": "g1h-08-choice-upper-letter-keys",
+      "topic": "insurance",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "b6c74a13d719d2256110d5447ab90192b5815507aedaae101fc2a89fd4c89e3f",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        78
+      ]
+    },
+    {
+      "id": "g1h-09-choice-lower-letter-keys",
+      "topic": "clinic",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "90e632596d21c99d150cd8cedc6aff2e69367200ab280d7a0142dd43bf75f19d",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        87
+      ]
+    },
+    {
+      "id": "g1h-10-choice-27",
+      "topic": "contracts",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "9727f4a2cef8438cc0dc745988d7d9910afe844ff575feee5d247243c3bb3450",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        237
+      ]
+    },
+    {
+      "id": "g1h-11-choice-36-pool-fallback",
+      "topic": "travel",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "684db9f9652c18de144534a92d1c7ddd0e8e656f25d7a55aa9446e05b1212c94",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        305
+      ]
+    },
+    {
+      "id": "g1h-12-choice-255",
+      "topic": "schooling",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "b0247f7ec13988ea2cf0ee500bcbf08ffc86e68eae7c2182289b1becb97ebe21",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        2122
+      ]
+    },
+    {
+      "id": "g1h-13-choice-json-object",
+      "topic": "it_incidents",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "98ce08da33d3b03b3bed673f366c62bd98cebe67b4acb830912919601f4a362e",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        191
+      ]
+    },
+    {
+      "id": "g1h-14-choice-json-object-1500-tokens",
+      "topic": "utilities",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "841e4b72215bc9c98a7c77addd740a0bc52d3a880ac491282e39dfc751dafd40",
+      "target_tokens": 1500,
+      "measured_tokens": 1500,
+      "pass_tokens": [
+        1500
+      ]
+    },
+    {
+      "id": "g1h-15-choice-json-array",
+      "topic": "sports",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "a122d2e1e74b0d1b72f40e26b2430d1a32c888a01d0d2f510e569bcc43b17294",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        134
+      ]
+    },
+    {
+      "id": "g1h-16-choice-null-state",
+      "topic": "allergens",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "b4f845b77440f84b630fdf869468d502d72cb91cba3553e23e530e53526361c3",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        58
+      ]
+    },
+    {
+      "id": "g1h-17-choice-64-tokens",
+      "topic": "property",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "dc85cb19d0bfa0bb659828746c23a08e01bae477944166c4ac1853a38138fa9d",
+      "target_tokens": 64,
+      "measured_tokens": 64,
+      "pass_tokens": [
+        64
+      ]
+    },
+    {
+      "id": "g1h-18-choice-4064-tokens",
+      "topic": "code_review",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "d2b9447b1202a1d91883705c5c30277da546bd263405048318c7ab71324ba0db",
+      "target_tokens": 4064,
+      "measured_tokens": 4064,
+      "pass_tokens": [
+        4064
+      ]
+    },
+    {
+      "id": "g1h-19-noul-criteria-a",
+      "topic": "hr_leave",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "1ee0f297d2619ed7ded10fbe0c39594ec48a74b43fe3edb308c38ff1b30adc35",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        68
+      ]
+    },
+    {
+      "id": "g1h-20-noul-criteria-b",
+      "topic": "insurance",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "bbda1e1932e0dcf313f350b0ffbb8f966b9d59b1b3f4931063f50201e2f9bf32",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        67
+      ]
+    },
+    {
+      "id": "g1h-21-noul-criteria-c",
+      "topic": "clinic",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "2a5d430fab09624153bad010aec880533298a907d1b79a44e3bd48cbd1ea8a6b",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        74
+      ]
+    },
+    {
+      "id": "g1h-22-noul-no-criteria",
+      "topic": "contracts",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "66fb76709d13f7a8cd2d136234382c9d04221030a79c58bd59156b06646eedf2",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        45
+      ]
+    },
+    {
+      "id": "g1h-23-noul-63-tokens",
+      "topic": "travel",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "0f8aab4e0d2ec6e64221d50e601a02a5d7cb3e361351f5d8f0125f88a4aea768",
+      "target_tokens": 63,
+      "measured_tokens": 63,
+      "pass_tokens": [
+        63
+      ]
+    },
+    {
+      "id": "g1h-24-noul-true-only",
+      "topic": "schooling",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "4b772d250f105f5a62b5a9e6f084fcd5946c4cfbe7736dbf5339b100f3f27fb1",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        49
+      ]
+    },
+    {
+      "id": "g1h-25-noul-json-object",
+      "topic": "it_incidents",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "9289f4fee150f6ef76f1f408754408492f4de28d826dec03e392526bc465d283",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        161
+      ]
+    },
+    {
+      "id": "g1h-26-noul-json-array",
+      "topic": "utilities",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "7b70aa70d693fbe6f2b4ef8ba5af906522cab19f710221a54c8b723d8de3b424",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        117
+      ]
+    },
+    {
+      "id": "g1h-27-noul-empty-state",
+      "topic": "sports",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "ba9ac97d35dc7d79f5634bb85e0ab07db8ff0590181446b544fc9f44ff0e445f",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        27
+      ]
+    },
+    {
+      "id": "g1h-28-noul-65-tokens",
+      "topic": "allergens",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "94567b73b070bb403c9178668a975bd8391524511f4c959842b8716e2725fc4d",
+      "target_tokens": 65,
+      "measured_tokens": 65,
+      "pass_tokens": [
+        65
+      ]
+    },
+    {
+      "id": "g1h-29-score-2",
+      "topic": "property",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "183fcdc098edcebc2a55d2154b5de9e51dccb9cbdc409f9819d74e7461759c2e",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        57
+      ]
+    },
+    {
+      "id": "g1h-30-score-3",
+      "topic": "code_review",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "c3d7094a1b92f13da3e4e39933cd22fe0c5bc4b74a83a1babfa8ec00b127b21a",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        60
+      ]
+    },
+    {
+      "id": "g1h-31-score-borderline",
+      "topic": "it_incidents",
+      "questions": [
+        "severity"
+      ],
+      "request_text_sha256": "10c862eaadd2beee5bea6f8176a64ce2bef750d65a9f310487c81d66b81343d8",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        81
+      ]
+    },
+    {
+      "id": "g1h-32-score-7",
+      "topic": "hr_leave",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "4247ad415772c13a5f403190e9ec6f2e0becae1b2e64cdc0cd5a0b49ce6faeae",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        82
+      ]
+    },
+    {
+      "id": "g1h-33-score-10",
+      "topic": "insurance",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "eed22cc97bbdc6daeb91e708b8ae050bed3c8e04f75f41021e7d5bd0a8fe4019",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        92
+      ]
+    },
+    {
+      "id": "g1h-34-score-json-object",
+      "topic": "clinic",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "d6c577d3cb4419850086657ea7bfb99d5720f1c545461e49b151b91fcefbf6a3",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        186
+      ]
+    },
+    {
+      "id": "g1h-35-score-null-state",
+      "topic": "contracts",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "5e98a9c2e747f97dad33ad71ee2106dce83cfa3555d9226e106ab99d867b2255",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        41
+      ]
+    },
+    {
+      "id": "g1h-36-score-unicode",
+      "topic": "sports",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "5a98ca16aa13a9fab5a7a4d0b09695eda37c697903d472ee9ed7639750b83045",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        92
+      ]
+    },
+    {
+      "id": "g1h-37-choice-unicode",
+      "topic": "travel",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "7644a9c16045ed9e4d80667ca34bb52f2cd4c3b2d888336de33c2e0b9938bc62",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        87
+      ]
+    },
+    {
+      "id": "g1h-38-score-json-mixed",
+      "topic": "travel",
+      "questions": [
+        "answer"
+      ],
+      "request_text_sha256": "fa498fec20e9d2a492223f162c2c0889e0f60ad4f3543a32d2b71e325f6edb74",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        248
+      ]
+    },
+    {
+      "id": "g1h-39-multi-text",
+      "topic": "schooling",
+      "questions": [
+        "route",
+        "today",
+        "level"
+      ],
+      "request_text_sha256": "b3582e165255c40e444272457b9857439a032a422c2429c6c010ea8f86cf2005",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        62,
+        60,
+        58
+      ]
+    },
+    {
+      "id": "g1h-40-multi-json",
+      "topic": "it_incidents",
+      "questions": [
+        "flag",
+        "route",
+        "level"
+      ],
+      "request_text_sha256": "a226c2001c46738ca09f43b4e5d0ea21bbfd0fe4964e5696676399af771466e8",
+      "target_tokens": null,
+      "measured_tokens": null,
+      "pass_tokens": [
+        222,
+        251,
+        236
+      ]
+    }
+  ],
+  "measured_with": {
+    "tool": "tools/conformance/decision/build/bin/decision-oracle",
+    "tool_sha256": "3192392b4b8285870893f8d29f0bc531ec6968d5c4cc25d536d6f6202b84ab31",
+    "tool_identity": {
+      "identity_version": 1,
+      "fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+      "llama_cpp": {
+        "checkout": "git",
+        "commit": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "dirty": false
+      },
+      "tool_files": {
+        "CMakeLists.txt": "06ffbe1864b132cbef95bf3ec33ec1b2ab22910dbaecb2051aba3ae0c7004565",
+        "identity.cmake": "26b05a73fdc47b8f06e03806544bf19406fd6f440165b5ce31a0ddcead87eb29",
+        "oracle.cpp": "814fa577941d72e8816612aa30c4f0ba437cb5a84db1847834cdb99540b84707",
+        "test_access.h": "41d4b5ed68279a1957eb72edd18fdef41b4e5f0e504b19ee4453155ba3f91cd1"
+      },
+      "upstream_files": {
+        "tools/server/server-decision.cpp": "86379ffbf753cbe4ae90cebd60d5df62cda44cf37459e4e1de2db081fec8652b",
+        "tools/server/server-decision.h": "b2badfb6dfa7514208875bdaa2fb52061d65e313bfc6c1c586cafbb2560a1710",
+        "tools/server/server-context.cpp": "26acff2657377779f0b48317c043c97b6e9022eaf89d8d956d8ae2a8b2e6e38d",
+        "tools/server/server.cpp": "d4d343db7c1b648eb5358ae2b87966a5f78ce5c9b245c7fbfe9827ba6971f08b",
+        "tools/server/server-common.cpp": "b686729ed7d098e2f0c3da1ba28325d0e6d30721dab09f71cb9b53f342710ddb"
+      },
+      "build": {
+        "system": "Linux",
+        "processor": "x86_64",
+        "build_type": "Release",
+        "c_compiler": "GNU 11.5.0",
+        "cxx_compiler": "GNU 11.5.0",
+        "c_flags": " -O3 -DNDEBUG",
+        "cxx_flags": " -O3 -DNDEBUG",
+        "exe_linker_flags": " ",
+        "backends": [
+          "cpu"
+        ],
+        "options": {
+          "BUILD_SHARED_LIBS": "OFF",
+          "GGML_ACCELERATE": "OFF",
+          "GGML_AMX_BF16": "OFF",
+          "GGML_AMX_INT8": "OFF",
+          "GGML_AMX_TILE": "OFF",
+          "GGML_AVX": "ON",
+          "GGML_AVX2": "ON",
+          "GGML_AVX512": "OFF",
+          "GGML_AVX512_BF16": "OFF",
+          "GGML_AVX512_VBMI": "OFF",
+          "GGML_AVX512_VNNI": "OFF",
+          "GGML_AVX_VNNI": "OFF",
+          "GGML_BACKEND_DL": "OFF",
+          "GGML_BLAS": "OFF",
+          "GGML_BMI2": "ON",
+          "GGML_CANN": "OFF",
+          "GGML_CPU": "ON",
+          "GGML_CPU_ALL_VARIANTS": "OFF",
+          "GGML_CPU_ARM_ARCH": "",
+          "GGML_CPU_HBM": "OFF",
+          "GGML_CPU_KLEIDIAI": "OFF",
+          "GGML_CPU_REPACK": "ON",
+          "GGML_CUDA": "OFF",
+          "GGML_ET": "OFF",
+          "GGML_F16C": "ON",
+          "GGML_FMA": "ON",
+          "GGML_GPROF": "OFF",
+          "GGML_HEXAGON": "OFF",
+          "GGML_HIP": "OFF",
+          "GGML_LLAMAFILE": "ON",
+          "GGML_LTO": "OFF",
+          "GGML_METAL": "OFF",
+          "GGML_MUSA": "OFF",
+          "GGML_NATIVE": "OFF",
+          "GGML_OPENCL": "OFF",
+          "GGML_OPENMP": "OFF",
+          "GGML_OPENVINO": "OFF",
+          "GGML_RPC": "OFF",
+          "GGML_SANITIZE_ADDRESS": "OFF",
+          "GGML_SANITIZE_THREAD": "OFF",
+          "GGML_SANITIZE_UNDEFINED": "OFF",
+          "GGML_SCHED_NO_REALLOC": "OFF",
+          "GGML_SSE42": "ON",
+          "GGML_STATIC": "OFF",
+          "GGML_SYCL": "OFF",
+          "GGML_VIRTGPU": "OFF",
+          "GGML_VIRTGPU_BACKEND": "OFF",
+          "GGML_VULKAN": "OFF",
+          "GGML_WEBGPU": "OFF",
+          "GGML_ZDNN": "OFF",
+          "GGML_ZENDNN": "OFF",
+          "LLAMA_LLGUIDANCE": "OFF",
+          "LLAMA_SANITIZE_ADDRESS": "OFF",
+          "LLAMA_SANITIZE_THREAD": "OFF",
+          "LLAMA_SANITIZE_UNDEFINED": "OFF"
+        }
+      }
+    },
+    "vocab": "d1-2B-Q4_K_M.gguf",
+    "vocab_sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+    "calls": 77
+  }
+}

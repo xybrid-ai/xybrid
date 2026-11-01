@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-33-score-10",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 33: score 10 (insurance)",
+  "covers": [
+    "state-string",
+    "score-10-levels"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"A laptop was stolen from a train while its owner slept; the theft was reported to the police the next morning.\", \"questions\": {\"answer\": {\"type\": \"score\", \"instructions\": \"How likely is the claim to be paid in full?\", \"criteria\": [\"impossible\", \"very unlikely\", \"unlikely\", \"doubtful\", \"uncertain\", \"plausible\", \"likely\", \"very likely\", \"almost certain\", \"certain\"]}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-21-noul-criteria-c",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 21: noul criteria c (clinic)",
+  "covers": [
+    "state-string",
+    "noul-order"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"A parent calls because their child has a rash on both arms after a weekend at the lake; the child is playing normally.\", \"questions\": {\"answer\": {\"type\": \"noul\", \"instructions\": \"Does the patient need to be seen today?\", \"criteria\": {\"true\": \"Symptoms could get worse within hours\", \"false\": \"It can safely wait for a routine appointment\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

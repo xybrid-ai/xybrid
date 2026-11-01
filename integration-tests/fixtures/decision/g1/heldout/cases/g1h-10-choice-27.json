@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-10-choice-27",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 10: choice 27 (contracts)",
+  "covers": [
+    "state-string",
+    "choice-27"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"Either party may end this agreement with thirty days' written notice, without giving a reason.\", \"questions\": {\"answer\": {\"type\": \"choice\", \"instructions\": \"Which regional office should file this report?\", \"criteria\": {\"danube\": \"The danube basin office\", \"rhine\": \"The rhine basin office\", \"elbe\": \"The elbe basin office\", \"loire\": \"The loire basin office\", \"seine\": \"The seine basin office\", \"rhone\": \"The rhone basin office\", \"tagus\": \"The tagus basin office\", \"douro\": \"The douro basin office\", \"ebro\": \"The ebro basin office\", \"po\": \"The po basin office\", \"tiber\": \"The tiber basin office\", \"arno\": \"The arno basin office\", \"oder\": \"The oder basin office\", \"vistula\": \"The vistula basin office\", \"dnieper\": \"The dnieper basin office\", \"volga\": \"The volga basin office\", \"don\": \"The don basin office\", \"thames\": \"The thames basin office\", \"severn\": \"The severn basin office\", \"shannon\": \"The shannon basin office\", \"meuse\": \"The meuse basin office\", \"scheldt\": \"The scheldt basin office\", \"garonne\": \"The garonne basin office\", \"dordogne\": \"The dordogne basin office\", \"inn\": \"The inn basin office\", \"drava\": \"The drava basin office\", \"sava\": \"The sava basin office\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

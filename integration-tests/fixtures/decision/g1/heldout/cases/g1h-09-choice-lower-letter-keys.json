@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-09-choice-lower-letter-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 9: choice lower letter keys (clinic)",
+  "covers": [
+    "state-string",
+    "choice-lowercase-keys"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"An elderly patient has had a dry cough for three weeks, sleeps poorly and lost some appetite, but has no fever.\", \"questions\": {\"answer\": {\"type\": \"choice\", \"instructions\": \"Which service should see this patient first?\", \"criteria\": {\"a\": \"Rehabilitation and movement\", \"b\": \"Routine assessment and referral\", \"c\": \"Skin conditions and rashes\", \"d\": \"Immediate danger to life\", \"e\": \"Medication advice only\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

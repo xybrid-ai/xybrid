@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "what": "G1's held-out corpus: every generated case is in the shared domain by construction (make_heldout.py check_domain); the comparator still checks every identity and fails on any mismatch.",
+  "corpora": {
+    "heldout": {
+      "cases": "integration-tests/fixtures/decision/g1/heldout/cases",
+      "hf": "integration-tests/fixtures/decision/g1/heldout/hf",
+      "oracle": "integration-tests/fixtures/decision/g1/heldout/oracle",
+      "counts": {
+        "cases": 40,
+        "included_cases": 40,
+        "included_questions": 44,
+        "excluded_cases": 0
+      },
+      "included": {
+        "g1h-01-choice-2": [
+          "answer"
+        ],
+        "g1h-02-choice-3": [
+          "answer"
+        ],
+        "g1h-03-choice-4": [
+          "answer"
+        ],
+        "g1h-04-choice-5": [
+          "answer"
+        ],
+        "g1h-05-choice-ambiguous": [
+          "service"
+        ],
+        "g1h-06-choice-6": [
+          "answer"
+        ],
+        "g1h-07-choice-8-600-tokens": [
+          "answer"
+        ],
+        "g1h-08-choice-upper-letter-keys": [
+          "answer"
+        ],
+        "g1h-09-choice-lower-letter-keys": [
+          "answer"
+        ],
+        "g1h-10-choice-27": [
+          "answer"
+        ],
+        "g1h-11-choice-36-pool-fallback": [
+          "answer"
+        ],
+        "g1h-12-choice-255": [
+          "answer"
+        ],
+        "g1h-13-choice-json-object": [
+          "answer"
+        ],
+        "g1h-14-choice-json-object-1500-tokens": [
+          "answer"
+        ],
+        "g1h-15-choice-json-array": [
+          "answer"
+        ],
+        "g1h-16-choice-null-state": [
+          "answer"
+        ],
+        "g1h-17-choice-64-tokens": [
+          "answer"
+        ],
+        "g1h-18-choice-4064-tokens": [
+          "answer"
+        ],
+        "g1h-19-noul-criteria-a": [
+          "answer"
+        ],
+        "g1h-20-noul-criteria-b": [
+          "answer"
+        ],
+        "g1h-21-noul-criteria-c": [
+          "answer"
+        ],
+        "g1h-22-noul-no-criteria": [
+          "answer"
+        ],
+        "g1h-23-noul-63-tokens": [
+          "answer"
+        ],
+        "g1h-24-noul-true-only": [
+          "answer"
+        ],
+        "g1h-25-noul-json-object": [
+          "answer"
+        ],
+        "g1h-26-noul-json-array": [
+          "answer"
+        ],
+        "g1h-27-noul-empty-state": [
+          "answer"
+        ],
+        "g1h-28-noul-65-tokens": [
+          "answer"
+        ],
+        "g1h-29-score-2": [
+          "answer"
+        ],
+        "g1h-30-score-3": [
+          "answer"
+        ],
+        "g1h-31-score-borderline": [
+          "severity"
+        ],
+        "g1h-32-score-7": [
+          "answer"
+        ],
+        "g1h-33-score-10": [
+          "answer"
+        ],
+        "g1h-34-score-json-object": [
+          "answer"
+        ],
+        "g1h-35-score-null-state": [
+          "answer"
+        ],
+        "g1h-36-score-unicode": [
+          "answer"
+        ],
+        "g1h-37-choice-unicode": [
+          "answer"
+        ],
+        "g1h-38-score-json-mixed": [
+          "answer"
+        ],
+        "g1h-39-multi-text": [
+          "route",
+          "today",
+          "level"
+        ],
+        "g1h-40-multi-json": [
+          "flag",
+          "route",
+          "level"
+        ]
+      },
+      "excluded": {}
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-40-multi-json",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 40: multi json (it_incidents)",
+  "covers": [
+    "state-object",
+    "multi-question"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": {\"summary\": \"A scheduled certificate renewal failed; the current certificate expires in nine days.\", \"incident\": {\"status\": \"investigating\", \"id\": 6949, \"tags\": [\"new\", \"investigating\"]}, \"history\": [{\"step\": 1, \"note\": \"Logs are kept for thirty days.\"}, {\"step\": 2, \"note\": \"The vendor's support line answered within an hour.\"}], \"metrics\": {\"count\": 168, \"ratio\": 0.25, \"amount\": 781.25, \"offset\": -201, \"verified\": false, \"reviewer\": null, \"large\": 1000000353, \"zero\": 0.0}}, \"questions\": {\"flag\": {\"type\": \"noul\", \"instructions\": \"Is data at risk of being lost?\"}, \"route\": {\"type\": \"choice\", \"instructions\": \"Which team should own this incident?\", \"criteria\": {\"no_action\": \"Not an incident\", \"platform\": \"Servers, containers and deployments\", \"database\": \"Database servers and storage\", \"network\": \"Connectivity, routing and VPN\"}}, \"level\": {\"type\": \"score\", \"instructions\": \"How severe is this incident?\", \"criteria\": [\"negligible\", \"low\", \"major\", \"catastrophic\"]}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-37-choice-unicode",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 37: choice unicode (travel)",
+  "covers": [
+    "state-string",
+    "json-unicode"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"Reisende: Frau Jürgensen aus Göteborg; der Anschlussflug nach Málaga fällt aus, Hotel in São Paulo bestätigt.\", \"questions\": {\"answer\": {\"type\": \"choice\", \"instructions\": \"What should the traveller ask for first?\", \"criteria\": {\"new_booking\": \"A fresh reservation elsewhere\", \"rebooking\": \"A seat on another flight or train\", \"nothing\": \"No request is needed\", \"compensation\": \"A payment for the delay\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

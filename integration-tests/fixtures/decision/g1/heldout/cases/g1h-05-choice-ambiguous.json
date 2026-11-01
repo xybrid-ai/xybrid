@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-05-choice-ambiguous",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 5: choice ambiguous (clinic)",
+  "covers": [
+    "state-string",
+    "choice-order"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"Patient reports chest tightness after a long run this morning; it eased after resting, came back briefly while climbing stairs, and there is no history of heart problems.\", \"questions\": {\"service\": {\"type\": \"choice\", \"instructions\": \"Which service should see this patient first?\", \"criteria\": {\"cardiology\": \"Possible heart-related symptoms\", \"sports_medicine\": \"Exercise-related strain or injury\", \"general_practice\": \"Routine assessment and referral\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

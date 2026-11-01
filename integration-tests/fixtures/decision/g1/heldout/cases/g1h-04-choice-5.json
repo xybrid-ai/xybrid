@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-04-choice-5",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 4: choice 5 (property)",
+  "covers": [
+    "state-string",
+    "choice-order"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"The landlord wants to raise the rent by 9 percent at the end of the fixed term.\", \"questions\": {\"answer\": {\"type\": \"choice\", \"instructions\": \"What kind of issue is this?\", \"criteria\": {\"contract\": \"Terms of the lease\", \"neighbour_dispute\": \"A problem with neighbours\", \"deposit\": \"The security deposit\", \"rent\": \"Rent level or payment\", \"health_hazard\": \"Damp, mould, gas or electrical danger\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

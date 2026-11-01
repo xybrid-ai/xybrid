@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "g1h-15-choice-json-array",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 15: choice json array (sports)",
+  "covers": [
+    "state-array"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": [{\"from\": \"first\", \"text\": \"The home team led 2-0 at half time, conceded three goals in ten minutes and lost 2-3.\"}, {\"from\": \"second\", \"text\": \"The event was broadcast on regional television.\"}, \"finished\", 87], \"questions\": {\"answer\": {\"type\": \"choice\", \"instructions\": \"How did the event end for the athlete or team?\", \"criteria\": {\"postponed\": \"Moved to another date\", \"retirement\": \"Stopped before the end\", \"loss\": \"A defeat\", \"unknown\": \"The text does not say\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

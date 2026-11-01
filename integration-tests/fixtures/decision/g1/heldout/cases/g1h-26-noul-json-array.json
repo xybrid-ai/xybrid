@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-26-noul-json-array",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 26: noul json array (utilities)",
+  "covers": [
+    "state-array",
+    "noul-order"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": [{\"from\": \"first\", \"text\": \"The electricity bill for January is three times last January's, although nobody lived in the flat for two weeks.\"}, {\"from\": \"second\", \"text\": \"The account has been active for four years.\"}, \"in_review\", 44], \"questions\": {\"answer\": {\"type\": \"noul\", \"instructions\": \"Is a meter reading mentioned?\", \"criteria\": {\"true\": \"A reading is given or questioned\", \"false\": \"No reading is mentioned\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-25-noul-json-object",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 25: noul json object (it_incidents)",
+  "covers": [
+    "state-object",
+    "noul-order"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": {\"summary\": \"A scheduled certificate renewal failed; the current certificate expires in nine days.\", \"incident\": {\"status\": \"resolved\", \"id\": 9972, \"tags\": [\"investigating\", \"resolved\"]}, \"history\": [{\"step\": 1, \"note\": \"The status page was not updated yet.\"}, {\"step\": 2, \"note\": \"Logs are kept for thirty days.\"}]}, \"questions\": {\"answer\": {\"type\": \"noul\", \"instructions\": \"Is a customer-facing service affected?\", \"criteria\": {\"true\": \"Customers notice the problem\", \"false\": \"Only internal users are affected\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

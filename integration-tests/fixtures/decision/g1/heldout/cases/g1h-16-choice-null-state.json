@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "g1h-16-choice-null-state",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 16: choice null state (allergens)",
+  "covers": [
+    "state-null"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": null, \"questions\": {\"answer\": {\"type\": \"choice\", \"instructions\": \"Which allergen is the main concern in this dish?\", \"criteria\": {\"none_listed\": \"No common allergen\", \"tree_nuts\": \"Almonds, walnuts, hazelnuts and similar\", \"eggs\": \"Whole eggs or egg products\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

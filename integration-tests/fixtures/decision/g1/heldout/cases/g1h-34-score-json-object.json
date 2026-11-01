@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "g1h-34-score-json-object",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 34: score json object (clinic)",
+  "covers": [
+    "state-object"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": {\"summary\": \"An elderly patient has had a dry cough for three weeks, sleeps poorly and lost some appetite, but has no fever.\", \"patient\": {\"status\": \"discharged\", \"id\": 8673, \"tags\": [\"referred\", \"discharged\"]}, \"history\": [{\"step\": 1, \"note\": \"The previous visit was eleven months ago, for a vaccination.\"}, {\"step\": 2, \"note\": \"The patient arrived at the front desk at nine and filled in the intake form.\"}]}, \"questions\": {\"answer\": {\"type\": \"score\", \"instructions\": \"How urgent is this case?\", \"criteria\": [\"no urgency\", \"slight\", \"high\", \"critical\"]}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

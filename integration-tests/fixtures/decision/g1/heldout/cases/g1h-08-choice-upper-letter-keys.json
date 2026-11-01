@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-08-choice-upper-letter-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 8: choice upper letter keys (insurance)",
+  "covers": [
+    "state-string",
+    "choice-letter-keys"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"A storm broke a window and water soaked the living room carpet; the policy holder sent photos the same night.\", \"questions\": {\"answer\": {\"type\": \"choice\", \"instructions\": \"Which kind of claim is this?\", \"criteria\": {\"A\": \"Nothing the policy covers\", \"B\": \"Medical costs\", \"C\": \"Damage caused to someone else\", \"D\": \"Damage to a building or its contents\"}}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

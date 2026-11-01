@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "g1h-38-score-json-mixed",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 38: score json mixed (travel)",
+  "covers": [
+    "state-object",
+    "json-int",
+    "json-float",
+    "json-literals"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": {\"summary\": \"A rental car was returned with a full tank, but the company charged a refuelling fee.\", \"booking\": {\"status\": \"changed\", \"id\": 4773, \"tags\": [\"completed\", \"changed\"]}, \"history\": [{\"step\": 1, \"note\": \"Announcements were made in three languages.\"}, {\"step\": 2, \"note\": \"The boarding pass was stored on a phone.\"}], \"metrics\": {\"count\": 27, \"ratio\": 0.125, \"amount\": 2137.5, \"offset\": -1, \"verified\": false, \"reviewer\": null, \"large\": 1000000601, \"zero\": 0.0}}, \"questions\": {\"answer\": {\"type\": \"score\", \"instructions\": \"How disruptive is this for the trip?\", \"criteria\": [\"none\", \"minor\", \"noticeable\", \"significant\", \"major\", \"trip ruined\"]}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

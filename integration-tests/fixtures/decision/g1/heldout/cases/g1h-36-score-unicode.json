@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "g1h-36-score-unicode",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 36: score unicode (sports)",
+  "covers": [
+    "state-string",
+    "json-unicode"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"Résumé: l'équipe de Saint-Étienne a mené 2-0, puis a perdu 2-3; le gardien Søren Ødegård s'est blessé.\", \"questions\": {\"answer\": {\"type\": \"score\", \"instructions\": \"How disappointing is the result for the fans?\", \"criteria\": [\"delightful\", \"pleasing\", \"mixed\", \"very disappointing\", \"devastating\"]}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

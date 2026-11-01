@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "g1h-32-score-7",
+  "profile": "lfm3-d1/text/v1",
+  "title": "G1 held-out slot 32: score 7 (hr_leave)",
+  "covers": [
+    "state-string"
+  ],
+  "notes": "Written by tools/conformance/decision_g1/make_heldout.py from its fixed recipe; upstream is left for the upstream oracle, and the xybrid expectations are proposals.",
+  "artifact": "d1-2b-f16",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"An employee asks for three days off next week to move house, and has twelve days of leave left this year.\", \"questions\": {\"answer\": {\"type\": \"score\", \"instructions\": \"How much planning does the team need for this absence?\", \"criteria\": [\"none\", \"very little\", \"little\", \"some\", \"considerable\", \"extensive\", \"a full replacement\"]}}}",
+  "upstream": {},
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}
