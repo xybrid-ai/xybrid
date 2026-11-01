@@ -53,11 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - llama.cpp raw-prompt generation (`generate_raw`, which tool-result
   continuations use) reported `finish_reason: "length"` for every answer, even
   one that ended on an end-of-generation token or a stop sequence. Every
-  llama.cpp path now reports `length` only when the token budget ran out without
-  either, and `stop` otherwise. Codec TTS reads only the generated text and is
-  unaffected. In chat and streaming generation, an empty stop sequence no longer
-  erases the answer or suppresses the whole stream, and a partial stop trimmed
-  off an answer the budget cut short no longer counts as `stop`.
+  llama.cpp path now reports `stop` for those, and `length` only for an answer
+  cut off unfinished, by the token budget or a failed decode. Codec TTS reads
+  only the generated text and is unaffected. In chat and streaming generation,
+  an empty stop sequence no longer erases the answer or suppresses the whole
+  stream, and a partial stop trimmed off an answer the budget cut short no
+  longer counts as `stop`.
 - llama.cpp streaming always ends with the terminal token that carries
   `finish_reason` once any token was generated. When the text filter suppressed
   every delta, as for a reasoning model whose budget ran out mid-thought, the

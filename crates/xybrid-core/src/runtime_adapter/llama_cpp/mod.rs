@@ -674,16 +674,18 @@ fn should_emit_recovered_answer(
         && !recovered_text.is_empty()
 }
 
-/// Whether the token budget cut the output off: the native loop used its
-/// whole budget with no EOG token or stop sequence, and no stop pattern cut
-/// the decoded text short either. The finish reason is `length` exactly when
-/// this holds (unless the turn parsed into tool calls).
+/// Whether the output was cut off unfinished: the native loop used its whole
+/// budget, or a decode failure ended it early ([`GenerationEnd::Interrupted`]),
+/// with no EOG token or stop sequence, and no stop pattern cut the decoded
+/// text short either. The finish reason is `length` exactly when this holds
+/// (unless the turn parsed into tool calls), and a primed thought cut off this
+/// way stays reasoning instead of passing for a finished answer.
 ///
 /// `stopped_in_text` is for the paths that truncate their text at a complete
 /// stop pattern; a trimmed partial stop suffix does not count, since the
 /// output never completed that stop.
 fn generation_truncated_by_budget(stopped_in_text: bool, end: GenerationEnd) -> bool {
-    !stopped_in_text && end == GenerationEnd::MaxTokens
+    !stopped_in_text && matches!(end, GenerationEnd::MaxTokens | GenerationEnd::Interrupted)
 }
 
 /// Whether a streaming run ends with the terminal token, the empty chunk that
@@ -1937,7 +1939,7 @@ mod tests {
     /// and stop checks run before its budget check, so an EOG or stop on the
     /// last budgeted token reads as that cause, never as `MaxTokens`.
     #[test]
-    fn only_a_budget_end_without_a_text_stop_is_truncation() {
+    fn a_budget_end_without_a_text_stop_is_truncation() {
         assert!(generation_truncated_by_budget(
             false,
             GenerationEnd::MaxTokens
@@ -1955,9 +1957,23 @@ mod tests {
             true,
             GenerationEnd::MaxTokens
         ));
-        // An early end with neither is not the budget's doing.
+    }
+
+    /// A decode failure ends the native loop early, without an error code,
+    /// and leaves the output unfinished: it reports `length` like a budget
+    /// cut, and a primed thought cut off this way stays reasoning instead of
+    /// being split off as an answer.
+    #[test]
+    fn a_generation_a_decode_failure_cut_short_is_truncation() {
+        let truncated = generation_truncated_by_budget(false, GenerationEnd::Interrupted);
+        assert!(truncated);
+        assert_eq!(
+            strip_and_capture_thinking_tags_primed("an unfinished thought", true, truncated),
+            (String::new(), Some("an unfinished thought".to_string()))
+        );
+        // A complete stop pattern found in the text still ends the turn.
         assert!(!generation_truncated_by_budget(
-            false,
+            true,
             GenerationEnd::Interrupted
         ));
     }
