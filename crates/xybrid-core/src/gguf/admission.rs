@@ -32,6 +32,8 @@
 //! Core ML files are not GGUFs, whisper.cpp reads GGML, and the zzz speech
 //! engine and a vision encoder's projector (llama.cpp's clip loader) read
 //! their GGUFs with loaders of their own, which build no llama.cpp model.
+//! So a decision GGUF declared as a projector or as a zzz model is not
+//! detected here; those loaders fail on it.
 //!
 //! # What it guarantees
 //!
