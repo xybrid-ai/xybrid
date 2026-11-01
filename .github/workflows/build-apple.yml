@@ -166,20 +166,64 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
 
       - name: Run Swift unit tests (iOS Simulator)
-        # The generic build above can't execute tests (no bootable device);
-        # a concrete simulator runs XybridTests against the xcframework the
-        # previous step already flipped Package.swift to. iPhone 17 / iOS 26.5
-        # is the pair macos-26 ships with its default Xcode 26.6 (no iPhone 16
-        # on that image); bump DEVELOPER_DIR and OS= together when the image
-        # rolls forward. Timeout guards against a simulator/test hang.
+        # The generic build above can't execute tests (no bootable device), so
+        # create a simulator from the installed iOS runtime and test by UDID.
+        # GitHub runner images can ship a runtime without a pre-created device
+        # matching a fixed marketing name/OS pair. Timeout guards against a
+        # simulator/test hang.
         timeout-minutes: 10
         env:
           DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
         run: |
           set -euo pipefail
+          RUNTIME_ID="$(
+            xcrun simctl list runtimes --json | python3 -c '
+          import json, sys
+          runtimes = json.load(sys.stdin).get("runtimes", [])
+          candidates = [
+              runtime for runtime in runtimes
+              if runtime.get("isAvailable", True)
+              and (
+                  runtime.get("platform") == "iOS"
+                  or "iOS" in runtime.get("name", "")
+                  or "iOS" in runtime.get("identifier", "")
+              )
+          ]
+          if not candidates:
+              raise SystemExit("no available iOS simulator runtime")
+          candidates.sort(
+              key=lambda runtime: tuple(
+                  int(part) if part.isdigit() else 0
+                  for part in runtime.get("version", "0").split(".")
+              )
+          )
+          print(candidates[-1]["identifier"])
+          '
+          )"
+          DEVICE_TYPE="$(
+            xcrun simctl list devicetypes --json | python3 -c '
+          import json, re, sys
+          devices = json.load(sys.stdin).get("devicetypes", [])
+          iphones = [
+              device for device in devices
+              if device.get("name", "").startswith("iPhone")
+          ]
+          if not iphones:
+              raise SystemExit("no iPhone simulator device type")
+          def key(device):
+              nums = [int(part) for part in re.findall(r"\d+", device.get("name", ""))]
+              return (nums or [0], device.get("name", ""))
+          iphones.sort(key=key)
+          print(iphones[-1]["identifier"])
+          '
+          )"
+          SIM_ID="$(xcrun simctl create "Xybrid CI iPhone" "$DEVICE_TYPE" "$RUNTIME_ID")"
+          trap 'xcrun simctl shutdown "$SIM_ID" >/dev/null 2>&1 || true; xcrun simctl delete "$SIM_ID" >/dev/null 2>&1 || true' EXIT
+          xcrun simctl boot "$SIM_ID"
+          xcrun simctl bootstatus "$SIM_ID" -b
           xcodebuild test \
             -scheme Xybrid \
-            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 
