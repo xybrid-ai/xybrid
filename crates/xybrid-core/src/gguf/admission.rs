@@ -37,7 +37,7 @@
 //! engine and a vision encoder's projector (llama.cpp's clip loader) read
 //! their GGUFs with loaders of their own, which build no llama.cpp model.
 //! So a decision GGUF declared as a projector or as a zzz model is not
-//! detected here; those loaders fail on it.
+//! detected here: those loaders are not covered by admission.
 //!
 //! # What it guarantees
 //!

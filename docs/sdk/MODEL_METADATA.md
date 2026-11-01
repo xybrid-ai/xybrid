@@ -359,7 +359,7 @@ cached models, Hugging Face downloads) do not call it yet: they adopt it with
 the decision request API. Its scope is narrow: it reads only the language-model
 file of a `Gguf`, `VisionLanguage` or `GgufDecision` template, so a decision
 GGUF declared as a vision projector or as a zzz speech model is not detected by
-it; those loaders fail on such a file.
+it: those loaders are not covered by admission.
 
 When xybrid writes the metadata itself (a Hugging Face repo without
 `model_metadata.json`, `--model-file`, `fromModelFile`, `xybrid init`), it
