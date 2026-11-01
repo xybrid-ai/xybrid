@@ -83,6 +83,7 @@ impl fmt::Display for ScoreStatistic {
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct DecisionScore {
+    #[serde(deserialize_with = "super::decode::string")]
     key: String,
     #[serde(with = "raw_score")]
     #[cfg_attr(feature = "schema", schemars(schema_with = "raw_score::schema"))]
@@ -191,6 +192,7 @@ pub enum DecisionValue {
     #[non_exhaustive]
     Choice {
         /// Its key.
+        #[serde(deserialize_with = "super::decode::string")]
         key: String,
     },
     /// The probability of yes: the distribution's `"true"` entry.
@@ -298,7 +300,9 @@ pub struct DecisionAnswer {
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(deny_unknown_fields, rename = "DecisionAnswer")]
 struct AnswerFields {
+    #[serde(deserialize_with = "super::decode::string")]
     question_id: String,
+    #[serde(deserialize_with = "super::decode::distribution")]
     distribution: Vec<DecisionScore>,
     value: DecisionValue,
     confidence: Option<f64>,
@@ -572,6 +576,7 @@ impl DecisionUsage {
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Decisions {
+    #[serde(deserialize_with = "super::decode::answers")]
     answers: Vec<DecisionAnswer>,
     usage: DecisionUsage,
 }

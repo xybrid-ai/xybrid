@@ -495,15 +495,18 @@ impl Serialize for OrderedJson {
     }
 }
 
-/// Reads the string [`Serialize`] writes and parses it with the default
-/// value ceiling ([`DEFAULT_MAX_JSON_NODES`]) and no byte ceiling; invalid
-/// JSON text is refused with a content-free message.
+/// Reads the string [`Serialize`] writes and parses it under the decode
+/// ceilings: 2 MiB of text, checked on its length before parsing (bincode
+/// hands it over borrowed, so nothing is copied first), and the default
+/// value ceiling ([`DEFAULT_MAX_JSON_NODES`]). Invalid JSON text is refused
+/// with a content-free message.
 ///
-/// The text is already in memory, and compact text can be longer than the
-/// text a value was parsed from, so a byte ceiling would refuse values the
-/// defaults accepted. The value ceiling bounds the tree a decoded blob can
-/// build. A value parsed under a larger value ceiling serializes, but does
-/// not deserialize: serde gives no way to pass limits in.
+/// 2 MiB, not the 1 MiB default: compact text can be longer than the text a
+/// value was parsed from, and 2 MiB holds the compact text of every value
+/// the default limits accept (see `decode::MAX_JSON_TEXT_BYTES` for the
+/// derivation), so such a value always decodes again. A value parsed under
+/// larger limits serializes, but may not deserialize: serde gives no way to
+/// pass limits in.
 impl<'de> Deserialize<'de> for OrderedJson {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserializer.deserialize_str(JsonTextVisitor)
@@ -520,7 +523,7 @@ impl Visitor<'_> for JsonTextVisitor {
     }
 
     fn visit_str<E: de::Error>(self, text: &str) -> Result<OrderedJson, E> {
-        let limits = JsonLimits::default().with_max_bytes(usize::MAX);
+        let limits = JsonLimits::default().with_max_bytes(super::decode::MAX_JSON_TEXT_BYTES);
         OrderedJson::parse_with_limits(text, &limits).map_err(E::custom)
     }
 }

@@ -31,6 +31,12 @@ pub const DEFAULT_MAX_REQUEST_JSON_NODES: usize = 1 << 16;
 /// - [`DEFAULT_MAX_REQUEST_BYTES`] (1 MiB) and
 ///   [`DEFAULT_MAX_REQUEST_JSON_NODES`] (65,536): ceilings against oversized
 ///   input, far above what a decision prompt reads.
+///
+/// The IR's decode ceilings (16 questions or answers; 255 options, levels or
+/// distribution entries; 1 MiB per string field; 2 MiB of text and 65,536
+/// values per JSON value) bound whatever limits are configured here: a
+/// request beyond them can be built and validated in memory, but its serde
+/// form is refused when decoded, so keep these limits at or below them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct StructuralLimits {

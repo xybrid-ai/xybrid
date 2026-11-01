@@ -24,7 +24,7 @@ pub struct DecisionContent(Content);
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename = "DecisionContent")]
 enum Content {
-    Text(String),
+    Text(#[serde(deserialize_with = "super::decode::string")] String),
     Json(OrderedJson),
 }
 
@@ -277,6 +277,7 @@ impl fmt::Debug for DecisionInstructions {
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct DecisionOption {
+    #[serde(deserialize_with = "super::decode::string")]
     key: String,
     description: Option<DecisionContent>,
 }
@@ -399,6 +400,7 @@ pub enum DecisionQuestionKind {
     #[non_exhaustive]
     Choice {
         /// The options, in the order the caller offers them.
+        #[serde(deserialize_with = "super::decode::options")]
         options: Vec<DecisionOption>,
     },
     /// Yes or no, each optionally described. The answer's distribution is
@@ -414,6 +416,7 @@ pub enum DecisionQuestionKind {
     #[non_exhaustive]
     Score {
         /// The levels, lowest first.
+        #[serde(deserialize_with = "super::decode::levels")]
         levels: Vec<DecisionLevel>,
     },
 }
@@ -499,6 +502,7 @@ impl fmt::Debug for DecisionQuestionKind {
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct DecisionQuestion {
+    #[serde(deserialize_with = "super::decode::string")]
     id: String,
     instructions: Option<DecisionInstructions>,
     kind: DecisionQuestionKind,
@@ -558,6 +562,7 @@ impl fmt::Debug for DecisionQuestion {
 #[serde(deny_unknown_fields)]
 pub struct DecisionRequest {
     state: DecisionState,
+    #[serde(deserialize_with = "super::decode::questions")]
     questions: Vec<DecisionQuestion>,
 }
 

@@ -73,6 +73,30 @@
 //! value, say) are outside that promise; the boundary that decodes envelopes
 //! must withhold them.
 //!
+//! # Decoding is bounded
+//!
+//! Deserializing these types, in every format, applies fixed ceilings
+//! before it allocates what they bound, nested values included:
+//!
+//! | Field | Ceiling |
+//! |-------|---------|
+//! | a request's questions, a result's answers | 16 |
+//! | a choice's options, a score's levels, an answer's distribution | 255 |
+//! | each string: question id, option key, text content, answer question id, distribution key, chosen key | 1 MiB |
+//! | an [`OrderedJson`]'s text | 2 MiB, and 65,536 values |
+//!
+//! A sequence is refused on its declared length when the format declares
+//! one (bincode does), before any element is read, and otherwise at the
+//! element past its ceiling; a string is measured before it is copied, and
+//! JSON text before it is parsed. A refusal names the kind of field and the
+//! ceiling, never content. The ceilings are the IR's, the same for every
+//! model, and at or above the default [`StructuralLimits`], so data within
+//! the defaults always decodes (JSON text has room for its compact form,
+//! which can be longer than the text it was parsed from); configured limits
+//! should stay within them. bincode hands strings over borrowed only when
+//! decoding from a byte slice; from an `io::Read` it allocates a string's
+//! declared length first, so set its size limit there.
+//!
 //! # Compatibility
 //!
 //! The representation is frozen; these are the rules for changing it.
@@ -109,10 +133,10 @@
 //! - **`OrderedJson` in serde.** In every format it is one string holding
 //!   its compact JSON text, which keeps key order and number identity
 //!   exactly and works in formats that cannot carry an ordered map
-//!   (bincode). Decoding parses the string under the default value ceiling
-//!   and no byte ceiling. Floats are spelled as serde_json spells them, so
-//!   the bytes (and [`StructuralLimits::max_bytes`] totals) can change with
-//!   serde_json; the values cannot.
+//!   (bincode). Decoding parses the string under the decode ceilings
+//!   (2 MiB of text, 65,536 values). Floats are spelled as serde_json
+//!   spells them, so the bytes (and [`StructuralLimits::max_bytes`] totals)
+//!   can change with serde_json; the values cannot.
 //! - **Raw scores.** In human-readable formats a finite
 //!   [`DecisionScore::raw_score`] is a number and `-inf` is the string
 //!   `"-Infinity"`, never `null`; binary formats keep the `f32` itself.
@@ -173,6 +197,7 @@
 //! ```
 
 mod answer;
+mod decode;
 mod error;
 mod json;
 mod request;
