@@ -383,6 +383,12 @@ jobs:
           key: ubuntu-test-llm
       - name: Test with llm-llamacpp
         run: cargo test -p xybrid-core --features "ort-download,llm-llamacpp" --lib
+      # The C boundary's exception guard on real throws: each case throws
+      # inside a guarded shim, or fails a real allocation inside llama.cpp, in
+      # a child process, and expects a typed error instead of an abort. The
+      # cases that need no model run here; the build is the one above.
+      - name: Test the llama.cpp exception boundary
+        run: cargo test -p xybrid-llama --features bindings --lib fault_tests
 
   # Linux-only on push/PR. macOS + Windows validation runs in release-prep.yml
   # at release time, and check-platform-macos / build-apple.yml cover

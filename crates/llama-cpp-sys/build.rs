@@ -831,6 +831,14 @@ fn emit_link_and_wrapper(
             .define("XYBRID_LLAMA_VISION", None);
     }
     wrapper_build.include(dst.join("include"));
+    // The shims catch llama.cpp's C++ exceptions at the C boundary, so the
+    // wrapper needs exceptions on: cl and clang-cl leave them off without
+    // /EHsc (cc adds no /EH flag). wrapper.cpp refuses to compile without them.
+    if wrapper_build.get_compiler().is_like_msvc() {
+        wrapper_build.flag("/EHsc");
+    } else {
+        wrapper_build.flag("-fexceptions");
+    }
 
     // Windows MSVC CRT: Do NOT call static_crt() — let the cc crate auto-detect from
     // CARGO_CFG_TARGET_FEATURE. When crt-static is set (CLI via RUSTFLAGS), cc uses /MT.

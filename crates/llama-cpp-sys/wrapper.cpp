@@ -58,10 +58,18 @@
 // body through `guarded`, which turns any exception into the shim's failure
 // status. GGML_ASSERT and GGML_ABORT stop the process without an exception;
 // callers prevent those by validating arguments first.
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
-#define XYBRID_HAS_EXCEPTIONS 1
-#else
-#define XYBRID_HAS_EXCEPTIONS 0
+//
+// The boundary needs C++ exceptions, so every build compiles this file with
+// them (cargo: build.rs; Bazel: :wrapper_cc), and a build that does not fails
+// here rather than shipping shims that cannot catch.
+#if !defined(__cpp_exceptions) && !defined(__EXCEPTIONS) && !defined(_CPPUNWIND)
+#error "wrapper.cpp needs C++ exceptions: compile it with /EHsc (MSVC) or -fexceptions"
+#endif
+// Emscripten's default, -fignore-exceptions, compiles catch blocks away and
+// still defines the macros above, so its builds pass -fexceptions and vouch
+// for it with XYBRID_EMSCRIPTEN_EXCEPTIONS.
+#if defined(__EMSCRIPTEN__) && !defined(XYBRID_EMSCRIPTEN_EXCEPTIONS)
+#error "wrapper.cpp needs Emscripten exceptions: compile it with -fexceptions and define XYBRID_EMSCRIPTEN_EXCEPTIONS"
 #endif
 
 // Fault injection for the Rust tests, armed with llama_xybrid_fail_next_c:
@@ -70,32 +78,22 @@ static std::atomic<bool> g_fail_armed{false};
 static char g_fail_shim[64];
 
 static void xybrid_failpoint(const char* shim) {
-#if XYBRID_HAS_EXCEPTIONS
     if (g_fail_armed.load(std::memory_order_acquire) && strcmp(g_fail_shim, shim) == 0) {
         g_fail_armed.store(false, std::memory_order_relaxed);
         throw std::bad_alloc();
     }
-#else
-    (void)shim;
-#endif
 }
 
 // Runs `body` and returns its result, or `on_exception` when it (or llama.cpp
 // under it) throws.
 template <typename T, typename F>
 static T guarded(const char* shim, T on_exception, F&& body) noexcept {
-#if XYBRID_HAS_EXCEPTIONS
     try {
         xybrid_failpoint(shim);
         return body();
     } catch (...) {
         return on_exception;
     }
-#else
-    (void)shim;
-    (void)on_exception;
-    return body();
-#endif
 }
 
 // =============================================================================
