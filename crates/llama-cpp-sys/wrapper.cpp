@@ -73,13 +73,36 @@
 #endif
 
 // Fault injection for the Rust tests, armed with llama_xybrid_fail_next_c:
-// the next call of the named shim throws std::bad_alloc inside its boundary.
-static std::atomic<bool> g_fail_armed{false};
-static char g_fail_shim[64];
+// the next call of the named shim, on any thread, throws std::bad_alloc
+// inside its boundary. The arm is one atomic index into k_failpoints, whose
+// names never change, and the call that fails consumes it with a
+// compare-exchange: two calls cannot both fail, and no shim reads memory an
+// arm writes. With nothing armed, a shim pays one relaxed load.
+static const char* const k_failpoints[] = {
+    "",  // nothing armed
+    "llama_new_readout_context_c",
+    "llama_context_facts_c",
+    "llama_set_abort_callback_c",
+    "llama_kv_cache_clear_c",
+    "llama_kv_cache_seq_rm_c",
+    "llama_tokenize_c",
+    "llama_model_has_encoder_c",
+    "llama_model_meta_count_c",
+    "llama_model_meta_val_str_c",
+    "llama_model_meta_lookup_c",
+    "llama_model_chat_template_named_c",
+    "llama_vocab_get_attr_c",
+    "llama_vocab_get_text_c",
+    "llama_decode_c",
+    "llama_get_logits_c",
+    "llama_get_logits_ith_c",
+};
+static std::atomic<size_t> g_failpoint{0};
 
 static void xybrid_failpoint(const char* shim) {
-    if (g_fail_armed.load(std::memory_order_acquire) && strcmp(g_fail_shim, shim) == 0) {
-        g_fail_armed.store(false, std::memory_order_relaxed);
+    size_t armed = g_failpoint.load(std::memory_order_relaxed);
+    if (armed != 0 && strcmp(k_failpoints[armed], shim) == 0 &&
+        g_failpoint.compare_exchange_strong(armed, 0, std::memory_order_relaxed)) {
         throw std::bad_alloc();
     }
 }
@@ -137,13 +160,16 @@ static void xybrid_log_callback(enum ggml_log_level level, const char* text, voi
 
 extern "C" {
 
-void llama_xybrid_fail_next_c(const char* shim_name) {
-    g_fail_armed.store(false, std::memory_order_relaxed);
-    if (shim_name) {
-        strncpy(g_fail_shim, shim_name, sizeof(g_fail_shim) - 1);
-        g_fail_shim[sizeof(g_fail_shim) - 1] = '\0';
-        g_fail_armed.store(true, std::memory_order_release);
+bool llama_xybrid_fail_next_c(const char* shim_name) {
+    size_t armed = 0;
+    for (size_t i = 1; shim_name && i < sizeof(k_failpoints) / sizeof(k_failpoints[0]); i++) {
+        if (strcmp(k_failpoints[i], shim_name) == 0) {
+            armed = i;
+            break;
+        }
     }
+    g_failpoint.store(armed, std::memory_order_relaxed);
+    return armed != 0;
 }
 
 // =============================================================================

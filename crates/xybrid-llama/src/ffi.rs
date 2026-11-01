@@ -185,14 +185,20 @@ pub(crate) unsafe fn set_abort_callback(
     sys::llama_set_abort_callback_c(ctx, Some(callback), data) == 0
 }
 
-/// Makes the next call of the guarded shim `shim` throw `std::bad_alloc`
-/// inside its exception boundary, as an allocation failure in llama.cpp
-/// would.
+/// Makes the next call of the guarded shim `shim`, on any thread, throw
+/// `std::bad_alloc` inside its exception boundary, as an allocation failure
+/// in llama.cpp would. One-shot and process-wide (see wrapper.h): the tests
+/// arm it in a child process that makes the one call.
+///
+/// # Panics
+///
+/// When `shim` is not a guarded shim.
 #[cfg(test)]
 pub(crate) fn fail_next_native_call(shim: &str) {
-    let shim = CString::new(shim).expect("a shim name has no NUL");
-    // SAFETY: the shim copies the name before returning.
-    unsafe { sys::llama_xybrid_fail_next_c(shim.as_ptr()) };
+    let name = CString::new(shim).expect("a shim name has no NUL");
+    // SAFETY: the shim only reads the name during the call.
+    let armed = unsafe { sys::llama_xybrid_fail_next_c(name.as_ptr()) };
+    assert!(armed, "{shim} is not a guarded shim");
 }
 
 /// The logits row of batch entry `i` from the last decode.

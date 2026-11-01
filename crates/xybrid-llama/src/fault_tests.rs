@@ -14,6 +14,7 @@
 //! failures inside llama.cpp, provoked with an address-space limit.
 
 use crate::context::LlamaContext;
+use crate::error::LlamaError;
 use crate::ffi;
 use crate::memoryless::{MemorylessContext, MemorylessParams};
 use crate::model::LlamaModel;
@@ -48,6 +49,13 @@ const STUB_CASES: &[(&str, &str, &str)] = &[
         "llama_decode_c",
         "Err(DecodeFailed { code: -1000,",
     ),
+    // One arm fails one call, whichever thread makes it: on a null context
+    // the others return the shim's -1, not the exception's -1000.
+    (
+        "decode_once_across_threads",
+        "llama_decode_c",
+        "1 of 8 calls threw",
+    ),
 ];
 
 /// Cases on the real d1 model.
@@ -79,6 +87,15 @@ fn run_case(case: &str) -> String {
         .lines()
         .find_map(|line| line.split_once(&prefix).map(|(_, rest)| rest.to_string()))
         .unwrap_or_else(|| panic!("{case}: no report in {stdout}"))
+}
+
+#[test]
+fn the_fault_hook_arms_only_guarded_shims() {
+    let unknown = std::ffi::CString::new("llama_no_such_shim_c").unwrap();
+    // SAFETY: the hook only reads the name during the call. Disarming here
+    // is harmless: only child processes arm it.
+    assert!(!unsafe { llama_cpp_sys::bindings::llama_xybrid_fail_next_c(unknown.as_ptr()) });
+    assert!(!unsafe { llama_cpp_sys::bindings::llama_xybrid_fail_next_c(std::ptr::null()) });
 }
 
 #[test]
@@ -140,6 +157,29 @@ fn stub_case(case: &str, shim: &str) -> String {
             "{:?}",
             MemorylessContext::test_stub(&model, 8, 10).read_last(&[1, 2, 3], &[0])
         ),
+        "decode_once_across_threads" => {
+            const THREADS: usize = 8;
+            let start = std::sync::Barrier::new(THREADS);
+            let threw = std::thread::scope(|scope| {
+                let calls: Vec<_> = (0..THREADS)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            let mut ctx = MemorylessContext::test_stub(&model, 8, 10);
+                            start.wait();
+                            ctx.read_last(&[1, 2, 3], &[0])
+                        })
+                    })
+                    .collect();
+                calls
+                    .into_iter()
+                    .map(|call| call.join().expect("a readout thread"))
+                    .filter(|result| {
+                        matches!(result, Err(LlamaError::DecodeFailed { code: -1000, .. }))
+                    })
+                    .count()
+            });
+            format!("{threw} of {THREADS} calls threw")
+        }
         other => panic!("unknown case {other}"),
     }
 }

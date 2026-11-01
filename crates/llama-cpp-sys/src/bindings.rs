@@ -955,7 +955,7 @@ pub struct mtmd_helper_gen_audio_inp {
     pub out_type: mtmd_helper_gen_audio_outtype,
 }
 unsafe extern "C" {
-    pub fn llama_xybrid_fail_next_c(shim_name: *const ::std::os::raw::c_char);
+    pub fn llama_xybrid_fail_next_c(shim_name: *const ::std::os::raw::c_char) -> bool;
 }
 unsafe extern "C" {
     pub fn llama_backend_init_c();

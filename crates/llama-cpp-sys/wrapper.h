@@ -64,10 +64,15 @@ extern "C" {
 #define LLAMA_XYBRID_DECODE_EXCEPTION (-1000)
 
 /* Fault injection for tests: the next call of the guarded shim named
-   `shim_name` (e.g. "llama_decode_c") throws std::bad_alloc inside its
-   exception boundary, as an allocation failure inside llama.cpp would. NULL
-   disarms. Nothing calls this outside tests. */
-void llama_xybrid_fail_next_c(const char* shim_name);
+   `shim_name` (e.g. "llama_decode_c"), on any thread, throws std::bad_alloc
+   inside its exception boundary, as an allocation failure inside llama.cpp
+   would. One-shot and process-wide: the call that fails consumes the arm
+   (a compare-exchange, so two calls cannot both fail), arming again replaces
+   an arm not yet consumed, and NULL disarms. Returns whether a shim is now
+   armed: false for NULL, and for a name that is not a guarded shim (which
+   disarms too). Nothing calls this outside tests, which arm it in a process
+   of their own. */
+bool llama_xybrid_fail_next_c(const char* shim_name);
 
 /* Backend lifecycle */
 void llama_backend_init_c(void);
