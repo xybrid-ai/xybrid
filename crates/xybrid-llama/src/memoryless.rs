@@ -247,6 +247,11 @@ impl MemorylessContext {
     /// A cancel requested after the completion point leaves the result as
     /// it is.
     ///
+    /// How soon a cancel during the pass returns has no fixed bound: the
+    /// node running at that moment finishes first, and one node is a
+    /// whole-batch matrix product, so the wait grows with the prompt's
+    /// length and shrinks with more threads (see `measure::cancel_latency`).
+    ///
     /// # Errors
     ///
     /// [`LlamaError::InvalidInput`], before any native call, when `tokens`
@@ -305,8 +310,9 @@ impl MemorylessContext {
     ///
     /// A request is every readout from one [`Self::clear_cancel`] (or the
     /// context's creation) to the next. Using the handle stops the running
-    /// readout (on the CPU backend, between two graph nodes) and refuses
-    /// every later one of the same request with [`LlamaError::Cancelled`].
+    /// readout (on the CPU backend, once the graph node running then
+    /// finishes: see [`Self::read_last`]) and refuses every later one of the
+    /// same request with [`LlamaError::Cancelled`].
     /// Once the context starts its next request, the handle (and every
     /// clone) does nothing to it: take a new one.
     pub fn cancel_handle(&self) -> ReadoutCancel {
