@@ -14,11 +14,12 @@
       "test_access.h": "41d4b5ed68279a1957eb72edd18fdef41b4e5f0e504b19ee4453155ba3f91cd1",
       "build.sh": "19bb0f1f204b722d6c61bdae8d3002e1d5aa768df2e97a0dc1675d26618efa75",
       "cases.py": "27aef08e3deb0ffa66a782148ede27c2f31d429919822019f22390acf5d66e94",
-      "oracle.py": "e624217cc4c2cabda87e95c4fe017879b8687df903b35e09d837e212bdfc88d0"
+      "oracle.py": "8a2beed183b87f9e4d833c4e2fcb67cce348a82e864f97cb55a734cfae4dd731"
     }
   },
   "collector": {
     "official": true,
+    "developer_run": false,
     "problems": []
   },
   "build": {

@@ -120,6 +120,12 @@ executables:
 `decision-oracle --identity` prints it, and `build/bin/oracle-identity.json`
 holds a copy.
 
+The identity rides into `llama-server` as one inert data object added to its
+sources (`target_sources` in `CMakeLists.txt`). No upstream code changes and
+nothing reads the object at run time, but the stamped `llama-server` is **not
+byte-identical to a plain upstream build** of the same commit; reproducibility
+claims about its bytes must say so.
+
 ## Build
 
 Needs CMake 3.14+, a C++17 compiler, ninja (or make), Python 3.9+ and the
@@ -179,9 +185,10 @@ official observations only if:
 - the repository's `vendor/llama-cpp` gitlink agrees;
 - the oracle's sources on disk are the ones the executables were built from.
 
-Otherwise it stops and says why. `--dev` runs anyway: the records say
-`"collector": {"official": false, "problems": [...]}`, and a developer run does
-not write the committed fixtures.
+Otherwise it stops and says why. `--dev` runs anyway, whatever the
+executables: the records say
+`"collector": {"official": false, "developer_run": true, "problems": [...]}`, and
+a developer run does not write the committed fixtures.
 
 `oracle.json` records the collector, the build identity, the settings as they
 ran (server arguments, effective context, devices) and the sha256 of every
@@ -206,24 +213,71 @@ different build and reports the identity differences as warnings.
 
 ```bash
 python3 tools/conformance/decision/oracle.py --collect integration-tests/fixtures/decision/hf/cases \
-    --artifact d1-2b-f16 --settings cpu-t4-fa-off --out /tmp/f16-observations --download
+    --artifact d1-2b-f16 --settings cpu-t4-fa-off --expect-cases 46 --out /tmp/f16-observations --download
 ```
 
-`--collect DIR` reads every `*.json` of `DIR` as a schema-v1 case file. Only
-`id`, `request_text` and the optional `metadata`, `has_media` and synthetic
-`upstream.evaluate.raw_scores` are used. It runs the exact `request_text` bytes
-on `--artifact` (any id of `artifacts.json`, size and sha256 checked) under
-`--settings`, sends the sendable ones to `llama-server`, and writes to `--out`:
+`--collect DIR` runs a directory of schema-v1 case files on `--artifact` (any
+id of `artifacts.json`, size and sha256 checked) under `--settings`, sends the
+sendable requests to `llama-server`, and writes observations to `--out`. It is
+the path for evidence other gates rely on, so it fails closed:
 
-- `<id>.<sha256 of request_text>.json` per case: the `upstream` stages as in a
-  case file, `server` included;
-- `collection.json`: the collector and build identity, the artifact, the
-  settings as they ran, and every case file with its status.
+- **Before anything runs:**
+  - `DIR` must exist and hold `*.json` files.
+  - `--out` must be a new or empty directory, neither `DIR` nor inside the
+    committed fixtures.
+  - `--expect-cases N`, when given, must equal the number of case files, or of
+    `--only` ids.
+  - Every `--only` id must be a valid case there.
+  - `--collect` refuses `--check`.
+- **Every file is read as a strict envelope:**
+  - a JSON object with no key twice and no `NaN`/`Infinity`;
+  - `schema_version` the integer 1, `profile` `lfm3-d1/text/v1`, `id` matching
+    the schema's `^[a-z0-9]+(-[a-z0-9]+)*$`;
+  - `request_text` a string with UTF-8 bytes;
+  - `has_media` a boolean, `metadata` the typed edits of the variant command;
+  - synthetic `upstream.evaluate.raw_scores` lists of f32 bit patterns.
 
-A file that is not a schema-v1 case, or a case the oracle cannot run, is
-listed with `"status": "error"` and its reason, and the run exits non-zero. A
-case with metadata edits runs on a metadata-only copy of the chosen artifact, so
-it is evaluated only from synthetic scores.
+  The request text itself is opaque: malformed or duplicate-key requests are
+  test data and go out byte for byte.
+- **A file that fails** (as does every file sharing its id with another) gets
+  an `invalid` receipt with the reason and is never run. A case the oracle
+  cannot run gets an `error` receipt. Either makes the collection `incomplete`
+  and the exit status non-zero, as does a disagreeing server. Every file is
+  written inside `--out` or not at all.
+
+It writes, all inside `--out`:
+
+- `<id>.<sha256 of the request bytes>.json` per observed case. It holds:
+  - the `upstream` stages as in a case file, `server` included;
+  - `case_file_sha256`, the digest of the whole case file;
+  - `request_sha256`, the join key;
+  - `inputs`, everything that can change the observation: the request
+    digest, the media flag, the metadata edits, the synthetic scores, and the
+    artifact with its sha256 and the sha256 of the metadata-only variant built
+    from it;
+  - `inputs_sha256`, its canonical digest;
+  - the collector, the build fingerprint, and the digest of the recipe.
+- `collection.json`, the receipt:
+  - `status` (`complete` or `incomplete`);
+  - the corpus counts;
+  - the artifact;
+  - `recipe`, the sha256 of every file that makes an observation (the four
+    compiled sources, `build.sh`, `cases.py`, `oracle.py`), and its digest;
+  - the collector, the build identity, and the settings as they ran;
+  - every case file with its `file_sha256`, its status, and for a selected
+    case its request and inputs digests.
+
+`--dev` collections, like `--dev` generations, say
+`"official": false, "developer_run": true`. Cases with metadata edits run on a
+metadata-only copy of the chosen artifact, so they are evaluated only from
+synthetic scores.
+
+`tests/` holds stdlib tests of these rules, which need neither a model nor a
+build:
+
+```bash
+python3 -m unittest discover -s tools/conformance/decision/tests
+```
 
 ### `decision-oracle` directly
 
