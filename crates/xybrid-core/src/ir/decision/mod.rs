@@ -185,7 +185,7 @@ pub use answer::{
     DecisionAnswer, DecisionOrigin, DecisionScore, DecisionUsage, DecisionValue, Decisions,
     ScoreStatistic, PROBABILITY_TOLERANCE,
 };
-pub use error::{AnswerInvariant, DecisionError, JsonErrorKind};
+pub use error::{AnswerInvariant, ContentPart, DecisionError, DecisionRefusalKind, JsonErrorKind};
 pub use json::{
     JsonKind, JsonLimits, JsonNumber, JsonView, OrderedJson, DEFAULT_MAX_JSON_BYTES,
     DEFAULT_MAX_JSON_NODES, MAX_JSON_DEPTH,

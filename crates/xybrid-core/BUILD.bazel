@@ -244,7 +244,8 @@ rust_test(
     crate = ":xybrid-core",
     # Fixture files inline tests read off disk (model metadata, the web SDK's
     # serialization fixture, the choice-scoring conformance inputs with
-    # their fake ONNX scorers, and the llama.cpp chat-render byte fixtures).
+    # their fake ONNX scorers, the llama.cpp chat-render byte fixtures, and
+    # the decision conformance cases).
     # Cargo reads them straight from the worktree; Bazel sandboxes the
     # action, so they have to be declared inputs. All are resolved relative
     # to CARGO_MANIFEST_DIR, which rules_rust points at this crate's
@@ -254,6 +255,7 @@ rust_test(
         "//bindings/web:rust_metadata_fixtures",
         "//integration-tests:chat_render_fixtures",
         "//integration-tests:choice_fixtures",
+        "//integration-tests:decision_fixtures",
         "//integration-tests:model_metadata_fixtures",
     ],
     deps = [

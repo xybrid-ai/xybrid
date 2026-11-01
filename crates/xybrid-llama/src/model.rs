@@ -115,6 +115,72 @@ impl LlamaModel {
         self.tokenize_internal(text, add_special, true)
     }
 
+    /// Tokenize `text` with both flags explicit, as llama.cpp's
+    /// `common_tokenize` does: the text goes to llama.cpp with its length,
+    /// so a NUL byte is tokenized like any other character.
+    ///
+    /// [`Self::tokenize`] and [`Self::tokenize_special`] pass a C string,
+    /// which cannot hold a NUL; a decision prompt renders the caller's text
+    /// verbatim, NUL bytes included.
+    ///
+    /// # Errors
+    ///
+    /// [`LlamaError::InvalidInput`] when `text` is longer than llama.cpp's
+    /// `int32_t` length, and [`LlamaError::TokenizationFailed`] when
+    /// llama.cpp reports a failure.
+    pub fn tokenize_with(
+        &self,
+        text: &str,
+        add_special: bool,
+        parse_special: bool,
+    ) -> LlamaResult<Vec<i32>> {
+        if i32::try_from(text.len()).is_err() {
+            return Err(LlamaError::InvalidInput(
+                "tokenize text: longer than llama.cpp's int32 length".to_string(),
+            ));
+        }
+        // SAFETY: the handle keeps the model pointer live, the length fits a
+        // c_int, and the probe passes a null buffer with capacity 0.
+        let probe = unsafe {
+            ffi::tokenize_bytes(
+                self.as_ptr(),
+                text.as_bytes(),
+                std::ptr::null_mut(),
+                0,
+                add_special,
+                parse_special,
+            )
+        };
+        // INT32_MIN is a failure (llama.cpp's, or the shim's for an
+        // exception); otherwise a probe returns the negated count.
+        if probe == i32::MIN {
+            return Err(LlamaError::TokenizationFailed);
+        }
+        let required = probe.unsigned_abs() as usize;
+        if required == 0 {
+            return Ok(Vec::new());
+        }
+        let capacity = i32::try_from(required).map_err(|_| LlamaError::TokenizationFailed)?;
+        let mut tokens = vec![0i32; required];
+        // SAFETY: as above; `tokens` is writable for `capacity` elements.
+        let written = unsafe {
+            ffi::tokenize_bytes(
+                self.as_ptr(),
+                text.as_bytes(),
+                tokens.as_mut_ptr(),
+                capacity,
+                add_special,
+                parse_special,
+            )
+        };
+        let written = usize::try_from(written).map_err(|_| LlamaError::TokenizationFailed)?;
+        if written > required {
+            return Err(LlamaError::TokenizationFailed);
+        }
+        tokens.truncate(written);
+        Ok(tokens)
+    }
+
     fn tokenize_internal(
         &self,
         text: &str,

@@ -65,6 +65,13 @@ pub mod template;
 // Choice-scoring primitives (decision models)
 pub mod choice;
 
+// The LFM3 d1 decision protocol: prepare passes, finish answers. Internal;
+// public with `test-util` for cross-crate conformance tests.
+#[cfg(feature = "test-util")]
+pub mod decision;
+#[cfg(not(feature = "test-util"))]
+pub(crate) mod decision;
+
 // Chat template formatting for LLM prompts
 pub mod chat_template;
 pub use chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
