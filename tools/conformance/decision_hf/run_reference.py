@@ -326,7 +326,10 @@ class ParityCheck:
     replay returns the recorded output's structure (types, lengths, keys), dtypes and shapes with the same bytes.
     `require_coverage` raises unless at least one call was verified and every hooked module at least once. The
     modules chain (embedding, each decoder layer, final norm, LM head), so equal outputs from equal inputs make the
-    whole forward a float32 load's. A float32 load itself (about 9 GB) does not fit this machine's 8 GB."""
+    whole forward a float32 load's. A float32 load itself (about 9 GB) does not fit this machine's 8 GB.
+
+    `immediate` verifies each call as its module returns, so at most one call's tensors are held (a 3,605-token
+    forward would otherwise keep every layer's hidden states until it ends); without it, calls wait for `verify`."""
 
     HOOKS = (
         "_forward_pre_hooks",
@@ -336,9 +339,10 @@ class ParityCheck:
         "_forward_hooks_always_called",
     )
 
-    def __init__(self, torch_module, modules: list) -> None:
+    def __init__(self, torch_module, modules: list, immediate: bool = False) -> None:
         self.torch = torch_module
         self.modules = list(modules)
+        self.immediate = immediate
         self.pending: dict[int, tuple] = {}
         self.records: list[tuple] = []
         self.verified: set[int] = set()
@@ -353,6 +357,8 @@ class ParityCheck:
     def after(self, module, args, kwargs, output) -> None:
         recorded_args, recorded_kwargs = self.pending.pop(id(module))
         self.records.append((module, recorded_args, recorded_kwargs, output))
+        if self.immediate:
+            self.verify()
 
     def discard(self) -> None:
         """Forget the calls of a forward that raised: they reach no observation."""
@@ -431,9 +437,12 @@ class ParityCheck:
             name = type(module).__name__
             self.require_float32(args, f"{name} args")
             self.require_float32(kwargs, f"{name} kwargs")
-            clone = self.float32_copy(module)
-            with torch.inference_mode():
-                again = clone(*args, **kwargs)
+            try:
+                clone = self.float32_copy(module)
+                with torch.inference_mode():
+                    again = clone(*args, **kwargs)
+            except Exception as error:  # no replay, no proof: never a refusal by the reference
+                raise RunnerError(f"float32 parity: replaying {name} failed: {error!r}") from error
             self.compare(output, again, f"{name} output")
             self.calls += 1
             self.verified.add(id(module))
@@ -553,7 +562,7 @@ class Reference:
         if args.check_f32_parity:
             if args.precision != "f32":
                 raise SystemExit("--check-f32-parity checks --precision f32")
-            self.parity = ParityCheck(torch, hooked)
+            self.parity = ParityCheck(torch, hooked, immediate=True)
 
         capture = self.capture
 

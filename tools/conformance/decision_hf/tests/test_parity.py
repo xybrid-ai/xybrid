@@ -125,6 +125,39 @@ class ParityGateTests(unittest.TestCase):
             self.parity.require_coverage()
 
 
+class ImmediateParityTests(unittest.TestCase):
+    """The mode the runner uses: each call verified as its module returns."""
+
+    def setUp(self):
+        torch.set_num_threads(1)
+        self.model = Pair()
+        self.hooked = [self.model.first, self.model.second]
+        Float32Compute(torch, self.hooked)
+
+    def forward(self):
+        with torch.inference_mode():
+            return self.model(torch.randn(4, 16, generator=torch.Generator().manual_seed(1)))
+
+    def test_widened_forward_passes_holding_nothing(self):
+        parity = ParityCheck(torch, self.hooked, immediate=True)
+        self.forward()
+        self.assertEqual(parity.records, [])
+        self.assertEqual(parity.require_coverage()["calls"], 2)
+
+    def test_changed_output_stops_the_forward(self):
+        # a hook between the widening and the proof changes what the module returned
+        self.model.second.register_forward_hook(lambda module, args, output: output + 1)
+        ParityCheck(torch, self.hooked, immediate=True)
+        with self.assertRaisesRegex(RunnerError, "Linear output: .* bytes differ"):
+            self.forward()
+
+    def test_failing_replay_is_a_runner_error(self):
+        parity = ParityCheck(torch, self.hooked, immediate=True)
+        with mock.patch.object(parity, "float32_copy", side_effect=MemoryError("no room")):
+            with self.assertRaisesRegex(RunnerError, "replaying Linear failed"):
+                self.forward()
+
+
 class FailingProof:
     def __init__(self, fail_at_end):
         self.fail_at_end = fail_at_end
