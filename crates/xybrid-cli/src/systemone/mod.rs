@@ -1,5 +1,8 @@
 //! The SystemOne transport for decision requests: subset v1.
 //!
+//! Internal: the CLI's and its tests' interface (`#[doc(hidden)]`), with no
+//! stability promise.
+//!
 //! SystemOne is the JSON shape llama.cpp's server answers decision requests
 //! in (`POST /v1/systemone`). `xybrid run --decision` reads a request in a
 //! subset of it, and writes the answers back in its response shape.

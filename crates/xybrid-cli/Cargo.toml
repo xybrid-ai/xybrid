@@ -2,6 +2,9 @@
 name = "xybrid-cli"
 version.workspace = true
 edition.workspace = true
+# Installed from a checkout or git (install.sh), never from crates.io; its
+# library (src/lib.rs) is the CLI's internal interface to its tests.
+publish = false
 
 [[bin]]
 name = "xybrid"
