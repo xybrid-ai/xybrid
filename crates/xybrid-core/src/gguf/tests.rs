@@ -640,6 +640,54 @@ fn inconsistent_decision_tagging_is_an_error() {
     );
 }
 
+/// Every decision key is checked for its architecture, not only a type, and
+/// with or without a decision type of the file's own.
+#[test]
+fn a_decision_key_of_another_architecture_is_an_error() {
+    let invalid = |builder: GgufBuilder, what: &str| match classify_bytes(&builder.build()) {
+        Err(GgufError::InvalidDecision(_)) => {}
+        other => panic!("{what}: {other:?}"),
+    };
+    let lfm3_chat = || {
+        GgufBuilder::new()
+            .str("general.architecture", "lfm3")
+            .bool("lfm3.attention.causal", true)
+    };
+    type AddKey = fn(GgufBuilder, &str) -> GgufBuilder;
+    let foreign: [(&str, AddKey); 5] = [
+        ("llama.decision.temperature.choice", |b, k| b.f32(k, 1.0)),
+        ("llama.decision.something_new", |b, k| b.u32(k, 3)),
+        ("llama.decision.labels", |b, k| {
+            b.str_array(k, &["yes", "no"])
+        }),
+        ("decision.temperature.choice", |b, k| b.f32(k, 1.0)),
+        ("lfm3.attention.decision.type", |b, k| b.str(k, "lfm3-d1")),
+    ];
+    for (key, add) in foreign {
+        invalid(add(lfm3_chat(), key), &format!("{key} without a type"));
+        invalid(
+            add(d1_builder(), key),
+            &format!("{key} in a complete d1 profile"),
+        );
+    }
+
+    // Keys that only mention "decision" are not decision keys, and neither
+    // are tensor names.
+    let unrelated = lfm3_chat()
+        .u32("general.decisions", 2)
+        .str("lfm3.decision", "x")
+        .tensor("decision.hidden_norm.weight", &[4], 0, 0)
+        .build();
+    assert_eq!(
+        classify_bytes(&unrelated).unwrap(),
+        DecisionClassification::NotDecision
+    );
+    assert_eq!(
+        classify_bytes(&d1_builder().u32("general.decisions", 2).build()).unwrap(),
+        D1
+    );
+}
+
 #[test]
 fn classification_needs_the_architecture() {
     let missing = GgufBuilder::new().u32("x", 1).build();

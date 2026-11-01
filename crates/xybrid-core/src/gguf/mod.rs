@@ -65,8 +65,12 @@
 //!    malformed or oversized file is an error, never [`NotDecision`].
 //! 2. `general.architecture` (`<arch>` below) must be a UTF-8 string;
 //!    otherwise an error.
-//! 3. A `<x>.decision.type` key with `<x>` other than `<arch>` is an error:
-//!    a decision model labelled for another architecture.
+//! 3. Every decision key, `<x>.decision.<rest>` (the first `.decision.`
+//!    decides `<x>`) or `decision.<rest>` (an empty `<x>`), must have
+//!    `<x> = <arch>`; any other is an error, whether it is a type, a
+//!    temperature, an array or anything else, and whether or not the file
+//!    has a decision type of its own: a decision model labelled for another
+//!    architecture. Tensor names are not keys.
 //! 4. Without `<arch>.decision.type`: any other `<arch>.decision.*` key is
 //!    an error (decision keys without a type); with none,
 //!    [`NotDecision`].
