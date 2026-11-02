@@ -216,10 +216,17 @@ genrule(
 # "graph node" llama target the evaluation's Option B describes.
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 
+# CMake compiles absolute source paths, which __FILE__ retains in ggml's
+# assertion strings. Remap the execroot before Rust bundles the native objects
+# into a staticlib; rules_rust rejects artifacts containing that build path.
+_LLAMA_PATH_FLAGS = "-ffile-prefix-map=$$EXT_BUILD_ROOT=."
+
 # Base llama cmake configuration (CPU-only, hermetic on desktop: Metal OFF).
 # SDK builds omit the application and tools; vision adds standalone mtmd.
 _LLAMA_CACHE_ENTRIES = {
     "CMAKE_BUILD_TYPE": "Release",
+    "CMAKE_C_FLAGS": _LLAMA_PATH_FLAGS,
+    "CMAKE_CXX_FLAGS": _LLAMA_PATH_FLAGS,
     "BUILD_SHARED_LIBS": "OFF",
     "CMAKE_INSTALL_LIBDIR": "lib",
     "LLAMA_BUILD_EXAMPLES": "OFF",
@@ -458,8 +465,8 @@ cmake(
             # ANSI (glibc/bionic expose it by default — this bites only the
             # windows cross). rfcc maps these to CMAKE_*_FLAGS_INIT with
             # replace=False, so they APPEND to the toolchain-derived flags.
-            "CMAKE_C_FLAGS": "-D_USE_MATH_DEFINES",
-            "CMAKE_CXX_FLAGS": "-D_USE_MATH_DEFINES",
+            "CMAKE_C_FLAGS": _LLAMA_PATH_FLAGS + " -D_USE_MATH_DEFINES",
+            "CMAKE_CXX_FLAGS": _LLAMA_PATH_FLAGS + " -D_USE_MATH_DEFINES",
         },
         # Desktop Windows cross (MSVC ABI) — the Flutter/cargokit lane. Same
         # CMAKE_SYSTEM seeding and vision set as the GNU arm above, but the C++
@@ -478,8 +485,8 @@ cmake(
             "CMAKE_RC_COMPILER": "$$EXT_BUILD_ROOT/$(execpath @llvm//tools:llvm-rc)",
             # mtmd-audio's M_PI, same as the MinGW arm: Microsoft's math.h is
             # where _USE_MATH_DEFINES comes from in the first place.
-            "CMAKE_C_FLAGS": "-D_USE_MATH_DEFINES",
-            "CMAKE_CXX_FLAGS": "-D_USE_MATH_DEFINES",
+            "CMAKE_C_FLAGS": _LLAMA_PATH_FLAGS + " -D_USE_MATH_DEFINES",
+            "CMAKE_CXX_FLAGS": _LLAMA_PATH_FLAGS + " -D_USE_MATH_DEFINES",
         },
         # macOS cross from Linux RBE (the macOS-CPU lane): same rfcc gap as
         # windows — no darwin entry in rfcc's _TARGET_OS_PARAMS, so without
