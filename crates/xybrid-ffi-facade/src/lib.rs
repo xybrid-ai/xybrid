@@ -4844,7 +4844,10 @@ stages:
     /// neither.
     #[test]
     fn every_name_a_binding_registers_is_accepted() {
-        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let repo = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+        )
+        .join("../..");
         let roots = [repo.join("bindings"), repo.join("crates/xybrid-bolt/src")];
         if !roots.iter().all(|root| root.is_dir()) {
             eprintln!("skipped: no bindings/ checkout at {}", repo.display());

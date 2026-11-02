@@ -14,14 +14,28 @@
 # `cargo:rustc-link-lib=c++` on macOS/iOS and the Android 16KB-page link-arg —
 # and a no-op on Linux, so the Linux/desktop cdylib compiles without it. Bazel
 # does NOT run this build.rs (no cargo_build_script target), so those link
-# directives are ported to the cdylib's rustc_flags below (+ the android
-# c++_shared that cargo picks up from .cargo/config.toml). The frb Dart-bridge
-# codegen is a separate `flutter_rust_bridge_codegen` CLI step (not a build
-# script) and stays in CI.
+# directives are ported to the cdylib's rustc_flags below. The Android C++
+# runtime that cargo selects in .cargo/config.toml is an explicit dependency.
+# The frb Dart-bridge codegen remains a separate
+# `flutter_rust_bridge_codegen` CLI step in CI.
 load("@rules_rs//rs:rust_shared_library.bzl", "rust_shared_library")
 load("@rules_rs//rs:rust_static_library.bzl", "rust_static_library")
+load("@rules_cc//cc:defs.bzl", "cc_import")
 load("@crates//:defs.bzl", "all_crate_deps")
 load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
+
+# Stage the matching NDK runtime as a link input on remote workers. A bare
+# -lc++_shared flag does not make the library available in the action sandbox.
+cc_import(
+    name = "android_cxx_shared",
+    shared_library = select({
+        "@rules_rs//rs/platforms/config:aarch64-linux-android": "@androidndk//:libcxx_shared_aarch64-linux-android",
+        "@rules_rs//rs/platforms/config:armv7-linux-androideabi": "@androidndk//:libcxx_shared_arm-linux-androideabi",
+        "@rules_rs//rs/platforms/config:x86_64-linux-android": "@androidndk//:libcxx_shared_x86_64-linux-android",
+        "//conditions:default": None,
+    }),
+    target_compatible_with = ["@platforms//os:android"],
+)
 
 # cdylib — libxybrid_flutter_ffi.{so,dylib}
 rust_shared_library(
@@ -37,9 +51,9 @@ rust_shared_library(
     # "static" selects static_runtime_lib, the runtime the CLI binary gets.
     #
     # LINUX ONLY: on android this library NEEDs the NDK's libc++_shared.so
-    # (-lc++_shared below), which the Flutter plugin packages beside it. There
-    # "static" would select every NDK sysroot archive, bionic's libc.a included
-    # (see the bolt cdylib's note).
+    # (linked through :android_cxx_shared), which the plugin packages beside it.
+    # There "static" would select every NDK sysroot archive, including bionic's
+    # libc.a (see the bolt cdylib's note).
     cc_runtime_linkage = select({
         "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": "static",
         "//conditions:default": "dynamic",
@@ -50,6 +64,10 @@ rust_shared_library(
     # ggml_metal/mtmd/candle/CoreML symbols with default features only).
     crate_features = ["default"],
     deps = all_crate_deps(normal = True),
+    link_deps = select({
+        "@platforms//os:android": [":android_cxx_shared"],
+        "//conditions:default": [],
+    }),
     # build.rs is NOT run under Bazel (no cargo_build_script target here), so its
     # link directives are ported to rustc_flags — the proven xybrid-bolt form
     # (-Clink-arg=, not bare linkopts). cdylib ONLY: the staticlib is an unlinked
@@ -60,11 +78,6 @@ rust_shared_library(
         "@platforms//os:macos": ["-Clink-arg=-lc++"],
         "@platforms//os:ios": ["-Clink-arg=-lc++"],  # covers ios-sim
         "@platforms//os:android": [
-            # candle/llama.cpp built -DANDROID_STL=c++_shared leave undefined C++
-            # ABI symbols needing a DT_NEEDED. cargo gets this from
-            # .cargo/config.toml (which Bazel doesn't read); build.rs emits only
-            # the 16KB arg — so both are needed here.
-            "-Clink-arg=-lc++_shared",
             # Android 15+ (API 35) 16KB page alignment; last -z wins with lld.
             "-Clink-arg=-Wl,-z,max-page-size=16384",
         ],

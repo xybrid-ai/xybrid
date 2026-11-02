@@ -715,7 +715,7 @@ mod tests {
             return crate_path.to_string();
         }
         // Try absolute path as last resort
-        env!("CARGO_MANIFEST_DIR").to_string()
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests")
             + "/../../integration-tests/fixtures/models/kokoro-82m"
     }
 
@@ -1219,7 +1219,7 @@ mod tests {
         if std::path::Path::new(crate_path).join("misaki").exists() {
             return crate_path.to_string();
         }
-        env!("CARGO_MANIFEST_DIR").to_string()
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests")
             + "/../../integration-tests/fixtures/models/kitten-tts-nano-0.2"
     }
 
