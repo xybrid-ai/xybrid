@@ -538,6 +538,17 @@ internal path-dep `version = "..."` pins (e.g. `xybrid-sdk`/`xybrid-core` in
 sibling `Cargo.toml`s). If those drift, lockfile regen fails under `^0.1.x` —
 update them to match and re-run `cargo update -w` when bumping.
 
+**Native changes after the bump need a Flutter crate edit.** cargokit names
+the Flutter precompiled release after a hash of `bindings/flutter/rust` alone,
+and release-prep reuses whatever that release already holds. If anything the
+library is built from (any `Cargo.toml`, workspace crates, `vendor/` gitlinks,
+Bazel config) changes on a release branch after the bump, a master merge
+included, or you rebase or re-cut the branch after release-prep ran, change a
+line of `bindings/flutter/rust/Cargo.toml` too. The Verify release branch job
+runs `tools/scripts/check_flutter_precompiled_inputs.py`, which fails on the
+first case from history and on most of the second from the release's
+publication date.
+
 **llama.cpp stable updates (POC).** `llamacpp-update.yml` checks official
 `vX.Y.Z` releases daily and opens one version-specific update PR at a time.
 Keep the submodule gitlink, `LLAMA_CPP_COMMIT`, and
