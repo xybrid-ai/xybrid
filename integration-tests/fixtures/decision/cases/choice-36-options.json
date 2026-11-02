@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "id": "choice-36-options",
+  "profile": "lfm3-d1/text/v1",
+  "title": "36 options: code AJ is not one token, the first free pool entry (00) replaces it",
+  "covers": ["choice-pool-fallback"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"option_000\": \"Option number 0\", \"option_001\": \"Option number 1\", \"option_002\": \"Option number 2\", \"option_003\": \"Option number 3\", \"option_004\": \"Option number 4\", \"option_005\": \"Option number 5\", \"option_006\": \"Option number 6\", \"option_007\": \"Option number 7\", \"option_008\": \"Option number 8\", \"option_009\": \"Option number 9\", \"option_010\": \"Option number 10\", \"option_011\": \"Option number 11\", \"option_012\": \"Option number 12\", \"option_013\": \"Option number 13\", \"option_014\": \"Option number 14\", \"option_015\": \"Option number 15\", \"option_016\": \"Option number 16\", \"option_017\": \"Option number 17\", \"option_018\": \"Option number 18\", \"option_019\": \"Option number 19\", \"option_020\": \"Option number 20\", \"option_021\": \"Option number 21\", \"option_022\": \"Option number 22\", \"option_023\": \"Option number 23\", \"option_024\": \"Option number 24\", \"option_025\": \"Option number 25\", \"option_026\": \"Option number 26\", \"option_027\": \"Option number 27\", \"option_028\": \"Option number 28\", \"option_029\": \"Option number 29\", \"option_030\": \"Option number 30\", \"option_031\": \"Option number 31\", \"option_032\": \"Option number 32\", \"option_033\": \"Option number 33\", \"option_034\": \"Option number 34\", \"option_035\": \"Option number 35\"}}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "choice",
+          "keys": ["option_000", "option_001", "option_002", "option_003", "option_004", "option_005", "option_006", "option_007", "option_008", "option_009", "option_010", "option_011", "option_012", "option_013", "option_014", "option_015", "option_016", "option_017", "option_018", "option_019", "option_020", "option_021", "option_022", "option_023", "option_024", "option_025", "option_026", "option_027", "option_028", "option_029", "option_030", "option_031", "option_032", "option_033", "option_034", "option_035"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA Option number 0\nB Option number 1\nC Option number 2\nD Option number 3\nE Option number 4\nF Option number 5\nG Option number 6\nH Option number 7\nI Option number 8\nJ Option number 9\nK Option number 10\nL Option number 11\nM Option number 12\nN Option number 13\nO Option number 14\nP Option number 15\nQ Option number 16\nR Option number 17\nS Option number 18\nT Option number 19\nU Option number 20\nV Option number 21\nW Option number 22\nX Option number 23\nY Option number 24\nZ Option number 25\nAA Option number 26\nAB Option number 27\nAC Option number 28\nAD Option number 29\nAE Option number 30\nAF Option number 31\nAG Option number 32\nAH Option number 33\nAI Option number 34\n00 Option number 35\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 41, 31921, 1579, 229, 24, 207, 42, 31921, 1579, 229, 25, 207, 43, 31921, 1579, 229, 26, 207, 44, 31921, 1579, 229, 27, 207, 45, 31921, 1579, 229, 28, 207, 46, 31921, 1579, 229, 29, 207, 47, 31921, 1579, 229, 30, 207, 48, 31921, 1579, 229, 31, 207, 49, 31921, 1579, 229, 32, 207, 50, 31921, 1579, 229, 33, 207, 51, 31921, 1579, 229, 654, 207, 52, 31921, 1579, 229, 1131, 207, 53, 31921, 1579, 229, 873, 207, 54, 31921, 1579, 229, 1031, 207, 55, 31921, 1579, 229, 1035, 207, 56, 31921, 1579, 229, 885, 207, 57, 31921, 1579, 229, 942, 207, 58, 31921, 1579, 229, 916, 207, 59, 31921, 1579, 229, 632, 207, 60, 31921, 1579, 229, 412, 207, 61, 31921, 1579, 229, 397, 207, 62, 31921, 1579, 229, 1696, 207, 63, 31921, 1579, 229, 1518, 207, 64, 31921, 1579, 229, 1467, 207, 65, 31921, 1579, 229, 1325, 207, 66, 31921, 1579, 229, 1197, 207, 6713, 31921, 1579, 229, 1616, 207, 5193, 31921, 1579, 229, 1641, 207, 2843, 31921, 1579, 229, 1637, 207, 3875, 31921, 1579, 229, 1734, 207, 28527, 31921, 1579, 229, 1163, 207, 10593, 31921, 1579, 229, 2498, 207, 5157, 31921, 1579, 229, 2424, 207, 51133, 31921, 1579, 229, 2124, 207, 22348, 31921, 1579, 229, 2432, 207, 555, 31921, 1579, 229, 2036, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 255,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407, 46, 410, 47, 417, 48, 403, 49, 358, 50, 461, 51, 483, 52, 402, 53, 356, 54, 427, 55, 480, 56, 372, 57, 1392, 58, 408, 59, 325, 60, 336, 61, 502, 62, 518, 63, 422, 64, 1549, 65, 766, 66, 895, 6713, 27196, 5193, 19033, 2843, 13677, 3875, 7437, 28527, 42605, 10593, 23398, 5157, 14321, 51133, 48643, 22348, 13508, 555]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "option_000",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "option_001",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "option_002",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "option_003",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "option_004",
+              "code": "E",
+              "range": [8, 10]
+            },
+            {
+              "key": "option_005",
+              "code": "F",
+              "range": [10, 12]
+            },
+            {
+              "key": "option_006",
+              "code": "G",
+              "range": [12, 14]
+            },
+            {
+              "key": "option_007",
+              "code": "H",
+              "range": [14, 16]
+            },
+            {
+              "key": "option_008",
+              "code": "I",
+              "range": [16, 18]
+            },
+            {
+              "key": "option_009",
+              "code": "J",
+              "range": [18, 20]
+            },
+            {
+              "key": "option_010",
+              "code": "K",
+              "range": [20, 22]
+            },
+            {
+              "key": "option_011",
+              "code": "L",
+              "range": [22, 24]
+            },
+            {
+              "key": "option_012",
+              "code": "M",
+              "range": [24, 26]
+            },
+            {
+              "key": "option_013",
+              "code": "N",
+              "range": [26, 28]
+            },
+            {
+              "key": "option_014",
+              "code": "O",
+              "range": [28, 30]
+            },
+            {
+              "key": "option_015",
+              "code": "P",
+              "range": [30, 32]
+            },
+            {
+              "key": "option_016",
+              "code": "Q",
+              "range": [32, 34]
+            },
+            {
+              "key": "option_017",
+              "code": "R",
+              "range": [34, 36]
+            },
+            {
+              "key": "option_018",
+              "code": "S",
+              "range": [36, 38]
+            },
+            {
+              "key": "option_019",
+              "code": "T",
+              "range": [38, 40]
+            },
+            {
+              "key": "option_020",
+              "code": "U",
+              "range": [40, 42]
+            },
+            {
+              "key": "option_021",
+              "code": "V",
+              "range": [42, 44]
+            },
+            {
+              "key": "option_022",
+              "code": "W",
+              "range": [44, 46]
+            },
+            {
+              "key": "option_023",
+              "code": "X",
+              "range": [46, 48]
+            },
+            {
+              "key": "option_024",
+              "code": "Y",
+              "range": [48, 50]
+            },
+            {
+              "key": "option_025",
+              "code": "Z",
+              "range": [50, 52]
+            },
+            {
+              "key": "option_026",
+              "code": "AA",
+              "range": [52, 54]
+            },
+            {
+              "key": "option_027",
+              "code": "AB",
+              "range": [54, 56]
+            },
+            {
+              "key": "option_028",
+              "code": "AC",
+              "range": [56, 58]
+            },
+            {
+              "key": "option_029",
+              "code": "AD",
+              "range": [58, 60]
+            },
+            {
+              "key": "option_030",
+              "code": "AE",
+              "range": [60, 62]
+            },
+            {
+              "key": "option_031",
+              "code": "AF",
+              "range": [62, 64]
+            },
+            {
+              "key": "option_032",
+              "code": "AG",
+              "range": [64, 66]
+            },
+            {
+              "key": "option_033",
+              "code": "AH",
+              "range": [66, 68]
+            },
+            {
+              "key": "option_034",
+              "code": "AI",
+              "range": [68, 70]
+            },
+            {
+              "key": "option_035",
+              "code": "00",
+              "range": [70, 71]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40a22f5a", "0x3f7dca12", "0x40a8ace4", "0x3f7c69b9", "0x409f5da9", "0x3f52e84c", "0x40a40ef5", "0x3fb8a03e", "0x40a52aae", "0x3fa56479", "0x40a724bf", "0x3fbfbd9c", "0x40a800e0", "0x3fc9c9f7", "0x4099640c", "0x3f67442c", "0x409cf421", "0x3f801c45", "0x40a4310c", "0x3fea379f", "0x40a4f206", "0x3fd2f60f", "0x40957c2e", "0x3f4f0b60", "0x409cedae", "0x3f2e38fc", "0x4091755d", "0x3f4fbfb0", "0x408432a7", "0x3f05ccb8", "0x409462a0", "0x3f5c588c", "0x40996524", "0x3fe3b45a", "0x40985158", "0x3f9c856c", "0x408e0941", "0x3f1a661e", "0x40916ff1", "0x3f408540", "0x40935525", "0x3f938b42", "0x408f3b08", "0x3f295184", "0x409223f2", "0x3fb04a5b", "0x408b5306", "0x3f51c34e", "0x408112b3", "0x3f5bc812", "0x40867b1c", "0x3f8d72da", "0x40806255", "0x3fef5311", "0x40760442", "0x3f3e22a0", "0x407ada07", "0x3f9d7406", "0x407b9e30", "0x3f815a16", "0x40682040", "0x3fad7854", "0x407037e8", "0x3f891536", "0x407befc9", "0x3f8ebd82", "0x405b9fac", "0x3f8cb539", "0x4068c191", "0x3f62574c", "0x4033118e"]
+      ],
+      "scores": [
+        ["0x40a22f5a", "0x40a8ace4", "0x409f5da9", "0x40a40ef5", "0x40a52aae", "0x40a724bf", "0x40a800e0", "0x4099640c", "0x409cf421", "0x40a4310c", "0x40a4f206", "0x40957c2e", "0x409cedae", "0x4091755d", "0x408432a7", "0x409462a0", "0x40996524", "0x40985158", "0x408e0941", "0x40916ff1", "0x40935525", "0x408f3b08", "0x409223f2", "0x408b5306", "0x408112b3", "0x40867b1c", "0x40806255", "0x40760442", "0x407ada07", "0x407b9e30", "0x40682040", "0x407037e8", "0x407befc9", "0x405b9fac", "0x4068c191", "0x4033118e"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "choice",
+          "choice": "option_001",
+          "probabilities": {
+            "option_000": 0.039985207563414525,
+            "option_001": 0.046533183867565608,
+            "option_002": 0.037436178131654514,
+            "option_003": 0.041774466968954371,
+            "option_004": 0.042870414653012154,
+            "option_005": 0.044897086376509826,
+            "option_006": 0.045808288795907509,
+            "option_007": 0.032557993316246772,
+            "option_008": 0.03538445935633263,
+            "option_009": 0.041904652024804173,
+            "option_010": 0.042649292407064242,
+            "option_011": 0.029718226687091318,
+            "option_012": 0.03536363645577708,
+            "option_013": 0.027049629780874624,
+            "option_014": 0.019842435299976372,
+            "option_015": 0.028964234996615667,
+            "option_016": 0.032561243790602164,
+            "option_017": 0.031751803404260107,
+            "option_018": 0.024970793717221978,
+            "option_019": 0.027036246803642406,
+            "option_020": 0.028260500936623235,
+            "option_021": 0.025677536892828007,
+            "option_022": 0.027484115041970306,
+            "option_023": 0.023437595190994108,
+            "option_024": 0.018445262000246421,
+            "option_025": 0.020929692682247859,
+            "option_026": 0.018150710608502058,
+            "option_027": 0.016008142300316712,
+            "option_028": 0.016938444688776633,
+            "option_029": 0.017090761942556907,
+            "option_030": 0.013610085565670726,
+            "option_031": 0.014959638048867217,
+            "option_032": 0.017154524740759777,
+            "option_033": 0.011760489323078912,
+            "option_034": 0.013710653237178023,
+            "option_035": 0.0073223724018554696
+          },
+          "confidence": 0.046533183867565608
+        }
+      },
+      "usage": {
+        "input_tokens": 256,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

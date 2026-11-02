@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "id": "math-neg-inf-all",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Every score -inf: upstream answers NaN probabilities",
+  "covers": ["math-neg-inf", "math-non-finite", "divergence"],
+  "notes": "Contract 3: -inf is allowed only if one offered score is finite.",
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"a\": \"A\", \"b\": \"B\"}}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "choice",
+          "keys": ["a", "b"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\na A\nb B\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 73, 334, 207, 74, 378, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 45,
+          "select": [73, 267, 74, 293]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "a",
+              "code": "a",
+              "range": [0, 2]
+            },
+            {
+              "key": "b",
+              "code": "b",
+              "range": [2, 4]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "synthetic",
+      "raw_scores": [
+        ["0xff800000", "0xff800000", "0xff800000", "0xff800000"]
+      ],
+      "scores": [
+        ["0xff800000", "0xff800000"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "choice",
+          "choice": "a",
+          "probabilities": {
+            "a": "NaN",
+            "b": "NaN"
+          },
+          "confidence": "NaN"
+        }
+      },
+      "usage": {
+        "input_tokens": 46,
+        "output_tokens": 0
+      }
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "given",
+    "finalize": {
+      "refuse": "non_finite_scores"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "parse-message-image-part",
+  "profile": "lfm3-d1/text/v1",
+  "title": "An image_url part in the state's messages becomes a file: 501",
+  "covers": ["media", "state-messages", "refusal-parse"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"state\": [{\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"See photo\"}, {\"type\": \"image_url\", \"image_url\": {\"url\": \"data:image/png;base64,iVBORw0KGgo=\"}}]}], \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "not_supported",
+        "status": 501,
+        "type": "not_supported_error",
+        "message": "This server does not support image input for decisions. For a model that supports it, start it with `--mmproj`"
+      }
+    },
+    "server": {
+      "status": 501,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "media_unsupported"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}
