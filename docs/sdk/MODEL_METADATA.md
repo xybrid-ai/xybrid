@@ -76,6 +76,21 @@ GGUF model execution for local LLMs via llama.cpp.
 | `chat_template` | string | no | `null` | Path to chat template JSON file |
 | `context_length` | integer | no | `4096` | Maximum context length in tokens |
 
+llama.cpp reserves the KV cache for all `context_length` tokens when the model
+loads, so memory follows this value, not the prompt length. When xybrid
+generates the file itself (a Hugging Face repo without one, `--model-file`,
+`fromModelFile`, `xybrid init`), `context_length` is the model's native context
+capped at 4,096 tokens, and the native value is recorded as
+`metadata.max_context_length`. Uncapped, LFM3 1.7B's 262,144 tokens would
+reserve about 5.9 GB of KV cache.
+
+To allow longer conversations, raise `context_length` in the generated file. It
+is written next to the GGUF for `--model-file` and `fromModelFile`, and to the
+model's cache directory for Hugging Face repos
+(`xybrid fetch --huggingface <repo>` prints it). `xybrid run --model-file`
+regenerates the metadata on every run instead of reading the file, so run the
+edited directory with `xybrid run --directory`.
+
 ### `ZzzPhonon`
 
 Phonon speech from one GGUF through the opt-in `tts-zzz` CPU backend. The

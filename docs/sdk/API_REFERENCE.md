@@ -359,7 +359,7 @@ using var result = loader.Load().Run(Envelope.Text("Hello!"));
 
 ### `fromHuggingFace()`
 
-Downloads a model from a HuggingFace Hub repository and caches it locally. Model metadata (`model_metadata.json`) is auto-generated from the model card and file inspection if not present in the repository.
+Downloads a model from a HuggingFace Hub repository and caches it locally. Model metadata (`model_metadata.json`) is auto-generated from the model card and file inspection if not present in the repository. For a GGUF, the generated context is capped at 4,096 tokens; see [`Gguf`](MODEL_METADATA.md#gguf) to raise it.
 
 > **Note:** Requires the `huggingface` feature flag to be enabled at compile time.
 

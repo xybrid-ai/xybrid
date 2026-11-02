@@ -12,7 +12,7 @@ description: 几分钟内开始使用 Xybrid
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.13.1
+  xybrid_flutter: ^0.16.0
 ```
 
 ```bash
@@ -54,7 +54,7 @@ https://github.com/xybrid-ai/xybrid
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.13.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.16.0")
 ]
 ```
 
@@ -85,9 +85,13 @@ let result = try await model.runAsync(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.13.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.16.0")
 }
 ```
+
+0.16.0 及更高版本需要 Android 10（API 29）：请在应用的 `defaultConfig` 中将 `minSdk` 设为 29 或更高，否则构建会在清单合并阶段失败。
+
+从注册表下载模型需要网络访问，而 SDK 不声明任何权限：请在应用的 `AndroidManifest.xml` 中添加 `<uses-permission android:name="android.permission.INTERNET" />`。
 
 **运行推理**
 
@@ -114,10 +118,12 @@ val result = model.runAsync(envelope)
 **安装**：React Native 0.76+ 应用需启用新架构；Expo SDK 52+ 需使用开发构建。
 
 ```bash
-npm install @xybrid/react-native@0.13.1
+npm install @xybrid/react-native@0.16.0
 ```
 
 原生 React Native 应用运行 `cd ios && pod install`；Expo 应用运行 `npx expo prebuild`。Expo Go 无法加载该原生模块。
+
+在 Android 上，0.16.0 及更高版本要求 `minSdkVersion` 至少为 29（Android 10）。React Native 和 Expo 模板默认为 24，提高方法请参阅 [React Native 指南](/en/docs/sdks/react-native#installation)。
 
 **运行推理**
 
@@ -145,7 +151,7 @@ await model.release();
 https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-或通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) 安装：`openupm add ai.xybrid.sdk`。原生库在首次导入时自动下载（经 SHA-256 校验）；如需固定版本，在 git URL 后追加 `#v0.13.1`。
+或通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) 安装：`openupm add ai.xybrid.sdk`。原生库在首次导入时自动下载（经 SHA-256 校验）；如需固定版本，在 git URL 后追加 `#v0.16.0`。
 
 **运行推理**
 
@@ -218,7 +224,7 @@ GGUF 加载、取消生成、测量与当前 API 请参阅 [Web SDK 指南](/zh/
 ```toml
 # Cargo.toml
 [dependencies]
-xybrid = "0.13.1"
+xybrid = "0.16.0"
 ```
 
 **运行推理**

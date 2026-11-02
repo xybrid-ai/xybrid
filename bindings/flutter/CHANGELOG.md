@@ -2,11 +2,18 @@
 
 ## Unreleased
 
+## 0.16.0
+
+* Changed: precompiled native libraries now use llama.cpp v0.8.0.
+* Fixed: registry resolution sends runtime OS compatibility information and
+  retains backend/OS refusal diagnostics, including with telemetry disabled.
 * Fixed: Android builds support Gradle 9 / AGP 9 and copy `libc++_shared.so`
   from the host app's selected NDK. Apple build logs no longer dump the environment.
 * Fixed: `load()` throws `XybridException` with the native diagnostic, and run
   failures retain their causes without duplicated inference prefixes. Cached
   speech models fail during load when the build lacks a usable zzz backend.
+* Standard precompiled Flutter binaries continue to omit the optional speech
+  backend; native iOS speech linkage remains unqualified.
 
 ## 0.15.0
 

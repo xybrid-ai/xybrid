@@ -1,6 +1,10 @@
 [package]
 name = "xybrid_flutter"
-version = "0.15.0"  # Hardcoded (not workspace) — cargokit hashes this file to detect changes
+version = "0.16.0"  # Hardcoded (not workspace) — cargokit hashes this file to detect changes
+# That hash covers only this directory, not the workspace crates or the
+# vendored llama.cpp this library links. If native code changes on a release
+# branch after the version bump, change this file too, or release-prep reuses
+# precompiled binaries built before the change.
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

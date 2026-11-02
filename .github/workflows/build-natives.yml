@@ -116,8 +116,13 @@ jobs:
             runner: macos-15
             needs-ndk: false
           # --- Linux (host build; consumed by the Flutter linux leg) ---
+          # Pinned to an LTS image like the arm64 row below: min_glibc is this
+          # runner's glibc, and on ubuntu-latest (26.04, glibc 2.43) every
+          # Ubuntu 24.04 / Debian consumer declined the slice. The Flutter leg
+          # stays on ubuntu-latest, so its fingerprint pull misses and build.rs
+          # downloads this slice through the manifest instead.
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             needs-ndk: false
           # --- Desktop rows: not consumed by any xybrid CI job. These exist
           #     purely so an EXTERNAL `cargo build --features llm-llamacpp`

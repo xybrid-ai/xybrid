@@ -369,12 +369,21 @@ fn test_generate_metadata_writes_valid_json_for_gguf() {
         serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap())
             .expect("Written model_metadata.json should parse");
 
+    // The window is capped at 4,096 tokens; the GGUF's 32,768 is kept as
+    // `max_context_length`.
     match &parsed.execution_template {
         ExecutionTemplate::Gguf { context_length, .. } => {
-            assert_eq!(*context_length, 32768);
+            assert_eq!(*context_length, 4096);
         }
         other => panic!("Expected Gguf template, got {:?}", other),
     }
+    assert_eq!(
+        parsed
+            .metadata
+            .get("max_context_length")
+            .and_then(|v| v.as_u64()),
+        Some(32768)
+    );
 
     assert!(parsed.preprocessing.is_empty());
     assert!(parsed.postprocessing.is_empty());

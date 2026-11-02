@@ -11,11 +11,13 @@ Android SDK 通过 BoltFFI 为 Xybrid 运行时提供原生 Kotlin 绑定，支�
 
 ```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.13.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.16.0")
 }
 ```
 
-最低 SDK 版本：0.15.0 之后的版本为 **29**（Android 10）：请在应用的 `defaultConfig` 中将 `minSdk` 设为 29 或更高，否则构建会在清单合并阶段失败。0.15.0 及更早版本为 **24**（Android 7.0）。
+最低 SDK 版本：0.16.0 及更高版本为 **29**（Android 10）：请在应用的 `defaultConfig` 中将 `minSdk` 设为 29 或更高，否则构建会在清单合并阶段失败。0.16.0 之前的版本为 **24**（Android 7.0）。
+
+从注册表下载模型需要网络访问，而 SDK 不声明任何权限：请在应用的 `AndroidManifest.xml` 中添加 `<uses-permission android:name="android.permission.INTERNET" />`。
 
 ## 快速开始
 
