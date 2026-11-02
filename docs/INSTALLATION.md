@@ -292,6 +292,12 @@ xybrid repl --huggingface "unsloth/SmolLM2-360M-Instruct-GGUF:Q4_K_M" --stream
 xybrid run --model-file ./my-model.gguf --input-text "Hello!"
 ```
 
+If the file has no `model_metadata.json` beside it, xybrid writes one from the
+GGUF header, with the context capped at 4,096 tokens. `run --model-file`
+regenerates the metadata on every run, so for a longer context raise
+`context_length` in that file and run the directory instead:
+`xybrid run --directory . --input-text "Hello!"`.
+
 ### Pipelines
 
 Chain models together with a YAML file:
