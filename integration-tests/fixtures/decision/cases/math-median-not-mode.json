@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "id": "math-median-not-mode",
+  "profile": "lfm3-d1/text/v1",
+  "title": "The median level differs from the mode; confidence is the mode's p, not the median's",
+  "covers": ["math-median-not-mode"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"x\", \"criteria\": [\"0\", \"1\", \"2\", \"3\", \"4\"]}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "score",
+          "keys": ["0", "1", "2", "3", "4"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nx\n\n0 0\n1 1\n2 2\n3 3\n4 4\n\nReply with a single digit 0-4 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 96, 8, 24, 229, 24, 207, 25, 229, 25, 207, 26, 229, 26, 207, 27, 229, 27, 207, 28, 229, 28, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 28, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 58,
+          "select": [24, 25, 26, 27, 28]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            },
+            {
+              "key": "4",
+              "code": "4",
+              "range": [4, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "synthetic",
+      "raw_scores": [
+        ["0x40000000", "0x3fb33333", "0xc0400000", "0xc0400000", "0x40133333"]
+      ],
+      "scores": [
+        ["0x40000000", "0x3fb33333", "0xc0400000", "0xc0400000", "0x40133333"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": "0",
+            "1": "1",
+            "2": "2",
+            "3": "3",
+            "4": "4"
+          },
+          "probabilities": {
+            "0": 0.34042066244690916,
+            "1": 0.2173588666052324,
+            "2": 0.0080976943431063601,
+            "3": 0.0080976943431063601,
+            "4": 0.42602508226164565
+          },
+          "confidence": 0.42602508226164565
+        }
+      },
+      "usage": {
+        "input_tokens": 59,
+        "output_tokens": 0
+      }
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "given",
+    "finalize": "match"
+  }
+}

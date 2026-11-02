@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "choice-structured-descriptions",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Object, array and number descriptions print with compact tojson",
+  "covers": ["description-structured", "json-float"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"billing\": {\"team\": \"billing\", \"sla_hours\": 24}, \"technical\": [\"app\", \"site\", 2], \"fraud\": 3.5, \"other\": -1, \"nested\": {\"a\": {\"b\": [1.0, null]}}}}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "choice",
+          "keys": ["billing", "technical", "fraud", "other", "nested"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA {\"team\": \"billing\", \"sla_hours\": 24}\nB [\"app\", \"site\", 2]\nC 3.5\nD -1\nE {\"a\": {\"b\": [1.0, null]}}\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 41, 36579, 40653, 6380, 496, 74, 5921, 1377, 496, 91, 1997, 10939, 2169, 6380, 229, 1325, 604, 42, 34564, 1287, 1377, 496, 11101, 1377, 229, 26, 2347, 43, 229, 27, 22, 29, 207, 44, 640, 25, 207, 45, 36579, 73, 6380, 36579, 74, 6380, 1106, 25, 22, 24, 20, 3495, 69, 114982, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 91,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "billing",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "technical",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "fraud",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "other",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "nested",
+              "code": "E",
+              "range": [8, 10]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4132fc0b", "0x40d01ed7", "0x41082b31", "0x407f1986", "0x40c5505e", "0x3fb169be", "0x4100be30", "0x407bebd1", "0x41047f5c", "0x4086a689"]
+      ],
+      "scores": [
+        ["0x4132fc0b", "0x41082b31", "0x40c5505e", "0x4100be30", "0x41047f5c"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "choice",
+          "choice": "billing",
+          "probabilities": {
+            "billing": 0.73093760855930057,
+            "technical": 0.098833443048127634,
+            "fraud": 0.017122903277920817,
+            "other": 0.06985416779759139,
+            "nested": 0.083251877317059783
+          },
+          "confidence": 0.73093760855930057
+        }
+      },
+      "usage": {
+        "input_tokens": 92,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

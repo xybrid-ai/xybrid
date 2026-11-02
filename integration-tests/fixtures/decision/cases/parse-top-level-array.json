@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "parse-top-level-array",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A body that is a JSON array",
+  "covers": ["transport", "refusal-parse"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "[{\"state\": \"x\"}]",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "invalid_argument",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "\"state\" must be provided"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "invalid_request"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

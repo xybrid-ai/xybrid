@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "id": "math-underflow",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A spread wide enough that exp underflows to exactly 0",
+  "covers": ["math-underflow"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"c\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"a\": \"A\", \"b\": \"B\", \"c\": \"C\"}}, \"s\": {\"type\": \"score\", \"instructions\": \"x\", \"criteria\": [\"0\", \"1\", \"2\", \"3\"]}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "c",
+          "type": "choice",
+          "keys": ["a", "b", "c"]
+        },
+        {
+          "id": "s",
+          "type": "score",
+          "keys": ["0", "1", "2", "3"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "c",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\na A\nb B\nc C\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 73, 334, 207, 74, 378, 207, 75, 340, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 48,
+          "select": [73, 267, 74, 293, 75, 280]
+        },
+        {
+          "question": "s",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nx\n\n0 0\n1 1\n2 2\n3 3\n\nReply with a single digit 0-3 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 96, 8, 24, 229, 24, 207, 25, 229, 25, 207, 26, 229, 26, 207, 27, 229, 27, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 27, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 54,
+          "select": [24, 25, 26, 27]
+        }
+      ],
+      "answers": [
+        {
+          "question": "c",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "a",
+              "code": "a",
+              "range": [0, 2]
+            },
+            {
+              "key": "b",
+              "code": "b",
+              "range": [2, 4]
+            },
+            {
+              "key": "c",
+              "code": "c",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "s",
+          "type": "score",
+          "pass": 1,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "synthetic",
+      "raw_scores": [
+        ["0x00000000", "0xbf800000", "0xc4480000", "0xc4484000", "0xc4c80000", "0xc4c82000"],
+        ["0xc47a0000", "0x41f00000", "0xc4fa0000", "0x41e80000"]
+      ],
+      "scores": [
+        ["0x00000000", "0xc4480000", "0xc4c80000"],
+        ["0xc47a0000", "0x41f00000", "0xc4fa0000", "0x41e80000"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "c": {
+          "type": "choice",
+          "choice": "a",
+          "probabilities": {
+            "a": 1.0,
+            "b": 1.6416280589847205e-260,
+            "c": 0.0
+          },
+          "confidence": 1.0
+        },
+        "s": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": "0",
+            "1": "1",
+            "2": "2",
+            "3": "3"
+          },
+          "probabilities": {
+            "0": 0.0,
+            "1": 0.67868181453607002,
+            "2": 0.0,
+            "3": 0.32131818546392998
+          },
+          "confidence": 0.67868181453607002
+        }
+      },
+      "usage": {
+        "input_tokens": 104,
+        "output_tokens": 0
+      }
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "given",
+    "finalize": "match"
+  }
+}
