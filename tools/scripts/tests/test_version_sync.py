@@ -1,7 +1,9 @@
-"""The committed manifests and Unity README install pins match the Cargo version.
+"""The committed manifests and docs install pins match the Cargo version.
 
-`version-sync.sh --check` otherwise runs only on release branches and tags, so a
-hand edit that breaks a pin would first fail while a release is being cut.
+CI's Version sync job runs `version-sync.sh --check` on every pull request, and
+release-prep runs it again on the release branch. This keeps it in the tooling
+suite, so a change to version-sync.sh or install_pins.py that breaks the check
+on the committed tree fails locally too.
 """
 
 from pathlib import Path
