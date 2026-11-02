@@ -229,6 +229,8 @@ xybrid repl --huggingface "unsloth/SmolLM2-360M-Instruct-GGUF:Q4_K_M" --stream
 xybrid run --model-file ./my-model.gguf --input-text "Hello!"
 ```
 
+如果文件旁没有 `model_metadata.json`，xybrid 会根据 GGUF 文件头写入一个，上下文最多 4,096 个 token。`run --model-file` 每次运行都会重新生成元数据，因此如需更长的上下文，请调大该文件中的 `context_length`，然后改为运行该目录：`xybrid run --directory . --input-text "Hello!"`。
+
 ### 流水线
 
 使用 YAML 文件将多个模型串联起来：
