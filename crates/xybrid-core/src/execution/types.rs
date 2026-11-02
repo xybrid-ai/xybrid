@@ -9,6 +9,7 @@ use crate::ir::{ImageSource, ImageValidationLimits};
 use crate::runtime_adapter::AdapterError;
 use ndarray::{ArrayD, IxDyn};
 use std::collections::HashMap;
+use std::ops::Range;
 
 /// Result type for executor operations.
 pub type ExecutorResult<T> = Result<T, AdapterError>;
@@ -43,6 +44,10 @@ pub enum PreprocessedData {
     /// Phoneme IDs for TTS models
     PhonemeIds {
         ids: Vec<i64>,
+        /// The phoneme each id stands for, one entry per id (`symbols.len() ==
+        /// ids.len()`): `None` for padding and silence tokens, which no phoneme
+        /// produced. Lets per-token durations be read back as phoneme timings.
+        symbols: Vec<Option<char>>,
         phonemes: String,
         original_text: String,
     },
@@ -127,6 +132,16 @@ impl PreprocessedData {
     pub fn as_phoneme_ids(&self) -> Option<&Vec<i64>> {
         match self {
             PreprocessedData::PhonemeIds { ids, .. } => Some(ids),
+            _ => None,
+        }
+    }
+
+    /// Get the phoneme symbol of each id if this is phoneme data: one entry
+    /// per id from [`PreprocessedData::as_phoneme_ids`], `None` for padding
+    /// and silence tokens.
+    pub fn as_phoneme_symbols(&self) -> Option<&[Option<char>]> {
+        match self {
+            PreprocessedData::PhonemeIds { symbols, .. } => Some(symbols),
             _ => None,
         }
     }
@@ -231,6 +246,17 @@ pub enum RawOutputs {
 
     /// Raw audio bytes (PCM or WAV)
     AudioBytes(Vec<u8>),
+
+    /// 16-bit PCM encoded by `TTSAudioEncode`, with the range of the input
+    /// waveform's samples it kept after silence trimming. Converts to an
+    /// envelope exactly as [`RawOutputs::AudioBytes`] does; the range lets
+    /// phoneme timings measured on the waveform be moved onto the PCM.
+    TtsAudio {
+        /// Little-endian 16-bit PCM samples.
+        pcm: Vec<u8>,
+        /// The input waveform samples the PCM holds, in input sample indices.
+        kept: Range<usize>,
+    },
 }
 
 impl RawOutputs {
@@ -256,7 +282,9 @@ impl RawOutputs {
             RawOutputs::TokenIds(ids) => {
                 Ok(Envelope::new(EnvelopeKind::Text(format!("{:?}", ids))))
             }
-            RawOutputs::AudioBytes(bytes) => Ok(Envelope::new(EnvelopeKind::Audio(bytes.clone()))),
+            RawOutputs::AudioBytes(bytes) | RawOutputs::TtsAudio { pcm: bytes, .. } => {
+                Ok(Envelope::new(EnvelopeKind::Audio(bytes.clone())))
+            }
         }
     }
 
@@ -356,5 +384,21 @@ mod tests {
         let outputs = RawOutputs::AudioBytes(vec![1, 2, 3, 4]);
         let envelope = outputs.to_envelope().unwrap();
         assert!(matches!(envelope.kind, EnvelopeKind::Audio(_)));
+    }
+
+    #[test]
+    fn tts_audio_becomes_the_same_envelope_as_audio_bytes() {
+        let pcm = vec![1, 2, 3, 4];
+        let tts = RawOutputs::TtsAudio {
+            pcm: pcm.clone(),
+            kept: 3..5,
+        }
+        .to_envelope()
+        .unwrap();
+        let plain = RawOutputs::AudioBytes(pcm.clone()).to_envelope().unwrap();
+
+        assert_eq!(tts.kind, EnvelopeKind::Audio(pcm));
+        assert_eq!(tts.kind, plain.kind);
+        assert_eq!(tts.metadata.len(), plain.metadata.len());
     }
 }

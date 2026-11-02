@@ -3,6 +3,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
 
 namespace Xybrid
 {
@@ -20,6 +22,38 @@ namespace Xybrid
         {
             StageId = stageId;
             LatencyMs = latencyMs;
+        }
+    }
+
+    /// <summary>
+    /// When one phoneme is spoken in a TTS result's audio. Drive lip sync or
+    /// word highlighting from <see cref="InferenceResult.PhonemeTimings"/>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Start"/> and <see cref="End"/> are seconds from the first
+    /// sample of <see cref="InferenceResult.AudioBytes"/>, the audio exactly as
+    /// returned (after silence trimming and chunk crossfades).
+    /// </remarks>
+    public sealed class PhonemeTiming
+    {
+        /// <summary>
+        /// The phoneme as the model's phonemizer wrote it (IPA-style, for
+        /// example <c>ə</c>). It can be more than one character, and it can be
+        /// punctuation or a space.
+        /// </summary>
+        public string Phoneme { get; }
+
+        /// <summary>Start of the phoneme, in seconds from the first audio sample.</summary>
+        public float Start { get; }
+
+        /// <summary>End of the phoneme, in seconds from the first audio sample.</summary>
+        public float End { get; }
+
+        internal PhonemeTiming(string phoneme, float start, float end)
+        {
+            Phoneme = phoneme;
+            Start = start;
+            End = end;
         }
     }
 
@@ -134,6 +168,24 @@ namespace Xybrid
         /// <summary>Gets whether the model asked to call at least one tool.</summary>
         public bool HasToolCalls => ToolCalls != null && ToolCalls.Count > 0;
 
+        /// <summary>
+        /// When each phoneme is spoken in <see cref="AudioBytes"/>, in order.
+        /// Never null.
+        /// </summary>
+        /// <remarks>
+        /// Filled for ONNX TTS models that expose a per-token duration output
+        /// (for example KittenTTS 0.8, or a Kokoro export that adds one). Empty
+        /// for every other model, for streaming TTS, for cloud results and for
+        /// failed results. Entries never overlap and stay inside the audio.
+        /// Padding and silence tokens are not listed, so there can be gaps
+        /// between entries. A malformed timing payload yields an empty list
+        /// rather than an error.
+        /// </remarks>
+        public IReadOnlyList<PhonemeTiming> PhonemeTimings { get; }
+
+        /// <summary>Gets whether this result carries per-phoneme timings.</summary>
+        public bool HasPhonemeTimings => PhonemeTimings != null && PhonemeTimings.Count > 0;
+
         private InferenceResult(
             bool success,
             string error,
@@ -146,7 +198,8 @@ namespace Xybrid
             string reasoningContent,
             XybridBolt.XybridExecutionTarget executionTarget =
                 XybridBolt.XybridExecutionTarget.Local,
-            IReadOnlyList<XybridBolt.XybridToolCall> toolCalls = null)
+            IReadOnlyList<XybridBolt.XybridToolCall> toolCalls = null,
+            IReadOnlyList<PhonemeTiming> phonemeTimings = null)
         {
             Success = success;
             Error = error;
@@ -159,6 +212,7 @@ namespace Xybrid
             ReasoningContent = reasoningContent;
             ExecutionTarget = executionTarget;
             ToolCalls = toolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>();
+            PhonemeTimings = phonemeTimings ?? Array.Empty<PhonemeTiming>();
         }
 
         /// <summary>Decode a successful bolt result into the public shape.</summary>
@@ -168,8 +222,14 @@ namespace Xybrid
 
             var speech = TtsStreamResult.FromBolt(result);
             bool hasSpeechStatus = false;
+            string phonemeTimingsJson = null;
             foreach (var entry in result.Envelope.Metadata)
-                if (entry.Key == "tts_status") { hasSpeechStatus = true; break; }
+            {
+                if (entry.Key == "tts_status")
+                    hasSpeechStatus = true;
+                else if (entry.Key == PhonemeTimingParser.MetadataKey && phonemeTimingsJson == null)
+                    phonemeTimingsJson = entry.Value;
+            }
             bool partial = hasSpeechStatus && speech.Status != TtsStatus.Completed;
             return new InferenceResult(
                 success: !partial,
@@ -182,7 +242,8 @@ namespace Xybrid
                 metrics: MapMetrics(result.Metrics),
                 reasoningContent: result.ReasoningContent,
                 executionTarget: result.ExecutionTarget,
-                toolCalls: result.ToolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>())
+                toolCalls: result.ToolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>(),
+                phonemeTimings: PhonemeTimingParser.Parse(phonemeTimingsJson))
             {
                 SpeechStatus = hasSpeechStatus ? speech.Status : (TtsStatus?)null,
                 LimitedChunks = hasSpeechStatus ? speech.LimitedChunks : (uint?)null,
@@ -294,6 +355,363 @@ namespace Xybrid
                 ? $"InferenceResult(Success, OutputType={OutputType}, LatencyMs={LatencyMs}, " +
                   $"Text=\"{Text ?? "null"}\", AudioBytes={AudioBytes?.Length ?? 0})"
                 : $"InferenceResult(Failed, Error=\"{Error}\")";
+        }
+    }
+
+    /// <summary>
+    /// Strict reader for the <c>phoneme_timings</c> metadata entry: a JSON
+    /// array of <c>{"phoneme": string, "start": number, "end": number}</c>
+    /// objects, as the native SDK writes it.
+    /// </summary>
+    /// <remarks>
+    /// Unknown keys are skipped. Anything else that is not exactly that shape
+    /// (invalid JSON, a missing, repeated or mistyped field, a time that is
+    /// not a finite number, trailing text) makes the whole list empty: a
+    /// partial list would put the mouth out of sync with the audio. Numbers
+    /// always use the invariant culture, so a comma-decimal locale reads
+    /// <c>0.5</c> as one half. <see cref="Parse"/> never throws.
+    /// </remarks>
+    internal sealed class PhonemeTimingParser
+    {
+        /// <summary>Metadata key the native SDK stores the timings under.</summary>
+        internal const string MetadataKey = "phoneme_timings";
+
+        // Values under unknown keys are skipped recursively; cap their nesting
+        // so a hostile payload cannot exhaust the stack.
+        private const int MaxSkipDepth = 32;
+
+        private readonly string _json;
+        private int _pos;
+
+        private PhonemeTimingParser(string json)
+        {
+            _json = json;
+        }
+
+        /// <summary>
+        /// Parse a <c>phoneme_timings</c> value. Returns an empty list when
+        /// <paramref name="json"/> is null, empty or malformed.
+        /// </summary>
+        internal static IReadOnlyList<PhonemeTiming> Parse(string json)
+        {
+            if (string.IsNullOrEmpty(json))
+                return Array.Empty<PhonemeTiming>();
+            var parser = new PhonemeTimingParser(json);
+            return parser.TryReadDocument(out PhonemeTiming[] timings)
+                ? timings
+                : Array.Empty<PhonemeTiming>();
+        }
+
+        private bool TryReadDocument(out PhonemeTiming[] timings)
+        {
+            timings = null;
+            var list = new List<PhonemeTiming>();
+            SkipWhitespace();
+            if (!Consume('['))
+                return false;
+            SkipWhitespace();
+            if (!Consume(']'))
+            {
+                while (true)
+                {
+                    if (!TryReadTiming(out PhonemeTiming timing))
+                        return false;
+                    list.Add(timing);
+                    SkipWhitespace();
+                    if (Consume(']'))
+                        break;
+                    if (!Consume(','))
+                        return false;
+                    SkipWhitespace();
+                }
+            }
+            SkipWhitespace();
+            if (_pos != _json.Length)
+                return false;
+            timings = list.ToArray();
+            return true;
+        }
+
+        private bool TryReadTiming(out PhonemeTiming timing)
+        {
+            timing = null;
+            string phoneme = null;
+            float start = 0f;
+            float end = 0f;
+            bool hasStart = false;
+            bool hasEnd = false;
+            if (!Consume('{'))
+                return false;
+            SkipWhitespace();
+            if (!Consume('}'))
+            {
+                while (true)
+                {
+                    if (!TryReadString(out string key))
+                        return false;
+                    SkipWhitespace();
+                    if (!Consume(':'))
+                        return false;
+                    SkipWhitespace();
+                    switch (key)
+                    {
+                        case "phoneme":
+                            if (phoneme != null || !TryReadString(out phoneme))
+                                return false;
+                            break;
+                        case "start":
+                            if (hasStart || !TryReadTime(out start))
+                                return false;
+                            hasStart = true;
+                            break;
+                        case "end":
+                            if (hasEnd || !TryReadTime(out end))
+                                return false;
+                            hasEnd = true;
+                            break;
+                        default:
+                            if (!TrySkipValue(0))
+                                return false;
+                            break;
+                    }
+                    SkipWhitespace();
+                    if (Consume('}'))
+                        break;
+                    if (!Consume(','))
+                        return false;
+                    SkipWhitespace();
+                }
+            }
+            if (phoneme == null || !hasStart || !hasEnd)
+                return false;
+            timing = new PhonemeTiming(phoneme, start, end);
+            return true;
+        }
+
+        private bool TryReadTime(out float value)
+        {
+            value = 0f;
+            int begin = _pos;
+            if (!TryScanNumber())
+                return false;
+            // The token already matches the JSON number grammar, so Float plus
+            // the invariant culture accepts exactly it, whatever the locale.
+            return float.TryParse(
+                       _json.Substring(begin, _pos - begin),
+                       NumberStyles.Float,
+                       CultureInfo.InvariantCulture,
+                       out value)
+                   && !float.IsNaN(value)
+                   && !float.IsInfinity(value);
+        }
+
+        // JSON number: -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?
+        private bool TryScanNumber()
+        {
+            Consume('-');
+            if (!Consume('0'))
+            {
+                if (!IsDigit(Peek()))
+                    return false;
+                SkipDigits();
+            }
+            if (Consume('.') && SkipDigits() == 0)
+                return false;
+            if (Consume('e') || Consume('E'))
+            {
+                if (!Consume('+'))
+                    Consume('-');
+                if (SkipDigits() == 0)
+                    return false;
+            }
+            return true;
+        }
+
+        private bool TryReadString(out string value)
+        {
+            value = null;
+            if (!Consume('"'))
+                return false;
+            var builder = new StringBuilder();
+            while (_pos < _json.Length)
+            {
+                char c = _json[_pos++];
+                if (c == '"')
+                {
+                    value = builder.ToString();
+                    return true;
+                }
+                if (c < ' ')
+                    return false; // control characters must be escaped
+                if (c != '\\')
+                {
+                    builder.Append(c);
+                    continue;
+                }
+                if (_pos >= _json.Length)
+                    return false;
+                char escape = _json[_pos++];
+                switch (escape)
+                {
+                    case '"': builder.Append('"'); break;
+                    case '\\': builder.Append('\\'); break;
+                    case '/': builder.Append('/'); break;
+                    case 'b': builder.Append('\b'); break;
+                    case 'f': builder.Append('\f'); break;
+                    case 'n': builder.Append('\n'); break;
+                    case 'r': builder.Append('\r'); break;
+                    case 't': builder.Append('\t'); break;
+                    case 'u':
+                        if (!TryReadHex4(out char unit))
+                            return false;
+                        if (char.IsHighSurrogate(unit))
+                        {
+                            // Only a \u-escaped low surrogate may complete the pair.
+                            if (!Consume('\\') || !Consume('u')
+                                || !TryReadHex4(out char low) || !char.IsLowSurrogate(low))
+                                return false;
+                            builder.Append(unit).Append(low);
+                        }
+                        else if (char.IsLowSurrogate(unit))
+                        {
+                            return false;
+                        }
+                        else
+                        {
+                            builder.Append(unit);
+                        }
+                        break;
+                    default:
+                        return false;
+                }
+            }
+            return false; // unterminated string
+        }
+
+        private bool TryReadHex4(out char unit)
+        {
+            unit = '\0';
+            if (_json.Length - _pos < 4)
+                return false;
+            int code = 0;
+            for (int i = 0; i < 4; i++)
+            {
+                int digit = HexValue(_json[_pos + i]);
+                if (digit < 0)
+                    return false;
+                code = (code << 4) | digit;
+            }
+            _pos += 4;
+            unit = (char)code;
+            return true;
+        }
+
+        private bool TrySkipValue(int depth)
+        {
+            if (depth > MaxSkipDepth)
+                return false;
+            switch (Peek())
+            {
+                case '"':
+                    return TryReadString(out _);
+                case '{':
+                    _pos++;
+                    SkipWhitespace();
+                    if (Consume('}'))
+                        return true;
+                    while (true)
+                    {
+                        if (!TryReadString(out _))
+                            return false;
+                        SkipWhitespace();
+                        if (!Consume(':'))
+                            return false;
+                        SkipWhitespace();
+                        if (!TrySkipValue(depth + 1))
+                            return false;
+                        SkipWhitespace();
+                        if (Consume('}'))
+                            return true;
+                        if (!Consume(','))
+                            return false;
+                        SkipWhitespace();
+                    }
+                case '[':
+                    _pos++;
+                    SkipWhitespace();
+                    if (Consume(']'))
+                        return true;
+                    while (true)
+                    {
+                        if (!TrySkipValue(depth + 1))
+                            return false;
+                        SkipWhitespace();
+                        if (Consume(']'))
+                            return true;
+                        if (!Consume(','))
+                            return false;
+                        SkipWhitespace();
+                    }
+                case 't':
+                    return ConsumeLiteral("true");
+                case 'f':
+                    return ConsumeLiteral("false");
+                case 'n':
+                    return ConsumeLiteral("null");
+                default:
+                    return TryScanNumber();
+            }
+        }
+
+        private bool ConsumeLiteral(string literal)
+        {
+            if (_json.Length - _pos < literal.Length
+                || string.CompareOrdinal(_json, _pos, literal, 0, literal.Length) != 0)
+                return false;
+            _pos += literal.Length;
+            return true;
+        }
+
+        private int Peek() => _pos < _json.Length ? _json[_pos] : -1;
+
+        private bool Consume(char expected)
+        {
+            if (_pos >= _json.Length || _json[_pos] != expected)
+                return false;
+            _pos++;
+            return true;
+        }
+
+        private void SkipWhitespace()
+        {
+            while (_pos < _json.Length)
+            {
+                char c = _json[_pos];
+                if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
+                    return;
+                _pos++;
+            }
+        }
+
+        private int SkipDigits()
+        {
+            int begin = _pos;
+            while (IsDigit(Peek()))
+                _pos++;
+            return _pos - begin;
+        }
+
+        private static bool IsDigit(int c) => c >= '0' && c <= '9';
+
+        private static int HexValue(char c)
+        {
+            if (c >= '0' && c <= '9')
+                return c - '0';
+            if (c >= 'a' && c <= 'f')
+                return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F')
+                return c - 'A' + 10;
+            return -1;
         }
     }
 }
