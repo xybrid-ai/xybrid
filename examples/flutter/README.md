@@ -22,12 +22,13 @@ This example includes 7 interactive demo screens:
 |------|------------------|--------------|
 | Flutter | 3.19.0+ | [flutter.dev/docs/get-started/install](https://flutter.dev/docs/get-started/install) |
 | Dart | 3.3.0+ | Included with Flutter |
-| Xcode | 14.0+ | Mac App Store (for iOS/macOS) |
+| Xcode | 15.0+ | Mac App Store (for iOS/macOS) |
 | Android Studio | Hedgehog+ | [developer.android.com/studio](https://developer.android.com/studio) |
 
 ### Platform-Specific Requirements
 
 **iOS/macOS:**
+- Deployment target iOS 16.0+ or macOS 14.0+ (Apple Silicon)
 - Valid Apple Developer account (for device testing)
 - Xcode command line tools: `xcode-select --install`
 
