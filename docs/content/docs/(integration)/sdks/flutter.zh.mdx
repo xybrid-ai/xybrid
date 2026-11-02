@@ -5,6 +5,18 @@ description: 面向 Flutter 应用的本地 ML 推理
 
 Flutter SDK（`xybrid_flutter`）通过 FFI 提供到 Xybrid Rust 核心的 Dart 绑定，支持在移动端和桌面应用中进行本地 ML 推理。
 
+## 系统要求
+
+- iOS 16.0+
+- macOS 14.0+，需 Apple Silicon
+- Android 9 / API 28+
+
+预编译的原生库面向这些版本构建。0.16.0 之后的版本中，插件也会声明这些最低版本，因此目标版本更低的应用会在构建时失败。请提高应用的最低版本：
+
+- **Android**：在 `android/app/build.gradle.kts` 的 `defaultConfig` 中将 `minSdk` 设为 28 或更高。Flutter 的默认值 `flutter.minSdkVersion` 低于此值。
+- **iOS**：在 `ios/Podfile` 中设置 `platform :ios, '16.0'`，并在 Xcode 中将 Runner target 的 iOS Deployment Target 设为 16.0。
+- **macOS**：在 `macos/Podfile` 中设置 `platform :osx, '14.0'`，并在 Xcode 中将 Runner target 的 macOS Deployment Target 设为 14.0。
+
 ## 安装
 
 在 `pubspec.yaml` 中添加依赖：

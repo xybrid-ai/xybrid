@@ -1275,7 +1275,8 @@ fn build_flutter_android(target: &str, release: bool) -> Result<()> {
             // Required because:
             // - POSIX_MADV_* constants (used by llama.cpp) require API 23+
             // - aws-lc-sys (used for TLS) requires API 28+ for getentropy()
-            // This doesn't affect app minSdkVersion - only the NDK headers used during compilation
+            // It matches the plugin's minSdkVersion: a library linked for API 28
+            // needs API 28 at runtime (bindings/flutter/android/build.gradle)
             .arg("--platform")
             .arg("28")
             .arg("build")
