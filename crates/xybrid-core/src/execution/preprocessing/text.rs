@@ -8,6 +8,7 @@ use super::super::tokenizer_cache::TokenizerCache;
 use super::super::types::{ExecutorResult, PreprocessedData};
 use crate::execution::template::{PhonemizerBackend, TokenizerType};
 use crate::runtime_adapter::AdapterError;
+use std::collections::HashMap;
 
 /// Tokenize text input for NLP models.
 ///
@@ -190,42 +191,57 @@ pub fn phonemize_step(
     let phonemes = backend_impl.phonemize(&processed_text, &tokens_map)?;
 
     // Convert phonemes to token IDs
-    let mut ids: Vec<i64> = Vec::new();
-
-    if add_padding {
-        ids.push(0); // Start padding token
-    }
-
-    // Prepend silence tokens for plosive onset smoothing
-    if silence_tokens > 0 {
-        ids.extend(std::iter::repeat_n(
-            KOKORO_SILENCE_TOKEN_ID,
-            silence_tokens as usize,
-        ));
-    }
-
-    for c in phonemes.chars() {
-        if let Some(&id) = tokens_map.get(&c) {
-            ids.push(id);
-        } else if c == ' ' {
-            // Space character - check if it has a mapping
-            if let Some(&id) = tokens_map.get(&' ') {
-                ids.push(id);
-            }
-        }
-        // Skip unknown characters silently
-    }
-
-    if add_padding {
-        ids.push(0); // End padding token
-    }
+    let (ids, symbols) = phonemes_to_ids(&phonemes, &tokens_map, add_padding, silence_tokens);
 
     // Return as PhonemeIds for use by TTS models
     Ok(PreprocessedData::PhonemeIds {
         ids,
+        symbols,
         phonemes,
         original_text: text,
     })
+}
+
+/// Maps a phoneme string to token ids, recording the phoneme behind each id.
+///
+/// Emits, in order: a start pad (`0`) when `add_padding`, `silence_tokens`
+/// silence tokens (plosive onset smoothing), one id per phoneme character the
+/// tokens map knows (unknown characters are skipped), and an end pad. The two
+/// vectors are the same length: each phoneme id gets its character, and pads
+/// and silence tokens get `None`, since no phoneme produced them.
+fn phonemes_to_ids(
+    phonemes: &str,
+    tokens_map: &HashMap<char, i64>,
+    add_padding: bool,
+    silence_tokens: u8,
+) -> (Vec<i64>, Vec<Option<char>>) {
+    let mut ids: Vec<i64> = Vec::new();
+    let mut symbols: Vec<Option<char>> = Vec::new();
+
+    if add_padding {
+        ids.push(0); // Start padding token
+        symbols.push(None);
+    }
+
+    // Prepend silence tokens for plosive onset smoothing
+    let silence = usize::from(silence_tokens);
+    ids.extend(std::iter::repeat_n(KOKORO_SILENCE_TOKEN_ID, silence));
+    symbols.extend(std::iter::repeat_n(None, silence));
+
+    for c in phonemes.chars() {
+        // Skip unknown characters silently (a mapped space is a token too)
+        if let Some(&id) = tokens_map.get(&c) {
+            ids.push(id);
+            symbols.push(Some(c));
+        }
+    }
+
+    if add_padding {
+        ids.push(0); // End padding token
+        symbols.push(None);
+    }
+
+    (ids, symbols)
 }
 
 /// Normalize text for TTS processing.
@@ -588,7 +604,6 @@ fn number_to_words(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     use crate::execution::preprocessing::backends::MisakiBackend;
     use crate::execution::preprocessing::backends::PhonemizerBackend as PhonemizerBackendTrait;
@@ -1454,5 +1469,82 @@ mod tests {
         assert_eq!(trailing_special_tokens(&[1, 0, 1, 1]), 2);
         assert_eq!(trailing_special_tokens(&[0, 0]), 0);
         assert_eq!(trailing_special_tokens(&[]), 0);
+    }
+
+    // ============================================================================
+    // Phoneme symbols (one per token id)
+    // ============================================================================
+
+    /// A tiny Kokoro-like vocabulary: `h`, `ə`, space, and the quote mark
+    /// Kokoro maps to id 11.
+    fn tiny_vocab() -> HashMap<char, i64> {
+        HashMap::from([('h', 50), ('ə', 83), (' ', 16), ('"', 11)])
+    }
+
+    #[test]
+    fn symbols_align_one_to_one_with_ids_including_pads_and_silence() {
+        let (ids, symbols) = phonemes_to_ids("hə \"h", &tiny_vocab(), true, 2);
+
+        assert_eq!(ids, vec![0, 30, 30, 50, 83, 16, 11, 50, 0]);
+        assert_eq!(
+            symbols,
+            vec![
+                None,
+                None,
+                None,
+                Some('h'),
+                Some('ə'),
+                Some(' '),
+                Some('"'),
+                Some('h'),
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn unknown_phoneme_chars_are_skipped_in_lockstep() {
+        // `x` and `ˈ` are not in the vocabulary: neither an id nor a symbol.
+        let (ids, symbols) = phonemes_to_ids("xhˈəx", &tiny_vocab(), false, 0);
+
+        assert_eq!(ids, vec![50, 83]);
+        assert_eq!(symbols, vec![Some('h'), Some('ə')]);
+    }
+
+    #[test]
+    fn phonemize_step_symbols_name_the_phoneme_behind_each_id() {
+        if !has_kokoro_fixtures() {
+            eprintln!("Skipping: Kokoro fixtures not found");
+            return;
+        }
+        let base = kokoro_fixture_path();
+        let tokens_path = std::path::Path::new(&base)
+            .join("tokens.txt")
+            .to_string_lossy()
+            .to_string();
+        let vocab = kokoro_vocab();
+
+        let result = phonemize_step(
+            PreprocessedData::Text("Hello there, world.".to_string()),
+            &tokens_path,
+            &PhonemizerBackend::MisakiDictionary,
+            None,
+            None,
+            true, // add_padding
+            true, // normalize_text
+            2,    // silence_tokens
+        )
+        .unwrap();
+
+        let ids = result.as_phoneme_ids().expect("phoneme ids").clone();
+        let symbols = result.as_phoneme_symbols().expect("phoneme symbols");
+        assert_eq!(symbols.len(), ids.len());
+        assert_eq!(&symbols[..3], &[None, None, None]);
+        assert_eq!(symbols.last(), Some(&None));
+        for (id, symbol) in ids.iter().zip(symbols) {
+            if let Some(c) = symbol {
+                assert_eq!(vocab.get(c), Some(id), "symbol {c:?}");
+            }
+        }
     }
 }
