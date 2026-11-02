@@ -48,8 +48,11 @@ fn staged_model_path() -> Option<PathBuf> {
     let models = std::env::var_os("XYBRID_TEST_MODELS")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../integration-tests/fixtures/models")
+            PathBuf::from(
+                std::env::var_os("CARGO_MANIFEST_DIR")
+                    .expect("CARGO_MANIFEST_DIR is set for tests"),
+            )
+            .join("../../integration-tests/fixtures/models")
         });
     let path = models.join(MODEL_ID).join(MODEL_FILE);
     if path.is_file() {

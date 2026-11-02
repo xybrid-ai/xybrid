@@ -399,10 +399,10 @@ availability:
 #[test]
 #[ignore = "target: integration not yet a valid ExecutionTarget variant"]
 fn test_demo_voice_assistant_yaml_parses() {
-    let yaml_path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../xybrid_flutter/example/assets/pipelines/voice-assistant.yaml"
-    );
+    let yaml_path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+    )
+    .join("../xybrid_flutter/example/assets/pipelines/voice-assistant.yaml");
     let yaml = std::fs::read_to_string(yaml_path).expect("Failed to read voice-assistant.yaml");
 
     let pipeline = xybrid_core::pipeline::PipelineConfig::from_yaml(&yaml);
@@ -440,10 +440,10 @@ fn test_demo_voice_assistant_yaml_parses() {
 #[test]
 #[ignore = "target: integration not yet a valid ExecutionTarget variant"]
 fn test_demo_voice_assistant_a_yaml_parses() {
-    let yaml_path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../xybrid_flutter/example/assets/pipelines/voice-assistant-a.yaml"
-    );
+    let yaml_path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+    )
+    .join("../xybrid_flutter/example/assets/pipelines/voice-assistant-a.yaml");
     let yaml = std::fs::read_to_string(yaml_path).expect("Failed to read voice-assistant-a.yaml");
 
     let pipeline = xybrid_core::pipeline::PipelineConfig::from_yaml(&yaml);
@@ -465,10 +465,10 @@ fn test_demo_voice_assistant_a_yaml_parses() {
 #[test]
 #[ignore = "target: integration not yet a valid ExecutionTarget variant"]
 fn test_demo_voice_assistant_b_yaml_parses() {
-    let yaml_path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../xybrid_flutter/example/assets/pipelines/voice-assistant-b.yaml"
-    );
+    let yaml_path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+    )
+    .join("../xybrid_flutter/example/assets/pipelines/voice-assistant-b.yaml");
     let yaml = std::fs::read_to_string(yaml_path).expect("Failed to read voice-assistant-b.yaml");
 
     let pipeline = xybrid_core::pipeline::PipelineConfig::from_yaml(&yaml);
@@ -490,10 +490,10 @@ fn test_demo_voice_assistant_b_yaml_parses() {
 #[test]
 #[ignore = "target: integration not yet a valid ExecutionTarget variant"]
 fn test_demo_hiiipe_yaml_parses() {
-    let yaml_path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../xybrid_flutter/example/assets/pipelines/hiiipe.yaml"
-    );
+    let yaml_path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+    )
+    .join("../xybrid_flutter/example/assets/pipelines/hiiipe.yaml");
     let yaml = std::fs::read_to_string(yaml_path).expect("Failed to read hiiipe.yaml");
 
     let pipeline = xybrid_core::pipeline::PipelineConfig::from_yaml(&yaml);
@@ -512,10 +512,10 @@ fn test_demo_hiiipe_yaml_parses() {
 #[test]
 #[ignore = "target: integration not yet a valid ExecutionTarget variant"]
 fn test_demo_speech_to_text_yaml_parses() {
-    let yaml_path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../xybrid_flutter/example/assets/pipelines/speech-to-text.yaml"
-    );
+    let yaml_path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+    )
+    .join("../xybrid_flutter/example/assets/pipelines/speech-to-text.yaml");
     let yaml = std::fs::read_to_string(yaml_path).expect("Failed to read speech-to-text.yaml");
 
     let pipeline = xybrid_core::pipeline::PipelineConfig::from_yaml(&yaml);

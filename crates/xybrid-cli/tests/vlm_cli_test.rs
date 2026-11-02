@@ -13,12 +13,14 @@ fn xybrid_bin() -> PathBuf {
 }
 
 fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf()
+    PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+    )
+    .parent()
+    .unwrap()
+    .parent()
+    .unwrap()
+    .to_path_buf()
 }
 
 fn encoded_test_image(width: u32, height: u32) -> Vec<u8> {

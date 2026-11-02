@@ -354,6 +354,7 @@ rules_rust.patch(
 use_repo(rules_rust, "rules_rust")
 
 toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
+_RUST_VERSION = "1.92.0"
 toolchains.toolchain(
     edition = "2021",
     # Per-triple rustc flags travel WITH the toolchain (the Bazel analog of
@@ -378,7 +379,7 @@ toolchains.toolchain(
             "--check-cfg=cfg(windows_raw_dylib)",
         ],
     },
-    version = "1.92.0",
+    version = _RUST_VERSION,
 )
 use_repo(toolchains, "default_rust_toolchains")
 
@@ -412,6 +413,17 @@ crate.from_cargo(
         "armv7-linux-androideabi",
         "x86_64-linux-android",
     ],
+)
+# built records the resolved RUSTC path in rav1e's public build metadata. On
+# RBE that embeds /buildbuddy-execroot in the rlib, which rules_rust rejects.
+# Keep the pinned compiler version, but report stable tool names.
+crate.annotation(
+    crate = "rav1e",
+    build_script_env = {
+        "BUILT_OVERRIDE_rav1e_RUSTC": "rustc",
+        "BUILT_OVERRIDE_rav1e_RUSTC_VERSION": "rustc " + _RUST_VERSION,
+        "BUILT_OVERRIDE_rav1e_RUSTDOC": "rustdoc",
+    },
 )
 # Apple builds use the vendored ONNX Runtime archives. Stage them for rustc
 # too, which bundles the static library into the rlib.

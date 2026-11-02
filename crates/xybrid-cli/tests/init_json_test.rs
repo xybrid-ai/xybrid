@@ -13,12 +13,14 @@ fn xybrid_bin() -> std::path::PathBuf {
 
 /// Get the workspace root (repos/xybrid/).
 fn workspace_root() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent() // crates/
-        .unwrap()
-        .parent() // repos/xybrid/
-        .unwrap()
-        .to_path_buf()
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+    )
+    .parent() // crates/
+    .unwrap()
+    .parent() // repos/xybrid/
+    .unwrap()
+    .to_path_buf()
 }
 
 #[test]
