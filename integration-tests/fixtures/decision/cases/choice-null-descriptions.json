@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "id": "choice-null-descriptions",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Null descriptions print the key, underscores as spaces",
+  "covers": ["description-null"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"needs_human\": null, \"auto_reply\": null, \"spam\": null, \"two__underscores_\": null}}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "choice",
+          "keys": ["needs_human", "auto_reply", "spam", "two__underscores_"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA needs human\nB auto reply\nC spam\nD two  underscores \n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 41, 3487, 1994, 207, 42, 9006, 26697, 207, 43, 59185, 207, 44, 1046, 229, 89257, 64019, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 55,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "needs_human",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "auto_reply",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "spam",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "two__underscores_",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x411aa2c0", "0x40b54e78", "0x410b8cd8", "0x40998614", "0x40e6fffb", "0x4056acc1", "0x41037a40", "0x4096a18c"]
+      ],
+      "scores": [
+        ["0x411aa2c0", "0x410b8cd8", "0x40e6fffb", "0x41037a40"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "choice",
+          "choice": "needs_human",
+          "probabilities": {
+            "needs_human": 0.50162073115992256,
+            "auto_reply": 0.24785833292769816,
+            "spam": 0.080554190501097619,
+            "two__underscores_": 0.16996674541128173
+          },
+          "confidence": 0.50162073115992256
+        }
+      },
+      "usage": {
+        "input_tokens": 56,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

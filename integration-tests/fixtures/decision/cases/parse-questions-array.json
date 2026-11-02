@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "parse-questions-array",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Questions as an array",
+  "covers": ["transport", "refusal-parse"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": [{\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}]}",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "invalid_argument",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "\"questions\" must be a non-empty object"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "invalid_questions"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

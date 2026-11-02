@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "id": "parse-duplicate-state-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "The same key twice inside the state: upstream renders the last value",
+  "covers": ["transport", "divergence", "state-object"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": {\"amount\": 10, \"currency\": \"EUR\", \"amount\": 20}, \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Refund?\"}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\n{\n  \"amount\": 20,\n  \"currency\": \"EUR\"\n}\n\n\nQUESTION:\nRefund?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 2718, 229, 496, 50008, 6380, 229, 397, 920, 229, 496, 55545, 6380, 496, 115411, 1110, 64024, 63509, 833, 9405, 855, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 38,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x408acec2", "0x41065732", "0x4096cd1c", "0x410fe960", "0x403b556a"]
+      ],
+      "scores": [
+        ["0x41065732", "0x410fe960"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "noul",
+          "noul": 0.3900081984454607
+        }
+      },
+      "usage": {
+        "input_tokens": 39,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "duplicate_key"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

@@ -17,7 +17,7 @@ pub use decision::{
     DecisionUsage, DecisionValue, Decisions, JsonErrorKind, JsonKind, JsonNumber, JsonView,
     OrderedJson, ScoreStatistic,
 };
-pub use envelope::{AudioSamples, Envelope, EnvelopeKind, ToolCallResult};
+pub use envelope::{AudioSamples, Envelope, EnvelopeKind, PhonemeTiming, ToolCallResult};
 pub use envelope::{
     ImageDimensions, ImageFormat, ImagePlane, ImageSource, ImageSummary, ImageSummarySource,
     ImageValidationLimits, PixelFormat, RawImageRef, YuvColorInfo, YuvColorMatrix, YuvColorRange,

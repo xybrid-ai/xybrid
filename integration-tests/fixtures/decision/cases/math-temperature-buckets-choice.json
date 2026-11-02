@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "id": "math-temperature-buckets-choice",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Bucket temperatures choice.2, .3_5, .6_10 and .11 win over the type temperature",
+  "covers": ["math-temperature-bucket"],
+  "artifact": "d1-2b-q4km",
+  "metadata": {
+    "set": {
+      "lfm3.decision.temperature.choice.2": "f32:0.5",
+      "lfm3.decision.temperature.choice.3_5": "f32:2.0",
+      "lfm3.decision.temperature.choice.6_10": "f32:3.25",
+      "lfm3.decision.temperature.choice.11": "f32:0.125"
+    }
+  },
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"two\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"option_000\": \"Option number 0\", \"option_001\": \"Option number 1\"}}, \"four\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"option_000\": \"Option number 0\", \"option_001\": \"Option number 1\", \"option_002\": \"Option number 2\", \"option_003\": \"Option number 3\"}}, \"six\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"option_000\": \"Option number 0\", \"option_001\": \"Option number 1\", \"option_002\": \"Option number 2\", \"option_003\": \"Option number 3\", \"option_004\": \"Option number 4\", \"option_005\": \"Option number 5\"}}, \"eleven\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"option_000\": \"Option number 0\", \"option_001\": \"Option number 1\", \"option_002\": \"Option number 2\", \"option_003\": \"Option number 3\", \"option_004\": \"Option number 4\", \"option_005\": \"Option number 5\", \"option_006\": \"Option number 6\", \"option_007\": \"Option number 7\", \"option_008\": \"Option number 8\", \"option_009\": \"Option number 9\", \"option_010\": \"Option number 10\"}}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "two",
+          "type": "choice",
+          "keys": ["option_000", "option_001"]
+        },
+        {
+          "id": "four",
+          "type": "choice",
+          "keys": ["option_000", "option_001", "option_002", "option_003"]
+        },
+        {
+          "id": "six",
+          "type": "choice",
+          "keys": ["option_000", "option_001", "option_002", "option_003", "option_004", "option_005"]
+        },
+        {
+          "id": "eleven",
+          "type": "choice",
+          "keys": ["option_000", "option_001", "option_002", "option_003", "option_004", "option_005", "option_006", "option_007", "option_008", "option_009", "option_010"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "two",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA Option number 0\nB Option number 1\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 41, 31921, 1579, 229, 24, 207, 42, 31921, 1579, 229, 25, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 51,
+          "select": [41, 334, 42, 378]
+        },
+        {
+          "question": "four",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA Option number 0\nB Option number 1\nC Option number 2\nD Option number 3\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 41, 31921, 1579, 229, 24, 207, 42, 31921, 1579, 229, 25, 207, 43, 31921, 1579, 229, 26, 207, 44, 31921, 1579, 229, 27, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 63,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388]
+        },
+        {
+          "question": "six",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA Option number 0\nB Option number 1\nC Option number 2\nD Option number 3\nE Option number 4\nF Option number 5\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 41, 31921, 1579, 229, 24, 207, 42, 31921, 1579, 229, 25, 207, 43, 31921, 1579, 229, 26, 207, 44, 31921, 1579, 229, 27, 207, 45, 31921, 1579, 229, 28, 207, 46, 31921, 1579, 229, 29, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 75,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407, 46, 410]
+        },
+        {
+          "question": "eleven",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA Option number 0\nB Option number 1\nC Option number 2\nD Option number 3\nE Option number 4\nF Option number 5\nG Option number 6\nH Option number 7\nI Option number 8\nJ Option number 9\nK Option number 10\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 41, 31921, 1579, 229, 24, 207, 42, 31921, 1579, 229, 25, 207, 43, 31921, 1579, 229, 26, 207, 44, 31921, 1579, 229, 27, 207, 45, 31921, 1579, 229, 28, 207, 46, 31921, 1579, 229, 29, 207, 47, 31921, 1579, 229, 30, 207, 48, 31921, 1579, 229, 31, 207, 49, 31921, 1579, 229, 32, 207, 50, 31921, 1579, 229, 33, 207, 51, 31921, 1579, 229, 654, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 105,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407, 46, 410, 47, 417, 48, 403, 49, 358, 50, 461, 51, 483]
+        }
+      ],
+      "answers": [
+        {
+          "question": "two",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "option_000",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "option_001",
+              "code": "B",
+              "range": [2, 4]
+            }
+          ],
+          "temperature": "0.500000",
+          "temperature_f32": "0x3f000000"
+        },
+        {
+          "question": "four",
+          "type": "choice",
+          "pass": 1,
+          "groups": [
+            {
+              "key": "option_000",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "option_001",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "option_002",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "option_003",
+              "code": "D",
+              "range": [6, 8]
+            }
+          ],
+          "temperature": "2.000000",
+          "temperature_f32": "0x40000000"
+        },
+        {
+          "question": "six",
+          "type": "choice",
+          "pass": 2,
+          "groups": [
+            {
+              "key": "option_000",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "option_001",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "option_002",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "option_003",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "option_004",
+              "code": "E",
+              "range": [8, 10]
+            },
+            {
+              "key": "option_005",
+              "code": "F",
+              "range": [10, 12]
+            }
+          ],
+          "temperature": "3.250000",
+          "temperature_f32": "0x40500000"
+        },
+        {
+          "question": "eleven",
+          "type": "choice",
+          "pass": 3,
+          "groups": [
+            {
+              "key": "option_000",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "option_001",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "option_002",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "option_003",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "option_004",
+              "code": "E",
+              "range": [8, 10]
+            },
+            {
+              "key": "option_005",
+              "code": "F",
+              "range": [10, 12]
+            },
+            {
+              "key": "option_006",
+              "code": "G",
+              "range": [12, 14]
+            },
+            {
+              "key": "option_007",
+              "code": "H",
+              "range": [14, 16]
+            },
+            {
+              "key": "option_008",
+              "code": "I",
+              "range": [16, 18]
+            },
+            {
+              "key": "option_009",
+              "code": "J",
+              "range": [18, 20]
+            },
+            {
+              "key": "option_010",
+              "code": "K",
+              "range": [20, 22]
+            }
+          ],
+          "temperature": "0.125000",
+          "temperature_f32": "0x3e000000"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "synthetic",
+      "raw_scores": [
+        ["0x3f800000", "0x00000000", "0x00000000", "0xbf800000"],
+        ["0x3f800000", "0x00000000", "0x00000000", "0xbf800000", "0xbf800000", "0xc0000000", "0x3f000000", "0xbf000000"],
+        ["0x3f800000", "0x00000000", "0x00000000", "0xbf800000", "0xbf800000", "0xc0000000", "0x3f000000", "0xbf000000", "0x40000000", "0x3f800000", "0xc0000000", "0xc0400000"],
+        ["0x3f800000", "0x00000000", "0x00000000", "0xbf800000", "0xbf800000", "0xc0000000", "0x3f000000", "0xbf000000", "0x40000000", "0x3f800000", "0xc0000000", "0xc0400000", "0x3e800000", "0xbf400000", "0x3f400000", "0xbe800000", "0x3fc00000", "0x3f000000", "0xbf000000", "0xbfc00000", "0x3e000000", "0xbf600000"]
+      ],
+      "scores": [
+        ["0x3f800000", "0x00000000"],
+        ["0x3f800000", "0x00000000", "0xbf800000", "0x3f000000"],
+        ["0x3f800000", "0x00000000", "0xbf800000", "0x3f000000", "0x40000000", "0xc0000000"],
+        ["0x3f800000", "0x00000000", "0xbf800000", "0x3f000000", "0x40000000", "0xc0000000", "0x3e800000", "0x3f400000", "0x3fc00000", "0xbf000000", "0x3e000000"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "two": {
+          "type": "choice",
+          "choice": "option_000",
+          "probabilities": {
+            "option_000": 0.88079707797788231,
+            "option_001": 0.11920292202211755
+          },
+          "confidence": 0.88079707797788231
+        },
+        "four": {
+          "type": "choice",
+          "choice": "option_000",
+          "probabilities": {
+            "option_000": 0.36321227909840342,
+            "option_001": 0.22029938325728377,
+            "option_002": 0.13361833026132661,
+            "option_003": 0.28287000738298623
+          },
+          "confidence": 0.36321227909840342
+        },
+        "six": {
+          "type": "choice",
+          "choice": "option_004",
+          "probabilities": {
+            "option_000": 0.20447574983136008,
+            "option_001": 0.15031860547612094,
+            "option_002": 0.11050544219019283,
+            "option_003": 0.17531830927867806,
+            "option_004": 0.27814475883851109,
+            "option_005": 0.081237134385137161
+          },
+          "confidence": 0.27814475883851109
+        },
+        "eleven": {
+          "type": "choice",
+          "choice": "option_004",
+          "probabilities": {
+            "option_000": 0.00032930337132511646,
+            "option_001": 1.1046897432188023e-07,
+            "option_002": 3.705821242771304e-11,
+            "option_003": 6.0314016340335749e-06,
+            "option_004": 0.98163951491137391,
+            "option_005": 1.2431645326370139e-14,
+            "option_006": 8.1626144845570239e-07,
+            "option_007": 4.4566365029056074e-05,
+            "option_008": 0.017979354874028915,
+            "option_009": 2.0233098420884071e-09,
+            "option_010": 3.0028580550767589e-07
+          },
+          "confidence": 0.98163951491137391
+        }
+      },
+      "usage": {
+        "input_tokens": 298,
+        "output_tokens": 0
+      }
+    }
+  },
+  "xybrid": {
+    "load": "match",
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "given",
+    "finalize": "match"
+  }
+}

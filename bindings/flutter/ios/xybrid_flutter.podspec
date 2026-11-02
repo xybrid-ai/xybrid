@@ -30,8 +30,12 @@ with intelligent routing based on device capabilities. Supports ASR, TTS, and LL
   # - otherwise: downloaded from HuggingFace to ~/.xybrid/cache/ort-ios/
   # See cargokit/build_pod.sh for the full resolution logic.
 
-  # iOS 13.0 minimum for modern APIs (Metal 2, Combine, CoreML 3, etc.)
-  s.platform = :ios, '13.0'
+  # iOS 16.0 minimum: the precompiled library is built for it
+  # (--ios_minimum_os=16.0 in .bazelrc's ios and ios-sim configs). Declaring
+  # it makes `pod install` reject an app with a lower deployment target.
+  # release-prep fails if an object in the library needs a newer iOS
+  # (tools/scripts/verify_apple_min_os.py reads this line).
+  s.platform = :ios, '16.0'
   s.swift_version = '5.0'
 
   # System frameworks required for ML inference

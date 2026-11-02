@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "id": "math-temperature-default",
+  "profile": "lfm3-d1/text/v1",
+  "title": "No temperature key at all: T = 1",
+  "covers": ["math-temperature-default"],
+  "artifact": "d1-2b-q4km",
+  "metadata": {
+    "remove": ["lfm3.decision.temperature.choice", "lfm3.decision.temperature.noul", "lfm3.decision.temperature.score"]
+  },
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"c\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"a\": \"A\", \"b\": \"B\", \"c\": \"C\"}}, \"n\": {\"type\": \"noul\", \"instructions\": \"x\"}, \"s\": {\"type\": \"score\", \"instructions\": \"x\", \"criteria\": [\"0\", \"1\", \"2\"]}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "c",
+          "type": "choice",
+          "keys": ["a", "b", "c"]
+        },
+        {
+          "id": "n",
+          "type": "noul",
+          "keys": ["true", "false"]
+        },
+        {
+          "id": "s",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "c",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\na A\nb B\nc C\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 73, 334, 207, 74, 378, 207, 75, 340, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 48,
+          "select": [73, 267, 74, 293, 75, 280]
+        },
+        {
+          "question": "n",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nx\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 96, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 34,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        },
+        {
+          "question": "s",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nx\n\n0 0\n1 1\n2 2\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 96, 8, 24, 229, 24, 207, 25, 229, 25, 207, 26, 229, 26, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 50,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "c",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "a",
+              "code": "a",
+              "range": [0, 2]
+            },
+            {
+              "key": "b",
+              "code": "b",
+              "range": [2, 4]
+            },
+            {
+              "key": "c",
+              "code": "c",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": null,
+          "temperature_f32": "0x3f800000"
+        },
+        {
+          "question": "n",
+          "type": "noul",
+          "pass": 1,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": null,
+          "temperature_f32": "0x3f800000"
+        },
+        {
+          "question": "s",
+          "type": "score",
+          "pass": 2,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": null,
+          "temperature_f32": "0x3f800000"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "synthetic",
+      "raw_scores": [
+        ["0x40800000", "0x40400000", "0x3fc00000", "0x3f000000", "0xc0000000", "0xc0400000"],
+        ["0x40200000", "0x3fc00000", "0x3e800000", "0xbf400000", "0xbf400000"],
+        ["0x3e99999a", "0x40000000", "0x3f8ccccd"]
+      ],
+      "scores": [
+        ["0x40800000", "0x3fc00000", "0xc0000000"],
+        ["0x40200000", "0x3e800000"],
+        ["0x3e99999a", "0x40000000", "0x3f8ccccd"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "c": {
+          "type": "choice",
+          "choice": "a",
+          "probabilities": {
+            "a": 0.92202970942174245,
+            "b": 0.07568480742907753,
+            "c": 0.0022854831491801939
+          },
+          "confidence": 0.92202970942174245
+        },
+        "n": {
+          "type": "noul",
+          "noul": 0.90465053510089055
+        },
+        "s": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": "0",
+            "1": "1",
+            "2": "2"
+          },
+          "probabilities": {
+            "0": 0.11494928984812387,
+            "1": 0.62922635784406877,
+            "2": 0.25582435230780726
+          },
+          "confidence": 0.62922635784406877
+        }
+      },
+      "usage": {
+        "input_tokens": 135,
+        "output_tokens": 0
+      }
+    }
+  },
+  "xybrid": {
+    "load": "match",
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "given",
+    "finalize": "match"
+  }
+}

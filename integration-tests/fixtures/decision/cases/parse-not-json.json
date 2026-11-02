@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "parse-not-json",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A body that is not JSON",
+  "covers": ["transport", "refusal-parse"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "state: refund please",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "common_json_error",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "[json.exception.parse_error.101] parse error at line 1, column 1: syntax error while parsing value - invalid literal; last read: 's'"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "invalid_json"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

@@ -275,6 +275,8 @@ pub use xybrid_core::ir::{
     DecisionUsage, DecisionValue, Decisions, JsonErrorKind, JsonKind, JsonNumber, JsonView,
     OrderedJson, ScoreStatistic,
 };
+// Per-phoneme timings a TTS result carries (`InferenceResult::phoneme_timings`).
+pub use xybrid_core::ir::PhonemeTiming;
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)
 pub use streaming::{FfiPartialResult, FfiStreamState, FfiStreamStats, FfiStreamingConfig};
 pub use telemetry::{

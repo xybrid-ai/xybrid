@@ -56,6 +56,21 @@ class ChangeSelectionTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
 
+    def test_flutter_platform_floors_run_tooling_tests(self):
+        for path in (
+            "bindings/flutter/ios/xybrid_flutter.podspec",
+            "bindings/flutter/macos/xybrid_flutter.podspec",
+            "bindings/flutter/android/build.gradle", ".bazelrc",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "true")
+        for path in (
+            "bindings/flutter/example/android/app/build.gradle.kts",
+            "bindings/flutter/ios/Classes/dummy_file.c", "bindings/.bazelrc",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
+
     def test_workflow_changes_run_every_optional_gate(self):
         outputs = classify("pull_request", pr_files(".github/workflows/ci.yml"))
         self.assertTrue(all(value == "true" for value in outputs.values()))
