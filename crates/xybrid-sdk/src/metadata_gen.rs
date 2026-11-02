@@ -2685,8 +2685,10 @@ mod tests {
     #[cfg(feature = "onnx-inspect")]
     fn test_inspect_onnx_model_mnist() {
         // The mnist fixture has input: Input3 [1,1,28,28] float32
-        let model_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../integration-tests/fixtures/models/mnist/model.onnx");
+        let model_path = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+        )
+        .join("../../integration-tests/fixtures/models/mnist/model.onnx");
         if !model_path.exists() {
             eprintln!(
                 "Skipping test: mnist fixture not found at {}",
@@ -3137,8 +3139,10 @@ mod tests {
     #[cfg(feature = "onnx-inspect")]
     fn test_generate_metadata_mnist_fixture() {
         // Integration test: run generate_metadata on the real mnist fixture
-        let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../integration-tests/fixtures/models/mnist");
+        let fixture_dir = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+        )
+        .join("../../integration-tests/fixtures/models/mnist");
         if !fixture_dir.exists() {
             eprintln!(
                 "Skipping test: mnist fixture not found at {}",

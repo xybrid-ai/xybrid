@@ -15,7 +15,9 @@ use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 /// Path to integration-tests/fixtures/models/ from the workspace root.
 #[cfg(feature = "onnx-inspect")]
 fn fixtures_dir() -> PathBuf {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+    );
     // crates/xybrid-sdk/ → ../../integration-tests/fixtures/models/
     manifest
         .join("../../integration-tests/fixtures/models")

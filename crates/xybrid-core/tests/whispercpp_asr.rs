@@ -22,7 +22,7 @@ use xybrid_core::streaming::{StreamConfig, StreamSession};
 
 fn workspace_root() -> PathBuf {
     // CARGO_MANIFEST_DIR is `<root>/crates/xybrid-core`.
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"))
         .parent()
         .and_then(Path::parent)
         .expect("crate lives two levels below the workspace root")
