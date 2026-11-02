@@ -8,9 +8,12 @@ on:
       - 'vendor/llama-cpp'
       - 'crates/llama-cpp-sys/**'
       - 'crates/xybrid-llama/**'
+      - 'crates/xybrid-core/src/runtime_adapter/llama_cpp/**'
+      - 'crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs'
       - '.github/llamacpp-version.json'
       - 'tools/scripts/llamacpp_update.py'
       - 'integration-tests/tests/llamacpp_release.rs'
+      - 'crates/xybrid-core/tests/llamacpp_stream_text.rs'
       - '.github/workflows/llamacpp-validate.yml'
   pull_request:
     branches: [master]
@@ -18,9 +21,12 @@ on:
       - 'vendor/llama-cpp'
       - 'crates/llama-cpp-sys/**'
       - 'crates/xybrid-llama/**'
+      - 'crates/xybrid-core/src/runtime_adapter/llama_cpp/**'
+      - 'crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs'
       - '.github/llamacpp-version.json'
       - 'tools/scripts/llamacpp_update.py'
       - 'integration-tests/tests/llamacpp_release.rs'
+      - 'crates/xybrid-core/tests/llamacpp_stream_text.rs'
       - '.github/workflows/llamacpp-validate.yml'
   workflow_dispatch:
 
@@ -74,6 +80,15 @@ jobs:
           LIST="$(cargo test -p integration-tests --features llm-llamacpp --test llamacpp_release -- --list)"
           printf '%s\n' "$LIST" | grep -qx 'text_generation_obeys_grammar: test'
           cargo test -p integration-tests --features llm-llamacpp --test llamacpp_release -- --nocapture
+
+      - name: Test streamed text across token boundaries
+        run: |
+          LIST="$(cargo test -p xybrid-core --features llm-llamacpp,ort-download --test llamacpp_stream_text -- --list)"
+          printf '%s\n' "$LIST" | grep -qx 'characters_split_into_byte_tokens_survive_on_functiongemma: test'
+          printf '%s\n' "$LIST" | grep -qx 'text_ahead_of_a_stop_inside_a_token_is_streamed: test'
+          # The FunctionGemma tests only: this job does not download
+          # qwen3-0.6b, and XYBRID_REQUIRE_MODELS fails a missing model.
+          cargo test -p xybrid-core --features llm-llamacpp,ort-download --test llamacpp_stream_text -- --nocapture functiongemma text_ahead_of_a_stop
 
       - name: Test real vision inference
         run: |

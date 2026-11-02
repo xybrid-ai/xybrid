@@ -405,22 +405,20 @@ impl StreamingTextFilter {
             self.suppress_complete_tool_blocks();
         }
 
-        // Complete stop pattern observed?
-        for pattern in &self.stop_patterns {
-            if self.cumulative_text.contains(pattern.as_str()) {
-                self.hit_stop_pattern = true;
-                if let Some(pos) = self.cumulative_text.find(pattern.as_str()) {
-                    self.cumulative_text.truncate(pos);
-                    // The stop can complete at a position below text that was
-                    // already emitted (a partial prefix under-held in an
-                    // earlier chunk). Re-establish the boundary invariant
-                    // (`last_emitted_len <= cumulative_text.len()`) exactly
-                    // like the think-strip branch above, or
-                    // `cumulative_emitted()` slices out of bounds and panics.
-                    self.last_emitted_len = self.last_emitted_len.min(self.cumulative_text.len());
-                }
-                return None;
-            }
+        // Complete stop pattern observed? Cut at the earliest one, as the
+        // final-text cleanup does, and fall through: the chunk that completes
+        // a stop can carry text ahead of it ("The" completes the stop "he"),
+        // and that text is emitted below like any other. Later pushes return
+        // nothing.
+        if truncate_at_first_stop(&mut self.cumulative_text, &self.stop_patterns) {
+            self.hit_stop_pattern = true;
+            // The stop can complete at a position below text that was
+            // already emitted (a partial prefix under-held in an earlier
+            // chunk). Re-establish the boundary invariant
+            // (`last_emitted_len <= cumulative_text.len()`) exactly like the
+            // think-strip branch above, or `cumulative_emitted()` slices out
+            // of bounds and panics.
+            self.last_emitted_len = self.last_emitted_len.min(self.cumulative_text.len());
         }
 
         // Find the safe emission boundary (exclude potential partial
@@ -1259,5 +1257,46 @@ mod tests {
         assert_eq!(f.push("x"), None); // completes the stop
         assert!(f.is_stopped());
         assert_eq!(f.cumulative_emitted(), "hello ");
+    }
+
+    /// A chunk can carry text ahead of the stop it completes: the token "The"
+    /// completes the stop "he". That text is part of the answer, which the
+    /// final text keeps, so the stream emits it before it stops.
+    #[test]
+    fn streaming_filter_emits_the_text_before_a_stop_inside_a_chunk() {
+        let mut f = StreamingTextFilter::new(vec!["he".to_string()]);
+        assert_eq!(f.push("The"), Some("T".to_string()));
+        assert!(f.is_stopped());
+        assert_eq!(f.cumulative_emitted(), "T");
+
+        let mut f = StreamingTextFilter::new(vec!["<|im_end|>".to_string()]);
+        assert_eq!(f.push("Hello wor"), Some("Hello wor".to_string()));
+        assert_eq!(f.push("ld.<|im_end|>tail"), Some("ld.".to_string()));
+        assert_eq!(f.push(" more"), None);
+        assert_eq!(f.cumulative_emitted(), "Hello world.");
+    }
+
+    /// Two stops in one chunk: the stream cuts at the earlier one, wherever
+    /// it sits in the pattern list, as `truncate_at_first_stop` cuts the
+    /// final text.
+    #[test]
+    fn streaming_filter_cuts_at_the_earliest_stop_in_a_chunk() {
+        let mut f = StreamingTextFilter::new(vec!["B".to_string(), "A".to_string()]);
+        assert_eq!(f.push("xAyBz"), Some("x".to_string()));
+        assert_eq!(f.cumulative_emitted(), "x");
+    }
+
+    /// Text before the stop that could be the start of a stop stays held
+    /// back, as the final-text cleanup trims it.
+    #[test]
+    fn streaming_filter_holds_a_partial_stop_left_before_the_stop() {
+        let mut f = StreamingTextFilter::new(vec!["ab".to_string()]);
+        assert_eq!(f.push("xaab"), Some("x".to_string()));
+        assert_eq!(f.cumulative_emitted(), "x");
+
+        let mut text = String::from("xaab");
+        assert!(truncate_at_first_stop(&mut text, &["ab"]));
+        assert!(trim_partial_stop_suffix(&mut text, &["ab"]));
+        assert_eq!(text, "x");
     }
 }
