@@ -202,7 +202,7 @@ missing:
 | Malformed requests | the `parse-*` cases, `instructions-null`, `instructions-missing`, `choice-criteria-*`, `choice-256-options`, `score-1-level`, `score-11-levels`, `score-criteria-object`, `noul-criteria-array`, `depth-*-over-limit`, `budget-over-limit` |
 | Nesting depth | `depth-*`: upstream's limit depends on the field (below) |
 | Media fields present but empty | `parse-files-empty`, `parse-files-null`, `parse-images-empty`, `parse-videos-null`: upstream answers, xybrid refuses on presence |
-| Answer arithmetic | `math-median-b3` (the review's float32 counterexample), `math-median-exact-half`, `math-median-not-mode`, `math-choice-tie`, `math-noul-tie`, `math-underflow`, `math-neg-inf-some`, `math-neg-inf-all`, `math-nan*`, `math-pos-inf*`, `math-alias-max`, `math-temperature-*`, `math-score-bias`, `math-media-temperature*` |
+| Answer arithmetic | `math-median-b3` (a float32 counterexample), `math-median-exact-half`, `math-median-not-mode`, `math-choice-tie`, `math-noul-tie`, `math-underflow`, `math-neg-inf-some`, `math-neg-inf-all`, `math-nan*`, `math-pos-inf*`, `math-alias-max`, `math-temperature-*`, `math-score-bias`, `math-media-temperature*` |
 
 Two notes on what the cases show:
 
