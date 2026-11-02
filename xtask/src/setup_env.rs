@@ -43,7 +43,8 @@ pub fn run(registry_url: Option<String>) -> Result<()> {
 fn project_root() -> Result<PathBuf> {
     let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR")
         .context("CARGO_MANIFEST_DIR is not set; run this command with cargo xtask")?;
-    PathBuf::from(manifest_dir)
+    std::path::absolute(manifest_dir)
+        .context("resolve xtask manifest directory")?
         .parent()
         .context("xtask must be inside the workspace root")
         .map(PathBuf::from)

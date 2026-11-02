@@ -12,14 +12,15 @@ fn xybrid_bin() -> PathBuf {
 }
 
 fn workspace_root() -> PathBuf {
-    PathBuf::from(
-        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
-    )
-    .parent()
-    .unwrap()
-    .parent()
-    .unwrap()
-    .to_path_buf()
+    let manifest_dir =
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+    std::path::absolute(manifest_dir)
+        .expect("CARGO_MANIFEST_DIR can be resolved")
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
 #[test]
