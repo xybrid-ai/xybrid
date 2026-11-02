@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "id": "parse-duplicate-question-ids",
+  "profile": "lfm3-d1/text/v1",
+  "title": "The same question id twice: upstream keeps the last question at the first position",
+  "covers": ["transport", "divergence"],
+  "notes": "OrderedJson refuses duplicate keys (contract 1); upstream's parser keeps the last value.",
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"First?\"}, \"other\": {\"type\": \"noul\", \"instructions\": \"Other?\"}, \"q\": {\"type\": \"noul\", \"instructions\": \"Second?\"}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "noul",
+          "keys": ["true", "false"]
+        },
+        {
+          "id": "other",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nSecond?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 15282, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 34,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        },
+        {
+          "question": "other",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nOther?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 10309, 64929, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 34,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        },
+        {
+          "question": "other",
+          "type": "noul",
+          "pass": 1,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x40d4fadf", "0x4127b530", "0x408b1387", "0x4102081c", "0x402e43e0"],
+        ["0x405b343a", "0x41055782", "0x409b70b0", "0x411d04cc", "0x40469a94"]
+      ],
+      "scores": [
+        ["0x4127b530", "0x4102081c"],
+        ["0x41055782", "0x411d04cc"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "noul",
+          "noul": 0.85329718231947016
+        },
+        "other": {
+          "type": "noul",
+          "noul": 0.24852733012191622
+        }
+      },
+      "usage": {
+        "input_tokens": 70,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "duplicate_key"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

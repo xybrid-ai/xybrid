@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "parse-empty-body",
+  "profile": "lfm3-d1/text/v1",
+  "title": "An empty body",
+  "covers": ["transport", "refusal-parse"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "common_json_error",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "[json.exception.parse_error.101] parse error at line 1, column 1: attempting to parse an empty input; check that your input string or stream contains the expected JSON"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "invalid_json"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}
