@@ -57,6 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chat-template marker off the end matched the start of `end_of_turn>`, so a
   grammar-constrained `true` came back as `tru` after the stream had shown
   `true`.
+- llama.cpp output keeps characters the vocabulary splits across tokens. Each
+  token's bytes were decoded on their own, so a character spread over several
+  tokens vanished from the stream and from the final text: qwen3-0.6b returned
+  `ok` for a grammar-constrained `🙂 ok`, and `本` for `日本語`. Text is now
+  decoded across token boundaries. Bytes that cannot be UTF-8 become U+FFFD, and
+  a character the budget cuts off midway is dropped from both.
+- llama.cpp streaming emits the text ahead of a stop sequence that completes
+  inside a token. With the stop `he` and the token `The`, the stream sent
+  nothing while the final text was `T`. When two stops complete in one chunk,
+  the stream now cuts at the earlier one, as the final text does.
 
 ## [0.16.0] - 2026-10-30
 
