@@ -39,7 +39,11 @@ minijinja = { version = "2.5", default-features = false, features = ["builtins",
 minijinja-contrib = { version = "2.5", features = ["pycompat"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
-serde_json = "1.0"
+# `float_roundtrip`: read every float back as the f64 it was written from.
+# serde_json's default parsing is best-effort and can be an ulp off, which can
+# move a decision answer's median across its one-half boundary
+# (ir::decision); Cargo turns it on for every crate that links this one.
+serde_json = { version = "1.0", features = ["float_roundtrip"] }
 anyhow = "1.0"
 dirs = "6.0"
 tar = "0.4"

@@ -165,6 +165,12 @@ _SDK_INTEGRATION_TESTS = {
         "@crates//:tokio",
         "@crates//:tokio-stream",
     ],
+    # The decision IR built and read from outside xybrid-core, through the
+    # sdk's re-exports (non_exhaustive variants via constructors/accessors).
+    "decision_ir": [
+        ":xybrid-sdk",
+        "@crates//:serde_json",
+    ],
     # NOTE: no cloud_fallback_e2e. Cargo declares it
     # `required-features = ["dev-tools"]`, so a default `cargo test -p xybrid-sdk`
     # skips it too; it reaches xybrid_core::orchestrator::authority::test_seams,
