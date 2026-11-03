@@ -152,13 +152,20 @@ void llama_free_model_c(llama_model* model) {
 }
 
 #ifdef XYBRID_LLAMA_VISION
+/**
+ * @param image_max_tokens  Most tokens one image may become; larger images are
+ *                          scaled down to fit. <= 0 keeps the projector's own
+ *                          limit (LFM3-VL's is 4096, enough for one image to
+ *                          fill a small context).
+ */
 mtmd_context* mtmd_init_from_file_c(
     const char* mmproj_fname,
     const llama_model* text_model,
     bool use_gpu,
     bool warmup,
     int n_threads,
-    bool flash_attn
+    bool flash_attn,
+    int image_max_tokens
 ) {
     mtmd_context_params params = mtmd_context_params_default();
     params.use_gpu = use_gpu;
@@ -167,6 +174,9 @@ mtmd_context* mtmd_init_from_file_c(
     params.flash_attn_type = flash_attn
         ? LLAMA_FLASH_ATTN_TYPE_ENABLED
         : LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    if (image_max_tokens > 0) {
+        params.image_max_tokens = image_max_tokens;
+    }
 
     return mtmd_init_from_file(mmproj_fname, text_model, params);
 }
@@ -539,6 +549,18 @@ int32_t llama_token_nl_c(const llama_model* model) {
 bool llama_vocab_is_eog_c(const llama_model* model, int32_t token) {
     const llama_vocab* vocab = llama_model_get_vocab(model);
     return llama_vocab_is_eog(vocab, token);
+}
+
+/**
+ * Whether tokenizing with add_special prepends the BOS token.
+ *
+ * Reads the GGUF `tokenizer.ggml.add_bos_token` flag. Most vocabularies set
+ * it, but some (LFM3) leave BOS to the chat template's `bos_token`; a prompt
+ * rendered without it then starts without BOS.
+ */
+bool llama_vocab_get_add_bos_c(const llama_model* model) {
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+    return llama_vocab_get_add_bos(vocab);
 }
 
 int llama_n_vocab_c(const llama_model* model) {

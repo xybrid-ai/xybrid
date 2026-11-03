@@ -55,7 +55,7 @@ pub mod traits;
 // Always-available types for FFI/bindings (NOT feature-gated)
 pub mod types;
 
-// Always-compiled tool-call text protocols, LFM2- and gemma-4-family
+// Always-compiled tool-call text protocols, LFM2-, LFM3- and gemma-4-family
 // (parser + continuation composer).
 pub mod tool_call;
 

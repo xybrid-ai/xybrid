@@ -430,8 +430,9 @@ pub struct GenerationConfig {
     ///
     /// When non-empty, the local llama.cpp backend renders the definitions
     /// into the model's embedded chat template and the executor parses any
-    /// emitted tool-call blocks (LFM2-family pythonic and gemma-4-family
-    /// `call:` notation) into the response envelope's `tool_calls` metadata.
+    /// emitted tool-call blocks (LFM2-family pythonic, LFM3 `<tool_call>`
+    /// XML, typed against these schemas, and gemma-4-family `call:`
+    /// notation) into the response envelope's `tool_calls` metadata.
     /// Tool calling is llama.cpp-only today and unsupported paths fail
     /// closed: a model without an embedded chat template, the mistralrs
     /// backend, and the SDK's cloud-fallback leg all reject tool-bearing
@@ -610,6 +611,13 @@ pub struct LlmConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vision_encoder_path: Option<String>,
 
+    /// Most tokens one image may become (optional). The vision encoder scales
+    /// larger images down to fit. `None` keeps the encoder's own limit, which
+    /// for a native-resolution encoder such as LFM3-VL's is thousands of
+    /// tokens per photo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_image_tokens: Option<usize>,
+
     /// Maximum context length (tokens). Default: 4096
     #[serde(default = "default_context_length")]
     pub context_length: usize,
@@ -711,6 +719,7 @@ impl Default for LlmConfig {
             model_path: String::new(),
             chat_template: None,
             vision_encoder_path: None,
+            max_image_tokens: None,
             context_length: default_context_length(),
             gpu_layers: default_gpu_layers(),
             paged_attention: default_paged_attention(),
@@ -741,6 +750,13 @@ impl LlmConfig {
     /// Set the sibling vision encoder / mmproj artifact path.
     pub fn with_vision_encoder(mut self, path: impl Into<String>) -> Self {
         self.vision_encoder_path = Some(path.into());
+        self
+    }
+
+    /// Cap how many tokens one image may become. See
+    /// [`Self::max_image_tokens`].
+    pub fn with_max_image_tokens(mut self, tokens: usize) -> Self {
+        self.max_image_tokens = Some(tokens);
         self
     }
 
@@ -1029,6 +1045,21 @@ mod tests {
             config.vision_encoder_path.as_deref(),
             Some("/path/to/mmproj.gguf")
         );
+    }
+
+    #[test]
+    fn test_llm_config_max_image_tokens_defaults_to_the_encoders_limit() {
+        let config = LlmConfig::new("/path/to/model.gguf");
+        assert_eq!(config.max_image_tokens, None);
+        assert!(!serde_json::to_string(&config)
+            .unwrap()
+            .contains("max_image_tokens"));
+
+        let capped = config.with_max_image_tokens(1024);
+        assert_eq!(capped.max_image_tokens, Some(1024));
+        let round_trip: LlmConfig =
+            serde_json::from_str(&serde_json::to_string(&capped).unwrap()).unwrap();
+        assert_eq!(round_trip.max_image_tokens, Some(1024));
     }
 
     #[test]

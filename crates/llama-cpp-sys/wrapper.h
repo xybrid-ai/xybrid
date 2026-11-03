@@ -106,6 +106,7 @@ int32_t llama_token_bos_c(const XYBRID_LLAMA_MODEL* model);
 int32_t llama_token_eos_c(const XYBRID_LLAMA_MODEL* model);
 int32_t llama_token_nl_c(const XYBRID_LLAMA_MODEL* model);
 bool llama_vocab_is_eog_c(const XYBRID_LLAMA_MODEL* model, int32_t token);
+bool llama_vocab_get_add_bos_c(const XYBRID_LLAMA_MODEL* model);
 
 /* Model metadata */
 const char* llama_model_chat_template_c(const XYBRID_LLAMA_MODEL* model);
@@ -230,7 +231,8 @@ mtmd_context* mtmd_init_from_file_c(
     bool use_gpu,
     bool warmup,
     int n_threads,
-    bool flash_attn);
+    bool flash_attn,
+    int image_max_tokens);
 void mtmd_free_c(mtmd_context* ctx);
 
 /* mtmd bitmap helpers */

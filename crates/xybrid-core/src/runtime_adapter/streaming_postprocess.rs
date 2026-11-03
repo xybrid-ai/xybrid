@@ -193,6 +193,19 @@ pub(crate) fn strip_and_capture_thinking_tags(text: &str) -> (String, Option<Str
     (clean, reasoning)
 }
 
+/// Whether output generated after `prompt` starts inside a reasoning block:
+/// the prompt ends in the `<think>` opener, primed by the llama.cpp adapter
+/// (`THINK_PRIME`) or written by the chat template itself (LFM3 with thinking
+/// on, including its tool continuations). The model's reasoning then carries
+/// no opener of its own.
+///
+/// The chat paths' double-prime guard applies the same test before appending
+/// `THINK_PRIME`. LFM3's thinking-off state (`<think></think>`) is closed, and
+/// raw codec-TTS prompts never end in `<think>`.
+pub(crate) fn is_reasoning_primed(prompt: &str) -> bool {
+    prompt.trim_end().ends_with(PRIMED_OPEN)
+}
+
 /// Like [`strip_and_capture_thinking_tags`], for output generated from a
 /// reasoning-primed prompt (the llama.cpp adapter's `THINK_PRIME`). The opener
 /// lives in the prompt, so output whose budget ran out before `</think>` is
@@ -624,6 +637,35 @@ mod tests {
     }
 
     #[test]
+    fn prompt_ending_in_an_open_think_is_reasoning_primed() {
+        // xybrid's own prime, and the channel an LFM3 continuation with
+        // thinking on reopens.
+        assert!(is_reasoning_primed(
+            "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n<think>\n"
+        ));
+        assert!(is_reasoning_primed(
+            "</tool_response><|im_end|>\n<|im_start|>assistant\n<think>"
+        ));
+    }
+
+    #[test]
+    fn prompt_without_an_open_think_is_not_reasoning_primed() {
+        for prompt in [
+            // LFM3 with thinking off pre-fills a closed channel.
+            "<|im_start|>assistant\n<think></think>",
+            // A ChatML continuation opens a fresh turn.
+            "<|im_start|>tool\n<|tool_response_start|>{}<|tool_response_end|><|im_end|>\n<|im_start|>assistant\n",
+            // A replayed thought earlier in the prompt does not count.
+            "<|im_start|>assistant\n<think>plan</think>answer<|im_end|>\n<|im_start|>user\n",
+            // A codec-TTS raw prompt.
+            "user: Convert the text to speech:<|TEXT_PROMPT_START|>hi<|TEXT_PROMPT_END|>\nassistant:<|SPEECH_GENERATION_START|>",
+            "",
+        ] {
+            assert!(!is_reasoning_primed(prompt), "{prompt:?}");
+        }
+    }
+
+    #[test]
     fn unprimed_strip_leaves_markerless_text_as_answer() {
         let (clean, reasoning) =
             strip_and_capture_thinking_tags_primed("just an answer", false, false);
@@ -836,6 +878,55 @@ mod tests {
         assert_eq!(f.push("done"), Some("done".to_string()));
 
         assert_eq!(f.cumulative_emitted(), "Checking done");
+        assert!(f.saw_tool_call_block());
+    }
+
+    /// LFM3's call block, streamed in the token pieces the model produces:
+    /// nothing of it reaches the callback, prose on either side does.
+    #[test]
+    fn streaming_filter_suppresses_lfm3_tool_block_split_across_tokens() {
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("Checking."), Some("Checking.".to_string()));
+        for piece in [
+            "<tool_call>",
+            "\n",
+            "<function=",
+            "get",
+            "_weather",
+            ">\n",
+            "<parameter=",
+            "city",
+            ">\nParis\n",
+            "</parameter>",
+            "\n",
+            "</function>",
+            "\n",
+            "</tool_call>",
+        ] {
+            assert_eq!(f.push(piece), None, "{piece:?} must not reach the callback");
+        }
+        assert_eq!(f.push(" Done."), Some(" Done.".to_string()));
+
+        assert_eq!(f.cumulative_emitted(), "Checking. Done.");
+        assert!(f.saw_tool_call_block());
+    }
+
+    /// A reasoning-primed LFM3 stream closes its thinking before the call:
+    /// neither the reasoning nor the call block is emitted.
+    #[test]
+    fn streaming_filter_hides_lfm3_reasoning_and_tool_block() {
+        let mut f = StreamingTextFilter::new_reasoning_primed(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("The user wants the weather."), None);
+        assert_eq!(f.push("</think>"), None);
+        assert_eq!(
+            f.push("<tool_call>\n<function=get_weather>\n<parameter=city>\nParis\n</parameter>\n</function>\n</tool_call>"),
+            None
+        );
+
+        assert_eq!(f.cumulative_emitted(), "");
+        assert_eq!(f.reasoning(), Some("The user wants the weather."));
         assert!(f.saw_tool_call_block());
     }
 

@@ -182,6 +182,121 @@
         }
       }
     },
+    "lfm3-1.7b": {
+      "description": "Liquid LFM3 1.7B - hybrid conv + sliding-window/global attention LLM with tool calling (quantization-aware Q4_0 GGUF)",
+      "source": "url",
+      "size_mb": 1001,
+      "task": "text-generation",
+      "feature_gate": "llm-llamacpp",
+      "files": [
+        {
+          "url": "https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/resolve/b3f2ae5d73cd3c91bf40e8ba752c648aa05dffdf/LFM3-1.7B-QAD-Q4_0.gguf",
+          "output": "LFM3-1.7B-QAD-Q4_0.gguf",
+          "sha256": "43a7d09a0e9cba91b63eb7052488b9564569bddfd65754d2e426465e572a7452"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "lfm3-1.7b",
+        "version": "1.0",
+        "description": "Liquid LFM3 1.7B, quantization-aware distilled Q4_0 GGUF.",
+        "execution_template": {
+          "type": "Gguf",
+          "model_file": "LFM3-1.7B-QAD-Q4_0.gguf",
+          "context_length": 8192,
+          "generation_params": {
+            "max_tokens": 1024,
+            "temperature": 0.1,
+            "top_k": 50,
+            "repetition_penalty": 1.1
+          }
+        },
+        "preprocessing": [],
+        "postprocessing": [],
+        "files": [
+          "LFM3-1.7B-QAD-Q4_0.gguf"
+        ],
+        "metadata": {
+          "task": "text-generation",
+          "architecture": "lfm3",
+          "backend": "llamacpp",
+          "family": "lfm3",
+          "instruction_tuned": true,
+          "license_name": "LFM Open License v1.0",
+          "parameters": 1730000000,
+          "quantization": "q4_0",
+          "context_length": 262144,
+          "tool_calling": true,
+          "source_repo": "LiquidAI/LFM3-1.7B-GGUF",
+          "source_revision": "b3f2ae5d73cd3c91bf40e8ba752c648aa05dffdf",
+          "sha256": "43a7d09a0e9cba91b63eb7052488b9564569bddfd65754d2e426465e572a7452",
+          "ram_minimum_mb": 1536,
+          "ram_recommended_mb": 2048
+        }
+      }
+    },
+    "lfm3-vl-2b": {
+      "description": "Liquid LFM3-VL 2B - vision-language model with a native-resolution encoder (quantization-aware Q4_0 GGUF + Q8_0 mmproj)",
+      "source": "url",
+      "size_mb": 1195,
+      "task": "vision-language",
+      "feature_gate": "llm-llamacpp-vision",
+      "files": [
+        {
+          "url": "https://huggingface.co/LiquidAI/LFM3-VL-2B-GGUF/resolve/7c3b4a43c9023e80bf234fec5e826a3365c8dda8/LFM3-VL-2B-QAD-Q4_0.gguf",
+          "output": "LFM3-VL-2B-QAD-Q4_0.gguf",
+          "sha256": "621c455376cb96a20891697deb9975c6fb47dd5ea98ed3ad1f3b7e8f24f0b1e6"
+        },
+        {
+          "url": "https://huggingface.co/LiquidAI/LFM3-VL-2B-GGUF/resolve/7c3b4a43c9023e80bf234fec5e826a3365c8dda8/mmproj-LFM3-VL-2B-Q8_0.gguf",
+          "output": "mmproj-LFM3-VL-2B-Q8_0.gguf",
+          "sha256": "c5c5b58d544a18da919172d2d0368090ea1a4a351b6feb7f8a326a264a5918ab"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "lfm3-vl-2b",
+        "version": "1.0",
+        "description": "Liquid LFM3-VL 2B vision-language model for edge inference.",
+        "execution_template": {
+          "type": "VisionLanguage",
+          "model_file": "LFM3-VL-2B-QAD-Q4_0.gguf",
+          "context_length": 4096,
+          "generation_params": {
+            "max_tokens": 512,
+            "temperature": 0.1,
+            "top_k": 50,
+            "repetition_penalty": 1.1
+          }
+        },
+        "vision_encoder": {
+          "file": "mmproj-LFM3-VL-2B-Q8_0.gguf",
+          "preprocessing_preset": "siglip",
+          "image_size": 512,
+          "patch_size": 16,
+          "max_image_tokens": 1024
+        },
+        "preprocessing": [],
+        "postprocessing": [],
+        "files": [
+          "LFM3-VL-2B-QAD-Q4_0.gguf",
+          "mmproj-LFM3-VL-2B-Q8_0.gguf"
+        ],
+        "metadata": {
+          "task": "vlm",
+          "architecture": "lfm3",
+          "vision_architecture": "lfm3vl",
+          "backend": "llamacpp",
+          "context_length": 128000,
+          "license_name": "LFM Open License v1.0",
+          "chat_format": "chatml",
+          "quantization": "q4_0",
+          "source_repo": "LiquidAI/LFM3-VL-2B-GGUF",
+          "source_revision": "7c3b4a43c9023e80bf234fec5e826a3365c8dda8",
+          "sha256": "621c455376cb96a20891697deb9975c6fb47dd5ea98ed3ad1f3b7e8f24f0b1e6",
+          "ram_minimum_mb": 2048,
+          "ram_recommended_mb": 3072
+        }
+      }
+    },
     "gemma-4-e2b": {
       "description": "Gemma 4 E2B - multimodal VLM correctness fixture (Q8 GGUF + Q8 mmproj)",
       "source": "url",
