@@ -57,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **llama.cpp:** update to [v0.9.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.9.0) (commit `cd959bae99ff4bed22bef2604f45241c09bbb8c8`).
+
 - **Rust:** `xybrid-core` turns on serde_json's `float_roundtrip` feature, so
   every crate that links it parses JSON floats correctly rounded (serde_json's
   default is best-effort and can be one ulp off). Float-dense JSON parses about
