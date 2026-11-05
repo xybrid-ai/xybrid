@@ -54,8 +54,8 @@ customer integration produces.
 cd repos/xybrid
 
 # Local platform (requires backend on :3001 + ingest on :8081)
-XYBRID_API_KEY=sk_test_u9Y5WQeT6SfMmvdj2iwJ6dYdzehclUIs \
-XYBRID_PLATFORM_URL=http://localhost:8081 \
+XYBRID_API_KEY=sk_test_YOUR_API_KEY \
+XYBRID_INGEST_URL=http://localhost:8081 \
   cargo run --release --example voice_assistant_demo \
     -p xybrid-sdk --features platform-macos -- \
     integration-tests/fixtures/input/jfk.wav \

@@ -25,6 +25,7 @@
 //! | `bundle` | Fetch and bundle a registry model |
 
 mod commands;
+mod install_id;
 #[allow(dead_code)]
 mod tracing_viz;
 pub mod ui;
@@ -47,7 +48,7 @@ struct Cli {
     #[arg(long, global = true, env = "XYBRID_API_KEY")]
     api_key: Option<String>,
 
-    /// Platform API endpoint for telemetry (default: https://api.xybrid.dev)
+    /// Platform API endpoint for cloud routing and gateway requests
     #[arg(
         long,
         global = true,
@@ -56,7 +57,16 @@ struct Cli {
     )]
     platform_url: String,
 
-    /// Device ID for telemetry attribution
+    /// Telemetry ingest endpoint
+    #[arg(
+        long,
+        global = true,
+        env = "XYBRID_INGEST_URL",
+        default_value = xybrid_sdk::telemetry::DEFAULT_INGEST_URL
+    )]
+    ingest_url: String,
+
+    /// Device ID for telemetry attribution (defaults to a random install ID)
     #[arg(long, global = true, env = "XYBRID_DEVICE_ID")]
     device_id: Option<String>,
 
@@ -406,7 +416,7 @@ fn main() -> Result<()> {
 
     let telemetry_enabled = init_telemetry(&cli);
     if telemetry_enabled && !cli.quiet {
-        ui::hint(&format!("Telemetry enabled ({})", cli.platform_url));
+        ui::hint(&format!("Telemetry enabled ({})", cli.ingest_url));
     }
 
     let result = run_command(cli);
@@ -516,32 +526,36 @@ fn init_telemetry(cli: &Cli) -> bool {
         // in-memory cell that CloudConfig::resolve_api_key reads.
         xybrid_sdk::set_api_key(api_key);
 
-        let platform = Platform::detect().to_string();
-
-        let device_id = cli.device_id.clone().unwrap_or_else(|| {
-            hostname::get()
-                .ok()
-                .and_then(|h| h.into_string().ok())
-                .unwrap_or_else(|| "cli-unknown".to_string())
-        });
-
-        let mut config = xybrid_sdk::TelemetryConfig::new(&cli.platform_url, api_key);
-        config = config.with_device(&device_id, &platform);
-        config = config.with_app_version(env!("CARGO_PKG_VERSION"));
-
-        xybrid_sdk::init_platform_telemetry(config);
+        xybrid_sdk::init_platform_telemetry(telemetry_config(cli, api_key, install_id::get));
         true
     } else {
         false
     }
 }
 
+fn telemetry_config(
+    cli: &Cli,
+    api_key: &str,
+    install_id: impl FnOnce() -> String,
+) -> xybrid_sdk::TelemetryConfig {
+    let platform = Platform::detect().to_string();
+    let mut config = xybrid_sdk::TelemetryConfig::new(&cli.ingest_url, api_key)
+        .with_platform(&platform)
+        .with_app_version(env!("CARGO_PKG_VERSION"));
+    if let Some(device_id) = &cli.device_id {
+        config = config.with_device(device_id, &platform);
+    } else {
+        // Keep the default implicit so the SDK can suppress it on hardware opt-out.
+        config.device_id = Some(install_id());
+    }
+    config
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_command(cli: Cli) -> Result<()> {
     let verbose = cli.verbose;
-    // Point the SDK's cloud gateway at the same endpoint as telemetry, so cloud
-    // calls (speculative cloud, reactive fallback) don't silently fall back to
-    // the production default (`api.xybrid.dev`) and 401 with a staging key.
+    // Point the SDK's cloud gateway at the platform API, independently of ingest,
+    // so cloud calls don't silently use the production API with a staging key.
     // `cli.platform_url` already encodes clap's flag > env > default precedence,
     // so set it unconditionally. Use the in-memory setter rather than
     // `std::env::set_var`: telemetry threads are already running by now, and a
@@ -851,6 +865,81 @@ fn resolve_config_path(config: Option<PathBuf>, pipeline: Option<String>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_telemetry_args(args: &[&str]) -> Cli {
+        use clap::{CommandFactory, FromArgMatches};
+        // Ignore the developer's environment without mutating process-wide state.
+        let command = ["api_key", "platform_url", "ingest_url", "device_id"]
+            .into_iter()
+            .fold(Cli::command(), |command, name| {
+                command.mut_arg(name, |arg| arg.env(None::<&str>))
+            });
+        Cli::from_arg_matches(&command.try_get_matches_from(args).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn telemetry_defaults_to_ingest_while_platform_uses_the_api() {
+        let cli = parse_telemetry_args(&[
+            "xybrid",
+            "telemetry",
+            "status",
+            "--device-id",
+            "explicit-device",
+        ]);
+        let config = telemetry_config(&cli, "sk_test_placeholder", || {
+            panic!("explicit device IDs must not read installation storage")
+        });
+        assert_eq!(config.endpoint, "https://ingest.xybrid.dev");
+        assert_eq!(cli.platform_url, "https://api.xybrid.dev");
+        assert_eq!(config.device_id.as_deref(), Some("explicit-device"));
+        assert!(config.device_id_explicit);
+    }
+
+    #[test]
+    fn default_telemetry_identity_uses_the_install_id_and_stays_implicit() {
+        let cli = parse_telemetry_args(&["xybrid", "telemetry", "status"]);
+        let id = uuid::Uuid::new_v4().to_string();
+        let config = telemetry_config(&cli, "sk_test_placeholder", || id.clone());
+        assert_eq!(config.device_id.as_deref(), Some(id.as_str()));
+        assert!(!config.device_id_explicit);
+        assert!(!config.capture_hostname);
+    }
+
+    #[test]
+    fn telemetry_and_platform_endpoints_can_be_overridden_independently() {
+        for args in [
+            vec![
+                "xybrid",
+                "--platform-url",
+                "http://localhost:3001",
+                "telemetry",
+                "status",
+                "--device-id",
+                "explicit-device",
+            ],
+            vec![
+                "xybrid",
+                "telemetry",
+                "status",
+                "--ingest-url",
+                "http://localhost:8081",
+                "--device-id",
+                "explicit-device",
+            ],
+        ] {
+            let cli = parse_telemetry_args(&args);
+            let config = telemetry_config(&cli, "sk_test_placeholder", || {
+                panic!("explicit device IDs must not read installation storage")
+            });
+            if args.contains(&"--ingest-url") {
+                assert_eq!(config.endpoint, "http://localhost:8081");
+                assert_eq!(cli.platform_url, "https://api.xybrid.dev");
+            } else {
+                assert_eq!(config.endpoint, "https://ingest.xybrid.dev");
+                assert_eq!(cli.platform_url, "http://localhost:3001");
+            }
+        }
+    }
 
     #[test]
     fn every_subcommand_parses_without_arg_collisions() {

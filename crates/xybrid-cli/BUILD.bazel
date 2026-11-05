@@ -65,6 +65,10 @@ _CLI_INTEGRATION_TESTS = {
         "@crates//:tempfile",
     ],
     "telemetry_status_test": [],
+    "telemetry_config_test": [
+        "@crates//:tempfile",
+        "@crates//:uuid",
+    ],
     "vlm_cli_test": [
         "//crates/xybrid-core:xybrid-core",
         "@crates//:image",

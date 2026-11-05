@@ -25,8 +25,8 @@
 //! ./target/release/xybrid -q run -m kokoro-82m \
 //!     --input-text hi -o /tmp/warm.wav
 //!
-//! XYBRID_API_KEY=sk_test_u9Y5WQeT6SfMmvdj2iwJ6dYdzehclUIs \
-//! XYBRID_PLATFORM_URL=http://localhost:8081 \
+//! XYBRID_API_KEY=sk_test_YOUR_API_KEY \
+//! XYBRID_INGEST_URL=http://localhost:8081 \
 //!   cargo run --release --example voice_assistant_demo \
 //!     -p xybrid-sdk --features platform-macos -- \
 //!     integration-tests/fixtures/input/jfk.wav \
@@ -246,11 +246,11 @@ fn configure_telemetry() -> bool {
     let Ok(api_key) = std::env::var("XYBRID_API_KEY") else {
         println!(
             "ℹ  XYBRID_API_KEY not set — running without platform telemetry.\n   \
-             Set XYBRID_API_KEY + XYBRID_PLATFORM_URL to ship the trace."
+             Set XYBRID_API_KEY + XYBRID_INGEST_URL to ship the trace."
         );
         return false;
     };
-    let endpoint = std::env::var("XYBRID_PLATFORM_URL")
+    let endpoint = std::env::var("XYBRID_INGEST_URL")
         .unwrap_or_else(|_| "https://ingest.xybrid.dev".to_string());
 
     println!("📡 Platform ingest : {}", endpoint);

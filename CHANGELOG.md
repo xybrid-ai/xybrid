@@ -254,6 +254,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CLI telemetry reaches the ingest service.** `--ingest-url` (or
+  `XYBRID_INGEST_URL`) defaults to `https://ingest.xybrid.dev`; `--platform-url`
+  continues to select the API for cloud routing. The default telemetry device
+  ID is now a random UUID saved in `~/.xybrid/install-id`, rather than the
+  hostname. Explicit `--device-id` / `XYBRID_DEVICE_ID` values still win.
 - **Unity Android builds no longer fail on a duplicate `libc++_shared.so`.**
   When Unity's GameActivity packages its own copy, Gradle stopped at
   `mergeDebugNativeLibs` with "2 files found with path
