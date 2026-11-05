@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.17.0
+
 * Breaking: the plugin declares the platform minimums its precompiled libraries
   are built for: iOS 16.0 (was 13.0), macOS 14.0 (was 10.15) and Android 9,
   API 28 (`minSdkVersion` was 21). An app that targets an older version now
@@ -12,6 +14,23 @@
   `platform :ios, '16.0'` in `ios/Podfile` and an iOS Deployment Target of 16.0
   for the Runner target; `platform :osx, '14.0'` in `macos/Podfile` and a macOS
   Deployment Target of 14.0. The libraries themselves are unchanged.
+* Added: LFM3 1.7B text and LFM3-VL 2B vision support through the existing
+  model APIs, including reasoning, tool calls and tool-result continuations.
+  Vision metadata can cap image tokens, and Hugging Face loading of
+  `LiquidAI/LFM3-VL-2B-GGUF` includes its projector with a 1,024-token image
+  cap. LFM3-Audio and LFM3-Omni are not supported.
+* Fixed: newly generated GGUF metadata caps the default context at 4,096
+  tokens to avoid allocating the model's full native KV cache. Increase
+  `execution_template.context_length` in the generated metadata for longer
+  conversations; previously generated files retain their configured context.
+* Fixed: llama.cpp results and streams preserve Unicode characters split
+  across tokens and trailing text, emit text before an in-token stop sequence,
+  report correct finish reasons, and deliver the terminal event even when
+  reasoning filtering suppresses every text delta.
+* Changed: precompiled libraries continue to use llama.cpp v0.8.0. Release
+  checks reject stale precompiled libraries and verify Apple deployment floors.
+  The new Rust decision data types and ONNX phoneme-timing metadata are not
+  exposed in Dart.
 
 ## 0.16.0
 
