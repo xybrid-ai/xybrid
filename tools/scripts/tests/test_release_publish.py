@@ -18,7 +18,7 @@ UNGATED = {
 # Parser guard: these publish packages, so the split below must find them.
 PUBLISHERS = {
     "publish-crates", "publish-flutter", "publish-kotlin", "publish-npm",
-    "publish-web-npm", "publish-swift-branch",
+    "publish-web-npm", "publish-observability-npm", "publish-swift-branch",
 }
 # Status functions in a job's `if:` replace the implicit success() check,
 # so any of them (even `success() || ...`) can run a job after a need failed.
@@ -157,6 +157,39 @@ class ObservabilityReleaseTests(unittest.TestCase):
         manifest = tomllib.loads((directory / "Cargo.toml").read_text())
         self.assertTrue((directory / manifest["package"]["readme"]).is_file())
         self.assertIn("README.md", manifest["package"]["include"])
+
+
+    def test_prep_gates_draft_on_both_validated_checksummed_archives(self):
+        build = self.prep.split("  build-web:\n", 1)[1].split("\n  # ====", 1)[0]
+        self.assertIn("working-directory: bindings/observability-js", build)
+        self.assertIn("pnpm pack:release", build)
+        self.assertIn("name: observability-npm", build)
+        self.assertIn('sha256sum "xybrid-observability-${VERSION}.tgz"', build)
+        self.assertIn('sha256sum "xybrid-web-${VERSION}.tgz"', build)
+        self.assertLess(build.index("Test and pack the Observability SDK"),
+                        build.index("Pack and verify the Web SDK"))
+        draft = self.prep.split("  create-draft-release:\n", 1)[1].split("\n  # ====", 1)[0]
+        self.assertIn("build-web", needs(draft))
+        self.assertIn("artifacts/*", draft)
+
+
+    def test_publishers_validate_then_stage_original_release_archives(self):
+        for name in ("observability", "web"):
+            job = self.jobs[f"publish-{name}-npm"]
+            with self.subTest(package=name):
+                archive = f'xybrid-{name}-${{VERSION}}.tgz'
+                self.assertIn("gh release download", job)
+                self.assertIn(f'sha256sum --check "{archive}.sha256"', job)
+                self.assertIn("node scripts/check-pack.mjs", job)
+                stage = re.search(r"npm stage publish ([^\n]+)\n([^\n]+)", job)
+                self.assertIsNotNone(stage)
+                self.assertIn(archive, stage.group(1))
+                self.assertIn("--ignore-scripts --provenance --access public", stage.group(2))
+                self.assertLess(job.index("sha256sum --check"), job.index("node scripts/check-pack.mjs"))
+                self.assertLess(job.index("node scripts/check-pack.mjs"), stage.start())
+                self.assertIn(f'npm view "@xybrid/{name}@${{VERSION}}"', job)
+                self.assertNotIn("pnpm build", job)
+                self.assertIn('case "$VERSION" in *-*) DIST_TAG=next ;; esac', job)
 
 
 

@@ -649,6 +649,80 @@ jobs:
           npm stage publish --provenance --access public --tag "$DIST_TAG"
 
   # =========================================================================
+  # Stage the shared JS instrumentation before its web consumer. Enabling web
+  # also enables this dependency publisher; neither job rebuilds approved bytes.
+  # A maintainer must approve observability on npm before web can be staged.
+  # =========================================================================
+  publish-observability-npm:
+    name: Publish Observability SDK (npm)
+    if: ${{ (vars.NPM_OBSERVABILITY_PUBLISH_ENABLED == 'true' || vars.NPM_WEB_PUBLISH_ENABLED == 'true') && (github.event_name != 'workflow_dispatch' || !inputs.flutter_only) }}
+    needs: [publish-release, verify-spm-checksum]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # npm trusted publishing + provenance
+    defaults:
+      run:
+        working-directory: bindings/observability-js
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.publish-release.outputs.tag }}
+
+      - name: Use Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm
+        run: npm install -g npm@11
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.2.2 --activate
+
+      - name: Install package verification tools
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the tested observability release package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.publish-release.outputs.tag }}
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "xybrid-observability-${VERSION}.tgz*" --dir "$RUNNER_TEMP/xybrid-observability-npm"
+
+      - name: Verify release archive checksum
+        working-directory: ${{ runner.temp }}/xybrid-observability-npm
+        env:
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: sha256sum --check "xybrid-observability-${VERSION}.tgz.sha256"
+
+      - name: Verify the release archive contents and telemetry version
+        env:
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: node scripts/check-pack.mjs "$RUNNER_TEMP/xybrid-observability-npm/xybrid-observability-${VERSION}.tgz" "$VERSION"
+
+      - name: Stage Observability SDK for npm approval
+        env:
+          VERSION: ${{ needs.publish-release.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_OBSERVABILITY_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+          if npm view "@xybrid/observability@${VERSION}" version >/dev/null 2>&1; then
+            echo "::notice::@xybrid/observability@${VERSION} is already on npm — skipping."
+            exit 0
+          fi
+          DIST_TAG=latest
+          case "$VERSION" in *-*) DIST_TAG=next ;; esac
+          npm stage publish "$RUNNER_TEMP/xybrid-observability-npm/xybrid-observability-${VERSION}.tgz" \
+            --ignore-scripts --provenance --access public --tag "$DIST_TAG"
+
+  # =========================================================================
   # Stage @xybrid/web using the exact archive built and tested by release-prep.
   # Separate opt-in and stage-only token let its first-publish/trusted-publisher
   # setup happen independently of React Native. See bindings/web/RELEASING.md.
