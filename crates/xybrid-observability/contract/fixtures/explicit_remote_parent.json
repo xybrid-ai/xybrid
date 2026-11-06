@@ -1,0 +1,123 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "An explicit W3C parent from another process or language wins over ambient context and keeps the trace id and tracestate.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.01
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.execute_tool.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "execute_tool",
+              "gen_ai.tool.name": "noop",
+              "gen_ai.tool.type": "function"
+            },
+            "count": 1,
+            "sum": 0.001
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.name": "noop",
+          "gen_ai.tool.type": "function"
+        },
+        "end_ms": 6,
+        "id": "tool",
+        "kind": "INTERNAL",
+        "name": "execute_tool noop",
+        "parent": "chat",
+        "start_ms": 5,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0,
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "tracestate": "vendor=abc"
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 10,
+        "id": "chat",
+        "kind": "INTERNAL",
+        "name": "chat tiny",
+        "parent": null,
+        "parent_span_id": "00f067aa0ba902b7",
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0,
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "tracestate": "vendor=abc"
+      }
+    ]
+  },
+  "name": "explicit_remote_parent",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "parent_traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+      "parent_tracestate": "vendor=abc",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 5,
+      "id": "tool",
+      "name": "noop",
+      "op": "start_tool",
+      "parent": "chat",
+      "tool_type": "function"
+    },
+    {
+      "at_ms": 6,
+      "id": "tool",
+      "op": "end"
+    },
+    {
+      "at_ms": 10,
+      "id": "chat",
+      "op": "end"
+    }
+  ]
+}

@@ -140,5 +140,19 @@ class ChecksumGateTests(unittest.TestCase):
         self.assertLess(step.index("ok=true"), first_check)
 
 
+class ObservabilityReleaseTests(unittest.TestCase):
+    def setUp(self):
+        self.jobs = workflow_jobs()
+        self.prep = (ROOT / ".github/workflows/release-prep.yml").read_text()
+
+
+    def test_observability_crate_readme_is_packaged(self):
+        directory = ROOT / "crates/xybrid-observability"
+        manifest = tomllib.loads((directory / "Cargo.toml").read_text())
+        self.assertTrue((directory / manifest["package"]["readme"]).is_file())
+        self.assertIn("README.md", manifest["package"]["include"])
+
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,4 @@
-# Purpose: Rust format, lint, tests and feature matrix, plus binding drift, API contract, Python and Web SDK checks. Gates merges.
+# Purpose: Rust format, lint, tests and feature matrix, plus binding drift, API contract, observability, Python and Web SDK checks. Gates merges.
 name: "CI: Workspace"
 
 on:
@@ -473,6 +473,24 @@ jobs:
       - name: Check API contract
         run: ./tools/scripts/api-contract-check.sh --check
 
+  observability:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
+    name: Observability contract (Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: observability-contract
+      - name: Test Rust instrumentation, transport and shared contract fixtures
+        run: cargo test --locked -p xybrid-observability --features test-util
+      - name: Check instrumentation without the optional exporter
+        run: cargo check --locked -p xybrid-observability --no-default-features
+
   web:
     needs: tooling-changes
     if: needs.tooling-changes.outputs.full_ci == 'true'
@@ -591,7 +609,7 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, workflow-index, version-sync, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, web]
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, workflow-index, version-sync, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, observability, web]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Verify required job results

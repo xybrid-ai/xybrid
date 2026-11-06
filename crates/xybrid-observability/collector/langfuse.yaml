@@ -1,0 +1,70 @@
+# OpenTelemetry Collector profile: canonical GenAI traces → Langfuse.
+#
+# Instrumentation stays canonical (gen_ai.* + xybrid.genai.*); this profile
+# adds the Langfuse-specific attributes at export time only.
+#
+# Requires otelcol-contrib (transform processor). Tested with the version
+# pinned in collector/README.md.
+#
+# Environment:
+#   LANGFUSE_OTLP_ENDPOINT  e.g. https://cloud.langfuse.com/api/public/otel
+#   LANGFUSE_AUTH           base64("<public key>:<secret key>")
+#   METRICS_OTLP_ENDPOINT   where metrics go (Langfuse accepts traces only)
+#   LOGS_OTLP_ENDPOINT      where log events (evaluations, details) go
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+  transform/langfuse:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          # One generation per logical request. Attempt and model-load spans
+          # carry a model name, which Langfuse would otherwise treat as a
+          # generation and double count.
+          - set(attributes["langfuse.observation.type"], "generation") where attributes["gen_ai.operation.name"] == "chat" or attributes["gen_ai.operation.name"] == "text_completion" or attributes["gen_ai.operation.name"] == "generate_content"
+          - set(attributes["langfuse.observation.type"], "embedding") where attributes["gen_ai.operation.name"] == "embeddings"
+          - set(attributes["langfuse.observation.type"], "tool") where attributes["gen_ai.operation.name"] == "execute_tool"
+          - set(attributes["langfuse.observation.type"], "chain") where attributes["gen_ai.operation.name"] == "invoke_workflow"
+          - set(attributes["langfuse.observation.type"], "span") where attributes["gen_ai.operation.name"] == "load_model" or attributes["gen_ai.operation.name"] == "predict" or attributes["xybrid.genai.attempt.index"] != nil
+          # Content: GenAI message attributes → observation input/output.
+          - set(attributes["langfuse.observation.input"], attributes["gen_ai.input.messages"]) where attributes["gen_ai.input.messages"] != nil
+          - set(attributes["langfuse.observation.output"], attributes["gen_ai.output.messages"]) where attributes["gen_ai.output.messages"] != nil
+          - set(attributes["langfuse.observation.level"], "ERROR") where status.code == STATUS_CODE_ERROR
+          - set(attributes["langfuse.session.id"], attributes["gen_ai.conversation.id"]) where attributes["gen_ai.conversation.id"] != nil
+          # Filterable metadata for execution identity.
+          - set(attributes["langfuse.observation.metadata.execution_location"], attributes["xybrid.genai.execution.location"]) where attributes["xybrid.genai.execution.location"] != nil
+          - set(attributes["langfuse.observation.metadata.runtime"], attributes["xybrid.genai.runtime.name"]) where attributes["xybrid.genai.runtime.name"] != nil
+          - set(attributes["langfuse.observation.metadata.provider"], attributes["gen_ai.provider.name"]) where attributes["gen_ai.provider.name"] != nil
+
+exporters:
+  otlphttp/langfuse:
+    endpoint: ${env:LANGFUSE_OTLP_ENDPOINT}
+    headers:
+      Authorization: "Basic ${env:LANGFUSE_AUTH}"
+      x-langfuse-ingestion-version: "4"
+  otlphttp/metrics:
+    endpoint: ${env:METRICS_OTLP_ENDPOINT}
+  otlphttp/logs:
+    endpoint: ${env:LOGS_OTLP_ENDPOINT}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [transform/langfuse, batch]
+      exporters: [otlphttp/langfuse]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/metrics]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/logs]

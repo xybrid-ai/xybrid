@@ -1,0 +1,342 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "A logical request whose local attempt fails and falls back to a remote target: attempt spans carry their own identity and usage, the logical span carries totals, metrics count one request and two attempts.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "xybrid",
+              "gen_ai.request.model": "qwen2.5-0.5b",
+              "gen_ai.response.model": "gpt-4o-mini",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.505
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "xybrid",
+              "gen_ai.request.model": "qwen2.5-0.5b",
+              "gen_ai.response.model": "gpt-4o-mini",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 12
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "xybrid",
+              "gen_ai.request.model": "qwen2.5-0.5b",
+              "gen_ai.response.model": "gpt-4o-mini",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 3
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "xybrid",
+              "gen_ai.request.model": "qwen2.5-0.5b",
+              "gen_ai.response.model": "gpt-4o-mini",
+              "gen_ai.token.modality": "unknown",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 12
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "xybrid",
+              "gen_ai.request.model": "qwen2.5-0.5b",
+              "gen_ai.response.model": "gpt-4o-mini",
+              "gen_ai.token.modality": "unknown",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 3
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "xybrid.genai.client.inference.attempts",
+        "points": [
+          {
+            "attributes": {
+              "error.type": "resource_exhausted",
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "qwen2.5-0.5b",
+              "xybrid.genai.attempt.reason": "initial",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 1
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "xybrid.genai.attempt.reason": "fallback",
+              "xybrid.genai.execution.location": "remote"
+            },
+            "value": 1
+          }
+        ],
+        "unit": "{attempt}"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "error.type": "resource_exhausted",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "qwen2.5-0.5b",
+          "xybrid.genai.attempt.index": 0,
+          "xybrid.genai.attempt.reason": "initial",
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 120,
+        "id": "a0",
+        "kind": "INTERNAL",
+        "name": "attempt 0",
+        "parent": "req",
+        "start_ms": 1,
+        "status": {
+          "code": "ERROR",
+          "description": "memory pressure"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "gen_ai.provider.name": "openai",
+          "gen_ai.request.model": "gpt-4o-mini",
+          "gen_ai.usage.input_tokens": 12,
+          "gen_ai.usage.output_tokens": 3,
+          "server.address": "gateway.xybrid.dev",
+          "server.port": 443,
+          "xybrid.genai.attempt.index": 1,
+          "xybrid.genai.attempt.reason": "fallback",
+          "xybrid.genai.execution.location": "remote",
+          "xybrid.genai.runtime.name": "http"
+        },
+        "end_ms": 500,
+        "id": "a1",
+        "kind": "CLIENT",
+        "name": "attempt 1",
+        "parent": "req",
+        "start_ms": 121,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "gen_ai.input.messages": [
+            {
+              "parts": [
+                {
+                  "content": "What is the capital of France?",
+                  "type": "text"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "gen_ai.operation.name": "chat",
+          "gen_ai.output.messages": [
+            {
+              "finish_reason": "stop",
+              "parts": [
+                {
+                  "content": "Paris.",
+                  "type": "text"
+                }
+              ],
+              "role": "assistant"
+            }
+          ],
+          "gen_ai.provider.name": "xybrid",
+          "gen_ai.request.model": "qwen2.5-0.5b",
+          "gen_ai.response.finish_reasons": [
+            "stop"
+          ],
+          "gen_ai.response.model": "gpt-4o-mini",
+          "gen_ai.usage.input_tokens": 12,
+          "gen_ai.usage.output_tokens": 3,
+          "xybrid.genai.attempt.count": 2,
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 505,
+        "id": "req",
+        "kind": "INTERNAL",
+        "name": "chat qwen2.5-0.5b",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "retry_fallback_attempts",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "req",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "qwen2.5-0.5b",
+        "operation": "chat",
+        "provider": "xybrid",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 0,
+      "id": "req",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "What is the capital of France?",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 1,
+      "id": "a0",
+      "index": 0,
+      "location": "local",
+      "model": "qwen2.5-0.5b",
+      "op": "start_attempt",
+      "parent": "req",
+      "provider": "llama.cpp",
+      "reason": "initial",
+      "runtime": "llama.cpp"
+    },
+    {
+      "at_ms": 120,
+      "error_type": "resource_exhausted",
+      "id": "a0",
+      "message": "memory pressure",
+      "op": "end_with_error"
+    },
+    {
+      "at_ms": 121,
+      "id": "a1",
+      "index": 1,
+      "location": "remote",
+      "model": "gpt-4o-mini",
+      "op": "start_attempt",
+      "parent": "req",
+      "provider": "openai",
+      "reason": "fallback",
+      "runtime": "http",
+      "server_address": "gateway.xybrid.dev",
+      "server_port": 443
+    },
+    {
+      "at_ms": 500,
+      "id": "a1",
+      "input_tokens": 12,
+      "op": "usage",
+      "output_tokens": 3
+    },
+    {
+      "at_ms": 500,
+      "id": "a1",
+      "op": "end"
+    },
+    {
+      "at_ms": 500,
+      "id": "req",
+      "input_tokens": 12,
+      "op": "usage",
+      "output_tokens": 3
+    },
+    {
+      "at_ms": 500,
+      "id": "req",
+      "model": "gpt-4o-mini",
+      "op": "response"
+    },
+    {
+      "at_ms": 500,
+      "id": "req",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "stop",
+          "parts": [
+            {
+              "content": "Paris.",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 500,
+      "id": "req",
+      "op": "finish_reasons",
+      "value": [
+        "stop"
+      ]
+    },
+    {
+      "at_ms": 505,
+      "id": "req",
+      "op": "end"
+    }
+  ]
+}
