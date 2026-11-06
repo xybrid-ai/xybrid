@@ -581,6 +581,8 @@ const PRIVACY_CHILD: &str = "XYBRID_TEST_CHOICE_PRIVACY_CHILD";
 /// The child starts ONNX Runtime with its
 /// environment logging warnings (`ORT_LOG=warning`), so a scorer that let
 /// ONNX Runtime log would show on that stderr.
+/// Refusal and local-surface checks run without ONNX Runtime; runtime and
+/// actual OTLP export checks require it, following `XYBRID_REQUIRE_MODELS`.
 #[test]
 fn caller_content_reaches_only_the_result() {
     if std::env::var_os(PRIVACY_CHILD).is_some() {
@@ -618,13 +620,19 @@ fn check_every_surface_for_caller_content() {
     log::set_logger(&LOGGER).expect("the child process installs the only logger");
     log::set_max_level(log::LevelFilter::Trace);
     let capture = xybrid_core::tracing::capture();
-    let (endpoint, exported, collector) = otlp::start_mock_ingest();
-    xybrid_sdk::init_observability(
-        xybrid_sdk::ObservabilityConfig::otlp(otlp::trace_config(&endpoint))
-            .content(xybrid_sdk::observability::ContentPolicy::metadata_only())
-            .device_attributes(false),
-    )
-    .unwrap();
+    let ran = onnx_runtime();
+    // Refusals emit no spans. Only start a collector when runtime checks can
+    // produce an export, so the no-runtime path cannot wait on accept/recv.
+    let collector = ran.then(|| {
+        let (endpoint, exported, collector) = otlp::start_mock_ingest();
+        xybrid_sdk::init_observability(
+            xybrid_sdk::ObservabilityConfig::otlp(otlp::trace_config(&endpoint))
+                .content(xybrid_sdk::observability::ContentPolicy::metadata_only())
+                .device_attributes(false),
+        )
+        .unwrap();
+        (exported, collector)
+    });
 
     let (telemetry_tx, telemetry_rx) = std::sync::mpsc::channel();
     xybrid_sdk::register_telemetry_sender(telemetry_tx);
@@ -702,7 +710,6 @@ fn check_every_surface_for_caller_content() {
     // the byte. The SDK also scores it with `shape_warning.onnx`, whose extra
     // output is as long as the first context byte id (100, for 'c'), which
     // ONNX Runtime warns about at the child's log level.
-    let ran = onnx_runtime();
     if ran {
         let (_warning_dir, warning) = scorer_with("shape_warning.onnx");
         for model in [&scorer, &warning] {
@@ -735,17 +742,14 @@ fn check_every_surface_for_caller_content() {
     xybrid_sdk::clear_execution_listener();
     let telemetry: Vec<_> = telemetry_rx.try_iter().collect();
     let trace = capture.stages_json();
-    xybrid_sdk::shutdown_observability(std::time::Duration::from_secs(5)).unwrap();
-    let exported_body = exported
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .unwrap();
-    collector.join().unwrap();
-    let exported_json: serde_json::Value = serde_json::from_str(&exported_body).unwrap();
-    let exported_spans = otlp::spans(&exported_json);
-    assert!(
-        !exported_spans.is_empty(),
-        "the privacy check must inspect actual exported spans"
-    );
+    let exported_body = collector.map(|(exported, collector)| {
+        xybrid_sdk::shutdown_observability(std::time::Duration::from_secs(5)).unwrap();
+        let body = exported
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        collector.join().unwrap();
+        body
+    });
     let logs = LOG_LINES.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let listened = listened.lock().unwrap_or_else(|e| e.into_inner()).clone();
 
@@ -775,6 +779,17 @@ fn check_every_surface_for_caller_content() {
         assert!(decisions.is_empty(), "{decisions:?}");
     }
     if ran {
+        let exported_json: serde_json::Value = serde_json::from_str(
+            exported_body
+                .as_deref()
+                .expect("runtime privacy checks must inspect an actual export"),
+        )
+        .unwrap();
+        let exported_spans = otlp::spans(&exported_json);
+        assert!(
+            !exported_spans.is_empty(),
+            "the privacy check must inspect actual exported spans"
+        );
         let scoring_spans: Vec<_> = exported_spans
             .iter()
             .filter(|span| scoring_span(span))
@@ -812,7 +827,10 @@ fn check_every_surface_for_caller_content() {
         ("execution events", listened),
         ("logs", logs),
         ("trace", vec![trace.to_string()]),
-        ("OTLP spans (metadata-only)", vec![exported_body]),
+        (
+            "OTLP spans (metadata-only)",
+            exported_body.into_iter().collect(),
+        ),
     ] {
         for line in lines {
             assert!(
