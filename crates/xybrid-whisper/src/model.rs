@@ -28,6 +28,15 @@ const FULL_WINDOW_SAMPLES: usize = SAMPLE_RATE as usize * 30;
 /// CPU path until they are measured independently.
 const DEFAULT_USE_GPU: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
 
+fn native_prompt(prompt: Option<&str>) -> WhisperResult<Option<CString>> {
+    prompt
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .map(|prompt| CString::new(format!(" {prompt}")))
+        .transpose()
+        .map_err(|_| WhisperError::InvalidInput("prompt contains a null byte".into()))
+}
+
 fn default_context_params() -> sys::whisper_context_params {
     // SAFETY: `whisper_context_default_params` is a pure value constructor
     // with no preconditions.
@@ -179,12 +188,7 @@ impl WhisperModel {
         // borrows the language pointer rather than copying it.
         let language = self.resolve_language(params.language.as_deref())?;
         // Native parameters borrow both strings until whisper_full returns.
-        let prompt = params
-            .prompt
-            .as_deref()
-            .map(CString::new)
-            .transpose()
-            .map_err(|_| WhisperError::InvalidInput("prompt contains a null byte".into()))?;
+        let prompt = native_prompt(params.prompt.as_deref())?;
 
         // SAFETY: pure value constructor, no preconditions.
         let mut wparams = unsafe {
@@ -421,7 +425,19 @@ impl std::fmt::Debug for WhisperModel {
 
 #[cfg(test)]
 mod tests {
-    use super::default_context_params;
+    use super::{default_context_params, native_prompt};
+
+    #[test]
+    fn native_prompt_prepends_one_space_to_trimmed_text() {
+        for (input, expected) in [
+            ("Jarv, Quarry.", " Jarv, Quarry."),
+            ("  Jarv  ", " Jarv"),
+            (" Jarv", " Jarv"),
+        ] {
+            let prompt = native_prompt(Some(input)).unwrap().unwrap();
+            assert_eq!(prompt.to_bytes(), expected.as_bytes());
+        }
+    }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[test]
