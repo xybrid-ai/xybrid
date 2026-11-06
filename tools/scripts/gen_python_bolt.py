@@ -17,8 +17,8 @@ What it does:
   2. Copies the generated package into bindings/python/xybrid/_bolt/, which the
      hand-written `xybrid/__init__.py` wrapper re-exports.
   3. Prunes stale files so a removed export cannot linger.
-  4. Makes the append-only `XybridResult.reasoning_content` tail optional while
-     decoding the merged tool-calling wire shape.
+  4. Makes the append-only `XybridResult.reasoning_content` and `observation`
+     tails optional while decoding older wire shapes that omit them.
 
 The compiled extension is NOT built here — `tools/scripts/build-python-bolt.sh`
 runs `boltffi pack python`, which compiles `_native` and stages the cdylib.
@@ -85,6 +85,7 @@ def _add_result_wire_compatibility(source: str) -> str:
             metrics=XybridInferenceMetrics._boltffi_from_reader(reader),
             tool_calls=reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader)),
             reasoning_content=reader.optional(lambda: reader.string()),
+            observation=reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader)),
         )
 """
     decoder_replacement = """    @classmethod
@@ -104,6 +105,11 @@ def _add_result_wire_compatibility(source: str) -> str:
                 None,
             )
         )
+        observation = (
+            reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader))
+            if reader.has_remaining()
+            else None
+        )
         return cls(
             envelope=envelope,
             output_type=output_type,
@@ -113,6 +119,7 @@ def _add_result_wire_compatibility(source: str) -> str:
             metrics=metrics,
             tool_calls=tool_calls,
             reasoning_content=reasoning_content,
+            observation=observation,
         )
 """
     if source.count(decoder_target) != 1:
@@ -144,14 +151,20 @@ def generate() -> list[Path]:
     # Anchored on the field declaration alone: boltffi 0.30 renders the Rust
     # doc comment as a docstring *between* the field and whatever follows it,
     # so anchoring on the next declaration breaks on every doc edit.
-    target = "    reasoning_content: str | None\n"
-    replacement = "    reasoning_content: str | None = None\n"
+    defaults = (
+        ("    reasoning_content: str | None\n", "    reasoning_content: str | None = None\n"),
+        (
+            "    observation: XybridObservationRef | None\n",
+            "    observation: XybridObservationRef | None = None\n",
+        ),
+    )
     for name in ("__init__.py", "__init__.pyi"):
         path = RAW_DIR / name
         source = path.read_text()
-        if source.count(target) != 1:
-            sys.exit(f"error: expected one XybridResult reasoning field in {path}")
-        source = source.replace(target, replacement)
+        for target, replacement in defaults:
+            if source.count(target) != 1:
+                sys.exit(f"error: expected one XybridResult `{target.strip()}` field in {path}")
+            source = source.replace(target, replacement)
         if name == "__init__.py":
             source = _add_result_wire_compatibility(source)
         path.write_text(source)

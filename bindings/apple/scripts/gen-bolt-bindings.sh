@@ -5,9 +5,9 @@
 #                                                     xcframework ships)
 #
 # The Swift source receives two compatibility transforms:
-#   (a) XybridResult's append-only reasoning field defaults to nil and decodes
-#       results from the merged tool-calling wire shape, which does not emit
-#       that trailing field.
+#   (a) XybridResult's append-only reasoning and observation fields default
+#       to nil and decode results from older wire shapes, which do not emit
+#       those trailing fields.
 #   (b) a fallible method taking a slice and returning unit is emitted as
 #       `_ = x.withUnsafeBufferPointer { ... throw ... }`, which Swift rejects
 #       for the missing `try`. Without this the binding does not compile.
@@ -77,12 +77,12 @@ from pathlib import Path
 source_path, destination_path = map(Path, sys.argv[1:])
 source = source_path.read_text()
 
-initializer = "        reasoningContent: String?\n    ) {"
+initializer = "        reasoningContent: String?,\n        observation: XybridObservationRef?\n    ) {"
 if source.count(initializer) != 1:
-    raise SystemExit("error: expected one XybridResult reasoning initializer parameter")
+    raise SystemExit("error: expected one XybridResult reasoning/observation initializer tail")
 source = source.replace(
     initializer,
-    "        reasoningContent: String? = nil\n    ) {",
+    "        reasoningContent: String? = nil,\n        observation: XybridObservationRef? = nil\n    ) {",
 )
 
 decoder = '''    @inlinable static func decode(from reader: inout WireReader) -> XybridResult {
@@ -94,7 +94,8 @@ decoder = '''    @inlinable static func decode(from reader: inout WireReader) ->
             executionTarget: XybridExecutionTarget(rawValue: reader.readI32())!,
             metrics: XybridInferenceMetrics.decode(from: &reader),
             toolCalls: reader.readArray { reader in XybridToolCall.decode(from: &reader) },
-            reasoningContent: reader.readOptional { reader in reader.readString() }
+            reasoningContent: reader.readOptional { reader in reader.readString() },
+            observation: reader.readOptional { reader in XybridObservationRef.decode(from: &reader) }
         )
     }
 '''
@@ -109,6 +110,9 @@ replacement = '''    @inlinable static func decode(from reader: inout WireReader
         let reasoningContent = reader.position < reader.data.count
             ? reader.readOptional { reader in reader.readString() }
             : envelope.metadata.first { $0.key == "reasoning_content" }?.value
+        let observation = reader.position < reader.data.count
+            ? reader.readOptional { reader in XybridObservationRef.decode(from: &reader) }
+            : nil
         return XybridResult(
             envelope: envelope,
             outputType: outputType,
@@ -117,7 +121,8 @@ replacement = '''    @inlinable static func decode(from reader: inout WireReader
             executionTarget: executionTarget,
             metrics: metrics,
             toolCalls: toolCalls,
-            reasoningContent: reasoningContent
+            reasoningContent: reasoningContent,
+            observation: observation
         )
     }
 '''

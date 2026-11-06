@@ -562,6 +562,14 @@ pub struct XybridRunOptions {
     pub fallback_to_cloud: bool,
     pub max_grace_tokens: u32,
     pub correlation_id: Option<String>,
+    /// W3C `traceparent` of the caller's span: the run becomes its child.
+    pub traceparent: Option<String>,
+    /// W3C `tracestate` accompanying `traceparent`.
+    pub tracestate: Option<String>,
+    /// Caller-owned conversation id recorded on the run.
+    pub conversation_id: Option<String>,
+    /// Skip the detailed trace for this run; metrics are still recorded.
+    pub suppress_trace: bool,
 }
 
 impl From<XybridRunOptions> for facade::RunOptions {
@@ -572,6 +580,37 @@ impl From<XybridRunOptions> for facade::RunOptions {
             fallback_to_cloud: o.fallback_to_cloud,
             max_grace_tokens: o.max_grace_tokens,
             correlation_id: o.correlation_id,
+            traceparent: o.traceparent,
+            tracestate: o.tracestate,
+            conversation_id: o.conversation_id,
+            suppress_trace: o.suppress_trace,
+        }
+    }
+}
+
+/// Trace and span ids (lowercase hex) of a recorded run, for linking
+/// feedback and evaluation results.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct XybridObservationRef {
+    pub trace_id: String,
+    pub span_id: String,
+}
+
+impl From<facade::ObservationRef> for XybridObservationRef {
+    fn from(r: facade::ObservationRef) -> Self {
+        Self {
+            trace_id: r.trace_id,
+            span_id: r.span_id,
+        }
+    }
+}
+
+impl From<XybridObservationRef> for facade::ObservationRef {
+    fn from(r: XybridObservationRef) -> Self {
+        Self {
+            trace_id: r.trace_id,
+            span_id: r.span_id,
         }
     }
 }
@@ -663,6 +702,8 @@ pub struct XybridResult {
     /// Model reasoning emitted separately from the final answer text.
     /// Appended last because `#[data]` fields serialize in declaration order.
     pub reasoning_content: Option<String>,
+    /// The run's trace reference, when it was traced.
+    pub observation: Option<XybridObservationRef>,
 }
 
 /// Where a result was produced — observed fact, not a routing preference.
@@ -747,6 +788,7 @@ impl From<facade::InferenceResult> for XybridResult {
             metrics,
             tool_calls: r.tool_calls.into_iter().map(Into::into).collect(),
             reasoning_content,
+            observation: r.observation.map(Into::into),
         }
     }
 }
@@ -1108,20 +1150,17 @@ fn set_platform_fallback_binding() {
     facade::set_fallback_binding("kotlin".to_string());
 }
 
-/// One-stop SDK initialization: API key + gateway/ingest URL overrides in
-/// one call. Delegates to [`facade::configure_runtime`]; blank strings are
-/// treated as absent. This is the canonical init the Swift
-/// `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
-/// `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
+/// One-stop SDK initialization: API key + gateway URL override in one call.
+/// Delegates to [`facade::configure_runtime`]; blank strings are treated as
+/// absent. This is the canonical init the Swift
+/// `Xybrid.initialize(apiKey:gatewayUrl:)` and Kotlin
+/// `Xybrid.init(context, apiKey, gatewayUrl)` wrappers call. Observability
+/// export is configured separately with [`XybridObservabilityConfig`].
 #[export]
-pub fn configure_runtime(
-    api_key: Option<String>,
-    gateway_url: Option<String>,
-    ingest_url: Option<String>,
-) {
+pub fn configure_runtime(api_key: Option<String>, gateway_url: Option<String>) {
     ensure_native_logging();
     set_platform_fallback_binding();
-    facade::configure_runtime(api_key, gateway_url, ingest_url);
+    facade::configure_runtime(api_key, gateway_url);
 }
 
 #[export]
@@ -2175,96 +2214,177 @@ impl XybridConversationContext {
 }
 
 // ============================================================================
-// Telemetry (advanced config + lifecycle)
+// Observability (OpenTelemetry export config + lifecycle)
 // ============================================================================
 //
-// Mirrors the pre-bolt C ABI's telemetry surface. The apiKey-only fast path is
-// [`configure_runtime`]; this is the advanced builder (batch size, flush
-// interval, device label/attributes) plus the init/flush/shutdown lifecycle.
-// Telemetry *events* never cross the FFI — only this config/lifecycle control
-// plane does. Every setter takes simple scalars/strings, so the whole surface
-// generates natively (no hand-port needed).
+// Export is off until a host builds an `XybridObservabilityConfig` and calls
+// `init`. Spans, metrics, and logs never cross the FFI — only this control
+// plane, run options' trace context, result references, and feedback do.
 
-/// The SDK's default telemetry ingest endpoint (for display alongside a config).
+/// The default Xybrid OTLP trace endpoint.
 #[export]
-pub fn telemetry_default_endpoint() -> String {
-    facade::telemetry_default_endpoint()
+pub fn observability_default_traces_endpoint() -> String {
+    facade::observability_default_traces_endpoint()
 }
 
-/// Flush pending telemetry events. Safe before init / after shutdown.
-#[export]
-pub fn telemetry_flush() {
-    facade::telemetry_flush();
+/// Delivery counters of the observability pipeline.
+#[data]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct XybridObservabilityStats {
+    pub enabled: bool,
+    pub spans_exported: u64,
+    pub spans_dropped: u64,
+    pub export_failures: u64,
 }
 
-/// Shut down the telemetry exporter. Idempotent.
+/// Current delivery counters (all zero when observability is off).
 #[export]
-pub fn telemetry_shutdown() {
-    facade::telemetry_shutdown();
+pub fn observability_stats() -> XybridObservabilityStats {
+    let s = facade::observability_stats();
+    XybridObservabilityStats {
+        enabled: s.enabled,
+        spans_exported: s.spans_exported,
+        spans_dropped: s.spans_dropped,
+        export_failures: s.export_failures,
+    }
 }
 
-/// Advanced telemetry configuration builder.
+/// Export queued telemetry, waiting at most `timeout_ms`.
 ///
-/// Create with [`new`](Self::new), tune via the setters, then hand to
-/// [`telemetry_init`]. Wraps the facade's interior-mutable, thread-safe
-/// `TelemetryConfigHandle`.
-pub struct XybridTelemetryConfig {
-    inner: std::sync::Arc<facade::TelemetryConfigHandle>,
+/// # Errors
+/// When the bound is exceeded.
+#[export]
+pub fn observability_flush(timeout_ms: u32) -> Result<(), XybridError> {
+    facade::observability_flush(timeout_ms).map_err(XybridError::from)
+}
+
+/// Flush and stop exporting, waiting at most `timeout_ms`. Idempotent.
+///
+/// # Errors
+/// When the bound is exceeded.
+#[export]
+pub fn observability_shutdown(timeout_ms: u32) -> Result<(), XybridError> {
+    facade::observability_shutdown(timeout_ms).map_err(XybridError::from)
+}
+
+/// Record end-user feedback on a run (`XybridResult::observation`). Returns
+/// `false` when no logs signal is configured (the Xybrid preset sends traces
+/// only).
+///
+/// # Errors
+/// When `target` is not a valid trace/span id pair.
+#[export]
+pub fn observability_record_feedback(
+    target: XybridObservationRef,
+    score: Option<f64>,
+    label: Option<String>,
+    comment: Option<String>,
+) -> Result<bool, XybridError> {
+    facade::observability_record_feedback(&target.into(), score, label, comment)
+        .map_err(XybridError::from)
+}
+
+/// Record an evaluation result on a run. Returns `false` when no logs signal
+/// is configured.
+///
+/// # Errors
+/// When `target` is not a valid trace/span id pair.
+#[export]
+pub fn observability_record_evaluation(
+    target: XybridObservationRef,
+    name: String,
+    score_value: Option<f64>,
+    score_label: Option<String>,
+    explanation: Option<String>,
+) -> Result<bool, XybridError> {
+    facade::observability_record_evaluation(
+        &target.into(),
+        name,
+        score_value,
+        score_label,
+        explanation,
+    )
+    .map_err(XybridError::from)
+}
+
+/// Observability (OpenTelemetry) export configuration.
+///
+/// Create with [`xybrid`](Self::xybrid) (traces to the Xybrid dashboard) or
+/// [`otlp`](Self::otlp) (traces, metrics, and logs to an OTLP/HTTP endpoint
+/// such as an OpenTelemetry Collector), tune via the setters, then call
+/// [`init`](Self::init). Prompts and outputs are captured unless
+/// [`set_metadata_only`](Self::set_metadata_only) is set.
+pub struct XybridObservabilityConfig {
+    inner: std::sync::Arc<facade::ObservabilityConfigHandle>,
 }
 
 #[export]
-impl XybridTelemetryConfig {
-    /// A new config bound to the default ingest endpoint and the given API key.
-    pub fn new(api_key: String) -> Self {
+impl XybridObservabilityConfig {
+    /// Traces to the Xybrid dashboard, authenticated with `api_key`.
+    pub fn xybrid(api_key: String) -> Self {
         Self {
-            inner: facade::TelemetryConfigHandle::new(api_key),
+            inner: facade::ObservabilityConfigHandle::xybrid(api_key),
         }
     }
 
-    /// Override the ingest endpoint (self-hosted collector / non-prod).
-    pub fn set_endpoint(&self, endpoint: String) {
-        self.inner.set_endpoint(endpoint);
+    /// Traces, metrics, and logs to an OTLP/HTTP endpoint
+    /// (`http://host:4318`).
+    pub fn otlp(endpoint: String) -> Self {
+        Self {
+            inner: facade::ObservabilityConfigHandle::otlp(endpoint),
+        }
     }
 
-    /// Set the app version reported with every event.
-    pub fn set_app_version(&self, version: String) {
-        self.inner.set_app_version(version);
+    /// Override the full trace endpoint URL (staging, self-hosted).
+    pub fn set_traces_endpoint(&self, endpoint: String) {
+        self.inner.set_traces_endpoint(endpoint);
     }
 
-    /// Set the human-friendly device label reported with every event.
-    pub fn set_device_label(&self, label: String) {
-        self.inner.set_device_label(label);
+    /// Add an HTTP header sent with every export request.
+    pub fn set_header(&self, name: String, value: String) {
+        self.inner.set_header(name, value);
     }
 
-    /// Attach an app-provided device attribute (stored under `device.custom`).
-    pub fn set_device_attribute(&self, key: String, value: String) {
-        self.inner.set_device_attribute(key, value);
+    /// Send OTLP JSON instead of protobuf.
+    pub fn set_json_protocol(&self, json: bool) {
+        self.inner.set_json_protocol(json);
     }
 
-    /// Set the number of events buffered before a flush.
-    pub fn set_batch_size(&self, batch_size: u32) {
-        self.inner.set_batch_size(batch_size);
+    /// Set the reported service (app) name and version.
+    pub fn set_service(&self, name: String, version: Option<String>) {
+        self.inner.set_service(name, version);
     }
 
-    /// Set the background flush interval, in seconds.
-    pub fn set_flush_interval_secs(&self, secs: u32) {
-        self.inner.set_flush_interval_secs(secs);
+    /// Attach a resource attribute (for example `deployment.environment`).
+    pub fn set_resource_attribute(&self, key: String, value: String) {
+        self.inner.set_resource_attribute(key, value);
     }
 
-    /// Start the process-global telemetry exporter from this config.
-    ///
-    /// Consumes the config: subsequent setters no-op and a second `init` on the
-    /// same handle errors. Modeled as a method (not a free `telemetry_init`)
-    /// because boltffi 0.25.3 drops free functions that take a handle
-    /// parameter, but lowers a handle self-method fine (same reason the
-    /// generated `run` lives on `XybridModel`).
+    /// Record metadata only: no prompts, outputs, or tool payloads.
+    pub fn set_metadata_only(&self, metadata_only: bool) {
+        self.inner.set_metadata_only(metadata_only);
+    }
+
+    /// Maximum bytes per captured content attribute.
+    pub fn set_max_content_bytes(&self, bytes: u32) {
+        self.inner.set_max_content_bytes(bytes);
+    }
+
+    /// Minimum interval between traced frames of one live session.
+    pub fn set_live_trace_interval_ms(&self, ms: u32) {
+        self.inner.set_live_trace_interval_ms(ms);
+    }
+
+    /// Start exporting with this configuration, replacing any previous one.
+    /// Consumes the config: later setters no-op and a second `init` errors.
+    /// A method rather than a free function because boltffi drops free
+    /// functions that take a handle parameter.
     ///
     /// # Errors
-    /// Errors if this config was already consumed, or if telemetry is already
-    /// initialized without an intervening [`telemetry_shutdown`].
+    /// If this config was already consumed or is rejected.
     pub fn init(&self) -> Result<(), XybridError> {
         set_platform_fallback_binding();
-        facade::telemetry_init(&self.inner).map_err(XybridError::from)
+        self.inner.init().map_err(XybridError::from)
     }
 }
 
@@ -2496,6 +2616,10 @@ stages:
             fallback_to_cloud: false,
             max_grace_tokens: 0,
             correlation_id: None,
+            traceparent: None,
+            tracestate: None,
+            conversation_id: None,
+            suppress_trace: false,
         };
 
         let envelope = XybridEnvelope {
@@ -2569,8 +2693,14 @@ stages:
             fallback_to_cloud: true,
             max_grace_tokens: 4,
             correlation_id: Some("trace".into()),
+            traceparent: Some("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01".into()),
+            tracestate: None,
+            conversation_id: None,
+            suppress_trace: true,
         };
         let facade_opts: facade::RunOptions = opts.into();
+        assert!(facade_opts.suppress_trace);
+        assert!(facade_opts.traceparent.is_some());
         assert!(facade_opts.fallback_to_cloud);
         assert_eq!(facade_opts.max_grace_tokens, 4);
         assert_eq!(
@@ -2683,6 +2813,7 @@ stages:
                 stage_latencies_ms: Vec::new(),
             },
             tool_calls: Vec::new(),
+            observation: None,
         };
 
         // When

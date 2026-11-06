@@ -105,6 +105,24 @@ class XybridRunOptions:
     fallback_to_cloud: bool
     max_grace_tokens: int
     correlation_id: str | None
+    traceparent: str | None
+    """W3C `traceparent` of the caller's span: the run becomes its child."""
+    tracestate: str | None
+    """W3C `tracestate` accompanying `traceparent`."""
+    conversation_id: str | None
+    """Caller-owned conversation id recorded on the run."""
+    suppress_trace: bool
+    """Skip the detailed trace for this run; metrics are still recorded."""
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridObservationRef:
+    """Trace and span ids (lowercase hex) of a recorded run, for linking
+    feedback and evaluation results.
+    """
+    trace_id: str
+    span_id: str
 
 
 
@@ -151,6 +169,8 @@ class XybridResult:
     """Model reasoning emitted separately from the final answer text.
     Appended last because `#[data]` fields serialize in declaration order.
     """
+    observation: XybridObservationRef | None = None
+    """The run's trace reference, when it was traced."""
 
 
 
@@ -339,6 +359,16 @@ class XybridPartialResult:
     """Monotonic chunk sequence number this result corresponds to."""
     audio_duration_ms: int
     """Audio covered so far, in milliseconds."""
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridObservabilityStats:
+    """Delivery counters of the observability pipeline."""
+    enabled: bool
+    spans_exported: int
+    spans_dropped: int
+    export_failures: int
 
 
 
@@ -954,41 +984,46 @@ class XybridConversationContext:
 
 
 
-class XybridTelemetryConfig:
+class XybridObservabilityConfig:
     _handle: int
 
-
-    def __init__(self, api_key: str) -> None:
-        """A new config bound to the default ingest endpoint and the given API key."""
-
+    def __init__(self) -> None: ...
 
     @classmethod
-    def _from_handle(cls, handle: int) -> "XybridTelemetryConfig": ...
+    def _from_handle(cls, handle: int) -> "XybridObservabilityConfig": ...
     def __del__(self) -> None: ...
-    def set_endpoint(self, endpoint: str) -> None:
-        """Override the ingest endpoint (self-hosted collector / non-prod)."""
-    def set_app_version(self, version: str) -> None:
-        """Set the app version reported with every event."""
-    def set_device_label(self, label: str) -> None:
-        """Set the human-friendly device label reported with every event."""
-    def set_device_attribute(self, key: str, value: str) -> None:
-        """Attach an app-provided device attribute (stored under `device.custom`)."""
-    def set_batch_size(self, batch_size: int) -> None:
-        """Set the number of events buffered before a flush."""
-    def set_flush_interval_secs(self, secs: int) -> None:
-        """Set the background flush interval, in seconds."""
+    @classmethod
+    def xybrid(cls, api_key: str) -> "XybridObservabilityConfig":
+        """Traces to the Xybrid dashboard, authenticated with `api_key`."""
+    @classmethod
+    def otlp(cls, endpoint: str) -> "XybridObservabilityConfig":
+        """Traces, metrics, and logs to an OTLP/HTTP endpoint
+        (`http://host:4318`).
+        """
+    def set_traces_endpoint(self, endpoint: str) -> None:
+        """Override the full trace endpoint URL (staging, self-hosted)."""
+    def set_header(self, name: str, value: str) -> None:
+        """Add an HTTP header sent with every export request."""
+    def set_json_protocol(self, json: bool) -> None:
+        """Send OTLP JSON instead of protobuf."""
+    def set_service(self, name: str, version: str | None) -> None:
+        """Set the reported service (app) name and version."""
+    def set_resource_attribute(self, key: str, value: str) -> None:
+        """Attach a resource attribute (for example `deployment.environment`)."""
+    def set_metadata_only(self, metadata_only: bool) -> None:
+        """Record metadata only: no prompts, outputs, or tool payloads."""
+    def set_max_content_bytes(self, bytes: int) -> None:
+        """Maximum bytes per captured content attribute."""
+    def set_live_trace_interval_ms(self, ms: int) -> None:
+        """Minimum interval between traced frames of one live session."""
     def init(self) -> None:
-        """Start the process-global telemetry exporter from this config.
-
-        Consumes the config: subsequent setters no-op and a second `init` on the
-        same handle errors. Modeled as a method (not a free `telemetry_init`)
-        because boltffi 0.25.3 drops free functions that take a handle
-        parameter, but lowers a handle self-method fine (same reason the
-        generated `run` lives on `XybridModel`).
+        """Start exporting with this configuration, replacing any previous one.
+        Consumes the config: later setters no-op and a second `init` errors.
+        A method rather than a free function because boltffi drops free
+        functions that take a handle parameter.
 
         # Errors
-        Errors if this config was already consumed, or if telemetry is already
-        initialized without an intervening [`telemetry_shutdown`].
+        If this config was already consumed or is rejected.
         """
 
 
@@ -1053,12 +1088,13 @@ def set_thermal_state(state: XybridThermalState) -> None: ...
 def clear_thermal_state() -> None: ...
 def set_battery_level(percent: int) -> None: ...
 def clear_battery_level() -> None: ...
-def configure_runtime(api_key: str | None, gateway_url: str | None, ingest_url: str | None) -> None:
-    """One-stop SDK initialization: API key + gateway/ingest URL overrides in
-    one call. Delegates to [`facade::configure_runtime`]; blank strings are
-    treated as absent. This is the canonical init the Swift
-    `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
-    `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
+def configure_runtime(api_key: str | None, gateway_url: str | None) -> None:
+    """One-stop SDK initialization: API key + gateway URL override in one call.
+    Delegates to [`facade::configure_runtime`]; blank strings are treated as
+    absent. This is the canonical init the Swift
+    `Xybrid.initialize(apiKey:gatewayUrl:)` and Kotlin
+    `Xybrid.init(context, apiKey, gatewayUrl)` wrappers call. Observability
+    export is configured separately with [`XybridObservabilityConfig`].
     """
 def init_sdk_cache_dir(cache_dir: str) -> None: ...
 def cache_status() -> XybridCacheStatus:
@@ -1128,9 +1164,34 @@ def set_auto_release(enabled: bool) -> None:
     """
 def is_auto_release_enabled() -> bool:
     """Whether automatic model release is enabled process-wide."""
-def telemetry_default_endpoint() -> str:
-    """The SDK's default telemetry ingest endpoint (for display alongside a config)."""
-def telemetry_flush() -> None:
-    """Flush pending telemetry events. Safe before init / after shutdown."""
-def telemetry_shutdown() -> None:
-    """Shut down the telemetry exporter. Idempotent."""
+def observability_default_traces_endpoint() -> str:
+    """The default Xybrid OTLP trace endpoint."""
+def observability_stats() -> XybridObservabilityStats:
+    """Current delivery counters (all zero when observability is off)."""
+def observability_flush(timeout_ms: int) -> None:
+    """Export queued telemetry, waiting at most `timeout_ms`.
+
+    # Errors
+    When the bound is exceeded.
+    """
+def observability_shutdown(timeout_ms: int) -> None:
+    """Flush and stop exporting, waiting at most `timeout_ms`. Idempotent.
+
+    # Errors
+    When the bound is exceeded.
+    """
+def observability_record_feedback(target: XybridObservationRef, score: float | None, label: str | None, comment: str | None) -> bool:
+    """Record end-user feedback on a run (`XybridResult::observation`). Returns
+    `false` when no logs signal is configured (the Xybrid preset sends traces
+    only).
+
+    # Errors
+    When `target` is not a valid trace/span id pair.
+    """
+def observability_record_evaluation(target: XybridObservationRef, name: str, score_value: float | None, score_label: str | None, explanation: str | None) -> bool:
+    """Record an evaluation result on a run. Returns `false` when no logs signal
+    is configured.
+
+    # Errors
+    When `target` is not a valid trace/span id pair.
+    """

@@ -110,10 +110,11 @@ RECORD_STRUCT_RE = re.compile(
 # XybridToolResult), plus 2 for the live ASR session (XybridStreamingConfig /
 # XybridPartialResult), plus 2 for the pipeline result (XybridPipelineResult /
 # XybridStageResult), plus 2 for model cache management (XybridCacheEntry /
-# XybridCacheStatus).
+# XybridCacheStatus), plus 2 for observability (XybridObservationRef /
+# XybridObservabilityStats).
 # Bump this deliberately: the count is a tripwire for unreviewed boltffi output
 # drift, not a value to auto-sync.
-EXPECTED_RECORD_STRUCTS = 21
+EXPECTED_RECORD_STRUCTS = 23
 
 
 # --- Transform (g): Unsafe.SizeOf<T>() -> Marshal.SizeOf<T>(). boltffi's wire
@@ -159,8 +160,10 @@ CONTEXT_PARTIAL_REPLACEMENT = (
 )
 
 RESULT_FILE = "XybridResult.cs"
-RESULT_REASONING_TARGET = "string? ReasoningContent) {"
-RESULT_REASONING_REPLACEMENT = "string? ReasoningContent = null) {"
+RESULT_REASONING_TARGET = "string? ReasoningContent, XybridObservationRef? Observation) {"
+RESULT_REASONING_REPLACEMENT = (
+    "string? ReasoningContent = null, XybridObservationRef? Observation = null) {"
+)
 
 READER_REMAINING_TARGET = (
     "        internal WireReader(nint pointer, nuint length)\n"
@@ -189,7 +192,8 @@ RESULT_DECODER_TARGET = """        internal static XybridResult Decode(WireReade
                 (XybridExecutionTarget)reader.ReadI32(),
                 XybridInferenceMetrics.Decode(reader),
                 reader.ReadArray(reader => XybridToolCall.Decode(reader)),
-                reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadU8() == 0 ? default(XybridObservationRef?) : XybridObservationRef.Decode(reader)
             );
 """
 RESULT_DECODER_REPLACEMENT = """        internal static XybridResult Decode(WireReader reader)
@@ -204,6 +208,9 @@ RESULT_DECODER_REPLACEMENT = """        internal static XybridResult Decode(Wire
             string? reasoningContent = reader.HasRemaining
                 ? reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
                 : ReasoningFromMetadata(envelope);
+            XybridObservationRef? observation = reader.HasRemaining
+                ? reader.ReadU8() == 0 ? default(XybridObservationRef?) : XybridObservationRef.Decode(reader)
+                : null;
             return new XybridResult(
                 envelope,
                 outputType,
@@ -212,7 +219,8 @@ RESULT_DECODER_REPLACEMENT = """        internal static XybridResult Decode(Wire
                 executionTarget,
                 metrics,
                 toolCalls,
-                reasoningContent
+                reasoningContent,
+                observation
             );
         }
 
@@ -305,8 +313,8 @@ BOLT_CLASS_REPLACEMENT = "public static partial class XybridBolt"
 ENTRY_PARTIAL_TARGETS = {
     "XybridDownload.cs": "public sealed class XybridDownload : global::System.IDisposable",
     "XybridPipeline.cs": "public sealed class XybridPipeline : global::System.IDisposable",
-    "XybridTelemetryConfig.cs": (
-        "public sealed class XybridTelemetryConfig : global::System.IDisposable"
+    "XybridObservabilityConfig.cs": (
+        "public sealed class XybridObservabilityConfig : global::System.IDisposable"
     ),
 }
 

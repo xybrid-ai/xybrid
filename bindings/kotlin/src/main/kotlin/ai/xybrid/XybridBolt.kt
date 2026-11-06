@@ -978,15 +978,18 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_has_system(`receiver`: Long): Boolean
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_set_max_history_len(`receiver`: Long, len: Int): Unit
-    @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_telemetry_config(handle: Long): Unit
-    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_telemetry_config_new(api_key: java.nio.ByteBuffer, __boltffi_api_key_len: Int): Long
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_endpoint(`receiver`: Long, endpoint: java.nio.ByteBuffer, __boltffi_endpoint_len: Int): Unit
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_app_version(`receiver`: Long, version: java.nio.ByteBuffer, __boltffi_version_len: Int): Unit
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_device_label(`receiver`: Long, label: java.nio.ByteBuffer, __boltffi_label_len: Int): Unit
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_device_attribute(`receiver`: Long, key: java.nio.ByteBuffer, __boltffi_key_len: Int, value: java.nio.ByteBuffer, __boltffi_value_len: Int): Unit
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_batch_size(`receiver`: Long, batch_size: Int): Unit
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_flush_interval_secs(`receiver`: Long, secs: Int): Unit
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_init(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_observability_config(handle: Long): Unit
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_observability_config_xybrid(api_key: java.nio.ByteBuffer, __boltffi_api_key_len: Int): Long
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_observability_config_otlp(endpoint: java.nio.ByteBuffer, __boltffi_endpoint_len: Int): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_traces_endpoint(`receiver`: Long, endpoint: java.nio.ByteBuffer, __boltffi_endpoint_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_header(`receiver`: Long, name: java.nio.ByteBuffer, __boltffi_name_len: Int, value: java.nio.ByteBuffer, __boltffi_value_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_json_protocol(`receiver`: Long, json: Boolean): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_service(`receiver`: Long, name: java.nio.ByteBuffer, __boltffi_name_len: Int, version: java.nio.ByteBuffer, __boltffi_version_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_resource_attribute(`receiver`: Long, key: java.nio.ByteBuffer, __boltffi_key_len: Int, value: java.nio.ByteBuffer, __boltffi_value_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_metadata_only(`receiver`: Long, metadata_only: Boolean): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_max_content_bytes(`receiver`: Long, bytes: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_live_trace_interval_ms(`receiver`: Long, ms: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_init(`receiver`: Long): Unit
     @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_bundle(handle: Long): Unit
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_bundle_open(path: java.nio.ByteBuffer, __boltffi_path_len: Int): Long
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_bundle_model_id(`receiver`: Long): ByteArray?
@@ -1005,7 +1008,7 @@ private object Native {
     @JvmStatic external fun boltffi_function_xybrid_bolt_clear_thermal_state(): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_set_battery_level(percent: Byte): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_clear_battery_level(): Unit
-    @JvmStatic external fun boltffi_function_xybrid_bolt_configure_runtime(api_key: java.nio.ByteBuffer, __boltffi_api_key_len: Int, gateway_url: java.nio.ByteBuffer, __boltffi_gateway_url_len: Int, ingest_url: java.nio.ByteBuffer, __boltffi_ingest_url_len: Int): Unit
+    @JvmStatic external fun boltffi_function_xybrid_bolt_configure_runtime(api_key: java.nio.ByteBuffer, __boltffi_api_key_len: Int, gateway_url: java.nio.ByteBuffer, __boltffi_gateway_url_len: Int): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_init_sdk_cache_dir(cache_dir: java.nio.ByteBuffer, __boltffi_cache_dir_len: Int): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_cache_status(): ByteArray?
     @JvmStatic external fun boltffi_function_xybrid_bolt_cache_entries(): ByteArray?
@@ -1026,9 +1029,12 @@ private object Native {
     @JvmStatic external fun boltffi_function_xybrid_bolt_release_memory(): Int
     @JvmStatic external fun boltffi_function_xybrid_bolt_set_auto_release(enabled: Boolean): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_is_auto_release_enabled(): Boolean
-    @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_default_endpoint(): ByteArray?
-    @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_flush(): Unit
-    @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_shutdown(): Unit
+    @JvmStatic external fun boltffi_function_xybrid_bolt_observability_default_traces_endpoint(): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_observability_stats(): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_observability_flush(timeout_ms: Int): Unit
+    @JvmStatic external fun boltffi_function_xybrid_bolt_observability_shutdown(timeout_ms: Int): Unit
+    @JvmStatic external fun boltffi_function_xybrid_bolt_observability_record_feedback(target: java.nio.ByteBuffer, __boltffi_target_len: Int, score: java.nio.ByteBuffer, __boltffi_score_len: Int, label: java.nio.ByteBuffer, __boltffi_label_len: Int, comment: java.nio.ByteBuffer, __boltffi_comment_len: Int): Boolean
+    @JvmStatic external fun boltffi_function_xybrid_bolt_observability_record_evaluation(target: java.nio.ByteBuffer, __boltffi_target_len: Int, name: java.nio.ByteBuffer, __boltffi_name_len: Int, score_value: java.nio.ByteBuffer, __boltffi_score_value_len: Int, score_label: java.nio.ByteBuffer, __boltffi_score_label_len: Int, explanation: java.nio.ByteBuffer, __boltffi_explanation_len: Int): Boolean
     @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe(`receiver`: Long): Long
     @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_pop_batch(subscription: Long, max_count: Long): ByteArray?
     @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_wait(subscription: Long, timeout_milliseconds: Int): Int
@@ -1368,10 +1374,26 @@ data class XybridRunOptions(
     val abortOn: List<XybridAbortSignal>,
     val fallbackToCloud: Boolean,
     val maxGraceTokens: UInt,
-    val correlationId: String?
+    val correlationId: String?,
+    /**
+     * W3C `traceparent` of the caller's span: the run becomes its child.
+     */
+    val traceparent: String?,
+    /**
+     * W3C `tracestate` accompanying `traceparent`.
+     */
+    val tracestate: String?,
+    /**
+     * Caller-owned conversation id recorded on the run.
+     */
+    val conversationId: String?,
+    /**
+     * Skip the detailed trace for this run; metrics are still recorded.
+     */
+    val suppressTrace: Boolean
 ) {
     internal fun wireSize(): Int {
-        return 1 + (this.generationConfig?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0) + 4 + this.abortOn.sumOf { __boltffi_value_0 -> (4).toInt() } + 1 + 4 + 1 + (this.correlationId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0)
+        return 1 + (this.generationConfig?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0) + 4 + this.abortOn.sumOf { __boltffi_value_0 -> (4).toInt() } + 1 + 4 + 1 + (this.correlationId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.traceparent?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.tracestate?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.conversationId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1
     }
 
     internal fun writeTo(writer: WireWriter) {
@@ -1380,6 +1402,10 @@ data class XybridRunOptions(
         writer.writeBool(this.fallbackToCloud)
         writer.writeU32(this.maxGraceTokens)
         writer.writeOptionalValue(this.correlationId, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.traceparent, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.tracestate, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.conversationId, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeBool(this.suppressTrace)
     }
 
     internal fun toByteArray(): ByteArray {
@@ -1400,11 +1426,59 @@ data class XybridRunOptions(
                 reader.readSequence({ reader -> XybridAbortSignal.fromValue(reader.readI32()) }),
                 reader.readBool(),
                 reader.readU32(),
-                reader.readOptionalValue({ reader -> reader.readString() })
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readBool()
             )
         }
 
         internal fun fromByteArray(bytes: ByteArray): XybridRunOptions {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Trace and span ids (lowercase hex) of a recorded run, for linking
+ * feedback and evaluation results.
+ */
+data class XybridObservationRef(
+    val traceId: String,
+    val spanId: String
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.traceId) + 4 + Utf8Codec.maxBytes(this.spanId)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.traceId)
+        writer.writeString(this.spanId)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridObservationRef {
+            return XybridObservationRef(
+                reader.readString(),
+                reader.readString()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridObservationRef {
             val reader = WireReader(bytes)
             return fromReader(reader)
         }
@@ -1533,10 +1607,14 @@ data class XybridResult(
      * Model reasoning emitted separately from the final answer text.
      * Appended last because `#[data]` fields serialize in declaration order.
      */
-    val reasoningContent: String? = null
+    val reasoningContent: String? = null,
+    /**
+     * The run's trace reference, when it was traced.
+     */
+    val observation: XybridObservationRef? = null
 ) {
     internal fun wireSize(): Int {
-        return this.envelope.wireSize() + 4 + 4 + Utf8Codec.maxBytes(this.modelId) + 4 + 4 + this.metrics.wireSize() + 4 + this.toolCalls.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() } + 1 + (this.reasoningContent?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0)
+        return this.envelope.wireSize() + 4 + 4 + Utf8Codec.maxBytes(this.modelId) + 4 + 4 + this.metrics.wireSize() + 4 + this.toolCalls.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() } + 1 + (this.reasoningContent?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.observation?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
@@ -1548,6 +1626,7 @@ data class XybridResult(
         this.metrics.writeTo(writer)
         writer.writeSequence(this.toolCalls, this.toolCalls.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
         writer.writeOptionalValue(this.reasoningContent, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.observation, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -1575,6 +1654,11 @@ data class XybridResult(
             } else {
                 envelope.metadata.firstOrNull { it.key == "reasoning_content" }?.value
             }
+            val observation = if (reader.hasRemaining()) {
+                reader.readOptionalValue({ reader -> XybridObservationRef.fromReader(reader) })
+            } else {
+                null
+            }
             return XybridResult(
                 envelope,
                 outputType,
@@ -1583,7 +1667,8 @@ data class XybridResult(
                 executionTarget,
                 metrics,
                 toolCalls,
-                reasoningContent
+                reasoningContent,
+                observation
             )
         }
 
@@ -2242,6 +2327,55 @@ data class XybridPartialResult(
         }
 
         internal fun fromByteArray(bytes: ByteArray): XybridPartialResult {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Delivery counters of the observability pipeline.
+ */
+data class XybridObservabilityStats(
+    val enabled: Boolean,
+    val spansExported: ULong,
+    val spansDropped: ULong,
+    val exportFailures: ULong
+) {
+    internal fun wireSize(): Int {
+        return 1 + 8 + 8 + 8
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeBool(this.enabled)
+        writer.writeU64(this.spansExported)
+        writer.writeU64(this.spansDropped)
+        writer.writeU64(this.exportFailures)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridObservabilityStats {
+            return XybridObservabilityStats(
+                reader.readBool(),
+                reader.readU64(),
+                reader.readU64(),
+                reader.readU64()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridObservabilityStats {
             val reader = WireReader(bytes)
             return fromReader(reader)
         }
@@ -3732,87 +3866,116 @@ class XybridConversationContext internal constructor(internal val handle: Long) 
     }
 }
 
-class XybridTelemetryConfig internal constructor(internal val handle: Long) : AutoCloseable {
+class XybridObservabilityConfig internal constructor(internal val handle: Long) : AutoCloseable {
     private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
 
     override fun close() {
         if (__boltffi_closed.compareAndSet(false, true)) {
-            Native.boltffi_release_class_xybrid_bolt_xybrid_telemetry_config(handle)
+            Native.boltffi_release_class_xybrid_bolt_xybrid_observability_config(handle)
         }
     }
 
     internal fun boltffiHandle(): Long {
-        check(!__boltffi_closed.get()) { "XybridTelemetryConfig is closed" }
+        check(!__boltffi_closed.get()) { "XybridObservabilityConfig is closed" }
         return handle
     }
 
     /**
-     * A new config bound to the default ingest endpoint and the given API key.
+     * Traces to the Xybrid dashboard, authenticated with `api_key`.
      */
-    constructor(apiKey: String) : this(new(apiKey).handle)
+    constructor(apiKey: String) : this(xybrid(apiKey).handle)
 
     companion object {
         /**
-         * A new config bound to the default ingest endpoint and the given API key.
+         * Traces to the Xybrid dashboard, authenticated with `api_key`.
          */
-        fun new(apiKey: String): XybridTelemetryConfig {
+        fun xybrid(apiKey: String): XybridObservabilityConfig {
             val __boltffi_apiKey_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(apiKey))
             val __boltffi_apiKey_writer = __boltffi_apiKey_wire.writer
             __boltffi_apiKey_writer.writeString(apiKey)
             try {
-                return XybridTelemetryConfig(Native.boltffi_init_class_xybrid_bolt_xybrid_telemetry_config_new(__boltffi_apiKey_wire.directBuffer(), __boltffi_apiKey_wire.size()))
+                return XybridObservabilityConfig(Native.boltffi_init_class_xybrid_bolt_xybrid_observability_config_xybrid(__boltffi_apiKey_wire.directBuffer(), __boltffi_apiKey_wire.size()))
             } finally {
                 __boltffi_apiKey_wire.close()
+            }
+        }
+        /**
+         * Traces, metrics, and logs to an OTLP/HTTP endpoint
+         * (`http://host:4318`).
+         */
+        fun otlp(endpoint: String): XybridObservabilityConfig {
+            val __boltffi_endpoint_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(endpoint))
+            val __boltffi_endpoint_writer = __boltffi_endpoint_wire.writer
+            __boltffi_endpoint_writer.writeString(endpoint)
+            try {
+                return XybridObservabilityConfig(Native.boltffi_init_class_xybrid_bolt_xybrid_observability_config_otlp(__boltffi_endpoint_wire.directBuffer(), __boltffi_endpoint_wire.size()))
+            } finally {
+                __boltffi_endpoint_wire.close()
             }
         }
     }
 
     /**
-     * Override the ingest endpoint (self-hosted collector / non-prod).
+     * Override the full trace endpoint URL (staging, self-hosted).
      */
-    fun setEndpoint(endpoint: String) {
+    fun setTracesEndpoint(endpoint: String) {
         val __boltffi_endpoint_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(endpoint))
         val __boltffi_endpoint_writer = __boltffi_endpoint_wire.writer
         __boltffi_endpoint_writer.writeString(endpoint)
         try {
-            Native.boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_endpoint(this.boltffiHandle(), __boltffi_endpoint_wire.directBuffer(), __boltffi_endpoint_wire.size())
+            Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_traces_endpoint(this.boltffiHandle(), __boltffi_endpoint_wire.directBuffer(), __boltffi_endpoint_wire.size())
         } finally {
             __boltffi_endpoint_wire.close()
         }
     }
 
     /**
-     * Set the app version reported with every event.
+     * Add an HTTP header sent with every export request.
      */
-    fun setAppVersion(version: String) {
-        val __boltffi_version_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(version))
-        val __boltffi_version_writer = __boltffi_version_wire.writer
-        __boltffi_version_writer.writeString(version)
+    fun setHeader(name: String, value: String) {
+        val __boltffi_name_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(name))
+        val __boltffi_name_writer = __boltffi_name_wire.writer
+        __boltffi_name_writer.writeString(name)
+        val __boltffi_value_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(value))
+        val __boltffi_value_writer = __boltffi_value_wire.writer
+        __boltffi_value_writer.writeString(value)
         try {
-            Native.boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_app_version(this.boltffiHandle(), __boltffi_version_wire.directBuffer(), __boltffi_version_wire.size())
+            Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_header(this.boltffiHandle(), __boltffi_name_wire.directBuffer(), __boltffi_name_wire.size(), __boltffi_value_wire.directBuffer(), __boltffi_value_wire.size())
         } finally {
+            __boltffi_name_wire.close()
+            __boltffi_value_wire.close()
+        }
+    }
+
+    /**
+     * Send OTLP JSON instead of protobuf.
+     */
+    fun setJsonProtocol(json: Boolean) {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_json_protocol(this.boltffiHandle(), json)
+    }
+
+    /**
+     * Set the reported service (app) name and version.
+     */
+    fun setService(name: String, version: String?) {
+        val __boltffi_name_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(name))
+        val __boltffi_name_writer = __boltffi_name_wire.writer
+        __boltffi_name_writer.writeString(name)
+        val __boltffi_version_wire = WireWriterPool.acquire(1 + (version?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
+        val __boltffi_version_writer = __boltffi_version_wire.writer
+        __boltffi_version_writer.writeOptionalValue(version, { __boltffi_version_writer, __boltffi_value_0 -> __boltffi_version_writer.writeString(__boltffi_value_0) })
+        try {
+            Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_service(this.boltffiHandle(), __boltffi_name_wire.directBuffer(), __boltffi_name_wire.size(), __boltffi_version_wire.directBuffer(), __boltffi_version_wire.size())
+        } finally {
+            __boltffi_name_wire.close()
             __boltffi_version_wire.close()
         }
     }
 
     /**
-     * Set the human-friendly device label reported with every event.
+     * Attach a resource attribute (for example `deployment.environment`).
      */
-    fun setDeviceLabel(label: String) {
-        val __boltffi_label_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(label))
-        val __boltffi_label_writer = __boltffi_label_wire.writer
-        __boltffi_label_writer.writeString(label)
-        try {
-            Native.boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_device_label(this.boltffiHandle(), __boltffi_label_wire.directBuffer(), __boltffi_label_wire.size())
-        } finally {
-            __boltffi_label_wire.close()
-        }
-    }
-
-    /**
-     * Attach an app-provided device attribute (stored under `device.custom`).
-     */
-    fun setDeviceAttribute(key: String, value: String) {
+    fun setResourceAttribute(key: String, value: String) {
         val __boltffi_key_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(key))
         val __boltffi_key_writer = __boltffi_key_wire.writer
         __boltffi_key_writer.writeString(key)
@@ -3820,7 +3983,7 @@ class XybridTelemetryConfig internal constructor(internal val handle: Long) : Au
         val __boltffi_value_writer = __boltffi_value_wire.writer
         __boltffi_value_writer.writeString(value)
         try {
-            Native.boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_device_attribute(this.boltffiHandle(), __boltffi_key_wire.directBuffer(), __boltffi_key_wire.size(), __boltffi_value_wire.directBuffer(), __boltffi_value_wire.size())
+            Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_resource_attribute(this.boltffiHandle(), __boltffi_key_wire.directBuffer(), __boltffi_key_wire.size(), __boltffi_value_wire.directBuffer(), __boltffi_value_wire.size())
         } finally {
             __boltffi_key_wire.close()
             __boltffi_value_wire.close()
@@ -3828,34 +3991,37 @@ class XybridTelemetryConfig internal constructor(internal val handle: Long) : Au
     }
 
     /**
-     * Set the number of events buffered before a flush.
+     * Record metadata only: no prompts, outputs, or tool payloads.
      */
-    fun setBatchSize(batchSize: UInt) {
-        Native.boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_batch_size(this.boltffiHandle(), batchSize.toInt())
+    fun setMetadataOnly(metadataOnly: Boolean) {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_metadata_only(this.boltffiHandle(), metadataOnly)
     }
 
     /**
-     * Set the background flush interval, in seconds.
+     * Maximum bytes per captured content attribute.
      */
-    fun setFlushIntervalSecs(secs: UInt) {
-        Native.boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_flush_interval_secs(this.boltffiHandle(), secs.toInt())
+    fun setMaxContentBytes(bytes: UInt) {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_max_content_bytes(this.boltffiHandle(), bytes.toInt())
     }
 
     /**
-     * Start the process-global telemetry exporter from this config.
-     *
-     * Consumes the config: subsequent setters no-op and a second `init` on the
-     * same handle errors. Modeled as a method (not a free `telemetry_init`)
-     * because boltffi 0.25.3 drops free functions that take a handle
-     * parameter, but lowers a handle self-method fine (same reason the
-     * generated `run` lives on `XybridModel`).
+     * Minimum interval between traced frames of one live session.
+     */
+    fun setLiveTraceIntervalMs(ms: UInt) {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_live_trace_interval_ms(this.boltffiHandle(), ms.toInt())
+    }
+
+    /**
+     * Start exporting with this configuration, replacing any previous one.
+     * Consumes the config: later setters no-op and a second `init` errors.
+     * A method rather than a free function because boltffi drops free
+     * functions that take a handle parameter.
      *
      * # Errors
-     * Errors if this config was already consumed, or if telemetry is already
-     * initialized without an intervening [`telemetry_shutdown`].
+     * If this config was already consumed or is rejected.
      */
     fun `init`() {
-        try { Native.boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_init(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+        try { Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_init(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
     }
 }
 
@@ -4171,28 +4337,25 @@ fun clearBatteryLevel() {
 }
 
 /**
- * One-stop SDK initialization: API key + gateway/ingest URL overrides in
- * one call. Delegates to [`facade::configure_runtime`]; blank strings are
- * treated as absent. This is the canonical init the Swift
- * `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
- * `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
+ * One-stop SDK initialization: API key + gateway URL override in one call.
+ * Delegates to [`facade::configure_runtime`]; blank strings are treated as
+ * absent. This is the canonical init the Swift
+ * `Xybrid.initialize(apiKey:gatewayUrl:)` and Kotlin
+ * `Xybrid.init(context, apiKey, gatewayUrl)` wrappers call. Observability
+ * export is configured separately with [`XybridObservabilityConfig`].
  */
-fun configureRuntime(apiKey: String?, gatewayUrl: String?, ingestUrl: String?) {
+fun configureRuntime(apiKey: String?, gatewayUrl: String?) {
     val __boltffi_apiKey_wire = WireWriterPool.acquire(1 + (apiKey?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
     val __boltffi_apiKey_writer = __boltffi_apiKey_wire.writer
     __boltffi_apiKey_writer.writeOptionalValue(apiKey, { __boltffi_apiKey_writer, __boltffi_value_0 -> __boltffi_apiKey_writer.writeString(__boltffi_value_0) })
     val __boltffi_gatewayUrl_wire = WireWriterPool.acquire(1 + (gatewayUrl?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
     val __boltffi_gatewayUrl_writer = __boltffi_gatewayUrl_wire.writer
     __boltffi_gatewayUrl_writer.writeOptionalValue(gatewayUrl, { __boltffi_gatewayUrl_writer, __boltffi_value_0 -> __boltffi_gatewayUrl_writer.writeString(__boltffi_value_0) })
-    val __boltffi_ingestUrl_wire = WireWriterPool.acquire(1 + (ingestUrl?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
-    val __boltffi_ingestUrl_writer = __boltffi_ingestUrl_wire.writer
-    __boltffi_ingestUrl_writer.writeOptionalValue(ingestUrl, { __boltffi_ingestUrl_writer, __boltffi_value_0 -> __boltffi_ingestUrl_writer.writeString(__boltffi_value_0) })
     try {
-        Native.boltffi_function_xybrid_bolt_configure_runtime(__boltffi_apiKey_wire.directBuffer(), __boltffi_apiKey_wire.size(), __boltffi_gatewayUrl_wire.directBuffer(), __boltffi_gatewayUrl_wire.size(), __boltffi_ingestUrl_wire.directBuffer(), __boltffi_ingestUrl_wire.size())
+        Native.boltffi_function_xybrid_bolt_configure_runtime(__boltffi_apiKey_wire.directBuffer(), __boltffi_apiKey_wire.size(), __boltffi_gatewayUrl_wire.directBuffer(), __boltffi_gatewayUrl_wire.size())
     } finally {
         __boltffi_apiKey_wire.close()
         __boltffi_gatewayUrl_wire.close()
-        __boltffi_ingestUrl_wire.close()
     }
 }
 
@@ -4427,24 +4590,104 @@ fun isAutoReleaseEnabled(): Boolean {
 }
 
 /**
- * The SDK's default telemetry ingest endpoint (for display alongside a config).
+ * The default Xybrid OTLP trace endpoint.
  */
-fun telemetryDefaultEndpoint(): String {
-    val __boltffi_result = Native.boltffi_function_xybrid_bolt_telemetry_default_endpoint() ?: throw IllegalStateException("null buffer returned")
+fun observabilityDefaultTracesEndpoint(): String {
+    val __boltffi_result = Native.boltffi_function_xybrid_bolt_observability_default_traces_endpoint() ?: throw IllegalStateException("null buffer returned")
     val __boltffi_reader = WireReader(__boltffi_result)
     return __boltffi_reader.readString()
 }
 
 /**
- * Flush pending telemetry events. Safe before init / after shutdown.
+ * Current delivery counters (all zero when observability is off).
  */
-fun telemetryFlush() {
-    Native.boltffi_function_xybrid_bolt_telemetry_flush()
+fun observabilityStats(): XybridObservabilityStats {
+    val __boltffi_result = Native.boltffi_function_xybrid_bolt_observability_stats() ?: throw IllegalStateException("null buffer returned")
+    val __boltffi_reader = WireReader(__boltffi_result)
+    return XybridObservabilityStats.fromReader(__boltffi_reader)
 }
 
 /**
- * Shut down the telemetry exporter. Idempotent.
+ * Export queued telemetry, waiting at most `timeout_ms`.
+ *
+ * # Errors
+ * When the bound is exceeded.
  */
-fun telemetryShutdown() {
-    Native.boltffi_function_xybrid_bolt_telemetry_shutdown()
+fun observabilityFlush(timeoutMs: UInt) {
+    try { Native.boltffi_function_xybrid_bolt_observability_flush(timeoutMs.toInt()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+}
+
+/**
+ * Flush and stop exporting, waiting at most `timeout_ms`. Idempotent.
+ *
+ * # Errors
+ * When the bound is exceeded.
+ */
+fun observabilityShutdown(timeoutMs: UInt) {
+    try { Native.boltffi_function_xybrid_bolt_observability_shutdown(timeoutMs.toInt()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+}
+
+/**
+ * Record end-user feedback on a run (`XybridResult::observation`). Returns
+ * `false` when no logs signal is configured (the Xybrid preset sends traces
+ * only).
+ *
+ * # Errors
+ * When `target` is not a valid trace/span id pair.
+ */
+fun observabilityRecordFeedback(target: XybridObservationRef, score: Double?, label: String?, comment: String?): Boolean {
+    val __boltffi_target_wire = WireWriterPool.acquire(target.wireSize())
+    val __boltffi_target_writer = __boltffi_target_wire.writer
+    target.writeTo(__boltffi_target_writer)
+    val __boltffi_score_wire = WireWriterPool.acquire(if (score == null) 1 else 9)
+    val __boltffi_score_writer = __boltffi_score_wire.writer
+    __boltffi_score_writer.writeOptionalF64(score)
+    val __boltffi_label_wire = WireWriterPool.acquire(1 + (label?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
+    val __boltffi_label_writer = __boltffi_label_wire.writer
+    __boltffi_label_writer.writeOptionalValue(label, { __boltffi_label_writer, __boltffi_value_0 -> __boltffi_label_writer.writeString(__boltffi_value_0) })
+    val __boltffi_comment_wire = WireWriterPool.acquire(1 + (comment?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
+    val __boltffi_comment_writer = __boltffi_comment_wire.writer
+    __boltffi_comment_writer.writeOptionalValue(comment, { __boltffi_comment_writer, __boltffi_value_0 -> __boltffi_comment_writer.writeString(__boltffi_value_0) })
+    try {
+        return try { Native.boltffi_function_xybrid_bolt_observability_record_feedback(__boltffi_target_wire.directBuffer(), __boltffi_target_wire.size(), __boltffi_score_wire.directBuffer(), __boltffi_score_wire.size(), __boltffi_label_wire.directBuffer(), __boltffi_label_wire.size(), __boltffi_comment_wire.directBuffer(), __boltffi_comment_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+    } finally {
+        __boltffi_target_wire.close()
+        __boltffi_score_wire.close()
+        __boltffi_label_wire.close()
+        __boltffi_comment_wire.close()
+    }
+}
+
+/**
+ * Record an evaluation result on a run. Returns `false` when no logs signal
+ * is configured.
+ *
+ * # Errors
+ * When `target` is not a valid trace/span id pair.
+ */
+fun observabilityRecordEvaluation(target: XybridObservationRef, name: String, scoreValue: Double?, scoreLabel: String?, explanation: String?): Boolean {
+    val __boltffi_target_wire = WireWriterPool.acquire(target.wireSize())
+    val __boltffi_target_writer = __boltffi_target_wire.writer
+    target.writeTo(__boltffi_target_writer)
+    val __boltffi_name_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(name))
+    val __boltffi_name_writer = __boltffi_name_wire.writer
+    __boltffi_name_writer.writeString(name)
+    val __boltffi_scoreValue_wire = WireWriterPool.acquire(if (scoreValue == null) 1 else 9)
+    val __boltffi_scoreValue_writer = __boltffi_scoreValue_wire.writer
+    __boltffi_scoreValue_writer.writeOptionalF64(scoreValue)
+    val __boltffi_scoreLabel_wire = WireWriterPool.acquire(1 + (scoreLabel?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
+    val __boltffi_scoreLabel_writer = __boltffi_scoreLabel_wire.writer
+    __boltffi_scoreLabel_writer.writeOptionalValue(scoreLabel, { __boltffi_scoreLabel_writer, __boltffi_value_0 -> __boltffi_scoreLabel_writer.writeString(__boltffi_value_0) })
+    val __boltffi_explanation_wire = WireWriterPool.acquire(1 + (explanation?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
+    val __boltffi_explanation_writer = __boltffi_explanation_wire.writer
+    __boltffi_explanation_writer.writeOptionalValue(explanation, { __boltffi_explanation_writer, __boltffi_value_0 -> __boltffi_explanation_writer.writeString(__boltffi_value_0) })
+    try {
+        return try { Native.boltffi_function_xybrid_bolt_observability_record_evaluation(__boltffi_target_wire.directBuffer(), __boltffi_target_wire.size(), __boltffi_name_wire.directBuffer(), __boltffi_name_wire.size(), __boltffi_scoreValue_wire.directBuffer(), __boltffi_scoreValue_wire.size(), __boltffi_scoreLabel_wire.directBuffer(), __boltffi_scoreLabel_wire.size(), __boltffi_explanation_wire.directBuffer(), __boltffi_explanation_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+    } finally {
+        __boltffi_target_wire.close()
+        __boltffi_name_wire.close()
+        __boltffi_scoreValue_wire.close()
+        __boltffi_scoreLabel_wire.close()
+        __boltffi_explanation_wire.close()
+    }
 }
