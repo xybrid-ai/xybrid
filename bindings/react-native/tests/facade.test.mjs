@@ -14,6 +14,8 @@ const {
   GenerationConfigs,
   Model,
   ModelLoader,
+  Observability,
+  ObservabilityConfig,
   Pipeline,
   Xybrid,
   isRetryable,
@@ -269,7 +271,82 @@ test('live ASR sessions feed base64 Float32 and pull partials until null', async
   assert.deepEqual(calls.at(-1), ['dispose', 'session:1']);
 });
 
-test('pipelines load from any source and only forward correlationId', async () => {
+test('observability configs build natively only on init, with every setter applied', async () => {
+  const calls = installFakeNative();
+  const config = ObservabilityConfig.otlp('http://collector:4318')
+    .setTracesEndpoint('http://collector:4318/v1/traces')
+    .setHeader('x-tenant', 'a')
+    .setHeader('x-env', 'dev')
+    .setJsonProtocol(true)
+    .setService('demo', '1.2.3')
+    .setResourceAttribute('deployment.environment', 'dev')
+    .setMetadataOnly(true)
+    .setMaxContentBytes(4096)
+    .setLiveTraceIntervalMs(250);
+  assert.equal(calls.length, 0, 'setters stay in JS');
+  await config.init();
+  assert.deepEqual(calls, [
+    [
+      'observabilityInit',
+      {
+        kind: 'otlp',
+        endpoint: 'http://collector:4318',
+        tracesEndpoint: 'http://collector:4318/v1/traces',
+        headers: { 'x-tenant': 'a', 'x-env': 'dev' },
+        jsonProtocol: true,
+        service: { name: 'demo', version: '1.2.3' },
+        resourceAttributes: { 'deployment.environment': 'dev' },
+        metadataOnly: true,
+        maxContentBytes: 4096,
+        liveTraceIntervalMs: 250,
+      },
+    ],
+  ]);
+
+  await ObservabilityConfig.xybrid('key').setService('demo').init();
+  assert.deepEqual(calls[1], ['observabilityInit', { kind: 'xybrid', apiKey: 'key', service: { name: 'demo' } }]);
+});
+
+test('observability controls forward timeouts, refs and feedback', async () => {
+  const stats = { enabled: true, spansExported: 3, spansDropped: 0, exportFailures: 0 };
+  const calls = installFakeNative({
+    observabilityStats: () => stats,
+    observabilityDefaultTracesEndpoint: () => 'https://ingest.xybrid.dev/v1/traces',
+    observabilityRecordFeedback: () => true,
+    observabilityRecordEvaluation: () => false,
+  });
+  const ref = { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16) };
+  assert.deepEqual(await Observability.stats(), stats);
+  assert.equal(await Observability.defaultTracesEndpoint(), 'https://ingest.xybrid.dev/v1/traces');
+  await Observability.flush();
+  await Observability.shutdown(1000);
+  assert.equal(await Observability.recordFeedback(ref, { score: 1, comment: 'great' }), true);
+  assert.equal(await Observability.recordEvaluation(ref, { name: 'relevance', scoreValue: 0.8 }), false);
+  assert.deepEqual(calls.slice(2), [
+    ['observabilityFlush', 5000],
+    ['observabilityShutdown', 1000],
+    ['observabilityRecordFeedback', ref, { score: 1, comment: 'great' }],
+    ['observabilityRecordEvaluation', ref, { name: 'relevance', scoreValue: 0.8 }],
+  ]);
+});
+
+test('run results carry the observation and runs forward the trace fields', async () => {
+  const observation = { traceId: 'c'.repeat(32), spanId: 'd'.repeat(16) };
+  const calls = installFakeNative({ run: () => ({ ...wireResult(), observation }) });
+  const result = await new Model('model:1').run(Envelope.text('hi'), {
+    traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    conversationId: 'conv-1',
+    suppressTrace: false,
+  });
+  assert.deepEqual(result.observation, observation);
+  assert.deepEqual(calls[0][3], {
+    traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    conversationId: 'conv-1',
+    suppressTrace: false,
+  });
+});
+
+test('pipelines load from any source and forward only the trace fields', async () => {
   const calls = installFakeNative({
     loadPipeline: () => 'pipeline:1',
     runPipeline: () => ({
@@ -280,11 +357,15 @@ test('pipelines load from any source and only forward correlationId', async () =
     }),
   });
   const pipeline = await Pipeline.fromYaml('name: x');
-  const result = await pipeline.run(Envelope.text('go'), { correlationId: 'c' });
+  const result = await pipeline.run(Envelope.text('go'), {
+    correlationId: 'c',
+    tracestate: 's',
+    generationConfig: { maxTokens: 1 },
+  });
   await (await Pipeline.fromFile('file:///p.yaml')).run(Envelope.text('go'));
   assert.equal(result.text, 'done');
   assert.deepEqual(calls[0], ['loadPipeline', { kind: 'yaml', value: 'name: x' }]);
-  assert.deepEqual(calls[1][3], { correlationId: 'c' });
+  assert.deepEqual(calls[1][3], { correlationId: 'c', tracestate: 's' });
   assert.equal(calls[3][3], null);
 });
 

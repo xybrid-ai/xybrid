@@ -13,6 +13,8 @@ import ai.xybrid.XybridExecutionTarget
 import ai.xybrid.XybridGenerationConfig
 import ai.xybrid.XybridInferenceMetrics
 import ai.xybrid.XybridMetadataEntry
+import ai.xybrid.XybridObservabilityStats
+import ai.xybrid.XybridObservationRef
 import ai.xybrid.XybridOutputType
 import ai.xybrid.XybridPartialResult
 import ai.xybrid.XybridPipelineResult
@@ -283,6 +285,10 @@ internal object XybridCodec {
       fallbackToCloud = optionalBoolean(o, "fallbackToCloud", what) ?: false,
       maxGraceTokens = optionalUInt(o, "maxGraceTokens", what) ?: 0u,
       correlationId = optionalString(o, "correlationId", what),
+      traceparent = optionalString(o, "traceparent", what),
+      tracestate = optionalString(o, "tracestate", what),
+      conversationId = optionalString(o, "conversationId", what),
+      suppressTrace = optionalBoolean(o, "suppressTrace", what) ?: false,
     )
     return RunRequest(
       options = options,
@@ -340,7 +346,33 @@ internal object XybridCodec {
       "toolCalls" to result.toolCalls.map(::encodeToolCall),
     )
     result.reasoningContent?.let { out["reasoningContent"] = it }
+    result.observation?.let { out["observation"] = encodeObservationRef(it) }
     return out
+  }
+
+  // -- Observability --------------------------------------------------------------
+
+  fun encodeObservationRef(ref: XybridObservationRef): Map<String, Any?> =
+    mapOf("traceId" to ref.traceId, "spanId" to ref.spanId)
+
+  fun decodeObservationRef(any: Any?): XybridObservationRef {
+    val o = obj(any, "observation")
+    return XybridObservationRef(string(o, "traceId", "observation"), string(o, "spanId", "observation"))
+  }
+
+  fun encodeObservabilityStats(stats: XybridObservabilityStats): Map<String, Any?> = mapOf(
+    "enabled" to stats.enabled,
+    "spansExported" to stats.spansExported.toDouble(),
+    "spansDropped" to stats.spansDropped.toDouble(),
+    "exportFailures" to stats.exportFailures.toDouble(),
+  )
+
+  /** An object of strings, in key order; absent means empty. */
+  fun stringMap(o: JsObject, key: String, what: String): List<Pair<String, String>> {
+    val map = optionalObj(o, key, what) ?: return emptyList()
+    return map.keys.sorted().map { name ->
+      name to (map[name] as? String ?: throw BridgeException.InvalidArgument("$what: '$key.$name' must be a string"))
+    }
   }
 
   fun encodeStreamToken(token: XybridStreamToken): Map<String, Any?> {

@@ -15,6 +15,7 @@ import type {
   InferenceMetrics,
   InferenceResult,
   MessageRole,
+  ObservationRef,
   OutputType,
   PipelineResult,
   StageResult,
@@ -66,6 +67,10 @@ export interface WireRunOptions {
   fallbackToCloud?: boolean;
   maxGraceTokens?: number;
   correlationId?: string;
+  traceparent?: string;
+  tracestate?: string;
+  conversationId?: string;
+  suppressTrace?: boolean;
   /** Conversation-context handle. */
   context?: string;
   /** Cancellation-token handle. */
@@ -81,6 +86,7 @@ export interface WireResult {
   metrics: InferenceMetrics;
   toolCalls: ToolCall[];
   reasoningContent?: string;
+  observation?: ObservationRef | null;
 }
 
 export interface WireStreamToken {
@@ -273,7 +279,14 @@ export interface RunOptionsInput {
   fallbackToCloud?: boolean;
   maxGraceTokens?: number;
   correlationId?: string;
+  traceparent?: string;
+  tracestate?: string;
+  conversationId?: string;
+  suppressTrace?: boolean;
 }
+
+/** The per-call trace fields, which pipelines accept too. */
+const TRACE_KEYS = ['correlationId', 'traceparent', 'tracestate', 'conversationId', 'suppressTrace'] as const;
 
 /**
  * Build the wire options. Sampling parameters must sit under
@@ -301,10 +314,19 @@ export function toWireRunOptions(
   if (options?.abortOn) wire.abortOn = [...options.abortOn];
   if (options?.fallbackToCloud !== undefined) wire.fallbackToCloud = options.fallbackToCloud;
   if (options?.maxGraceTokens !== undefined) wire.maxGraceTokens = options.maxGraceTokens;
-  if (options?.correlationId !== undefined) wire.correlationId = options.correlationId;
+  if (options) Object.assign(wire, toWireTraceOptions(options));
   if (handles.context) wire.context = handles.context;
   if (handles.cancel) wire.cancel = handles.cancel;
   return Object.keys(wire).length > 0 ? wire : null;
+}
+
+/** Only the trace fields of `options` that are set. */
+export function toWireTraceOptions(options: RunOptionsInput): WireRunOptions {
+  const wire: WireRunOptions = {};
+  for (const key of TRACE_KEYS) {
+    if (options[key] !== undefined) (wire as Record<string, unknown>)[key] = options[key];
+  }
+  return wire;
 }
 
 export function toWireToolResult(result: ToolResult): {
@@ -351,6 +373,7 @@ export function fromWireResult(wire: WireResult): InferenceResult {
     latencyMs: wire.latencyMs,
     metrics: wire.metrics,
     executionTarget: wire.executionTarget,
+    ...(wire.observation ? { observation: wire.observation } : {}),
   };
 }
 

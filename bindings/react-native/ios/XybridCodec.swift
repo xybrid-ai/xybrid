@@ -277,7 +277,11 @@ enum XybridCodec {
       abortOn: try stringArray(object, "abortOn", what).map(decodeAbortSignal),
       fallbackToCloud: try optionalBool(object, "fallbackToCloud", what) ?? false,
       maxGraceTokens: try optionalUInt32(object, "maxGraceTokens", what) ?? 0,
-      correlationId: try optionalString(object, "correlationId", what)
+      correlationId: try optionalString(object, "correlationId", what),
+      traceparent: try optionalString(object, "traceparent", what),
+      tracestate: try optionalString(object, "tracestate", what),
+      conversationId: try optionalString(object, "conversationId", what),
+      suppressTrace: try optionalBool(object, "suppressTrace", what) ?? false
     )
     return RunRequest(
       options: options,
@@ -341,7 +345,40 @@ enum XybridCodec {
       "toolCalls": result.toolCalls.map(encodeToolCall),
     ]
     if let reasoning = result.reasoningContent { out["reasoningContent"] = reasoning }
+    if let observation = result.observation { out["observation"] = encodeObservationRef(observation) }
     return out
+  }
+
+  // MARK: - Observability
+
+  static func encodeObservationRef(_ ref: XybridObservationRef) -> JSObject {
+    ["traceId": ref.traceId, "spanId": ref.spanId]
+  }
+
+  static func decodeObservationRef(_ any: Any?) throws -> XybridObservationRef {
+    let object = try self.object(any, "observation")
+    return XybridObservationRef(traceId: try string(object, "traceId", "observation"),
+                                spanId: try string(object, "spanId", "observation"))
+  }
+
+  static func encodeObservabilityStats(_ stats: XybridObservabilityStats) -> JSObject {
+    [
+      "enabled": stats.enabled,
+      "spansExported": Double(stats.spansExported),
+      "spansDropped": Double(stats.spansDropped),
+      "exportFailures": Double(stats.exportFailures),
+    ]
+  }
+
+  /// An object of strings, in key order; absent means empty.
+  static func stringMap(_ object: JSObject, _ key: String, _ what: String) throws -> [(String, String)] {
+    guard let map = try optionalObject(object, key, "\(what): '\(key)'") else { return [] }
+    return try map.keys.sorted().map { name in
+      guard let value = map[name] as? String else {
+        throw BridgeError.invalidArgument("\(what): '\(key).\(name)' must be a string")
+      }
+      return (name, value)
+    }
   }
 
   static func encodeStreamToken(_ token: XybridStreamToken) -> JSObject {

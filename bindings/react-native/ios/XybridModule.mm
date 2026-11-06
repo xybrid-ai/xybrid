@@ -126,6 +126,55 @@ RCT_EXPORT_MODULE(RNXybrid)
   [_impl isAutoReleaseEnabled:resolve reject:reject];
 }
 
+- (void)observabilityInit:(NSDictionary *)config
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observabilityInit:config resolve:resolve reject:reject];
+}
+
+- (void)observabilityDefaultTracesEndpoint:(RCTPromiseResolveBlock)resolve
+                                    reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observabilityDefaultTracesEndpoint:resolve reject:reject];
+}
+
+- (void)observabilityStats:(RCTPromiseResolveBlock)resolve
+                    reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observabilityStats:resolve reject:reject];
+}
+
+- (void)observabilityFlush:(double)timeoutMs
+                   resolve:(RCTPromiseResolveBlock)resolve
+                    reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observabilityFlush:timeoutMs resolve:resolve reject:reject];
+}
+
+- (void)observabilityShutdown:(double)timeoutMs
+                      resolve:(RCTPromiseResolveBlock)resolve
+                       reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observabilityShutdown:timeoutMs resolve:resolve reject:reject];
+}
+
+- (void)observabilityRecordFeedback:(NSDictionary *)target
+                           feedback:(NSDictionary *)feedback
+                            resolve:(RCTPromiseResolveBlock)resolve
+                             reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observabilityRecordFeedback:target feedback:feedback resolve:resolve reject:reject];
+}
+
+- (void)observabilityRecordEvaluation:(NSDictionary *)target
+                           evaluation:(NSDictionary *)evaluation
+                              resolve:(RCTPromiseResolveBlock)resolve
+                               reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observabilityRecordEvaluation:target evaluation:evaluation resolve:resolve reject:reject];
+}
+
 - (void)setBatteryLevel:(double)percent
                 resolve:(RCTPromiseResolveBlock)resolve
                  reject:(RCTPromiseRejectBlock)reject
