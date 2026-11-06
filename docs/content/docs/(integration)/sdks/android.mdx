@@ -47,13 +47,45 @@ if (result.success) {
 
 ## Initialization
 
-Inference runs entirely on-device whether or not you authenticate. Pass an `apiKey` to light up the [dashboard](https://dashboard.xybrid.dev) — that single call starts the telemetry exporter, and your `model.run(...)` calls automatically emit execution traces:
+Inference runs entirely on-device whether or not you authenticate. The `apiKey` authenticates the cloud gateway; `gatewayUrl` overrides it:
 
 ```kotlin
 Xybrid.init(this, apiKey = BuildConfig.XYBRID_API_KEY)
 ```
 
-Without a key, telemetry is disabled and the first inference logs a one-shot hint pointing at the dashboard (suppress with the `XYBRID_QUIET=1` environment variable). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev). For a self-hosted dashboard, also pass `ingestUrl`.
+## Observability
+
+Trace export is off until you configure it — an API key alone does not enable it. Start it once, after `Xybrid.init`, with one of two presets:
+
+```kotlin
+import ai.xybrid.service
+import ai.xybrid.start
+
+// Traces to the Xybrid dashboard
+Xybrid.Observability.xybrid(BuildConfig.XYBRID_API_KEY)
+    .service("MyApp", version = BuildConfig.VERSION_NAME)
+    .start()
+
+// Traces, metrics, and logs to an OTLP/HTTP endpoint (e.g. an OpenTelemetry Collector)
+Xybrid.Observability.otlp("http://collector:4318").start()
+```
+
+Prompts and outputs are captured by default; add `.metadataOnly()` to export metadata only. `.tracesEndpoint(url)` points the dashboard preset at a self-hosted endpoint. Until export is configured, the first inference logs a one-shot hint (suppress with `XYBRID_QUIET=1`). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+
+Run options carry per-run trace context, and each result's `observation` identifies its trace:
+
+```kotlin
+val result = model.runAsync(
+    envelope,
+    runOptions(traceparent = parentTraceparent, conversationId = chatId),
+)
+result.observation?.let {
+    Xybrid.Observability.recordFeedback(it, score = 1.0, label = "thumbs_up")
+}
+Xybrid.Observability.flushAsync()
+```
+
+Feedback and evaluations (`recordEvaluation(target, name, ...)`) need a logs signal, so they return `false` with the dashboard preset, which sends traces only.
 
 ---
 

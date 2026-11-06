@@ -113,8 +113,8 @@ public class XybridExample : MonoBehaviour
 
     void Start()
     {
-        // Runs locally with no key. Pass an apiKey to light up the
-        // dashboard: XybridClient.Initialize(apiKey: "xy_live_...")
+        // Runs locally with no key. Observability export is opt-in;
+        // see "Observability" below.
         XybridClient.Initialize();
 
         // Load a model from the registry
@@ -392,7 +392,9 @@ bindings/unity/
 │   │   ├── Model.cs             # Model inference (Run, RunText, RunAudio)
 │   │   ├── ModelLoader.cs       # Model loading (FromRegistry, FromBundle)
 │   │   ├── Envelope.cs          # Input data (Text, Audio, Image, UserMessage)
-│   │   ├── InferenceResult.cs   # Output container (Text, Success, LatencyMs)
+│   │   ├── InferenceResult.cs   # Output container (Text, Success, LatencyMs, Observation)
+│   │   ├── ObservabilityConfig.cs # OpenTelemetry export presets + setters
+│   │   ├── ObservationOptions.cs  # Per-run trace context
 │   │   ├── ConversationContext.cs # Multi-turn LLM state
 │   │   ├── MessageRole.cs       # Role enum (System, User, Assistant)
 │   │   └── XybridException.cs   # Exception types
@@ -434,7 +436,47 @@ bindings/unity/
 
 See the [full API documentation](https://docs.xybrid.dev/en/docs/sdks/unity) for detailed reference.
 
-## Telemetry
+## Observability
+
+Model loads, runs, and pipelines can be exported as OpenTelemetry (OTLP/HTTP)
+traces. Export is off until you configure it; an API key passed to
+`XybridClient.Initialize` does not enable it.
+
+```csharp
+// Traces to the Xybrid dashboard...
+XybridClient.InitializeObservability(
+    ObservabilityConfig.Xybrid("xy_live_...")
+        .WithService(Application.productName, Application.version));
+
+// ...or traces, metrics, and logs to an OpenTelemetry Collector.
+XybridClient.InitializeObservability(
+    ObservabilityConfig.Otlp("http://localhost:4318")
+        .WithMetadataOnly());   // drop prompts and outputs
+
+// Parent a run to your own trace and tag the conversation.
+var result = model.Run(envelope, observation: new ObservationOptions
+{
+    Traceparent = traceparent,
+    ConversationId = "chat-42",
+});
+
+// Link end-user feedback to the run (needs a logs signal: Otlp preset).
+if (result.Observation is XybridBolt.XybridObservationRef run)
+    XybridClient.RecordFeedback(run, score: 1.0, label: "helpful");
+
+// On OnApplicationPause(true) / OnApplicationQuit:
+XybridClient.FlushObservability(TimeSpan.FromSeconds(2));
+XybridClient.ShutdownObservability();
+```
+
+Prompts and outputs are captured once export is enabled. Other setters:
+`WithTracesEndpoint`, `WithHeader`, `WithJsonProtocol`,
+`WithResourceAttribute`, `WithMaxContentBytes`, `WithLiveTraceInterval`.
+`XybridClient.ObservabilityStats()` reports delivery counters. See
+[examples/unity/Observability](../../examples/unity/Observability/README.md)
+for the mobile lifecycle wiring.
+
+## Registry Telemetry
 
 The Unity binding reports `binding=unity` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).
 

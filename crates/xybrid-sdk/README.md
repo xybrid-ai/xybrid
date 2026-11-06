@@ -10,26 +10,28 @@ The Xybrid SDK provides high-level abstractions and macros for building hybrid i
 
 Configure the SDK in one call with the `init()` builder. The SDK is
 **local-first** — inference runs on-device whether or not you authenticate.
-Passing an API key adds the **platform layer** on top of the same runtime: it
-authenticates the cloud gateway (for local→cloud routing) and starts the
-telemetry exporter so your runs show up on the dashboard. The local path is
-unchanged either way.
+Passing an API key authenticates the cloud gateway and registry. Observability
+export is enabled explicitly and uses OpenTelemetry:
 
 ```rust
-// Anonymous — local inference, telemetry disabled
+use xybrid_sdk::observability::ObservabilityConfig;
+
+// Anonymous local inference.
 xybrid_sdk::init().run();
 
-// Authenticated — telemetry exporter starts automatically
+// Cloud authentication with explicit trace export to Xybrid.
 xybrid_sdk::init()
     .api_key("xy_live_...")
+    .observability(ObservabilityConfig::xybrid("xy_live_..."))
     .run();
 ```
 
-Without a key, the first inference logs a one-shot hint pointing at the
-dashboard (suppress with `XYBRID_QUIET=1`). Get a free key at
-<https://dashboard.xybrid.dev>. The builder also takes `.cache_dir(...)`,
-`.gateway_url(...)`, `.ingest_url(...)` (self-hosted dashboards), and
-`.resource_telemetry(...)`.
+An API key alone does not enable export. Without observability configuration,
+the first inference logs a one-shot setup hint (suppress with `XYBRID_QUIET=1`).
+Get a key at <https://dashboard.xybrid.dev>. The builder also accepts
+`.cache_dir(...)`, `.gateway_url(...)`, and `.resource_telemetry(...)`.
+Use the fallible `init_observability` API below when startup errors must be
+handled by your application; the convenience builder logs configuration errors.
 
 ## Usage
 
@@ -78,63 +80,97 @@ Future versions of the macro will:
 - **`xybrid-sdk`**: Main SDK crate that re-exports `xybrid-core` and provides the macro
 - **`xybrid-macros`**: Procedural macro crate implementing `#[hybrid::route]`
 
-## Telemetry
+## Observability and local telemetry
 
-The SDK includes built-in telemetry that exports events to the Xybrid Platform.
-For the common case you don't need anything here — just pass `.api_key(...)` to
-[`init()`](#initialization) and the exporter starts with sensible defaults
-(production ingest URL, batching, retry). The APIs below are the **advanced**
-path for callers that need explicit control over batching, device context, or
-the exporter lifecycle.
+`xybrid_sdk::observability` records inference, attempts, model loads, workflows,
+and stages as OpenTelemetry spans, with optional metrics and log events.
+`TelemetryEvent` and `register_telemetry_sender` provide a separate in-process
+stream for host applications. Publishing a local event does not export it or
+create an OpenTelemetry span.
 
-### Advanced configuration
-
-```rust
-use xybrid_sdk::telemetry::{TelemetryConfig, HttpTelemetryExporter};
-
-// From environment variables
-let exporter = HttpTelemetryExporter::from_env()?;
-
-// Manual configuration
-let config = TelemetryConfig::new("https://ingest.xybrid.dev", "sk_live_xxx")
-    .with_batch_size(50)
-    .with_flush_interval(Duration::from_secs(5));
-let exporter = HttpTelemetryExporter::new(config);
-```
-
-### Device context
-
-Telemetry auto-detects chip family, RAM, OS and kernel versions, CPU architecture,
-and execution provider hints by default.
+### Explicit configuration and lifecycle
 
 ```rust
-use xybrid_sdk::telemetry::{HttpTelemetryExporter, TelemetryConfig};
+use std::time::Duration;
+use xybrid_sdk::observability::{
+    self, ContentPolicy, ObservabilityConfig, OtlpConfig,
+};
 
-let config = TelemetryConfig::new("https://ingest.xybrid.dev", "sk_live_xxx")
-    .with_app_version("mirage-vault/0.0.1")
-    .with_device_label("Sami's MacBook Pro")
-    .with_hardware_chip("Apple M4 Max");
+// Send traces, metrics and logs to your own OpenTelemetry Collector.
+observability::init_observability(
+    ObservabilityConfig::otlp(OtlpConfig::collector("http://localhost:4318"))
+        .service("my-app", Some("1.0.0".to_owned()))
+        .content(ContentPolicy::metadata_only()),
+)?;
 
-let exporter = HttpTelemetryExporter::new(config);
+// Load models and run inference through the SDK here.
+
+// Flush without stopping export; use shutdown when the application exits.
+observability::flush_observability(Duration::from_secs(5))?;
+observability::shutdown_observability(Duration::from_secs(5))?;
+Ok::<(), xybrid_sdk::SdkError>(())
 ```
 
-See [telemetry.md](../../docs/sdk/telemetry.md) for full privacy posture,
-opt-out, and wire format.
+For the Xybrid dashboard use `ObservabilityConfig::xybrid(api_key)`, which sends
+bearer-authenticated **traces only** to `https://ingest.xybrid.dev/v1/traces`.
+`ObservabilityConfig::xybrid_at(full_traces_endpoint, api_key)` selects a custom
+trace endpoint. Metrics and logs require their own configured destinations.
 
-### Environment Variables
+Initialization replaces the previous configuration and shuts down its packaged
+pipeline. Flush and shutdown have bounded timeouts; shutdown is idempotent and
+disables the observer. `observability::stats()` exposes delivery counters while
+a packaged pipeline is installed. With `ObservabilityConfig::with_observer`,
+the application owns provider flush/shutdown.
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `XYBRID_INGEST_URL` | Telemetry ingest endpoint | `https://ingest.xybrid.dev` |
-| `XYBRID_API_KEY` | API key for authentication | (required) |
-| `XYBRID_PLATFORM_URL` | Legacy fallback URL | - |
+Once observability is enabled, prompts and outputs are captured by default.
+Select `ContentPolicy::metadata_only()` to retain metadata without content, or
+configure a content policy with redaction. Per-run `ObservationOptions` on
+`RunOptions` sets a parent trace, conversation id or trace suppression; successful
+inference results expose an `observation_ref()` for feedback and evaluations.
 
-### Features
+### Resource attributes and delivery
 
-- **Circuit breaker**: Prevents hammering failing endpoints
-- **Automatic retry**: Exponential backoff with jitter
-- **Batching**: Configurable batch size and flush interval
-- **Background queue**: Retries failed events automatically
+The SDK attaches its version and binding to the OpenTelemetry resource. Device
+attributes include detected OS, architecture, chip and RAM by default; hostnames
+are never sent. Set `.device_attributes(false)` to disable hardware attributes.
+Use `.service(...)` for application identity and
+`OtlpConfig::with_resource_attribute(...)` for application-specific attributes.
+Resource sampling around runs is off by default; enable it with
+`.resource_telemetry(ResourceTelemetryMode::summary())`.
+
+`OtlpConfig::with_batch(...)` and `with_retry(...)` configure bounded queues,
+batches and retries. Export failures and dropped items are reflected in delivery
+counters.
+
+### Environment variables
+
+Environment configuration is explicit too:
+
+```rust
+use xybrid_sdk::observability::{self, ObservabilityConfig};
+
+if let Some(config) = ObservabilityConfig::from_env() {
+    observability::init_observability(config)?;
+}
+Ok::<(), xybrid_sdk::SdkError>(())
+```
+
+| Variable | Purpose |
+|----------|---------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector base URL; enables all three signals in `from_env()` |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | Full per-signal destination URLs |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` (default) or `http/json`; per-signal overrides are supported |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Export headers; per-signal overrides are supported |
+| `OTEL_SDK_DISABLED=true` | Makes `from_env()` return no configuration |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT` | Content-capture policy when no policy is explicitly provided |
+| `XYBRID_RESOURCE_TELEMETRY` | Overrides resource sampling: `off`, `boundary`, `summary[:ms]`, `debug_local[:ms]` |
+
+`XYBRID_API_KEY` configures authentication separately; it does not automatically
+start observability in the SDK. The examples explicitly use it as a dashboard
+export preset when no OTLP endpoint is configured.
+
+See [the observability crate](../xybrid-observability/README.md) for the signal
+contract, configuration, and provider ownership.
 
 ## Examples
 

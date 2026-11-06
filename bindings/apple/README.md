@@ -37,8 +37,8 @@ Then add the dependency to your target:
 ```swift
 import Xybrid
 
-// Once, at app launch. Runs locally as-is; pass a free key from
-// dashboard.xybrid.dev to see your inference traces: initialize(apiKey: "...")
+// Once, at app launch. Runs locally as-is; an `apiKey` authenticates the cloud
+// gateway but exports nothing (see "Observability" below).
 Xybrid.initialize()
 
 // Describing the source is cheap; load() is the explicit async boundary.
@@ -77,6 +77,42 @@ let result = try await model.runAsync(envelope: XybridEnvelope.text(
 if let answer = result.text { print("Answer:", answer) }
 if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
 ```
+
+### Observability (OpenTelemetry)
+
+Export is off until you start it; an API key alone does not enable it. Once
+started, each run is exported as an OpenTelemetry trace, with prompts and
+outputs included unless you call `.metadataOnly()`.
+
+```swift
+// Traces to the Xybrid dashboard (free key at dashboard.xybrid.dev)
+try Xybrid.Observability.xybrid(apiKey: key)
+    .service("MyApp", version: "1.4.0")
+    .start()
+
+// Or traces, metrics, and logs to any OTLP/HTTP endpoint (OpenTelemetry Collector)
+try Xybrid.Observability.otlp(endpoint: "http://collector:4318")
+    .metadataOnly()
+    .start()
+
+// Join your own trace, and tag the run with your conversation id
+let result = try await model.runAsync(
+    envelope: envelope,
+    options: .make(traceparent: currentTraceparent, conversationId: chatId)
+)
+
+// Link user feedback to the run's trace (needs the OTLP preset's logs signal)
+if let observation = result.observation {
+    try Xybrid.Observability.recordFeedback(for: observation, score: 1, label: "thumbs_up")
+}
+
+// Before the app suspends
+try await Xybrid.Observability.flushAsync()
+```
+
+`Xybrid.Observability.stats` reports spans exported, dropped, and failed.
+`suppressTrace: true` in `XybridRunOptions.make(...)` skips the detailed trace
+for one run.
 
 ### Available Types
 

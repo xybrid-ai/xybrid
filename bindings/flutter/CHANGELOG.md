@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+* Added explicit OpenTelemetry export configuration, exporter stats, bounded
+  flush/shutdown, and feedback/evaluation APIs through `XybridObservability`.
+  `RunOptions.observation` forwards W3C context, conversation IDs and trace
+  suppression on batch and token-streaming runs. Results and stream completion
+  tokens expose observation references; streamed tool calls remain single-use.
+  Normal/fallback streams retain one successful terminal token and its native
+  finish reason/index while attaching completion metrics and observation data.
+* Changed: an API key alone configures authentication without enabling export.
+  Pass `observability:` to `Xybrid.init` to opt in. Explicit legacy `ingestUrl`
+  and `initTelemetry` configure OTLP traces (bare URLs gain `/v1/traces`) and
+  replace previous configuration. Legacy receivers must accept OTLP. Native
+  legacy calls preserve metadata-only export (no prompt/output content).
+  Exporter state now reflects shutdown; invalid configurations can be corrected/retried.
+  Invalid resource modes/intervals fail before export is enabled or replaced.
+  Resource sampling remains independent of export. See README for migration.
+
+
 ## 0.17.0
 
 * Breaking: the plugin declares the platform minimums its precompiled libraries

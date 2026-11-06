@@ -14,7 +14,7 @@ Set the environment variable before any registry call is made:
 export XYBRID_TELEMETRY_OPTOUT=1
 ```
 
-When the variable is set to any of `1`, `true`, or `yes` (case-insensitive, surrounding whitespace ignored), the SDK omits `X-Xybrid-Client` from every registry request. The opt-out also disables the platform telemetry exporter described in [telemetry.md](../sdk/telemetry.md). It does not remove the `backends` or optional `os` query parameters from resolve requests, because they decide which file the registry serves; see [Resolve compatibility](#resolve-compatibility).
+When the variable is set to any of `1`, `true`, or `yes` (case-insensitive, surrounding whitespace ignored), the SDK omits `X-Xybrid-Client` from every registry request and omits automatically detected device attributes from observability resources. Explicit OpenTelemetry export is configured separately and is not disabled by this variable. Use `OTEL_SDK_DISABLED=true` for the CLI or environment-based OTLP configuration; applications using explicit configurations can omit initialization or call `shutdown_observability`. See the [SDK observability guide](../../crates/xybrid-sdk/README.md#observability-and-local-telemetry). The opt-out does not remove the `backends` or optional `os` query parameters from resolve requests, because they decide which file the registry serves; see [Resolve compatibility](#resolve-compatibility).
 
 The value is read once per process and cached, so changing it after the first registry call has no effect for that run.
 
