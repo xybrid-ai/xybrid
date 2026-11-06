@@ -137,7 +137,7 @@ xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.16.0
+  xybrid_flutter: ^0.17.0
 ```
 
 **モデルを実行:**
@@ -154,7 +154,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.16.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.17.0")
 }
 ```
 
@@ -176,7 +176,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.16.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.17.0")
 ]
 ```
 
@@ -225,7 +225,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.16.0"
+xybrid = "0.17.0"
 ```
 
 **モデルを実行:**
