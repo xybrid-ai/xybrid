@@ -1,0 +1,24 @@
+{
+  "effective_context": {
+    "causal_attention": false,
+    "has_memory": false,
+    "n_batch": 4096,
+    "n_ctx": 4096,
+    "n_ctx_seq": 4096,
+    "n_seq_max": 1,
+    "n_threads": 4,
+    "n_threads_batch": 4,
+    "n_ubatch": 4096,
+    "offload_devices": 0
+  },
+  "gate": "G2",
+  "model_cases_executed": 63,
+  "model_sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+  "profile": "lfm3-d1/text/v1",
+  "reference_collection_sha256": "faaa8ec6f56291e2887bf92a22ee4b536adecca7eb8d49bfe9bfcea2ecd6523f",
+  "schema_version": 1,
+  "scope": "matched native CPU configuration; no portable numerical tolerance",
+  "selected_logits_bit_equal": true,
+  "status": "passed",
+  "whole_prompt_passes_executed": 78
+}

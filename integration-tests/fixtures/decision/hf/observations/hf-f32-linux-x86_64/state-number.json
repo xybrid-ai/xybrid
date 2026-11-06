@@ -1,0 +1,85 @@
+{
+  "id": "state-number",
+  "split": "calibration",
+  "request_sha256": "8ac855502064fa9470830b4d0627c6655b54028e42ebadb2e5804807ae3d44f0",
+  "case_file_sha256": "9b0435b44f41e6b5faf6de5259aed20aeeb8e16d875bd412a023ec26ecc269e0",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "q",
+      "prompt": "<|startoftext|><|im_start|>user\n5\n\n\nQUESTION:\nIs the customer asking for a refund?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        29,
+        7,
+        63509,
+        833,
+        4439,
+        278,
+        13107,
+        13564,
+        374,
+        267,
+        52966,
+        64929,
+        57922,
+        415,
+        18171,
+        432,
+        794,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            11683,
+            12447
+          ],
+          [
+            2243,
+            4547,
+            19598
+          ]
+        ],
+        "raw_scores": [
+          "0x4049f3cf",
+          "0x41031f79",
+          "0x40a6d7f7",
+          "0x41293794",
+          "0x40573dc5"
+        ],
+        "log_probabilities": [
+          "0xc0f64406",
+          "0xc029fdf8",
+          "0xc0b465f7",
+          "0xbe8cec60",
+          "0xc0ef9f0c"
+        ]
+      },
+      "result": {
+        "answers": {
+          "q": {
+            "type": "noul",
+            "noul": 0.14427397222963506
+          }
+        },
+        "usage": {
+          "input_tokens": 30,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 25.660194907999994
+}

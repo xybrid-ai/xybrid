@@ -1,5 +1,13 @@
 # Upstream decision oracle (llama.cpp, LFM3 d1)
 
+The runtime conformance suite, independent HF collector and qualification
+boundaries are documented in
+[`decision-conformance.md`](../../../docs/development/decision-conformance.md).
+`check.py` verifies immutable input, observation and source digests; `hf_reference.py` collects actual
+pinned HF observations, and `compare_reference.py` reports differences without
+turning observed maxima into release tolerances. The upstream oracle below
+remains an independent executable, never linked into the production runtime.
+
 Writes the decision conformance cases,
 [`integration-tests/fixtures/decision/cases/`](../../../integration-tests/fixtures/decision),
 from llama.cpp's own decision code: the oracle side of gates G0 (exact
@@ -8,9 +16,12 @@ pinned upstream routines did with a SystemOne request, stage by stage, and the
 stock `llama-server` built from the same sources answers the same request as a
 black-box check. The fixture README defines the case format.
 
-Nothing here is part of xybrid's cargo or Bazel build, and nothing here is
-copied into xybrid: it exists so that xybrid's own implementation is compared
-with upstream, never with a port of it.
+The oracle/server decision implementation is not part of xybrid's production
+Cargo or Bazel build. For matched-build G2, `stage_native.py` copies only the
+underlying upstream engine archives into an explicit test prefix; Rust still
+compiles its own wrapper and Jinja bridge. Neither oracle nor server decision
+code is linked into that runtime. The stages are compared with upstream's
+implementation, never a second port of it.
 
 | File | Role |
 |---|---|
@@ -21,6 +32,7 @@ with upstream, never with a port of it.
 | `cases.py` | The case set: requests, coverage tags, xybrid's expectations, synthetic scores |
 | `oracle.py` | Runs the oracle and the server on every case; writes the case files and `oracle.json`, checks them, or collects observations for other case files and artifacts |
 | `build.sh`, `clean.sh` | Build; list or delete `build/` and `work/` |
+| `stage_native.py` | Validate and hash the official Release CPU engine archives, then stage/check an exact Linux x86_64 prefix for Rust G2 |
 | `NOTICE` | The llama.cpp material repeated here, and its MIT license |
 
 ## What runs, and what is the oracle's own code

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "score-2-levels",
+  "profile": "lfm3-d1/text/v1",
+  "title": "The fewest levels: 2",
+  "covers": [
+    "score-2-levels"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"How urgent is this?\", \"criteria\": [\"Not urgent\", \"Urgent\"]}}}",
+  "artifact": "d1-2b-hf"
+}

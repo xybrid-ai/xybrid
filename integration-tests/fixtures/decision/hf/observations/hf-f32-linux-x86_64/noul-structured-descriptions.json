@@ -1,0 +1,115 @@
+{
+  "id": "noul-structured-descriptions",
+  "split": "held_out",
+  "request_sha256": "81d41842d87a357da6789ada8493ce685a8b7c21bee81014dbabe3a0971b4ebf",
+  "case_file_sha256": "b036e9f3861899d716bd0af0074cbaf41058fa8cfa87fa82f01974c787d9cd0e",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "q",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nRefund?\nYes: {'refund': True, 'amount': 12.5}\nNo: ['no', 0]\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        532,
+        5304,
+        20,
+        8193,
+        52966,
+        734,
+        302,
+        876,
+        64673,
+        63509,
+        833,
+        9405,
+        855,
+        1283,
+        12447,
+        34,
+        33857,
+        1390,
+        855,
+        8091,
+        15779,
+        20,
+        951,
+        50008,
+        8091,
+        229,
+        873,
+        22,
+        29,
+        604,
+        4547,
+        34,
+        19655,
+        2243,
+        2372,
+        229,
+        24,
+        64197,
+        57922,
+        415,
+        18171,
+        432,
+        794,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            11683,
+            12447
+          ],
+          [
+            2243,
+            4547,
+            19598
+          ]
+        ],
+        "raw_scores": [
+          "0x40b07aa6",
+          "0x4129e0fb",
+          "0x406ca89a",
+          "0x4114fb99",
+          "0x40643b82"
+        ],
+        "log_probabilities": [
+          "0xc0b43994",
+          "0xbf079220",
+          "0xc0ee5fed",
+          "0xbfeaf420",
+          "0xc0f29679"
+        ]
+      },
+      "result": {
+        "answers": {
+          "q": {
+            "type": "noul",
+            "noul": 0.7264179540845559
+          }
+        },
+        "usage": {
+          "input_tokens": 60,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 14.687771629000054
+}

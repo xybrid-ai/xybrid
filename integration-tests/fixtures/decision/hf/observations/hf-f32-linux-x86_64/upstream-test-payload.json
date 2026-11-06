@@ -1,0 +1,321 @@
+{
+  "id": "upstream-test-payload",
+  "split": "held_out",
+  "request_sha256": "c2dc79f1729739d719298328adcb2b3b1eb6aca38c562f4b2533cf5b6d748fb0",
+  "case_file_sha256": "c0b2d0afe846bbca0b2f7a1d2eaf7de4a5743ca4d462b7c9a1f7a1620f9fcf9b",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "route",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice for my order last week and nobody has replied.\n\n\nQUESTION:\nWhich team should handle this?\n\nOptions:\nA payments and refunds\nB shipping\nC technical\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        374,
+        1226,
+        2064,
+        2158,
+        2524,
+        309,
+        31230,
+        677,
+        25222,
+        64673,
+        63509,
+        833,
+        28327,
+        2909,
+        1252,
+        9435,
+        532,
+        64929,
+        13314,
+        833,
+        41,
+        22824,
+        309,
+        52966,
+        91,
+        207,
+        42,
+        21542,
+        207,
+        43,
+        9516,
+        8,
+        57922,
+        415,
+        278,
+        7331,
+        4713,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            41,
+            334
+          ],
+          [
+            42,
+            378
+          ],
+          [
+            43,
+            340
+          ]
+        ],
+        "raw_scores": [
+          "0x414ae100",
+          "0x4101e846",
+          "0x40fa74d0",
+          "0x404b5902",
+          "0x410307c1",
+          "0x40683a55"
+        ],
+        "log_probabilities": [
+          "0xbd980b80",
+          "0xc09451a2",
+          "0xc09dad5e",
+          "0xc1193ad6",
+          "0xc09212ac",
+          "0xc1120282"
+        ]
+      },
+      "result": {
+        "answers": {
+          "route": {
+            "type": "choice",
+            "choice": "billing",
+            "confidence": 0.9421838290645198,
+            "probabilities": {
+              "billing": 0.9421838290645198,
+              "shipping": 0.02501272902261159,
+              "technical": 0.03280344191286863
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 54,
+          "output_tokens": 0
+        }
+      }
+    },
+    {
+      "question": "urgency",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice for my order last week and nobody has replied.\n\n\nQUESTION:\nHow urgent is this?\n\n0 can wait\n1 this week\n2 today\n3 right now\n\nReply with a single digit 0-3 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        374,
+        1226,
+        2064,
+        2158,
+        2524,
+        309,
+        31230,
+        677,
+        25222,
+        64673,
+        63509,
+        833,
+        3522,
+        30648,
+        355,
+        532,
+        64929,
+        24,
+        510,
+        6997,
+        207,
+        25,
+        532,
+        2524,
+        207,
+        26,
+        3507,
+        207,
+        27,
+        1583,
+        1665,
+        8,
+        57922,
+        415,
+        267,
+        2936,
+        19763,
+        229,
+        24,
+        21,
+        27,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            24
+          ],
+          [
+            25
+          ],
+          [
+            26
+          ],
+          [
+            27
+          ]
+        ],
+        "raw_scores": [
+          "0x4130472c",
+          "0x41283e84",
+          "0x41200a09",
+          "0x41142007"
+        ],
+        "log_probabilities": [
+          "0xbf585280",
+          "0xbfac6e80",
+          "0xbfee1258",
+          "0xc026b134"
+        ]
+      },
+      "result": {
+        "answers": {
+          "urgency": {
+            "type": "score",
+            "score": 1.0,
+            "confidence": 0.412630620605463,
+            "probabilities": {
+              "0": 0.412630620605463,
+              "1": 0.28347174765981903,
+              "2": 0.19318959234906058,
+              "3": 0.11070803938565744
+            },
+            "legend": {
+              "0": "can wait",
+              "1": "this week",
+              "2": "today",
+              "3": "right now"
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 58,
+          "output_tokens": 0
+        }
+      }
+    },
+    {
+      "question": "angry",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice for my order last week and nobody has replied.\n\n\nQUESTION:\nIs the customer angry?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        374,
+        1226,
+        2064,
+        2158,
+        2524,
+        309,
+        31230,
+        677,
+        25222,
+        64673,
+        63509,
+        833,
+        4439,
+        278,
+        13107,
+        23231,
+        64929,
+        57922,
+        415,
+        18171,
+        432,
+        794,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            11683,
+            12447
+          ],
+          [
+            2243,
+            4547,
+            19598
+          ]
+        ],
+        "raw_scores": [
+          "0x40a5fd31",
+          "0x411fc2da",
+          "0x409f3c63",
+          "0x4121e240",
+          "0x4061d78e"
+        ],
+        "log_probabilities": [
+          "0xc0b9db11",
+          "0xbf814a38",
+          "0xc0c09bdf",
+          "0xbf609e10",
+          "0xc0eeec7b"
+        ]
+      },
+      "result": {
+        "answers": {
+          "angry": {
+            "type": "noul",
+            "noul": 0.475221117751916
+          }
+        },
+        "usage": {
+          "input_tokens": 39,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 27.166832039999917
+}

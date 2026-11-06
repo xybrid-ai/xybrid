@@ -88,6 +88,45 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# Audited decision renderer closure from the same immutable upstream pin.
+# It links neither common/chat.cpp nor the server application. The model
+# runtime dependency remains selected by wrapper_cc (including Android DL).
+cc_library(
+    name = "llama_decision_jinja",
+    copts = ["-std=c++17"] + select({
+        "@rules_rs//rs/platforms/config:wasm32-unknown-emscripten": ["-fexceptions"],
+        "//conditions:default": [],
+    }),
+    srcs = [
+        "vendor/llama-cpp/common/jinja/lexer.cpp",
+        "vendor/llama-cpp/common/jinja/parser.cpp",
+        "vendor/llama-cpp/common/jinja/runtime.cpp",
+        "vendor/llama-cpp/common/jinja/value.cpp",
+        "vendor/llama-cpp/common/jinja/string.cpp",
+        "vendor/llama-cpp/common/json.cpp",
+        "vendor/llama-cpp/common/unicode.cpp",
+    ],
+    hdrs = glob([
+        "vendor/llama-cpp/common/jinja/*.h",
+        "vendor/llama-cpp/vendor/nlohmann/*.hpp",
+    ]) + [
+        "vendor/llama-cpp/common/json.h",
+        "vendor/llama-cpp/common/unicode.h",
+        "vendor/llama-cpp/ggml/include/ggml.h",
+        "vendor/llama-cpp/src/llama-ext.h",
+        "vendor/llama-cpp/src/llama-arch.h",
+    ],
+    # common/unicode.h and src/unicode.h expose different APIs. Keep common
+    # first for the Jinja sources, matching Cargo's audited source closure.
+    includes = [
+        "vendor/llama-cpp/common",
+        "vendor/llama-cpp/ggml/include",
+        "vendor/llama-cpp/src",
+        "vendor/llama-cpp/vendor",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 # The browser runtime uses the same pinned sources as //:llama. These sources
 # mirror ggml/src/{,ggml-cpu/}CMakeLists.txt and src/CMakeLists.txt. Keeping the
 # browser build in Bazel lets Emscripten's registered toolchain own compilation

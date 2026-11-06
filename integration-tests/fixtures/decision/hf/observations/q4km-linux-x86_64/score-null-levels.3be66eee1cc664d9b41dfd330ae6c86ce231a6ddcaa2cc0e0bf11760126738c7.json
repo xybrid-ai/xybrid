@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "id": "score-null-levels",
+  "source_file": "score-null-levels.json",
+  "case_file_sha256": "2229f45ca907df349d41231f3d915eaae9f0e4b8a8485ad885e529c144f9cf23",
+  "request_sha256": "3be66eee1cc664d9b41dfd330ae6c86ce231a6ddcaa2cc0e0bf11760126738c7",
+  "inputs_sha256": "77be0bd92a28f9abde8c4ec3b2731b840c1f6e1d0da069c063386eb42987b46a",
+  "inputs": {
+    "request_sha256": "3be66eee1cc664d9b41dfd330ae6c86ce231a6ddcaa2cc0e0bf11760126738c7",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "a47890cb2de4667f033c93d0fb9edb557c780758565abc981bb24428890cf871",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "score",
+          "keys": ["0", "1", "2"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nHow urgent is this?\n\n0 null\n1 Today\n2 null\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 3522, 30648, 355, 532, 64929, 24, 3495, 207, 25, 10767, 207, 26, 3495, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 26, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 50,
+          "select": [24, 25, 26]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x412e64e2", "0x411d3f38", "0x41263722"]
+      ],
+      "scores": [
+        ["0x412e64e2", "0x411d3f38", "0x41263722"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": null,
+            "1": "Today",
+            "2": null
+          },
+          "probabilities": {
+            "0": 0.46924501708290212,
+            "1": 0.21056543130090763,
+            "2": 0.32018955161619028
+          },
+          "confidence": 0.46924501708290212
+        }
+      },
+      "usage": {
+        "input_tokens": 51,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

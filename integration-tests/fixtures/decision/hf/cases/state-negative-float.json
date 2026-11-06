@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "state-negative-float",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A negative float state prints in Python repr",
+  "covers": [
+    "state-scalar",
+    "json-float"
+  ],
+  "request_text": "{\"state\": -2.5, \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "artifact": "d1-2b-hf"
+}

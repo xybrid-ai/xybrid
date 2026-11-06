@@ -68,6 +68,8 @@ pub(crate) mod ffi;
 #[cfg(feature = "bindings")]
 mod context;
 #[cfg(feature = "bindings")]
+mod decision;
+#[cfg(feature = "bindings")]
 mod generation;
 #[cfg(feature = "bindings")]
 mod log_control;
@@ -82,6 +84,11 @@ mod vision;
 
 #[cfg(feature = "bindings")]
 pub use context::{LlamaContext, LlamaSeqSnapshot};
+#[cfg(feature = "bindings")]
+pub use decision::{
+    DecisionContext, DecisionContextSettings, DecisionRenderer, VocabularyModel,
+    DECISION_CONTEXT_TOKENS, DECISION_RENDER_BYTES,
+};
 #[cfg(all(feature = "bindings", feature = "vision"))]
 pub use generation::generate_from_current_logits_streaming;
 #[cfg(feature = "bindings")]

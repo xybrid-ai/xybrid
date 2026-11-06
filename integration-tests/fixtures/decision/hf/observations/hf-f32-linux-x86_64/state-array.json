@@ -1,0 +1,119 @@
+{
+  "id": "state-array",
+  "split": "calibration",
+  "request_sha256": "5b7fdc86ddf2e7ff93d3a6279dfb8a34bfb26c5946de63977a08976f3f09fe6b",
+  "case_file_sha256": "52850d989698ec21cea8e645cf6a794ed682c64e1ccedfe63f81971b15acbb27",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "q",
+      "prompt": "<|startoftext|><|im_start|>user\n[\n  \"first message\",\n  2,\n  3.5,\n  true,\n  null,\n  {\n    \"k\": \"v\"\n  },\n  []\n]\n\n\nQUESTION:\nIs the customer asking for a refund?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        14200,
+        229,
+        496,
+        15557,
+        5781,
+        6107,
+        229,
+        229,
+        26,
+        920,
+        229,
+        229,
+        27,
+        22,
+        29,
+        920,
+        229,
+        2846,
+        920,
+        229,
+        3495,
+        920,
+        229,
+        827,
+        360,
+        496,
+        83,
+        6380,
+        496,
+        94,
+        1110,
+        229,
+        10016,
+        229,
+        34289,
+        88887,
+        63509,
+        833,
+        4439,
+        278,
+        13107,
+        13564,
+        374,
+        267,
+        52966,
+        64929,
+        57922,
+        415,
+        18171,
+        432,
+        794,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            11683,
+            12447
+          ],
+          [
+            2243,
+            4547,
+            19598
+          ]
+        ],
+        "raw_scores": [
+          "0x4078fd1f",
+          "0x41019dd9",
+          "0x40a7507d",
+          "0x41193df3",
+          "0x403de167"
+        ],
+        "log_probabilities": [
+          "0xc0c88d34",
+          "0xc003a024",
+          "0xc09dbb47",
+          "0xbf147ef0",
+          "0xc0e61b10"
+        ]
+      },
+      "result": {
+        "answers": {
+          "q": {
+            "type": "noul",
+            "noul": 0.24897726725139846
+          }
+        },
+        "usage": {
+          "input_tokens": 64,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 13.219573599000114
+}

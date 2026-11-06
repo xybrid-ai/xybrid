@@ -6,6 +6,7 @@ mod observability;
 
 use anyhow::{Context, Result};
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use xybrid_core::context::{DeviceMetrics, StageDescriptor, DEVICE_CLASS_SCHEMA_VERSION};
 use xybrid_core::device::ResourceMonitor;
@@ -30,6 +31,58 @@ use super::utils::{
     maybe_warn_thinking_budget, refuse_choice_scorer, save_wav_file, SPECULATIVE_CLOUD_STREAMS,
 };
 use crate::ui;
+
+/// Read at most the protocol transport limit plus one detection byte.
+fn read_decision_json(reader: impl Read) -> Result<String> {
+    let limit = xybrid_core::execution::decision::wire::MAX_RAW_BYTES;
+    let mut bytes = Vec::new();
+    reader
+        .take((limit as u64) + 1)
+        .read_to_end(&mut bytes)
+        .context("Failed to read decision request")?;
+    if bytes.len() > limit {
+        anyhow::bail!("decision request exceeds the transport byte limit");
+    }
+    String::from_utf8(bytes).map_err(|_| anyhow::anyhow!("decision request must be UTF-8"))
+}
+
+/// Run the shared Liquid decoder and SDK path; stdout contains exactly one JSON record.
+pub(crate) fn run_decisions(
+    loader: xybrid_sdk::ModelLoader,
+    request_path: &Path,
+    output_path: Option<&Path>,
+) -> Result<()> {
+    let json = if request_path == Path::new("-") {
+        read_decision_json(std::io::stdin().lock())?
+    } else {
+        read_decision_json(
+            fs::File::open(request_path).context("Failed to open decision request")?,
+        )?
+    };
+    // Validate before downloading/loading a model. Neither parser errors nor
+    // the request's optional `model` field can alter the selected model.
+    let request = xybrid_sdk::decode_decision_request(&json)?;
+    let model = loader.with_speculative_cloud(false).load()?;
+    let result = model.run(&Envelope::new(EnvelopeKind::DecisionRequest(request)), None)?;
+    let decisions = result
+        .decisions()
+        .ok_or_else(|| anyhow::anyhow!("decision model returned an incompatible output"))?;
+    let record = serde_json::json!({
+        "format": "xybrid.decision.v1",
+        "model_id": model.model_id(),
+        "decisions": decisions,
+        "tokens_in": result.tokens_in(),
+        "tokens_out": result.tokens_out(),
+    });
+    let mut bytes = serde_json::to_vec(&record)?;
+    bytes.push(b'\n');
+    if let Some(path) = output_path {
+        fs::write(path, bytes).context("Failed to write decision result")?;
+    } else {
+        std::io::stdout().lock().write_all(&bytes)?;
+    }
+    Ok(())
+}
 
 /// Run a pipeline from a configuration file.
 pub(crate) fn run_pipeline(
@@ -800,7 +853,10 @@ fn print_pipeline_results(
                 ui::kv("  Parts", &format!("{}", parts.len()));
             }
             // Pipelines refuse choice kinds before and after every stage.
-            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+            EnvelopeKind::ChoiceRequest(_)
+            | EnvelopeKind::ChoiceScores(_)
+            | EnvelopeKind::DecisionRequest(_)
+            | EnvelopeKind::Decisions(_) => {
                 anyhow::bail!("pipeline stages do not return choice requests or scores");
             }
         }
@@ -846,7 +902,10 @@ fn save_pipeline_output(
                 EnvelopeKind::MultiPart(_) => {
                     save_envelope_json(path, &last_result.output)?;
                 }
-                EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                EnvelopeKind::ChoiceRequest(_)
+                | EnvelopeKind::ChoiceScores(_)
+                | EnvelopeKind::DecisionRequest(_)
+                | EnvelopeKind::Decisions(_) => {
                     anyhow::bail!("pipeline stages do not return choice requests or scores");
                 }
             }
@@ -1707,7 +1766,9 @@ fn print_output_payload(output: &Envelope, output_path: Option<&PathBuf>) -> Res
             }
         }
         EnvelopeKind::ChoiceScores(scores) => print_choice_scores(scores, output_path)?,
-        EnvelopeKind::ChoiceRequest(_) => {
+        EnvelopeKind::ChoiceRequest(_)
+        | EnvelopeKind::DecisionRequest(_)
+        | EnvelopeKind::Decisions(_) => {
             anyhow::bail!("a run never returns a choice request");
         }
     }
@@ -1881,6 +1942,22 @@ fn emit_pipeline_complete_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decision_reader_bounds_transport_before_decoding_and_hides_utf8_content() {
+        let max = xybrid_core::execution::decision::wire::MAX_RAW_BYTES;
+        assert_eq!(read_decision_json(&b"{}"[..]).unwrap(), "{}");
+        assert_eq!(
+            read_decision_json(vec![b' '; max].as_slice())
+                .unwrap()
+                .len(),
+            max
+        );
+        let error = read_decision_json(vec![b' '; max + 1].as_slice()).unwrap_err();
+        assert!(error.to_string().contains("byte limit"));
+        let error = read_decision_json(&b"private-canary\xff"[..]).unwrap_err();
+        assert_eq!(error.to_string(), "decision request must be UTF-8");
+    }
     use std::sync::Arc;
 
     fn png_image(width: u32, height: u32) -> Vec<u8> {

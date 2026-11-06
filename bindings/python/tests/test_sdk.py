@@ -11,6 +11,7 @@ the failure lands here rather than in a user's code.
 from __future__ import annotations
 
 import inspect
+import threading
 
 import pytest
 
@@ -318,6 +319,74 @@ def test_model_supports_explicit_release() -> None:
     assert hasattr(xybrid.XybridModel, "__exit__")
 
 
+def test_active_native_borrow_delays_explicit_disposal() -> None:
+    started = threading.Event()
+    released = threading.Event()
+
+    class Handle:
+        def __init__(self):
+            self.alive = True
+
+        def __del__(self):
+            if self.alive:
+                self.alive = False
+                released.set()
+
+    xybrid._sugar._guard_handle_finalizer(Handle)
+    handle = Handle()
+
+    def dispose():
+        started.set()
+        handle.__del__()
+
+    with xybrid._sugar._handle_lifetime_lock(handle):
+        disposer = threading.Thread(target=dispose)
+        disposer.start()
+        assert started.wait(timeout=1)
+        assert not released.wait(timeout=0.02)
+        assert handle.alive
+    disposer.join(timeout=1)
+    assert released.is_set()
+    assert id(handle) not in xybrid._sugar._HANDLE_LOCKS
+
+
+def test_model_property_waiter_keeps_cancellation_live(monkeypatch) -> None:
+    model = xybrid.XybridModel.__new__(xybrid.XybridModel)
+    model._handle = None
+    token = xybrid.XybridCancellationToken()
+    getter_started = threading.Event()
+    native_getter_entered = threading.Event()
+    cancelled = threading.Event()
+    values = []
+
+    def native_getter(_handle):
+        native_getter_entered.set()
+        return True
+
+    monkeypatch.setattr(bolt._native, "_boltffi_xybrid_model_is_loaded", native_getter)
+
+    def read_property():
+        getter_started.set()
+        values.append(model.is_loaded)
+
+    def cancel():
+        token.cancel()
+        cancelled.set()
+
+    with xybrid._sugar._handle_lifetime_lock(model):
+        reader = threading.Thread(target=read_property)
+        reader.start()
+        assert getter_started.wait(timeout=1)
+        stopper = threading.Thread(target=cancel)
+        stopper.start()
+        assert cancelled.wait(timeout=1)
+        assert token.is_cancelled()
+        assert not native_getter_entered.is_set()
+    reader.join(timeout=1)
+    stopper.join(timeout=1)
+    assert values == [True]
+
+
 @pytest.mark.parametrize(
     "subscription",
     [bolt.XybridDownloadProgressSubscription, bolt.XybridModelDownloadProgressSubscription],
@@ -454,3 +523,40 @@ def test_every_generated_error_variant_maps_to_a_typed_exception() -> None:
     ]
 
     assert unmapped == [], f"add typed exceptions for {unmapped} in xybrid/_errors.py"
+
+
+def test_decision_json_factory_preserves_order_and_large_numbers():
+    raw = '{"state":{"z":9223372036854775807,"a":9007199254740993,"f":1.0,"zero":-0.0},"questions":{"q":{"type":"choice","instructions":"choose","criteria":{"a":null}}}}'
+    envelope = xybrid.XybridEnvelope.decision_request_json(raw)
+    assert isinstance(envelope.kind, bolt.XybridEnvelopeKindDecisionRequest)
+    assert envelope.kind.request.state.json_text == '{"z":9223372036854775807,"a":9007199254740993,"f":1.0,"zero":-0.0}'
+    assert envelope.kind.request.questions[0].kind.options[0].key == 'a'
+    typed = xybrid.XybridEnvelope.decision_request(envelope.kind.request)
+    assert typed.kind.request == envelope.kind.request
+
+
+def test_decision_result_accessor_preserves_double_precision_and_infinity():
+    probability = 0.5000000018693014
+    decisions = bolt.XybridDecisions(
+        answers=[bolt.XybridDecisionAnswer(question_id='q', distribution=[
+            bolt.XybridDecisionScore(key='0', raw_score=0.0, probability=1.0-probability, origin=bolt.XybridDecisionOrigin.CALLER),
+            bolt.XybridDecisionScore(key='1', raw_score=1e-8, probability=probability, origin=bolt.XybridDecisionOrigin.CALLER),
+            bolt.XybridDecisionScore(key='2', raw_score=float('-inf'), probability=0.0, origin=bolt.XybridDecisionOrigin.CALLER),
+        ], value=bolt.XybridDecisionValueScore(value=1.0, statistic=bolt.XybridScoreStatistic.MEDIAN), confidence=probability)],
+        passes=1, input_tokens=512,
+    )
+    envelope = bolt.XybridEnvelope(kind=bolt.XybridEnvelopeKindDecisions(decisions=decisions), metadata=[bolt.XybridMetadataEntry(key='tokens_in', value='512'), bolt.XybridMetadataEntry(key='tokens_out', value='0')])
+    result = _result(envelope, bolt.XybridOutputType.DECISIONS)
+    assert result.decisions is decisions
+    assert result.decisions.answers[0].distribution[1].probability == probability
+    assert result.decisions.answers[0].distribution[2].raw_score == float('-inf')
+    assert result.tokens_in == 512
+    assert result.tokens_out == 0
+    assert result.text is None
+
+
+def test_decision_json_factory_refuses_unsigned_overflow_without_content():
+    raw = '{"state":{"private":18446744073709551615},"questions":{"q":{"type":"choice","instructions":"private instructions","criteria":{"a":null}}}}'
+    with pytest.raises(xybrid.InferenceError) as raised:
+        xybrid.XybridEnvelope.decision_request_json(raw)
+    assert str(raised.value) == "Decision request refused: decision number_out_of_range"

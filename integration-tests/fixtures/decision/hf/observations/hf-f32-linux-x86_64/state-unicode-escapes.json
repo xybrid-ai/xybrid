@@ -1,0 +1,97 @@
+{
+  "id": "state-unicode-escapes",
+  "split": "held_out",
+  "request_sha256": "301b72874b40acbe1184864881e5cb4a36a1166d7b83d7e41dd7e0bad6a4c1ef",
+  "case_file_sha256": "09cfff2a31d36bf8c62454cbb4b884abf3ee526dc9701e6e17aa0ca099c66944",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "q",
+      "prompt": "<|startoftext|><|im_start|>user\ncafé 😀 中文 / \b\f\n\n\nQUESTION:\n{'café': '😀'}\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        75,
+        1804,
+        359,
+        53841,
+        231,
+        50525,
+        4966,
+        1406,
+        229,
+        205,
+        209,
+        7,
+        63509,
+        833,
+        67035,
+        75,
+        1804,
+        359,
+        8091,
+        951,
+        71778,
+        231,
+        35159,
+        8,
+        57922,
+        415,
+        18171,
+        432,
+        794,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            11683,
+            12447
+          ],
+          [
+            2243,
+            4547,
+            19598
+          ]
+        ],
+        "raw_scores": [
+          "0x40a1b689",
+          "0x40f3d921",
+          "0x4089d022",
+          "0x40e016cf",
+          "0x401d2894"
+        ],
+        "log_probabilities": [
+          "0xc08adb47",
+          "0xbfe2e2bc",
+          "0xc0a2c1ae",
+          "0xc018f602",
+          "0xc0ddfd86"
+        ]
+      },
+      "result": {
+        "answers": {
+          "q": {
+            "type": "noul",
+            "noul": 0.6134162998073613
+          }
+        },
+        "usage": {
+          "input_tokens": 42,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 12.687119790999986
+}

@@ -3,6 +3,7 @@
 import os
 import subprocess
 import tempfile
+import tarfile
 import unittest
 from pathlib import Path
 
@@ -63,6 +64,12 @@ class NativesPushTests(unittest.TestCase):
                 text=True,
                 timeout=30,
             )
+            if (slice_dir / "native.tar.gz").exists():
+                with tarfile.open(slice_dir / "native.tar.gz") as archive:
+                    self.assertEqual(
+                        (SCRIPT.parents[2] / "crates/llama-cpp-sys/NOTICE").read_bytes(),
+                        archive.extractfile("NOTICE").read(),
+                    )
             return (
                 result,
                 push_log.read_text() if push_log.exists() else None,

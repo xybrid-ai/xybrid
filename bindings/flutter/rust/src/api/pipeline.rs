@@ -4,7 +4,7 @@ use std::sync::Arc;
 use xybrid_sdk::{InferenceMetrics, Pipeline, PipelineExecutionResult, PipelineRef};
 
 use super::envelope::FfiEnvelope;
-use super::result::{ensure_ffi_payload, FfiExecutionTarget, FfiResult};
+use super::result::{ensure_ffi_payload, FfiExecutionTarget, FfiResult, FfiRunResult};
 
 fn final_execution_target(target: Option<&str>) -> FfiExecutionTarget {
     match target {
@@ -103,10 +103,10 @@ impl FfiPipeline {
     /// produces a TTS envelope and the LLM metrics are not surfaced here.
     /// Hoisting them from intermediate stages is a follow-up at the SDK
     /// layer.
-    pub fn run(&self, envelope: FfiEnvelope) -> Result<FfiResult, String> {
+    pub fn run(&self, envelope: FfiEnvelope) -> Result<FfiRunResult, String> {
         let input = envelope.into_envelope();
         let result = self.0.run(&input).map_err(|e| e.to_string())?;
-        pipeline_ffi_result(&result)
+        pipeline_ffi_result(&result).map(FfiRunResult::Legacy)
     }
 
     /// Get the pipeline name (if specified in YAML).

@@ -10,6 +10,7 @@ namespace XybridBolt
         Text = 0,
         Audio = 1,
         Embedding = 2,
-        Unknown = 3
+        Unknown = 3,
+        Decisions = 4
     }
 }

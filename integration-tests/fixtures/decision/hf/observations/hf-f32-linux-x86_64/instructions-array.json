@@ -1,0 +1,103 @@
+{
+  "id": "instructions-array",
+  "split": "calibration",
+  "request_sha256": "49a94a3e9fe4f5ecffff31ad57c90ffbbab4668e6ed0d60404b00d040ee733b9",
+  "case_file_sha256": "0cbc45f9392a69ff8d4cd632f4f082d79e7ca37770714b7b2d90674a60d388eb",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "q",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\n['Is', 'this', 'a refund', 1, None]\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        532,
+        5304,
+        20,
+        8193,
+        52966,
+        734,
+        302,
+        876,
+        64673,
+        63509,
+        833,
+        5370,
+        4439,
+        2372,
+        951,
+        2495,
+        2372,
+        951,
+        73,
+        52966,
+        2372,
+        229,
+        25,
+        20,
+        10856,
+        64197,
+        57922,
+        415,
+        18171,
+        432,
+        794,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            11683,
+            12447
+          ],
+          [
+            2243,
+            4547,
+            19598
+          ]
+        ],
+        "raw_scores": [
+          "0x40b6aa93",
+          "0x4109ce7d",
+          "0x40acfa1a",
+          "0x41084677",
+          "0x4051befa"
+        ],
+        "log_probabilities": [
+          "0xc08b7d9d",
+          "0xbfba2cd8",
+          "0xc0952e16",
+          "0xbfc66d08",
+          "0xc0d948b3"
+        ]
+      },
+      "result": {
+        "answers": {
+          "q": {
+            "type": "noul",
+            "noul": 0.5178832309303312
+          }
+        },
+        "usage": {
+          "input_tokens": 48,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 10.37045185299985
+}

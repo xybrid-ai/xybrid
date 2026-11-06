@@ -55,8 +55,10 @@ export interface RunOptions {
   context?: ConversationContext;
   /**
    * Stop button. Aborting stops generation at the next token boundary. A
-   * batch `run` is only cancellable before generation starts; use
-   * `runStreaming` when a mid-flight stop matters.
+   * generative batch `run` is only cancellable before generation starts; use
+   * `runStreaming` when a mid-flight stop matters. Decision runs additionally
+   * observe cancellation between passes and through the native abort callback,
+   * returning an error rather than partial answers.
    */
   signal?: AbortSignalLike;
 }

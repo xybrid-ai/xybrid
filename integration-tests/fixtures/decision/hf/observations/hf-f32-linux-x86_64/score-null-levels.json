@@ -1,0 +1,11 @@
+{
+  "id": "score-null-levels",
+  "split": "calibration",
+  "request_sha256": "3be66eee1cc664d9b41dfd330ae6c86ce231a6ddcaa2cc0e0bf11760126738c7",
+  "case_file_sha256": "2229f45ca907df349d41231f3d915eaae9f0e4b8a8485ad885e529c144f9cf23",
+  "status": "failed",
+  "passes": [],
+  "error_type": "ValueError",
+  "error": "a score's \"criteria\" lists 2 to 10 levels, lowest first: [\"Can wait\", \"Today\", \"Now\"]",
+  "duration_seconds": 6.612600009248126e-05
+}

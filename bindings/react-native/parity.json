@@ -1,6 +1,8 @@
 {
   "$comment": "Every export of crates/xybrid-bolt/src/lib.rs, mapped to the React Native surface. tests/parity.test.mjs fails when bolt gains an export, record field or error variant that is not listed here, so a new SDK capability cannot silently skip React Native. Map it (spec = the NativeXybrid.ts method that carries it, api = the public TS entry point; '#' marks an instance method), mark it native (used by the shims, no public API), or exclude it with a reason.",
   "functions": {
+    "decision_request_envelope": {"spec": "run", "api": "Envelope.decisionRequest"},
+    "decision_request_json_envelope": {"spec": "run", "api": "Envelope.decisionRequestJson"},
     "tool_results_envelope": { "spec": "toolResultsEnvelope", "api": "Envelope.toolResults" },
     "json_schema_to_gbnf": { "spec": "jsonSchemaToGbnf", "api": "jsonSchemaToGbnf" },
     "set_thermal_state": { "spec": "setThermalState", "api": "Xybrid.setThermalState" },
@@ -134,7 +136,19 @@
     "XybridBundle::extract": { "excluded": "See XybridBundle::open." }
   },
   "records": {
-    "XybridEnvelopeKind": { "ts": "EnvelopeKind", "variants": { "Text": "text", "Audio": "audio", "Embedding": "embedding", "Image": "image", "MultiPart": "multipart" } },
+    "XybridDecisionOption": {"ts": "DecisionOption", "fields": {"key": "key", "description": "description"}},
+    "XybridDecisionLevel": {"ts": "DecisionLevel", "fields": {"description": "description"}},
+    "XybridDecisionQuestion": {"ts": "DecisionQuestion", "fields": {"id": "id", "instructions": "instructions", "kind": "kind"}},
+    "XybridDecisionRequest": {"ts": "DecisionRequest", "fields": {"state": "state", "questions": "questions"}},
+    "XybridDecisionScore": {"ts": "DecisionScore", "fields": {"key": "key", "raw_score": "rawScore", "probability": "probability", "origin": "origin"}},
+    "XybridDecisionAnswer": {"ts": "DecisionAnswer", "fields": {"question_id": "questionId", "distribution": "distribution", "value": "value", "confidence": "confidence"}},
+    "XybridDecisions": {"ts": "Decisions", "fields": {"answers": "answers", "passes": "passes", "input_tokens": "inputTokens"}},
+    "XybridDecisionContent": {"ts": "DecisionContentKind", "variants": {"Text": "text", "Json": "json"}},
+    "XybridDecisionQuestionKind": {"ts": "DecisionQuestionType", "variants": {"Choice": "choice", "YesNo": "yesNo", "Score": "score"}},
+    "XybridDecisionOrigin": {"ts": "DecisionOrigin", "variants": {"Caller": "caller", "Fixed": "fixed"}},
+    "XybridScoreStatistic": {"ts": "ScoreStatistic", "variants": {"Median": "median", "Expected": "expected"}},
+    "XybridDecisionValue": {"ts": "DecisionValueKind", "variants": {"Choice": "choice", "YesNo": "yesNo", "Score": "score"}},
+    "XybridEnvelopeKind": {"ts": "EnvelopeKind", "variants": {"Text": "text", "Audio": "audio", "Embedding": "embedding", "Image": "image", "MultiPart": "multipart", "DecisionRequest": "decisionRequest", "Decisions": "decisions"}},
     "XybridMetadataEntry": { "native": "One key/value pair of Envelope.metadata (a Record<string, string>)." },
     "XybridEnvelope": { "ts": "Envelope", "fields": { "kind": "kind", "metadata": "metadata" } },
     "XybridMessageRole": { "ts": "MessageRole", "variants": { "System": "system", "User": "user", "Assistant": "assistant" } },
@@ -146,7 +160,7 @@
     "XybridRunOptions": { "ts": "RunOptions", "fields": { "generation_config": "generationConfig", "abort_on": "abortOn", "fallback_to_cloud": "fallbackToCloud", "max_grace_tokens": "maxGraceTokens", "correlation_id": "correlationId", "traceparent": "traceparent", "tracestate": "tracestate", "conversation_id": "conversationId", "suppress_trace": "suppressTrace" } },
     "XybridObservationRef": { "ts": "ObservationRef", "fields": { "trace_id": "traceId", "span_id": "spanId" } },
     "XybridObservabilityStats": { "ts": "ObservabilityStats", "fields": { "enabled": "enabled", "spans_exported": "spansExported", "spans_dropped": "spansDropped", "export_failures": "exportFailures" } },
-    "XybridOutputType": { "ts": "OutputType", "variants": { "Text": "text", "Audio": "audio", "Embedding": "embedding", "Unknown": "unknown" } },
+    "XybridOutputType": { "ts": "OutputType", "variants": { "Text": "text", "Audio": "audio", "Embedding": "embedding", "Unknown": "unknown", "Decisions": "decisions" } },
     "XybridStageLatency": { "ts": "StageLatency", "fields": { "stage_id": "stageId", "latency_ms": "latencyMs" } },
     "XybridInferenceMetrics": { "ts": "InferenceMetrics", "fields": { "total_ms": "totalMs", "ttft_ms": "ttftMs", "tokens_per_second": "tokensPerSecond", "prefill_tps": "prefillTps", "decode_tps": "decodeTps", "tokens_out": "tokensOut", "stage_latencies_ms": "stageLatenciesMs" } },
     "XybridResult": { "ts": "InferenceResult", "fields": { "envelope": "envelope", "output_type": "outputType", "model_id": "modelId", "latency_ms": "latencyMs", "execution_target": "executionTarget", "metrics": "metrics", "tool_calls": "toolCalls", "reasoning_content": "reasoningContent", "observation": "observation" } },

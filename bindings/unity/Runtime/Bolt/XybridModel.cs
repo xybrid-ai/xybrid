@@ -239,10 +239,6 @@ namespace XybridBolt
             finally
             {
                 NativeMethods.FreeBuf(boltffiResultBuffer);
-                // StreamNext can block for the full inter-token gap. Keep
-                // this wrapper alive so its finalizer cannot free the
-                // native handle while the call is still using it.
-                global::System.GC.KeepAlive(this);
             }
         }
 
@@ -487,7 +483,18 @@ namespace XybridBolt
                 }
             }
             byte[] optionsBytes = optionsWriter.ToArray();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, cancel.Handle, out FfiBuf boltffiResultBuffer);
+            FfiBuf boltffiErrorBuffer;
+            FfiBuf boltffiResultBuffer;
+            try
+            {
+                boltffiErrorBuffer = NativeMethods.NativeXybridModelRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, cancel.Handle, out boltffiResultBuffer);
+            }
+            finally
+            {
+                // Native code borrows these handles for the full call.
+                global::System.GC.KeepAlive(this);
+                global::System.GC.KeepAlive(cancel);
+            }
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try
@@ -564,7 +571,17 @@ namespace XybridBolt
         public global::XybridBolt.XybridStreamEvent StreamNext(ulong streamId)
         {
             ThrowIfDisposed();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelStreamNext(this.Handle, streamId, out FfiBuf boltffiResultBuffer);
+            FfiBuf boltffiErrorBuffer;
+            FfiBuf boltffiResultBuffer;
+            try
+            {
+                boltffiErrorBuffer = NativeMethods.NativeXybridModelStreamNext(this.Handle, streamId, out boltffiResultBuffer);
+            }
+            finally
+            {
+                // Native code borrows these handles for the full call.
+                global::System.GC.KeepAlive(this);
+            }
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try

@@ -32,6 +32,7 @@ pub mod ui;
 use commands::{CacheCommand, ModelsCommand, TelemetryCommand};
 
 use anyhow::{Context, Result};
+use clap::builder::TypedValueParser;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -223,6 +224,15 @@ enum Commands {
         )]
         choices: Vec<Choice>,
 
+        /// Liquid decision request JSON from a file, or - for stdin.
+        /// Prints the machine-readable xybrid.decision.v1 result format.
+        #[arg(long, value_name = "FILE-OR--", value_parser = clap::builder::PathBufValueParser::new().map(Box::new), conflicts_with_all = [
+            "config", "pipeline", "input_audio", "input_text", "input_images", "choices",
+            "voice", "max_tokens", "speculative_cloud", "show_reasoning", "policy",
+            "trace", "trace_export", "target", "model_file", "dry_run"
+        ])]
+        decision_request: Option<Box<PathBuf>>,
+
         /// Voice ID for TTS models (e.g., "af_bella", "am_adam")
         #[arg(long, value_name = "VOICE")]
         voice: Option<String>,
@@ -410,11 +420,18 @@ fn main() -> Result<()> {
     xybrid_sdk::set_binding("cli");
 
     let cli = Cli::parse();
+    let decision_output = matches!(
+        &cli.command,
+        Commands::Run {
+            decision_request: Some(_),
+            ..
+        }
+    );
 
     configure_log_level(&cli);
 
-    let observability_enabled = init_observability(&cli);
-    if observability_enabled && !cli.quiet {
+    let observability_enabled = init_observability(&cli, decision_output);
+    if observability_enabled && !cli.quiet && !decision_output {
         ui::hint("Observability enabled");
     }
 
@@ -422,8 +439,17 @@ fn main() -> Result<()> {
 
     if observability_enabled {
         if let Err(error) = xybrid_sdk::shutdown_observability(Duration::from_secs(5)) {
-            ui::warning(&format!("Observability shutdown failed: {error}"));
+            warn_cli(
+                decision_output,
+                &format!("Observability shutdown failed: {error}"),
+            );
         }
+    }
+
+    // Keep stdout a JSON-only channel even when telemetry is enabled or a
+    // registry load fails. Returning the error uses Rust's stderr reporting.
+    if decision_output {
+        return result;
     }
 
     if let Err(ref err) = result {
@@ -538,8 +564,18 @@ fn observability_config(cli: &Cli, environment: Option<OtlpConfig>) -> Option<Ot
     Some(config.with_service("xybrid-cli", Some(env!("CARGO_PKG_VERSION").into())))
 }
 
+/// Prints a warning without breaking a machine-readable stdout record:
+/// `run --decision-request` sends warnings to stderr, other commands use the UI.
+fn warn_cli(machine_output: bool, message: &str) {
+    if machine_output {
+        eprintln!("warning: {message}");
+    } else {
+        ui::warning(message);
+    }
+}
+
 /// Configure cloud authentication independently from optional observability.
-fn init_observability(cli: &Cli) -> bool {
+fn init_observability(cli: &Cli, machine_output: bool) -> bool {
     if let Some(ref api_key) = cli.api_key {
         // Make the key resolvable by the cloud gateway too (speculative cloud,
         // reactive fallback). `--api-key` may
@@ -558,7 +594,10 @@ fn init_observability(cli: &Cli) -> bool {
     match xybrid_sdk::init_observability(ObservabilityConfig::otlp(config)) {
         Ok(()) => true,
         Err(error) => {
-            ui::warning(&format!("Observability was not started: {error}"));
+            warn_cli(
+                machine_output,
+                &format!("Observability was not started: {error}"),
+            );
             false
         }
     }
@@ -629,6 +668,7 @@ fn run_command(cli: Cli) -> Result<()> {
             input_text,
             input_images,
             choices,
+            decision_request,
             voice,
             output,
             target,
@@ -638,6 +678,20 @@ fn run_command(cli: Cli) -> Result<()> {
             trace_export,
             speculative_cloud,
         } => {
+            if let Some(request_path) = decision_request {
+                let loader = if let Some(model_id) = model {
+                    xybrid_sdk::ModelLoader::from_registry(&model_id)
+                } else if let Some(dir) = directory {
+                    xybrid_sdk::ModelLoader::from_directory(dir)?
+                } else if let Some(path) = bundle {
+                    xybrid_sdk::ModelLoader::from_bundle(path)?
+                } else if let Some(repo) = huggingface {
+                    xybrid_sdk::ModelLoader::from_huggingface_parsed(&repo)
+                } else {
+                    anyhow::bail!("--decision-request requires --model, --directory, --bundle, or --huggingface");
+                };
+                return commands::run::run_decisions(loader, &request_path, output.as_deref());
+            }
             if trace {
                 tracing_viz::reset_collector();
             }
@@ -1078,6 +1132,35 @@ mod tests {
                 Choice::new("name", "fill Name: Jane Doe"),
             ]
         );
+    }
+
+    #[test]
+    fn decision_request_accepts_stdin_and_refuses_conflicting_shapes_before_load() {
+        let args = [
+            "xybrid",
+            "run",
+            "--directory",
+            "model",
+            "--decision-request",
+            "-",
+        ];
+        let parsed = Cli::try_parse_from(args).unwrap();
+        assert!(
+            matches!(parsed.command, Commands::Run { decision_request: Some(path), .. } if path.as_path() == std::path::Path::new("-"))
+        );
+        for conflict in [
+            vec!["--input-text", "secret"],
+            vec!["--input-audio", "audio.wav"],
+            vec!["--input-image", "image.png"],
+            vec!["--choice", "a=secret"],
+            vec!["--max-tokens", "1"],
+            vec!["--speculative-cloud"],
+            vec!["--show-reasoning"],
+            vec!["--target", "cloud"],
+            vec!["--trace"],
+        ] {
+            assert!(Cli::try_parse_from(args.into_iter().chain(conflict)).is_err());
+        }
     }
 
     #[test]

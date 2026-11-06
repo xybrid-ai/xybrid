@@ -39,6 +39,13 @@ use std::time::Duration;
 
 use xybrid_sdk as sdk;
 
+mod decision;
+pub use decision::{
+    DecisionAnswer, DecisionContent, DecisionLevel, DecisionOption, DecisionOrigin,
+    DecisionQuestion, DecisionQuestionKind, DecisionRequest, DecisionScore, DecisionValue,
+    Decisions, ScoreStatistic,
+};
+
 // ============================================================================
 // Error
 // ============================================================================
@@ -341,6 +348,14 @@ pub enum EnvelopeKind {
     MultiPart {
         parts: Vec<Envelope>,
     },
+    /// Ordered text/JSON decision input, appended for wire compatibility.
+    DecisionRequest {
+        request: DecisionRequest,
+    },
+    /// Typed atomic decision output, appended for wire compatibility.
+    Decisions {
+        decisions: Decisions,
+    },
 }
 
 /// Owned envelope carrying a typed payload plus string metadata.
@@ -355,6 +370,22 @@ pub struct Envelope {
 }
 
 impl Envelope {
+    /// Build an envelope from typed decision data after structural validation.
+    pub fn decision_request(request: DecisionRequest) -> Result<Self> {
+        let core = request.into_sdk()?;
+        Self::try_from_sdk(sdk::ir::Envelope::new(
+            sdk::ir::EnvelopeKind::DecisionRequest(core),
+        ))
+    }
+
+    /// Decode the bounded Liquid SystemOne JSON protocol without map round trips.
+    pub fn decision_request_json(json: String) -> Result<Self> {
+        let request = sdk::decode_decision_request(&json).map_err(Error::from)?;
+        Self::try_from_sdk(sdk::ir::Envelope::new(
+            sdk::ir::EnvelopeKind::DecisionRequest(request),
+        ))
+    }
+
     pub fn text(text: String) -> Self {
         Self {
             kind: EnvelopeKind::Text { text },
@@ -492,6 +523,12 @@ impl Envelope {
     pub fn into_sdk(self) -> Result<sdk::ir::Envelope> {
         let Envelope { kind, metadata } = self;
         let sdk_kind = match kind {
+            EnvelopeKind::DecisionRequest { request } => {
+                sdk::ir::EnvelopeKind::DecisionRequest(request.into_sdk()?)
+            }
+            EnvelopeKind::Decisions { decisions } => {
+                sdk::ir::EnvelopeKind::Decisions(decisions.into_sdk()?)
+            }
             EnvelopeKind::Text { text } => sdk::ir::EnvelopeKind::Text(text),
             EnvelopeKind::Audio { bytes } => sdk::ir::EnvelopeKind::Audio(bytes),
             EnvelopeKind::Embedding { values } => sdk::ir::EnvelopeKind::Embedding(values),
@@ -526,6 +563,12 @@ impl Envelope {
     /// [`MultiPart`]: EnvelopeKind::MultiPart
     pub fn try_from_sdk(env: sdk::ir::Envelope) -> Result<Self> {
         let kind = match env.kind {
+            sdk::ir::EnvelopeKind::DecisionRequest(request) => EnvelopeKind::DecisionRequest {
+                request: DecisionRequest::try_from_sdk(&request)?,
+            },
+            sdk::ir::EnvelopeKind::Decisions(decisions) => EnvelopeKind::Decisions {
+                decisions: Decisions::try_from_sdk(&decisions)?,
+            },
             sdk::ir::EnvelopeKind::Text(text) => EnvelopeKind::Text { text },
             sdk::ir::EnvelopeKind::Audio(bytes) => EnvelopeKind::Audio { bytes },
             sdk::ir::EnvelopeKind::Embedding(values) => EnvelopeKind::Embedding { values },
@@ -677,6 +720,9 @@ impl ConversationContextHandle {
     /// decode/validation (so multimodal history can't store a bad image).
     pub fn push(&self, envelope: Envelope) -> Result<()> {
         let sdk_env = envelope.into_sdk()?;
+        if sdk_env.kind.contains_decision_kind() {
+            return Err(unrepresentable("decisions in conversation history"));
+        }
         self.lock().push(sdk_env);
         Ok(())
     }
@@ -688,6 +734,9 @@ impl ConversationContextHandle {
     /// decode/validation.
     pub fn set_system(&self, envelope: Envelope) -> Result<()> {
         let sdk_env = envelope.into_sdk()?;
+        if sdk_env.kind.contains_decision_kind() {
+            return Err(unrepresentable("decisions in conversation history"));
+        }
         let mut guard = self.lock();
         let new_ctx = std::mem::take(&mut *guard).with_system(sdk_env);
         *guard = new_ctx;
@@ -1187,6 +1236,7 @@ pub enum OutputType {
     Audio,
     Embedding,
     Unknown,
+    Decisions,
 }
 
 impl OutputType {
@@ -1195,6 +1245,7 @@ impl OutputType {
             sdk::OutputType::Text => OutputType::Text,
             sdk::OutputType::Audio => OutputType::Audio,
             sdk::OutputType::Embedding => OutputType::Embedding,
+            sdk::OutputType::Decisions => OutputType::Decisions,
             // A scorer never loads through the facade (`ensure_ffi_supported`).
             sdk::OutputType::Unknown | sdk::OutputType::ChoiceScores => OutputType::Unknown,
         }
@@ -1207,7 +1258,10 @@ impl OutputType {
             EnvelopeKind::Text { .. } => OutputType::Text,
             EnvelopeKind::Audio { .. } => OutputType::Audio,
             EnvelopeKind::Embedding { .. } => OutputType::Embedding,
-            EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart { .. } => OutputType::Unknown,
+            EnvelopeKind::Decisions { .. } => OutputType::Decisions,
+            EnvelopeKind::Image { .. }
+            | EnvelopeKind::MultiPart { .. }
+            | EnvelopeKind::DecisionRequest { .. } => OutputType::Unknown,
         }
     }
 }
@@ -1542,6 +1596,30 @@ fn send_audio_event(
 }
 
 impl InferenceResult {
+    /// Typed decisions, without adding fields to the frozen result record.
+    pub fn decisions(&self) -> Option<&Decisions> {
+        match &self.envelope.kind {
+            EnvelopeKind::Decisions { decisions } => Some(decisions),
+            _ => None,
+        }
+    }
+
+    /// Total input token usage across decision passes, or ordinary model input.
+    pub fn tokens_in(&self) -> Option<u64> {
+        self.envelope
+            .metadata
+            .get("tokens_in")
+            .and_then(|value| value.parse().ok())
+    }
+
+    /// Generated output token usage (zero for decisions).
+    pub fn tokens_out(&self) -> Option<u64> {
+        self.envelope
+            .metadata
+            .get("tokens_out")
+            .and_then(|value| value.parse().ok())
+    }
+
     /// Convert an SDK result.
     ///
     /// # Errors
@@ -2262,6 +2340,15 @@ impl XybridModel {
 
     // -- Inference ----------------------------------------------------------
 
+    fn refuse_decision_surface(&self, envelope: &sdk::ir::Envelope, surface: &str) -> Result<()> {
+        if self.inner.is_decision_model() || envelope.kind.contains_decision_kind() {
+            return Err(Error::UnsupportedModelCapability {
+                message: format!("decision models do not support {surface}"),
+            });
+        }
+        Ok(())
+    }
+
     /// Run inference with no overrides.
     pub fn run(&self, envelope: Envelope) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
@@ -2277,7 +2364,18 @@ impl XybridModel {
         options: RunOptions,
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<InferenceResult> {
+        if cancel.as_ref().is_some_and(|token| token.is_cancelled()) {
+            return Err(Error::Cancelled {
+                message: "inference cancelled".into(),
+            });
+        }
         let env = envelope.into_sdk()?;
+        if options.generation_config.is_some() {
+            self.refuse_decision_surface(&env, "generation settings")?;
+        }
+        if options.fallback_to_cloud {
+            self.refuse_decision_surface(&env, "cloud fallback")?;
+        }
         let opts =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
         let result = self
@@ -2299,6 +2397,7 @@ impl XybridModel {
         generation_config: Option<GenerationConfig>,
     ) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
+        self.refuse_decision_surface(&env, "conversation history")?;
         let ctx = context.snapshot();
         let gc = generation_config
             .as_ref()
@@ -2327,6 +2426,7 @@ impl XybridModel {
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
+        self.refuse_decision_surface(&env, "conversation history")?;
         let ctx = context.snapshot();
         let opts =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
@@ -2365,6 +2465,7 @@ impl XybridModel {
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<Arc<StreamingSession>> {
         let envelope = envelope.into_sdk()?;
+        self.refuse_decision_surface(&envelope, "streaming")?;
         let options =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
         let model = self.inner.clone();
@@ -2448,6 +2549,7 @@ impl XybridModel {
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<Arc<StreamingSession>> {
         let envelope = envelope.into_sdk()?;
+        self.refuse_decision_surface(&envelope, "streaming")?;
         let ctx = context.snapshot();
         let options =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
@@ -3883,6 +3985,9 @@ mod tests {
 
     #[test]
     fn pipeline_construction_collapses_ref_and_exposes_stage_ids() {
+        static CACHE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| tempfile::tempdir().expect("create facade test cache"));
+        sdk::init_sdk_cache_dir(cache.path());
         let pipeline = Pipeline::from_yaml(
             r#"
 name: assistant

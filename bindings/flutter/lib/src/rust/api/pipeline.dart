@@ -54,7 +54,7 @@ abstract class FfiPipeline implements RustOpaqueInterface {
   /// produces a TTS envelope and the LLM metrics are not surfaced here.
   /// Hoisting them from intermediate stages is a follow-up at the SDK
   /// layer.
-  Future<FfiResult> run({required FfiEnvelope envelope});
+  Future<FfiRunResult> run({required FfiEnvelope envelope});
 
   /// Get the number of stages in the pipeline.
   BigInt stageCount();

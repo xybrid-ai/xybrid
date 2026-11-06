@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "choice-falsy-descriptions",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Every falsy description (empty string, false, 0, 0.0, [], {}) prints the key; truthy ones print themselves",
+  "covers": [
+    "description-falsy",
+    "description-structured"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"empty_string\": \"\", \"false_value\": false, \"zero\": 0, \"zero_float\": 0.0, \"empty_list\": [], \"empty_object\": {}, \"null_value\": null, \"truthy\": \"kept\", \"true_value\": true, \"space\": \" \"}}}}",
+  "artifact": "d1-2b-hf"
+}

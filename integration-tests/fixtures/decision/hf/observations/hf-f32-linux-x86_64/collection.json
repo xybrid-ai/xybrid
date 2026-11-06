@@ -1,0 +1,385 @@
+{
+  "schema_version": 1,
+  "status": "incomplete",
+  "purpose": "independent observations; not numerical promotion thresholds",
+  "profile": "lfm3-d1/text/v1",
+  "repository": "LiquidAI/d1-2B",
+  "revision": "10e7671d44e4b37700020b1eed3f594c5f2af0b4",
+  "assets_manifest_sha256": "cd32d20b562ab576a95b84880f37897308335ea501db5f78fce2fb1cb67d9208",
+  "corpus_manifest_sha256": "726f9d3debc652a44f17bfac0ef32f4057c48bb4a14961e36afffdb9880a750c",
+  "collector_sha256": "da301b770aa0f2793c57a2d22e28bf796241027c2610289220688572b87519cc",
+  "requirements_sha256": "67b944ec0bfa4281fd0466ba968889b5b389874ed5390be7cb6891cf387bef7e",
+  "environment": {
+    "annotated-doc": "0.0.5",
+    "anyio": "4.16.0",
+    "click": "8.5.1",
+    "filelock": "4.2.9",
+    "fsspec": "2026.9.0",
+    "h11": "0.16.0",
+    "hf-xet": "1.8.0",
+    "httpcore2": "2.16.0",
+    "httpx2": "2.16.0",
+    "huggingface-hub": "2.4.0",
+    "idna": "3.20",
+    "jinja2": "3.1.6",
+    "markdown-it-py": "4.2.0",
+    "markupsafe": "3.0.4",
+    "mdurl": "0.1.2",
+    "mpmath": "1.3.0",
+    "networkx": "3.7",
+    "numpy": "2.5.4",
+    "packaging": "26.3",
+    "pillow": "13.0.0",
+    "pygments": "2.21.0",
+    "pyyaml": "6.0.3",
+    "regex": "2026.9.29",
+    "rich": "15.0.0",
+    "safetensors": "0.8.0",
+    "setuptools": "84.2.1",
+    "shellingham": "1.5.4",
+    "sympy": "1.14.0",
+    "tokenizers": "0.23.3",
+    "torch": "2.14.0+cpu",
+    "torchvision": "0.29.0+cpu",
+    "tqdm": "4.70.1",
+    "transformers": "5.19.0",
+    "truststore": "0.10.5",
+    "typer": "0.28.0",
+    "typing-extensions": "4.16.0"
+  },
+  "python": "3.12.14",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "torch_config": "PyTorch built with:\n  - GCC 13.3\n  - C++ Version: 202002\n  - Intel(R) oneAPI Math Kernel Library Version 2024.2-Product Build 20240605 for Intel(R) 64 architecture applications\n  - Intel(R) MKL-DNN v3.12.0 (Git Hash 80afa71049cd69a3df32adcccb623b12cd7baa22)\n  - OpenMP 201511 (a.k.a. OpenMP 4.5)\n  - LAPACK is enabled (usually provided by MKL)\n  - NNPACK is enabled\n  - CPU capability usage: AVX512\n  - Build settings: BLAS_INFO=mkl, BUILD_TYPE=Release, COMMIT_SHA=08187d9e0fba026dc8217405802ab5381dc88d90, CUDA_FLAGS= -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS -Xfatbin -compress-all  -Wno-deprecated-gpu-targets --expt-extended-lambda -DCUB_WRAPPED_NAMESPACE=at_cuda_detail -DDISABLE_CUSPARSE_DEPRECATED -DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -DC10_NODEPRECATED, CXX_COMPILER=/opt/rh/gcc-toolset-13/root/usr/bin/c++, CXX_FLAGS= -fvisibility-inlines-hidden -DUSE_PTHREADPOOL -DNDEBUG -DUSE_KINETO -DUSE_FBGEMM -DUSE_PYTORCH_QNNPACK -DSYMBOLICATE_MOBILE_DEBUG_HANDLE -O2 -fPIC -DC10_NODEPRECATED -Wall -Wextra -Werror=return-type -Werror=non-virtual-dtor -Werror=range-loop-construct -Werror=bool-operation -Wnarrowing -Wno-missing-field-initializers -Wno-unknown-pragmas -Wno-unused-parameter -Wno-strict-overflow -Wno-strict-aliasing -Wno-stringop-overflow -Wsuggest-override -Wno-psabi -Wno-error=old-style-cast -faligned-new -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -Werror=format -Wno-dangling-reference -Wno-error=dangling-reference -Wno-stringop-overflow, LAPACK_INFO=mkl, PERF_WITH_AVX=1, PERF_WITH_AVX2=1, TORCH_VERSION=2.14.0, USE_CUDA=0, USE_CUDNN=OFF, USE_CUSPARSELT=OFF, USE_GFLAGS=OFF, USE_GLOG=OFF, USE_GLOO=ON, USE_HIPSPARSELT=OFF, USE_MKL=ON, USE_MKLDNN=ON, USE_MPI=OFF, USE_NCCL=OFF, USE_NNPACK=ON, USE_OPENMP=ON, USE_ROCM=OFF, USE_ROCM_KERNEL_ASSERT=OFF, USE_XCCL=OFF, USE_XPU=OFF, \n",
+  "settings": {
+    "dtype": "float32",
+    "device": "cpu",
+    "threads": 4,
+    "interop_threads": 4,
+    "attention": "set",
+    "set_size": 1,
+    "batch_rows": 1,
+    "compiled": false
+  },
+  "counts": {
+    "selected": 63,
+    "executed": 63,
+    "failed": 5
+  },
+  "cases": [
+    {
+      "id": "state-number",
+      "status": "complete",
+      "sha256": "7a8e6fcb42e37d1deed0742b5548ef8184682eddf35ab3f2c457933a4838bfb1"
+    },
+    {
+      "id": "state-negative-float",
+      "status": "complete",
+      "sha256": "6e8932c7258681c128e8fa0c9d82379316ddef1f5f64dd4d5ef30ed213783af2"
+    },
+    {
+      "id": "state-true",
+      "status": "complete",
+      "sha256": "5ca6eb0174fb75dc58812539fa09b1d839b6c33e1b38e4f2d9c8e52887ab753f"
+    },
+    {
+      "id": "state-false",
+      "status": "complete",
+      "sha256": "5039df3e8f19c90a9497e22f5cc4e9984bc6ebb43166c393a3df19523667defa"
+    },
+    {
+      "id": "state-whitespace",
+      "status": "complete",
+      "sha256": "4a7117745bdc55b456b4d652645d61540d268539ce84960eda9ffafa76c5b0e3"
+    },
+    {
+      "id": "state-unicode-escapes",
+      "status": "complete",
+      "sha256": "45b7733cccf3a8bdf8fab52f2b540b676b38f00179c572077d2453868941b488"
+    },
+    {
+      "id": "escape-zwsp-in-input",
+      "status": "complete",
+      "sha256": "d0fe32213a70bbd6ff424f403c7e570c4e0185a4aa04e8fc6cd9687f3109b248"
+    },
+    {
+      "id": "state-array",
+      "status": "complete",
+      "sha256": "7d66d73be84e46b8819574a60fdb25e8aababdd10a508fb11a585db4961885c6"
+    },
+    {
+      "id": "instructions-array",
+      "status": "complete",
+      "sha256": "5ec5b83e1373e0c61013acec9a68dc6b7fb64cd90b8c2c5a90d89700bd43db78"
+    },
+    {
+      "id": "noul-empty-string-description",
+      "status": "complete",
+      "sha256": "3f7c4088a0de8713950863234e209c83dcd316e91be0af003d6cee92a81918de"
+    },
+    {
+      "id": "escape-user-defined-not-broken",
+      "status": "complete",
+      "sha256": "bc2c9a90786b1df99d6e94ffb873f92e3d7f71aa141f20cf03cbea0a8e19f891"
+    },
+    {
+      "id": "noul-criteria-empty-object",
+      "status": "complete",
+      "sha256": "fa292bf4be7f3e90b3ac9a481f36ac04432284018d54a4de30f13d887150339c"
+    },
+    {
+      "id": "noul-criteria-null",
+      "status": "complete",
+      "sha256": "357543fe7dece9befefcef169a851a6cb9ab013d3dc3c834ec9bc73a484fa7fe"
+    },
+    {
+      "id": "parse-model-field",
+      "status": "complete",
+      "sha256": "c38622f78690abe6efc54348191333816e4519fac5b570f4700969e8a6873f52"
+    },
+    {
+      "id": "score-null-levels",
+      "status": "failed",
+      "sha256": "f3cfb05de8e9c3bf46317dd09404c94f401e0f25a8192ba3eefbe0d370f8fea4"
+    },
+    {
+      "id": "score-2-levels",
+      "status": "complete",
+      "sha256": "4d7807836c3640d2a25a8b926ce043b72ce07e1718d40dde5ac7856f7c7a0cd5"
+    },
+    {
+      "id": "choice-one-option",
+      "status": "complete",
+      "sha256": "f4dde299b81bc8424ce49d6c0df0bb78c9f76447a661e5884be85e3d5b447ffa"
+    },
+    {
+      "id": "noul-partial-false",
+      "status": "complete",
+      "sha256": "c55ff55d777b4ae634bcb5e0816c94cef879118da5dee5a783e3f4aac65453c8"
+    },
+    {
+      "id": "noul-all-null",
+      "status": "complete",
+      "sha256": "d13917060c0c1c5c46585b000e41c85e98bcdaf1eb864713ac7de4fe4d874cc5"
+    },
+    {
+      "id": "choice-mixed-case-keys",
+      "status": "complete",
+      "sha256": "7581692887fd55a86746851cdab611ab2b6e7adb79b756df2952490cd4d9afab"
+    },
+    {
+      "id": "noul-structured-descriptions",
+      "status": "complete",
+      "sha256": "ef4a8023b6e5286a8db55c6a2cde1d028ae22d009699f80f6a70a4a1e6b4a678"
+    },
+    {
+      "id": "noul-partial-true",
+      "status": "complete",
+      "sha256": "401fa2cd9a7e1861b6f1b6c427757368595bfebab1549494bb5f3445588aab79"
+    },
+    {
+      "id": "choice-non-letter-short-keys",
+      "status": "complete",
+      "sha256": "a2edf702bd2e30b0c93b484c66dcbe2dccb67d01b50afc7a396994d720722921"
+    },
+    {
+      "id": "instructions-object",
+      "status": "complete",
+      "sha256": "7252b26dfaf5b32b2bccdd4441d94964af0b46137cf92013869d4c38651dd654"
+    },
+    {
+      "id": "choice-letter-keys",
+      "status": "complete",
+      "sha256": "4b2f9d4d6de41dd80abf87def22139e4ec797ae095931b1868f9f3eedec5e681"
+    },
+    {
+      "id": "score-structured-levels",
+      "status": "failed",
+      "sha256": "ee2ab912ac76c6866e0e57524d91133ea7046d64e4299ae4ef2ca6927e75c9e0"
+    },
+    {
+      "id": "choice-letter-and-word-keys",
+      "status": "complete",
+      "sha256": "c179dc816aaa9f1474422697484547242e83893f30e5c4f07a80555fbb7c6f8b"
+    },
+    {
+      "id": "choice-lowercase-keys",
+      "status": "complete",
+      "sha256": "180cfdf6cc62ffb68b78df78ebd89f10f5ec8584d1dedeb2d3e0d885eb29f255"
+    },
+    {
+      "id": "choice-keys-equal-after-escape",
+      "status": "complete",
+      "sha256": "6757e0f1244080759e9c7bd5dac1f5716163c55a1bc69962ddec5ddbb94f05e8"
+    },
+    {
+      "id": "state-wrapped-messages",
+      "status": "complete",
+      "sha256": "bfddef2513f8ac1f8416bc0056290eacb06dc7bf56225d667643aba97fc2734b"
+    },
+    {
+      "id": "state-empty-string",
+      "status": "complete",
+      "sha256": "b369447a202d635b1f181f3476d2c1575e2447131f67c695183c2563bf0daf04"
+    },
+    {
+      "id": "state-string-escapes",
+      "status": "complete",
+      "sha256": "9a7d44557fdae562af78e866e10a7d4b52509632476b8d842ecf79163d228eff"
+    },
+    {
+      "id": "state-null",
+      "status": "complete",
+      "sha256": "bc669efd52415bcfaa904a280e07d86ecda40a2122c984f9589c995d911e0044"
+    },
+    {
+      "id": "choice-criteria-order",
+      "status": "complete",
+      "sha256": "b65a6cbb03607748fb8b03de8a81cb2e665adad179269f572c12621da84165c2"
+    },
+    {
+      "id": "noul-false-first",
+      "status": "complete",
+      "sha256": "3b4aaf9a69c2da5b85cfeb06956a3f0034a0cced2039ac23fd685b1424e73696"
+    },
+    {
+      "id": "choice-null-descriptions",
+      "status": "complete",
+      "sha256": "9670ce64e8fc2de91c039d40fd889b3926a1761940d8b3a4bab0437a53e0b53f"
+    },
+    {
+      "id": "choice-keys-special-tokens",
+      "status": "complete",
+      "sha256": "eabf8505bf9c3751fc593d4e9ddf32d59cb1500e93c532d948257ec0b42f4cd5"
+    },
+    {
+      "id": "escape-adjacent-and-partial",
+      "status": "complete",
+      "sha256": "c7ec161bc2a473159e3845e979fcece4a1887b27664deafea5dbddf858cc6d61"
+    },
+    {
+      "id": "score-10-levels",
+      "status": "complete",
+      "sha256": "347fadf60f2bfbf250e6fb71b7a48eddb3d74742b83bc00145a28d17340661ab"
+    },
+    {
+      "id": "escape-state-control-tokens",
+      "status": "complete",
+      "sha256": "7c3c239446c32d6ff60c0a25c26590cfe515f124f6c3389f3586b50a218bdbcf"
+    },
+    {
+      "id": "choice-structured-descriptions",
+      "status": "complete",
+      "sha256": "dfca49b1efc831186a971601bb7ac064c000523724c3337f9636f57cb5415cb0"
+    },
+    {
+      "id": "depth-instructions-at-limit",
+      "status": "complete",
+      "sha256": "c40af8dd2318b6a4d9cf054933169570b5462e141d972518167fcbead342cb03"
+    },
+    {
+      "id": "depth-state-empty-at-limit",
+      "status": "complete",
+      "sha256": "b912707d1d93d7d9f7608d0d73eea2d78ac1ffb18bb338b869bf6b68e4e632e5"
+    },
+    {
+      "id": "depth-score-level-at-limit",
+      "status": "failed",
+      "sha256": "f8385a55ebd602cf4172fa1c24b867dc7d7cf34195f32f81cf26870d2a9d0227"
+    },
+    {
+      "id": "depth-noul-description-at-limit",
+      "status": "complete",
+      "sha256": "7f0dea484701b12d9762c137ea2f7e570384d923862d5100f3b3b4d731385920"
+    },
+    {
+      "id": "choice-falsy-descriptions",
+      "status": "complete",
+      "sha256": "ac805d13bbc14f34cd699cbd82d37e23bf881266751d11def06a6e2f8bfc3e16"
+    },
+    {
+      "id": "depth-description-at-limit",
+      "status": "complete",
+      "sha256": "a2961df5cf887da248edbd9a1549d103b3bf4cd5f85f842ffdca33ede28bfa6f"
+    },
+    {
+      "id": "state-chat-messages",
+      "status": "complete",
+      "sha256": "f0d07e970f0d82e17010887ded7666639b407628f8a0e60b95589994d58cdc83"
+    },
+    {
+      "id": "instructions-scalars",
+      "status": "failed",
+      "sha256": "cc8a33c054333ee1e9620bdb98eb5f5b1a58c9ea15e2150565097d02c18a7721"
+    },
+    {
+      "id": "question-id-special-tokens",
+      "status": "complete",
+      "sha256": "d288dae17e7d3e594b55b56da0300ffcbae5c2c00a86ee774335a8a93a915387"
+    },
+    {
+      "id": "state-object-nested",
+      "status": "complete",
+      "sha256": "94707870427c9fb37251dfcd5fcdee53d38aa038f2ebc5b4c6c0f8316526abe2"
+    },
+    {
+      "id": "upstream-test-payload",
+      "status": "complete",
+      "sha256": "73388b09922a0f32a95162ca0675b2b86930bd59ff537fcb2695a7b74e4cb439"
+    },
+    {
+      "id": "escape-everywhere",
+      "status": "failed",
+      "sha256": "b583edc31653e90444ed3ebb45a2f5acc4d41353d449bea6366d8c1f8280047f"
+    },
+    {
+      "id": "state-numbers",
+      "status": "complete",
+      "sha256": "ae6a24ced36823ae4982cde8dba29f8695253b9fb51b8e25968e0d8d553b2ecb"
+    },
+    {
+      "id": "card-text-example",
+      "status": "complete",
+      "sha256": "cc74bebde90dc379cb117a1c0a76ea1347506b5d957263b1e0d0a082bc0e7549"
+    },
+    {
+      "id": "multi-question-order",
+      "status": "complete",
+      "sha256": "c956656353430765083351fab617e0e548a907d6e79c0969319214047d59f8e0"
+    },
+    {
+      "id": "choice-26-options",
+      "status": "complete",
+      "sha256": "90f74a9e9bcf298c6ae5185c2d0a3dbfb33593aaa42f8a9986d0c1a5c3228ab4"
+    },
+    {
+      "id": "choice-52-letter-keys",
+      "status": "complete",
+      "sha256": "2e1f1f5139aa6f30b0f88f81ea4e818321acdc95a79c19a2c3bb8eb04bc1be27"
+    },
+    {
+      "id": "choice-27-options",
+      "status": "complete",
+      "sha256": "b3958d6b44d93b7b28ab604eb245d06d05fb0142f2d443c2f7c042290f5bb06d"
+    },
+    {
+      "id": "choice-36-options",
+      "status": "complete",
+      "sha256": "e702157adb9741ab5385350d84fc71da3c190d1bcaa57f4a8f4842476daa768c"
+    },
+    {
+      "id": "choice-120-options",
+      "status": "complete",
+      "sha256": "df37128e2c9a270e964129ba0595f5904e89dde99ed2d9e7f7c98ea3a4b3c9f1"
+    },
+    {
+      "id": "budget-at-limit",
+      "status": "complete",
+      "sha256": "f1d5f2a0205179659d4235952b172ca882a183c9721d244a82ac60bce20e4959"
+    },
+    {
+      "id": "choice-255-options",
+      "status": "complete",
+      "sha256": "88721f7bd1836840ad07b4ccedb1a2d69b85c058dc093a6c6b1643c1b71f8deb"
+    }
+  ]
+}

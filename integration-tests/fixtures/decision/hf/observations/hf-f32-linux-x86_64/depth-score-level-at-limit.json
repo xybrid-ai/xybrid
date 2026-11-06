@@ -1,0 +1,11 @@
+{
+  "id": "depth-score-level-at-limit",
+  "split": "held_out",
+  "request_sha256": "eb89e2c0bc7ce9d55d842c2ad34acb0f022c4b6a13c5577887b262c8d530aa7e",
+  "case_file_sha256": "6fe5b4036d8a7b237c5dcd152997c7694da600d6f345cc9b2fc3e30ca26a58c8",
+  "status": "failed",
+  "passes": [],
+  "error_type": "ValueError",
+  "error": "a score's \"criteria\" lists 2 to 10 levels, lowest first: [\"Can wait\", \"Today\", \"Now\"]",
+  "duration_seconds": 9.595799974704278e-05
+}

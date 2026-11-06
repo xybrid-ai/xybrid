@@ -1,0 +1,114 @@
+{
+  "id": "state-null",
+  "split": "held_out",
+  "request_sha256": "89b9479436c6d2650bdd42ce986139347fed7f70222081fc919d61df203218cf",
+  "case_file_sha256": "045f6b43482c089cd7b6111172dd3119a22324bf6a27e354583109948ffa3832",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "q",
+      "prompt": "<|startoftext|><|im_start|>user\nWhich team should handle this?\n\nOptions:\nA Charges, refunds, invoices\nB App or site faults\nC Suspected unauthorised use\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        28327,
+        2909,
+        1252,
+        9435,
+        532,
+        64929,
+        13314,
+        833,
+        41,
+        120315,
+        20,
+        52966,
+        91,
+        20,
+        60326,
+        1363,
+        207,
+        42,
+        4634,
+        432,
+        2974,
+        49521,
+        207,
+        43,
+        11130,
+        7436,
+        58505,
+        2350,
+        1016,
+        8,
+        57922,
+        415,
+        278,
+        7331,
+        4713,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            41,
+            334
+          ],
+          [
+            42,
+            378
+          ],
+          [
+            43,
+            340
+          ]
+        ],
+        "raw_scores": [
+          "0x40f46e50",
+          "0x40883c74",
+          "0x4107221d",
+          "0x40a4045e",
+          "0x40e1b532",
+          "0x4079b473"
+        ],
+        "log_probabilities": [
+          "0xc01ab528",
+          "0xc0b98c70",
+          "0xbfce12a8",
+          "0xc09dc486",
+          "0xc0402764",
+          "0xc0c4eeaa"
+        ]
+      },
+      "result": {
+        "answers": {
+          "q": {
+            "type": "choice",
+            "choice": "technical",
+            "confidence": 0.5263611804384547,
+            "probabilities": {
+              "billing": 0.28781164127934417,
+              "technical": 0.5263611804384547,
+              "fraud": 0.18582717828220116
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 48,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 12.39333329100009
+}

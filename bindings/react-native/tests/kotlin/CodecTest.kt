@@ -2,6 +2,13 @@
 // (bindings/kotlin/.../XybridBolt.kt) on a plain JVM. Nothing here calls into
 // Rust — the codec is pure — so no native library is loaded.
 
+import ai.xybrid.XybridDecisions
+import ai.xybrid.XybridDecisionAnswer
+import ai.xybrid.XybridDecisionScore
+import ai.xybrid.XybridDecisionValue
+import ai.xybrid.XybridDecisionOrigin
+import ai.xybrid.XybridDecisionContent
+import ai.xybrid.XybridScoreStatistic
 import ai.xybrid.XybridAbortSignal
 import ai.xybrid.XybridDownloadState
 import ai.xybrid.XybridDownloadStatus
@@ -218,6 +225,27 @@ fun main() {
   expectInvalidArgument("partial float") {
     XybridCodec.float32Samples(java.util.Base64.getEncoder().encodeToString(byteArrayOf(1, 2, 3)))
   }
+
+  // -- Decisions: raw content and double probabilities survive the JS codec.
+  val rawDecisionJson = """{"z":18446744073709551615,"a":9007199254740993,"zero":-0.0}"""
+  val decisionRequest = XybridCodec.decodeDecisionRequest(js(
+    "state" to js("kind" to "json", "jsonText" to rawDecisionJson),
+    "questions" to listOf(js("id" to "q", "instructions" to js("kind" to "text", "text" to "choose"),
+      "kind" to js("kind" to "choice", "options" to listOf(js("key" to "a"))))),
+  ))
+  check((decisionRequest.state as XybridDecisionContent.Json).jsonText == rawDecisionJson, "decision JSON verbatim")
+  check(XybridCodec.decodeDecisionRequest(XybridCodec.encodeDecisionRequest(decisionRequest)) == decisionRequest, "decision request round trip")
+  val probability = 0.5000000018693014
+  val decisions = XybridDecisions(listOf(XybridDecisionAnswer("q", listOf(
+    XybridDecisionScore("0", 0f, 1.0 - probability, XybridDecisionOrigin.CALLER),
+    XybridDecisionScore("1", 0f, probability, XybridDecisionOrigin.CALLER),
+    XybridDecisionScore("2", Float.NEGATIVE_INFINITY, 0.0, XybridDecisionOrigin.CALLER),
+  ), XybridDecisionValue.Score(1.0, XybridScoreStatistic.MEDIAN), probability)), 1u, 512uL)
+  val encodedDecisions = XybridCodec.encodeDecisions(decisions)
+  val decisionAnswers = encodedDecisions["answers"] as List<*>
+  val decisionDistribution = (decisionAnswers[0] as Map<*, *>)["distribution"] as List<*>
+  check((decisionDistribution[1] as Map<*, *>)["probability"] == probability, "decision f64 preserved")
+  check((decisionDistribution[2] as Map<*, *>)["rawScore"] == "-Infinity", "decision infinity string")
 
   // -- Errors
   check(XybridCodec.rejection(XybridError.RateLimited(3uL)).first == "xybrid_rate_limited", "sdk code")

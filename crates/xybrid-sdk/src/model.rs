@@ -32,6 +32,7 @@ use xybrid_core::conversation::ConversationContext;
 use xybrid_core::execution::choice::{
     ensure_no_choice_kinds, validate_choice_request, validate_scorer_spec, EntryPoint,
 };
+use xybrid_core::execution::decision::{ensure_no_decision_kinds, validate_decision_request};
 use xybrid_core::execution::template::backend_label_from_template;
 use xybrid_core::execution::{
     ExecutionTemplate, ModelMetadata, TemplateExecutor, VoiceConfig, VoiceInfo,
@@ -216,8 +217,7 @@ pub enum SdkError {
     RateLimited { retry_after_secs: u64 },
     #[error("Request timeout after {timeout_ms}ms")]
     Timeout { timeout_ms: u64 },
-    /// The caller asked for the operation to stop — currently only
-    /// [`ModelDownload::cancel`](crate::download::ModelDownload::cancel).
+    /// The caller asked for a download or controlled decision execution to stop.
     /// Deliberately **not** retryable: retrying would undo the cancellation
     /// the caller just asked for.
     #[error("Cancelled: {message}")]
@@ -309,8 +309,7 @@ impl SdkError {
             SdkError::CacheError { .. } => false,
             SdkError::PipelineError { .. } => false,
             SdkError::CircuitOpen(_) => false, // Don't retry when circuit is open
-            // Retrying a cancelled download would resume exactly what the
-            // caller just stopped.
+            // Retrying would resume exactly what the caller just stopped.
             SdkError::Cancelled { .. } => false,
         }
     }
@@ -332,12 +331,15 @@ impl SdkError {
     }
 }
 
-fn sdk_execution_error<E>(context: &str, error: E) -> SdkError
+pub(crate) fn sdk_execution_error<E>(context: &str, error: E) -> SdkError
 where
     E: Into<xybrid_core::error::XybridError>,
 {
     let error = error.into();
     match error {
+        xybrid_core::error::XybridError::Cancelled => SdkError::Cancelled {
+            message: "Execution cancelled".to_string(),
+        },
         xybrid_core::error::XybridError::MissingArtifact { artifact, path } => {
             SdkError::MissingArtifact { artifact, path }
         }
@@ -396,10 +398,44 @@ fn choice_warmup_request(fixed: &[Choice]) -> Envelope {
     Envelope::choice_request(Envelope::new(EnvelopeKind::Text(".".to_string())), caller)
 }
 
+fn decision_warmup_request() -> Envelope {
+    use xybrid_core::ir::{
+        DecisionContent, DecisionQuestion, DecisionQuestionKind, DecisionRequest, DecisionState,
+    };
+    Envelope::new(EnvelopeKind::DecisionRequest(DecisionRequest::new(
+        DecisionState::text("."),
+        vec![DecisionQuestion::new(
+            "warmup",
+            Some(DecisionContent::text("Is the state present?").into()),
+            DecisionQuestionKind::yes_no(None, None),
+        )],
+    )))
+}
+
+fn decision_capability_refusal(model_id: &str, capability: &str) -> SdkError {
+    SdkError::UnsupportedModelCapability {
+        model_id: model_id.to_string(),
+        capability: capability.to_string(),
+        hint: "Liquid text/v1 accepts local batch decision requests only".to_string(),
+    }
+}
+
 /// Adds a choice scorer's decision fields to its `ModelComplete` data: the
 /// task, the backend and how many candidates were scored. Never their ids,
 /// texts or scores. Other models' data is left as it is.
 fn add_choice_telemetry(data: &mut serde_json::Value, metadata: &ModelMetadata, output: &Envelope) {
+    if let EnvelopeKind::Decisions(decisions) = &output.kind {
+        data["task"] = "decision".into();
+        data["backend"] = "llamacpp".into();
+        data["decision_protocol"] = "lfm3-d1/text/v1".into();
+        data["question_count"] = decisions.answers().len().into();
+        for key in ["tokens_in", "tokens_out"] {
+            if let Some(value) = output.metadata.get(key).and_then(|v| v.parse::<u64>().ok()) {
+                data[key] = value.into();
+            }
+        }
+        return;
+    }
     let EnvelopeKind::ChoiceScores(scores) = &output.kind else {
         return;
     };
@@ -764,6 +800,9 @@ where
             // candidates, and the gateway would read the request as text. The
             // entry guards refuse them before a local run can abort, so this
             // only backs them up.
+            if envelope.kind.contains_decision_kind() {
+                return Err(decision_capability_refusal(model_id, "cloud fallback"));
+            }
             if envelope.kind.contains_choice_kind() {
                 crate::telemetry::publish_cloud_denied_by_policy(
                     &correlation_id,
@@ -2474,7 +2513,7 @@ impl ModelLoader {
                         // `XybridModel::watch_download`.
                         |status| bg_download.set_progress(status),
                     )
-                    .and_then(|dir| Self::create_model_handle(&dir));
+                    .and_then(|dir| Self::create_model_handle(&dir, true));
                 match built {
                     Ok(real) => {
                         *bg_handle.write().unwrap_or_else(|e| e.into_inner()) = real;
@@ -2584,9 +2623,7 @@ impl ModelLoader {
         let extract_dir = cache.ensure_extracted(path)?;
 
         // Load from extracted directory (extraction is permanent in cache)
-        let handle = Self::create_model_handle(&extract_dir)?;
-
-        Ok(Self::publish_loaded_model(handle))
+        self.load_from_directory(&extract_dir)
     }
 
     /// Try to load `repo` entirely from the shared Hugging Face cache with
@@ -3197,7 +3234,7 @@ impl ModelLoader {
     }
 
     fn load_from_directory(&self, path: &PathBuf) -> SdkResult<XybridModel> {
-        let handle = Self::create_model_handle(path)?;
+        let handle = Self::create_model_handle(path, self.speculative_enabled())?;
 
         Ok(Self::publish_loaded_model(handle))
     }
@@ -3233,7 +3270,7 @@ impl ModelLoader {
         }
     }
 
-    fn create_model_handle(model_dir: &PathBuf) -> SdkResult<ModelHandle> {
+    fn create_model_handle(model_dir: &PathBuf, speculative: bool) -> SdkResult<ModelHandle> {
         // Load metadata
         let metadata_path = model_dir.join("model_metadata.json");
         let metadata_str = std::fs::read_to_string(&metadata_path)
@@ -3241,9 +3278,20 @@ impl ModelLoader {
         let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
             .map_err(|e| SdkError::load_src("Failed to parse metadata", e))?;
         Self::validate_native_execution_template(&metadata)?;
+        if speculative && matches!(metadata.execution_template, ExecutionTemplate::Decision(_)) {
+            return Err(decision_capability_refusal(
+                &metadata.model_id,
+                "speculative execution",
+            ));
+        }
 
         // Create executor with base path
-        let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
+        let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
+        if matches!(metadata.execution_template, ExecutionTemplate::Decision(_)) {
+            executor
+                .load_decision(&metadata)
+                .map_err(|e| sdk_execution_error("Decision model load failed", e))?;
+        }
 
         Ok(ModelHandle {
             executor: Arc::new(Mutex::new(executor)),
@@ -3301,7 +3349,7 @@ impl ModelLoader {
         // A scorer answers one batch run, whatever task its bundle declares.
         if matches!(
             metadata.execution_template,
-            ExecutionTemplate::ChoiceScorer { .. }
+            ExecutionTemplate::ChoiceScorer { .. } | ExecutionTemplate::Decision(_)
         ) {
             return false;
         }
@@ -3333,6 +3381,9 @@ impl ModelLoader {
     }
 
     fn infer_output_type(metadata: &ModelMetadata) -> OutputType {
+        if matches!(metadata.execution_template, ExecutionTemplate::Decision(_)) {
+            return OutputType::Decisions;
+        }
         if matches!(
             metadata.execution_template,
             ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. }
@@ -3469,6 +3520,9 @@ struct WarmupEventFields {
 }
 
 fn cap_warmup_generation(mut warmup_input: Envelope) -> Envelope {
+    if matches!(warmup_input.kind, EnvelopeKind::DecisionRequest(_)) {
+        return warmup_input;
+    }
     warmup_input
         .metadata
         .insert("max_tokens".to_string(), "1".to_string());
@@ -3552,6 +3606,18 @@ impl XybridModel {
     /// [`Self::touch`] at every run entry point.
     fn guard_input(&self, envelope: &Envelope, entry: EntryPoint) -> SdkResult<()> {
         let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
+        validate_decision_request(&handle.metadata, envelope, entry)
+            .map_err(|e| sdk_execution_error("Decision request refused", e))?;
+        if matches!(
+            handle.metadata.execution_template,
+            ExecutionTemplate::Decision(_)
+        ) && self.speculative.is_some()
+        {
+            return Err(decision_capability_refusal(
+                &self.model_id,
+                "speculative execution",
+            ));
+        }
         validate_choice_request(&handle.metadata, envelope, entry)
             .map_err(|e| sdk_execution_error("Execution failed", e))
     }
@@ -3565,6 +3631,14 @@ impl XybridModel {
         entry: EntryPoint,
     ) -> SdkResult<()> {
         self.guard_input(envelope, entry)?;
+        ensure_no_decision_kinds(
+            &self.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )
+        .map_err(|e| sdk_execution_error("Decision history refused", e))?;
         ensure_no_choice_kinds(
             &self.model_id,
             context
@@ -3586,6 +3660,16 @@ impl XybridModel {
             matches!(
                 h.metadata.execution_template,
                 ExecutionTemplate::ChoiceScorer { .. }
+            )
+        })
+    }
+
+    /// Whether this model returns typed decisions through local batch execution.
+    pub fn is_decision_model(&self) -> bool {
+        self.handle.read().ok().is_some_and(|handle| {
+            matches!(
+                handle.metadata.execution_template,
+                ExecutionTemplate::Decision(_)
             )
         })
     }
@@ -4037,6 +4121,7 @@ impl XybridModel {
 
         // Create a minimal input based on expected input type
         let warmup_input = match self.output_type {
+            OutputType::Decisions => decision_warmup_request(),
             OutputType::ChoiceScores => choice_warmup_request(&self.fixed_choices()),
             // For TTS models, use a short text
             OutputType::Audio => Envelope {
@@ -4197,23 +4282,36 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
-        self.run_observed(envelope, config, None, None)
+        self.run_observed(envelope, config, None, None, None)
     }
 
     /// [`Self::run`] with per-run options and a parent context captured
-    /// before a hop to a blocking worker.
+    /// before a hop to a blocking worker. `abort` is the caller's
+    /// cancellation flag, which decision execution polls between passes.
     fn run_observed(
         &self,
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
         options: Option<&RunOptions>,
         parent: Option<ObservationContext>,
+        abort: Option<&AtomicBool>,
     ) -> SdkResult<InferenceResult> {
+        if abort.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst)) {
+            return Err(SdkError::Cancelled {
+                message: "Decision execution cancelled".into(),
+            });
+        }
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
         self.guard_input(envelope, EntryPoint::Batch)?;
+        if self.is_decision_model() && config.is_some() {
+            return Err(decision_capability_refusal(
+                &self.model_id,
+                "generation options",
+            ));
+        }
         let obs = self.observe(envelope, &[], options, config, false, parent);
-        let result = self.run_body(envelope, config, &obs);
+        let result = self.run_body(envelope, config, &obs, abort);
         obs.finish(result)
     }
 
@@ -4222,6 +4320,7 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
         obs: &RunObservation,
+        abort: Option<&AtomicBool>,
     ) -> SdkResult<InferenceResult> {
         // Speculative cloud: serve from the gateway until the local handle is
         // ready (see `cloud_serve`).
@@ -4248,7 +4347,7 @@ impl XybridModel {
                 .executor
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .execute(&metadata, envelope, config)
+                .execute_controlled(&metadata, envelope, config, abort)
                 .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
             let latency_ms = start.elapsed().as_millis() as u32;
@@ -4501,6 +4600,21 @@ impl XybridModel {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> SdkResult<InferenceResult> {
+        if options
+            .cancellation_token
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Err(SdkError::Cancelled {
+                message: "Execution cancelled".into(),
+            });
+        }
+        if self.is_decision_model() && options.abort_policy.fallback_to_cloud {
+            return Err(decision_capability_refusal(
+                &self.model_id,
+                "cloud fallback",
+            ));
+        }
         let mut abort_state = AbortState::new(options);
         abort_state
             .check_before_run()
@@ -4538,6 +4652,10 @@ impl XybridModel {
             options.generation_config.as_ref(),
             Some(options),
             None,
+            options
+                .cancellation_token
+                .as_ref()
+                .map(CancellationToken::flag),
         )
     }
 
@@ -5603,7 +5721,7 @@ impl XybridModel {
         // Captured on the caller's thread: the run happens on a blocking worker.
         let parent = crate::observability::ambient_parent();
         tokio::task::spawn_blocking(move || {
-            model.run_observed(&envelope, config.as_ref(), None, parent)
+            model.run_observed(&envelope, config.as_ref(), None, parent, None)
         })
         .await
         .map_err(|e| SdkError::inference_src("Task join error", e))?
@@ -6408,10 +6526,11 @@ mod tests {
             std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
                 .expect("model metadata should be written");
 
-            let error = match ModelLoader::create_model_handle(&temp_dir.path().to_path_buf()) {
-                Ok(_) => panic!("{format} metadata must be rejected during load"),
-                Err(error) => error,
-            };
+            let error =
+                match ModelLoader::create_model_handle(&temp_dir.path().to_path_buf(), false) {
+                    Ok(_) => panic!("{format} metadata must be rejected during load"),
+                    Err(error) => error,
+                };
             let message = error.to_string();
 
             assert!(message.contains(&format!("browser-only {format} format")));
@@ -9458,6 +9577,126 @@ mod tests {
     // =====================================================================
     // Choice scorers: warmup request and decision telemetry
     // =====================================================================
+
+    fn liquid_metadata() -> ModelMetadata {
+        let mut metadata = ModelMetadata::onnx("d1", "1.0", "model.gguf");
+        metadata.execution_template = ExecutionTemplate::Decision(
+            xybrid_core::execution::template::DecisionTemplate::new("model.gguf"),
+        );
+        metadata
+    }
+
+    #[test]
+    fn decision_batch_surface_refuses_generation_fallback_history_and_streaming() {
+        let metadata = liquid_metadata();
+        assert_eq!(
+            ModelLoader::infer_output_type(&metadata),
+            OutputType::Decisions
+        );
+        assert!(!ModelLoader::check_streaming_support(&metadata));
+        let model = test_model_with_metadata(metadata);
+        let request = decision_warmup_request();
+        let options = RunOptions::new().with_abort_policy(
+            crate::run_options::AbortPolicy::default().with_cloud_fallback(true),
+        );
+        for error in [
+            model
+                .run(&request, Some(&GenerationConfig::default()))
+                .unwrap_err(),
+            model.run_with_options(&request, &options).unwrap_err(),
+            model
+                .run_with_context(&request, &ConversationContext::new(), None)
+                .unwrap_err(),
+            model
+                .guard_input(&request, EntryPoint::Streaming)
+                .unwrap_err(),
+            model
+                .run(&text_envelope("private-canary"), None)
+                .unwrap_err(),
+        ] {
+            assert!(matches!(error, SdkError::UnsupportedModelCapability { .. }));
+            assert!(!error.is_retryable());
+            assert!(!format!("{error:?}").contains("private-canary"));
+        }
+        let async_error = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(model.run_async(&request, Some(&GenerationConfig::default())))
+            .unwrap_err();
+        assert!(matches!(
+            async_error,
+            SdkError::UnsupportedModelCapability { .. }
+        ));
+    }
+
+    #[test]
+    fn decision_warmup_has_no_generation_settings_and_is_protocol_valid() {
+        let input = cap_warmup_generation(decision_warmup_request());
+        assert!(!input.metadata.contains_key("max_tokens"));
+        validate_decision_request(&liquid_metadata(), &input, EntryPoint::Batch).unwrap();
+        let EnvelopeKind::DecisionRequest(request) = input.kind else {
+            panic!("decision warmup")
+        };
+        xybrid_core::execution::decision::liquid::validate_request(&request).unwrap();
+    }
+
+    #[test]
+    fn decision_cancelled_batch_returns_before_waiting_for_the_model_lock() {
+        let model = test_model_with_metadata(liquid_metadata());
+        let held = model.handle.write().unwrap();
+        let token = CancellationToken::new();
+        token.cancel();
+        let error = model
+            .run_with_options(
+                &decision_warmup_request(),
+                &RunOptions::new().with_cancellation_token(token),
+            )
+            .unwrap_err();
+        assert!(matches!(error, SdkError::Cancelled { .. }));
+        drop(held);
+    }
+
+    #[test]
+    fn decision_native_cancellation_stays_typed_and_non_retryable_at_the_sdk_boundary() {
+        let error = sdk_execution_error(
+            "Execution failed",
+            xybrid_core::runtime_adapter::AdapterError::Cancelled,
+        );
+        assert!(matches!(error, SdkError::Cancelled { .. }));
+        assert!(!error.is_retryable());
+    }
+
+    #[test]
+    fn decision_telemetry_excludes_answer_content() {
+        use xybrid_core::ir::{
+            DecisionAnswer, DecisionOrigin, DecisionScore, DecisionUsage, DecisionValue, Decisions,
+        };
+        let answer = DecisionAnswer::new(
+            "private-question",
+            vec![DecisionScore::new(
+                "private-answer",
+                0.0,
+                1.0,
+                DecisionOrigin::Caller,
+            )],
+            DecisionValue::choice("private-answer"),
+            Some(1.0),
+        )
+        .unwrap();
+        let mut output = Envelope::new(EnvelopeKind::Decisions(Decisions::new(
+            vec![answer],
+            DecisionUsage::new(1, 11),
+        )));
+        output.metadata.insert("tokens_in".into(), "11".into());
+        output.metadata.insert("tokens_out".into(), "0".into());
+        let mut data = serde_json::json!({});
+        add_choice_telemetry(&mut data, &liquid_metadata(), &output);
+        assert_eq!(data["question_count"], 1);
+        assert_eq!(data["tokens_in"], 11);
+        assert_eq!(data["tokens_out"], 0);
+        assert!(!data.to_string().contains("private-"));
+        assert!(!data.to_string().contains("distribution"));
+        assert!(!data.to_string().contains("raw_score"));
+    }
 
     /// A scorer's metadata: one-byte fields that reject longer text, and
     /// `fixed` as its fixed choices.

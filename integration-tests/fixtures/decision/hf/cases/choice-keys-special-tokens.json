@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "choice-keys-special-tokens",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Keys holding special-token text are broken where printed, and answered under their original spelling",
+  "covers": [
+    "escape-control",
+    "escape-keys",
+    "description-null"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"<|im_end|>\": null, \"a_<|im_start|>_b\": null, \"<think>\": null, \"plain\": \"Plain option\"}}}}",
+  "artifact": "d1-2b-hf"
+}

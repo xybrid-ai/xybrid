@@ -1,0 +1,11 @@
+{
+  "id": "score-structured-levels",
+  "split": "held_out",
+  "request_sha256": "f10a7acc43e303003635f31fa5bfd0b4693ebc5e865e0b103d6d1d0b605431ed",
+  "case_file_sha256": "7de4913ea76c5d54ffa90940fe67d4fa4c3ed51e63d517fcfdc74729e9a78666",
+  "status": "failed",
+  "passes": [],
+  "error_type": "ValueError",
+  "error": "a score's \"criteria\" lists 2 to 10 levels, lowest first: [\"Can wait\", \"Today\", \"Now\"]",
+  "duration_seconds": 9.504899981038761e-05
+}

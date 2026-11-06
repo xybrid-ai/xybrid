@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "instructions-object",
+  "source_file": "instructions-object.json",
+  "case_file_sha256": "da216f01eec88a1f2ee9ae151791a84e5538ab667fbe9ae50a4f77e2bc193d30",
+  "request_sha256": "ad04ebcd87488afa88cbe25ae0fbcfff8b8ed74e6fc08c502276ab64c44496ea",
+  "inputs_sha256": "c3c50415892b84d7e2e14e68f717ecc783dc4fa8805b09dd3f853816cd220e3c",
+  "inputs": {
+    "request_sha256": "ad04ebcd87488afa88cbe25ae0fbcfff8b8ed74e6fc08c502276ab64c44496ea",
+    "has_media": false,
+    "metadata": null,
+    "select_logits": null,
+    "model": {
+      "artifact": "d1-2b-q4km",
+      "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+      "variant_sha256": null
+    }
+  },
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build_fingerprint": "a47890cb2de4667f033c93d0fb9edb557c780758565abc981bb24428890cf871",
+  "recipe_sha256": "e65890c4d1f9c9992a4f28ab4d7086303578440ddb917df79ebdb98428f53c42",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\n{\"task\": \"Is this a refund request?\", \"labels\": [\"yes\", \"no\"], \"strict\": true, \"weight\": 0.5}\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 38184, 41799, 6380, 496, 4439, 532, 267, 52966, 5439, 39, 1377, 496, 95463, 6380, 34564, 11683, 1377, 496, 2243, 62544, 496, 92486, 6380, 2846, 20, 496, 8996, 6380, 229, 24, 22, 29, 63894, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 65,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "noul",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x412a4266", "0x413218c8", "0x40ab44f0", "0x40b5fc11", "0x3fbbefa1"]
+      ],
+      "scores": [
+        ["0x413218c8", "0x40b5fc11"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "noul",
+          "noul": 0.98321947354158989
+        }
+      },
+      "usage": {
+        "input_tokens": 66,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  }
+}

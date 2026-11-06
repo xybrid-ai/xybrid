@@ -1,0 +1,96 @@
+{
+  "id": "noul-criteria-empty-object",
+  "split": "held_out",
+  "request_sha256": "0da533a7e1607068445f2b0d6802e9245fff906af4e1bd24863b4519508e2914",
+  "case_file_sha256": "5c8727c75279502c01ab7cebab33c923f9b1f63dd57f55576526810274854189",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "q",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nIs the customer asking for a refund?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        532,
+        5304,
+        20,
+        8193,
+        52966,
+        734,
+        302,
+        876,
+        64673,
+        63509,
+        833,
+        4439,
+        278,
+        13107,
+        13564,
+        374,
+        267,
+        52966,
+        64929,
+        57922,
+        415,
+        18171,
+        432,
+        794,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            11683,
+            12447
+          ],
+          [
+            2243,
+            4547,
+            19598
+          ]
+        ],
+        "raw_scores": [
+          "0x41272b01",
+          "0x4177a4a9",
+          "0x4031cf9f",
+          "0x40ef349d",
+          "0x3fb50f2f"
+        ],
+        "log_probabilities": [
+          "0xc0a17bcc",
+          "0xbc887c00",
+          "0xc14b74ff",
+          "0xc1004e98",
+          "0xc1614701"
+        ]
+      },
+      "result": {
+        "answers": {
+          "q": {
+            "type": "noul",
+            "noul": 0.9974867251748306
+          }
+        },
+        "usage": {
+          "input_tokens": 41,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 16.93503155999997
+}

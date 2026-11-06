@@ -45,6 +45,7 @@ REQUIRED_CHECKS = {
     "Test whisper.cpp (integration, real model)",
     "Test policy routing (real local model, fake DeepSeek)",
     "Provenance and fixture digests",
+    "Decision CPU conformance",
 }
 AUTOMATION_CHECKS = {"Discover llama.cpp stable", "Prepare llama.cpp release"}
 NATIVE_TARGETS = {

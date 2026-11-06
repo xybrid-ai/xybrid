@@ -1,0 +1,204 @@
+{
+  "id": "choice-falsy-descriptions",
+  "split": "calibration",
+  "request_sha256": "712fef2048e5da0ea0640495def72e78b356f424e2e2c97bdb4311ca3240c550",
+  "case_file_sha256": "3e351202bf6529f7cfff6e80684c11a00545a39d15c2774660a4682a9ba7a133",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "q",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA empty string\nB false value\nC zero\nD zero float\nE empty list\nF empty object\nG null value\nH kept\nI True\nJ  \n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        532,
+        5304,
+        20,
+        8193,
+        52966,
+        734,
+        302,
+        876,
+        64673,
+        63509,
+        833,
+        28327,
+        7331,
+        24612,
+        1737,
+        64929,
+        13314,
+        833,
+        41,
+        11209,
+        4160,
+        207,
+        42,
+        4330,
+        2035,
+        207,
+        43,
+        9116,
+        207,
+        44,
+        9116,
+        14163,
+        207,
+        45,
+        11209,
+        1815,
+        207,
+        46,
+        11209,
+        2431,
+        207,
+        47,
+        3495,
+        2035,
+        207,
+        48,
+        8042,
+        207,
+        49,
+        15779,
+        207,
+        50,
+        64650,
+        57922,
+        415,
+        278,
+        7331,
+        4713,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            41,
+            334
+          ],
+          [
+            42,
+            378
+          ],
+          [
+            43,
+            340
+          ],
+          [
+            44,
+            388
+          ],
+          [
+            45,
+            407
+          ],
+          [
+            46,
+            410
+          ],
+          [
+            47,
+            417
+          ],
+          [
+            48,
+            403
+          ],
+          [
+            49,
+            358
+          ],
+          [
+            50,
+            461
+          ]
+        ],
+        "raw_scores": [
+          "0x40c3c10a",
+          "0x3fc9978b",
+          "0x40cf48b5",
+          "0x3ffc94fc",
+          "0x40c8a281",
+          "0x3ff352fa",
+          "0x40b2bb27",
+          "0x3fbbb296",
+          "0x409bc0b2",
+          "0x3f3e5160",
+          "0x40b46236",
+          "0x3fda9003",
+          "0x40a68876",
+          "0x3f93fa5a",
+          "0x41055379",
+          "0x408bb1ce",
+          "0x41207657",
+          "0x40bcebe7",
+          "0x41107dd7",
+          "0x40aef7d2"
+        ],
+        "log_probabilities": [
+          "0xc09cb93e",
+          "0xc1170a33",
+          "0xc0913193",
+          "0xc110aa84",
+          "0xc097d7c7",
+          "0xc111d2c5",
+          "0xc0adbf21",
+          "0xc118c6d1",
+          "0xc0c4b996",
+          "0xc124580e",
+          "0xc0ac1812",
+          "0xc114eb24",
+          "0xc0b9f1d2",
+          "0xc11dbdd9",
+          "0xc02ba6ac",
+          "0xc0d4c87a",
+          "0xbf7c6cd0",
+          "0xc0a38e61",
+          "0xbffdfa68",
+          "0xc0b18276"
+        ]
+      },
+      "result": {
+        "answers": {
+          "q": {
+            "type": "choice",
+            "choice": "true_value",
+            "confidence": 0.4851306937717991,
+            "probabilities": {
+              "empty_string": 0.02604048785650335,
+              "false_value": 0.03409205724244901,
+              "zero": 0.02918622269364963,
+              "zero_float": 0.0174945398733146,
+              "empty_list": 0.010226381230052047,
+              "empty_object": 0.01818329411520922,
+              "null_value": 0.013155854578143755,
+              "truthy": 0.13649327136039793,
+              "true_value": 0.4851306937717991,
+              "space": 0.22999719727848125
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 75,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 13.123323771000287
+}

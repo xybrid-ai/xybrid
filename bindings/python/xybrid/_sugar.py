@@ -10,9 +10,10 @@ attaches them to the generated classes when ``xybrid`` is imported.
 Patching rather than subclassing is deliberate: the compiled bridge
 instantiates the generated classes directly (``_native._register_xybrid_result``
 and friends), so instances handed back from a native call would never be of a
-subclass. Every addition here is a new name; nothing generated is replaced
-except the four model ``run*`` methods and ``XybridPipeline.run``, which gain a
-default for their trailing ``options`` argument.
+subclass. Model calls coordinate handle lifetime while a native batch run
+releases the GIL; model/token finalizers wait for active borrowed handles.
+The four model ``run*`` methods and ``XybridPipeline.run`` also gain a default
+for their trailing ``options`` argument.
 
 Regeneration safety: ``tests/test_sdk.py`` asserts each patched member is
 present, so a generator change that renames or removes one fails the suite
@@ -21,6 +22,8 @@ instead of silently dropping the documented API.
 
 from __future__ import annotations
 
+import threading
+from functools import wraps
 from typing import Any
 
 from . import _bolt
@@ -29,6 +32,45 @@ from ._errors import ConfigError
 __all__ = ["install"]
 
 _IMAGE_FORMATS = ("png", "jpeg", "webp")
+_HANDLE_LOCKS: dict[int, Any] = {}
+_HANDLE_LOCKS_GUARD = threading.RLock()
+
+
+def _handle_lifetime_lock(instance: Any) -> Any:
+    """Generated opaque objects have slots but no weakrefs or lock field."""
+    with _HANDLE_LOCKS_GUARD:
+        return _HANDLE_LOCKS.setdefault(id(instance), threading.RLock())
+
+
+def _guard_handle_finalizer(klass: type) -> None:
+    finalize = klass.__del__
+
+    def guarded_finalize(self: Any) -> None:
+        # Model.close and explicit finalization cannot release a handle while
+        # model.run lends it to Rust with the GIL released. Cancellation itself
+        # remains unlocked, so it can stop the run that close is waiting for.
+        lock = _handle_lifetime_lock(self)
+        try:
+            with lock:
+                finalize(self)
+        finally:
+            with _HANDLE_LOCKS_GUARD:
+                if _HANDLE_LOCKS.get(id(self)) is lock:
+                    del _HANDLE_LOCKS[id(self)]
+
+    klass.__del__ = guarded_finalize
+
+
+def _guard_model_method(method: Any) -> Any:
+    @wraps(method)
+    def guarded(self: Any, *args: Any, **kwargs: Any) -> Any:
+        # Waiting for this Python lock releases the GIL. A getter/history call
+        # must not enter Rust and hold the GIL while waiting for a batch run's
+        # model lock, otherwise the cancellation thread could never progress.
+        with _handle_lifetime_lock(self):
+            return method(self, *args, **kwargs)
+
+    return guarded
 
 
 def normalize_image_format(format: str) -> str:
@@ -152,6 +194,16 @@ def _install_envelope_factories() -> None:
             metadata=[entry(key="xybrid.role", value="user")],
         )
 
+    def decision_request(request: _bolt.XybridDecisionRequest) -> _bolt.XybridEnvelope:
+        """Build ordered typed decision input for the existing model.run API."""
+        return _bolt.decision_request_envelope(request)
+
+    def decision_request_json(json: str) -> _bolt.XybridEnvelope:
+        """Decode raw Liquid JSON without dictionary conversion or numeric rounding."""
+        return _bolt.decision_request_json_envelope(json)
+
+    envelope.decision_request = staticmethod(decision_request)
+    envelope.decision_request_json = staticmethod(decision_request_json)
     envelope.text = staticmethod(text)
     envelope.audio = staticmethod(audio)
     envelope.embedding = staticmethod(embedding)
@@ -182,6 +234,27 @@ def _install_result_accessors() -> None:
         kind = self.envelope.kind
         return kind.values if isinstance(kind, _bolt.XybridEnvelopeKindEmbedding) else None
 
+    def decisions(self: Any) -> _bolt.XybridDecisions | None:
+        """Typed decisions in request order, with double precision probabilities."""
+        kind = self.envelope.kind
+        return kind.decisions if isinstance(kind, _bolt.XybridEnvelopeKindDecisions) else None
+
+    def token_usage(self: Any, key: str) -> int | None:
+        value = next((entry.value for entry in self.envelope.metadata if entry.key == key), None)
+        try:
+            count = int(value) if value is not None else -1
+        except (ValueError, TypeError):
+            return None
+        return count if 0 <= count <= 2**64 - 1 else None
+
+    def tokens_in(self: Any) -> int | None:
+        """Total input tokens evaluated across the request's passes."""
+        return token_usage(self, "tokens_in")
+
+    def tokens_out(self: Any) -> int | None:
+        """Generated output token usage; always zero for decisions."""
+        return token_usage(self, "tokens_out")
+
     def success(self: Any) -> bool:
         """Always ``True``; failures raise instead. Shape-compat with Swift/Kotlin."""
 
@@ -206,6 +279,9 @@ def _install_result_accessors() -> None:
         text,
         audio_bytes,
         embedding,
+        decisions,
+        tokens_in,
+        tokens_out,
         success,
         is_failure,
         latency_seconds,
@@ -312,11 +388,17 @@ def _install_model_accessors() -> None:
     # `cancel` is keyword-only here to keep the positional shape these wrappers
     # have always had.
     token = _bolt.XybridCancellationToken
+    _guard_handle_finalizer(model)
+    _guard_handle_finalizer(token)
 
     def _run(self: Any, envelope: Any, options: Any = None, *, cancel: Any = None) -> Any:
         """Run one inference and return its result."""
 
-        return run(self, envelope, options, cancel if cancel is not None else token())
+        run_token = cancel if cancel is not None else token()
+        if not isinstance(run_token, token):
+            raise TypeError("cancel must be an XybridCancellationToken")
+        with _handle_lifetime_lock(self), _handle_lifetime_lock(run_token):
+            return run(self, envelope, options, run_token)
 
     def _run_stream(self: Any, envelope: Any, options: Any = None, *, cancel: Any = None) -> int:
         """Start a streaming run and return its stream id.
@@ -348,6 +430,7 @@ def _install_model_accessors() -> None:
     def close(self: Any) -> None:
         """Release the native handle now instead of at garbage collection.
 
+        Waits for an active batch run before releasing its borrowed handle.
         Idempotent, and what leaving a ``with`` block does. The handle is gone
         afterwards, so calling any other method raises ``TypeError``.
         """
@@ -369,6 +452,13 @@ def _install_model_accessors() -> None:
     model.close = close
     model.__enter__ = __enter__
     model.__exit__ = __exit__
+    for name, member in list(model.__dict__.items()):
+        if name.startswith("_") or isinstance(member, (classmethod, staticmethod)):
+            continue
+        if isinstance(member, property) and member.fget is not None:
+            setattr(model, name, property(_guard_model_method(member.fget), doc=member.__doc__))
+        elif callable(member):
+            setattr(model, name, _guard_model_method(member))
 
 
 def _install_download_iteration() -> None:

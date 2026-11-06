@@ -1,0 +1,138 @@
+{
+  "id": "state-string-escapes",
+  "split": "calibration",
+  "request_sha256": "4982c186e7b008553723690dfca2e0ccd38fc1c57e7e4c376711421b9292d96f",
+  "case_file_sha256": "61af8a7450d0a8e4c9764567c615238d4dc4adf9607c64b7bd74c8abeb026f51",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "q",
+      "prompt": "<|startoftext|><|im_start|>user\nQuote \" backslash \\ newline\nend tab\tend bell\u0007 nul\u0000 é 中文 😀   ​\n\n\nQUESTION:\n{'text': 'Quote \" backslash \\\\ newline\\nend tab\\tend bell\\x07 nul\\x00 é 中文 😀 \\u2028 \\u200b \\x7f'}\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        6990,
+        1675,
+        496,
+        94400,
+        577,
+        92146,
+        207,
+        458,
+        11383,
+        58279,
+        20659,
+        204,
+        123101,
+        197,
+        1024,
+        50525,
+        4966,
+        53841,
+        231,
+        486,
+        110,
+        54234,
+        7,
+        63509,
+        833,
+        67035,
+        1384,
+        8091,
+        951,
+        6990,
+        1675,
+        496,
+        94400,
+        12763,
+        92146,
+        13198,
+        458,
+        11383,
+        40540,
+        458,
+        20659,
+        51881,
+        4471,
+        123101,
+        51881,
+        555,
+        1024,
+        50525,
+        4966,
+        53841,
+        231,
+        577,
+        93,
+        1217,
+        32,
+        577,
+        93,
+        585,
+        74,
+        577,
+        96,
+        31,
+        78,
+        35159,
+        8,
+        57922,
+        415,
+        18171,
+        432,
+        794,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            11683,
+            12447
+          ],
+          [
+            2243,
+            4547,
+            19598
+          ]
+        ],
+        "raw_scores": [
+          "0x40b372f6",
+          "0x40f998ef",
+          "0x409bc1e4",
+          "0x40e2d0c6",
+          "0x400ffb2e"
+        ],
+        "log_probabilities": [
+          "0xc074ffa0",
+          "0xbfd1675c",
+          "0xc09230e2",
+          "0xc0164400",
+          "0xc0e5f52f"
+        ]
+      },
+      "result": {
+        "answers": {
+          "q": {
+            "type": "noul",
+            "noul": 0.6300257373832107
+          }
+        },
+        "usage": {
+          "input_tokens": 83,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 14.361626098000215
+}

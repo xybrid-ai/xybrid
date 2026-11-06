@@ -1,0 +1,417 @@
+{
+  "id": "multi-question-order",
+  "split": "calibration",
+  "request_sha256": "218a72b3663fce0adae45746fc8aa0f5ef6a0dfca7545aacba0c6d9770559b80",
+  "case_file_sha256": "7f09cd61ef863e2ba47da27a822396412189de04172b0ebe8e62e49ea2d227f0",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "zeta",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich team should handle this?\n\nOptions:\nA Charges, refunds, invoices\nB App or site faults\nC Suspected unauthorised use\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        532,
+        5304,
+        20,
+        8193,
+        52966,
+        734,
+        302,
+        876,
+        64673,
+        63509,
+        833,
+        28327,
+        2909,
+        1252,
+        9435,
+        532,
+        64929,
+        13314,
+        833,
+        41,
+        120315,
+        20,
+        52966,
+        91,
+        20,
+        60326,
+        1363,
+        207,
+        42,
+        4634,
+        432,
+        2974,
+        49521,
+        207,
+        43,
+        11130,
+        7436,
+        58505,
+        2350,
+        1016,
+        8,
+        57922,
+        415,
+        278,
+        7331,
+        4713,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            41,
+            334
+          ],
+          [
+            42,
+            378
+          ],
+          [
+            43,
+            340
+          ]
+        ],
+        "raw_scores": [
+          "0x4150820e",
+          "0x4105f143",
+          "0x40f96d85",
+          "0x4037d840",
+          "0x40f5580d",
+          "0x403d7c65"
+        ],
+        "log_probabilities": [
+          "0xbd49e300",
+          "0xc096b55c",
+          "0xc0a92a5d",
+          "0xc12355e1",
+          "0xc0ad3fd5",
+          "0xc121ecd8"
+        ]
+      },
+      "result": {
+        "answers": {
+          "zeta": {
+            "type": "choice",
+            "choice": "billing",
+            "confidence": 0.9633618038573202,
+            "probabilities": {
+              "billing": 0.9633618038573202,
+              "technical": 0.019192481626939505,
+              "fraud": 0.01744571451574023
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 63,
+          "output_tokens": 0
+        }
+      }
+    },
+    {
+      "question": "alpha",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nIs the customer asking for a refund?\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        532,
+        5304,
+        20,
+        8193,
+        52966,
+        734,
+        302,
+        876,
+        64673,
+        63509,
+        833,
+        4439,
+        278,
+        13107,
+        13564,
+        374,
+        267,
+        52966,
+        64929,
+        57922,
+        415,
+        18171,
+        432,
+        794,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            11683,
+            12447
+          ],
+          [
+            2243,
+            4547,
+            19598
+          ]
+        ],
+        "raw_scores": [
+          "0x41272b01",
+          "0x4177a4a9",
+          "0x4031cf9f",
+          "0x40ef349d",
+          "0x3fb50f2f"
+        ],
+        "log_probabilities": [
+          "0xc0a17bcc",
+          "0xbc887c00",
+          "0xc14b74ff",
+          "0xc1004e98",
+          "0xc1614701"
+        ]
+      },
+      "result": {
+        "answers": {
+          "alpha": {
+            "type": "noul",
+            "noul": 0.9974867251748306
+          }
+        },
+        "usage": {
+          "input_tokens": 41,
+          "output_tokens": 0
+        }
+      }
+    },
+    {
+      "question": "Mid",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nHow urgent is this?\n\n0 Can wait\n1 Today\n2 Blocking the customer now\n\nReply with a single digit 0-2 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        532,
+        5304,
+        20,
+        8193,
+        52966,
+        734,
+        302,
+        876,
+        64673,
+        63509,
+        833,
+        3522,
+        30648,
+        355,
+        532,
+        64929,
+        24,
+        2076,
+        6997,
+        207,
+        25,
+        10767,
+        207,
+        26,
+        18077,
+        299,
+        278,
+        13107,
+        1665,
+        8,
+        57922,
+        415,
+        267,
+        2936,
+        19763,
+        229,
+        24,
+        21,
+        26,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            24
+          ],
+          [
+            25
+          ],
+          [
+            26
+          ]
+        ],
+        "raw_scores": [
+          "0x413ac6c2",
+          "0x411dc766",
+          "0x40d56ea7"
+        ],
+        "log_probabilities": [
+          "0xbe7abf00",
+          "0xc003a960",
+          "0xc0a7f4d5"
+        ]
+      },
+      "result": {
+        "answers": {
+          "Mid": {
+            "type": "score",
+            "score": 0.0,
+            "confidence": 0.7802532330970209,
+            "probabilities": {
+              "0": 0.7802532330970209,
+              "1": 0.20123882567458481,
+              "2": 0.018507941228394307
+            },
+            "legend": {
+              "0": "Can wait",
+              "1": "Today",
+              "2": "Blocking the customer now"
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 56,
+          "output_tokens": 0
+        }
+      }
+    },
+    {
+      "question": "beta",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nIs the customer polite?\nYes: Polite wording\nNo: None\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        532,
+        5304,
+        20,
+        8193,
+        52966,
+        734,
+        302,
+        876,
+        64673,
+        63509,
+        833,
+        4439,
+        278,
+        13107,
+        1074,
+        624,
+        1283,
+        12447,
+        34,
+        2266,
+        624,
+        93011,
+        207,
+        4547,
+        34,
+        10856,
+        8,
+        57922,
+        415,
+        18171,
+        432,
+        794,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            11683,
+            12447
+          ],
+          [
+            2243,
+            4547,
+            19598
+          ]
+        ],
+        "raw_scores": [
+          "0x408cb07d",
+          "0x4115af27",
+          "0x408aaae2",
+          "0x4127f071",
+          "0x4081ca6a"
+        ],
+        "log_probabilities": [
+          "0xc0d2e965",
+          "0xbfd0ee50",
+          "0xc0d4ef00",
+          "0xbefb9000",
+          "0xc0ddcf78"
+        ]
+      },
+      "result": {
+        "answers": {
+          "beta": {
+            "type": "noul",
+            "noul": 0.298782168769626
+          }
+        },
+        "usage": {
+          "input_tokens": 49,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 4.461399945999801
+}

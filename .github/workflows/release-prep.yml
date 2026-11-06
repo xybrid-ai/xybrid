@@ -618,6 +618,7 @@ jobs:
           mkdir -p dist-cli
           BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=macos-metal -c opt)
           cp "$BIN" dist-cli/xybrid-${TAG}-macos-arm64
+          cp crates/llama-cpp-sys/NOTICE dist-cli/xybrid-${TAG}-macos-arm64.NOTICE
           chmod +w dist-cli/xybrid-${TAG}-macos-arm64   # bazel outputs are read-only
           strip dist-cli/xybrid-${TAG}-macos-arm64
           chmod +x dist-cli/xybrid-${TAG}-macos-arm64
@@ -1242,6 +1243,7 @@ jobs:
           ARTIFACT="dist/xybrid-${TAG}-linux-x86_64"
           BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote -c opt)
           cp "$BIN" "$ARTIFACT"
+          cp crates/llama-cpp-sys/NOTICE "${ARTIFACT}.NOTICE"
           chmod +w "$ARTIFACT"   # bazel-bin outputs are read-only
           strip "$ARTIFACT"
           chmod +x "$ARTIFACT"
@@ -1333,6 +1335,7 @@ jobs:
           ARTIFACT="dist/xybrid-${TAG}-windows-x86_64.exe"
           EXE=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=windows -c opt)
           cp "$EXE" "$ARTIFACT"
+          cp crates/llama-cpp-sys/NOTICE "${ARTIFACT}.NOTICE"
           echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
 
       - name: Attest CLI provenance (windows-x86_64)
@@ -1508,6 +1511,7 @@ jobs:
             echo
             echo "**CLI**"
             echo "- Cross-platform binaries for macOS (arm64), Linux (x86_64), and Windows (x86_64)"
+            echo "- Each CLI binary has a matching .NOTICE asset containing its llama.cpp/Jinja and JSON dependency licenses; retain it when redistributing the binary"
             echo
             echo "**Web (GGUF preview)**"
             echo "- \`xybrid-web-${TAG#v}.tgz\` — ESM, TypeScript declarations, worker, CPU/WASM SIMD and experimental WebGPU runtimes"

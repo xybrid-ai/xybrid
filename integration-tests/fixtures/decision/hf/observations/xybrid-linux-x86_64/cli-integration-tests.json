@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "test_target": "xybrid-cli/decision_cli_test",
+  "result": {
+    "passed": 3,
+    "failed": 0,
+    "ignored": 0,
+    "filtered_out": 0
+  },
+  "duration_seconds": 11.75,
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "-p",
+    "xybrid-cli",
+    "--features",
+    "llm-llamacpp",
+    "--test",
+    "decision_cli_test",
+    "--",
+    "--test-threads=1"
+  ],
+  "environment": {
+    "XYBRID_NATIVES_PREBUILT_DIR": "/workspace/work/decision-native-prefix",
+    "XYBRID_REQUIRE_MODELS": "1"
+  },
+  "test_binary": "target/debug/deps/decision_cli_test-95e58229b39e917f",
+  "test_binary_sha256": "8be17c93c2b7f8a48cd47333df1097cd3525217e42c134dec3b536e1e06a65f8",
+  "test_source_sha256": "2bc690c1955e635bffc96813ecc46629b5b0d6b6041a470573b7308a733209f9",
+  "log_sha256": "7385e5dbb8e1e1bc4e0184db0e1bb44ed6c4e599c4fbe3eb302dff6d0f6919ac",
+  "model_sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+  "scope": "real local Q4 file/stdin/output-file parity with the Rust SDK, order/f64/usage and bounded refusals; no package/device qualification"
+}

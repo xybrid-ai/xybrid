@@ -1,0 +1,98 @@
+{
+  "id": "noul-empty-string-description",
+  "split": "calibration",
+  "request_sha256": "d28cde5b2ac6ce046424ba31cb52fec0dd9248c192c44b7e033b62476ef00138",
+  "case_file_sha256": "bd9d43a7e02ec8eba332ec0592878323214d9a89cdcefd3f3422d9e8e42f551a",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "q",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nRefund?\nYes: \nNo: None\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        532,
+        5304,
+        20,
+        8193,
+        52966,
+        734,
+        302,
+        876,
+        64673,
+        63509,
+        833,
+        9405,
+        855,
+        1283,
+        12447,
+        34,
+        469,
+        4547,
+        34,
+        10856,
+        8,
+        57922,
+        415,
+        18171,
+        432,
+        794,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            11683,
+            12447
+          ],
+          [
+            2243,
+            4547,
+            19598
+          ]
+        ],
+        "raw_scores": [
+          "0x40f8a2af",
+          "0x415093b5",
+          "0x4012a8ea",
+          "0x40ecdcae",
+          "0x402a7121"
+        ],
+        "log_probabilities": [
+          "0xc0aa23b1",
+          "0xbd4f7b00",
+          "0xc12cb8f6",
+          "0xc0b5e9b2",
+          "0xc126c6e8"
+        ]
+      },
+      "result": {
+        "answers": {
+          "q": {
+            "type": "noul",
+            "noul": 0.9854103839170619
+          }
+        },
+        "usage": {
+          "input_tokens": 43,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 15.925297610999905
+}

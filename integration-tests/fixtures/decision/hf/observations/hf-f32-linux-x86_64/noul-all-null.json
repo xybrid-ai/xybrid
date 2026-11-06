@@ -1,0 +1,104 @@
+{
+  "id": "noul-all-null",
+  "split": "calibration",
+  "request_sha256": "f203aef8be2259f1024e4d4545e31fdd61d1c8fe2708ebffc040e205191a7d05",
+  "case_file_sha256": "221062889a506eb34262a7df36661594e2336fedc3765dd84d48c6f26135ae22",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "q",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nIs the customer asking for a refund?\nYes: None\nNo: None\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        532,
+        5304,
+        20,
+        8193,
+        52966,
+        734,
+        302,
+        876,
+        64673,
+        63509,
+        833,
+        4439,
+        278,
+        13107,
+        13564,
+        374,
+        267,
+        52966,
+        1283,
+        12447,
+        34,
+        10856,
+        207,
+        4547,
+        34,
+        10856,
+        8,
+        57922,
+        415,
+        18171,
+        432,
+        794,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            11683,
+            12447
+          ],
+          [
+            2243,
+            4547,
+            19598
+          ]
+        ],
+        "raw_scores": [
+          "0x4116090d",
+          "0x41725d9a",
+          "0x40048d52",
+          "0x40f09c2c",
+          "0x3fc2f0f3"
+        ],
+        "log_probabilities": [
+          "0xc0b91eac",
+          "0xbc6b2400",
+          "0xc151750e",
+          "0xc0f4949a",
+          "0xc15a3a45"
+        ]
+      },
+      "result": {
+        "answers": {
+          "q": {
+            "type": "noul",
+            "noul": 0.9966791224360063
+          }
+        },
+        "usage": {
+          "input_tokens": 49,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 17.883472916000073
+}

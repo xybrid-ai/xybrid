@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "depth-noul-description-at-limit",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A noul description 125 levels deep: the same limit as a choice description",
+  "covers": [
+    "json-depth",
+    "description-structured",
+    "noul-partial-criteria"
+  ],
+  "request_text": "{\"state\": null, \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"x\", \"criteria\": {\"true\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}}}}",
+  "artifact": "d1-2b-hf"
+}

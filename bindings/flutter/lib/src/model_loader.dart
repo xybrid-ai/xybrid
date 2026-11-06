@@ -108,9 +108,9 @@ class XybridException implements Exception {
   String toString() => 'XybridException: $message';
 }
 
-/// Cooperative cancel handle for an in-flight streaming run.
+/// Cooperative cancel handle for an in-flight batch or streaming run.
 ///
-/// Construct one, pass it into [XybridModel.runStreaming],
+/// Construct one, pass it into [XybridModel.run], [XybridModel.runStreaming],
 /// [XybridModel.runStreamingWithContext], or
 /// [XybridModel.runStreamingWithFallback], and call [cancel] to halt Rust
 /// generation. Cancellation is cooperative: it takes effect at the next token
@@ -427,17 +427,22 @@ class XybridModel {
   ///
   /// Pass an optional [config] to control generation parameters (temperature,
   /// top-p, etc.). When `null`, the model's default parameters are used.
+  /// Decision requests reject explicit generation settings and observe
+  /// [cancellationToken] before preparation, between passes and at native abort
+  /// boundaries. They return all answers together or an error.
   ///
   /// Throws [XybridException] if inference fails.
   Future<XybridResult> run(
     XybridEnvelope envelope, {
     GenerationConfig? config,
+    CancellationToken? cancellationToken,
     RunOptions? options,
   }) async {
     try {
       final ffiResult = await inner.run(
         envelope: envelope.inner,
         config: config?.toFfi(),
+        cancellationToken: cancellationToken?.inner.fork(),
         options: options?.toFfi(),
       );
       return XybridResult.fromFfi(ffiResult);
@@ -548,7 +553,7 @@ class XybridModel {
       final stream = inner.runStream(
         envelope: envelope.inner,
         config: config?.toFfi(),
-        cancellationToken: cancellationToken?.inner,
+        cancellationToken: cancellationToken?.inner.fork(),
         preempt: preempt,
         frameSessionId: frameSessionId,
         options: options?.toFfi(),
@@ -580,7 +585,7 @@ class XybridModel {
     final stream = inner.runTtsStream(
       envelope: envelope.inner,
       config: null,
-      cancellationToken: cancellationToken?.inner,
+      cancellationToken: cancellationToken?.inner.fork(),
       options: options?.toFfi(),
     );
     await for (final event in stream) {
@@ -616,7 +621,7 @@ class XybridModel {
         envelope: envelope.inner,
         options: options.toFfi(),
         config: config?.toFfi(),
-        cancellationToken: cancellationToken?.inner,
+        cancellationToken: cancellationToken?.inner.fork(),
       );
 
       yield* _tokensWithCompletion(stream);
@@ -684,7 +689,7 @@ class XybridModel {
         envelope: envelope.inner,
         context: context.inner,
         config: config?.toFfi(),
-        cancellationToken: cancellationToken?.inner,
+        cancellationToken: cancellationToken?.inner.fork(),
         preempt: preempt,
         frameSessionId: frameSessionId,
         options: options?.toFfi(),

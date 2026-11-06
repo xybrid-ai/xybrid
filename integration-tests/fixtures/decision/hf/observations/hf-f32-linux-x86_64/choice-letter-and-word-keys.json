@@ -1,0 +1,116 @@
+{
+  "id": "choice-letter-and-word-keys",
+  "split": "calibration",
+  "request_sha256": "7c3dac4e624da004cc61dbc653317f7a8f58efe4139e6bded9f6e4493233516c",
+  "case_file_sha256": "f3c950c83dab94bee935da566a56e653b88d97688d1bf23a942c4e7d1c6b93d0",
+  "status": "complete",
+  "passes": [
+    {
+      "question": "q",
+      "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA First\nB Second\nC Something else\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "token_ids": [
+        124894,
+        124899,
+        5922,
+        207,
+        49,
+        452,
+        14917,
+        10625,
+        532,
+        5304,
+        20,
+        8193,
+        52966,
+        734,
+        302,
+        876,
+        64673,
+        63509,
+        833,
+        28327,
+        7331,
+        24612,
+        1737,
+        64929,
+        13314,
+        833,
+        41,
+        5206,
+        207,
+        42,
+        7795,
+        207,
+        43,
+        39280,
+        3080,
+        8,
+        57922,
+        415,
+        278,
+        7331,
+        4713,
+        1049,
+        22,
+        124900,
+        207,
+        124899,
+        63514,
+        207,
+        124901,
+        124902
+      ],
+      "selected": {
+        "groups": [
+          [
+            41,
+            334
+          ],
+          [
+            42,
+            378
+          ],
+          [
+            43,
+            340
+          ]
+        ],
+        "raw_scores": [
+          "0x41113f6d",
+          "0x40bdc4ae",
+          "0x4117d0d7",
+          "0x40cc3060",
+          "0x410bfd83",
+          "0x40b73dd8"
+        ],
+        "log_probabilities": [
+          "0xbfd12290",
+          "0xc09902d0",
+          "0xbf9c9740",
+          "0xc08a971e",
+          "0xbffb31e0",
+          "0xc09f89a6"
+        ]
+      },
+      "result": {
+        "answers": {
+          "q": {
+            "type": "choice",
+            "choice": "B",
+            "confidence": 0.4326895541162312,
+            "probabilities": {
+              "A": 0.31832733467993957,
+              "B": 0.4326895541162312,
+              "other": 0.24898311120382932
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 50,
+          "output_tokens": 0
+        }
+      }
+    }
+  ],
+  "duration_seconds": 17.52804797900012
+}
