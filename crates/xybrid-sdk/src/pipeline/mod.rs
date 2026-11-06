@@ -516,12 +516,10 @@ fn publish_streaming_fast_path_events(
     stage_name: &str,
     model_id: &str,
     route: &StreamingFastPathRoute,
-    pipeline_id: Option<uuid::Uuid>,
-    trace_id: Option<uuid::Uuid>,
 ) {
     for event in streaming_fast_path_events(stage_name, model_id, route) {
         let telemetry = crate::telemetry::convert_orchestrator_event(&event);
-        crate::telemetry::publish_telemetry_event_in_context(telemetry, pipeline_id, trace_id);
+        crate::telemetry::publish_telemetry_event(telemetry);
     }
 }
 
@@ -1262,18 +1260,30 @@ fn execute_blocking(
     // Collect runtime metrics from caller options when provided.
     let metrics = pipeline_metrics(options);
 
-    // Install per-call pipeline context. The RAII guard clears on every exit
-    // (success, `?` error, panic) so we don't leak the global `trace_id` onto
-    // later unrelated telemetry — replaces the manual
-    // `set_telemetry_pipeline_context(None, None)` calls that previously had
-    // to be threaded through every exit.
-    let trace_id = uuid::Uuid::new_v4();
-    let pipeline_id = name
-        .as_ref()
-        .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
-    let _context_guard =
-        crate::telemetry::TelemetryPipelineContextGuard::install(pipeline_id, Some(trace_id));
+    // One `invoke_workflow` span per pipeline run; orchestrator stages are
+    // recorded beneath it.
+    let workflow =
+        crate::observability::WorkflowScope::start(name.as_deref().unwrap_or("pipeline"), options);
+    let result = execute_orchestrated(
+        name,
+        stage_descriptors,
+        availability_map,
+        envelope,
+        options,
+        &metrics,
+    );
+    workflow.end(&result);
+    result
+}
 
+fn execute_orchestrated(
+    name: Option<String>,
+    stage_descriptors: Vec<StageDescriptor>,
+    availability_map: HashMap<String, bool>,
+    envelope: &Envelope,
+    options: &RunOptions,
+    metrics: &DeviceMetrics,
+) -> PipelineResult<PipelineExecutionResult> {
     let mut orchestrator = Orchestrator::new();
     // Subscribe after construction: bootstrap events emitted by
     // `Orchestrator::new()` are constructor-local, while execution events
@@ -1289,7 +1299,7 @@ fn execute_blocking(
     let start_time = std::time::Instant::now();
     let resource_guard = crate::telemetry::begin_resource_run();
     let execution_result =
-        orchestrator.execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn);
+        orchestrator.execute_pipeline(&stage_descriptors, envelope, metrics, &availability_fn);
     drop(orchestrator);
     // Join the event bridge unconditionally so its thread never leaks, but
     // surface the *execution* error first when both fail — the pipeline
@@ -1334,12 +1344,7 @@ fn execute_blocking(
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0),
     };
-    crate::telemetry::publish_with_resource_summary_in_context(
-        event,
-        resource_guard,
-        pipeline_id,
-        Some(trace_id),
-    );
+    crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
     Ok(PipelineExecutionResult {
         name,
@@ -1570,23 +1575,33 @@ impl Xybrid {
 
                         drop(handle); // Release lock before executor call
 
-                        let trace_id = uuid::Uuid::new_v4();
-                        let pipeline_id = pipeline
-                            .name
-                            .as_ref()
-                            .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
-                        let _context_guard =
-                            crate::telemetry::TelemetryPipelineContextGuard::install(
-                                pipeline_id,
-                                Some(trace_id),
-                            );
-                        publish_streaming_fast_path_events(
-                            &stage_name,
-                            &model_id,
-                            &route,
-                            pipeline_id,
-                            Some(trace_id),
+                        publish_streaming_fast_path_events(&stage_name, &model_id, &route);
+
+                        let workflow = crate::observability::WorkflowScope::start(
+                            pipeline.name.as_deref().unwrap_or("pipeline"),
+                            options,
                         );
+                        let obs = crate::observability::RunObservation::start(
+                            crate::observability::RunStart {
+                                subject: crate::observability::RunSubject::from_metadata(
+                                    &model_id, &metadata,
+                                ),
+                                input: Some(&prepared),
+                                history: &[],
+                                options: None,
+                                generation: options.generation_config.as_ref(),
+                                streaming: true,
+                                location: crate::observability::Location::Local,
+                                parent: None,
+                            },
+                        );
+                        let chunks = obs.chunk_sink();
+                        let mut on_token = on_token;
+                        let on_token: xybrid_core::runtime_adapter::types::StreamingCallback<'_> =
+                            Box::new(move |token| {
+                                chunks.chunk();
+                                on_token(token)
+                            });
 
                         let mut executor =
                             TemplateExecutor::with_base_path(bundle_path.to_str().unwrap_or(""));
@@ -1596,7 +1611,19 @@ impl Xybrid {
                             .execute_streaming(&metadata, &prepared, on_token, None)
                             .map_err(|e| {
                                 SdkError::inference_src("LLM streaming execution failed", e)
-                            })?;
+                            });
+                        let output = match output {
+                            Ok(output) => {
+                                let _ = obs.succeed(&output);
+                                workflow.end(&Ok::<(), SdkError>(()));
+                                output
+                            }
+                            Err(e) => {
+                                obs.fail(&e);
+                                workflow.end(&Err::<(), _>(SdkError::inference(e.to_string())));
+                                return Err(e);
+                            }
+                        };
                         let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
                         let output_type = output_type_for_envelope(&output);
@@ -1629,11 +1656,7 @@ impl Xybrid {
                                 .map(|d| d.as_millis() as u64)
                                 .unwrap_or(0),
                         };
-                        crate::telemetry::publish_telemetry_event_in_context(
-                            event,
-                            pipeline_id,
-                            Some(trace_id),
-                        );
+                        crate::telemetry::publish_telemetry_event(event);
 
                         return Ok(PipelineExecutionResult {
                             name: pipeline.name.clone(),

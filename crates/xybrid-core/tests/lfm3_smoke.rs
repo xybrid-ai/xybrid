@@ -527,13 +527,11 @@ fn lfm3_vl_caption_respects_the_image_token_cap() {
     .expect("multipart VLM input");
     let config = GenerationConfig::greedy().with_max_tokens(128);
 
-    xybrid_core::tracing::init_tracing(true);
-    xybrid_core::tracing::reset_tracing();
+    let stage_trace = xybrid_core::tracing::capture();
     let output = executor
         .execute(&metadata, &input, Some(&config))
         .expect("LFM3-VL caption succeeds");
-    let spans = xybrid_core::tracing::get_stages_json();
-    xybrid_core::tracing::reset_tracing();
+    let spans = stage_trace.stages_json();
     let caption = text(&output);
     eprintln!("caption: {caption:?}");
 

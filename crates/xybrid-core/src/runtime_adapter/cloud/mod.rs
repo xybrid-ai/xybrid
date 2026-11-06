@@ -590,10 +590,12 @@ fn stream_with_gateway_sse(
         );
     }
 
-    let mut http_req = agent
-        .post(&url)
-        .set("Accept", "text/event-stream")
-        .set("Content-Type", "application/json");
+    let mut http_req = crate::tracing::inject_trace_headers(
+        agent
+            .post(&url)
+            .set("Accept", "text/event-stream")
+            .set("Content-Type", "application/json"),
+    );
 
     if let Some(key) = config.resolve_api_key() {
         http_req = http_req.set("Authorization", &format!("Bearer {}", key));

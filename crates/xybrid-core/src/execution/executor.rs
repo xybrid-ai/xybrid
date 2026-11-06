@@ -5509,7 +5509,6 @@ mod tests {
     #[test]
     fn vision_language_streaming_uses_multimodal_streaming_span() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
-        let _trace_lock = crate::tracing::test_lock();
 
         let metadata = ModelMetadata {
             model_id: "gemma-3n-e2b".to_string(),
@@ -5552,8 +5551,7 @@ mod tests {
         let image = Envelope::image(image_bytes, "png").unwrap();
         let input = Envelope::user_message("Describe this image", vec![image]).unwrap();
 
-        crate::tracing::init_tracing(true);
-        crate::tracing::reset_tracing();
+        let stage_trace = crate::tracing::capture();
 
         let mut executor = TemplateExecutor::with_base_path("/models");
         cache_text_only_boundary_backend(
@@ -5566,8 +5564,7 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("does not support vision input"));
 
-        let json = crate::tracing::get_stages_json();
-        crate::tracing::reset_tracing();
+        let json = stage_trace.stages_json();
         let spans = json["spans"].as_array().unwrap();
         assert!(
             spans
@@ -5587,7 +5584,6 @@ mod tests {
         };
         use ndarray::{ArrayD, IxDyn};
         use std::sync::{Arc, Mutex};
-        let _trace_lock = crate::tracing::test_lock();
 
         struct SpyVisionEncoder {
             events: Arc<Mutex<Vec<&'static str>>>,
@@ -5719,8 +5715,7 @@ mod tests {
         let image = Envelope::image(image_bytes, "png").unwrap();
         let input = Envelope::user_message("Describe this image", vec![image]).unwrap();
 
-        crate::tracing::init_tracing(true);
-        crate::tracing::reset_tracing();
+        let stage_trace = crate::tracing::capture();
 
         let events = Arc::new(Mutex::new(Vec::new()));
         let observed_shape = Arc::new(Mutex::new(None));
@@ -5763,8 +5758,7 @@ mod tests {
         assert_eq!(*image_count.lock().unwrap(), Some(1));
         assert_eq!(*events.lock().unwrap(), vec!["encoder", "llm"]);
 
-        let spans = crate::tracing::get_stages_json();
-        crate::tracing::reset_tracing();
+        let spans = stage_trace.stages_json();
         let vision_encoder_metadata = spans["spans"]
             .as_array()
             .and_then(|spans| {

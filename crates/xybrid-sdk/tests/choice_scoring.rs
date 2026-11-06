@@ -31,6 +31,9 @@ use xybrid_sdk::{
     StreamingCallback, XybridModel,
 };
 
+#[path = "support/otlp.rs"]
+mod otlp;
+
 const CANARY: &str = "canary-9c41d7";
 
 type TokenResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -568,15 +571,14 @@ const CANARY_SHAPE: &str = "[100]";
 /// starts.
 const PRIVACY_CHILD: &str = "XYBRID_TEST_CHOICE_PRIVACY_CHILD";
 
-/// No surface but the result carries the caller's content: not errors,
-/// `Debug`, telemetry and its spans, execution events, logs, the trace or
-/// stderr.
+/// With metadata-only observability, caller content reaches only the result:
+/// errors, `Debug`, local telemetry, exported spans, execution events, logs,
+/// scoped stage traces and stderr must not include it.
 ///
-/// The logger, the span collector, the telemetry senders and the execution
-/// listener are process-wide, and another test's telemetry resets the span
-/// collector, which could drop this test's spans before they are checked. So
-/// the checks run alone, in a child copy of this test binary; this test reads
-/// the child's result and stderr. The child starts ONNX Runtime with its
+/// The logger, observability configuration, telemetry senders and execution
+/// listener are process-wide. Run these checks alone in a child process so
+/// another test cannot replace a listener or observer during the assertions.
+/// The child starts ONNX Runtime with its
 /// environment logging warnings (`ORT_LOG=warning`), so a scorer that let
 /// ONNX Runtime log would show on that stderr.
 #[test]
@@ -615,7 +617,14 @@ fn check_every_surface_for_caller_content() {
     static LOGGER: RecordingLogger = RecordingLogger;
     log::set_logger(&LOGGER).expect("the child process installs the only logger");
     log::set_max_level(log::LevelFilter::Trace);
-    xybrid_core::tracing::init_tracing(true);
+    let capture = xybrid_core::tracing::capture();
+    let (endpoint, exported, collector) = otlp::start_mock_ingest();
+    xybrid_sdk::init_observability(
+        xybrid_sdk::ObservabilityConfig::otlp(otlp::trace_config(&endpoint))
+            .content(xybrid_sdk::observability::ContentPolicy::metadata_only())
+            .device_attributes(false),
+    )
+    .unwrap();
 
     let (telemetry_tx, telemetry_rx) = std::sync::mpsc::channel();
     xybrid_sdk::register_telemetry_sender(telemetry_tx);
@@ -725,15 +734,25 @@ fn check_every_surface_for_caller_content() {
 
     xybrid_sdk::clear_execution_listener();
     let telemetry: Vec<_> = telemetry_rx.try_iter().collect();
-    let trace = xybrid_core::tracing::get_stages_json();
+    let trace = capture.stages_json();
+    xybrid_sdk::shutdown_observability(std::time::Duration::from_secs(5)).unwrap();
+    let exported_body = exported
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    collector.join().unwrap();
+    let exported_json: serde_json::Value = serde_json::from_str(&exported_body).unwrap();
+    let exported_spans = otlp::spans(&exported_json);
+    assert!(
+        !exported_spans.is_empty(),
+        "the privacy check must inspect actual exported spans"
+    );
     let logs = LOG_LINES.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let listened = listened.lock().unwrap_or_else(|e| e.into_inner()).clone();
 
-    // Each request the SDK scored has its own completion, which names the
-    // decision, counts its five candidates and carries its spans; the
-    // executor's run and the failed one leave theirs in the trace. Both are
-    // then checked below, so this is the evidence that those checks saw the
-    // scorers' traces.
+    // Each SDK-scored request has a local completion with its decision
+    // metadata and separate OTLP child spans. The direct executor run uses
+    // the scoped local capture. Check evidence on all three surfaces so the
+    // subsequent privacy assertions cannot pass by inspecting empty data.
     let decisions: Vec<serde_json::Value> = telemetry
         .iter()
         .filter(|event| event.event_type == "ModelComplete")
@@ -747,20 +766,30 @@ fn check_every_surface_for_caller_content() {
             assert_eq!(data["task"], "decision", "{data}");
             assert_eq!(data["backend"], "ort", "{data}");
             assert_eq!(data["choice_count"], 5, "{data}");
-            let spans = data["spans"]
-                .as_array()
-                .expect("the completion carries its spans");
             assert!(
-                spans
-                    .iter()
-                    .any(|span| scoring_span(span) && span["metadata"]["choice_count"] == "5"),
-                "{data}"
+                data.get("spans").is_none(),
+                "local events no longer snapshot spans"
             );
         }
     } else {
         assert!(decisions.is_empty(), "{decisions:?}");
     }
     if ran {
+        let scoring_spans: Vec<_> = exported_spans
+            .iter()
+            .filter(|span| scoring_span(span))
+            .collect();
+        assert!(
+            scoring_spans.len() >= 2,
+            "SDK scoring stages must reach OTLP: {exported_json}"
+        );
+        assert!(
+            scoring_spans.iter().any(|span| {
+                otlp::attribute(&span["attributes"], "xybrid.stage.choice_count")
+                    .is_some_and(|value| value["stringValue"] == "5")
+            }),
+            "OTLP scoring stages must preserve candidate counts"
+        );
         // The wrong-shaped run's failure, which names its output, reached the
         // execution listener, which hands telemetry the same message, so the
         // checks below saw it.
@@ -783,6 +812,7 @@ fn check_every_surface_for_caller_content() {
         ("execution events", listened),
         ("logs", logs),
         ("trace", vec![trace.to_string()]),
+        ("OTLP spans (metadata-only)", vec![exported_body]),
     ] {
         for line in lines {
             assert!(

@@ -6614,6 +6614,7 @@ dependencies = [
  "uuid",
  "xybrid-core",
  "xybrid-macros",
+ "xybrid-observability",
 ]
 
 [[package]]

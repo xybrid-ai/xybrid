@@ -609,7 +609,9 @@ impl Orchestrator {
             .log_execution_start(&stage.name, &routing_decision.target.to_json_string());
 
         let mut executor_clone = self.executor.clone();
+        let recorder = trace::current_recorder();
         let execution_result = task::spawn_blocking(move || {
+            let _trace = recorder.map(trace::RecorderScope::install);
             executor_clone.execute_prepared(&stage_clone, &prepared_input_clone, &target)
         })
         .await
