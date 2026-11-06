@@ -754,6 +754,20 @@ impl WorkflowScope {
         }
     }
 
+    /// Carries the run's controls into an inference nested under this workflow.
+    /// An explicit caller parent belongs to the workflow; its inference is a child of it.
+    #[cfg(any(test, feature = "llm-mistral", feature = "llm-llamacpp"))]
+    pub(crate) fn child_options(
+        &self,
+        options: &crate::run_options::RunOptions,
+    ) -> crate::run_options::RunOptions {
+        let mut child = options.clone();
+        if let Some(observation) = child.observation.as_mut() {
+            observation.parent = self.op.context();
+        }
+        child
+    }
+
     /// Ends the workflow with `result`, returning its reference on success.
     pub(crate) fn end<T>(mut self, result: &SdkResult<T>) -> Option<ObservationRef> {
         self._scope.take();
@@ -1442,10 +1456,21 @@ impl TraceRecorder for StageRecorder {
 }
 
 /// The parent for a run started inside another observed run on this thread
-/// (for example a pipeline stage), taken from the installed stage recorder.
+/// (for example a pipeline stage), taken from the installed stage recorder,
+/// or the application's active OpenTelemetry span before a worker hop.
 pub(crate) fn ambient_parent() -> Option<ObservationContext> {
-    let headers = xybrid_core::tracing::current_trace_headers()?;
-    ObservationContext::from_traceparent(&headers.traceparent, headers.tracestate.as_deref()).ok()
+    if xybrid_core::tracing::current_recorder().is_some() {
+        // An installed recorder with no headers can represent a suppressed workflow.
+        // Do not bypass it by resurrecting an outer application's span.
+        return xybrid_core::tracing::current_trace_headers().and_then(|headers| {
+            ObservationContext::from_traceparent(
+                &headers.traceparent,
+                headers.tracestate.as_deref(),
+            )
+            .ok()
+        });
+    }
+    ObservationContext::current()
 }
 
 /// Starts a model-load observation.
@@ -1469,6 +1494,123 @@ pub(crate) fn start_model_load(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ambient_application_context_survives_worker_hops_and_recorder_precedence() {
+        let application = ObservationContext::from_traceparent(
+            "00-11111111111111111111111111111111-2222222222222222-01",
+            Some("vendor=app"),
+        )
+        .unwrap();
+        let _application = application.to_otel().attach();
+        assert_eq!(ambient_parent(), Some(application.clone()));
+        let captured = ambient_parent().unwrap();
+        std::thread::spawn(move || {
+            assert!(ambient_parent().is_none());
+            let _scope = ParentScope::install(captured.clone());
+            assert_eq!(ambient_parent(), Some(captured));
+        })
+        .join()
+        .unwrap();
+        let nested = ObservationContext::from_traceparent(
+            "00-33333333333333333333333333333333-4444444444444444-01",
+            None,
+        )
+        .unwrap();
+        {
+            let _scope = ParentScope::install(nested.clone());
+            assert_eq!(ambient_parent(), Some(nested));
+        }
+        {
+            let _scope =
+                RecorderScope::install(Arc::new(StageRecorder::new(Observer::disabled(), None)));
+            assert!(
+                ambient_parent().is_none(),
+                "a suppressed recorder must not inherit the outer application span"
+            );
+        }
+        assert_eq!(ambient_parent(), Some(application));
+    }
+
+    #[test]
+    fn streaming_workflow_children_keep_observer_and_suppression_controls() {
+        use crate::run_options::RunOptions;
+        use httpmock::prelude::*;
+        use xybrid_observability::otlp::ObservabilityPipeline;
+
+        let server = MockServer::start();
+        let pipeline = ObservabilityPipeline::build(OtlpConfig::default().with_traces(Some(
+            SignalEndpoint::new(server.url("/v1/traces")).with_protocol(Protocol::HttpJson),
+        )))
+        .unwrap();
+        let observer = pipeline.observer();
+        let caller = ObservationContext::from_traceparent(
+            "00-11111111111111111111111111111111-2222222222222222-01",
+            None,
+        )
+        .unwrap();
+        for trace in [TraceMode::Default, TraceMode::Suppress] {
+            let options = RunOptions::default().with_observation(ObservationOptions {
+                parent: Some(caller.clone()),
+                observer: Some(observer.clone()),
+                trace,
+                conversation_id: Some("conversation".into()),
+                attributes: vec![KeyValue::new("custom", "kept")],
+                ..ObservationOptions::default()
+            });
+            let workflow = WorkflowScope::start("streaming", &options);
+            let workflow_context = workflow.op.context();
+            let child = workflow.child_options(&options);
+            let controls = child.observation.as_ref().unwrap();
+            assert_eq!(controls.trace, trace);
+            assert_eq!(controls.parent, workflow_context);
+            assert_eq!(controls.conversation_id.as_deref(), Some("conversation"));
+            let obs = RunObservation::start(RunStart {
+                subject: RunSubject {
+                    operation: "chat",
+                    task: None,
+                    runtime: Some("llama.cpp"),
+                    model: "tiny".into(),
+                    format: Some("gguf"),
+                    input_modalities: vec![Modality::Text],
+                    output_modalities: vec![Modality::Text],
+                    output_type: None,
+                    is_llm: true,
+                },
+                input: None,
+                history: &[],
+                options: Some(&child),
+                generation: None,
+                streaming: true,
+                location: Location::Local,
+                parent: None,
+            });
+            if trace == TraceMode::Suppress {
+                assert!(obs.context().is_none());
+            } else {
+                assert_eq!(obs.context().unwrap().trace_id(), caller.trace_id());
+            }
+            obs.succeed_without_output();
+            workflow.end(&Ok::<(), SdkError>(()));
+            if let Some(parent) = workflow_context {
+                let sent = server.mock(|when, then| {
+                    when.method(POST)
+                        .path("/v1/traces")
+                        .body_contains(format!("\"parentSpanId\": \"{}\"", parent.span_id()))
+                        .body_contains("chat tiny");
+                    then.status(200);
+                });
+                pipeline.force_flush(Duration::from_secs(2)).unwrap();
+                sent.assert_hits(1);
+            }
+        }
+        assert_eq!(
+            pipeline.stats().spans_queued,
+            2,
+            "the suppressed workflow and inference must enqueue no spans"
+        );
+        pipeline.shutdown(Duration::from_secs(2)).unwrap();
+    }
 
     #[test]
     fn harvest_keeps_last_known_values() {

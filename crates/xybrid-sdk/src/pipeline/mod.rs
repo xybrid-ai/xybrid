@@ -1581,6 +1581,7 @@ impl Xybrid {
                             pipeline.name.as_deref().unwrap_or("pipeline"),
                             options,
                         );
+                        let inference_options = workflow.child_options(options);
                         let obs = crate::observability::RunObservation::start(
                             crate::observability::RunStart {
                                 subject: crate::observability::RunSubject::from_metadata(
@@ -1588,7 +1589,7 @@ impl Xybrid {
                                 ),
                                 input: Some(&prepared),
                                 history: &[],
-                                options: None,
+                                options: Some(&inference_options),
                                 generation: options.generation_config.as_ref(),
                                 streaming: true,
                                 location: crate::observability::Location::Local,
