@@ -220,7 +220,7 @@ default:
 | Mode | Spans | Events |
 |---|---|---|
 | `span_only` (**default once telemetry is enabled**) | content attributes as JSON strings | none |
-| `event_only` | none | `gen_ai.client.inference.operation.details` with structured content |
+| `event_only` | none | inference or tool details with structured content |
 | `span_and_event` | yes | yes |
 | `no_content` (metadata-only) | none | none |
 
@@ -235,6 +235,13 @@ Governed attributes: `gen_ai.input.messages`, `gen_ai.output.messages`,
 `gen_ai.tool.call.result`, `gen_ai.prompt.variable.<key>`, and the feedback
 comment. `gen_ai.tool.definitions` is schema, not content: it is recorded in
 every mode but still redacted and bounded.
+
+Tool arguments and results use `gen_ai.execute_tool.operation.details` at completion
+when event capture is enabled and a governed payload remains after redaction and
+bounding. The DEBUG event is linked to the tool span and includes the tool name,
+type, error type and truncation markers. Inference uses
+`gen_ai.client.inference.operation.details`. Both modes share the same redaction
+and byte budget; metadata-only capture emits neither payload.
 
 ### Message model
 
