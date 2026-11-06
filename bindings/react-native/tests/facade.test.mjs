@@ -161,6 +161,35 @@ test('a context crosses as its handle', async () => {
   assert.equal(calls[3][3].context, 'context:7');
 });
 
+test('run forwards cloud destination without changing explicit false fallback', async () => {
+  const calls = installFakeNative({ run: () => wireResult() });
+  await new Model('model:1').run(Envelope.text('hi'), {
+    fallbackToCloud: false,
+    cloudProvider: '',
+    cloudModel: 'gpt-4o-mini',
+    cloudGatewayUrl: 'https://api.xybrid.dev/v1',
+  });
+  assert.deepEqual(calls[0][3], {
+    fallbackToCloud: false,
+    cloudProvider: '',
+    cloudModel: 'gpt-4o-mini',
+    cloudGatewayUrl: 'https://api.xybrid.dev/v1',
+  });
+});
+
+test('streaming forwards cloud destination through the same options wire', async () => {
+  const calls = installFakeNative({
+    streamStart: () => 'stream:cloud',
+    streamNext: () => ({ kind: 'complete', result: wireResult() }),
+  });
+  const generator = new Model('model:1').runStreaming(Envelope.text('hi'), {
+    fallbackToCloud: true,
+    cloudProvider: 'openai',
+  });
+  await generator.next();
+  assert.deepEqual(calls[0][3], { fallbackToCloud: true, cloudProvider: 'openai' });
+});
+
 test('streaming yields tokens, returns the result and disposes the stream', async () => {
   const events = [
     { kind: 'token', token: { token: 'Hel', index: 0, cumulativeText: 'Hel', toolCalls: [] } },

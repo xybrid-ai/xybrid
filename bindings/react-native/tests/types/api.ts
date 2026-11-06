@@ -36,6 +36,14 @@ async function usage(): Promise<void> {
   };
   void options;
 
+  const cloudOptions: RunOptions = {
+    fallbackToCloud: false,
+    cloudProvider: 'openai',
+    cloudModel: 'gpt-4o-mini',
+    cloudGatewayUrl: 'https://api.xybrid.dev/v1',
+  };
+  await model.run({ kind: 'text', text: 'hi' }, cloudOptions);
+
   // @ts-expect-error unknown abort signal.
   const bad: RunOptions = { abortOn: ['meltdown'] };
   void bad;

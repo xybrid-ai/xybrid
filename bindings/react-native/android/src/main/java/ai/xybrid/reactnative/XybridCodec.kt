@@ -283,6 +283,9 @@ internal object XybridCodec {
       fallbackToCloud = optionalBoolean(o, "fallbackToCloud", what) ?: false,
       maxGraceTokens = optionalUInt(o, "maxGraceTokens", what) ?: 0u,
       correlationId = optionalString(o, "correlationId", what),
+      cloudProvider = optionalString(o, "cloudProvider", what),
+      cloudModel = optionalString(o, "cloudModel", what),
+      cloudGatewayUrl = optionalString(o, "cloudGatewayUrl", what),
     )
     return RunRequest(
       options = options,

@@ -89,6 +89,9 @@ test('run options carry sampling, platform knobs and handles', () => {
         fallbackToCloud: true,
         maxGraceTokens: 8,
         correlationId: 'req-1',
+        cloudProvider: 'openai',
+        cloudModel: 'gpt-4o-mini',
+        cloudGatewayUrl: 'https://api.xybrid.dev/v1',
       },
       { context: 'context:1', cancel: 'cancel:1' },
     ),
@@ -101,10 +104,27 @@ test('run options carry sampling, platform knobs and handles', () => {
       fallbackToCloud: true,
       maxGraceTokens: 8,
       correlationId: 'req-1',
+      cloudProvider: 'openai',
+      cloudModel: 'gpt-4o-mini',
+      cloudGatewayUrl: 'https://api.xybrid.dev/v1',
       context: 'context:1',
       cancel: 'cancel:1',
     },
   );
+});
+
+test('cloud destination does not enable fallback and blank values survive the wire', () => {
+  assert.deepEqual(wire.toWireRunOptions({
+    fallbackToCloud: false,
+    cloudProvider: '',
+    cloudModel: ' ',
+    cloudGatewayUrl: '',
+  }), {
+    fallbackToCloud: false,
+    cloudProvider: '',
+    cloudModel: ' ',
+    cloudGatewayUrl: '',
+  });
 });
 
 test('top-level sampling parameters are rejected instead of ignored', () => {

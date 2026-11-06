@@ -116,6 +116,9 @@ fun main() {
       "fallbackToCloud" to true,
       "maxGraceTokens" to 8.0,
       "correlationId" to "req",
+      "cloudProvider" to "openai",
+      "cloudModel" to "gpt-4o-mini",
+      "cloudGatewayUrl" to "https://api.xybrid.dev/v1",
       "context" to "context:1",
       "cancel" to "cancel:1",
     ),
@@ -128,6 +131,12 @@ fun main() {
   check(options.generationConfig?.tools?.single()?.parametersJson == "{}", "tools")
   check(options.abortOn == listOf(XybridAbortSignal.THERMAL_HOT, XybridAbortSignal.MEMORY_PRESSURE_CRITICAL), "abort signals")
   check(options.fallbackToCloud && options.maxGraceTokens == 8u, "platform knobs")
+  check(options.cloudProvider == "openai", "cloud provider")
+  check(options.cloudModel == "gpt-4o-mini", "cloud model")
+  check(options.cloudGatewayUrl == "https://api.xybrid.dev/v1", "cloud gateway")
+  val cloudOnly = XybridCodec.decodeRunRequest(js("fallbackToCloud" to false, "cloudProvider" to ""))
+  check(!cloudOnly.options!!.fallbackToCloud && cloudOnly.options!!.cloudProvider == "", "disabled fallback and blank provider")
+  check(cloudOnly.options!!.cloudModel == null && cloudOnly.options!!.cloudGatewayUrl == null, "omitted cloud fields")
   check(request.context == "context:1" && request.cancel == "cancel:1", "handles")
   check(XybridCodec.decodeRunRequest(null).options == null, "null options")
 
@@ -136,6 +145,7 @@ fun main() {
   }
   expectInvalidArgument("unknown abort signal") { XybridCodec.decodeRunRequest(js("abortOn" to listOf("hot"))) }
   expectInvalidArgument("string where a boolean belongs") { XybridCodec.decodeRunRequest(js("fallbackToCloud" to "yes")) }
+  expectInvalidArgument("number where a cloud string belongs") { XybridCodec.decodeRunRequest(js("cloudProvider" to 1)) }
 
   // -- Results
   val metrics = XybridInferenceMetrics(

@@ -40,6 +40,12 @@ export interface RunOptions {
   maxGraceTokens?: number;
   /** Correlation id threaded into telemetry for this call. */
   correlationId?: string;
+  /** Cloud provider selected by the caller for an enabled fallback. */
+  cloudProvider?: string;
+  /** Cloud model selected by the caller for an enabled fallback. */
+  cloudModel?: string;
+  /** Versioned cloud gateway base URL, validated by the shared facade. */
+  cloudGatewayUrl?: string;
   /**
    * Seed the run with this conversation's history (multi-turn chat). The
    * context is not modified: push the turns you want to keep yourself.

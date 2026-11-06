@@ -104,6 +104,31 @@ Use `GenerationConfigs.greedy()` for deterministic decoding
 `GenerationConfigs.creative()` for a higher-temperature preset
 (`temperature=0.9`, `top_p=0.95`, `top_k=50`).
 
+## Cloud Fallback Destination
+
+Pass a destination and explicit fallback permission through the options-aware
+model API:
+
+```python
+options = xybrid.XybridRunOptions(
+    generation_config=None,
+    abort_on=[],
+    fallback_to_cloud=True,
+    max_grace_tokens=0,
+    correlation_id=None,
+    cloud_provider="openai",
+    cloud_model="gpt-4o-mini",
+    cloud_gateway_url="https://api.xybrid.dev/v1",
+)
+result = model.run(xybrid.XybridEnvelope.text("Write a haiku"), options)
+```
+
+All three cloud fields are optional and have no Python or facade default.
+Supplying a destination without `fallback_to_cloud=True` does not permit a
+local-to-cloud fallback. Existing five-argument `XybridRunOptions` construction
+remains valid. `model.run` carries these settings into the existing execution
+path; it does not itself start an automatic cloud retry.
+
 ## Multimodal Input
 
 ```python

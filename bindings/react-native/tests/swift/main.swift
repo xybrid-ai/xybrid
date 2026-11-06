@@ -97,6 +97,9 @@ do {
     "fallbackToCloud": true,
     "maxGraceTokens": 8,
     "correlationId": "req",
+    "cloudProvider": "openai",
+    "cloudModel": "gpt-4o-mini",
+    "cloudGatewayUrl": "https://api.xybrid.dev/v1",
     "context": "context:1",
     "cancel": "cancel:1",
   ]))
@@ -110,6 +113,12 @@ do {
   check(options.abortOn == [.thermalHot, .memoryPressureCritical], "abort signals")
   check(options.fallbackToCloud && options.maxGraceTokens == 8, "platform knobs")
   check(options.correlationId == "req", "correlation id")
+  check(options.cloudProvider == "openai", "cloud provider")
+  check(options.cloudModel == "gpt-4o-mini", "cloud model")
+  check(options.cloudGatewayUrl == "https://api.xybrid.dev/v1", "cloud gateway")
+  let cloudOnly = try XybridCodec.decodeRunRequest(js(["fallbackToCloud": false, "cloudProvider": ""]))
+  check(cloudOnly.options?.fallbackToCloud == false && cloudOnly.options?.cloudProvider == "", "disabled fallback and blank provider")
+  check(cloudOnly.options?.cloudModel == nil && cloudOnly.options?.cloudGatewayUrl == nil, "omitted cloud fields")
   check(request.context == "context:1" && request.cancel == "cancel:1", "handles")
 
   let empty = try XybridCodec.decodeRunRequest(nil)
@@ -127,6 +136,9 @@ expectInvalidArgument("string where a boolean belongs") {
 }
 expectInvalidArgument("number where a boolean belongs") {
   _ = try XybridCodec.decodeRunRequest(js(["fallbackToCloud": 1]))
+}
+expectInvalidArgument("number where a cloud string belongs") {
+  _ = try XybridCodec.decodeRunRequest(js(["cloudProvider": 1]))
 }
 
 // MARK: - Results

@@ -4,11 +4,13 @@
 #   bindings/apple/include/xybrid-bolt.h             (C header the Bazel
 #                                                     xcframework ships)
 #
-# The Swift source receives two compatibility transforms:
+# The Swift source receives three compatibility transforms:
 #   (a) XybridResult's append-only reasoning field defaults to nil and decodes
 #       results from the merged tool-calling wire shape, which does not emit
 #       that trailing field.
-#   (b) a fallible method taking a slice and returning unit is emitted as
+#   (b) appended cloud fallback options default to nil in the public initializer,
+#       so existing five-argument Swift construction remains source-compatible.
+#   (c) a fallible method taking a slice and returning unit is emitted as
 #       `_ = x.withUnsafeBufferPointer { ... throw ... }`, which Swift rejects
 #       for the missing `try`. Without this the binding does not compile.
 #
@@ -77,6 +79,17 @@ from pathlib import Path
 source_path, destination_path = map(Path, sys.argv[1:])
 source = source_path.read_text()
 
+# Transform (b): preserve construction with the original five run options.
+options_start = source.index("public struct XybridRunOptions:")
+options_end = source.index("\npublic struct ", options_start + 1)
+options = source[options_start:options_end]
+for name in ("cloudProvider", "cloudModel", "cloudGatewayUrl"):
+    original = f"        {name}: String?"
+    if options.count(original) != 1:
+        raise SystemExit(f"error: expected one XybridRunOptions {name} initializer parameter")
+    options = options.replace(original, f"        {name}: String? = nil", 1)
+source = source[:options_start] + options + source[options_end:]
+
 initializer = "        reasoningContent: String?\n    ) {"
 if source.count(initializer) != 1:
     raise SystemExit("error: expected one XybridResult reasoning initializer parameter")
@@ -125,7 +138,7 @@ if source.count(decoder) != 1:
     raise SystemExit("error: expected one generated XybridResult decoder")
 source = source.replace(decoder, replacement)
 
-# Transform (b): mark a throwing slice call with `try`.
+# Transform (c): mark a throwing slice call with `try`.
 #
 # For a fallible method whose only parameter is a slice and whose result is
 # unit, boltffi 0.30.1 emits the call as the function's first statement:
