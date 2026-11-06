@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **CLI telemetry reaches the ingest service.** `--ingest-url` (or
+  `XYBRID_INGEST_URL`) defaults to `https://ingest.xybrid.dev`; `--platform-url`
+  continues to select the API for cloud routing. The default telemetry device
+  ID is now a random UUID saved in `~/.xybrid/install-id`, rather than the
+  hostname. Explicit `--device-id` / `XYBRID_DEVICE_ID` values still win.
+
+## [0.17.0] - 2026-11-05
+
 ### Added
 
 - **Rust:** decision-model data types in `xybrid_core::ir::decision`,
@@ -55,15 +65,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lack the `lfm3` architecture, and 0.16.0 loads it without LFM3's prompt
   format, tool calls or image-token cap.
 
+- **Phoneme timings from ONNX TTS models, for lip sync.** When an ONNX TTS
+  model declares a per-token duration output (named `duration`, `durations`
+  or `pred_dur`), the result now says when each phoneme is spoken: the
+  phoneme and its start and end, in seconds from the first sample of the
+  returned audio. Silence trimming and the crossfades between long-text
+  chunks are already accounted for, and pads and silence tokens are left out.
+  Rust reads them with `InferenceResult::phoneme_timings()` and Unity with
+  `InferenceResult.PhonemeTimings` and `HasPhonemeTimings`. Kotlin, Swift and
+  Python have no typed field yet: they parse the `phoneme_timings` JSON entry
+  of the result envelope's metadata. Dart results carry no metadata, so Dart
+  gets no timings. KittenTTS 0.8 already declares `duration`. Stock Kokoro-82M
+  does not; `tools/conformance/expose_tts_duration.py` adds the output to its
+  ONNX graph without changing the audio (see
+  [`TTSAudioEncode`](docs/sdk/MODEL_METADATA.md#ttsaudioencode)). A model
+  without such an output returns the same audio as before and no new metadata
+  key. Streaming TTS, the zzz speech engines (Phonon, Kitten TTS 2), codec TTS
+  (NeuTTS) and runs answered by the cloud report no timings.
+
 ### Changed
 
 - **Rust:** `xybrid-core` turns on serde_json's `float_roundtrip` feature, so
   every crate that links it parses JSON floats correctly rounded (serde_json's
   default is best-effort and can be one ulp off). Float-dense JSON parses about
   19–32% slower.
-
-### Changed
-
 - **Breaking (Flutter):** `xybrid_flutter` now declares the platform minimums
   its precompiled libraries are built for: iOS 16.0 (was 13.0), macOS 14.0
   (was 10.15) and Android 9, API 28 (`minSdkVersion` was 21). An app that
@@ -76,6 +101,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `macos/Podfile` and a macOS Deployment Target of 14.0. The libraries are
   unchanged. The Flutter README's macOS 13.3 was too low: the libraries'
   llama.cpp and whisper.cpp code is built for macOS 14.0.
+- **Build tooling:** upgrade rules_rs to 0.2.0 and remove its local patch.
+  llama.cpp remains pinned to v0.8.0.
 
 ### Fixed
 
@@ -138,6 +165,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reopened (`<think>\n\n</think>\n\n<think>\n`); it now asks for thinking on
   when the model's `reasoning` flag is set. gemma-4 still renders with
   thinking off.
+- **Rust builds:** refresh the generated llama.cpp native manifest for the
+  current wrapper, restoring matching prebuilt archives for external Cargo
+  builds on supported targets.
+- **Release preparation:** reject stale Flutter precompiled libraries after
+  native inputs change, verify Apple libraries against their declared OS
+  minimums, and check the draft XCFramework against the SwiftPM and React
+  Native checksums before publishing. Documentation install pins now update
+  with every version bump and are checked in CI.
 
 ## [0.16.0] - 2026-10-30
 
@@ -158,23 +193,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine's fourteen notice files (its runtime terms and the upstream licenses)
   under `assets/xybrid/zzz/`. Android merges library assets into the APK, so
   every app that ships the SDK carries them.
-- **Phoneme timings from ONNX TTS models, for lip sync.** When an ONNX TTS
-  model declares a per-token duration output (named `duration`, `durations`
-  or `pred_dur`), the result now says when each phoneme is spoken: the
-  phoneme and its start and end, in seconds from the first sample of the
-  returned audio. Silence trimming and the crossfades between long-text
-  chunks are already accounted for, and pads and silence tokens are left out.
-  Rust reads them with `InferenceResult::phoneme_timings()` and Unity with
-  `InferenceResult.PhonemeTimings` and `HasPhonemeTimings`. Kotlin, Swift and
-  Python have no typed field yet: they parse the `phoneme_timings` JSON entry
-  of the result envelope's metadata. Dart results carry no metadata, so Dart
-  gets no timings. KittenTTS 0.8 already declares `duration`. Stock Kokoro-82M
-  does not; `tools/conformance/expose_tts_duration.py` adds the output to its
-  ONNX graph without changing the audio (see
-  [`TTSAudioEncode`](docs/sdk/MODEL_METADATA.md#ttsaudioencode)). A model
-  without such an output returns the same audio as before and no new metadata
-  key. Streaming TTS, the zzz speech engines (Phonon, Kitten TTS 2), codec TTS
-  (NeuTTS) and runs answered by the cloud report no timings.
 
 ### Changed
 
@@ -254,11 +272,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **CLI telemetry reaches the ingest service.** `--ingest-url` (or
-  `XYBRID_INGEST_URL`) defaults to `https://ingest.xybrid.dev`; `--platform-url`
-  continues to select the API for cloud routing. The default telemetry device
-  ID is now a random UUID saved in `~/.xybrid/install-id`, rather than the
-  hostname. Explicit `--device-id` / `XYBRID_DEVICE_ID` values still win.
 - **Unity Android builds no longer fail on a duplicate `libc++_shared.so`.**
   When Unity's GameActivity packages its own copy, Gradle stopped at
   `mergeDebugNativeLibs` with "2 files found with path
