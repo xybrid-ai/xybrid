@@ -13,12 +13,13 @@ They use one question per call, one batch row, and explicit `set_size=1`.
 The collector records both the raw output-head logits and the log-probabilities
 that the HF runner actually passes to its finalizer.
 
-The [recorded CPU observations](observations/README.md) cover all 63 attempted
-HF cases, the full Q4 upstream reference, a deliberately partial F16 smoke,
-and matched-engine Rust G2. HF completes 58 cases and refuses five; 12 accepted
-cases differ in preparation, and four choices/medians differ against Q4 even
-with matching preparation. All reports remain explicitly unqualified for
-numerical promotion.
+The [implementation findings](../../../../docs/development/decision-conformance.md#implementation-validation-summary)
+summarize the initial CPU comparison: HF completed 58 of 63 attempted cases
+and refused five; 12 accepted cases differed in preparation, and four
+choices/medians differed against Q4 even with matching preparation. These
+findings do not establish numerical promotion bounds. Raw collection outputs
+are kept outside the source tree; the commands above reproduce them in the
+ignored conformance work directory.
 
 ## Compatibility observations
 

@@ -137,12 +137,19 @@ The HF runner subtracts vocabulary-wide logsumexp before its readout; the
 collector hooks the output head to retain true raw logits as well as those
 normalized log-probabilities.
 
-## Recorded implementation evidence
+## Implementation validation summary
 
-The checked-in [CPU observation report](../../integration-tests/fixtures/decision/hf/observations/README.md)
-contains complete identities and explicit limitations. The required native
-integration target passed all seven tests with zero skips. G0 matched all
-89 accepted preparations, nine preparation refusals and three load refusals.
+Raw collection outputs, token/logit arrays and per-run receipts are not
+committed. Use the commands above to reproduce them in the ignored
+`tools/conformance/decision/work/` directory or temporary storage. The required
+CI lane collects a fresh native reference and uploads its observations,
+runtime reports and staging receipt as the `decision-cpu-reference` artifact.
+`check.py` verifies the committed fixture inputs and source/artifact identities;
+it does not require historical run outputs or establish release qualification.
+
+The initial required native integration run passed all seven tests with zero
+skips. G0 matched all 89 accepted preparations, nine preparation refusals and
+three load refusals.
 G2 matched every selected f32 logit bit across 63 real-model cases and 78
 whole-prompt passes, including 4096 tokens. Lifecycle refusal/cancellation
 recovery, Rust sync/async/concurrent execution, wire decoding and independent
@@ -157,8 +164,8 @@ accepted cases had different preparation semantics from the pinned upstream
 profile. Among matching preparations, four choices/medians changed against
 Q4, including two held-out cases. The one-case/three-question F16 smoke matched
 preparation and selected answers; it is deliberately not a full F16 study.
-These findings leave P02 open. Observed numerical maxima are recorded for
-review and are not promoted to acceptance limits.
+These findings leave P02 open. The comparison command reports observed
+numerical maxima for review without promoting them to acceptance limits.
 
 ## Host binding verification
 

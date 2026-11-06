@@ -3,10 +3,13 @@
 The runtime conformance suite, independent HF collector and qualification
 boundaries are documented in
 [`decision-conformance.md`](../../../docs/development/decision-conformance.md).
-`check.py` verifies immutable input, observation and source digests; `hf_reference.py` collects actual
-pinned HF observations, and `compare_reference.py` reports differences without
-turning observed maxima into release tolerances. The upstream oracle below
-remains an independent executable, never linked into the production runtime.
+`check.py` verifies immutable fixture inputs and source digests;
+`hf_reference.py` collects actual pinned HF observations, and
+`compare_reference.py` reports differences without turning observed maxima
+into release tolerances. Keep collected outputs in the ignored `work/`
+directory or CI artifacts, outside the committed fixtures. The upstream
+oracle below remains an independent executable, never linked into the
+production runtime.
 
 Writes the decision conformance cases,
 [`integration-tests/fixtures/decision/cases/`](../../../integration-tests/fixtures/decision),

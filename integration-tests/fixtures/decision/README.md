@@ -11,8 +11,8 @@ with it stage by stage, and what xybrid must do.
 | `cases/<id>.json` | One case per file |
 | `oracle.json` | How the upstream observations were made: whether the collector was official, the identity stamped into the executables (llama.cpp commit and clean state, source hashes, build profile, CPU-only backends), the settings as they ran (server arguments, effective context, devices), the recipe hashes, the platform, the facts read from the artifact |
 | `NOTICE` | The llama.cpp material held here (the `systemone` template in `oracle.json`) and its MIT license |
-| `integrity.json` | Reviewed digests of the 143-case corpus, native identity, independent-reference inputs and recorded observations |
-| `hf/` | Pinned HF code/checkpoint assets, a 63-case calibration/held-out input corpus, and bounded CPU observation reports; compatibility differences are recorded in its README |
+| `integrity.json` | Reviewed digests of the 143-case corpus, native identity and independent-reference inputs |
+| `hf/` | Pinned HF code/checkpoint asset manifest and a 63-case calibration/held-out input corpus; compatibility differences are summarized in its README |
 
 The cases are written by the upstream oracle,
 [`tools/conformance/decision`](../../../tools/conformance/decision), which runs

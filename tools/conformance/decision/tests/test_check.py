@@ -48,17 +48,6 @@ class EvidenceInputs(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "changed: regenerate and review"):
                 evidence.check()
 
-    def test_reviewed_observation_cannot_be_removed_or_added_silently(self):
-        path = next((self.fixtures / "hf/observations").rglob("*.json"))
-        original = path.read_bytes()
-        path.unlink()
-        with self.assertRaisesRegex(ValueError, "observations differ"):
-            evidence.check()
-        path.write_bytes(original)
-        (path.parent / "unreviewed.json").write_text("{}")
-        with self.assertRaisesRegex(ValueError, "observations differ"):
-            evidence.check()
-
     def test_missing_and_corrupt_required_model_fail(self):
         path = self.fixtures / "missing.gguf"
         with self.assertRaises(FileNotFoundError):
@@ -66,14 +55,6 @@ class EvidenceInputs(unittest.TestCase):
         path.write_bytes(b"not the pinned model")
         with self.assertRaisesRegex(ValueError, "artifact identity mismatch"):
             evidence.check(path)
-
-    def test_changed_hf_collector_cannot_reuse_old_observations(self):
-        digest = evidence.hf_reference.digest
-        def changed(path):
-            return "0" * 64 if Path(path).name == "hf_reference.py" else digest(path)
-        with patch.object(evidence.hf_reference, "digest", side_effect=changed):
-            with self.assertRaisesRegex(ValueError, "reference source changed: collector_sha256"):
-                evidence.check()
 
 
 if __name__ == "__main__":
