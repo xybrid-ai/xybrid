@@ -51,9 +51,9 @@ Assets/Plugins/Android/**/*.so
 Assets/Plugins/macOS/*.dylib
 Assets/Plugins/Windows/*.dll
 
-# Secrets — the telemetry demo reads endpoint/API key from env vars or
+# Secrets — the observability demo reads endpoint/API key from env vars or
 # PlayerPrefs at runtime. Never commit any local override file.
-telemetry.local.*
+observability.local.*
 *.env
 .env
 .env.local

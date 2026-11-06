@@ -1,6 +1,6 @@
 //! LLM streaming telemetry metrics — TTFT, TPS, ITL.
 //!
-//! Runs a local GGUF LLM through the standard `TemplateExecutor` path and
+//! Runs a local GGUF LLM through the SDK streaming path and
 //! reports the streaming-derived telemetry fields (time-to-first-token,
 //! mean / p95 inter-chunk latency, emitted chunk count) alongside the
 //! existing aggregate metrics.
@@ -8,9 +8,8 @@
 //! Run with:
 //!   cargo run --example llm_streaming_metrics -p xybrid-sdk --features llm-mistral --release
 //!
-//! To also export telemetry to a local ingest service, set:
-//!   XYBRID_API_KEY=<your-api-key> \
-//!   XYBRID_INGEST_URL=http://localhost:8081 \
+//! To also export traces and metrics to a local Collector, set:
+//!   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
 //!   cargo run --example llm_streaming_metrics -p xybrid-sdk --features llm-mistral --release
 //!
 //! Reuses the `integration-tests/fixtures/models/qwen2.5-0.5b-instruct/`
@@ -19,14 +18,10 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
-use xybrid_core::template_executor::TemplateExecutor;
 
-// For telemetry export and trace ID generation.
-extern crate serde_json;
-extern crate uuid;
-extern crate xybrid_sdk;
+#[path = "support/observability.rs"]
+mod observability_support;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
@@ -34,22 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("═══════════════════════════════════════════════════════");
     println!();
 
-    // Initialize platform telemetry if XYBRID_API_KEY is set.
-    // This sends telemetry events to the ingest service (local or prod)
-    // so the dashboard can display the LLM metrics.
-    let telemetry_enabled = xybrid_sdk::init_platform_telemetry_from_env();
-    if telemetry_enabled {
-        println!(
-            "📡 Platform telemetry enabled (sending to {})",
-            std::env::var("XYBRID_INGEST_URL").unwrap_or_else(|_| "default endpoint".into())
-        );
-        // Set a trace ID so the exporter can group the event.
-        let trace_id = uuid::Uuid::new_v4();
-        xybrid_sdk::set_telemetry_pipeline_context(None, Some(trace_id));
-    } else {
-        println!("ℹ️  Platform telemetry disabled (set XYBRID_API_KEY to enable)");
-    }
-    println!();
+    let export = observability_support::configure("llm-streaming-metrics")?;
 
     let model_dir = PathBuf::from("integration-tests/fixtures/models/qwen2.5-0.5b-instruct");
     if !model_dir.exists() {
@@ -58,10 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("Model not found".into());
     }
 
-    let metadata_path = model_dir.join("model_metadata.json");
-    let metadata: ModelMetadata = serde_json::from_str(&std::fs::read_to_string(&metadata_path)?)?;
-
-    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
+    let model = xybrid_sdk::ModelLoader::from_directory(&model_dir)?.load()?;
 
     // Force `max_tokens` high enough that multi-chunk output is the common
     // case — otherwise a too-short reply can legitimately arrive as a single
@@ -84,7 +61,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔄 Running streaming inference (first run loads the model)...");
     println!();
 
-    let output = executor.execute(&metadata, &input, None)?;
+    let result = model.run_streaming(&input, None, |_token| Ok(()))?;
+    let output = result.envelope();
 
     let response_text = match &output.kind {
         EnvelopeKind::Text(t) => t.clone(),
@@ -175,39 +153,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!();
 
-    // Publish a ModelComplete event so the exporter converts it to a
-    // PlatformEvent with stages (including LLM span metadata).
-    // The exporter calls core_tracing::get_stages_json() on
-    // PipelineComplete / ModelComplete events to attach span data.
-    if telemetry_enabled {
-        let elapsed_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-
-        xybrid_sdk::publish_telemetry_event(xybrid_sdk::TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("qwen2.5-0.5b-instruct".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: m.get("generation_time_ms").and_then(|s| s.parse().ok()),
-            error: None,
-            data: Some(
-                serde_json::json!({
-                    "model_id": "qwen2.5-0.5b-instruct",
-                    "output_type": "Text",
-                })
-                .to_string(),
-            ),
-            timestamp_ms: elapsed_ms,
-        });
-
-        println!("📡 Flushing telemetry...");
-        // Small delay to let the exporter batch pick up the event.
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        xybrid_sdk::flush_platform_telemetry();
-        xybrid_sdk::shutdown_platform_telemetry();
-        println!("   ✅ Telemetry sent to ingest");
+    if let Some(reference) = result.observation_ref() {
+        println!("Inference trace: {}", reference.trace_id);
     }
+    export.finish()?;
 
     Ok(())
 }

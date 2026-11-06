@@ -11,12 +11,14 @@
 //!
 //! The SDK is **local-first**: model load/run/stream and pipelines work fully
 //! offline with no account. Authenticating with an API key adds an **additive
-//! platform layer** on top of the same runtime — cloud routing, telemetry, and
-//! control-plane sync. This crate provides high-level abstractions for:
+//! platform layer** on top of the same runtime — cloud routing and
+//! control-plane sync. Observability (OpenTelemetry traces, metrics, and logs)
+//! is configured separately and explicitly; see [`observability`]. This crate provides high-level abstractions for:
 //! - Loading and running ML models (ASR, TTS, embeddings) — local by default
 //! - Streaming inference for real-time applications
 //! - Multi-stage pipelines with intelligent local→cloud routing
-//! - Platform integration (auth, telemetry export) once a key is provided
+//! - Platform integration (auth, cloud routing) once a key is provided
+//! - OpenTelemetry observability to Xybrid or any OTLP backend, once configured
 //!
 //! # Architecture
 //!
@@ -32,22 +34,25 @@
 //! ## Initialization
 //!
 //! Anonymous use works out of the box — local inference, no account needed.
-//! Provide an API key to layer on the platform (cloud routing + telemetry
-//! dashboard) without changing the local path:
+//! Provide an API key to layer on the platform (cloud routing) without
+//! changing the local path. Trace export is a separate, explicit choice:
 //!
 //! ```no_run
-//! // Anonymous — local inference, telemetry disabled
+//! use xybrid_sdk::observability::ObservabilityConfig;
+//!
+//! // Anonymous — local inference, nothing exported
 //! xybrid_sdk::init().run();
 //!
-//! // Authenticated — telemetry exporter starts automatically
+//! // Cloud routing plus traces to the Xybrid dashboard
 //! xybrid_sdk::init()
 //!     .api_key("xy_live_...")
+//!     .observability(ObservabilityConfig::xybrid("xy_live_..."))
 //!     .run();
 //! ```
 //!
 //! Get a free key at <https://dashboard.xybrid.dev>. The first inference
-//! call without a key emits a one-shot info log nudging the developer
-//! toward the dashboard; set `XYBRID_QUIET=1` to suppress it.
+//! without observability configured emits a one-shot info log pointing at
+//! the observability docs; set `XYBRID_QUIET=1` to suppress it.
 //!
 //! ## Batch Inference
 //!
@@ -158,6 +163,7 @@ pub mod llm;
 pub mod metadata_gen;
 pub mod model;
 pub mod model_registry;
+pub mod observability;
 pub mod pipeline;
 pub mod platform;
 pub mod registry_client;
@@ -278,29 +284,16 @@ pub use xybrid_core::ir::{
 // Per-phoneme timings a TTS result carries (`InferenceResult::phoneme_timings`).
 pub use xybrid_core::ir::PhonemeTiming;
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)
+pub use observability::{
+    flush_observability, init_observability, shutdown_observability, ObservabilityConfig,
+    ObservationContext, ObservationOptions, ObservationRef,
+};
 pub use streaming::{FfiPartialResult, FfiStreamState, FfiStreamStats, FfiStreamingConfig};
+// In-process domain events (local subscribers; not an export path).
 pub use telemetry::{
-    // Orchestrator event bridge
-    bridge_orchestrator_events,
-    convert_orchestrator_event,
-    flush_platform_telemetry,
-    flush_platform_telemetry_blocking,
-    init_platform_telemetry,
-    init_platform_telemetry_from_env,
-    install_telemetry_panic_hook,
-    publish_telemetry_event,
-    register_telemetry_sender,
-    set_telemetry_pipeline_context,
-    shutdown_platform_telemetry,
-    // Platform telemetry exports
-    subscribe_orchestrator_events,
-    BridgeError,
-    BridgeHandle,
-    HttpTelemetryExporter,
-    OrchestratorEventBridge,
-    TelemetryConfig,
-    TelemetryEvent,
-    TelemetrySender,
+    bridge_orchestrator_events, convert_orchestrator_event, publish_telemetry_event,
+    register_telemetry_sender, subscribe_orchestrator_events, BridgeError, BridgeHandle,
+    OrchestratorEventBridge, TelemetryEvent, TelemetrySender,
 };
 pub use telemetry_optout::is_telemetry_opted_out;
 
@@ -681,17 +674,16 @@ pub fn init() -> XybridInit {
 
 /// Builder that bundles SDK initialization into a single call.
 ///
-/// Replaces the older multi-step setup (`init_sdk_cache_dir` →
-/// `set_api_key` → `init_platform_telemetry`) for host apps that want one
-/// entry point. The legacy free functions stay public for callers that
-/// need finer control.
-///
 /// # Anonymous use
 ///
 /// Omitting [`api_key`](Self::api_key) is supported: every inference path
-/// still runs locally. The platform telemetry exporter is not started, and
-/// the first inference logs a one-shot info-level hint pointing at the
-/// dashboard. Set `XYBRID_QUIET=1` to suppress the hint.
+/// still runs locally.
+///
+/// # Observability
+///
+/// Nothing is exported unless [`observability`](Self::observability) is set —
+/// an API key alone does not start export. Without it, the first inference
+/// logs a one-shot info-level hint; set `XYBRID_QUIET=1` to suppress it.
 ///
 /// # Examples
 ///
@@ -701,23 +693,28 @@ pub fn init() -> XybridInit {
 /// xybrid_sdk::init().run();
 /// ```
 ///
-/// Authenticated; telemetry defaults to the production ingest URL:
+/// Cloud routing, traces to the Xybrid dashboard, resource sampling on:
 ///
 /// ```no_run
-/// xybrid_sdk::init()
-///     .api_key("xy_live_...")
-///     .run();
-/// ```
-///
-/// Full configuration — self-hosted dashboard with resource sampling on:
-///
-/// ```no_run
+/// use xybrid_sdk::observability::ObservabilityConfig;
 /// use xybrid_sdk::ResourceTelemetryMode;
 ///
 /// xybrid_sdk::init()
 ///     .api_key("xy_live_...")
-///     .ingest_url("http://192.168.1.78:8081")
-///     .resource_telemetry(ResourceTelemetryMode::Summary { interval_ms: 5000 })
+///     .observability(
+///         ObservabilityConfig::xybrid("xy_live_...")
+///             .resource_telemetry(ResourceTelemetryMode::Summary { interval_ms: 5000 }),
+///     )
+///     .run();
+/// ```
+///
+/// Everything to an OpenTelemetry Collector:
+///
+/// ```no_run
+/// use xybrid_sdk::observability::{ObservabilityConfig, OtlpConfig};
+///
+/// xybrid_sdk::init()
+///     .observability(ObservabilityConfig::otlp(OtlpConfig::collector("http://localhost:4318")))
 ///     .run();
 /// ```
 #[derive(Debug, Clone, Default)]
@@ -726,14 +723,14 @@ pub struct XybridInit {
     api_key: Option<String>,
     cache_dir: Option<std::path::PathBuf>,
     gateway_url: Option<String>,
-    ingest_url: Option<String>,
+    observability: Option<observability::ObservabilityConfig>,
     resource_telemetry: Option<xybrid_core::device::ResourceTelemetryMode>,
     binding: Option<&'static str>,
 }
 
 impl XybridInit {
-    /// Set the Xybrid API key. With a key, the platform telemetry exporter
-    /// starts on `.run()` and inference traces flow to the dashboard.
+    /// Set the Xybrid API key used for cloud routing and the registry. It
+    /// does not enable observability export.
     ///
     /// Skip this call to run anonymously.
     pub fn api_key(mut self, key: impl Into<String>) -> Self {
@@ -757,15 +754,15 @@ impl XybridInit {
         self
     }
 
-    /// Override the telemetry ingest URL. Defaults to
-    /// [`telemetry::DEFAULT_INGEST_URL`] when an API key is set. Use this
-    /// for self-hosted dashboards or on-device dev consoles.
-    pub fn ingest_url(mut self, url: impl Into<String>) -> Self {
-        self.ingest_url = Some(url.into());
+    /// Enable observability export (traces, metrics, logs) with `config`.
+    pub fn observability(mut self, config: observability::ObservabilityConfig) -> Self {
+        self.observability = Some(config);
         self
     }
 
-    /// Configure resource-telemetry sampling. Defaults to `Off`.
+    /// Configure resource sampling (CPU, memory, thermal, battery) around
+    /// runs. Defaults to `Off`. Overrides the mode set on the observability
+    /// configuration.
     pub fn resource_telemetry(mut self, mode: xybrid_core::device::ResourceTelemetryMode) -> Self {
         self.resource_telemetry = Some(mode);
         self
@@ -780,13 +777,11 @@ impl XybridInit {
     }
 
     /// Apply the configuration. Cache dir, gateway URL, API key, and
-    /// telemetry exporter are wired up in the order other code in the SDK
-    /// expects them.
+    /// observability are wired up in the order other code in the SDK expects
+    /// them.
     ///
     /// Idempotent for the cache dir and binding (first-set-wins via
-    /// `OnceLock`). The telemetry exporter has its own process-wide
-    /// once-guard at the binding layer; a second `.run()` does not spawn a
-    /// second exporter.
+    /// `OnceLock`). A second observability configuration replaces the first.
     pub fn run(self) {
         if let Some(binding) = self.binding {
             set_binding(binding);
@@ -800,22 +795,17 @@ impl XybridInit {
         if let Some(key) = self.api_key.as_deref() {
             set_api_key(key);
         }
-
-        if let Some(key) = self.api_key.as_deref() {
-            let endpoint = self
-                .ingest_url
-                .as_deref()
-                .unwrap_or(telemetry::DEFAULT_INGEST_URL);
-            let mut config = telemetry::TelemetryConfig::new(endpoint, key);
-            if let Some(mode) = self.resource_telemetry {
-                config = config.with_resource_telemetry(mode);
+        match (self.observability, self.resource_telemetry) {
+            (Some(mut config), mode) => {
+                if let Some(mode) = mode {
+                    config = config.resource_telemetry(mode);
+                }
+                if let Err(e) = observability::init_observability(config) {
+                    log::warn!(target: "xybrid_sdk", "observability not started: {e}");
+                }
             }
-            telemetry::init_platform_telemetry(config);
-        } else if self.ingest_url.is_some() {
-            log::warn!(
-                target: "xybrid_sdk",
-                "ingest_url set without api_key; telemetry exporter not started"
-            );
+            (None, Some(mode)) => telemetry::activate_resource_telemetry(mode),
+            (None, None) => {}
         }
     }
 }
@@ -1243,10 +1233,19 @@ mod xybrid_init_tests {
     }
 
     #[test]
-    fn ingest_url_setter_stores_value() {
-        let builder = init().ingest_url("http://192.168.1.78:8081");
+    fn observability_setter_stores_config() {
+        let builder = init().observability(crate::observability::ObservabilityConfig::otlp(
+            crate::observability::OtlpConfig::collector("http://192.168.1.78:4318"),
+        ));
         let dbg = format!("{:?}", builder);
         assert!(dbg.contains("192.168.1.78"), "debug = {}", dbg);
+    }
+
+    #[test]
+    fn api_key_alone_does_not_enable_observability() {
+        let builder = init().api_key("xy_test_123");
+        let dbg = format!("{:?}", builder);
+        assert!(dbg.contains("observability: None"), "debug = {}", dbg);
     }
 
     #[test]
@@ -1269,7 +1268,6 @@ mod xybrid_init_tests {
             .api_key("xy_test")
             .cache_dir("/tmp/x")
             .gateway_url("https://gateway")
-            .ingest_url("https://ingest")
             .resource_telemetry(ResourceTelemetryMode::Off)
             .binding("rust");
     }

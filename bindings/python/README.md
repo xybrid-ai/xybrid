@@ -43,13 +43,42 @@ result = model.run(xybrid.XybridEnvelope.text("Hello from Python"))
 print(result.text)
 ```
 
-Pass an API key to enable optional platform features such as telemetry:
+Pass an API key to configure cloud authentication:
 
 ```python
 xybrid.init(api_key="xyb_...")
 ```
 
-Anonymous initialization keeps inference local-only and telemetry disabled.
+Initialization is optional for local inference. An API key alone does not enable
+observability export or replace an existing exporter. The first successful
+`init()` applies its arguments; subsequent calls are no-ops.
+
+Opt in to observability separately, using an export key independent of cloud
+authentication:
+
+```python
+config = xybrid.XybridObservabilityConfig.xybrid("export-key")
+config.set_metadata_only(True)  # omit prompts, outputs, and tool payloads
+config.init()
+# Before exiting, wait up to five seconds for queued exports and stop exporting.
+xybrid.observability_shutdown(5000)
+```
+
+The Xybrid preset sends bearer-authenticated OTLP/HTTP protobuf traces. For a
+Collector exporting traces, metrics, and logs, use
+`XybridObservabilityConfig.otlp("http://localhost:4318")`. New explicit configs
+capture content by default; call `set_metadata_only(True)` to exclude it.
+`observability_flush(5000)` flushes without stopping export.
+
+The retained `init(api_key="...", ingest_url="https://collector.example")`
+compatibility form explicitly enables **metadata-only OTLP traces**, using that
+API key for both cloud authentication and export. A base ingest URL maps to
+`/v1/traces`; a full endpoint path is preserved. The destination must now accept
+OTLP/HTTP protobuf, replacing the retired JSON event protocol. A blank ingest
+URL leaves export settings alone. A nonblank URL requires a nonblank explicit
+API key and an absolute HTTP(S) URL; invalid configuration raises `ConfigError`
+and initialization can be retried. Use the separate config API for independent
+export credentials or an unauthenticated Collector.
 
 A runnable LLM example lives in [`examples/quickstart.py`](examples/quickstart.py):
 
@@ -93,6 +122,10 @@ options = xybrid.XybridRunOptions(
     fallback_to_cloud=False,
     max_grace_tokens=0,
     correlation_id="example-run",
+    traceparent=None,
+    tracestate=None,
+    conversation_id=None,
+    suppress_trace=False,
 )
 
 result = model.run(xybrid.XybridEnvelope.text("Write a haiku"), options)

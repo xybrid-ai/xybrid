@@ -97,6 +97,10 @@ do {
     "fallbackToCloud": true,
     "maxGraceTokens": 8,
     "correlationId": "req",
+    "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+    "tracestate": "vendor=1",
+    "conversationId": "conv-1",
+    "suppressTrace": true,
     "context": "context:1",
     "cancel": "cancel:1",
   ]))
@@ -110,7 +114,12 @@ do {
   check(options.abortOn == [.thermalHot, .memoryPressureCritical], "abort signals")
   check(options.fallbackToCloud && options.maxGraceTokens == 8, "platform knobs")
   check(options.correlationId == "req", "correlation id")
+  check(options.traceparent == "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", "traceparent")
+  check(options.tracestate == "vendor=1" && options.conversationId == "conv-1", "trace context")
+  check(options.suppressTrace, "suppress trace")
   check(request.context == "context:1" && request.cancel == "cancel:1", "handles")
+  let untraced = try XybridCodec.decodeRunRequest(js([:]))
+  check(untraced.options?.suppressTrace == false, "suppressTrace defaults off")
 
   let empty = try XybridCodec.decodeRunRequest(nil)
   check(empty.options == nil && empty.context == nil, "null options")
@@ -146,9 +155,15 @@ let result = XybridResult(
   envelope: XybridEnvelope(kind: .text(text: "hello"), metadata: [XybridMetadataEntry(key: "xybrid.role", value: "assistant")]),
   outputType: .text, modelId: "qwen", latencyMs: 120, executionTarget: .cloud, metrics: metrics,
   toolCalls: [XybridToolCall(id: "1", name: "f", argumentsJson: "{\"a\":1}")],
-  reasoningContent: "because"
+  reasoningContent: "because",
+  observation: XybridObservationRef(traceId: String(repeating: "a", count: 32), spanId: String(repeating: "b", count: 16))
 )
 let encodedResult = XybridCodec.encodeResult(result)
+check((encodedResult["observation"] as? [String: Any])?["spanId"] as? String == String(repeating: "b", count: 16),
+      "observation")
+check(XybridCodec.encodeResult(XybridResult(envelope: result.envelope, outputType: .text, modelId: "qwen", latencyMs: 1,
+                                            executionTarget: .local, metrics: metrics, toolCalls: []))["observation"] == nil,
+      "untraced run has no observation")
 check(encodedResult["outputType"] as? String == "text", "output type")
 check(encodedResult["executionTarget"] as? String == "cloud", "execution target")
 check(encodedResult["reasoningContent"] as? String == "because", "reasoning")
@@ -166,6 +181,26 @@ let unknownSize = XybridCodec.encodeDownloadStatus(
 check(unknownSize["totalBytes"] == nil, "unknown total is absent")
 check(unknownSize["downloadedBytes"] as? Double == 5_000_000_000, "u64 bytes as Double")
 check(unknownSize["state"] as? String == "downloading", "state tag")
+
+// MARK: - Observability
+
+do {
+  let ref = try XybridCodec.decodeObservationRef(js(["traceId": "t", "spanId": "s"]))
+  check(ref == XybridObservationRef(traceId: "t", spanId: "s"), "observation ref")
+  let stats = XybridCodec.encodeObservabilityStats(
+    XybridObservabilityStats(enabled: true, spansExported: 5_000_000_000, spansDropped: 1, exportFailures: 0))
+  check(stats["enabled"] as? Bool == true && stats["spansExported"] as? Double == 5_000_000_000, "stats")
+  let headers = try XybridCodec.stringMap(js(["headers": ["b": "2", "a": "1"]]) as! JSObject, "headers", "config")
+  check(headers.map { $0.0 } == ["a", "b"] && headers.map { $0.1 } == ["1", "2"], "string map in key order")
+} catch {
+  check(false, "observability codec threw \(error)")
+}
+expectInvalidArgument("observation without a span id") {
+  _ = try XybridCodec.decodeObservationRef(js(["traceId": "t"]))
+}
+expectInvalidArgument("non-string header") {
+  _ = try XybridCodec.stringMap(js(["headers": ["a": 1]]) as! JSObject, "headers", "config")
+}
 
 // MARK: - Live ASR
 

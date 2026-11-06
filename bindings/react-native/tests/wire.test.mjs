@@ -107,6 +107,20 @@ test('run options carry sampling, platform knobs and handles', () => {
   );
 });
 
+test('run options carry the trace fields, false suppressTrace included', () => {
+  const trace = {
+    traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    tracestate: 'vendor=1',
+    conversationId: 'conv-1',
+    suppressTrace: false,
+  };
+  assert.deepEqual(wire.toWireRunOptions(trace), trace);
+  assert.deepEqual(wire.toWireTraceOptions({ correlationId: 'c', suppressTrace: true }), {
+    correlationId: 'c',
+    suppressTrace: true,
+  });
+});
+
 test('top-level sampling parameters are rejected instead of ignored', () => {
   assert.throws(
     () => wire.toWireRunOptions({ maxTokens: 64, temperature: 0 }),
@@ -135,7 +149,9 @@ test('results expose the lossless envelope plus payload shortcuts', () => {
     metrics,
     toolCalls: [{ id: '1', name: 'f', argumentsJson: '{}' }],
     reasoningContent: 'thinking',
+    observation: { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16) },
   });
+  assert.deepEqual(text.observation, { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16) });
   assert.equal(text.text, 'hello');
   assert.equal(text.envelope.role, 'assistant');
   assert.equal(text.reasoningContent, 'thinking');
@@ -155,6 +171,7 @@ test('results expose the lossless envelope plus payload shortcuts', () => {
   assert.equal(audio.audioBytesBase64, 'UklG');
   assert.equal(audio.envelope.sampleRate, 24000);
   assert.equal('reasoningContent' in audio, false);
+  assert.equal('observation' in audio, false, 'an untraced run has no observation');
 });
 
 test('an unknown download size reads as undefined on every platform', () => {

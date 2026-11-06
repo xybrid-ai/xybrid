@@ -156,6 +156,8 @@ pub struct InferenceResult {
     provenance: ExecutionProvenance,
     /// Typed metrics parsed from `envelope.metadata`
     metrics: InferenceMetrics,
+    /// Trace/span ids of the run's logical inference span, when traced
+    observation: Option<xybrid_observability::ObservationRef>,
 }
 
 /// Where a result was actually produced.
@@ -228,12 +230,29 @@ impl InferenceResult {
             model_id: model_id.into(),
             provenance,
             metrics,
+            observation: None,
         }
     }
 
     /// Where this result was actually produced — local or cloud.
     pub fn provenance(&self) -> ExecutionProvenance {
         self.provenance
+    }
+
+    /// Trace and span ids of this run's logical inference span, for linking
+    /// feedback and evaluation results. `None` when the run was not traced.
+    pub fn observation_ref(&self) -> Option<&xybrid_observability::ObservationRef> {
+        self.observation.as_ref()
+    }
+
+    pub(crate) fn with_observation(
+        mut self,
+        observation: Option<xybrid_observability::ObservationRef>,
+    ) -> Self {
+        if observation.is_some() {
+            self.observation = observation;
+        }
+        self
     }
 
     /// Create from envelope with pre-computed output type.
@@ -256,6 +275,7 @@ impl InferenceResult {
             model_id: model_id.into(),
             provenance: ExecutionProvenance::Local,
             metrics,
+            observation: None,
         }
     }
 

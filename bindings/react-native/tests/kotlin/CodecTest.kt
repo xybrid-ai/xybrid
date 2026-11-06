@@ -11,6 +11,8 @@ import ai.xybrid.XybridError
 import ai.xybrid.XybridExecutionTarget
 import ai.xybrid.XybridInferenceMetrics
 import ai.xybrid.XybridMetadataEntry
+import ai.xybrid.XybridObservabilityStats
+import ai.xybrid.XybridObservationRef
 import ai.xybrid.XybridOutputType
 import ai.xybrid.XybridResult
 import ai.xybrid.XybridStageLatency
@@ -116,6 +118,10 @@ fun main() {
       "fallbackToCloud" to true,
       "maxGraceTokens" to 8.0,
       "correlationId" to "req",
+      "traceparent" to "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+      "tracestate" to "vendor=1",
+      "conversationId" to "conv-1",
+      "suppressTrace" to true,
       "context" to "context:1",
       "cancel" to "cancel:1",
     ),
@@ -128,6 +134,10 @@ fun main() {
   check(options.generationConfig?.tools?.single()?.parametersJson == "{}", "tools")
   check(options.abortOn == listOf(XybridAbortSignal.THERMAL_HOT, XybridAbortSignal.MEMORY_PRESSURE_CRITICAL), "abort signals")
   check(options.fallbackToCloud && options.maxGraceTokens == 8u, "platform knobs")
+  check(options.traceparent == "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", "traceparent")
+  check(options.tracestate == "vendor=1" && options.conversationId == "conv-1", "trace context")
+  check(options.suppressTrace, "suppress trace")
+  check(XybridCodec.decodeRunRequest(js()).options?.suppressTrace == false, "suppressTrace defaults off")
   check(request.context == "context:1" && request.cancel == "cancel:1", "handles")
   check(XybridCodec.decodeRunRequest(null).options == null, "null options")
 
@@ -164,8 +174,11 @@ fun main() {
     metrics = metrics,
     toolCalls = listOf(XybridToolCall("1", "f", "{\"a\":1}")),
     reasoningContent = "because",
+    observation = XybridObservationRef("a".repeat(32), "b".repeat(16)),
   )
   val encodedResult = XybridCodec.encodeResult(result)
+  check(encodedResult["observation"] == mapOf("traceId" to "a".repeat(32), "spanId" to "b".repeat(16)), "observation")
+  check("observation" !in XybridCodec.encodeResult(result.copy(observation = null)), "untraced run has no observation")
   check(encodedResult["outputType"] == "text" && encodedResult["executionTarget"] == "cloud", "tags")
   check(encodedResult["latencyMs"] == 120.0, "latency as Double")
   check(encodedResult["reasoningContent"] == "because", "reasoning")
@@ -182,6 +195,16 @@ fun main() {
   )
   check("totalBytes" !in unknownSize, "unknown total is absent")
   check(unknownSize["downloadedBytes"] == 5_000_000_000.0, "u64 bytes as Double")
+
+  // -- Observability
+  check(XybridCodec.decodeObservationRef(js("traceId" to "t", "spanId" to "s")) == XybridObservationRef("t", "s"), "ref")
+  expectInvalidArgument("observation without a span id") { XybridCodec.decodeObservationRef(js("traceId" to "t")) }
+  val stats = XybridCodec.encodeObservabilityStats(XybridObservabilityStats(true, 5_000_000_000uL, 1uL, 0uL))
+  check(stats["enabled"] == true && stats["spansExported"] == 5_000_000_000.0, "stats")
+  check(stats.values.none { it is ULong }, "no unsigned stats reach Arguments")
+  val headers = XybridCodec.stringMap(js("headers" to js("b" to "2", "a" to "1")), "headers", "config")
+  check(headers == listOf("a" to "1", "b" to "2"), "string map in key order")
+  expectInvalidArgument("non-string header") { XybridCodec.stringMap(js("headers" to js("a" to 1.0)), "headers", "config") }
 
   // -- Live ASR
   val defaults = XybridCodec.decodeStreamingConfig(null)

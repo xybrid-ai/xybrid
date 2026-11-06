@@ -167,13 +167,6 @@ impl FfiGenerationConfig {
                 .collect(),
         }
     }
-
-    /// # Errors
-    /// Returns the facade's message when a tool carries a `parametersJson`
-    /// that isn't valid JSON.
-    pub(crate) fn to_sdk_over(&self, base: GenerationConfig) -> Result<GenerationConfig, String> {
-        self.to_facade().apply_over(base).map_err(|e| e.to_string())
-    }
 }
 
 /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
@@ -240,7 +233,14 @@ impl Clone for FfiCancellationToken {
 ///
 /// This mirrors the customer-facing Dart `RunOptions` wrapper and maps into
 /// `xybrid_sdk::RunOptions` at the FFI boundary.
+#[frb(non_opaque)]
+#[derive(Default)]
 pub struct FfiRunOptions {
+    pub traceparent: Option<String>,
+    pub tracestate: Option<String>,
+    pub conversation_id: Option<String>,
+    #[frb(default = false)]
+    pub suppress_trace: bool,
     pub cloud_provider: Option<String>,
     pub cloud_model: Option<String>,
     pub cloud_gateway_url: Option<String>,
@@ -271,6 +271,10 @@ impl FfiRunOptions {
         }
         facade::RunOptions {
             generation_config,
+            traceparent: self.traceparent.clone(),
+            tracestate: self.tracestate.clone(),
+            conversation_id: self.conversation_id.clone(),
+            suppress_trace: self.suppress_trace,
             abort_on,
             fallback_to_cloud: self.fallback_to_cloud,
             max_grace_tokens: self.max_grace_tokens.unwrap_or(0),
@@ -332,6 +336,33 @@ impl FfiRunOptions {
 /// that races in after the last token must NOT trigger a false cancel.
 fn should_cancel_on_sink_close(reached_terminal: bool) -> bool {
     !reached_terminal
+}
+
+/// Preserve the default streaming policy unless the caller supplied options.
+/// Generation parameters have already been resolved against the loaded model.
+fn resolved_streaming_run_options(
+    config: Option<GenerationConfig>,
+    cancellation_token: Option<&FfiCancellationToken>,
+    frame_session_id: Option<&str>,
+    options: Option<&FfiRunOptions>,
+) -> Result<RunOptions, String> {
+    let Some(options) = options else {
+        return Ok(streaming_run_options(
+            config,
+            cancellation_token,
+            frame_session_id,
+        ));
+    };
+    let mut mapped = options.to_sdk_with_cancellation_over(
+        None,
+        GenerationConfig::default(),
+        cancellation_token,
+    )?;
+    mapped.generation_config = config;
+    if let Some(id) = non_empty(frame_session_id) {
+        mapped = mapped.with_frame_session(id.to_string());
+    }
+    Ok(mapped)
 }
 
 /// Build minimal SDK [`RunOptions`] for the plain (non-cloud-fallback)
@@ -901,14 +932,16 @@ impl FfiModel {
         &self,
         envelope: super::envelope::FfiEnvelope,
         config: Option<FfiGenerationConfig>,
+        options: Option<FfiRunOptions>,
     ) -> Result<FfiResult, String> {
-        let sdk_config = config
-            .as_ref()
-            .map(|c| c.to_sdk_over(self.0.default_generation_config()))
-            .transpose()?;
+        let options = options.unwrap_or_default().to_sdk_with_cancellation_over(
+            config.map(|c| c.to_facade()),
+            self.0.default_generation_config(),
+            None,
+        )?;
         let result = self
             .0
-            .run(&envelope.into_envelope(), sdk_config.as_ref())
+            .run_with_options(&envelope.into_envelope(), &options)
             .map_err(sdk_error_message)?;
         FfiResult::try_from_inference_result(&result)
     }
@@ -952,6 +985,7 @@ impl FfiModel {
         cancellation_token: Option<FfiCancellationToken>,
         preempt: bool,
         frame_session_id: Option<String>,
+        options: Option<FfiRunOptions>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
         let model = self.0.clone();
@@ -980,11 +1014,18 @@ impl FfiModel {
                     return;
                 }
             };
-            let run_options = streaming_run_options(
+            let run_options = match resolved_streaming_run_options(
                 sdk_config,
                 cancel_handle.as_ref(),
                 frame_session_id.as_deref(),
-            );
+                options.as_ref(),
+            ) {
+                Ok(options) => options,
+                Err(error) => {
+                    let _ = sink.add(FfiStreamEvent::Error(error));
+                    return;
+                }
+            };
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let mut token_index = 0u32;
             let result = {
@@ -1045,6 +1086,7 @@ impl FfiModel {
         envelope: super::envelope::FfiEnvelope,
         config: Option<FfiGenerationConfig>,
         cancellation_token: Option<FfiCancellationToken>,
+        options: Option<FfiRunOptions>,
         sink: StreamSink<FfiTtsStreamEvent>,
     ) {
         let model = self.0.clone();
@@ -1067,7 +1109,18 @@ impl FfiModel {
                     return;
                 }
             };
-            let run_options = streaming_run_options(sdk_config, cancel_handle.as_ref(), None);
+            let run_options = match resolved_streaming_run_options(
+                sdk_config,
+                cancel_handle.as_ref(),
+                None,
+                options.as_ref(),
+            ) {
+                Ok(options) => options,
+                Err(error) => {
+                    let _ = sink.add(FfiTtsStreamEvent::Error(error));
+                    return;
+                }
+            };
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let result = {
                 let reached_terminal = reached_terminal.clone();
@@ -1153,11 +1206,13 @@ impl FfiModel {
         envelope: super::envelope::FfiEnvelope,
         context: &FfiConversationContext,
         config: Option<FfiGenerationConfig>,
+        options: Option<FfiRunOptions>,
     ) -> Result<FfiResult, String> {
-        let sdk_config = config
-            .as_ref()
-            .map(|c| c.to_sdk_over(self.0.default_generation_config()))
-            .transpose()?;
+        let options = options.unwrap_or_default().to_sdk_with_cancellation_over(
+            config.map(|c| c.to_facade()),
+            self.0.default_generation_config(),
+            None,
+        )?;
         let ctx_guard = context
             .0
             .read()
@@ -1165,7 +1220,7 @@ impl FfiModel {
 
         let result = self
             .0
-            .run_with_context(&envelope.into_envelope(), &ctx_guard, sdk_config.as_ref())
+            .run_with_context_options(&envelope.into_envelope(), &ctx_guard, &options)
             .map_err(sdk_error_message)?;
 
         FfiResult::try_from_inference_result(&result)
@@ -1201,8 +1256,7 @@ impl FfiModel {
     // FRB-exported boundary fn: each param maps to a named Dart argument, so
     // they cannot be bundled into a struct without reshaping the generated Dart
     // API. The arg count (envelope, context, config, token, preempt,
-    // frame_session_id, sink) is inherent to the binding surface.
-    #[allow(clippy::too_many_arguments)]
+    // frame_session_id, options, sink) is inherent to the binding surface.
     pub fn run_stream_with_context(
         &self,
         envelope: super::envelope::FfiEnvelope,
@@ -1211,6 +1265,7 @@ impl FfiModel {
         cancellation_token: Option<FfiCancellationToken>,
         preempt: bool,
         frame_session_id: Option<String>,
+        options: Option<FfiRunOptions>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
         let model = self.0.clone();
@@ -1235,11 +1290,18 @@ impl FfiModel {
                     return;
                 }
             };
-            let run_options = streaming_run_options(
+            let run_options = match resolved_streaming_run_options(
                 sdk_config,
                 cancel_handle.as_ref(),
                 frame_session_id.as_deref(),
-            );
+                options.as_ref(),
+            ) {
+                Ok(options) => options,
+                Err(error) => {
+                    let _ = sink.add(FfiStreamEvent::Error(error));
+                    return;
+                }
+            };
             // Get read lock on context
             let ctx_guard = match ctx.read() {
                 Ok(guard) => guard,
@@ -1478,7 +1540,77 @@ mod tests {
             fallback_to_cloud: false,
             max_grace_tokens: None,
             frame_session_id: None,
+            ..FfiRunOptions::default()
         }
+    }
+
+    #[test]
+    fn observation_options_reach_sdk_without_altering_generation_or_cancel() {
+        let mut options = sample_options();
+        options.traceparent =
+            Some("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01".into());
+        options.tracestate = Some("vendor=value".into());
+        options.conversation_id = Some("conversation-1".into());
+        options.suppress_trace = true;
+        let sdk = options
+            .to_sdk_with_cancellation_over(
+                Some(facade::GenerationConfig {
+                    max_tokens: Some(17),
+                    ..Default::default()
+                }),
+                GenerationConfig::default(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(sdk.generation_config.as_ref().unwrap().max_tokens, 17);
+        let observation = sdk.observation.unwrap();
+        assert_eq!(
+            observation.parent.unwrap().trace_id(),
+            "0af7651916cd43dd8448eb211c80319c"
+        );
+        assert_eq!(
+            observation.conversation_id.as_deref(),
+            Some("conversation-1")
+        );
+        assert_eq!(
+            observation.trace,
+            xybrid_sdk::observability::TraceMode::Suppress
+        );
+        assert!(!sdk.abort_policy.observes(AbortSignal::UserCancelled));
+        options.traceparent = Some("invalid".into());
+        options.tracestate = None;
+        options.conversation_id = None;
+        options.suppress_trace = false;
+        assert!(options
+            .to_sdk_with_cancellation_over(None, GenerationConfig::default(), None)
+            .unwrap()
+            .observation
+            .is_none());
+    }
+
+    #[test]
+    fn streaming_options_keep_model_config_cancellation_and_frame_session() {
+        let token = FfiCancellationToken::new();
+        let mut options = sample_options();
+        options.conversation_id = Some("stream-1".into());
+        let config = GenerationConfig {
+            max_tokens: 23,
+            ..Default::default()
+        };
+        let sdk = resolved_streaming_run_options(
+            Some(config),
+            Some(&token),
+            Some("frame-1"),
+            Some(&options),
+        )
+        .unwrap();
+        assert_eq!(sdk.generation_config.as_ref().unwrap().max_tokens, 23);
+        assert_eq!(sdk.frame_session_id.as_deref(), Some("frame-1"));
+        assert!(sdk.abort_policy.observes(AbortSignal::UserCancelled));
+        assert_eq!(
+            sdk.observation.as_ref().unwrap().conversation_id.as_deref(),
+            Some("stream-1")
+        );
     }
 
     #[test]
@@ -1599,6 +1731,7 @@ mod tests {
             fallback_to_cloud: false,
             max_grace_tokens: Some(2),
             frame_session_id: None,
+            ..FfiRunOptions::default()
         };
 
         let sdk = ffi

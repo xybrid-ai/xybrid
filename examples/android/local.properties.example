@@ -4,9 +4,10 @@
 # Android Studio reads it automatically — just press Run.
 # Get a free key at https://dashboard.xybrid.dev.
 #
-# Leave it unset to run anonymously (on-device inference, telemetry disabled).
+# Leave it unset to run anonymously (on-device inference, no trace export).
+# When set, the app also starts trace export to the Xybrid dashboard.
 xybrid.apiKey=xy_live_xxxxxxxxxxxxxxxxxxxxxxxx
 
-# Optional: point telemetry at a self-hosted / tunneled platform (ingest URL).
-# Leave unset to use the default Xybrid platform endpoint.
-xybrid.platformUrl=https://your-platform.example.com
+# Optional: send traces to a self-hosted / tunneled OTLP trace endpoint
+# (full URL, including /v1/traces). Leave unset for the Xybrid dashboard.
+xybrid.tracesEndpoint=https://your-platform.example.com/v1/traces

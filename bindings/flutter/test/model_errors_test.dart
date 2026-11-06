@@ -70,6 +70,7 @@ class _Model implements FfiModel {
   Future<FfiResult> run({
     required FfiEnvelope envelope,
     FfiGenerationConfig? config,
+    FfiRunOptions? options,
   }) async =>
       throw _api.runError;
 
@@ -78,6 +79,7 @@ class _Model implements FfiModel {
     required FfiEnvelope envelope,
     required FfiConversationContext context,
     FfiGenerationConfig? config,
+    FfiRunOptions? options,
   }) async =>
       throw _api.runError;
 

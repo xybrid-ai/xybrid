@@ -177,10 +177,11 @@ impl Cloud {
             );
         }
 
-        let mut req = self
-            .agent
-            .post(&url)
-            .set("Content-Type", "application/json");
+        let mut req = crate::tracing::inject_trace_headers(
+            self.agent
+                .post(&url)
+                .set("Content-Type", "application/json"),
+        );
 
         if let Some(ref key) = api_key {
             req = req.set("Authorization", &format!("Bearer {}", key));

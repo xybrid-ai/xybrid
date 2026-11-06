@@ -44,7 +44,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -231353907;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1427550815;
 
 // Section: executor
 
@@ -1646,6 +1646,8 @@ fn wire__crate__api__model__FfiModel_run_impl(
             let api_envelope = <FfiEnvelope>::sse_decode(&mut deserializer);
             let api_config =
                 <Option<crate::api::model::FfiGenerationConfig>>::sse_decode(&mut deserializer);
+            let api_options =
+                <Option<crate::api::model::FfiRunOptions>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -1667,6 +1669,7 @@ fn wire__crate__api__model__FfiModel_run_impl(
                         &*api_that_guard,
                         api_envelope,
                         api_config,
+                        api_options,
                     )?;
                     Ok(output_ok)
                 })())
@@ -1706,6 +1709,8 @@ fn wire__crate__api__model__FfiModel_run_stream_impl(
                 <Option<FfiCancellationToken>>::sse_decode(&mut deserializer);
             let api_preempt = <bool>::sse_decode(&mut deserializer);
             let api_frame_session_id = <Option<String>>::sse_decode(&mut deserializer);
+            let api_options =
+                <Option<crate::api::model::FfiRunOptions>>::sse_decode(&mut deserializer);
             let api_sink = <StreamSink<
                 crate::api::model::FfiStreamEvent,
                 flutter_rust_bridge::for_generated::SseCodec,
@@ -1735,6 +1740,7 @@ fn wire__crate__api__model__FfiModel_run_stream_impl(
                             api_cancellation_token,
                             api_preempt,
                             api_frame_session_id,
+                            api_options,
                             api_sink,
                         );
                     })?;
@@ -1779,6 +1785,8 @@ fn wire__crate__api__model__FfiModel_run_stream_with_context_impl(
                 <Option<FfiCancellationToken>>::sse_decode(&mut deserializer);
             let api_preempt = <bool>::sse_decode(&mut deserializer);
             let api_frame_session_id = <Option<String>>::sse_decode(&mut deserializer);
+            let api_options =
+                <Option<crate::api::model::FfiRunOptions>>::sse_decode(&mut deserializer);
             let api_sink = <StreamSink<
                 crate::api::model::FfiStreamEvent,
                 flutter_rust_bridge::for_generated::SseCodec,
@@ -1817,6 +1825,7 @@ fn wire__crate__api__model__FfiModel_run_stream_with_context_impl(
                             api_cancellation_token,
                             api_preempt,
                             api_frame_session_id,
+                            api_options,
                             api_sink,
                         );
                     })?;
@@ -1924,6 +1933,8 @@ fn wire__crate__api__model__FfiModel_run_tts_stream_impl(
                 <Option<crate::api::model::FfiGenerationConfig>>::sse_decode(&mut deserializer);
             let api_cancellation_token =
                 <Option<FfiCancellationToken>>::sse_decode(&mut deserializer);
+            let api_options =
+                <Option<crate::api::model::FfiRunOptions>>::sse_decode(&mut deserializer);
             let api_sink = <StreamSink<
                 crate::api::model::FfiTtsStreamEvent,
                 flutter_rust_bridge::for_generated::SseCodec,
@@ -1951,6 +1962,7 @@ fn wire__crate__api__model__FfiModel_run_tts_stream_impl(
                             api_envelope,
                             api_config,
                             api_cancellation_token,
+                            api_options,
                             api_sink,
                         );
                     })?;
@@ -1991,6 +2003,8 @@ fn wire__crate__api__model__FfiModel_run_with_context_impl(
             >>::sse_decode(&mut deserializer);
             let api_config =
                 <Option<crate::api::model::FfiGenerationConfig>>::sse_decode(&mut deserializer);
+            let api_options =
+                <Option<crate::api::model::FfiRunOptions>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -2021,6 +2035,7 @@ fn wire__crate__api__model__FfiModel_run_with_context_impl(
                         api_envelope,
                         &*api_context_guard,
                         api_config,
+                        api_options,
                     )?;
                     Ok(output_ok)
                 })())
@@ -3103,14 +3118,46 @@ fn wire__crate__api__sdk_client__XybridSdkClient_configure_platform_telemetry_im
             let api_ingest_url = <Option<String>>::sse_decode(&mut deserializer);
             let api_resource_telemetry = <Option<String>>::sse_decode(&mut deserializer);
             deserializer.end();
-            transform_result_sse::<_, ()>((move || {
-                let output_ok = Result::<_, ()>::Ok({
+            transform_result_sse::<_, String>((move || {
+                let output_ok =
                     crate::api::sdk_client::XybridSdkClient::configure_platform_telemetry(
                         api_api_key,
                         api_ingest_url,
                         api_resource_telemetry,
-                    );
-                })?;
+                    )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__sdk_client__XybridSdkClient_configure_resource_telemetry_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "XybridSdkClient_configure_resource_telemetry",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_mode = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok =
+                    crate::api::sdk_client::XybridSdkClient::configure_resource_telemetry(
+                        api_mode,
+                    )?;
                 Ok(output_ok)
             })())
         },
@@ -3138,10 +3185,9 @@ fn wire__crate__api__sdk_client__XybridSdkClient_flush_platform_telemetry_impl(
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             deserializer.end();
-            transform_result_sse::<_, ()>((move || {
-                let output_ok = Result::<_, ()>::Ok({
-                    crate::api::sdk_client::XybridSdkClient::flush_platform_telemetry();
-                })?;
+            transform_result_sse::<_, String>((move || {
+                let output_ok =
+                    crate::api::sdk_client::XybridSdkClient::flush_platform_telemetry()?;
                 Ok(output_ok)
             })())
         },
@@ -3238,13 +3284,11 @@ fn wire__crate__api__sdk_client__XybridSdkClient_init_telemetry_impl(
             let api_endpoint = <String>::sse_decode(&mut deserializer);
             let api_api_key = <String>::sse_decode(&mut deserializer);
             deserializer.end();
-            transform_result_sse::<_, ()>((move || {
-                let output_ok = Result::<_, ()>::Ok({
-                    crate::api::sdk_client::XybridSdkClient::init_telemetry(
-                        api_endpoint,
-                        api_api_key,
-                    );
-                })?;
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::sdk_client::XybridSdkClient::init_telemetry(
+                    api_endpoint,
+                    api_api_key,
+                )?;
                 Ok(output_ok)
             })())
         },
@@ -3663,6 +3707,37 @@ fn wire__crate__api__sdk_client__XybridSdkClient_set_speculative_cloud_impl(
         },
     )
 }
+fn wire__crate__api__sdk_client__XybridSdkClient_validate_resource_telemetry_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "XybridSdkClient_validate_resource_telemetry",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_mode = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok =
+                    crate::api::sdk_client::XybridSdkClient::validate_resource_telemetry(api_mode)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__model__ffi_generation_config_creative_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -3723,6 +3798,72 @@ fn wire__crate__api__model__ffi_generation_config_greedy_impl(
         },
     )
 }
+fn wire__crate__api__model__ffi_run_options_default_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "ffi_run_options_default",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::api::model::FfiRunOptions::default())?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__observability__flush_observability_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "flush_observability",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_timeout_ms = <u32>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::observability::flush_observability(api_timeout_ms)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__sdk_client__init_app_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3757,6 +3898,37 @@ fn wire__crate__api__sdk_client__init_app_impl(
         },
     )
 }
+fn wire__crate__api__observability__init_observability_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "init_observability",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_config =
+                <crate::api::observability::FfiObservabilityConfig>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::observability::init_observability(api_config)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__model__json_schema_to_gbnf_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -3784,6 +3956,150 @@ fn wire__crate__api__model__json_schema_to_gbnf_impl(
                 let output_ok = crate::api::model::json_schema_to_gbnf(api_schema_json)?;
                 Ok(output_ok)
             })())
+        },
+    )
+}
+fn wire__crate__api__observability__observability_stats_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "observability_stats",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok =
+                    Result::<_, ()>::Ok(crate::api::observability::observability_stats())?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__observability__record_evaluation_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "record_evaluation",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_target =
+                <crate::api::observability::FfiObservationRef>::sse_decode(&mut deserializer);
+            let api_name = <String>::sse_decode(&mut deserializer);
+            let api_score_value = <Option<f64>>::sse_decode(&mut deserializer);
+            let api_score_label = <Option<String>>::sse_decode(&mut deserializer);
+            let api_explanation = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::observability::record_evaluation(
+                    api_target,
+                    api_name,
+                    api_score_value,
+                    api_score_label,
+                    api_explanation,
+                )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__observability__record_feedback_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "record_feedback",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_target =
+                <crate::api::observability::FfiObservationRef>::sse_decode(&mut deserializer);
+            let api_score = <Option<f64>>::sse_decode(&mut deserializer);
+            let api_label = <Option<String>>::sse_decode(&mut deserializer);
+            let api_comment = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::observability::record_feedback(
+                    api_target,
+                    api_score,
+                    api_label,
+                    api_comment,
+                )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__observability__shutdown_observability_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "shutdown_observability",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_timeout_ms = <u32>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::api::observability::shutdown_observability(api_timeout_ms)?;
+                    Ok(output_ok)
+                })())
+            }
         },
     )
 }
@@ -4297,6 +4613,64 @@ impl SseDecode for crate::api::context::FfiMessageRole {
     }
 }
 
+impl SseDecode for crate::api::observability::FfiObservabilityConfig {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_apiKey = <Option<String>>::sse_decode(deserializer);
+        let mut var_endpoint = <Option<String>>::sse_decode(deserializer);
+        let mut var_tracesEndpoint = <Option<String>>::sse_decode(deserializer);
+        let mut var_headers = <Vec<(String, String)>>::sse_decode(deserializer);
+        let mut var_jsonProtocol = <bool>::sse_decode(deserializer);
+        let mut var_serviceName = <Option<String>>::sse_decode(deserializer);
+        let mut var_serviceVersion = <Option<String>>::sse_decode(deserializer);
+        let mut var_resourceAttributes = <Vec<(String, String)>>::sse_decode(deserializer);
+        let mut var_metadataOnly = <bool>::sse_decode(deserializer);
+        let mut var_maxContentBytes = <Option<u32>>::sse_decode(deserializer);
+        let mut var_liveTraceIntervalMs = <Option<u32>>::sse_decode(deserializer);
+        return crate::api::observability::FfiObservabilityConfig {
+            api_key: var_apiKey,
+            endpoint: var_endpoint,
+            traces_endpoint: var_tracesEndpoint,
+            headers: var_headers,
+            json_protocol: var_jsonProtocol,
+            service_name: var_serviceName,
+            service_version: var_serviceVersion,
+            resource_attributes: var_resourceAttributes,
+            metadata_only: var_metadataOnly,
+            max_content_bytes: var_maxContentBytes,
+            live_trace_interval_ms: var_liveTraceIntervalMs,
+        };
+    }
+}
+
+impl SseDecode for crate::api::observability::FfiObservabilityStats {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_enabled = <bool>::sse_decode(deserializer);
+        let mut var_spansExported = <u64>::sse_decode(deserializer);
+        let mut var_spansDropped = <u64>::sse_decode(deserializer);
+        let mut var_exportFailures = <u64>::sse_decode(deserializer);
+        return crate::api::observability::FfiObservabilityStats {
+            enabled: var_enabled,
+            spans_exported: var_spansExported,
+            spans_dropped: var_spansDropped,
+            export_failures: var_exportFailures,
+        };
+    }
+}
+
+impl SseDecode for crate::api::observability::FfiObservationRef {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_traceId = <String>::sse_decode(deserializer);
+        let mut var_spanId = <String>::sse_decode(deserializer);
+        return crate::api::observability::FfiObservationRef {
+            trace_id: var_traceId,
+            span_id: var_spanId,
+        };
+    }
+}
+
 impl SseDecode for crate::api::streaming::FfiPartialResult {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4357,6 +4731,8 @@ impl SseDecode for crate::api::device::FfiResourceSnapshot {
 impl SseDecode for crate::api::result::FfiResult {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_observation =
+            <Option<crate::api::observability::FfiObservationRef>>::sse_decode(deserializer);
         let mut var_success = <bool>::sse_decode(deserializer);
         let mut var_text = <Option<String>>::sse_decode(deserializer);
         let mut var_reasoningContent = <Option<String>>::sse_decode(deserializer);
@@ -4368,6 +4744,7 @@ impl SseDecode for crate::api::result::FfiResult {
         let mut var_metrics = <crate::api::result::FfiInferenceMetrics>::sse_decode(deserializer);
         let mut var_toolCalls = <Vec<crate::api::model::FfiToolCall>>::sse_decode(deserializer);
         return crate::api::result::FfiResult {
+            observation: var_observation,
             success: var_success,
             text: var_text,
             reasoning_content: var_reasoningContent,
@@ -4384,6 +4761,10 @@ impl SseDecode for crate::api::result::FfiResult {
 impl SseDecode for crate::api::model::FfiRunOptions {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_traceparent = <Option<String>>::sse_decode(deserializer);
+        let mut var_tracestate = <Option<String>>::sse_decode(deserializer);
+        let mut var_conversationId = <Option<String>>::sse_decode(deserializer);
+        let mut var_suppressTrace = <bool>::sse_decode(deserializer);
         let mut var_cloudProvider = <Option<String>>::sse_decode(deserializer);
         let mut var_cloudModel = <Option<String>>::sse_decode(deserializer);
         let mut var_cloudGatewayUrl = <Option<String>>::sse_decode(deserializer);
@@ -4394,6 +4775,10 @@ impl SseDecode for crate::api::model::FfiRunOptions {
         let mut var_maxGraceTokens = <Option<u32>>::sse_decode(deserializer);
         let mut var_frameSessionId = <Option<String>>::sse_decode(deserializer);
         return crate::api::model::FfiRunOptions {
+            traceparent: var_traceparent,
+            tracestate: var_tracestate,
+            conversation_id: var_conversationId,
+            suppress_trace: var_suppressTrace,
             cloud_provider: var_cloudProvider,
             cloud_model: var_cloudModel,
             cloud_gateway_url: var_cloudGatewayUrl,
@@ -4767,6 +5152,18 @@ impl SseDecode for Vec<u8> {
     }
 }
 
+impl SseDecode for Vec<(String, String)> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<(String, String)>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Option<String> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4842,6 +5239,30 @@ impl SseDecode for Option<crate::api::context::FfiMessageRole> {
             return Some(<crate::api::context::FfiMessageRole>::sse_decode(
                 deserializer,
             ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::observability::FfiObservationRef> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::observability::FfiObservationRef>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::model::FfiRunOptions> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::model::FfiRunOptions>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -4948,6 +5369,15 @@ impl SseDecode for Option<Vec<u8>> {
         } else {
             return None;
         }
+    }
+}
+
+impl SseDecode for (String, String) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_field0 = <String>::sse_decode(deserializer);
+        let mut var_field1 = <String>::sse_decode(deserializer);
+        return (var_field0, var_field1);
     }
 }
 
@@ -5081,25 +5511,40 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        72 => wire__crate__api__sdk_client__XybridSdkClient_has_cached_model_data_impl(
+        73 => wire__crate__api__sdk_client__XybridSdkClient_has_cached_model_data_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        79 => wire__crate__api__sdk_client__XybridSdkClient_list_extracted_model_ids_impl(
+        80 => wire__crate__api__sdk_client__XybridSdkClient_list_extracted_model_ids_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        81 => wire__crate__api__sdk_client__XybridSdkClient_remove_cached_model_impl(
+        82 => wire__crate__api__sdk_client__XybridSdkClient_remove_cached_model_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        90 => wire__crate__api__sdk_client__init_app_impl(port, ptr, rust_vec_len, data_len),
+        92 => {
+            wire__crate__api__model__ffi_run_options_default_impl(port, ptr, rust_vec_len, data_len)
+        }
+        93 => wire__crate__api__observability__flush_observability_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        94 => wire__crate__api__sdk_client__init_app_impl(port, ptr, rust_vec_len, data_len),
+        100 => wire__crate__api__observability__shutdown_observability_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
         _ => unreachable!(),
     }
 }
@@ -5259,85 +5704,101 @@ fn pde_ffi_dispatcher_sync_impl(
             rust_vec_len,
             data_len,
         ),
-        71 => wire__crate__api__sdk_client__XybridSdkClient_flush_platform_telemetry_impl(
+        71 => wire__crate__api__sdk_client__XybridSdkClient_configure_resource_telemetry_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        73 => wire__crate__api__sdk_client__XybridSdkClient_init_sdk_cache_dir_impl(
+        72 => wire__crate__api__sdk_client__XybridSdkClient_flush_platform_telemetry_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        74 => wire__crate__api__sdk_client__XybridSdkClient_init_telemetry_impl(
+        74 => wire__crate__api__sdk_client__XybridSdkClient_init_sdk_cache_dir_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        75 => wire__crate__api__sdk_client__XybridSdkClient_is_auto_release_enabled_impl(
+        75 => wire__crate__api__sdk_client__XybridSdkClient_init_telemetry_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        76 => wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
+        76 => wire__crate__api__sdk_client__XybridSdkClient_is_auto_release_enabled_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        77 => wire__crate__api__sdk_client__XybridSdkClient_is_speculative_cloud_enabled_impl(
+        77 => wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        78 => wire__crate__api__sdk_client__XybridSdkClient_is_telemetry_initialized_impl(
+        78 => wire__crate__api__sdk_client__XybridSdkClient_is_speculative_cloud_enabled_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        80 => wire__crate__api__sdk_client__XybridSdkClient_release_memory_impl(
+        79 => wire__crate__api__sdk_client__XybridSdkClient_is_telemetry_initialized_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        82 => wire__crate__api__sdk_client__XybridSdkClient_runtime_features_impl(
+        81 => wire__crate__api__sdk_client__XybridSdkClient_release_memory_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        83 => wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
+        83 => wire__crate__api__sdk_client__XybridSdkClient_runtime_features_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        84 => wire__crate__api__sdk_client__XybridSdkClient_set_auto_release_impl(
+        84 => wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        85 => wire__crate__api__sdk_client__XybridSdkClient_set_gateway_url_impl(
+        85 => wire__crate__api__sdk_client__XybridSdkClient_set_auto_release_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        86 => wire__crate__api__sdk_client__XybridSdkClient_set_platform_url_impl(
+        86 => wire__crate__api__sdk_client__XybridSdkClient_set_gateway_url_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        87 => wire__crate__api__sdk_client__XybridSdkClient_set_speculative_cloud_impl(
+        87 => wire__crate__api__sdk_client__XybridSdkClient_set_platform_url_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        88 => wire__crate__api__model__ffi_generation_config_creative_impl(
+        88 => wire__crate__api__sdk_client__XybridSdkClient_set_speculative_cloud_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        89 => {
+        89 => wire__crate__api__sdk_client__XybridSdkClient_validate_resource_telemetry_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        90 => wire__crate__api__model__ffi_generation_config_creative_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        91 => {
             wire__crate__api__model__ffi_generation_config_greedy_impl(ptr, rust_vec_len, data_len)
         }
-        91 => wire__crate__api__model__json_schema_to_gbnf_impl(ptr, rust_vec_len, data_len),
+        95 => wire__crate__api__observability__init_observability_impl(ptr, rust_vec_len, data_len),
+        96 => wire__crate__api__model__json_schema_to_gbnf_impl(ptr, rust_vec_len, data_len),
+        97 => {
+            wire__crate__api__observability__observability_stats_impl(ptr, rust_vec_len, data_len)
+        }
+        98 => wire__crate__api__observability__record_evaluation_impl(ptr, rust_vec_len, data_len),
+        99 => wire__crate__api__observability__record_feedback_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -5777,6 +6238,80 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::context::FfiMessageRole>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::observability::FfiObservabilityConfig {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.api_key.into_into_dart().into_dart(),
+            self.endpoint.into_into_dart().into_dart(),
+            self.traces_endpoint.into_into_dart().into_dart(),
+            self.headers.into_into_dart().into_dart(),
+            self.json_protocol.into_into_dart().into_dart(),
+            self.service_name.into_into_dart().into_dart(),
+            self.service_version.into_into_dart().into_dart(),
+            self.resource_attributes.into_into_dart().into_dart(),
+            self.metadata_only.into_into_dart().into_dart(),
+            self.max_content_bytes.into_into_dart().into_dart(),
+            self.live_trace_interval_ms.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::observability::FfiObservabilityConfig
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::observability::FfiObservabilityConfig>
+    for crate::api::observability::FfiObservabilityConfig
+{
+    fn into_into_dart(self) -> crate::api::observability::FfiObservabilityConfig {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::observability::FfiObservabilityStats {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.enabled.into_into_dart().into_dart(),
+            self.spans_exported.into_into_dart().into_dart(),
+            self.spans_dropped.into_into_dart().into_dart(),
+            self.export_failures.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::observability::FfiObservabilityStats
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::observability::FfiObservabilityStats>
+    for crate::api::observability::FfiObservabilityStats
+{
+    fn into_into_dart(self) -> crate::api::observability::FfiObservabilityStats {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::observability::FfiObservationRef {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.trace_id.into_into_dart().into_dart(),
+            self.span_id.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::observability::FfiObservationRef
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::observability::FfiObservationRef>
+    for crate::api::observability::FfiObservationRef
+{
+    fn into_into_dart(self) -> crate::api::observability::FfiObservationRef {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::streaming::FfiPartialResult {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -5855,6 +6390,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::device::FfiResourceSnapshot>
 impl flutter_rust_bridge::IntoDart for crate::api::result::FfiResult {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.observation.into_into_dart().into_dart(),
             self.success.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
             self.reasoning_content.into_into_dart().into_dart(),
@@ -5880,6 +6416,10 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::result::FfiResult>
 impl flutter_rust_bridge::IntoDart for crate::api::model::FfiRunOptions {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.traceparent.into_into_dart().into_dart(),
+            self.tracestate.into_into_dart().into_dart(),
+            self.conversation_id.into_into_dart().into_dart(),
+            self.suppress_trace.into_into_dart().into_dart(),
             self.cloud_provider.into_into_dart().into_dart(),
             self.cloud_model.into_into_dart().into_dart(),
             self.cloud_gateway_url.into_into_dart().into_dart(),
@@ -6648,6 +7188,41 @@ impl SseEncode for crate::api::context::FfiMessageRole {
     }
 }
 
+impl SseEncode for crate::api::observability::FfiObservabilityConfig {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<String>>::sse_encode(self.api_key, serializer);
+        <Option<String>>::sse_encode(self.endpoint, serializer);
+        <Option<String>>::sse_encode(self.traces_endpoint, serializer);
+        <Vec<(String, String)>>::sse_encode(self.headers, serializer);
+        <bool>::sse_encode(self.json_protocol, serializer);
+        <Option<String>>::sse_encode(self.service_name, serializer);
+        <Option<String>>::sse_encode(self.service_version, serializer);
+        <Vec<(String, String)>>::sse_encode(self.resource_attributes, serializer);
+        <bool>::sse_encode(self.metadata_only, serializer);
+        <Option<u32>>::sse_encode(self.max_content_bytes, serializer);
+        <Option<u32>>::sse_encode(self.live_trace_interval_ms, serializer);
+    }
+}
+
+impl SseEncode for crate::api::observability::FfiObservabilityStats {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.enabled, serializer);
+        <u64>::sse_encode(self.spans_exported, serializer);
+        <u64>::sse_encode(self.spans_dropped, serializer);
+        <u64>::sse_encode(self.export_failures, serializer);
+    }
+}
+
+impl SseEncode for crate::api::observability::FfiObservationRef {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.trace_id, serializer);
+        <String>::sse_encode(self.span_id, serializer);
+    }
+}
+
 impl SseEncode for crate::api::streaming::FfiPartialResult {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -6695,6 +7270,10 @@ impl SseEncode for crate::api::device::FfiResourceSnapshot {
 impl SseEncode for crate::api::result::FfiResult {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<crate::api::observability::FfiObservationRef>>::sse_encode(
+            self.observation,
+            serializer,
+        );
         <bool>::sse_encode(self.success, serializer);
         <Option<String>>::sse_encode(self.text, serializer);
         <Option<String>>::sse_encode(self.reasoning_content, serializer);
@@ -6710,6 +7289,10 @@ impl SseEncode for crate::api::result::FfiResult {
 impl SseEncode for crate::api::model::FfiRunOptions {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<String>>::sse_encode(self.traceparent, serializer);
+        <Option<String>>::sse_encode(self.tracestate, serializer);
+        <Option<String>>::sse_encode(self.conversation_id, serializer);
+        <bool>::sse_encode(self.suppress_trace, serializer);
         <Option<String>>::sse_encode(self.cloud_provider, serializer);
         <Option<String>>::sse_encode(self.cloud_model, serializer);
         <Option<String>>::sse_encode(self.cloud_gateway_url, serializer);
@@ -7020,6 +7603,16 @@ impl SseEncode for Vec<u8> {
     }
 }
 
+impl SseEncode for Vec<(String, String)> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <(String, String)>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<String> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7086,6 +7679,26 @@ impl SseEncode for Option<crate::api::context::FfiMessageRole> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::context::FfiMessageRole>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::observability::FfiObservationRef> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::observability::FfiObservationRef>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::model::FfiRunOptions> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::model::FfiRunOptions>::sse_encode(value, serializer);
         }
     }
 }
@@ -7177,6 +7790,14 @@ impl SseEncode for Option<Vec<u8>> {
         if let Some(value) = self {
             <Vec<u8>>::sse_encode(value, serializer);
         }
+    }
+}
+
+impl SseEncode for (String, String) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.0, serializer);
+        <String>::sse_encode(self.1, serializer);
     }
 }
 
