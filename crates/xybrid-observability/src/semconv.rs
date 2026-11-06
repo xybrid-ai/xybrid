@@ -257,6 +257,8 @@ pub mod metric {
 pub mod event {
     /// Inference details with structured content (severity DEBUG).
     pub const INFERENCE_DETAILS: &str = "gen_ai.client.inference.operation.details";
+    /// Tool details with governed arguments and results (severity DEBUG).
+    pub const TOOL_DETAILS: &str = "gen_ai.execute_tool.operation.details";
     /// Client operation exception (severity WARN).
     pub const OPERATION_EXCEPTION: &str = "gen_ai.client.operation.exception";
     /// Evaluation result (severity INFO).

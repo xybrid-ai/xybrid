@@ -2,6 +2,7 @@
 //! never performs I/O, and ends at most once. Dropping an un-ended handle
 //! ends it as cancelled.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::SystemTime;
@@ -1094,6 +1095,7 @@ struct Simple {
     dims: Vec<KeyValue>,
     ended: Mutex<bool>,
     truncated: Mutex<Vec<String>>,
+    event_content: Mutex<BTreeMap<&'static str, Value>>,
 }
 
 impl Simple {
@@ -1114,7 +1116,7 @@ impl Simple {
         if !truncated.is_empty() {
             self.core.set_attribute(KeyValue::new(
                 attr::CONTENT_TRUNCATED_ATTRIBUTES,
-                string_array(truncated),
+                string_array(truncated.clone()),
             ));
         }
         if let Some(e) = error {
@@ -1126,6 +1128,52 @@ impl Simple {
                 dims.push(KeyValue::new(attr::ERROR_TYPE, e.error_type.clone()));
             }
             record(i, seconds_between(self.core.start, at), &dims);
+        }
+        let content = std::mem::take(&mut *lock(&self.event_content));
+        if let Some(events) = self
+            .core
+            .observer
+            .events
+            .as_ref()
+            .filter(|_| !content.is_empty())
+        {
+            let mut attributes: Vec<(Key, AnyValue)> = self
+                .dims
+                .iter()
+                .map(|kv| {
+                    (
+                        kv.key.clone(),
+                        json_to_any(serde_json::Value::String(kv.value.to_string())),
+                    )
+                })
+                .collect();
+            attributes.extend(
+                content
+                    .into_iter()
+                    .map(|(key, value)| (Key::from_static_str(key), json_to_any(value))),
+            );
+            if let Some(e) = error {
+                attributes.push((
+                    Key::from_static_str(attr::ERROR_TYPE),
+                    AnyValue::from(e.error_type.clone()),
+                ));
+            }
+            if !truncated.is_empty() {
+                attributes.push((
+                    Key::from_static_str(attr::CONTENT_TRUNCATED_ATTRIBUTES),
+                    AnyValue::ListAny(Box::new(
+                        truncated.into_iter().map(AnyValue::from).collect(),
+                    )),
+                ));
+            }
+            events.emit(LogEvent {
+                name: event::TOOL_DETAILS,
+                severity: Severity::Debug,
+                severity_text: "DEBUG",
+                timestamp: at,
+                trace: self.core.trace_ids(),
+                attributes,
+            });
         }
         self.core.end_span(at);
     }
@@ -1232,6 +1280,7 @@ impl WorkflowOperation {
                 dims,
                 ended: Mutex::new(false),
                 truncated: Mutex::new(Vec::new()),
+                event_content: Mutex::new(BTreeMap::new()),
             },
         }
     }
@@ -1270,20 +1319,6 @@ impl ToolOperation {
         if let Some(d) = &call.description {
             attributes.push(KeyValue::new(attr::TOOL_DESCRIPTION, d.clone()));
         }
-        let mut truncated = Vec::new();
-        if let Some(args) = call.arguments.clone() {
-            if observer.content.capture().on_spans() {
-                let prepared = observer
-                    .content
-                    .prepare_json(attr::TOOL_CALL_ARGUMENTS, args);
-                if prepared.truncated {
-                    truncated.push(attr::TOOL_CALL_ARGUMENTS.to_owned());
-                }
-                if let Some(s) = prepared.value.and_then(|v| serde_json::to_string(&v).ok()) {
-                    attributes.push(KeyValue::new(attr::TOOL_CALL_ARGUMENTS, s));
-                }
-            }
-        }
         let cx = observer.start_span(
             span_name(op::EXECUTE_TOOL, Some(&call.name)),
             SpanKind::Internal,
@@ -1291,7 +1326,7 @@ impl ToolOperation {
             &mut options,
             start,
         );
-        Self {
+        let operation = Self {
             simple: Simple {
                 core: Core {
                     observer,
@@ -1300,20 +1335,40 @@ impl ToolOperation {
                 },
                 dims,
                 ended: Mutex::new(false),
-                truncated: Mutex::new(truncated),
+                truncated: Mutex::new(Vec::new()),
+                event_content: Mutex::new(BTreeMap::new()),
             },
+        };
+        if let Some(args) = call.arguments {
+            operation.record_content(attr::TOOL_CALL_ARGUMENTS, args);
         }
+        operation
     }
 
     /// Records the tool result (content).
     pub fn record_result(&self, result: &Value) {
-        let core = &self.simple.core;
-        if !core.observer.content.capture().on_spans() {
+        self.record_content(attr::TOOL_CALL_RESULT, result.clone());
+    }
+
+    fn record_content(&self, key: &'static str, value: Value) {
+        // Serialize recording with finish so no content can arrive after the event.
+        let ended = lock(&self.simple.ended);
+        if *ended {
             return;
         }
-        let (_, truncated) = core.content_json(attr::TOOL_CALL_RESULT, result.clone(), true);
+        let core = &self.simple.core;
+        let capture = core.observer.content.capture();
+        if !capture.any() {
+            return;
+        }
+        let (bounded, truncated) = core.content_json(key, value, capture.on_spans());
+        if capture.on_events() {
+            if let Some(value) = bounded {
+                lock(&self.simple.event_content).insert(key, value);
+            }
+        }
         if truncated {
-            lock(&self.simple.truncated).push(attr::TOOL_CALL_RESULT.to_owned());
+            lock(&self.simple.truncated).push(key.to_owned());
         }
     }
 }
@@ -1374,6 +1429,7 @@ impl ModelLoadOperation {
                 dims,
                 ended: Mutex::new(false),
                 truncated: Mutex::new(Vec::new()),
+                event_content: Mutex::new(BTreeMap::new()),
             },
         }
     }
@@ -1475,7 +1531,7 @@ impl SpanOperation {
 impl Drop for SpanOperation {
     fn drop(&mut self) {
         if !*lock(&self.ended) {
-            self.end();
+            self.end_with_error(&ErrorInfo::new("cancelled"));
         }
     }
 }
@@ -1485,5 +1541,38 @@ impl fmt::Debug for SpanOperation {
         f.debug_struct("SpanOperation")
             .field("observation_ref", &self.observation_ref())
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Observer;
+    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
+
+    #[test]
+    fn dropped_generic_spans_are_cancelled_but_explicit_completion_is_preserved() {
+        let spans = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(spans.clone())
+            .build();
+        let observer = Observer::builder().tracer_provider(&provider).build();
+        drop(observer.start_span("interrupted", vec![], StartOptions::default()));
+        let completed = observer.start_span("completed", vec![], StartOptions::default());
+        completed.end();
+        drop(completed);
+        let failed = observer.start_span("failed", vec![], StartOptions::default());
+        failed.end_with_error(&ErrorInfo::new("network"));
+        drop(failed);
+        let finished = spans.get_finished_spans().unwrap();
+        assert_eq!(finished.len(), 3);
+        assert!(matches!(finished[0].status, Status::Error { .. }));
+        assert!(finished[0]
+            .attributes
+            .contains(&KeyValue::new(attr::ERROR_TYPE, "cancelled")));
+        assert_eq!(finished[1].status, Status::Unset);
+        assert!(finished[2]
+            .attributes
+            .contains(&KeyValue::new(attr::ERROR_TYPE, "network")));
     }
 }

@@ -1,0 +1,117 @@
+{
+  "config": {
+    "content_capture": "span_and_event",
+    "logs": true,
+    "max_content_attribute_bytes": 128,
+    "redact_substrings": [
+      "secret"
+    ]
+  },
+  "description": "Tool payloads follow the capture policy, redaction and byte budget in both signals.",
+  "expect": {
+    "logs": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.call.arguments": {
+            "query": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…[truncated]",
+            "token": "[REDACTED]"
+          },
+          "gen_ai.tool.call.result": {
+            "text": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy…[truncated]",
+            "token": "[REDACTED]"
+          },
+          "gen_ai.tool.name": "get_weather",
+          "gen_ai.tool.type": "function",
+          "xybrid.genai.content.truncated_attributes": [
+            "gen_ai.tool.call.arguments",
+            "gen_ai.tool.call.result"
+          ]
+        },
+        "event_name": "gen_ai.execute_tool.operation.details",
+        "severity_number": 5,
+        "span": "tool"
+      }
+    ],
+    "metrics": [
+      {
+        "name": "gen_ai.execute_tool.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "execute_tool",
+              "gen_ai.tool.name": "get_weather",
+              "gen_ai.tool.type": "function"
+            },
+            "count": 1,
+            "sum": 0.05
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.call.arguments": {
+            "query": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…[truncated]",
+            "token": "[REDACTED]"
+          },
+          "gen_ai.tool.call.id": "call_1",
+          "gen_ai.tool.call.result": {
+            "text": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy…[truncated]",
+            "token": "[REDACTED]"
+          },
+          "gen_ai.tool.description": "Get the weather",
+          "gen_ai.tool.name": "get_weather",
+          "gen_ai.tool.type": "function",
+          "xybrid.genai.content.truncated_attributes": [
+            "gen_ai.tool.call.arguments",
+            "gen_ai.tool.call.result"
+          ]
+        },
+        "end_ms": 265,
+        "id": "tool",
+        "kind": "INTERNAL",
+        "name": "execute_tool get_weather",
+        "parent": null,
+        "start_ms": 215,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "span_and_event_tool_content",
+  "steps": [
+    {
+      "arguments": {
+        "query": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "token": "secret"
+      },
+      "at_ms": 215,
+      "call_id": "call_1",
+      "description": "Get the weather",
+      "id": "tool",
+      "name": "get_weather",
+      "op": "start_tool",
+      "tool_type": "function"
+    },
+    {
+      "at_ms": 265,
+      "id": "tool",
+      "op": "tool_result",
+      "value": {
+        "text": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+        "token": "secret"
+      }
+    },
+    {
+      "at_ms": 265,
+      "id": "tool",
+      "op": "end"
+    }
+  ]
+}
