@@ -102,11 +102,16 @@ export class OtlpHttpSender<T> {
   }
 
   /** Sends a batch, splitting it until each request fits the body bound. */
-  async sendItems<Item>(items: readonly Item[], wrap: (items: Item[]) => T): Promise<SendOutcome> {
+  async sendItems<Item>(
+    items: readonly Item[],
+    wrap: (items: Item[]) => T,
+    signal?: AbortSignal,
+  ): Promise<SendOutcome> {
+    if (this.aborted || signal?.aborted) return { exported: 0, failed: items.length, oversized: 0 };
     if (items.length === 0) return { exported: 0, failed: 0, oversized: 0 };
     const body = this.#serialize(wrap([...items]));
     if (body !== undefined && body.byteLength <= this.#maxBodyBytes) {
-      const ok = await this.#post(body);
+      const ok = await this.#post(body, signal);
       return ok
         ? { exported: items.length, failed: 0, oversized: 0 }
         : { exported: 0, failed: items.length, oversized: 0 };
@@ -117,8 +122,8 @@ export class OtlpHttpSender<T> {
       return { exported: 0, failed: 0, oversized: 1 };
     }
     const middle = Math.ceil(items.length / 2);
-    const first = await this.sendItems(items.slice(0, middle), wrap);
-    const second = await this.sendItems(items.slice(middle), wrap);
+    const first = await this.sendItems(items.slice(0, middle), wrap, signal);
+    const second = await this.sendItems(items.slice(middle), wrap, signal);
     return {
       exported: first.exported + second.exported,
       failed: first.failed + second.failed,
@@ -146,20 +151,26 @@ export class OtlpHttpSender<T> {
     }
   }
 
-  #post(body: Uint8Array): Promise<boolean> {
+  #post(body: Uint8Array, signal?: AbortSignal): Promise<boolean> {
     // All signals, split batches and retries share this transport. Keep async work suppressed
     // too, so HTTP instrumentation cannot feed export requests back into the span queue.
-    return context.with(suppressTracing(context.active()), () => this.#postSuppressed(body));
+    return context.with(suppressTracing(context.active()), () =>
+      this.#postSuppressed(body, signal),
+    );
   }
 
-  async #postSuppressed(body: Uint8Array): Promise<boolean> {
+  async #postSuppressed(body: Uint8Array, batchSignal?: AbortSignal): Promise<boolean> {
+    const signal =
+      batchSignal === undefined
+        ? this.#shutdown.signal
+        : AbortSignal.any([this.#shutdown.signal, batchSignal]);
     for (let attempt = 0; attempt <= this.#maxRetries; attempt += 1) {
-      if (this.aborted) return false;
+      if (signal.aborted) return false;
       let delay = Math.min(this.#initialDelayMs * 2 ** attempt, this.#maxDelayMs);
       const timeout = new AbortController();
       const timer = setTimeout(() => timeout.abort(), this.#timeoutMs);
       const cancelled = (): void => timeout.abort();
-      this.#shutdown.signal.addEventListener("abort", cancelled, { once: true });
+      signal.addEventListener("abort", cancelled, { once: true });
       try {
         // Synchronous browser context managers restore context at the first await. Re-enter
         // suppression for every fetch so later retry attempts cannot trace themselves either.
@@ -173,6 +184,7 @@ export class OtlpHttpSender<T> {
         );
         // Drain so the connection can be reused; the response body is never logged.
         await response.arrayBuffer().catch(() => undefined);
+        if (signal.aborted) return false;
         if (response.ok) return true;
         if (!RETRYABLE_STATUS.has(response.status)) {
           diag.warn(
@@ -192,9 +204,9 @@ export class OtlpHttpSender<T> {
         diag.debug(`xybrid-observability: ${this.#signal} export failed (${name})`);
       } finally {
         clearTimeout(timer);
-        this.#shutdown.signal.removeEventListener("abort", cancelled);
+        signal.removeEventListener("abort", cancelled);
       }
-      if (attempt < this.#maxRetries) await sleep(delay, this.#shutdown.signal);
+      if (attempt < this.#maxRetries) await sleep(delay, signal);
     }
     diag.warn(`xybrid-observability: ${this.#signal} export failed after retries`);
     return false;

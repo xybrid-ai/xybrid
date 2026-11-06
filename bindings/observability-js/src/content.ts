@@ -90,7 +90,9 @@ const ordered = (value: Record<string, unknown>, keys: readonly string[]): JsonV
   const result: Record<string, JsonValue> = {};
   for (const key of keys) {
     const field = value[key];
-    if (field !== undefined && field !== null) result[key] = toJson(field);
+    if (field !== undefined && (field !== null || key === "arguments" || key === "response")) {
+      result[key] = toJson(field);
+    }
   }
   return result;
 };

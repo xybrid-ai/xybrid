@@ -476,7 +476,7 @@ jobs:
   observability:
     needs: tooling-changes
     if: needs.tooling-changes.outputs.full_ci == 'true'
-    name: Observability contract (Rust/JS)
+    name: Observability contract (Rust)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

@@ -226,6 +226,7 @@ export const METRICS = {
 
 export const EVENTS = {
   "gen_ai.client.inference.operation.details": { severity_number: 5, severity_text: "DEBUG" },
+  "gen_ai.execute_tool.operation.details": { severity_number: 5, severity_text: "DEBUG" },
   "gen_ai.client.operation.exception": { severity_number: 13, severity_text: "WARN" },
   "gen_ai.evaluation.result": { severity_number: 9, severity_text: "INFO" },
 } as const;

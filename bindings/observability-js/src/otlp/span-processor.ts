@@ -106,17 +106,16 @@ export class CountingBatchSpanProcessor implements SpanProcessor {
   }
 
   async #exportBatch(batch: ReadableSpan[]): Promise<void> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timedOut = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), this.#exportTimeoutMs);
-      unref(timer);
-    });
-    const outcome = await Promise.race([
-      this.#sender.sendItems(batch, (items) => items).catch(() => undefined),
-      timedOut,
-    ]);
-    clearTimeout(timer);
-    if (outcome === "timeout" || outcome === undefined) {
+    const batchDeadline = new AbortController();
+    const timer = setTimeout(() => batchDeadline.abort(), this.#exportTimeoutMs);
+    unref(timer);
+    // The deadline cancels fetches, retry backoff and remaining split requests. Wait for the
+    // transport to settle before the next batch, preserving acknowledged partial exports.
+    const outcome = await this.#sender
+      .sendItems(batch, (items) => items, batchDeadline.signal)
+      .catch(() => undefined)
+      .finally(() => clearTimeout(timer));
+    if (outcome === undefined) {
       this.#failures += 1;
       this.#dropped += batch.length;
       return;

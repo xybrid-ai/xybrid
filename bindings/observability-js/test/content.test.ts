@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { canonicalPart } from "../src/content.ts";
 import {
   boundJson,
   type ContentCapture,
@@ -289,5 +290,16 @@ describe("failing redactors", () => {
       op.end();
       expect(spans.getFinishedSpans()[0]?.attributes["gen_ai.tool.definitions"]).toBe("null");
     }
+  });
+});
+
+test("message parts retain explicit null tool arguments and responses", () => {
+  expect(canonicalPart({ type: "tool_call", arguments: null })).toEqual({
+    type: "tool_call",
+    arguments: null,
+  });
+  expect(canonicalPart({ type: "tool_call_response", response: null })).toEqual({
+    type: "tool_call_response",
+    response: null,
   });
 });

@@ -559,7 +559,7 @@ abstract class Operation {
   /** Hook: metrics, recorded once whether or not the span is sampled. */
   protected abstract recordMetrics(endMs: number): void;
 
-  /** Hook: log events at the end (inference operations only in contract v1). */
+  /** Hook: log events at the end. */
   protected emitEvents(_endMs: number, _error: ErrorInfo | undefined, _message?: string): void {}
 
   protected spanContextForEvents(): Context | undefined {
@@ -1005,6 +1005,27 @@ export class ToolOperation extends Operation {
     this.recordJsonContent(ATTR.TOOL_CALL_RESULT, toJson(value), true);
   }
 
+  protected override emitEvents(endMs: number): void {
+    if (!this.core.eventContent || Object.keys(this.eventContent).length === 0) return;
+    this.core.emit(
+      "gen_ai.execute_tool.operation.details",
+      endMs,
+      {
+        ...pick(this.attributes, [
+          ATTR.OPERATION_NAME,
+          ATTR.TOOL_NAME,
+          ATTR.TOOL_TYPE,
+          ATTR.ERROR_TYPE,
+        ]),
+        ...this.eventContent,
+        ...(this.truncated.length === 0
+          ? {}
+          : { [ATTR.CONTENT_TRUNCATED_ATTRIBUTES]: [...this.truncated] }),
+      },
+      this.spanContextForEvents(),
+    );
+  }
+
   protected recordMetrics(endMs: number): void {
     this.core.record(
       "gen_ai.execute_tool.duration",
@@ -1121,6 +1142,17 @@ export class Observer {
   /** The effective content capture mode. */
   get contentCapture(): ContentCapture {
     return this.#core.capture;
+  }
+
+  /**
+   * Captures the active application context for a later callback invocation.
+   * This binds the callback itself; it does not propagate context into native Promise continuations.
+   */
+  bindContext<Args extends unknown[], Result>(
+    callback: (...args: Args) => Result,
+  ): (...args: Args) => Result {
+    const captured = contextApi.active();
+    return (...args: Args) => contextApi.with(captured, callback, undefined, ...args);
   }
 
   startInference(request: InferenceRequest, options: StartOptions = {}): InferenceOperation {

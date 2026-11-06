@@ -31,6 +31,36 @@ describe("parenting", () => {
     expect(inference?.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
   });
 
+  test("bound callbacks retain their captured parent and restore the invoking context", async () => {
+    const { observer, spans, tracerProvider } = createHarness();
+    const tracer = tracerProvider.getTracer("app");
+    const parent = tracer.startSpan("captured");
+    const other = tracer.startSpan("other");
+    const bound = context.with(trace.setSpan(context.active(), parent), () =>
+      observer.bindContext((model: string) => {
+        observer.startModelLoad({ model }).end();
+        return model.length;
+      }),
+    );
+    await Promise.resolve();
+    context.with(trace.setSpan(context.active(), other), () => {
+      expect(bound("tiny")).toBe(4);
+      expect(trace.getSpan(context.active())).toBe(other);
+    });
+    expect(spans.getFinishedSpans()[0]?.parentSpanContext?.spanId).toBe(
+      parent.spanContext().spanId,
+    );
+    const throwing = context.with(trace.setSpan(context.active(), parent), () =>
+      observer.bindContext(() => {
+        throw new Error("callback failure");
+      }),
+    );
+    expect(() => throwing()).toThrow("callback failure");
+    expect(trace.getSpan(context.active())).toBeUndefined();
+    parent.end();
+    other.end();
+  });
+
   test("an explicit parent wins over the ambient context", () => {
     const { observer, spans, tracerProvider } = createHarness();
     const outer = tracerProvider.getTracer("app").startSpan("ambient");

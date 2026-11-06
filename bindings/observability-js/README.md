@@ -77,6 +77,11 @@ await fetch(url, { headers: injectTraceHeaders(op.context(), new Headers()) });
 observer.startInference(request, { parent: "00-<trace>-<span>-01", tracestate: "vendor=x" });
 ```
 
+For callbacks that run later on the same thread, `observer.bindContext(callback)`
+captures the active application context and restores it when the callback is invoked.
+It binds the invocation only; a browser's synchronous context manager still does
+not propagate context into native Promise continuations.
+
 Workers report `performance.timeOrigin + performance.now()` (wall-clock epoch
 ms), never worker-relative offsets.
 
