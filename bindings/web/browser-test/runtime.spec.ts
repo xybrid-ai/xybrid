@@ -164,6 +164,7 @@ test("observer failures preserve real generation, reuse and native disposal", as
     // memory release all go through the shipped worker and Rust GGUF engine.
     const observer = {
       contentCapture: "no_content",
+      bindContext: (callback: unknown) => callback,
       startModelLoad: () => fail("startModelLoad"),
       startInference: () => {
         if (phase === "start") fail("startInference");
