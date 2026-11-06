@@ -117,7 +117,7 @@ namespace XybridBolt
                 return new XybridResult(
                     new XybridEnvelope(new XybridEnvelopeKind.Audio(audio.ToArray()), result.Envelope.Metadata),
                     result.OutputType, result.ModelId, result.LatencyMs, result.ExecutionTarget,
-                    result.Metrics, result.ToolCalls, result.ReasoningContent);
+                    result.Metrics, result.ToolCalls, result.ReasoningContent, result.Observation);
             }
             finally
             {

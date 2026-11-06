@@ -134,7 +134,7 @@ GameObject:
   - component: {fileID: 100000002}
   - component: {fileID: 100000003}
   m_Layer: 0
-  m_Name: XybridTelemetry
+  m_Name: XybridObservability
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -164,9 +164,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 100000001}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7b3e1d8c4a6f2e5a9c8d7b6a5f4e3d2c, type: 3}
+  m_Script: {fileID: 11500000, guid: 75dee9a9528b4e71934b4374225756d4, type: 3}
   m_Name:
   m_EditorClassIdentifier:
   modelId: kokoro-82m
-  prompt: Hello from the Xybrid telemetry demo.
+  prompt: Hello from the Xybrid observability demo.
   appVersion: 1.0.0
