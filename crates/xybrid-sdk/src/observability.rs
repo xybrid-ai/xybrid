@@ -1069,14 +1069,17 @@ impl RunObservation {
         if let Some(reason) = &h.finish_reason {
             self.op.record_finish_reasons([finish_reason(reason)]);
         }
-        if let Some(ttft) = h.ttft_ms {
+        if let Some(at) = h
+            .ttft_ms
+            .and_then(|ms| Duration::try_from_secs_f64(ms / 1000.0).ok())
+            .and_then(|duration| self.started.checked_add(duration))
+        {
             let state = self
                 .chunks
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if !state.first_token_marked || self.subject.is_llm {
-                self.op
-                    .record_first_token_at(self.started + Duration::from_secs_f64(ttft / 1000.0));
+                self.op.record_first_token_at(at);
             }
         }
         if let Some(itl) = h.mean_itl_ms {
@@ -1142,7 +1145,7 @@ fn finish_reason(raw: &str) -> String {
         "tool_calls" | "tool_call" | "tool_use" => "tool_call",
         "content_filter" => "content_filter",
         "error" => "error",
-        other => other,
+        _ => "_OTHER",
     }
     .to_owned()
 }
@@ -1167,9 +1170,10 @@ pub(crate) fn error_info(error: &SdkError) -> ErrorInfo {
         | SdkError::UnsupportedBackendCapability { .. } => "unsupported",
         _ => "_OTHER",
     };
-    ErrorInfo::new(error_type).with_message(crate::telemetry::redact_error_for_telemetry(
-        &error.to_string(),
-    ))
+    // Automatic diagnostics can contain prompts, credentials and model paths.
+    // Preserve the original error for the caller; export only its class. The
+    // public ErrorInfo API still permits explicitly supplied, redacted text.
+    ErrorInfo::new(error_type)
 }
 
 fn role(envelope: &Envelope, default: &str) -> String {
@@ -1323,6 +1327,11 @@ pub(crate) struct Harvest {
 impl Harvest {
     fn absorb<'a>(&mut self, pairs: impl Iterator<Item = (&'a str, &'a str)>) {
         for (key, value) in pairs {
+            // Output envelopes are caller/runtime-owned too. Use the same
+            // boundary as stages before promoting metadata to the logical run.
+            let Some(value) = stage_metadata_value(key, value) else {
+                continue;
+            };
             let n = || value.parse::<u64>().ok();
             let f = || value.parse::<f64>().ok();
             match key {
@@ -1344,6 +1353,181 @@ impl Harvest {
             }
         }
     }
+}
+
+/// Reviewed, content-free metadata from core stages and output envelopes.
+///
+/// These are not application observation attributes: core may place paths,
+/// snapshots, errors or arbitrary bundle strings here. Content is recorded by
+/// the logical operation's message/error APIs, which apply its content policy.
+/// Keep descriptor values closed as well as keys; token-shaped secrets are
+/// still secrets. Explicit public observation APIs continue to accept custom
+/// model/provider identities and application-owned attributes.
+fn stage_metadata_value(key: &str, value: &str) -> Option<String> {
+    let known = match key {
+        "backend" => matches!(
+            value,
+            "ort"
+                | "onnx"
+                | "llamacpp"
+                | "llama.cpp"
+                | "mistralrs"
+                | "mistral"
+                | "whispercpp"
+                | "candle"
+                | "zzz"
+                | "coreml"
+                | "cloud"
+                | "gateway"
+        ),
+        "execution_provider" => matches!(
+            value,
+            "cpu"
+                | "metal"
+                | "cuda"
+                | "vulkan"
+                | "coreml"
+                | "directml"
+                | "nnapi"
+                | "webgpu"
+                | "wasm"
+                | "tensorrt"
+                | "rocm"
+        ),
+        "provider" => matches!(
+            value,
+            "openai"
+                | "anthropic"
+                | "google"
+                | "groq"
+                | "together"
+                | "fireworks"
+                | "mistral"
+                | "deepseek"
+                | "openrouter"
+                | "elevenlabs"
+                | "custom"
+                | "xybrid"
+        ),
+        "stage_kind" => matches!(
+            value,
+            "asr" | "tts" | "llm" | "translate" | "vision" | "embed" | "audio" | "decision"
+        ),
+        "span_kind" => matches!(value, "cpu" | "gpu" | "io" | "tool"),
+        "task" => matches!(
+            value,
+            "speech-recognition"
+                | "speech-to-text"
+                | "asr"
+                | "text-to-speech"
+                | "tts"
+                | "text-generation"
+                | "text_generation"
+                | "chat"
+                | "llm"
+                | "translation"
+                | "translate"
+                | "image-classification"
+                | "image-to-text"
+                | "vision"
+                | "vision-language"
+                | "vision_language"
+                | "vlm"
+                | "embedding"
+                | "sentence-embedding"
+                | "audio-classification"
+                | "vad"
+                | "decision"
+        ),
+        "quantization" => {
+            let normalized = value.to_ascii_lowercase();
+            return matches!(
+                normalized.as_str(),
+                "f16"
+                    | "f32"
+                    | "fp16"
+                    | "fp32"
+                    | "bf16"
+                    | "int8"
+                    | "q2_k"
+                    | "q2_k_s"
+                    | "q3_k"
+                    | "q3_k_s"
+                    | "q3_k_m"
+                    | "q3_k_l"
+                    | "q4_0"
+                    | "q4_1"
+                    | "q4_k"
+                    | "q4_k_s"
+                    | "q4_k_m"
+                    | "q5_0"
+                    | "q5_1"
+                    | "q5_k"
+                    | "q5_k_s"
+                    | "q5_k_m"
+                    | "q6_k"
+                    | "q8_0"
+                    | "q8_1"
+                    | "q8_k"
+                    | "iq1_s"
+                    | "iq1_m"
+                    | "iq2_xxs"
+                    | "iq2_xs"
+                    | "iq2_s"
+                    | "iq3_xxs"
+                    | "iq3_s"
+                    | "iq4_xs"
+                    | "iq4_nl"
+            )
+            .then_some(normalized);
+        }
+        "tokens_in"
+        | "tokens_out"
+        | "prompt_tokens"
+        | "completion_tokens"
+        | "tokens_generated"
+        | "prompt_cached_tokens"
+        | "cache_read_input_tokens"
+        | "emitted_chunks"
+        | "choice_count"
+        | "image_count"
+        | "placeholder_tokens"
+        | "raw_image_source_vec_allocations"
+        | "raw_image_source_extra_pixel_copies"
+        | "raw_image_conversion_buffer_allocations"
+        | "raw_image_pixel_bytes" => {
+            return value.parse::<u64>().ok().map(|n| n.to_string());
+        }
+        "ttft_ms"
+        | "mean_itl_ms"
+        | "p95_itl_ms"
+        | "generation_time_ms"
+        | "image_preprocess_ms"
+        | "tokens_per_second"
+        | "decode_tps"
+        | "prefill_tps" => {
+            return value
+                .parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite() && *n >= 0.0)
+                .map(|n| n.to_string());
+        }
+        "finish_reason" => {
+            return Some(
+                match value {
+                    "stop" | "eos" | "end_turn" | "stop_sequence" => "stop",
+                    "length" | "max_tokens" => "length",
+                    "tool_calls" | "tool_call" | "tool_use" => "tool_call",
+                    "content_filter" => "content_filter",
+                    "error" => "error",
+                    _ => "_OTHER",
+                }
+                .to_owned(),
+            );
+        }
+        _ => false,
+    };
+    known.then(|| value.to_owned())
 }
 
 /// Records execution stages as `INTERNAL` child spans of the run and keeps
@@ -1432,15 +1616,15 @@ impl TraceRecorder for StageRecorder {
     }
 
     fn add_metadata(&self, id: u64, key: &str, value: &str) {
+        let Some(value) = stage_metadata_value(key, value) else {
+            return;
+        };
         self.harvest
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .absorb(std::iter::once((key, value)));
+            .absorb(std::iter::once((key, value.as_str())));
         if let Some(span) = self.spans().get(&id) {
-            span.set_attribute(KeyValue::new(
-                format!("xybrid.stage.{key}"),
-                value.to_owned(),
-            ));
+            span.set_attribute(KeyValue::new(format!("xybrid.stage.{key}"), value));
         }
     }
 
@@ -1494,6 +1678,347 @@ pub(crate) fn start_model_load(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+
+    /// One bounded local request; the long batch delay lets shutdown export all
+    /// test spans together, without sleeps or a dependency on a collector service.
+    fn collector() -> (
+        OtlpConfig,
+        mpsc::Receiver<String>,
+        std::thread::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline, "no OTLP export received");
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("collector accept: {error}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 4096];
+            let (start, length) = loop {
+                let n = stream.read(&mut chunk).unwrap();
+                assert_ne!(n, 0, "collector received an incomplete request");
+                request.extend_from_slice(&chunk[..n]);
+                if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&request[..end]);
+                    let length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().unwrap())
+                        })
+                        .expect("OTLP HTTP export has a content length");
+                    if request.len() >= end + 4 + length {
+                        break (end + 4, length);
+                    }
+                }
+            };
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").unwrap();
+            tx.send(String::from_utf8(request[start..start + length].to_vec()).unwrap())
+                .unwrap();
+        });
+        let config = OtlpConfig::default()
+            .with_traces(Some(
+                SignalEndpoint::new(format!("http://{address}/v1/traces"))
+                    .with_protocol(Protocol::HttpJson)
+                    .with_timeout(Duration::from_secs(5)),
+            ))
+            .with_batch(BatchLimits {
+                scheduled_delay: Duration::from_secs(60),
+                ..BatchLimits::default()
+            });
+        (config, rx, handle)
+    }
+
+    fn spans(body: &serde_json::Value) -> Vec<&serde_json::Value> {
+        body["resourceSpans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|r| r["scopeSpans"].as_array().unwrap())
+            .flat_map(|s| s["spans"].as_array().unwrap())
+            .collect()
+    }
+
+    fn attribute<'a>(span: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+        span["attributes"]
+            .as_array()?
+            .iter()
+            .find(|a| a["key"] == key)
+            .map(|a| &a["value"])
+    }
+
+    #[test]
+    fn stage_metadata_exports_only_validated_measurements_and_descriptors() {
+        use xybrid_observability::otlp::ObservabilityPipeline;
+
+        for capture in [false, true] {
+            let (config, exports, collector) = collector();
+            let pipeline = ObservabilityPipeline::build(config).unwrap();
+            let policy = if capture {
+                ContentPolicy::default().with_redactor(SubstringRedactor::new(["secret-content"]))
+            } else {
+                ContentPolicy::metadata_only()
+            };
+            let observer = pipeline.observer_with(policy);
+            let options = crate::RunOptions {
+                observation: Some(ObservationOptions {
+                    observer: Some(observer.clone()),
+                    ..ObservationOptions::default()
+                }),
+                ..crate::RunOptions::default()
+            };
+            let input = Envelope::new(EnvelopeKind::Text("prompt-text secret-content".into()));
+            let system = Envelope::new(EnvelopeKind::Text("system-text secret-content".into()))
+                .with_role(xybrid_core::ir::MessageRole::System);
+            let run = RunObservation::start(RunStart {
+                subject: RunSubject {
+                    operation: "chat",
+                    task: Some("text_generation".into()),
+                    runtime: Some("llama.cpp"),
+                    model: "test-model".into(),
+                    format: Some("gguf"),
+                    input_modalities: vec![Modality::Text],
+                    output_modalities: vec![Modality::Text],
+                    output_type: None,
+                    is_llm: true,
+                },
+                input: Some(&input),
+                history: &[system],
+                options: Some(&options),
+                generation: None,
+                streaming: false,
+                location: Location::Local,
+                parent: None,
+            });
+            {
+                let _stage = xybrid_core::tracing::SpanGuard::new("core-stage");
+                for (key, value) in [
+                    ("prompt_tokens", "8"),
+                    ("tokens_generated", "3"),
+                    ("prompt_cached_tokens", "2"),
+                    ("ttft_ms", "2.5"),
+                    ("mean_itl_ms", "1.5"),
+                    ("p95_itl_ms", "4"),
+                    ("emitted_chunks", "3"),
+                    ("choice_count", "0005"),
+                    ("backend", "llamacpp"),
+                    ("execution_provider", "cpu"),
+                    ("provider", "openai"),
+                    ("quantization", "Q4_K_M"),
+                    ("task", "chat"),
+                    ("span_kind", "cpu"),
+                    ("stage_kind", "llm"),
+                    ("finish_reason", "max_tokens"),
+                    ("unknown", "unknown-private"),
+                    ("model", "/private/model-path.gguf"),
+                    ("encoder_file", "/private/encoder-path.onnx"),
+                    ("model_id", "/private/model-id"),
+                    ("version", "version-private"),
+                    ("stages", "snapshot-private secret-content"),
+                    ("input", "input-snapshot-private secret-content"),
+                    ("output", "output-snapshot-private secret-content"),
+                    ("error", "stage-error-private secret-content"),
+                    // Even a known descriptor key must not become a side channel.
+                    ("backend", "backend-private"),
+                    ("execution_provider", "accelerator-private"),
+                    ("provider", "provider-private"),
+                    ("quantization", "quantization-private"),
+                    ("stage_kind", "stage-kind-private"),
+                    ("task", "task-private"),
+                    ("prompt_tokens", "token-count-private"),
+                    ("choice_count", "choice-count-private"),
+                    ("choice_count", "-1"),
+                    ("choice_count", "18446744073709551616"),
+                    ("ttft_ms", "NaN"),
+                    ("mean_itl_ms", "-1"),
+                ] {
+                    xybrid_core::tracing::add_metadata(key, value);
+                }
+            }
+            let harvest = run.stages.harvest();
+            assert_eq!(harvest.tokens_in, Some(8));
+            assert_eq!(harvest.tokens_out, Some(3));
+            assert_eq!(harvest.cached_tokens, Some(2));
+            assert_eq!(harvest.ttft_ms, Some(2.5));
+            assert_eq!(harvest.mean_itl_ms, Some(1.5));
+            assert_eq!(harvest.backend.as_deref(), Some("llamacpp"));
+            assert_eq!(harvest.quantization.as_deref(), Some("q4_k_m"));
+            let mut output = Envelope::new(EnvelopeKind::Text("output-text secret-content".into()));
+            for (key, value) in [
+                ("completion_tokens", "4"),
+                ("backend", "envelope-backend-private"),
+                ("provider", "envelope-provider-private"),
+                ("execution_provider", "envelope-accelerator-private"),
+                ("quantization", "envelope-quantization-private"),
+                ("finish_reason", "envelope-finish-private"),
+                ("untrusted", "envelope-unknown-private"),
+                ("reasoning_content", "reasoning-text secret-content"),
+            ] {
+                output.metadata.insert(key.into(), value.into());
+            }
+            run.succeed(&output).expect("logical inference is traced");
+
+            // Automatic errors are classification-only; the returned SDK error
+            // remains unchanged. Explicit custom identities are still supported.
+            let error = SdkError::inference("sdk-error-private secret-content");
+            let failure = observer.start_inference(
+                InferenceRequest::new("chat", "my-custom-provider")
+                    .with_model("organization/custom-model"),
+                StartOptions::default(),
+            );
+            failure.end_with_error(&error_info(&error));
+            assert!(error.to_string().contains("sdk-error-private"));
+
+            pipeline.shutdown(Duration::from_secs(5)).unwrap();
+            let raw = exports.recv_timeout(Duration::from_secs(5)).unwrap();
+            collector.join().unwrap();
+            assert!(
+                !raw.contains("private"),
+                "untrusted metadata escaped: {raw}"
+            );
+            assert!(
+                !raw.contains("secret-content"),
+                "content redaction was bypassed"
+            );
+            for content in [
+                "prompt-text",
+                "system-text",
+                "output-text",
+                "reasoning-text",
+            ] {
+                assert_eq!(
+                    raw.contains(content),
+                    capture,
+                    "content policy for {content}"
+                );
+            }
+            assert_eq!(raw.contains("[REDACTED]"), capture);
+            let body: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            let spans = spans(&body);
+            assert_eq!(
+                spans.len(),
+                3,
+                "stage, logical inference and explicit failure"
+            );
+            let stage = spans.iter().find(|s| s["name"] == "core-stage").unwrap();
+            let logical = spans
+                .iter()
+                .find(|s| s["spanId"] == stage["parentSpanId"])
+                .unwrap();
+            for (key, expected) in [
+                ("prompt_tokens", "8"),
+                ("tokens_generated", "3"),
+                ("backend", "llamacpp"),
+                ("execution_provider", "cpu"),
+                ("provider", "openai"),
+                ("quantization", "q4_k_m"),
+                ("task", "chat"),
+                ("stage_kind", "llm"),
+                ("span_kind", "cpu"),
+                ("ttft_ms", "2.5"),
+                ("mean_itl_ms", "1.5"),
+                ("p95_itl_ms", "4"),
+                ("emitted_chunks", "3"),
+                ("choice_count", "5"),
+                ("finish_reason", "length"),
+            ] {
+                assert_eq!(
+                    attribute(stage, &format!("xybrid.stage.{key}")).unwrap()["stringValue"],
+                    expected
+                );
+            }
+            for (key, expected) in [
+                ("gen_ai.usage.input_tokens", "8"),
+                ("gen_ai.usage.output_tokens", "4"),
+                ("gen_ai.usage.cache_read.input_tokens", "2"),
+            ] {
+                assert_eq!(attribute(logical, key).unwrap()["intValue"], expected);
+            }
+            assert_eq!(
+                attribute(logical, "xybrid.genai.runtime.name").unwrap()["stringValue"],
+                "llama.cpp"
+            );
+            assert_eq!(
+                attribute(logical, "xybrid.upstream.provider").unwrap()["stringValue"],
+                "openai"
+            );
+            assert_eq!(
+                attribute(logical, "xybrid.genai.accelerator").unwrap()["stringValue"],
+                "cpu"
+            );
+            assert_eq!(
+                attribute(logical, "xybrid.genai.model.quantization").unwrap()["stringValue"],
+                "q4_k_m"
+            );
+            assert_eq!(
+                attribute(logical, "gen_ai.response.finish_reasons").unwrap()["arrayValue"]
+                    ["values"][0]["stringValue"],
+                "_OTHER"
+            );
+            let failed = spans.iter().find(|s| s["status"]["code"] == 2).unwrap();
+            assert_eq!(
+                attribute(failed, "error.type").unwrap()["stringValue"],
+                "inference_error"
+            );
+            assert_eq!(failed["status"]["message"], "inference_error");
+            assert_eq!(
+                attribute(failed, "gen_ai.provider.name").unwrap()["stringValue"],
+                "my-custom-provider"
+            );
+            assert_eq!(
+                attribute(failed, "gen_ai.request.model").unwrap()["stringValue"],
+                "organization/custom-model"
+            );
+        }
+    }
+
+    #[test]
+    fn harvest_rejects_invalid_measurements_and_normalizes_unknown_finish_reason() {
+        let mut h = Harvest::default();
+        h.absorb([("tokens_in", "8"), ("ttft_ms", "2.5"), ("mean_itl_ms", "1")].into_iter());
+        for value in ["NaN", "inf", "-1", "arbitrary-secret"] {
+            h.absorb(
+                [
+                    ("ttft_ms", value),
+                    ("mean_itl_ms", value),
+                    ("tokens_in", value),
+                ]
+                .into_iter(),
+            );
+        }
+        h.absorb(
+            [
+                ("finish_reason", "arbitrary-secret"),
+                ("provider", "arbitrary-secret"),
+            ]
+            .into_iter(),
+        );
+        assert_eq!(h.tokens_in, Some(8));
+        assert_eq!(h.ttft_ms, Some(2.5));
+        assert_eq!(h.mean_itl_ms, Some(1.0));
+        assert_eq!(h.finish_reason.as_deref(), Some("_OTHER"));
+        assert_eq!(h.provider, None);
+    }
 
     #[test]
     fn ambient_application_context_survives_worker_hops_and_recorder_precedence() {

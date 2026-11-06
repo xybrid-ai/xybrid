@@ -268,35 +268,173 @@ struct StageRecorder {
     metadata: Mutex<HashMap<String, String>>,
 }
 
+// Core metadata is untrusted. Keep this boundary aligned with the SDK stage
+// recorder; explicit public observation APIs still support custom identities.
 fn stage_value(key: &str, value: &str) -> Option<String> {
-    match key {
-        "model_id" | "version" | "backend" | "execution_provider" | "provider" | "quantization"
-        | "stage_kind" | "task" => Some(value.to_owned()),
+    let known = match key {
+        "backend" => matches!(
+            value,
+            "ort"
+                | "onnx"
+                | "llamacpp"
+                | "llama.cpp"
+                | "mistralrs"
+                | "mistral"
+                | "whispercpp"
+                | "candle"
+                | "zzz"
+                | "coreml"
+                | "cloud"
+                | "gateway"
+        ),
+        "execution_provider" => matches!(
+            value,
+            "cpu"
+                | "metal"
+                | "cuda"
+                | "vulkan"
+                | "coreml"
+                | "directml"
+                | "nnapi"
+                | "webgpu"
+                | "wasm"
+                | "tensorrt"
+                | "rocm"
+        ),
+        "provider" => matches!(
+            value,
+            "openai"
+                | "anthropic"
+                | "google"
+                | "groq"
+                | "together"
+                | "fireworks"
+                | "mistral"
+                | "deepseek"
+                | "openrouter"
+                | "elevenlabs"
+                | "custom"
+                | "xybrid"
+        ),
+        "stage_kind" => matches!(
+            value,
+            "asr" | "tts" | "llm" | "translate" | "vision" | "embed" | "audio" | "decision"
+        ),
+        "span_kind" => matches!(value, "cpu" | "gpu" | "io" | "tool"),
+        "task" => matches!(
+            value,
+            "speech-recognition"
+                | "speech-to-text"
+                | "asr"
+                | "text-to-speech"
+                | "tts"
+                | "text-generation"
+                | "text_generation"
+                | "chat"
+                | "llm"
+                | "translation"
+                | "translate"
+                | "image-classification"
+                | "image-to-text"
+                | "vision"
+                | "vision-language"
+                | "vision_language"
+                | "vlm"
+                | "embedding"
+                | "sentence-embedding"
+                | "audio-classification"
+                | "vad"
+                | "decision"
+        ),
+        "quantization" => {
+            let normalized = value.to_ascii_lowercase();
+            return matches!(
+                normalized.as_str(),
+                "f16"
+                    | "f32"
+                    | "fp16"
+                    | "fp32"
+                    | "bf16"
+                    | "int8"
+                    | "q2_k"
+                    | "q2_k_s"
+                    | "q3_k"
+                    | "q3_k_s"
+                    | "q3_k_m"
+                    | "q3_k_l"
+                    | "q4_0"
+                    | "q4_1"
+                    | "q4_k"
+                    | "q4_k_s"
+                    | "q4_k_m"
+                    | "q5_0"
+                    | "q5_1"
+                    | "q5_k"
+                    | "q5_k_s"
+                    | "q5_k_m"
+                    | "q6_k"
+                    | "q8_0"
+                    | "q8_1"
+                    | "q8_k"
+                    | "iq1_s"
+                    | "iq1_m"
+                    | "iq2_xxs"
+                    | "iq2_xs"
+                    | "iq2_s"
+                    | "iq3_xxs"
+                    | "iq3_s"
+                    | "iq4_xs"
+                    | "iq4_nl"
+            )
+            .then_some(normalized);
+        }
         "tokens_in"
         | "tokens_out"
         | "prompt_tokens"
         | "completion_tokens"
         | "tokens_generated"
         | "prompt_cached_tokens"
-        | "cache_read_input_tokens" => value.parse::<u64>().ok().map(|n| n.to_string()),
-        "ttft_ms" | "mean_itl_ms" => value
-            .parse::<f64>()
-            .ok()
-            .filter(|n| n.is_finite() && *n >= 0.0)
-            .map(|n| n.to_string()),
-        "finish_reason" => Some(
-            match value {
-                "stop" | "eos" | "end_turn" | "stop_sequence" => "stop",
-                "length" | "max_tokens" => "length",
-                "tool_calls" | "tool_call" | "tool_use" => "tool_call",
-                "content_filter" => "content_filter",
-                "error" => "error",
-                _ => "_OTHER",
-            }
-            .to_owned(),
-        ),
-        _ => None,
-    }
+        | "cache_read_input_tokens"
+        | "emitted_chunks"
+        | "choice_count"
+        | "image_count"
+        | "placeholder_tokens"
+        | "raw_image_source_vec_allocations"
+        | "raw_image_source_extra_pixel_copies"
+        | "raw_image_conversion_buffer_allocations"
+        | "raw_image_pixel_bytes" => {
+            return value.parse::<u64>().ok().map(|n| n.to_string());
+        }
+        "ttft_ms"
+        | "mean_itl_ms"
+        | "p95_itl_ms"
+        | "generation_time_ms"
+        | "image_preprocess_ms"
+        | "tokens_per_second"
+        | "decode_tps"
+        | "prefill_tps" => {
+            return value
+                .parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite() && *n >= 0.0)
+                .map(|n| n.to_string());
+        }
+        "finish_reason" => {
+            return Some(
+                match value {
+                    "stop" | "eos" | "end_turn" | "stop_sequence" => "stop",
+                    "length" | "max_tokens" => "length",
+                    "tool_calls" | "tool_call" | "tool_use" => "tool_call",
+                    "content_filter" => "content_filter",
+                    "error" => "error",
+                    _ => "_OTHER",
+                }
+                .to_owned(),
+            );
+        }
+        _ => false,
+    };
+    known.then(|| value.to_owned())
 }
 
 impl StageRecorder {
@@ -524,6 +662,20 @@ mod tests {
             output
                 .metadata
                 .insert("untrusted".into(), "envelope-private".into());
+            for key in [
+                "backend",
+                "execution_provider",
+                "provider",
+                "quantization",
+                "task",
+            ] {
+                output
+                    .metadata
+                    .insert(key.into(), "descriptor-private".into());
+            }
+            output
+                .metadata
+                .insert("finish_reason".into(), "finish-private".into());
 
             let local = tracing::capture();
             let previous = tracing::current_recorder().unwrap();
@@ -543,6 +695,36 @@ mod tests {
                     tracing::add_metadata("finish_reason", "max_tokens");
                     tracing::add_metadata("ttft_ms", "2.5");
                     tracing::add_metadata("mean_itl_ms", "1");
+                    for (key, value) in [
+                        ("backend", "llamacpp"),
+                        ("execution_provider", "cpu"),
+                        ("provider", "openai"),
+                        ("quantization", "Q4_K_M"),
+                        ("stage_kind", "llm"),
+                        ("task", "chat"),
+                        ("p95_itl_ms", "4"),
+                        ("emitted_chunks", "3"),
+                        ("choice_count", "0005"),
+                    ] {
+                        tracing::add_metadata(key, value);
+                    }
+                    for key in [
+                        "backend",
+                        "execution_provider",
+                        "provider",
+                        "quantization",
+                        "stage_kind",
+                        "task",
+                    ] {
+                        tracing::add_metadata(key, "descriptor-private");
+                    }
+                    tracing::add_metadata("ttft_ms", "NaN");
+                    tracing::add_metadata("choice_count", "choice-count-private");
+                    tracing::add_metadata("choice_count", "-1");
+                    tracing::add_metadata("choice_count", "18446744073709551616");
+                    tracing::add_metadata("mean_itl_ms", "-1");
+                    tracing::add_metadata("model_id", "/private/model-id");
+                    tracing::add_metadata("version", "version-private");
                     tracing::add_metadata("model", "/private/model-path.gguf");
                     tracing::add_metadata("error", "stage-error-private");
                     tracing::add_metadata("stages", "stage-snapshot-private");
@@ -621,6 +803,24 @@ mod tests {
             let decode = spans.iter().find(|s| s["name"] == "core-decode").unwrap();
             let execute = spans.iter().find(|s| s["name"] == "core-execute").unwrap();
             assert_eq!(decode["parentSpanId"], execute["spanId"]);
+            for (key, value) in [
+                ("backend", "llamacpp"),
+                ("execution_provider", "cpu"),
+                ("provider", "openai"),
+                ("quantization", "q4_k_m"),
+                ("stage_kind", "llm"),
+                ("task", "chat"),
+                ("p95_itl_ms", "4"),
+                ("emitted_chunks", "3"),
+                ("choice_count", "5"),
+                ("ttft_ms", "2.5"),
+                ("mean_itl_ms", "1"),
+            ] {
+                assert_eq!(
+                    attribute(decode, &format!("xybrid.stage.{key}")).unwrap()["stringValue"],
+                    value
+                );
+            }
             let inference = spans
                 .iter()
                 .find(|s| s["spanId"] == execute["parentSpanId"])
@@ -636,6 +836,11 @@ mod tests {
             assert_eq!(
                 attribute(inference, "gen_ai.usage.output_tokens").unwrap()["intValue"],
                 "4"
+            );
+            assert_eq!(
+                attribute(inference, "gen_ai.response.finish_reasons").unwrap()["arrayValue"]
+                    ["values"][0]["stringValue"],
+                "_OTHER"
             );
             let pipeline_stage = spans
                 .iter()
@@ -709,6 +914,10 @@ mod tests {
                 "private-model-path",
                 "/private/model-path",
                 "missing-bundle-private",
+                "descriptor-private",
+                "finish-private",
+                "/private/model-id",
+                "version-private",
             ] {
                 assert!(
                     !raw.contains(excluded),
