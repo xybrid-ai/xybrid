@@ -146,6 +146,12 @@ class ObservabilityReleaseTests(unittest.TestCase):
         self.prep = (ROOT / ".github/workflows/release-prep.yml").read_text()
 
 
+    def test_routine_pr_ci_checks_observability_archive(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        observability = workflow.split("  observability:\n", 1)[1].split("\n  web:\n", 1)[0]
+        self.assertIn("pnpm pack:release", observability)
+        self.assertNotRegex(observability, r"(?m)^\s+pnpm build$")
+
     def test_observability_crate_readme_is_packaged(self):
         directory = ROOT / "crates/xybrid-observability"
         manifest = tomllib.loads((directory / "Cargo.toml").read_text())
