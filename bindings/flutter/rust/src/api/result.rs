@@ -4,6 +4,7 @@ use xybrid_sdk::ir::EnvelopeKind;
 use xybrid_sdk::{InferenceMetrics, InferenceResult, StageLatency};
 
 use super::model::FfiToolCall;
+use super::observability::FfiObservationRef;
 
 /// Per-stage latency entry for pipeline runs.
 ///
@@ -64,6 +65,7 @@ impl FfiInferenceMetrics {
 /// Fields are public and accessible directly via FRB-generated bindings.
 #[derive(Clone)]
 pub struct FfiResult {
+    pub observation: Option<FfiObservationRef>,
     pub success: bool,
     pub text: Option<String>,
     /// Model chain-of-thought / reasoning (`<think>` blocks), surfaced
@@ -113,6 +115,7 @@ impl FfiResult {
     pub(crate) fn try_from_inference_result(r: &InferenceResult) -> Result<Self, String> {
         ensure_ffi_payload(&r.envelope().kind)?;
         Ok(Self {
+            observation: r.observation_ref().map(FfiObservationRef::from_sdk),
             success: true,
             text: r.text().map(|s| s.to_string()),
             reasoning_content: r.reasoning_content().map(|s| s.to_string()),

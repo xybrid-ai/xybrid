@@ -111,3 +111,11 @@ export 'src/tools.dart' show ToolCall, ToolDefinition, ToolResult;
 export 'src/utils/utils.dart';
 export 'src/xybrid.dart'
     show Xybrid, CacheEntry, CacheEntryLocation, CacheStatus;
+
+export 'src/observability.dart'
+    show
+        ObservabilityConfig,
+        ObservationOptions,
+        ObservationRef,
+        ObservabilityStats,
+        XybridObservability;

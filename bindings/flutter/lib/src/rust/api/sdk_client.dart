@@ -10,7 +10,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `initialize_telemetry_once`, `parse_resource_telemetry_mode`, `resolve_ingest_endpoint`
+// These functions are ignored because they are not marked as `pub`: `init_legacy_trace_exporter`, `parse_resource_telemetry_mode`, `resolve_ingest_endpoint`, `validated_resource_telemetry_mode`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridSdkClient>>
@@ -34,14 +34,7 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
   static Future<int> clearModelCache() => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientClearModelCache();
 
-  /// Start the platform telemetry exporter from the bundled
-  /// `Xybrid.init(apiKey: ...)` path.
-  ///
-  /// When `ingest_url` is absent or blank the exporter targets
-  /// [`xybrid_sdk::telemetry::DEFAULT_INGEST_URL`], so providing only an
-  /// API key is enough to light up the dashboard — the caller does not
-  /// need to know the ingest endpoint. Shares the process-wide once-guard
-  /// with [`Self::init_telemetry`]; whichever path runs first wins.
+  /// Compatibility path for explicit legacy telemetry configuration.
   static void configurePlatformTelemetry(
           {required String apiKey,
           String? ingestUrl,
@@ -51,6 +44,11 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
               apiKey: apiKey,
               ingestUrl: ingestUrl,
               resourceTelemetry: resourceTelemetry);
+
+  /// Configure resource sampling independently of authentication/export.
+  static void configureResourceTelemetry({String? mode}) => XybridRustLib
+      .instance.api
+      .crateApiSdkClientXybridSdkClientConfigureResourceTelemetry(mode: mode);
 
   static void flushPlatformTelemetry() => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientFlushPlatformTelemetry();
@@ -64,24 +62,11 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
       XybridRustLib.instance.api
           .crateApiSdkClientXybridSdkClientInitSdkCacheDir(cacheDir: cacheDir);
 
-  /// Initialize the platform telemetry exporter for this process.
-  ///
-  /// Starts the HTTP telemetry sender targeting `endpoint`, authenticated
-  /// with `api_key`. Once initialized, the normal inference paths
-  /// (`Xybrid.model().run()`, `Xybrid.pipeline().run()`, conversation
-  /// turns, etc.) automatically emit `ExecutionStarted` /
-  /// `ExecutionCompleted` / `ExecutionFailed` events through it — no
-  /// per-call wiring required.
-  ///
-  /// Process-wide idempotent via [`TELEMETRY_INITIALIZED`]: only the
-  /// first successful call enters `init_platform_telemetry`; subsequent
-  /// calls (duplicate caller, second Dart isolate, Flutter hot-restart
-  /// inside a surviving process) observe the guard and return without
-  /// spawning a second exporter. No reconfigure path — restart the
-  /// process to change endpoint/key.
-  ///
-  /// Sync because `init_platform_telemetry` is sync; the HTTP exporter
-  /// spins up its own background thread for batched sends.
+  /// Compatibility entry point: start the OTLP trace exporter. A base URL
+  /// is mapped to `/v1/traces`; a full trace endpoint is used as supplied.
+  /// Export stays metadata-only, matching the legacy telemetry payload.
+  /// The export key does not change cloud authentication.
+  /// Replaces a previous configuration and reports initialization errors.
   static void initTelemetry(
           {required String endpoint, required String apiKey}) =>
       XybridRustLib.instance.api.crateApiSdkClientXybridSdkClientInitTelemetry(
@@ -104,9 +89,7 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
   static bool isSpeculativeCloudEnabled() => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientIsSpeculativeCloudEnabled();
 
-  /// Whether [`Self::init_telemetry`] has run at least once in this
-  /// process. Reflects the authoritative process-wide state, not any
-  /// Dart-side flag — survives hot-restart, multiple isolates, etc.
+  /// Authoritative native exporter state, including shutdown/reconfigure.
   static bool isTelemetryInitialized() => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientIsTelemetryInitialized();
 
@@ -175,6 +158,11 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
   static void setSpeculativeCloud({required bool enabled}) => XybridRustLib
       .instance.api
       .crateApiSdkClientXybridSdkClientSetSpeculativeCloud(enabled: enabled);
+
+  /// Validate resource sampling without changing native state.
+  static void validateResourceTelemetry({String? mode}) => XybridRustLib
+      .instance.api
+      .crateApiSdkClientXybridSdkClientValidateResourceTelemetry(mode: mode);
 }
 
 /// One physical model entry occupying managed cache storage.

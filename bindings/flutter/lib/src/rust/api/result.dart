@@ -9,6 +9,7 @@
 
 import '../frb_generated.dart';
 import 'model.dart';
+import 'observability.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `ensure_ffi_payload`, `from_core`, `from_core`, `from_sdk`, `try_from_inference_result`
@@ -79,6 +80,7 @@ class FfiInferenceMetrics {
 /// FFI wrapper for inference results.
 /// Fields are public and accessible directly via FRB-generated bindings.
 class FfiResult {
+  final FfiObservationRef? observation;
   final bool success;
   final String? text;
 
@@ -104,6 +106,7 @@ class FfiResult {
   final List<FfiToolCall> toolCalls;
 
   const FfiResult({
+    this.observation,
     required this.success,
     this.text,
     this.reasoningContent,
@@ -117,6 +120,7 @@ class FfiResult {
 
   @override
   int get hashCode =>
+      observation.hashCode ^
       success.hashCode ^
       text.hashCode ^
       reasoningContent.hashCode ^
@@ -132,6 +136,7 @@ class FfiResult {
       identical(this, other) ||
       other is FfiResult &&
           runtimeType == other.runtimeType &&
+          observation == other.observation &&
           success == other.success &&
           text == other.text &&
           reasoningContent == other.reasoningContent &&
