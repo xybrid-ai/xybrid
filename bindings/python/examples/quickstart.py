@@ -53,8 +53,8 @@ def load_model(spec: str) -> xybrid.XybridModel:
 def main() -> int:
     spec = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL
 
-    # Anonymous init: local inference, telemetry disabled. Pass an api_key to
-    # light up the platform features (see xybrid.init docstring).
+    # Local inference needs no API key. Cloud authentication and observability
+    # export are configured separately (see xybrid.init docstring).
     xybrid.init()
 
     print(f"loading {spec} (registry/HF models download on first run) ...")
@@ -87,6 +87,10 @@ def main() -> int:
         fallback_to_cloud=False,
         max_grace_tokens=0,
         correlation_id=None,
+        traceparent=None,
+        tracestate=None,
+        conversation_id=None,
+        suppress_trace=False,
     )
 
     prompt = "What is the capital of France? Answer in one short sentence."
