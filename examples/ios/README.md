@@ -4,7 +4,7 @@ A native iOS example app demonstrating Xybrid SDK integration using SwiftUI.
 
 ## Features
 
-- **SDK Initialization**: Cache directory setup plus `Xybrid.initialize()` (pass an `apiKey` to enable dashboard telemetry)
+- **SDK Initialization**: Cache directory setup plus `Xybrid.initialize()`; with an `apiKey`, also starts dashboard trace export via `Xybrid.Observability`
 - **Model Loading**: Downloads models from the xybrid registry with async/await
 - **Text-to-Speech** (Speech tab): Run TTS inference with voice selection + audio playback
 - **Live camera vision** (Vision tab): point the camera at a scene and get an on-device VLM caption that refreshes as the scene changes — AVFoundation capture + a cheap luma change-gate firing batch multimodal turns
@@ -70,8 +70,8 @@ In Xcode:
 
 ### 4. Set your API key (optional)
 
-The app reads `XYBRID_API_KEY` (and optionally `XYBRID_PLATFORM_URL`, the
-telemetry ingest endpoint) from the scheme's environment — the Xcode-native way
+The app reads `XYBRID_API_KEY` (and optionally `XYBRID_TRACES_ENDPOINT`, a full
+OTLP trace URL) from the scheme's environment — the Xcode-native way
 to inject values at run time without committing them. This is the iOS analog of
 Flutter's `flutter run --dart-define=...`.
 
@@ -79,22 +79,24 @@ Flutter's `flutter run --dart-define=...`.
 2. Select **Run** → **Arguments** tab
 3. Under **Environment Variables**, add:
    - `XYBRID_API_KEY` = `sk_test_...`
-   - `XYBRID_PLATFORM_URL` = `https://your-platform.example.com` *(optional)*
+   - `XYBRID_TRACES_ENDPOINT` = `https://your-platform.example.com/v1/traces` *(optional)*
 
 The values are saved in your *user* scheme under `xcuserdata/`, which is
 gitignored — so they never land in the repo. Leave **Shared** unchecked
 (the default) to keep it that way. Both are optional: without a key the app
-runs anonymously (on-device inference, telemetry disabled); without a platform
-URL it uses the default Xybrid endpoint (`XYBRID_PLATFORM_URL` is handy for
-pointing a debug build at a self-hosted or tunneled platform). Get a free key
-at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+runs anonymously (on-device inference, no trace export). With a key, the app
+passes it to `Xybrid.initialize` and also starts trace export with
+`Xybrid.Observability.xybrid(apiKey:)` — the SDK never exports on the key
+alone. `XYBRID_TRACES_ENDPOINT` points those traces at a self-hosted or
+tunneled endpoint instead of the Xybrid dashboard. Get a free key at
+[dashboard.xybrid.dev](https://dashboard.xybrid.dev).
 
 To inject them from the command line on a Simulator instead, prefix the
 launch environment:
 
 ```bash
 SIMCTL_CHILD_XYBRID_API_KEY=sk_test_... \
-SIMCTL_CHILD_XYBRID_PLATFORM_URL=https://your-platform.example.com \
+SIMCTL_CHILD_XYBRID_TRACES_ENDPOINT=https://your-platform.example.com/v1/traces \
   xcrun simctl launch --console booted ai.xybrid.example
 ```
 
@@ -138,15 +140,18 @@ let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMa
     .first!.appendingPathComponent("xybrid").path
 initSdkCacheDir(cacheDir: cacheDir)
 
-// Reads the key and platform URL from scheme environment variables (see
-// "Set your API key" above). Empty/unset → anonymous, local-only init.
-let env = ProcessInfo.processInfo.environment
-let apiKey = env["XYBRID_API_KEY"]
-let platformUrl = env["XYBRID_PLATFORM_URL"]
-Xybrid.initialize(
-    apiKey: (apiKey ?? "").isEmpty ? nil : apiKey,
-    ingestUrl: (platformUrl ?? "").isEmpty ? nil : platformUrl
-)
+// Reads the key from the scheme environment (see "Set your API key" above).
+// Empty/unset → anonymous, local-only init.
+let apiKey = ProcessInfo.processInfo.environment["XYBRID_API_KEY"]
+    .flatMap { $0.isEmpty ? nil : $0 }
+Xybrid.initialize(apiKey: apiKey)
+
+// The key alone exports nothing; start dashboard traces explicitly.
+if let apiKey {
+    try Xybrid.Observability.xybrid(apiKey: apiKey)
+        .service("XybridExample")
+        .start()
+}
 ```
 
 ### Load Model
@@ -179,13 +184,7 @@ let config = XybridGenerationConfig.make(
 )
 let result = try model.run(
     envelope: envelope,
-    options: XybridRunOptions(
-        generationConfig: config,
-        abortOn: [],
-        fallbackToCloud: false,
-        maxGraceTokens: 0,
-        correlationId: nil
-    )
+    options: .make(generationConfig: config)
 )
 ```
 
@@ -198,13 +197,7 @@ let image = try XybridEnvelope.image(jpegData, format: "jpeg")
 let envelope = try XybridEnvelope.userMessage("What do you see?", images: [image])
 let result = try model.run(
     envelope: envelope,
-    options: XybridRunOptions(
-        generationConfig: config,
-        abortOn: [],
-        fallbackToCloud: false,
-        maxGraceTokens: 0,
-        correlationId: nil
-    )
+    options: .make(generationConfig: config)
 )
 let caption = result.text
 ```

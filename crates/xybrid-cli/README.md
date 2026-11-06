@@ -47,6 +47,20 @@ xybrid run --model lfm2-vl-450m --input-text "Describe this image" --input-image
 xybrid run --huggingface "unsloth/SmolLM2-360M-Instruct-GGUF:Q4_K_M" --input-text "Hello!"
 ```
 
+## Observability
+
+Cloud authentication (`--api-key` or `XYBRID_API_KEY`) does not enable export.
+Add `--observability` to send traces to `https://ingest.xybrid.dev/v1/traces`.
+Use `--traces-endpoint` with that flag for a custom full trace URL; the cloud
+gateway selected by `--platform-url` remains independent.
+
+For an OpenTelemetry Collector, set `OTEL_EXPORTER_OTLP_ENDPOINT` or the
+per-signal `OTEL_EXPORTER_OTLP_*_ENDPOINT` variables instead. Collector export
+does not require a Xybrid API key. `OTEL_SDK_DISABLED=true` disables export in
+either mode. The CLI flushes and shuts down its exporter when a command ends.
+Enabled observability captures prompts and outputs by default. Set
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content` for metadata only.
+
 ## Documentation
 
 - [Installation & CLI Reference](../../docs/INSTALLATION.md) — install methods, all commands, flags, and options
