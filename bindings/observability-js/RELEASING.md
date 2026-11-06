@@ -3,10 +3,12 @@
 Releases start by pushing a `release/v<version>` branch, following the root
 AGENTS.md release process. Do not publish from a feature branch.
 `just bump-version` synchronizes the package manifest, `src/version.ts`, the
-Rust workspace.
+Rust workspace, and `@xybrid/web`'s exact observability dependency. The local
+pnpm link is an override and never appears in the published manifest.
 
 `release-prep.yml` tests and builds this package in the Web SDK job, validates
-the actual npm archive in an isolated consumer, without rebuilding downloaded artifacts. Core imports are checked with only the API and
+the actual npm archive in an isolated consumer, and uses that archive to check
+web's exported declarations. Core imports are checked with only the API and
 logs API installed; the OTLP declarations are checked with the pinned SDK peers.
 The package's exported telemetry `VERSION` must match the archive manifest.
 The draft release includes `xybrid-observability-<version>.tgz` and its SHA-256
@@ -30,7 +32,10 @@ skip versions already public on npm.
    secret `NPM_OBSERVABILITY_TOKEN`.
 3. Set `NPM_OBSERVABILITY_PUBLISH_ENABLED=true` for standalone publishing.
    `NPM_WEB_PUBLISH_ENABLED=true` also enables this dependency publisher.
-4. Approve the staged observability version with 2FA on npmjs.com.
+4. Approve the staged observability version with 2FA on npmjs.com before web.
+   Web staging waits for the exact version to be public for up to 30 minutes,
+   then fails without staging if it is unavailable. After approving the
+   dependency, rerun failed jobs using the command printed in the workflow.
 
 Both npm publishers wait for the shared `verify-spm-checksum` release gate.
 Staging requires Node >=22.14 and npm >=11.15; the workflow uses Node 22 and

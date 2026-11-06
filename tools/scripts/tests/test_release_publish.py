@@ -145,9 +145,11 @@ class ObservabilityReleaseTests(unittest.TestCase):
         self.jobs = workflow_jobs()
         self.prep = (ROOT / ".github/workflows/release-prep.yml").read_text()
 
-
-    def test_routine_pr_ci_checks_observability_archive(self):
+    def test_routine_pr_ci_runs_package_regressions_before_wasm_build(self):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        web = workflow.split("  web:\n", 1)[1].split("\n  # All checks passed", 1)[0]
+        self.assertIn("run: pnpm test:release", web)
+        self.assertLess(web.index("run: pnpm test:release"), web.index("run: pnpm build"))
         observability = workflow.split("  observability:\n", 1)[1].split("\n  web:\n", 1)[0]
         self.assertIn("pnpm pack:release", observability)
         self.assertNotRegex(observability, r"(?m)^\s+pnpm build$")
@@ -158,11 +160,11 @@ class ObservabilityReleaseTests(unittest.TestCase):
         self.assertTrue((directory / manifest["package"]["readme"]).is_file())
         self.assertIn("README.md", manifest["package"]["include"])
 
-
     def test_prep_gates_draft_on_both_validated_checksummed_archives(self):
         build = self.prep.split("  build-web:\n", 1)[1].split("\n  # ====", 1)[0]
         self.assertIn("working-directory: bindings/observability-js", build)
         self.assertIn("pnpm pack:release", build)
+        self.assertIn("XYBRID_OBSERVABILITY_ARCHIVE:", build)
         self.assertIn("name: observability-npm", build)
         self.assertIn('sha256sum "xybrid-observability-${VERSION}.tgz"', build)
         self.assertIn('sha256sum "xybrid-web-${VERSION}.tgz"', build)
@@ -171,7 +173,6 @@ class ObservabilityReleaseTests(unittest.TestCase):
         draft = self.prep.split("  create-draft-release:\n", 1)[1].split("\n  # ====", 1)[0]
         self.assertIn("build-web", needs(draft))
         self.assertIn("artifacts/*", draft)
-
 
     def test_publishers_validate_then_stage_original_release_archives(self):
         for name in ("observability", "web"):
@@ -191,6 +192,16 @@ class ObservabilityReleaseTests(unittest.TestCase):
                 self.assertNotIn("pnpm build", job)
                 self.assertIn('case "$VERSION" in *-*) DIST_TAG=next ;; esac', job)
 
+    def test_web_staging_waits_for_public_observability(self):
+        dependency = self.jobs["publish-observability-npm"]
+        web = self.jobs["publish-web-npm"]
+        self.assertIn("vars.NPM_WEB_PUBLISH_ENABLED == 'true'", dependency)
+        self.assertIn("publish-observability-npm", needs(web))
+        self.assertIn('npm view "@xybrid/observability@${VERSION}" version', web)
+        self.assertIn('if [ "$dependency_ready" != true ]; then', web)
+        self.assertLess(web.index('if [ "$dependency_ready" != true ]; then'),
+                        web.index("npm stage publish"))
+        self.assertIn('xybrid-observability-${VERSION}.tgz"', web)
 
 
 if __name__ == "__main__":

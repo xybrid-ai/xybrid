@@ -59,15 +59,17 @@ class JsVersionSyncTests(unittest.TestCase):
                 web = json.loads((self.root / "bindings/web/package.json").read_text())
                 self.assertEqual(observability["version"], version)
                 self.assertEqual(web["version"], version)
+                self.assertEqual(web["dependencies"]["@xybrid/observability"], version)
                 result = self.shell("get_observability_version; get_observability_source_version; "
-                                    "get_web_version; get_web_source_version")
+                                    "get_web_version; get_web_source_version; get_web_observability_version")
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout.splitlines(), [version] * 4)
+                self.assertEqual(result.stdout.splitlines(), [version] * 5)
 
     def test_check_rejects_independent_drift_on_each_js_surface(self):
-        # Stub other surfaces: the real check's list must include both new
+        # Stub other surfaces: the real check's list must include all three new
         # getters, and no install-pin or binding generator is needed here.
-        for getter in ("get_observability_version", "get_observability_source_version"):
+        for getter in ("get_observability_version", "get_observability_source_version",
+                       "get_web_observability_version"):
             with self.subTest(getter=getter):
                 result = self.shell(
                     'get_cargo_version() { echo 0.16.0; }; '

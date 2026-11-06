@@ -574,6 +574,10 @@ jobs:
         working-directory: bindings/web
         run: pnpm test
 
+      - name: Test package verification from a clean checkout
+        working-directory: bindings/web
+        run: pnpm test:release
+
       - name: Build Web SDK with CPU and WebGPU Rust runtimes
         id: web-build
         working-directory: bindings/web

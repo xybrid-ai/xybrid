@@ -210,5 +210,6 @@ pnpm example          # examples/node-basic.ts (console, or OTLP when OTEL_EXPOR
 ## Releases
 
 The package and instrumentation scope version follow the Cargo workspace version.
-`just bump-version` updates the manifest and `src/version.ts` together. See [RELEASING.md](./RELEASING.md) for the
+`just bump-version` updates the manifest, `src/version.ts`, and the exact
+`@xybrid/web` dependency together. See [RELEASING.md](./RELEASING.md) for the
 branch-driven release and npm approval process.
