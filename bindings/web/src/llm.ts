@@ -109,18 +109,26 @@ const observedLoad = async (
   if (observation === undefined) return load();
   const fallbackModel = typeof modelName === "string" ? modelName : modelName();
   const startedAtMs = epochNow();
+  // Capture the caller's context now. Browser context managers may restore it as soon as
+  // load() returns a Promise, while the resolved model identity is only known afterwards.
+  const finishLoad = observeSafely(() =>
+    observation.observer.bindContext(
+      (model: string, outcome: { readonly session: LlmSession } | { readonly error: unknown }) =>
+        recordLoad(observation, model, startedAtMs, outcome),
+    ),
+  );
   let session: LlmSession;
   try {
     session = await load();
   } catch (error: unknown) {
-    observeSafely(() => recordLoad(observation, fallbackModel, startedAtMs, { error }));
+    observeSafely(() => finishLoad?.(fallbackModel, { error }));
     throw error;
   }
   const model = session.modelId ?? fallbackModel;
   session.observe(
     observation.observer,
     model,
-    observeSafely(() => recordLoad(observation, model, startedAtMs, { session })),
+    observeSafely(() => finishLoad?.(model, { session })),
   );
   return session;
 };

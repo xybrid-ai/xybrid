@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { type ContextManager, context, ROOT_CONTEXT, TraceFlags, trace } from "@opentelemetry/api";
 import { LoggerProvider } from "@opentelemetry/sdk-logs";
 import {
   InMemorySpanExporter,
@@ -200,6 +201,66 @@ describe("observed loads", () => {
     expect(span?.spanContext().traceId).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
     expect(session.loaded.observation?.spanId).toBe(span?.spanContext().spanId ?? "");
   });
+
+  for (const fails of [false, true]) {
+    for (const explicit of [false, true]) {
+      test(`load preserves the invocation context across await (failed=${fails}, explicit=${explicit})`, async () => {
+        // Native Promise continuations do not inherit this browser-style manager's context.
+        let active = ROOT_CONTEXT;
+        const manager: ContextManager = {
+          active: () => active,
+          with: (ctx, fn, thisArg, ...args) => {
+            const previous = active;
+            active = ctx;
+            try {
+              return fn.call(thisArg, ...args);
+            } finally {
+              active = previous;
+            }
+          },
+          bind: (_ctx, target) => target,
+          enable: () => manager,
+          disable: () => {
+            active = ROOT_CONTEXT;
+            return manager;
+          },
+        };
+        context.disable();
+        context.setGlobalContextManager(manager.enable());
+        try {
+          const { observer, spans } = observe();
+          const control = scriptedRuntime({ deltas: [] }, true);
+          if (fails) control.failLoad();
+          const parent = {
+            traceId: "11111111111111111111111111111111",
+            spanId: "2222222222222222",
+            traceFlags: TraceFlags.SAMPLED,
+          };
+          const pending = context.with(trace.setSpanContext(ROOT_CONTEXT, parent), () =>
+            load(control.runtime, {
+              observer,
+              ...(explicit ? { observation: { parent: PARENT } } : {}),
+            }),
+          );
+          expect(trace.getSpanContext(context.active())).toBeUndefined();
+          if (fails) await expect(pending).rejects.toThrow();
+          else await (await pending).dispose();
+          const [span] = spans.getFinishedSpans();
+          expect(span?.name).toBe(fails ? "load_model smollm2" : "load_model browser-smollm2");
+          expect(span?.spanContext().traceId).toBe(
+            explicit ? "4bf92f3577b34da6a3ce929d0e0e4736" : parent.traceId,
+          );
+          expect(span?.parentSpanContext?.spanId).toBe(
+            explicit ? "00f067aa0ba902b7" : parent.spanId,
+          );
+          expect(trace.getSpanContext(context.active())).toBeUndefined();
+        } finally {
+          manager.disable();
+          context.disable();
+        }
+      });
+    }
+  }
 
   test("a failed load ends with its error type", async () => {
     const { observer, spans } = observe();
@@ -550,6 +611,7 @@ describe("telemetry failure isolation", () => {
   });
 
   for (const hook of [
+    "bindContext",
     "startModelLoad",
     "setAttribute",
     "recordResource",
@@ -571,7 +633,7 @@ describe("telemetry failure isolation", () => {
     }, 1_000);
   }
 
-  for (const hook of ["startModelLoad", "endWithError", "observationRef"]) {
+  for (const hook of ["bindContext", "startModelLoad", "endWithError", "observationRef"]) {
     test(`failed load preserves its original error when ${hook} fails`, async () => {
       const { observer } = observe();
       const hits: string[] = [];
