@@ -46,17 +46,56 @@ void main() {
               DecisionContent.text('much')
             ],
           ),
+          DecisionQuestion.yesNo(
+            id: 'present',
+            instructions: DecisionContent.text('Is there a number?'),
+          ),
         ],
       );
       final first = await model.run(XybridEnvelope.decisionRequest(request));
       expect(first.executionTarget, FfiExecutionTarget.local);
       expect(first.decisions!.answers.map((answer) => answer.questionId),
-          ['route', 'level']);
+          ['route', 'level', 'present']);
       expect(
           (first.decisions!.answers.first.value as ChoiceDecision).key, 'only');
       expect(
           first.decisions!.answers.first.distribution.single.probability, 1.0);
-      expect(first.decisions!.answers.last.value, isA<ScoreDecision>());
+      final answers = first.decisions!.answers;
+      expect(answers[0].confidence, 1.0);
+      final score = answers[1].value as ScoreDecision;
+      expect(score.statistic, ScoreStatistic.median);
+      expect(
+          answers[1].confidence,
+          answers[1]
+              .distribution
+              .map((entry) => entry.probability)
+              .reduce((first, next) => first > next ? first : next));
+      expect(answers[1].distribution.map((entry) => entry.key), ['0', '1']);
+      expect(score.value,
+          answers[1].distribution.first.probability >= 0.5 ? 0.0 : 1.0);
+      expect(
+          answers[2].distribution.map((entry) => entry.key), ['true', 'false']);
+      expect((answers[2].value as YesNoDecision).pYes,
+          answers[2].distribution.first.probability);
+      expect(answers[2].confidence, isNull);
+      for (final answer in answers) {
+        expect(
+            answer.distribution.every((entry) =>
+                entry.probability.isFinite &&
+                entry.probability >= 0 &&
+                entry.probability <= 1),
+            isTrue);
+        expect(
+            answer.distribution
+                .fold<double>(0, (total, entry) => total + entry.probability),
+            closeTo(1.0, 1e-14));
+        expect(
+            answer.distribution
+                .every((entry) => entry.origin == DecisionOrigin.caller),
+            isTrue);
+      }
+      expect(first.decisions!.passes, 3);
+      expect(first.decisions!.inputTokens, first.tokensIn);
       expect(first.tokensIn, greaterThan(0));
       expect(first.tokensOut, 0);
       expect(first.text, isNull);
@@ -91,7 +130,11 @@ void main() {
       await expectLater(
         model.run(XybridEnvelope.decisionRequest(request),
             cancellationToken: cancel),
-        throwsA(isA<XybridException>()),
+        throwsA(isA<XybridException>().having(
+          (error) => error.message.toLowerCase(),
+          'cancellation category',
+          contains('cancel'),
+        )),
       );
       final duringRun = CancellationToken();
       final manyQuestions = DecisionRequest(
@@ -130,6 +173,15 @@ void main() {
       expect(recovered.tokensIn, first.tokensIn);
       expect((recovered.decisions!.answers.first.value as ChoiceDecision).key,
           'only');
+      expect(recovered.decisions!.passes, first.decisions!.passes);
+      expect(recovered.decisions!.answers.map((answer) => answer.questionId),
+          answers.map((answer) => answer.questionId));
+      for (var index = 0; index < answers.length; index++) {
+        expect(
+            recovered.decisions!.answers[index].distribution
+                .map((entry) => entry.toJson()),
+            answers[index].distribution.map((entry) => entry.toJson()));
+      }
     } finally {
       await model.unload();
       XybridRustLib.dispose();

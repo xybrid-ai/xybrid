@@ -87,15 +87,22 @@ fn decision_cli_rejects_conflicts_before_model_loading() {
 fn decision_cli_bounds_stdin_and_redacts_decoder_errors_before_model_loading() {
     let dir = unloaded_model();
     let oversized = vec![b' '; xybrid_core::execution::decision::wire::MAX_RAW_BYTES + 1];
-    for bytes in [
-        oversized.as_slice(),
-        &b"private-decision-cli-canary\xff"[..],
-        &b"{\"private-decision-cli-canary\": 1}"[..],
+    for (bytes, expected_error) in [
+        (oversized.as_slice(), "exceeds the transport byte limit"),
+        (&b"private-decision-cli-canary\xff"[..], "UTF-8"),
+        (
+            &b"{\"private-decision-cli-canary\": 1}"[..],
+            "unknown_field",
+        ),
     ] {
         let output = stdin_run(dir.path(), bytes);
         assert!(!output.status.success());
         assert!(output.stdout.is_empty());
         let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains(expected_error),
+            "unexpected refusal: {error}"
+        );
         assert!(!error.contains("private-decision-cli-canary"));
         assert!(!error.contains("absent.gguf"));
         assert!(!error.contains("requires llm-llamacpp"));

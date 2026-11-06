@@ -89,7 +89,33 @@ fn plan(pass: &Value, answer: &Value) -> PreparedQuestion {
     }
 }
 
-fn assert_answer(case: &str, actual: &DecisionAnswer, expected: &Value) {
+fn assert_answer(
+    case: &str,
+    actual: &DecisionAnswer,
+    expected: &Value,
+    prepared: &PreparedQuestion,
+    raw: &[f32],
+) {
+    assert_eq!(
+        actual.question_id(),
+        prepared.plan.question,
+        "{case}: question id"
+    );
+    assert_eq!(actual.distribution().len(), prepared.plan.groups.len());
+    for (entry, group) in actual.distribution().iter().zip(&prepared.plan.groups) {
+        assert_eq!(entry.key(), group.key, "{case}: distribution order");
+        let expected_raw = raw[group.range.clone()]
+            .iter()
+            .copied()
+            .reduce(|first, next| if next > first { next } else { first })
+            .unwrap();
+        assert_eq!(
+            entry.raw_score().to_bits(),
+            expected_raw.to_bits(),
+            "{case}: raw score"
+        );
+        assert_eq!(entry.origin(), DecisionOrigin::Caller, "{case}: origin");
+    }
     match expected["type"].as_str().unwrap() {
         "choice" => assert_eq!(
             actual.value().as_choice(),
@@ -103,6 +129,15 @@ fn assert_answer(case: &str, actual: &DecisionAnswer, expected: &Value) {
                 "{case}"
             );
             assert!(actual.confidence().is_none(), "{case}");
+            let distribution = actual.distribution();
+            assert_eq!(distribution[0].key(), "true");
+            assert_eq!(distribution[1].key(), "false");
+            let p_yes = expected["noul"].as_f64().unwrap();
+            assert_eq!(distribution[0].probability().to_bits(), p_yes.to_bits());
+            assert!(
+                (distribution[1].probability() - (1.0 - p_yes)).abs() <= 2.0 * f64::EPSILON,
+                "{case}: no probability must complement yes"
+            );
         }
         "score" => assert_eq!(
             actual.value().as_score(),
@@ -132,10 +167,6 @@ fn assert_answer(case: &str, actual: &DecisionAnswer, expected: &Value) {
             );
         }
     }
-    assert!(actual
-        .distribution()
-        .iter()
-        .all(|entry| entry.origin() == DecisionOrigin::Caller));
     let round_trip: DecisionAnswer =
         serde_json::from_str(&serde_json::to_string(actual).unwrap()).unwrap();
     assert_eq!(&round_trip, actual, "{case}: JSON round trip");
@@ -222,6 +253,8 @@ fn upstream_selected_logits_finalize_independently_of_inference() {
                     id,
                     &result,
                     &upstream["finalize"]["answers"][result.question_id()],
+                    &prepared,
+                    &raw,
                 );
             } else {
                 assert_eq!(
@@ -580,7 +613,7 @@ mod native {
             executed += 1;
         }
         assert_eq!(executed, 63, "a skipped or narrowed model corpus must fail");
-        assert_eq!(passes, 78, "every question must execute exactly one pass");
+        assert_eq!(passes, 78, "every expected question pass must execute");
         eprintln!("G2 executed {executed} model cases, {passes} independent whole-prompt passes");
         if let Some(output) = std::env::var_os("XYBRID_DECISION_REPORT_DIR").map(PathBuf::from) {
             std::fs::create_dir_all(&output).unwrap();
@@ -745,20 +778,61 @@ mod native {
                 .as_array()
                 .unwrap();
             assert_eq!(answers.len(), prepared.len());
-            for (answer, plan) in answers.iter().zip(prepared) {
+            for (index, (answer, answer_plan)) in answers.iter().zip(prepared).enumerate() {
                 assert_eq!(
                     answer.question_id(),
-                    plan["question"].as_str().unwrap(),
+                    answer_plan["question"].as_str().unwrap(),
                     "request order"
                 );
+                let pass = plan(
+                    &reference["upstream"]["prepare"]["passes"][index],
+                    answer_plan,
+                );
+                let raw: Vec<_> = reference["upstream"]["evaluate"]["raw_scores"][index]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(f32_bits)
+                    .collect();
                 assert_answer(
                     case["id"].as_str().unwrap(),
                     answer,
                     &expected["answers"][answer.question_id()],
+                    &pass,
+                    &raw,
                 );
             }
+            let usage = sync.decisions().unwrap().usage();
+            assert_eq!(usage.passes() as usize, prepared.len());
+            assert_eq!(Some(usage.evaluated_tokens()), sync.tokens_in());
             assert_eq!(sync.tokens_in(), expected["usage"]["input_tokens"].as_u64());
             assert_eq!(sync.tokens_out(), Some(0));
+            assert_eq!(asynchronous.tokens_in(), sync.tokens_in());
+            assert_eq!(asynchronous.tokens_out(), sync.tokens_out());
+
+            if case["id"] == "multi-question-order" {
+                let invalid = cases()
+                    .into_iter()
+                    .find(|case| case["id"] == "budget-second-question-over")
+                    .unwrap();
+                let request =
+                    xybrid_sdk::decode_decision_request(invalid["request_text"].as_str().unwrap())
+                        .unwrap();
+                let error = model
+                    .run(&xybrid_core::ir::Envelope::decision_request(request), None)
+                    .unwrap_err();
+                assert!(
+                    format!("{error:?}").contains("budget_exceeded"),
+                    "{error:?}"
+                );
+                let recovered = model.run(&envelope, None).unwrap();
+                assert_eq!(
+                    recovered.decisions(),
+                    sync.decisions(),
+                    "failed later question must not return partial results or poison reuse"
+                );
+                assert_eq!(recovered.tokens_in(), sync.tokens_in());
+            }
             executed += 1;
         }
         assert_eq!(executed, 4);
