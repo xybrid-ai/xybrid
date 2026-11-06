@@ -88,7 +88,9 @@ xybrid run -c crates/xybrid-cli/examples/hybrid-platform.yaml \
 ```
 
 对于预发布或自托管平台，可传入 `--platform-url <base-url>` 或设置
-`XYBRID_PLATFORM_URL`；CLI 会为聊天请求追加 `/v1`。Xybrid 密钥仅发送到所配置的平台源。
+`XYBRID_PLATFORM_URL`；CLI 会为聊天请求追加 `/v1`，聊天请求中的 Xybrid 密钥仅发送到所配置的平台源。
+遥测使用独立端点，请同时为该环境设置 `--ingest-url`（或 `XYBRID_INGEST_URL`），
+否则 CLI 会把追踪数据和密钥发送到 `https://ingest.xybrid.dev`。
 
 ### 直连提供商测试
 

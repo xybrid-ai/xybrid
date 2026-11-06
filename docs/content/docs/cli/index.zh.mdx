@@ -81,7 +81,8 @@ xybrid fetch --model kokoro-82m
 | 选项 | 环境变量 | 说明 |
 |------|----------|------|
 | `--api-key` | `XYBRID_API_KEY` | Xybrid 平台 API Key（可选 — 不提供则匿名运行） |
-| `--platform-url` | — | 平台/注册表 URL（默认 `https://api.xybrid.dev`） |
-| `--device-id` | `XYBRID_DEVICE_ID` | 用于遥测的稳定设备标识 |
+| `--platform-url` | `XYBRID_PLATFORM_URL` | 用于云端路由和网关的平台 API（默认 `https://api.xybrid.dev`） |
+| `--ingest-url` | `XYBRID_INGEST_URL` | 遥测上报端点（默认 `https://ingest.xybrid.dev`） |
+| `--device-id` | `XYBRID_DEVICE_ID` | 遥测设备标识（默认是保存在 `~/.xybrid/install-id` 中的随机 ID） |
 | `-v`、`-vv` | — | 详细输出（`-vv` 包含库日志） |
 | `-q` | — | 安静模式（仅输出错误） |

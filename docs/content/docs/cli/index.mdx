@@ -81,7 +81,8 @@ xybrid fetch --model kokoro-82m
 | Flag | Environment variable | Description |
 |------|----------------------|-------------|
 | `--api-key` | `XYBRID_API_KEY` | API key for the Xybrid platform (optional — runs anonymously without one) |
-| `--platform-url` | — | Platform/registry URL (default `https://api.xybrid.dev`) |
-| `--device-id` | `XYBRID_DEVICE_ID` | Stable device identifier for telemetry |
+| `--platform-url` | `XYBRID_PLATFORM_URL` | Platform API for cloud routing and the gateway (default `https://api.xybrid.dev`) |
+| `--ingest-url` | `XYBRID_INGEST_URL` | Telemetry ingest endpoint (default `https://ingest.xybrid.dev`) |
+| `--device-id` | `XYBRID_DEVICE_ID` | Device identifier for telemetry (default: a random ID saved in `~/.xybrid/install-id`) |
 | `-v`, `-vv` | — | Verbose output (`-vv` includes library logs) |
 | `-q` | — | Quiet mode (errors only) |

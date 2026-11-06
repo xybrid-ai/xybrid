@@ -425,6 +425,7 @@ fn run_cli_with_env(home: &Path, args: &[&str], env_overrides: &[(&str, &str)]) 
         // Never let a developer's configured platform/gateway/proxy leak in.
         .env_remove("XYBRID_GATEWAY_URL")
         .env_remove("XYBRID_PLATFORM_URL")
+        .env_remove("XYBRID_INGEST_URL")
         .env_remove("XYBRID_REGISTRY_URL")
         .env_remove("HTTP_PROXY")
         .env_remove("HTTPS_PROXY")

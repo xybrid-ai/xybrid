@@ -526,7 +526,14 @@ fn init_telemetry(cli: &Cli) -> bool {
         // in-memory cell that CloudConfig::resolve_api_key reads.
         xybrid_sdk::set_api_key(api_key);
 
-        xybrid_sdk::init_platform_telemetry(telemetry_config(cli, api_key, install_id::get));
+        xybrid_sdk::init_platform_telemetry(telemetry_config(cli, api_key, || {
+            // An opted-out process sends no events, so leave no lasting ID behind.
+            if xybrid_sdk::is_telemetry_opted_out() {
+                uuid::Uuid::new_v4().to_string()
+            } else {
+                install_id::get()
+            }
+        }));
         true
     } else {
         false
@@ -907,37 +914,35 @@ mod tests {
 
     #[test]
     fn telemetry_and_platform_endpoints_can_be_overridden_independently() {
-        for args in [
-            vec![
-                "xybrid",
+        // (override flag, value, expected ingest endpoint, expected platform URL)
+        for (flag, value, ingest, platform) in [
+            (
                 "--platform-url",
                 "http://localhost:3001",
-                "telemetry",
-                "status",
-                "--device-id",
-                "explicit-device",
-            ],
-            vec![
-                "xybrid",
-                "telemetry",
-                "status",
+                "https://ingest.xybrid.dev",
+                "http://localhost:3001",
+            ),
+            (
                 "--ingest-url",
                 "http://localhost:8081",
+                "http://localhost:8081",
+                "https://api.xybrid.dev",
+            ),
+        ] {
+            let cli = parse_telemetry_args(&[
+                "xybrid",
+                flag,
+                value,
+                "telemetry",
+                "status",
                 "--device-id",
                 "explicit-device",
-            ],
-        ] {
-            let cli = parse_telemetry_args(&args);
+            ]);
             let config = telemetry_config(&cli, "sk_test_placeholder", || {
                 panic!("explicit device IDs must not read installation storage")
             });
-            if args.contains(&"--ingest-url") {
-                assert_eq!(config.endpoint, "http://localhost:8081");
-                assert_eq!(cli.platform_url, "https://api.xybrid.dev");
-            } else {
-                assert_eq!(config.endpoint, "https://ingest.xybrid.dev");
-                assert_eq!(cli.platform_url, "http://localhost:3001");
-            }
+            assert_eq!(config.endpoint, ingest, "{flag}");
+            assert_eq!(cli.platform_url, platform, "{flag}");
         }
     }
 

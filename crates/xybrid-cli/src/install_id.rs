@@ -40,6 +40,9 @@ fn load_or_create(directory: &Path) -> io::Result<Uuid> {
     let id = Uuid::new_v4();
     let mut file = tempfile::NamedTempFile::new_in(directory)?;
     writeln!(file, "{id}")?;
+    // Reach the disk before the rename. Otherwise a crash can publish an empty
+    // file, which is rejected without being replaced and would never heal.
+    file.as_file().sync_all()?;
     // Publish a complete file without overwriting another CLI process's ID.
     match file.persist_noclobber(&path) {
         Ok(_) => Ok(id),

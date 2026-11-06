@@ -36,10 +36,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "sk_test_telemetry_demo".to_string()
     });
 
-    let endpoint = std::env::var("XYBRID_PLATFORM_URL")
-        .unwrap_or_else(|_| "http://localhost:8000".to_string());
+    let endpoint = std::env::var("XYBRID_INGEST_URL")
+        .unwrap_or_else(|_| xybrid_sdk::telemetry::DEFAULT_INGEST_URL.to_string());
 
-    println!("Platform endpoint: {}", endpoint);
+    println!("Ingest endpoint: {}", endpoint);
     println!("API key: {}...\n", &api_key[..api_key.len().min(20)]);
 
     // Zero-effort path: auto-detect chip, RAM, OS, arch.

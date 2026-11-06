@@ -15,7 +15,8 @@ fn cli(home: &Path) -> Command {
         .env("HOME", home)
         .env("XYBRID_API_KEY", "sk_test_placeholder")
         .env("XYBRID_INGEST_URL", "http://127.0.0.1:1")
-        .env_remove("XYBRID_DEVICE_ID");
+        .env_remove("XYBRID_DEVICE_ID")
+        .env_remove("XYBRID_TELEMETRY_OPTOUT");
     cmd
 }
 
@@ -32,8 +33,11 @@ fn ingest_environment_and_flag_override_the_default_independently_of_platform() 
         ),
     ] {
         let mut cmd = cli(home.path());
+        // The first case keeps the production default, so opt out: the startup
+        // hint still names the endpoint, and no event can reach it.
         cmd.env_remove("XYBRID_INGEST_URL")
             .env("XYBRID_PLATFORM_URL", "http://localhost:3001")
+            .env("XYBRID_TELEMETRY_OPTOUT", "1")
             .env("NO_COLOR", "1");
         if let Some(value) = environment {
             cmd.env("XYBRID_INGEST_URL", value);
@@ -76,8 +80,14 @@ fn default_identity_persists_across_cli_processes() {
 }
 
 #[test]
-fn explicit_identity_and_no_key_do_not_create_install_id() {
+fn explicit_identity_opt_out_and_no_key_do_not_create_install_id() {
     let home = tempfile::tempdir().unwrap();
+    assert_success(
+        cli(home.path())
+            .env("XYBRID_TELEMETRY_OPTOUT", "1")
+            .output()
+            .unwrap(),
+    );
     assert_success(
         cli(home.path())
             .args(["--device-id", "test-device"])

@@ -145,6 +145,7 @@ impl Cli {
             .env_remove("XYBRID_API_KEY")
             .env_remove("XYBRID_GATEWAY_URL")
             .env_remove("XYBRID_PLATFORM_URL")
+            .env_remove("XYBRID_INGEST_URL")
             .env_remove("RUST_BACKTRACE")
             .env_remove("RUST_LIB_BACKTRACE")
             .env_remove("HTTP_PROXY")
