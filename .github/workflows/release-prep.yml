@@ -273,12 +273,18 @@ jobs:
         working-directory: bindings/web
         run: pnpm install --frozen-lockfile
 
+      - name: Test package verification from a clean checkout
+        working-directory: bindings/web
+        run: pnpm test:release
+
       - name: Build CPU and WebGPU Rust runtimes and Web SDK
         working-directory: bindings/web
         run: pnpm build
 
       - name: Pack and verify the Web SDK as an isolated npm consumer
         working-directory: bindings/web
+        env:
+          XYBRID_OBSERVABILITY_ARCHIVE: ${{ github.workspace }}/bindings/observability-js/test-results/npm/xybrid-observability-${{ needs.check-release-branch.outputs.version }}.tgz
         run: pnpm pack:release
 
       - name: Cache Web example model assets
@@ -1505,8 +1511,9 @@ jobs:
             echo
             echo "**Web (GGUF preview)**"
             echo "- \`xybrid-web-${TAG#v}.tgz\` — ESM, TypeScript declarations, worker, CPU/WASM SIMD and experimental WebGPU runtimes"
-            echo "- Matching \`.tgz.sha256\` checksum; install the tarball directly or use \`@xybrid/web\` after npm approval"
-            echo "- \`xybrid-observability-${TAG#v}.tgz\` and matching checksum — standalone GenAI instrumentation"
+            echo "- Matching \`.tgz.sha256\` checksum; use \`@xybrid/web\` after npm approval"
+            echo "- \`xybrid-observability-${TAG#v}.tgz\` and matching checksum — the validated \`@xybrid/observability\` dependency; approve it on npm before web"
+            echo "- Before npm approval, verify both checksums and install together: \`npm install ./xybrid-observability-${TAG#v}.tgz ./xybrid-web-${TAG#v}.tgz @opentelemetry/api\`"
             echo
             echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
           } > CHANGELOG_RELEASE.md

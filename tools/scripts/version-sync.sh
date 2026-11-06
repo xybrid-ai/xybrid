@@ -131,6 +131,10 @@ get_observability_source_version() {
     sed -n 's/^export const VERSION = "\(.*\)";$/\1/p' "$OBSERVABILITY_VERSION_TS"
 }
 
+get_web_observability_version() {
+    python3 -c "import json; print(json.load(open('$WEB_PACKAGE'))['dependencies']['@xybrid/observability'])"
+}
+
 get_web_source_version() {
     sed -n 's/^export const SDK_VERSION = "\(.*\)";$/\1/p' "$WEB_VERSION_TS"
 }
@@ -282,6 +286,7 @@ import json
 with open('$WEB_PACKAGE', 'r') as f:
     data = json.load(f)
 data['version'] = '$version'
+data['dependencies']['@xybrid/observability'] = '$version'
 with open('$WEB_PACKAGE', 'w') as f:
     json.dump(data, f, indent=2)
     f.write('\\n')
@@ -320,7 +325,7 @@ check_versions() {
     echo "Cargo workspace version: $cargo_version"
     echo ""
 
-    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "Swift FFI plist:get_swift_ffi_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version" "Python generated binding:get_python_bolt_version" "Observability JS:get_observability_version" "Observability JS source:get_observability_source_version" "Browser/Web:get_web_version" "Browser/Web source:get_web_source_version" "Flutter example lock:get_flutter_example_lock_version"; do
+    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "Swift FFI plist:get_swift_ffi_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version" "Python generated binding:get_python_bolt_version" "Observability JS:get_observability_version" "Observability JS source:get_observability_source_version" "Browser/Web observability dependency:get_web_observability_version" "Browser/Web:get_web_version" "Browser/Web source:get_web_source_version" "Flutter example lock:get_flutter_example_lock_version"; do
         local name="${name_func%%:*}"
         local func="${name_func##*:}"
         local version

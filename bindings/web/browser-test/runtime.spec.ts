@@ -1,6 +1,7 @@
 import { access, copyFile, open, unlink, writeFile } from "node:fs/promises";
 import { arch, cpus, platform } from "node:os";
 import { expect, test } from "@playwright/test";
+import type { Observer } from "@xybrid/observability";
 import { MODEL } from "../example/model.ts";
 import { SDK_VERSION } from "../src/version.ts";
 
@@ -139,6 +140,142 @@ test("rejects an overlapping generation and remains usable", async ({ page }) =>
   });
   expect(result.failure).toContain("in-flight run");
   expect(result.output.length).toBeGreaterThan(0);
+});
+
+test("observer failures preserve real generation, reuse and native disposal", async ({ page }) => {
+  await page.goto("/");
+  const result = await page.evaluate(async () => {
+    const moduleUrl = "/sdk/index.js";
+    const { XybridLlm, DisposedError } = (await import(
+      moduleUrl
+    )) as typeof import("../src/index.ts");
+    const reference = {
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      spanId: "00f067aa0ba902b7",
+    };
+    let phase: "healthy" | "start" | "finish" | "cancel" = "healthy";
+    const failures: string[] = [];
+    const tokenTimes: number[] = [];
+    const fail = (hook: string): never => {
+      failures.push(hook);
+      throw new Error(`application observer failed: ${hook}`);
+    };
+    // Only the application-owned observer is fake; loading, decoding, timing and
+    // memory release all go through the shipped worker and Rust GGUF engine.
+    const observer = {
+      contentCapture: "no_content",
+      startModelLoad: () => fail("startModelLoad"),
+      startInference: () => {
+        if (phase === "start") fail("startInference");
+        const currentPhase = phase;
+        return new Proxy(
+          {
+            context: () => ({
+              toTraceparent: () => `00-${reference.traceId}-${reference.spanId}-01`,
+            }),
+            recordFirstToken: (atMs: number) => tokenTimes.push(atMs),
+            end: () => {
+              if (currentPhase === "finish") fail("end");
+            },
+            cancel: () => {
+              if (currentPhase === "cancel") fail("cancel");
+            },
+            observationRef: () => {
+              if (currentPhase === "finish") fail("observationRef");
+              return reference;
+            },
+          },
+          { get: (target, key) => Reflect.get(target, key) ?? (() => undefined) },
+        );
+      },
+    } as unknown as Observer;
+    const model = await XybridLlm.fromUrl("/model.gguf", {
+      accelerator: "wasm",
+      wasmPath: "/sdk/runtime",
+      contextLength: 512,
+      observer,
+    });
+    try {
+      const healthy = await model.generate("Say hello.", { maxOutputTokens: 8 });
+      const healthyRun = model.lastRun;
+      phase = "start";
+      const startFailure = await model.generate("Say hello again.", { maxOutputTokens: 8 });
+      const startRun = model.lastRun;
+      phase = "finish";
+      let finishFailure = "";
+      for await (const text of model.generateStream("Tell me about a fox.", {
+        maxOutputTokens: 8,
+      })) {
+        finishFailure += text;
+      }
+      const finishRun = model.lastRun;
+      phase = "healthy";
+      const reused = await model.generate("Say goodbye.", { maxOutputTokens: 8 });
+      const reusedRun = model.lastRun;
+      phase = "cancel";
+      const paused = model.generateStream("Tell me a long story about a fox.", {
+        maxOutputTokens: 256,
+      });
+      const first = await paused.next();
+      await model.dispose();
+      const closed = await paused.next();
+      let disposedRejected = false;
+      try {
+        await model.generate("Hello.", { maxOutputTokens: 8 });
+      } catch (error) {
+        disposedRejected = error instanceof DisposedError;
+      }
+      return {
+        reference,
+        healthy,
+        healthyRun,
+        startFailure,
+        startRun,
+        finishFailure,
+        finishRun,
+        reused,
+        reusedRun,
+        failures,
+        tokenTimes,
+        first,
+        closed,
+        disposedRejected,
+        loaded: model.loaded,
+        released: model.releasedMemory,
+      };
+    } finally {
+      await model.dispose();
+    }
+  });
+  expect(result.loaded.rustVersion).toBe(SDK_VERSION);
+  expect(result.loaded.observation).toBeUndefined();
+  expect(result.healthyRun?.observation).toEqual(result.reference);
+  expect(result.reusedRun?.observation).toEqual(result.reference);
+  expect(result.startRun?.observation).toBeUndefined();
+  expect(result.finishRun?.observation).toBeUndefined();
+  for (const output of [result.healthy, result.startFailure, result.finishFailure, result.reused]) {
+    expect(output.length).toBeGreaterThan(0);
+  }
+  for (const run of [result.healthyRun, result.startRun, result.finishRun, result.reusedRun]) {
+    expect(run?.generatedTokens).toBeGreaterThan(0);
+    expect(run?.cancelled).toBe(false);
+  }
+  expect(result.failures).toEqual([
+    "startModelLoad",
+    "startInference",
+    "end",
+    "observationRef",
+    "cancel",
+  ]);
+  expect(result.tokenTimes.length).toBeGreaterThan(0);
+  for (const atMs of result.tokenTimes) expect(atMs).toBeGreaterThan(1_000_000_000_000);
+  expect(result.first.done).toBe(false);
+  expect(result.closed.done).toBe(true);
+  expect(result.disposedRejected).toBe(true);
+  expect(result.loaded.memory.allocatedBytes).toBeGreaterThan(50_000_000);
+  expect(result.released?.allocatedBytes ?? Infinity).toBeLessThan(
+    result.loaded.memory.allocatedBytes / 2,
+  );
 });
 
 test("explicit cancellation closes a paused iterator and permits immediate reuse", async ({
