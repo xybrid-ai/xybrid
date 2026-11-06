@@ -1,0 +1,134 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Live sessions suppress traces for most frames; metrics still count every frame and outcome.",
+  "expect": {
+    "logs": [
+      {
+        "attributes": {
+          "exception.message": "frame decode failed",
+          "exception.type": "invalid_input"
+        },
+        "event_name": "gen_ai.client.operation.exception",
+        "severity_number": 13,
+        "span": null
+      }
+    ],
+    "metrics": [
+      {
+        "name": "gen_ai.client.operation.duration",
+        "points": [
+          {
+            "attributes": {
+              "error.type": "invalid_input",
+              "gen_ai.operation.name": "predict",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "yolo",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.015
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "predict",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "yolo",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 2,
+            "sum": 0.06
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "predict",
+          "gen_ai.provider.name": "onnxruntime",
+          "gen_ai.request.model": "yolo",
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "onnxruntime",
+          "xybrid.genai.task": "object_detection"
+        },
+        "end_ms": 30,
+        "id": "f0",
+        "kind": "INTERNAL",
+        "name": "predict yolo",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "suppressed_trace_keeps_metrics",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "f0",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "yolo",
+        "operation": "predict",
+        "provider": "onnxruntime",
+        "runtime": "onnxruntime",
+        "task": "object_detection"
+      }
+    },
+    {
+      "at_ms": 30,
+      "id": "f0",
+      "op": "end"
+    },
+    {
+      "at_ms": 40,
+      "id": "f1",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "yolo",
+        "operation": "predict",
+        "provider": "onnxruntime",
+        "runtime": "onnxruntime",
+        "task": "object_detection"
+      },
+      "trace": "suppress"
+    },
+    {
+      "at_ms": 70,
+      "id": "f1",
+      "op": "end"
+    },
+    {
+      "at_ms": 80,
+      "id": "f2",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "yolo",
+        "operation": "predict",
+        "provider": "onnxruntime",
+        "runtime": "onnxruntime",
+        "task": "object_detection"
+      },
+      "trace": "suppress"
+    },
+    {
+      "at_ms": 95,
+      "error_type": "invalid_input",
+      "id": "f2",
+      "message": "frame decode failed",
+      "op": "end_with_error"
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Cancelling an operation marks it cancelled once; ending again is a no-op.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "error.type": "cancelled",
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.05
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "error.type": "cancelled",
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "gen_ai.request.stream": true,
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 50,
+        "id": "chat",
+        "kind": "INTERNAL",
+        "name": "chat tiny",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "ERROR",
+          "description": "cancelled"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "cancellation",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp",
+        "stream": true
+      }
+    },
+    {
+      "at_ms": 50,
+      "id": "chat",
+      "op": "cancel"
+    },
+    {
+      "at_ms": 60,
+      "id": "chat",
+      "op": "end"
+    }
+  ]
+}

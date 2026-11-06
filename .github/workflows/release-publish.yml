@@ -319,6 +319,7 @@ jobs:
           publish_crate xybrid-whisper-sys
           publish_crate xybrid-whisper
           publish_crate xybrid-zzz-sys
+          publish_crate xybrid-observability
           publish_crate xybrid-core
           publish_crate xybrid-sdk
           publish_crate xybrid
