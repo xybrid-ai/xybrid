@@ -73,19 +73,29 @@ struct ContentView: View {
                 .first!.appendingPathComponent("xybrid").path
             initSdkCacheDir(cacheDir: cacheDir)
 
-            // The key and platform URL come from the XYBRID_API_KEY and
-            // XYBRID_PLATFORM_URL scheme environment variables (Product →
+            // The key and trace endpoint come from the XYBRID_API_KEY and
+            // XYBRID_TRACES_ENDPOINT scheme environment variables (Product →
             // Scheme → Edit Scheme → Run → Arguments), so they never land in
-            // the repo. Empty/unset resolves to anonymous, local-only init
-            // against the default platform. Get a free key at
-            // dashboard.xybrid.dev. See README.
+            // the repo. Empty/unset resolves to anonymous, local-only init.
+            // Get a free key at dashboard.xybrid.dev. See README.
             let env = ProcessInfo.processInfo.environment
-            let apiKey = env["XYBRID_API_KEY"]
-            let platformUrl = env["XYBRID_PLATFORM_URL"]
-            Xybrid.initialize(
-                apiKey: (apiKey ?? "").isEmpty ? nil : apiKey,
-                ingestUrl: (platformUrl ?? "").isEmpty ? nil : platformUrl
-            )
+            let apiKey = env["XYBRID_API_KEY"].flatMap { $0.isEmpty ? nil : $0 }
+            let tracesEndpoint = env["XYBRID_TRACES_ENDPOINT"].flatMap { $0.isEmpty ? nil : $0 }
+            Xybrid.initialize(apiKey: apiKey)
+
+            // The API key alone exports nothing: opt in to dashboard traces.
+            if let apiKey {
+                let observability = Xybrid.Observability.xybrid(apiKey: apiKey)
+                    .service("XybridExample")
+                if let tracesEndpoint {
+                    observability.tracesEndpoint(tracesEndpoint)
+                }
+                do {
+                    try observability.start()
+                } catch {
+                    print("Observability disabled: \(error.localizedDescription)")
+                }
+            }
 
             await MainActor.run {
                 appState = .ready
