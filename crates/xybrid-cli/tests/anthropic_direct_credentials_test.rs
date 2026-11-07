@@ -166,7 +166,6 @@ fn run_cli(home: &Path, registry_url: &str, args: &[&str]) -> Run {
         .env("XYBRID_TELEMETRY_OPTOUT", "1")
         .env_remove("XYBRID_GATEWAY_URL")
         .env_remove("XYBRID_PLATFORM_URL")
-        .env_remove("XYBRID_INGEST_URL")
         .env_remove("HTTP_PROXY")
         .env_remove("HTTPS_PROXY")
         .env_remove("http_proxy")

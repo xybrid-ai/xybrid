@@ -68,8 +68,16 @@ npm install @xybrid/web
 npm install @xybrid/web@next
 ```
 
-Each GitHub Release also includes `xybrid-web-<version>.tgz` and its SHA-256
-checksum. Install that archive with `npm install ./xybrid-web-<version>.tgz`.
+Each GitHub Release includes `xybrid-web-<version>.tgz`, its exact
+`xybrid-observability-<version>.tgz` dependency, and SHA-256 checksums. Before
+npm approval, download and verify both archives, then install them together:
+
+```sh
+npm install ./xybrid-observability-<version>.tgz ./xybrid-web-<version>.tgz @opentelemetry/api
+```
+
+Installing only the web archive requires the matching `@xybrid/observability`
+version to already be public on npm.
 The archive contains the runtime assets, so installing it needs no Rust, Bun,
 Emscripten, or Bazel toolchain. See [RELEASING.md](https://github.com/xybrid-ai/xybrid/blob/master/bindings/web/RELEASING.md) for the release
 pipeline and npm setup.
@@ -124,6 +132,44 @@ rejected. `maxOutputTokens` defaults to 64 and must fit the context together wit
 the prompt. Direct loads default to a 512-token context; `contextLength` accepts
 positive integers through 32,768. Cancellation is cooperative at token
 boundaries; prompt prefill runs synchronously inside the worker.
+
+## Observability
+
+Pass an application-owned `Observer` from
+[`@xybrid/observability`](../observability-js/README.md) to record the load and
+every generation as OpenTelemetry GenAI spans, metrics and events. Without an
+observer nothing is recorded and no telemetry runs; `@xybrid/web` bundles no
+exporter and no OpenTelemetry code (the observer you pass carries it).
+
+```ts
+import { Observer } from "@xybrid/observability";
+import { createOtlpPipeline } from "@xybrid/observability/otlp";
+
+const pipeline = createOtlpPipeline({ traces: { endpoint: "https://collector.example/v1/traces" } });
+const model = await XybridLlm.fromUrl("/models/model.gguf", {
+  observer: pipeline.observer(),           // or new Observer({ tracerProvider, … })
+  observation: { parent: pageLoad.context() },
+});
+for await (const delta of model.generateStream(prompt, {
+  observation: { conversationId: "chat-42", parent: request.context() },
+})) output.append(delta);
+const ref = model.lastRun?.observation;   // { traceId, spanId } for feedback/evaluations
+```
+
+- Loads are `load_model` operations (model, `gguf`, size, accelerator, memory).
+- Generations are `chat` operations with `provider` and `runtime` `llama.cpp`,
+  `location=local`, `accelerator` `wasm` or `webgpu`, `max_tokens`, `stream`
+  for `generateStream`, prompt and output text per the observer's content
+  policy, usage from the runtime's token counts, and finish reason `length` or
+  `stop`. Cancellations end as `cancelled`; failures carry the error class as
+  `error.type`.
+- The trace context crosses to the worker in the generate message. The worker
+  stamps each token and the completion with wall-clock epoch milliseconds,
+  which the main thread records with the explicit-time API, so time to first
+  token (any token, including a partial UTF-8 character) and time to first
+  chunk (first non-empty text) are the worker's real times.
+- `observation.trace: "suppress"` keeps metrics without a span. `loaded.observation`
+  and `lastRun.observation` are `undefined` when nothing was traced.
 
 ## Model sources and verification
 

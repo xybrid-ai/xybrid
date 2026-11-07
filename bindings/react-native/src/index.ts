@@ -18,7 +18,13 @@ export {
   type RunOptions,
 } from './model';
 export { ConversationContext } from './context';
-export { Pipeline } from './pipeline';
+export {
+  Observability,
+  ObservabilityConfig,
+  type Evaluation,
+  type Feedback,
+} from './observability';
+export { Pipeline, type PipelineRunOptions } from './pipeline';
 export { StreamingSession } from './session';
 export { Envelope } from './envelope';
 export { GenerationConfigs, creative, greedy } from './presets';
@@ -53,6 +59,8 @@ export type {
   MessageRole,
   ModelInfo,
   MultiPartEnvelope,
+  ObservabilityStats,
+  ObservationRef,
   OutputType,
   PartialResult,
   PipelineInfo,

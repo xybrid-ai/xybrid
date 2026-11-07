@@ -6,6 +6,7 @@ import ai.xybrid.XybridConversationContext
 import ai.xybrid.XybridDownload
 import ai.xybrid.XybridError
 import ai.xybrid.XybridModel
+import ai.xybrid.XybridObservabilityConfig
 import ai.xybrid.XybridPartialResult
 import ai.xybrid.XybridPipeline
 import ai.xybrid.XybridStreamEventKind
@@ -119,7 +120,6 @@ class XybridModule(reactContext: ReactApplicationContext) : NativeXybridSpec(rea
         SdkSetup.Runtime(
           apiKey = XybridCodec.optionalString(o, "apiKey", what).nonBlank(),
           gatewayUrl = XybridCodec.optionalString(o, "gatewayUrl", what).nonBlank(),
-          ingestUrl = XybridCodec.optionalString(o, "ingestUrl", what).nonBlank(),
         ),
       )
       promise.resolve(null)
@@ -155,6 +155,50 @@ class XybridModule(reactContext: ReactApplicationContext) : NativeXybridSpec(rea
 
   override fun isAutoReleaseEnabled(promise: Promise) =
     now(promise) { ai.xybrid.isAutoReleaseEnabled() }
+
+  // -- Observability ------------------------------------------------------------
+
+  override fun observabilityInit(config: ReadableMap, promise: Promise) {
+    val raw = config.toHashMap()
+    background(promise) { SdkSetup.observabilityConfig(raw).use { it.`init`() } }
+  }
+
+  override fun observabilityDefaultTracesEndpoint(promise: Promise) =
+    now(promise) { ai.xybrid.observabilityDefaultTracesEndpoint() }
+
+  override fun observabilityStats(promise: Promise) =
+    now(promise) { XybridCodec.encodeObservabilityStats(ai.xybrid.observabilityStats()) }
+
+  override fun observabilityFlush(timeoutMs: Double, promise: Promise) =
+    background(promise) { ai.xybrid.observabilityFlush(XybridCodec.uint(timeoutMs, "flush timeout")) }
+
+  override fun observabilityShutdown(timeoutMs: Double, promise: Promise) =
+    background(promise) { ai.xybrid.observabilityShutdown(XybridCodec.uint(timeoutMs, "shutdown timeout")) }
+
+  override fun observabilityRecordFeedback(target: ReadableMap, feedback: ReadableMap, promise: Promise) =
+    now(promise) {
+      val what = "feedback"
+      val o = feedback.toHashMap()
+      ai.xybrid.observabilityRecordFeedback(
+        XybridCodec.decodeObservationRef(target.toHashMap()),
+        XybridCodec.optionalDouble(o, "score", what),
+        XybridCodec.optionalString(o, "label", what),
+        XybridCodec.optionalString(o, "comment", what),
+      )
+    }
+
+  override fun observabilityRecordEvaluation(target: ReadableMap, evaluation: ReadableMap, promise: Promise) =
+    now(promise) {
+      val what = "evaluation"
+      val o = evaluation.toHashMap()
+      ai.xybrid.observabilityRecordEvaluation(
+        XybridCodec.decodeObservationRef(target.toHashMap()),
+        XybridCodec.string(o, "name", what),
+        XybridCodec.optionalDouble(o, "scoreValue", what),
+        XybridCodec.optionalString(o, "scoreLabel", what),
+        XybridCodec.optionalString(o, "explanation", what),
+      )
+    }
 
   // -- Device state push ------------------------------------------------------
 
@@ -612,12 +656,12 @@ private fun String?.nonBlank(): String? = this?.trim()?.takeIf { it.isNotEmpty()
  * Process-wide SDK setup. The Rust SDK's configuration is process-global
  * (first-set-wins) and outlives this module: a JS reload builds a new module
  * instance but not a new process. So what has been applied is tracked
- * process-wide too, which is what keeps a reload from starting a second
- * telemetry exporter.
+ * process-wide too, which is what lets a reload repeat `initialize` with the
+ * same options.
  */
 private object SdkSetup {
-  data class Runtime(val apiKey: String?, val gatewayUrl: String?, val ingestUrl: String?) {
-    val isEmpty get() = apiKey == null && gatewayUrl == null && ingestUrl == null
+  data class Runtime(val apiKey: String?, val gatewayUrl: String?) {
+    val isEmpty get() = apiKey == null && gatewayUrl == null
   }
 
   private var appliedCacheDir: String? = null
@@ -641,13 +685,13 @@ private object SdkSetup {
     }
     // First-set-wins in the SDK: claim the binding and the cache directory
     // before Xybrid.init() would register "kotlin" and <filesDir>/xybrid/models.
-    // Its own configureRuntime(null, null, null) is a no-op; what it adds is
-    // the battery and thermal observers.
+    // Its own configureRuntime(null, null) is a no-op; what it adds is the
+    // battery and thermal observers.
     ai.xybrid.setBinding("react-native")
     val directory = requested ?: File(context.filesDir, "xybrid/models").absolutePath
     File(directory).mkdirs()
     ai.xybrid.initSdkCacheDir(directory)
-    Xybrid.init(context)
+    Xybrid.init(context, null, null)
     appliedCacheDir = directory
   }
 
@@ -662,7 +706,35 @@ private object SdkSetup {
         "Xybrid is already initialized with different options; they apply once per app process",
       )
     }
-    ai.xybrid.configureRuntime(runtime.apiKey, runtime.gatewayUrl, runtime.ingestUrl)
+    ai.xybrid.configureRuntime(runtime.apiKey, runtime.gatewayUrl)
     appliedRuntime = runtime
+  }
+
+  /** A bolt observability config from the object src/observability.ts sends. */
+  fun observabilityConfig(raw: Any?): XybridObservabilityConfig {
+    val what = "observability config"
+    val o = XybridCodec.obj(raw, what)
+    val config = when (val kind = XybridCodec.string(o, "kind", what)) {
+      "xybrid" -> XybridObservabilityConfig.xybrid(XybridCodec.string(o, "apiKey", what))
+      "otlp" -> XybridObservabilityConfig.otlp(XybridCodec.string(o, "endpoint", what))
+      else -> throw BridgeException.InvalidArgument("unknown observability preset '$kind'")
+    }
+    try {
+      XybridCodec.optionalString(o, "tracesEndpoint", what)?.let(config::setTracesEndpoint)
+      XybridCodec.stringMap(o, "headers", what).forEach { (name, value) -> config.setHeader(name, value) }
+      XybridCodec.optionalBoolean(o, "jsonProtocol", what)?.let(config::setJsonProtocol)
+      XybridCodec.optionalObj(o, "service", what)?.let { service ->
+        val serviceWhat = "$what service"
+        config.setService(XybridCodec.string(service, "name", serviceWhat), XybridCodec.optionalString(service, "version", serviceWhat))
+      }
+      XybridCodec.stringMap(o, "resourceAttributes", what).forEach { (key, value) -> config.setResourceAttribute(key, value) }
+      XybridCodec.optionalBoolean(o, "metadataOnly", what)?.let(config::setMetadataOnly)
+      XybridCodec.optionalUInt(o, "maxContentBytes", what)?.let(config::setMaxContentBytes)
+      XybridCodec.optionalUInt(o, "liveTraceIntervalMs", what)?.let(config::setLiveTraceIntervalMs)
+    } catch (t: Throwable) {
+      config.close()
+      throw t
+    }
+    return config
   }
 }

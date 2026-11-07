@@ -18,7 +18,7 @@ UNGATED = {
 # Parser guard: these publish packages, so the split below must find them.
 PUBLISHERS = {
     "publish-crates", "publish-flutter", "publish-kotlin", "publish-npm",
-    "publish-web-npm", "publish-swift-branch",
+    "publish-web-npm", "publish-observability-npm", "publish-swift-branch",
 }
 # Status functions in a job's `if:` replace the implicit success() check,
 # so any of them (even `success() || ...`) can run a job after a need failed.
@@ -138,6 +138,70 @@ class ChecksumGateTests(unittest.TestCase):
         # Both scripts run so both report; a failure in either must still fail.
         self.assertEqual(re.findall(r"\bok=true\b", step), ["ok=true"], "only the initial ok=true")
         self.assertLess(step.index("ok=true"), first_check)
+
+
+class ObservabilityReleaseTests(unittest.TestCase):
+    def setUp(self):
+        self.jobs = workflow_jobs()
+        self.prep = (ROOT / ".github/workflows/release-prep.yml").read_text()
+
+    def test_routine_pr_ci_runs_package_regressions_before_wasm_build(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        web = workflow.split("  web:\n", 1)[1].split("\n  # All checks passed", 1)[0]
+        self.assertIn("run: pnpm test:release", web)
+        self.assertLess(web.index("run: pnpm test:release"), web.index("run: pnpm build"))
+        observability = workflow.split("  observability:\n", 1)[1].split("\n  web:\n", 1)[0]
+        self.assertIn("pnpm pack:release", observability)
+        self.assertNotRegex(observability, r"(?m)^\s+pnpm build$")
+
+    def test_observability_crate_readme_is_packaged(self):
+        directory = ROOT / "crates/xybrid-observability"
+        manifest = tomllib.loads((directory / "Cargo.toml").read_text())
+        self.assertTrue((directory / manifest["package"]["readme"]).is_file())
+        self.assertIn("README.md", manifest["package"]["include"])
+
+    def test_prep_gates_draft_on_both_validated_checksummed_archives(self):
+        build = self.prep.split("  build-web:\n", 1)[1].split("\n  # ====", 1)[0]
+        self.assertIn("working-directory: bindings/observability-js", build)
+        self.assertIn("pnpm pack:release", build)
+        self.assertIn("XYBRID_OBSERVABILITY_ARCHIVE:", build)
+        self.assertIn("name: observability-npm", build)
+        self.assertIn('sha256sum "xybrid-observability-${VERSION}.tgz"', build)
+        self.assertIn('sha256sum "xybrid-web-${VERSION}.tgz"', build)
+        self.assertLess(build.index("Test and pack the Observability SDK"),
+                        build.index("Pack and verify the Web SDK"))
+        draft = self.prep.split("  create-draft-release:\n", 1)[1].split("\n  # ====", 1)[0]
+        self.assertIn("build-web", needs(draft))
+        self.assertIn("artifacts/*", draft)
+
+    def test_publishers_validate_then_stage_original_release_archives(self):
+        for name in ("observability", "web"):
+            job = self.jobs[f"publish-{name}-npm"]
+            with self.subTest(package=name):
+                archive = f'xybrid-{name}-${{VERSION}}.tgz'
+                self.assertIn("gh release download", job)
+                self.assertIn(f'sha256sum --check "{archive}.sha256"', job)
+                self.assertIn("node scripts/check-pack.mjs", job)
+                stage = re.search(r"npm stage publish ([^\n]+)\n([^\n]+)", job)
+                self.assertIsNotNone(stage)
+                self.assertIn(archive, stage.group(1))
+                self.assertIn("--ignore-scripts --provenance --access public", stage.group(2))
+                self.assertLess(job.index("sha256sum --check"), job.index("node scripts/check-pack.mjs"))
+                self.assertLess(job.index("node scripts/check-pack.mjs"), stage.start())
+                self.assertIn(f'npm view "@xybrid/{name}@${{VERSION}}"', job)
+                self.assertNotIn("pnpm build", job)
+                self.assertIn('case "$VERSION" in *-*) DIST_TAG=next ;; esac', job)
+
+    def test_web_staging_waits_for_public_observability(self):
+        dependency = self.jobs["publish-observability-npm"]
+        web = self.jobs["publish-web-npm"]
+        self.assertIn("vars.NPM_WEB_PUBLISH_ENABLED == 'true'", dependency)
+        self.assertIn("publish-observability-npm", needs(web))
+        self.assertIn('npm view "@xybrid/observability@${VERSION}" version', web)
+        self.assertIn('if [ "$dependency_ready" != true ]; then', web)
+        self.assertLess(web.index('if [ "$dependency_ready" != true ]; then'),
+                        web.index("npm stage publish"))
+        self.assertIn('xybrid-observability-${VERSION}.tgz"', web)
 
 
 if __name__ == "__main__":

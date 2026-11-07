@@ -91,11 +91,8 @@ xybrid run -c crates/xybrid-cli/examples/hybrid-platform.yaml \
 ```
 
 For a staging or self-hosted platform, pass `--platform-url <base-url>` or set
-`XYBRID_PLATFORM_URL`; the CLI appends `/v1` for chat requests, and sends the
-Xybrid key with them only to the configured platform origin. Telemetry has its
-own endpoint, so set `--ingest-url` (or `XYBRID_INGEST_URL`) for that
-environment too; otherwise the CLI sends traces, and the key, to
-`https://ingest.xybrid.dev`.
+`XYBRID_PLATFORM_URL`; the CLI appends `/v1` for chat requests. The Xybrid key
+is scoped to the configured platform origin.
 
 ### Direct provider testing
 

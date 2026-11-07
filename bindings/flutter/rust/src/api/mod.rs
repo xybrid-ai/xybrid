@@ -78,6 +78,7 @@ pub mod context;
 pub mod device;
 pub mod envelope;
 pub mod model;
+pub mod observability;
 pub mod pipeline;
 pub mod result;
 pub mod sdk_client;

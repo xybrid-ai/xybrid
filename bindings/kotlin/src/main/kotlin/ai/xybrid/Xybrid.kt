@@ -35,19 +35,21 @@ import kotlinx.coroutines.withContext
  * Main entry point for the Xybrid SDK.
  *
  * Call [Xybrid.init] once before using any other Xybrid functionality.
- * Inference runs on-device whether or not you authenticate; pass an
- * `apiKey` to start the telemetry exporter and see your runs on the
- * dashboard. Get a free key at https://dashboard.xybrid.dev.
+ * Inference runs on-device whether or not you authenticate. The `apiKey`
+ * authenticates the cloud gateway; it does not export anything. Trace export
+ * is off until you start it with [Xybrid.Observability]. Get a free key at
+ * https://dashboard.xybrid.dev.
  *
  * ```kotlin
  * class MyApplication : Application() {
  *     override fun onCreate() {
  *         super.onCreate()
- *         // Anonymous — local inference, telemetry disabled
+ *         // Anonymous — local inference only
  *         Xybrid.init(this)
  *
- *         // Authenticated — telemetry flows to the dashboard
+ *         // Authenticated, with traces sent to the Xybrid dashboard
  *         Xybrid.init(this, apiKey = BuildConfig.XYBRID_API_KEY)
+ *         Xybrid.Observability.xybrid(BuildConfig.XYBRID_API_KEY).start()
  *     }
  * }
  * ```
@@ -65,13 +67,11 @@ object Xybrid {
      * Typically called from `Application.onCreate()` or `Activity.onCreate()`.
      *
      * All parameters except [context] are optional. Without an [apiKey], the
-     * SDK runs fully on-device and telemetry is disabled — the first
-     * inference logs a one-shot hint pointing at the dashboard (suppress
-     * with the `XYBRID_QUIET=1` environment variable). Pass [apiKey] to
-     * start the platform telemetry exporter; [ingestUrl] overrides the
-     * destination for a self-hosted dashboard, and [gatewayUrl] overrides
-     * the LLM gateway. Configuration is applied on the first call; because
-     * `init` is idempotent, a later call with different arguments is a no-op.
+     * SDK runs fully on-device. [apiKey] authenticates the cloud gateway and
+     * [gatewayUrl] overrides it. Neither starts trace export: build a config
+     * with [Observability] and call `start()` for that. Configuration is
+     * applied on the first call; because `init` is idempotent, a later call
+     * with different arguments is a no-op.
      *
      * Also subscribes to OS-level battery and thermal notifications and
      * forwards each value through the SDK's push-state surface so the
@@ -85,9 +85,8 @@ object Xybrid {
      * [`PowerManager.OnThermalStatusChangedListener`].
      *
      * @param context Android context (application or activity).
-     * @param apiKey Xybrid API key. When set, starts the telemetry exporter.
+     * @param apiKey Xybrid API key for the cloud gateway.
      * @param gatewayUrl Optional override for the LLM gateway URL.
-     * @param ingestUrl Optional override for the telemetry ingest URL.
      */
     @JvmStatic
     @JvmOverloads
@@ -95,7 +94,6 @@ object Xybrid {
         context: Context,
         apiKey: String? = null,
         gatewayUrl: String? = null,
-        ingestUrl: String? = null,
     ) {
         if (initialized) return
         synchronized(this) {
@@ -103,7 +101,7 @@ object Xybrid {
             setBinding("kotlin")
             val cacheDir = File(context.filesDir, "xybrid/models")
             initSdkCacheDir(cacheDir.absolutePath)
-            configureRuntime(apiKey = apiKey, gatewayUrl = gatewayUrl, ingestUrl = ingestUrl)
+            configureRuntime(apiKey = apiKey, gatewayUrl = gatewayUrl)
             registerPlatformObservers(context.applicationContext)
             initialized = true
         }
@@ -190,8 +188,9 @@ object Xybrid {
      * Whether a Xybrid gateway API key is resolvable, from either [init] or
      * the environment.
      *
-     * Inference runs on-device without one; this reports whether the optional
-     * platform features (cloud routing, telemetry) can engage.
+     * Inference runs on-device without one; this reports whether cloud
+     * routing can engage. It says nothing about trace export, which only
+     * [Observability] starts.
      */
     @JvmStatic
     val hasApiKey: Boolean get() = ai.xybrid.hasApiKey()
@@ -286,6 +285,126 @@ object Xybrid {
      */
     suspend fun clearModelCacheAsync(): Int = withContext(Dispatchers.IO) { clearModelCache() }
 
+    /**
+     * OpenTelemetry export of runs as traces (and, for OTLP, metrics and logs).
+     *
+     * Export is off until a config is started; an API key alone never enables
+     * it. Once started, prompts, outputs, and tool payloads are captured unless
+     * the config sets [metadataOnly].
+     *
+     * ```kotlin
+     * // Traces to the Xybrid dashboard
+     * Xybrid.Observability.xybrid(apiKey)
+     *     .service("MyApp", version = BuildConfig.VERSION_NAME)
+     *     .start()
+     *
+     * // Traces, metrics, and logs to an OpenTelemetry Collector
+     * Xybrid.Observability.otlp("http://collector:4318")
+     *     .metadataOnly()
+     *     .start()
+     * ```
+     *
+     * Each run's [XybridResult.observation] identifies its trace, for
+     * [recordFeedback] and [recordEvaluation].
+     */
+    object Observability {
+        /** The Xybrid dashboard's OTLP trace endpoint, used by [xybrid]. */
+        @JvmStatic
+        val defaultTracesEndpoint: String get() = ai.xybrid.observabilityDefaultTracesEndpoint()
+
+        /**
+         * A config that sends traces to the Xybrid dashboard, authenticated
+         * with [apiKey]. Nothing is exported until you call `start()`.
+         */
+        @JvmStatic
+        fun xybrid(apiKey: String): XybridObservabilityConfig = XybridObservabilityConfig.xybrid(apiKey)
+
+        /**
+         * A config that sends traces, metrics, and logs to an OTLP/HTTP
+         * endpoint such as an OpenTelemetry Collector (`http://host:4318`).
+         * Nothing is exported until you call `start()`.
+         */
+        @JvmStatic
+        fun otlp(endpoint: String): XybridObservabilityConfig = XybridObservabilityConfig.otlp(endpoint)
+
+        /** Current delivery counters; all zero while export is off. */
+        @JvmStatic
+        val stats: XybridObservabilityStats get() = ai.xybrid.observabilityStats()
+
+        /**
+         * Export everything queued, waiting at most [timeoutMs].
+         *
+         * Blocks the caller; prefer [flushAsync] on the main thread.
+         * @throws XybridError when the bound is exceeded.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun flush(timeoutMs: Int = DEFAULT_TIMEOUT_MS) =
+            ai.xybrid.observabilityFlush(timeoutMs.toTimeout())
+
+        /**
+         * Flush and stop exporting, waiting at most [timeoutMs]. Idempotent.
+         *
+         * Blocks the caller; prefer [shutdownAsync] on the main thread.
+         * @throws XybridError when the bound is exceeded.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun shutdown(timeoutMs: Int = DEFAULT_TIMEOUT_MS) =
+            ai.xybrid.observabilityShutdown(timeoutMs.toTimeout())
+
+        /** [flush] on [Dispatchers.IO]. */
+        suspend fun flushAsync(timeoutMs: Int = DEFAULT_TIMEOUT_MS) =
+            withContext(Dispatchers.IO) { flush(timeoutMs) }
+
+        /** [shutdown] on [Dispatchers.IO]. */
+        suspend fun shutdownAsync(timeoutMs: Int = DEFAULT_TIMEOUT_MS) =
+            withContext(Dispatchers.IO) { shutdown(timeoutMs) }
+
+        /**
+         * Record end-user feedback on a run, such as a thumbs up or down.
+         *
+         * @param target the run's [XybridResult.observation].
+         * @return `false` when no logs signal is configured — the [xybrid]
+         *   preset sends traces only.
+         * @throws XybridError when [target] is not a valid trace/span id pair.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun recordFeedback(
+            target: XybridObservationRef,
+            score: Double? = null,
+            label: String? = null,
+            comment: String? = null,
+        ): Boolean = ai.xybrid.observabilityRecordFeedback(target, score, label, comment)
+
+        /**
+         * Record an evaluation result, such as an LLM-as-judge score, on a run.
+         *
+         * @param target the run's [XybridResult.observation].
+         * @return `false` when no logs signal is configured.
+         * @throws XybridError when [target] is not a valid trace/span id pair.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun recordEvaluation(
+            target: XybridObservationRef,
+            name: String,
+            score: Double? = null,
+            label: String? = null,
+            explanation: String? = null,
+        ): Boolean = ai.xybrid.observabilityRecordEvaluation(target, name, score, label, explanation)
+
+        private const val DEFAULT_TIMEOUT_MS = 5_000
+
+        // `Int` rather than the generated `UInt` keeps the `@JvmStatic` names
+        // unmangled for Java callers.
+        private fun Int.toTimeout(): UInt {
+            require(this >= 0) { "timeoutMs must be non-negative, was $this" }
+            return toUInt()
+        }
+    }
+
     private fun registerPlatformObservers(appContext: Context) {
         val batteryReceiver = object : BroadcastReceiver() {
             override fun onReceive(received: Context, intent: Intent) {
@@ -324,6 +443,86 @@ object Xybrid {
         else -> XybridThermalState.CRITICAL
     }
 }
+
+// -- Observability config --
+//
+// Chainable setters over the generated `setX` methods, ending in `start()`.
+// Java callers can use the generated setters and `init()` directly.
+
+/** Override the full trace endpoint URL (staging, self-hosted). */
+fun XybridObservabilityConfig.tracesEndpoint(endpoint: String) = apply { setTracesEndpoint(endpoint) }
+
+/** Add an HTTP header sent with every export request. */
+fun XybridObservabilityConfig.header(name: String, value: String) = apply { setHeader(name, value) }
+
+/** Send OTLP JSON instead of protobuf. */
+fun XybridObservabilityConfig.jsonProtocol(json: Boolean = true) = apply { setJsonProtocol(json) }
+
+/** Set the reported service (app) name and version. */
+fun XybridObservabilityConfig.service(name: String, version: String? = null) =
+    apply { setService(name, version) }
+
+/** Attach a resource attribute, for example `deployment.environment`. */
+fun XybridObservabilityConfig.resourceAttribute(key: String, value: String) =
+    apply { setResourceAttribute(key, value) }
+
+/** Record metadata only: no prompts, outputs, or tool payloads. */
+fun XybridObservabilityConfig.metadataOnly(enabled: Boolean = true) = apply { setMetadataOnly(enabled) }
+
+/** Maximum bytes kept per captured content attribute. */
+fun XybridObservabilityConfig.maxContentBytes(bytes: UInt) = apply { setMaxContentBytes(bytes) }
+
+/** Minimum interval between traced frames of one live session. */
+fun XybridObservabilityConfig.liveTraceIntervalMs(ms: UInt) = apply { setLiveTraceIntervalMs(ms) }
+
+/**
+ * Start exporting with this config, replacing any previously started one, and
+ * release the config's native handle.
+ *
+ * The config is single-use: calling a setter or [start] on it afterwards throws
+ * [IllegalStateException].
+ *
+ * @throws XybridError if the config is rejected.
+ */
+fun XybridObservabilityConfig.start() {
+    try {
+        `init`()
+    } finally {
+        close()
+    }
+}
+
+/**
+ * Build run options, defaulting every field you don't set.
+ *
+ * @param traceparent W3C `traceparent` of your own span; the run's trace
+ *   becomes its child. Invalid values start a new trace.
+ * @param tracestate W3C `tracestate` accompanying [traceparent].
+ * @param conversationId your conversation id, recorded on the run's trace.
+ * @param suppressTrace skip the detailed trace for this run; metrics are still
+ *   recorded.
+ */
+fun runOptions(
+    generationConfig: XybridGenerationConfig? = null,
+    abortOn: List<XybridAbortSignal> = emptyList(),
+    fallbackToCloud: Boolean = false,
+    maxGraceTokens: UInt = 0u,
+    correlationId: String? = null,
+    traceparent: String? = null,
+    tracestate: String? = null,
+    conversationId: String? = null,
+    suppressTrace: Boolean = false,
+): XybridRunOptions = XybridRunOptions(
+    generationConfig = generationConfig,
+    abortOn = abortOn,
+    fallbackToCloud = fallbackToCloud,
+    maxGraceTokens = maxGraceTokens,
+    correlationId = correlationId,
+    traceparent = traceparent,
+    tracestate = tracestate,
+    conversationId = conversationId,
+    suppressTrace = suppressTrace,
+)
 
 // -- Model loading --
 

@@ -168,6 +168,23 @@ export interface InferenceMetrics {
   stageLatenciesMs: StageLatency[];
 }
 
+/**
+ * Trace and span ids (lowercase hex, 32 and 16 characters) of a traced run.
+ * Pass it to `Observability.recordFeedback` / `recordEvaluation`.
+ */
+export interface ObservationRef {
+  traceId: string;
+  spanId: string;
+}
+
+/** Delivery counters of the observability pipeline; all zero while it is off. */
+export interface ObservabilityStats {
+  enabled: boolean;
+  spansExported: number;
+  spansDropped: number;
+  exportFailures: number;
+}
+
 /** The result of one inference. */
 export interface InferenceResult {
   /** The output, losslessly (payload plus metadata). */
@@ -192,6 +209,8 @@ export interface InferenceResult {
   metrics: InferenceMetrics;
   /** Where this answer actually came from. */
   executionTarget: ExecutionTarget;
+  /** The run's trace reference; absent when observability is off or the run was not traced. */
+  observation?: ObservationRef;
 }
 
 /** One token from a streaming run. */

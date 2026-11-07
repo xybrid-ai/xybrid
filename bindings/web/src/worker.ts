@@ -129,6 +129,8 @@ const load = async (request: Extract<Request, { type: "load" }>): Promise<LoadMe
 const generate = async (request: Extract<Request, { type: "generate" }>): Promise<void> => {
   const module = requireRuntime();
   module.xybridCancelled = false;
+  // Observed runs report wall-clock epoch times, never worker-relative offsets.
+  const observed = request.observation !== undefined;
   const started = performance.now();
   let firstTokenAt: number | null = null;
   let lastTokenAt: number | null = null;
@@ -140,7 +142,11 @@ const generate = async (request: Extract<Request, { type: "generate" }>): Promis
     const current = memory();
     peakMemory.heapBytes = Math.max(peakMemory.heapBytes, current.heapBytes);
     peakMemory.allocatedBytes = Math.max(peakMemory.allocatedBytes, current.allocatedBytes);
-    send({ type: "token", id: request.id, tokenId, text });
+    send(
+      observed
+        ? { type: "token", id: request.id, tokenId, text, atMs: performance.timeOrigin + now }
+        : { type: "token", id: request.id, tokenId, text },
+    );
   };
   const prompt = module.stringToNewUTF8(request.prompt);
   let status: number;
@@ -159,15 +165,17 @@ const generate = async (request: Extract<Request, { type: "generate" }>): Promis
   }
   const generatedTokens = module._xybrid_web_generated_tokens(handle);
   const decodeMs = firstTokenAt === null || lastTokenAt === null ? 0 : lastTokenAt - firstTokenAt;
+  const completedAt = performance.now();
   send({
     type: "complete",
     id: request.id,
+    ...(observed ? { completedAtMs: performance.timeOrigin + completedAt } : {}),
     metrics: {
       cancelled: status === 1,
       promptTokens: module._xybrid_web_prompt_tokens(handle),
       generatedTokens,
       firstTokenMs: firstTokenAt === null ? null : firstTokenAt - started,
-      totalMs: performance.now() - started,
+      totalMs: completedAt - started,
       decodeTokensPerSecond:
         generatedTokens > 1 && decodeMs > 0 ? ((generatedTokens - 1) * 1000) / decodeMs : null,
       peakMemory,

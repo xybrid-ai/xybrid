@@ -30,6 +30,8 @@ fn pipeline_ffi_result(result: &PipelineExecutionResult) -> Result<FfiResult, St
         .collect();
 
     Ok(FfiResult {
+        // The SDK pipeline result does not expose its workflow span reference.
+        observation: None,
         success: true,
         text: result.text().map(|s| s.to_string()),
         reasoning_content: result.output.metadata.get("reasoning_content").cloned(),

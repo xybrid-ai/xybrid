@@ -186,6 +186,18 @@ namespace Xybrid
         /// <summary>Gets whether this result carries per-phoneme timings.</summary>
         public bool HasPhonemeTimings => PhonemeTimings != null && PhonemeTimings.Count > 0;
 
+        /// <summary>
+        /// The run's trace and span ids, for linking feedback and evaluations
+        /// with <see cref="XybridClient.RecordFeedback"/> and
+        /// <see cref="XybridClient.RecordEvaluation"/>.
+        /// </summary>
+        /// <remarks>
+        /// Null when the run was not traced: observability is off, the run set
+        /// <see cref="ObservationOptions.SuppressTrace"/>, or it failed before
+        /// reaching the runtime.
+        /// </remarks>
+        public XybridBolt.XybridObservationRef? Observation { get; }
+
         private InferenceResult(
             bool success,
             string error,
@@ -199,7 +211,8 @@ namespace Xybrid
             XybridBolt.XybridExecutionTarget executionTarget =
                 XybridBolt.XybridExecutionTarget.Local,
             IReadOnlyList<XybridBolt.XybridToolCall> toolCalls = null,
-            IReadOnlyList<PhonemeTiming> phonemeTimings = null)
+            IReadOnlyList<PhonemeTiming> phonemeTimings = null,
+            XybridBolt.XybridObservationRef? observation = null)
         {
             Success = success;
             Error = error;
@@ -213,6 +226,7 @@ namespace Xybrid
             ExecutionTarget = executionTarget;
             ToolCalls = toolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>();
             PhonemeTimings = phonemeTimings ?? Array.Empty<PhonemeTiming>();
+            Observation = observation;
         }
 
         /// <summary>Decode a successful bolt result into the public shape.</summary>
@@ -243,7 +257,8 @@ namespace Xybrid
                 reasoningContent: result.ReasoningContent,
                 executionTarget: result.ExecutionTarget,
                 toolCalls: result.ToolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>(),
-                phonemeTimings: PhonemeTimingParser.Parse(phonemeTimingsJson))
+                phonemeTimings: PhonemeTimingParser.Parse(phonemeTimingsJson),
+                observation: result.Observation)
             {
                 SpeechStatus = hasSpeechStatus ? speech.Status : (TtsStatus?)null,
                 LimitedChunks = hasSpeechStatus ? speech.LimitedChunks : (uint?)null,

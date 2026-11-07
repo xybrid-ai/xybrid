@@ -257,9 +257,25 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.2.2 --activate
 
+      - name: Install Observability SDK dependencies
+        working-directory: bindings/observability-js
+        run: pnpm install --frozen-lockfile
+
+      - name: Test and pack the Observability SDK
+        working-directory: bindings/observability-js
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+          pnpm pack:release
+
       - name: Install Web SDK dependencies
         working-directory: bindings/web
         run: pnpm install --frozen-lockfile
+
+      - name: Test package verification from a clean checkout
+        working-directory: bindings/web
+        run: pnpm test:release
 
       - name: Build CPU and WebGPU Rust runtimes and Web SDK
         working-directory: bindings/web
@@ -267,6 +283,8 @@ jobs:
 
       - name: Pack and verify the Web SDK as an isolated npm consumer
         working-directory: bindings/web
+        env:
+          XYBRID_OBSERVABILITY_ARCHIVE: ${{ github.workspace }}/bindings/observability-js/test-results/npm/xybrid-observability-${{ needs.check-release-branch.outputs.version }}.tgz
         run: pnpm pack:release
 
       - name: Cache Web example model assets
@@ -301,13 +319,28 @@ jobs:
           VERSION: ${{ needs.check-release-branch.outputs.version }}
         run: sha256sum "xybrid-web-${VERSION}.tgz" > "xybrid-web-${VERSION}.tgz.sha256"
 
+      - name: Checksum the Observability npm release archive
+        working-directory: bindings/observability-js/test-results/npm
+        env:
+          VERSION: ${{ needs.check-release-branch.outputs.version }}
+        run: sha256sum "xybrid-observability-${VERSION}.tgz" > "xybrid-observability-${VERSION}.tgz.sha256"
+
+      - name: Upload Observability SDK release package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: observability-npm
+          path: |
+            bindings/observability-js/test-results/npm/*.tgz
+            bindings/observability-js/test-results/npm/*.tgz.sha256
+          if-no-files-found: error
+
       - name: Upload Web SDK release package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: web-npm
           path: |
-            bindings/web/test-results/npm/*.tgz
-            bindings/web/test-results/npm/*.tgz.sha256
+            bindings/web/test-results/npm/xybrid-web-*.tgz
+            bindings/web/test-results/npm/xybrid-web-*.tgz.sha256
           if-no-files-found: error
 
   # =========================================================================
@@ -1478,7 +1511,9 @@ jobs:
             echo
             echo "**Web (GGUF preview)**"
             echo "- \`xybrid-web-${TAG#v}.tgz\` — ESM, TypeScript declarations, worker, CPU/WASM SIMD and experimental WebGPU runtimes"
-            echo "- Matching \`.tgz.sha256\` checksum; install the tarball directly or use \`@xybrid/web\` after npm approval"
+            echo "- Matching \`.tgz.sha256\` checksum; use \`@xybrid/web\` after npm approval"
+            echo "- \`xybrid-observability-${TAG#v}.tgz\` and matching checksum — the validated \`@xybrid/observability\` dependency; approve it on npm before web"
+            echo "- Before npm approval, verify both checksums and install together: \`npm install ./xybrid-observability-${TAG#v}.tgz ./xybrid-web-${TAG#v}.tgz @opentelemetry/api\`"
             echo
             echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
           } > CHANGELOG_RELEASE.md

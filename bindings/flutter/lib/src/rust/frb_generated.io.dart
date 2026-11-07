@@ -11,6 +11,7 @@ import 'api/context.dart';
 import 'api/device.dart';
 import 'api/envelope.dart';
 import 'api/model.dart';
+import 'api/observability.dart';
 import 'api/pipeline.dart';
 import 'api/result.dart';
 import 'api/sdk_client.dart';
@@ -239,6 +240,13 @@ abstract class XybridRustLibApiImplPlatform
   FfiMessageRole dco_decode_box_autoadd_ffi_message_role(dynamic raw);
 
   @protected
+  FfiObservabilityConfig dco_decode_box_autoadd_ffi_observability_config(
+      dynamic raw);
+
+  @protected
+  FfiObservationRef dco_decode_box_autoadd_ffi_observation_ref(dynamic raw);
+
+  @protected
   FfiResult dco_decode_box_autoadd_ffi_result(dynamic raw);
 
   @protected
@@ -306,6 +314,15 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole dco_decode_ffi_message_role(dynamic raw);
+
+  @protected
+  FfiObservabilityConfig dco_decode_ffi_observability_config(dynamic raw);
+
+  @protected
+  FfiObservabilityStats dco_decode_ffi_observability_stats(dynamic raw);
+
+  @protected
+  FfiObservationRef dco_decode_ffi_observation_ref(dynamic raw);
 
   @protected
   FfiPartialResult dco_decode_ffi_partial_result(dynamic raw);
@@ -406,6 +423,9 @@ abstract class XybridRustLibApiImplPlatform
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  List<(String, String)> dco_decode_list_record_string_string(dynamic raw);
+
+  @protected
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
@@ -428,6 +448,13 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole? dco_decode_opt_box_autoadd_ffi_message_role(dynamic raw);
+
+  @protected
+  FfiObservationRef? dco_decode_opt_box_autoadd_ffi_observation_ref(
+      dynamic raw);
+
+  @protected
+  FfiRunOptions? dco_decode_opt_box_autoadd_ffi_run_options(dynamic raw);
 
   @protected
   FfiYuvColorInfo? dco_decode_opt_box_autoadd_ffi_yuv_color_info(dynamic raw);
@@ -455,6 +482,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  (String, String) dco_decode_record_string_string(dynamic raw);
 
   @protected
   int dco_decode_u_32(dynamic raw);
@@ -649,6 +679,14 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  FfiObservabilityConfig sse_decode_box_autoadd_ffi_observability_config(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiObservationRef sse_decode_box_autoadd_ffi_observation_ref(
+      SseDeserializer deserializer);
+
+  @protected
   FfiResult sse_decode_box_autoadd_ffi_result(SseDeserializer deserializer);
 
   @protected
@@ -726,6 +764,18 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole sse_decode_ffi_message_role(SseDeserializer deserializer);
+
+  @protected
+  FfiObservabilityConfig sse_decode_ffi_observability_config(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiObservabilityStats sse_decode_ffi_observability_stats(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiObservationRef sse_decode_ffi_observation_ref(
+      SseDeserializer deserializer);
 
   @protected
   FfiPartialResult sse_decode_ffi_partial_result(SseDeserializer deserializer);
@@ -836,6 +886,10 @@ abstract class XybridRustLibApiImplPlatform
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  List<(String, String)> sse_decode_list_record_string_string(
+      SseDeserializer deserializer);
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
@@ -858,6 +912,14 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole? sse_decode_opt_box_autoadd_ffi_message_role(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiObservationRef? sse_decode_opt_box_autoadd_ffi_observation_ref(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiRunOptions? sse_decode_opt_box_autoadd_ffi_run_options(
       SseDeserializer deserializer);
 
   @protected
@@ -889,6 +951,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  (String, String) sse_decode_record_string_string(
+      SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
@@ -1083,6 +1149,14 @@ abstract class XybridRustLibApiImplPlatform
       FfiMessageRole self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_ffi_observability_config(
+      FfiObservabilityConfig self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_observation_ref(
+      FfiObservationRef self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_ffi_result(
       FfiResult self, SseSerializer serializer);
 
@@ -1165,6 +1239,18 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_ffi_message_role(
       FfiMessageRole self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_observability_config(
+      FfiObservabilityConfig self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_observability_stats(
+      FfiObservabilityStats self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_observation_ref(
+      FfiObservationRef self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_partial_result(
@@ -1287,6 +1373,10 @@ abstract class XybridRustLibApiImplPlatform
       Uint8List self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_record_string_string(
+      List<(String, String)> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
@@ -1310,6 +1400,14 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_opt_box_autoadd_ffi_message_role(
       FfiMessageRole? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_observation_ref(
+      FfiObservationRef? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_run_options(
+      FfiRunOptions? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_ffi_yuv_color_info(
@@ -1342,6 +1440,10 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_opt_list_prim_u_8_strict(
       Uint8List? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_record_string_string(
+      (String, String) self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);

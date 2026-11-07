@@ -90,8 +90,10 @@ use xybrid_core::orchestrator::authority::test_seams::StagedResourceProvider;
 use xybrid_core::runtime_adapter::types::PartialToken;
 use xybrid_core::runtime_adapter::CloudRuntimeAdapter;
 use xybrid_sdk::run_options::{AbortPolicy, AbortSignal, RunOptions};
-use xybrid_sdk::telemetry::{flush_platform_telemetry, init_platform_telemetry_from_env};
 use xybrid_sdk::{ModelLoader, SeamInfo};
+
+#[path = "support/observability.rs"]
+mod observability_support;
 
 const PROMPT: &str = "Write a short story about a lighthouse keeper who learns to brew tea.";
 const LOCAL_MODEL_ID: &str = "qwen2.5-0.5b-instruct";
@@ -113,27 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Prompt: {}", PROMPT);
     println!();
 
-    // 0. Wire the telemetry publisher so `LocalAborted` and `CloudRetry`
-    //    events from `run_streaming_with_fallback` actually make it to the
-    //    ingest service. Requires `XYBRID_API_KEY` to be set; for a local
-    //    backend also set `XYBRID_INGEST_URL=http://localhost:8081`. If
-    //    init returns false, the events drop silently and the trace will
-    //    never appear in the console — print a loud warning instead of
-    //    failing the run, since the SDK orchestration itself is independent
-    //    of telemetry.
-    if init_platform_telemetry_from_env() {
-        println!("  Telemetry: publisher initialized");
-        if let Ok(url) = env::var("XYBRID_INGEST_URL") {
-            println!("    ingest endpoint: {}", url);
-        } else {
-            println!("    ingest endpoint: https://ingest.xybrid.dev (default)");
-        }
-    } else {
-        eprintln!(
-            "  ⚠ Telemetry: XYBRID_API_KEY not set — events will be dropped, no trace will \
-             appear in the console. Mint a key in the platform console and export it."
-        );
-    }
+    let export = observability_support::configure("cloud-fallback-demo")?;
     println!();
 
     // 1. Load the local model. The user is expected to have run
@@ -290,26 +272,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         result.text().unwrap_or("(non-text)")
     );
 
-    // Drain telemetry before exit. The SDK exporter is parked in a process-
-    // static (`PLATFORM_EXPORTER`) that never gets dropped, so its
-    // `Drop::stop` final-flush never runs. Without an explicit drain the
-    // CloudRetry event (published last, after the ~8s cloud round-trip)
-    // gets stuck in the exporter's mpsc channel / internal buffer when the
-    // demo exits before the periodic 15s flush thread fires next, which
-    // shows up in the console as a missing `target=cloud` row. Sleep
-    // briefly so the consumer thread can drain channel→buffer, then call
-    // `flush_platform_telemetry` to force a buffer→HTTP send.
-    println!();
-    println!("  Flushing telemetry (channel drain + buffer flush)…");
-    // Brief pause lets the exporter's mpsc-consumer thread drain pending
-    // events from the channel into the buffer (typically <50 ms in
-    // practice — 200 ms is generous). Then `flush_platform_telemetry` is
-    // synchronous-blocking on the HTTP send via ureq, so we don't need
-    // another long sleep after; the trailing 200 ms only covers the
-    // ingest service's `wait=false` async-queue acceptance path.
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    flush_platform_telemetry();
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    // The SDK records local and remote attempts under one inference trace.
+    if let Some(reference) = result.observation_ref() {
+        println!("  inference trace: {}", reference.trace_id);
+    }
+    export.finish()?;
 
     Ok(())
 }

@@ -53,20 +53,21 @@ customer integration produces.
 ```bash
 cd repos/xybrid
 
-# Local platform (requires backend on :3001 + ingest on :8081)
+# Export traces to Xybrid with your key, or set OTEL_EXPORTER_OTLP_ENDPOINT
+# instead to send them to an OpenTelemetry Collector.
 XYBRID_API_KEY=sk_test_YOUR_API_KEY \
-XYBRID_INGEST_URL=http://localhost:8081 \
   cargo run --release --example voice_assistant_demo \
     -p xybrid-sdk --features platform-macos -- \
     integration-tests/fixtures/input/jfk.wav \
     /tmp/voice-assistant-reply.wav
 ```
 
-Open <http://localhost:5173/traces> — the newest row is a
+Open the console's Traces page — the newest row is a
 `PipelineComplete` event with three nested spans and populated
 Token / TTFT / Decode / Prefill metadata. Click it for the flamegraph.
 
-Leave `XYBRID_API_KEY` unset to run locally without shipping telemetry
+Leave `XYBRID_API_KEY` and `OTEL_EXPORTER_OTLP_ENDPOINT` unset to run locally
+without exporting traces
 (useful while developing the pipeline).
 
 ### B) CLI path (works, but no spans yet)

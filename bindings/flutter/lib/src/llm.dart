@@ -5,6 +5,7 @@ library;
 
 import 'result.dart';
 import 'tools.dart';
+import 'observability.dart';
 
 /// A single token emitted during streaming generation.
 class StreamToken {
@@ -24,8 +25,11 @@ class StreamToken {
   /// "tool_calls", "error").
   final String? finishReason;
 
-  /// Final inference metrics. Present only on the completion token.
+  /// Final inference metrics supplied by native completion.
   final XybridInferenceMetrics? metrics;
+
+  /// Trace reference supplied by native completion.
+  final ObservationRef? observation;
 
   /// Tool calls the model asked for this turn — final token only.
   ///
@@ -54,6 +58,7 @@ class StreamToken {
     required this.isFinal,
     this.finishReason,
     this.metrics,
+    this.observation,
     this.toolCalls = const [],
     this.rawText,
   });

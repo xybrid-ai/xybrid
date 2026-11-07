@@ -1,5 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use flutter_rust_bridge::frb;
 use xybrid_ffi_facade as facade;
 use xybrid_sdk::ResourceTelemetryMode;
@@ -81,43 +79,24 @@ impl From<facade::CacheStatus> for FfiCacheStatus {
     }
 }
 
-/// Process-wide once-guard for [`XybridSdkClient::init_telemetry`]. Set on
-/// the first successful entry. Re-entry — whether from a duplicate Dart
-/// caller, a second Dart isolate, or a Flutter hot-restart — observes
-/// `true` and returns without spinning up a second exporter.
-///
-/// Telemetry init is non-trivial: it spawns a background HTTP sender,
-/// registers a process-global execution listener, and activates the
-/// resource-telemetry sampler. None of those have an unregister path
-/// today, so a second call would burn duplicate senders and emit each
-/// event twice. The guard trades runtime flexibility (no in-process
-/// reconfigure) for safety; apps that need to change endpoints must
-/// restart the process.
-static TELEMETRY_INITIALIZED: AtomicBool = AtomicBool::new(false);
-
 #[frb(opaque)]
 pub struct XybridSdkClient;
 
-fn initialize_telemetry_once(config: xybrid_sdk::TelemetryConfig) {
-    if TELEMETRY_INITIALIZED
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return;
+/// Map a legacy ingest base URL to the OTLP trace route. Explicit paths
+/// remain full endpoints so Collector and self-hosted routes work too.
+fn resolve_ingest_endpoint(ingest_url: Option<&str>) -> Result<String, String> {
+    let endpoint = ingest_url.map(str::trim).filter(|v| !v.is_empty());
+    let Some(endpoint) = endpoint else {
+        return Ok(facade::observability_default_traces_endpoint());
+    };
+    let mut url = url::Url::parse(endpoint).map_err(|e| format!("Invalid ingest URL: {e}"))?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err("Ingest endpoint must be an absolute HTTP(S) URL".into());
     }
-    xybrid_sdk::telemetry::init_platform_telemetry(config);
-}
-
-/// Resolve the telemetry ingest endpoint for the bundled init path: use the
-/// caller-supplied URL when present and non-blank, otherwise fall back to
-/// [`xybrid_sdk::telemetry::DEFAULT_INGEST_URL`]. Keeping this a pure free
-/// function lets the defaulting rule be unit-tested without touching the
-/// process-wide telemetry once-guard.
-fn resolve_ingest_endpoint(ingest_url: Option<&str>) -> &str {
-    ingest_url
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(xybrid_sdk::telemetry::DEFAULT_INGEST_URL)
+    if url.path().is_empty() || url.path() == "/" {
+        url.set_path("/v1/traces");
+    }
+    Ok(url.to_string())
 }
 
 fn parse_resource_telemetry_mode(value: Option<&str>) -> Option<ResourceTelemetryMode> {
@@ -127,13 +106,13 @@ fn parse_resource_telemetry_mode(value: Option<&str>) -> Option<ResourceTelemetr
     }
 
     let (head, interval) = match raw.split_once(':') {
-        Some((head, tail)) => (head, tail.parse::<u32>().ok()),
+        Some((head, tail)) => (head, Some(tail.parse::<u32>().ok()?)),
         None => (raw.as_str(), None),
     };
     let default_interval = ResourceTelemetryMode::DEFAULT_SUMMARY_INTERVAL_MS;
     let mode = match head {
-        "off" => ResourceTelemetryMode::Off,
-        "boundary" => ResourceTelemetryMode::Boundary,
+        "off" if interval.is_none() => ResourceTelemetryMode::Off,
+        "boundary" if interval.is_none() => ResourceTelemetryMode::Boundary,
         "summary" => ResourceTelemetryMode::Summary {
             interval_ms: interval.unwrap_or(default_interval),
         },
@@ -143,6 +122,25 @@ fn parse_resource_telemetry_mode(value: Option<&str>) -> Option<ResourceTelemetr
         _ => return None,
     };
     Some(mode.normalized())
+}
+
+fn validated_resource_telemetry_mode(
+    mode: Option<&str>,
+) -> Result<Option<ResourceTelemetryMode>, String> {
+    mode.map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|value| {
+            parse_resource_telemetry_mode(Some(value))
+                .ok_or_else(|| format!("Invalid resource telemetry mode: {value}"))
+        })
+        .transpose()
+}
+
+fn init_legacy_trace_exporter(api_key: String, endpoint: String) -> Result<(), String> {
+    let config = facade::ObservabilityConfigHandle::xybrid(api_key);
+    config.set_traces_endpoint(endpoint);
+    config.set_metadata_only(true);
+    config.init().map_err(|error| error.to_string())
 }
 
 impl XybridSdkClient {
@@ -265,64 +263,53 @@ impl XybridSdkClient {
         xybrid_sdk::set_gateway_url(gateway_url);
     }
 
-    /// Initialize the platform telemetry exporter for this process.
-    ///
-    /// Starts the HTTP telemetry sender targeting `endpoint`, authenticated
-    /// with `api_key`. Once initialized, the normal inference paths
-    /// (`Xybrid.model().run()`, `Xybrid.pipeline().run()`, conversation
-    /// turns, etc.) automatically emit `ExecutionStarted` /
-    /// `ExecutionCompleted` / `ExecutionFailed` events through it — no
-    /// per-call wiring required.
-    ///
-    /// Process-wide idempotent via [`TELEMETRY_INITIALIZED`]: only the
-    /// first successful call enters `init_platform_telemetry`; subsequent
-    /// calls (duplicate caller, second Dart isolate, Flutter hot-restart
-    /// inside a surviving process) observe the guard and return without
-    /// spawning a second exporter. No reconfigure path — restart the
-    /// process to change endpoint/key.
-    ///
-    /// Sync because `init_platform_telemetry` is sync; the HTTP exporter
-    /// spins up its own background thread for batched sends.
+    /// Compatibility entry point: start the OTLP trace exporter. A base URL
+    /// is mapped to `/v1/traces`; a full trace endpoint is used as supplied.
+    /// Export stays metadata-only, matching the legacy telemetry payload.
+    /// The export key does not change cloud authentication.
+    /// Replaces a previous configuration and reports initialization errors.
     #[frb(sync)]
-    pub fn init_telemetry(endpoint: String, api_key: String) {
-        let config = xybrid_sdk::TelemetryConfig::new(endpoint, api_key);
-        initialize_telemetry_once(config);
+    pub fn init_telemetry(endpoint: String, api_key: String) -> Result<(), String> {
+        let endpoint = resolve_ingest_endpoint(Some(&endpoint))?;
+        init_legacy_trace_exporter(api_key, endpoint)
     }
 
-    /// Start the platform telemetry exporter from the bundled
-    /// `Xybrid.init(apiKey: ...)` path.
-    ///
-    /// When `ingest_url` is absent or blank the exporter targets
-    /// [`xybrid_sdk::telemetry::DEFAULT_INGEST_URL`], so providing only an
-    /// API key is enough to light up the dashboard — the caller does not
-    /// need to know the ingest endpoint. Shares the process-wide once-guard
-    /// with [`Self::init_telemetry`]; whichever path runs first wins.
+    /// Compatibility path for explicit legacy telemetry configuration.
     #[frb(sync)]
     pub fn configure_platform_telemetry(
         api_key: String,
         ingest_url: Option<String>,
         resource_telemetry: Option<String>,
-    ) {
-        // Route the api-key through the facade (bolt migration);
-        // master's DEFAULT_INGEST_URL defaulting lives in
-        // resolve_ingest_endpoint below. Clone the key because it's moved
-        // into TelemetryConfig::new on the next line.
-        facade::set_api_key(api_key.clone());
-
-        let endpoint = resolve_ingest_endpoint(ingest_url.as_deref());
-        let mut config = xybrid_sdk::TelemetryConfig::new(endpoint, api_key);
-        if let Some(mode) = parse_resource_telemetry_mode(resource_telemetry.as_deref()) {
-            config = config.with_resource_telemetry(mode);
+    ) -> Result<(), String> {
+        let resource_mode = validated_resource_telemetry_mode(resource_telemetry.as_deref())?;
+        let endpoint = resolve_ingest_endpoint(ingest_url.as_deref())?;
+        init_legacy_trace_exporter(api_key.clone(), endpoint)?;
+        facade::set_api_key(api_key);
+        if let Some(mode) = resource_mode {
+            xybrid_sdk::init().resource_telemetry(mode).run();
         }
-        initialize_telemetry_once(config);
+        Ok(())
     }
 
-    /// Whether [`Self::init_telemetry`] has run at least once in this
-    /// process. Reflects the authoritative process-wide state, not any
-    /// Dart-side flag — survives hot-restart, multiple isolates, etc.
+    /// Validate resource sampling without changing native state.
+    #[frb(sync)]
+    pub fn validate_resource_telemetry(mode: Option<String>) -> Result<(), String> {
+        validated_resource_telemetry_mode(mode.as_deref()).map(|_| ())
+    }
+
+    /// Configure resource sampling independently of authentication/export.
+    #[frb(sync)]
+    pub fn configure_resource_telemetry(mode: Option<String>) -> Result<(), String> {
+        if let Some(mode) = validated_resource_telemetry_mode(mode.as_deref())? {
+            xybrid_sdk::init().resource_telemetry(mode).run();
+        }
+        Ok(())
+    }
+
+    /// Authoritative native exporter state, including shutdown/reconfigure.
     #[frb(sync)]
     pub fn is_telemetry_initialized() -> bool {
-        TELEMETRY_INITIALIZED.load(Ordering::Acquire)
+        facade::observability_stats().enabled
     }
 
     /// Return the xybrid runtime features compiled into this native library.
@@ -339,8 +326,8 @@ impl XybridSdkClient {
     }
 
     #[frb(sync)]
-    pub fn flush_platform_telemetry() {
-        xybrid_sdk::telemetry::flush_platform_telemetry();
+    pub fn flush_platform_telemetry() -> Result<(), String> {
+        facade::observability_flush(5000).map_err(|error| error.to_string())
     }
 
     /// Check if a model is cached locally (extracted and ready to use).
@@ -360,6 +347,23 @@ impl XybridSdkClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resource_validation_rejects_malformed_intervals_before_configuration() {
+        for mode in ["summary:invalid", "summary:", "off:100", "boundary:100"] {
+            assert!(XybridSdkClient::validate_resource_telemetry(Some(mode.into())).is_err());
+        }
+        for mode in [
+            "off",
+            "boundary",
+            "summary",
+            "summary:200",
+            "debug_local:200",
+        ] {
+            assert!(XybridSdkClient::validate_resource_telemetry(Some(mode.into())).is_ok());
+        }
+        assert!(XybridSdkClient::validate_resource_telemetry(None).is_ok());
+    }
 
     #[test]
     fn cache_records_preserve_facade_storage_fields() {
@@ -413,33 +417,43 @@ mod tests {
     #[test]
     fn ingest_endpoint_defaults_when_absent() {
         assert_eq!(
-            resolve_ingest_endpoint(None),
-            xybrid_sdk::telemetry::DEFAULT_INGEST_URL
+            resolve_ingest_endpoint(None).unwrap(),
+            facade::observability_default_traces_endpoint()
         );
     }
 
     #[test]
     fn ingest_endpoint_defaults_when_blank() {
         assert_eq!(
-            resolve_ingest_endpoint(Some("   ")),
-            xybrid_sdk::telemetry::DEFAULT_INGEST_URL
+            resolve_ingest_endpoint(Some("   ")).unwrap(),
+            facade::observability_default_traces_endpoint()
         );
     }
 
     #[test]
     fn ingest_endpoint_uses_supplied_value() {
         assert_eq!(
-            resolve_ingest_endpoint(Some("http://192.168.1.78:8081")),
-            "http://192.168.1.78:8081"
+            resolve_ingest_endpoint(Some("http://192.168.1.78:8081")).unwrap(),
+            "http://192.168.1.78:8081/v1/traces"
         );
     }
 
     #[test]
     fn ingest_endpoint_trims_surrounding_whitespace() {
         assert_eq!(
-            resolve_ingest_endpoint(Some("  https://ingest.example  ")),
-            "https://ingest.example"
+            resolve_ingest_endpoint(Some("  https://ingest.example/v1/traces  ")).unwrap(),
+            "https://ingest.example/v1/traces"
         );
+    }
+
+    #[test]
+    fn ingest_endpoint_preserves_custom_routes_and_rejects_invalid_urls() {
+        assert_eq!(
+            resolve_ingest_endpoint(Some("http://localhost:4318/custom/traces")).unwrap(),
+            "http://localhost:4318/custom/traces"
+        );
+        assert!(resolve_ingest_endpoint(Some("file:///tmp/traces")).is_err());
+        assert!(resolve_ingest_endpoint(Some("invalid")).is_err());
     }
 
     #[test]

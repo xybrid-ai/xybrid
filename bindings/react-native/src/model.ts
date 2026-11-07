@@ -38,8 +38,16 @@ export interface RunOptions {
   fallbackToCloud?: boolean;
   /** Tokens to emit after an abort signal before stopping. */
   maxGraceTokens?: number;
-  /** Correlation id threaded into telemetry for this call. */
+  /** Correlation id recorded on this call's trace. */
   correlationId?: string;
+  /** W3C `traceparent` of your span: the run's trace becomes its child. */
+  traceparent?: string;
+  /** W3C `tracestate` accompanying `traceparent`. */
+  tracestate?: string;
+  /** Your own conversation id, recorded on the run's trace. */
+  conversationId?: string;
+  /** Skip the detailed trace for this run; metrics are still recorded. */
+  suppressTrace?: boolean;
   /**
    * Seed the run with this conversation's history (multi-turn chat). The
    * context is not modified: push the turns you want to keep yourself.

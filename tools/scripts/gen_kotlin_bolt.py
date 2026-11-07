@@ -25,9 +25,9 @@ The post-processes:
   compile at all — this is a generator bug, not a style preference, so the
   transform is applied deterministically rather than by hand.
 
-  `XybridResult` gained an append-only `reasoning_content` wire field after
-  tool calling landed. Its decoder probes for that tail before reading it and
-  falls back to the existing reasoning metadata when the typed tail is absent.
+  `XybridResult` gained append-only `reasoning_content` and `observation`
+  wire fields. Its decoder probes for each tail before reading it, falling
+  back to the reasoning metadata (and no observation) when a tail is absent.
 
 The generated JNI source and header are committed beside the Bazel AAR inputs.
 Keeping all three outputs in one drift check prevents the Kotlin declarations
@@ -118,7 +118,8 @@ def _add_result_wire_compatibility(source: str) -> str:
                 XybridExecutionTarget.fromValue(reader.readI32()),
                 XybridInferenceMetrics.fromReader(reader),
                 reader.readSequence({ reader -> XybridToolCall.fromReader(reader) }),
-                reader.readOptionalValue({ reader -> reader.readString() })
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> XybridObservationRef.fromReader(reader) })
             )
         }
 """
@@ -135,6 +136,11 @@ def _add_result_wire_compatibility(source: str) -> str:
             } else {
                 envelope.metadata.firstOrNull { it.key == "reasoning_content" }?.value
             }
+            val observation = if (reader.hasRemaining()) {
+                reader.readOptionalValue({ reader -> XybridObservationRef.fromReader(reader) })
+            } else {
+                null
+            }
             return XybridResult(
                 envelope,
                 outputType,
@@ -143,7 +149,8 @@ def _add_result_wire_compatibility(source: str) -> str:
                 executionTarget,
                 metrics,
                 toolCalls,
-                reasoningContent
+                reasoningContent,
+                observation
             )
         }
 """
@@ -185,13 +192,15 @@ def render() -> tuple[str, dict[str, bytes]]:
         native_files[name] = source.read_bytes()
 
     source, overrides = _add_message_override(RAW_FILE.read_text())
-    result_field = "    val reasoningContent: String?\n) {"
-    if source.count(result_field) != 1:
-        sys.exit("error: expected one XybridResult reasoning constructor field")
-    source = source.replace(
-        result_field,
-        "    val reasoningContent: String? = null\n) {",
+    result_tail = re.compile(
+        r"    val reasoningContent: String\?,\n((?: +/?\*.*\n)*)    val observation: XybridObservationRef\?\n\) \{"
     )
+    source, tails = result_tail.subn(
+        r"    val reasoningContent: String? = null,\n\1    val observation: XybridObservationRef? = null\n) {",
+        source,
+    )
+    if tails != 1:
+        sys.exit("error: expected one XybridResult reasoning/observation constructor tail")
     source = _add_result_wire_compatibility(source)
     source = _qualify_kotlin_result(source)
     if overrides == 0:

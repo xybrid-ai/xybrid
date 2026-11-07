@@ -7,17 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **CLI telemetry reaches the ingest service.** `--ingest-url` (or
-  `XYBRID_INGEST_URL`) defaults to `https://ingest.xybrid.dev`; `--platform-url`
-  continues to select the API for cloud routing. Telemetry no longer follows
-  `--platform-url`, so when you point the CLI at staging or a local stack, set
-  `--ingest-url` too. The default telemetry device ID is now a random UUID
-  saved in `~/.xybrid/install-id`, rather than the hostname, and none is saved
-  while `XYBRID_TELEMETRY_OPTOUT` is set. Explicit `--device-id` /
-  `XYBRID_DEVICE_ID` values still win.
-
 ## [0.17.0] - 2026-11-05
 
 ### Added

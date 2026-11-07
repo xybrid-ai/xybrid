@@ -42,6 +42,8 @@ PYTHON_PYPROJECT="$REPO_ROOT/bindings/python/pyproject.toml"
 # the lightweight version check as well as regenerating it below, so release
 # validation catches drift without requiring the boltffi CLI in every CI job.
 PYTHON_BOLT_INIT="$REPO_ROOT/bindings/python/xybrid/_bolt/__init__.py"
+OBSERVABILITY_PACKAGE="$REPO_ROOT/bindings/observability-js/package.json"
+OBSERVABILITY_VERSION_TS="$REPO_ROOT/bindings/observability-js/src/version.ts"
 WEB_PACKAGE="$REPO_ROOT/bindings/web/package.json"
 # The browser SDK's source carries its version too, for the X-Xybrid-Client
 # header it sends the registry.
@@ -119,6 +121,18 @@ get_python_bolt_version() {
 
 get_web_version() {
     python3 -c "import json; print(json.load(open('$WEB_PACKAGE'))['version'])"
+}
+
+get_observability_version() {
+    python3 -c "import json; print(json.load(open('$OBSERVABILITY_PACKAGE'))['version'])"
+}
+
+get_observability_source_version() {
+    sed -n 's/^export const VERSION = "\(.*\)";$/\1/p' "$OBSERVABILITY_VERSION_TS"
+}
+
+get_web_observability_version() {
+    python3 -c "import json; print(json.load(open('$WEB_PACKAGE'))['dependencies']['@xybrid/observability'])"
 }
 
 get_web_source_version() {
@@ -249,6 +263,22 @@ regenerate_python_bolt() {
     python3 "$REPO_ROOT/tools/scripts/gen_python_bolt.py"
 }
 
+set_observability_version() {
+    local version="$1"
+    python3 -c "
+import json
+path = '$OBSERVABILITY_PACKAGE'
+with open(path) as f:
+    data = json.load(f)
+data['version'] = '$version'
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\\n')
+"
+    sed -i.bak "s/^export const VERSION = \".*\";$/export const VERSION = \"$version\";/" "$OBSERVABILITY_VERSION_TS"
+    rm -f "$OBSERVABILITY_VERSION_TS.bak"
+}
+
 set_web_version() {
     local version="$1"
     python3 -c "
@@ -256,6 +286,7 @@ import json
 with open('$WEB_PACKAGE', 'r') as f:
     data = json.load(f)
 data['version'] = '$version'
+data['dependencies']['@xybrid/observability'] = '$version'
 with open('$WEB_PACKAGE', 'w') as f:
     json.dump(data, f, indent=2)
     f.write('\\n')
@@ -294,7 +325,7 @@ check_versions() {
     echo "Cargo workspace version: $cargo_version"
     echo ""
 
-    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "Swift FFI plist:get_swift_ffi_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version" "Python generated binding:get_python_bolt_version" "Browser/Web:get_web_version" "Browser/Web source:get_web_source_version" "Flutter example lock:get_flutter_example_lock_version"; do
+    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "Swift FFI plist:get_swift_ffi_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version" "Python generated binding:get_python_bolt_version" "Observability JS:get_observability_version" "Observability JS source:get_observability_source_version" "Browser/Web observability dependency:get_web_observability_version" "Browser/Web:get_web_version" "Browser/Web source:get_web_source_version" "Flutter example lock:get_flutter_example_lock_version"; do
         local name="${name_func%%:*}"
         local func="${name_func##*:}"
         local version
@@ -348,6 +379,7 @@ case "${1:-}" in
         set_rn_aar_version "$VERSION"
         set_python_version "$VERSION"
         regenerate_python_bolt
+        set_observability_version "$VERSION"
         set_web_version "$VERSION"
         echo "Done. Run '$0 --check' to verify."
         ;;
@@ -375,6 +407,7 @@ case "${1:-}" in
         set_rn_aar_version "$VERSION"
         set_python_version "$VERSION"
         regenerate_python_bolt
+        set_observability_version "$VERSION"
         set_web_version "$VERSION"
         echo ""
         echo "Rust crates inherit via version.workspace = true."

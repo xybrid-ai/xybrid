@@ -1,0 +1,301 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Non-streaming local chat with system instructions, usage including cache reads, response identity and finish reasons.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "qwen2.5-0.5b-instruct",
+              "gen_ai.response.model": "qwen2.5-0.5b-instruct-q4_k_m",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.42
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "qwen2.5-0.5b-instruct",
+              "gen_ai.response.model": "qwen2.5-0.5b-instruct-q4_k_m",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 20
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "qwen2.5-0.5b-instruct",
+              "gen_ai.response.model": "qwen2.5-0.5b-instruct-q4_k_m",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 5
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.cache_read.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "qwen2.5-0.5b-instruct",
+              "gen_ai.response.model": "qwen2.5-0.5b-instruct-q4_k_m",
+              "gen_ai.token.modality": "text",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 8
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "qwen2.5-0.5b-instruct",
+              "gen_ai.response.model": "qwen2.5-0.5b-instruct-q4_k_m",
+              "gen_ai.token.modality": "text",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 20
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "qwen2.5-0.5b-instruct",
+              "gen_ai.response.model": "qwen2.5-0.5b-instruct-q4_k_m",
+              "gen_ai.token.modality": "text",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 5
+          }
+        ],
+        "unit": "{token}"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.conversation.id": "conv-1",
+          "gen_ai.input.messages": [
+            {
+              "parts": [
+                {
+                  "content": "What is the capital of France?",
+                  "type": "text"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "gen_ai.operation.name": "chat",
+          "gen_ai.output.messages": [
+            {
+              "finish_reason": "stop",
+              "parts": [
+                {
+                  "content": "Paris.",
+                  "type": "text"
+                }
+              ],
+              "role": "assistant"
+            }
+          ],
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.max_tokens": 64,
+          "gen_ai.request.model": "qwen2.5-0.5b-instruct",
+          "gen_ai.request.seed": 42,
+          "gen_ai.request.stop_sequences": [
+            "</s>"
+          ],
+          "gen_ai.request.temperature": 0.7,
+          "gen_ai.request.top_k": 40,
+          "gen_ai.request.top_p": 0.9,
+          "gen_ai.response.finish_reasons": [
+            "stop"
+          ],
+          "gen_ai.response.id": "resp-1",
+          "gen_ai.response.model": "qwen2.5-0.5b-instruct-q4_k_m",
+          "gen_ai.system_instructions": [
+            {
+              "content": "You are concise.",
+              "type": "text"
+            }
+          ],
+          "gen_ai.usage.cache_read.input_tokens": 8,
+          "gen_ai.usage.input_tokens": 20,
+          "gen_ai.usage.output_tokens": 5,
+          "gen_ai.usage.text.input_tokens": 20,
+          "gen_ai.usage.text.output_tokens": 5,
+          "xybrid.genai.accelerator": "metal",
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.input.modalities": [
+            "text"
+          ],
+          "xybrid.genai.output.modalities": [
+            "text"
+          ],
+          "xybrid.genai.runtime.name": "llama.cpp",
+          "xybrid.genai.runtime.version": "b6000",
+          "xybrid.genai.task": "text_generation"
+        },
+        "end_ms": 420,
+        "id": "chat",
+        "kind": "INTERNAL",
+        "name": "chat qwen2.5-0.5b-instruct",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "inference_chat_local",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "request": {
+        "accelerator": "metal",
+        "conversation_id": "conv-1",
+        "input_modalities": [
+          "text"
+        ],
+        "location": "local",
+        "max_tokens": 64,
+        "model": "qwen2.5-0.5b-instruct",
+        "operation": "chat",
+        "output_modalities": [
+          "text"
+        ],
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp",
+        "runtime_version": "b6000",
+        "seed": 42,
+        "stop_sequences": [
+          "</s>"
+        ],
+        "task": "text_generation",
+        "temperature": 0.7,
+        "top_k": 40,
+        "top_p": 0.9
+      }
+    },
+    {
+      "at_ms": 1,
+      "id": "chat",
+      "op": "system_instructions",
+      "value": [
+        {
+          "content": "You are concise.",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "at_ms": 1,
+      "id": "chat",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "What is the capital of France?",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 400,
+      "cache_read_input_tokens": 8,
+      "id": "chat",
+      "input_tokens": 20,
+      "op": "usage",
+      "output_tokens": 5,
+      "text_input_tokens": 20,
+      "text_output_tokens": 5
+    },
+    {
+      "at_ms": 400,
+      "id": "chat",
+      "model": "qwen2.5-0.5b-instruct-q4_k_m",
+      "op": "response",
+      "response_id": "resp-1"
+    },
+    {
+      "at_ms": 400,
+      "id": "chat",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "stop",
+          "parts": [
+            {
+              "content": "Paris.",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 400,
+      "id": "chat",
+      "op": "finish_reasons",
+      "value": [
+        "stop"
+      ]
+    },
+    {
+      "at_ms": 420,
+      "id": "chat",
+      "op": "end"
+    }
+  ]
+}

@@ -199,6 +199,46 @@ result.text?.let { println("Answer: $it") }
 result.reasoningContent?.let { println("Reasoning: $it") }
 ```
 
+### Observability (OpenTelemetry)
+
+Export is off until you start it; an API key passed to `Xybrid.init` does not
+enable it. Once started, each run is exported as an OpenTelemetry trace, with
+prompts and outputs included unless you call `.metadataOnly()`.
+
+```kotlin
+import ai.xybrid.metadataOnly
+import ai.xybrid.runOptions
+import ai.xybrid.service
+import ai.xybrid.start
+
+// Traces to the Xybrid dashboard (free key at dashboard.xybrid.dev)
+Xybrid.Observability.xybrid(apiKey)
+    .service("MyApp", version = BuildConfig.VERSION_NAME)
+    .start()
+
+// Or traces, metrics, and logs to any OTLP/HTTP endpoint (OpenTelemetry Collector)
+Xybrid.Observability.otlp("http://collector:4318")
+    .metadataOnly()
+    .start()
+
+// Join your own trace, and tag the run with your conversation id
+val result = model.runAsync(
+    envelope,
+    runOptions(traceparent = currentTraceparent, conversationId = chatId),
+)
+
+// Link user feedback to the run's trace (needs the OTLP preset's logs signal)
+result.observation?.let {
+    Xybrid.Observability.recordFeedback(it, score = 1.0, label = "thumbs_up")
+}
+
+// Before the app goes to the background
+Xybrid.Observability.flushAsync()
+```
+
+`Xybrid.Observability.stats` reports spans exported, dropped, and failed.
+`suppressTrace = true` in `runOptions` skips the detailed trace for one run.
+
 ### Error Handling
 
 ```kotlin
@@ -267,6 +307,7 @@ Creating a source or loader is always cheap. Only `load()` and
 | `audioBytes` | `ByteArray?` | Audio output (for TTS) |
 | `embedding` | `List<Float>?` | Embedding output |
 | `latencyMs` | `UInt` | Inference latency in milliseconds |
+| `observation` | `XybridObservationRef?` | Trace/span ids of the run, when it was traced |
 
 ## Directory Structure
 

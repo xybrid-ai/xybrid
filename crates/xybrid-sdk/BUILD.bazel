@@ -215,11 +215,18 @@ _SDK_TEST_DATA = {
     "from_directory_test": ["//integration-tests:model_metadata_fixtures"],
 }
 
+# Shared OTLP collector source is an action input for both integration binaries.
+_SDK_TEST_SUPPORT = {
+    "choice_scoring": ["tests/support/otlp.rs"],
+    "telemetry_integration": ["tests/support/otlp.rs"],
+}
+
 [
     rust_test(
         name = name,
         version = XYBRID_VERSION,
-        srcs = ["tests/{}.rs".format(name)],
+        crate_root = "tests/{}.rs".format(name),
+        srcs = ["tests/{}.rs".format(name)] + _SDK_TEST_SUPPORT.get(name, []),
         data = _SDK_TEST_DATA.get(name, []),
         edition = "2021",
         # macro_test exercises the `xybrid_model!` proc-macro the sdk re-exports,

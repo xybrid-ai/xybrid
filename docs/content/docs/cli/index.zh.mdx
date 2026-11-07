@@ -80,9 +80,16 @@ xybrid fetch --model kokoro-82m
 
 | 选项 | 环境变量 | 说明 |
 |------|----------|------|
-| `--api-key` | `XYBRID_API_KEY` | Xybrid 平台 API Key（可选 — 不提供则匿名运行） |
-| `--platform-url` | `XYBRID_PLATFORM_URL` | 用于云端路由和网关的平台 API（默认 `https://api.xybrid.dev`） |
-| `--ingest-url` | `XYBRID_INGEST_URL` | 遥测上报端点（默认 `https://ingest.xybrid.dev`） |
-| `--device-id` | `XYBRID_DEVICE_ID` | 遥测设备标识（默认是保存在 `~/.xybrid/install-id` 中的随机 ID） |
+| `--api-key` | `XYBRID_API_KEY` | 云端 API Key；仅配置密钥不会启用可观测性导出 |
+| `--platform-url` | `XYBRID_PLATFORM_URL` | 云端网关 URL（默认 `https://api.xybrid.dev`） |
+| `--observability` | — | 显式启用 Xybrid 链路导出；需要 API Key |
+| `--traces-endpoint` | — | `--observability` 使用的完整链路 URL（默认 `https://ingest.xybrid.dev/v1/traces`） |
+| `--device-id` | `XYBRID_DEVICE_ID` | 用于遥测的稳定设备标识 |
 | `-v`、`-vv` | — | 详细输出（`-vv` 包含库日志） |
 | `-q` | — | 安静模式（仅输出错误） |
+
+如需使用 OpenTelemetry Collector，可配置 `OTEL_EXPORTER_OTLP_ENDPOINT` 或各信号的
+`OTEL_EXPORTER_OTLP_*_ENDPOINT` 环境变量，无需 Xybrid API Key。
+`OTEL_SDK_DISABLED=true` 会禁用上述两种模式的导出。命令结束时，CLI 会刷新并关闭导出器。
+启用可观测性后，默认会采集提示词和输出。设置
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content` 可仅记录元数据。

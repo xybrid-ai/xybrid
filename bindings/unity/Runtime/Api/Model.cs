@@ -38,6 +38,7 @@ namespace Xybrid
         /// </summary>
         /// <param name="envelope">The input data for inference.</param>
         /// <param name="config">Optional generation config for LLM parameters. Pass null for model defaults.</param>
+        /// <param name="observation">Optional trace context and trace controls for this run. Pass null for none.</param>
         /// <returns>The inference result (<see cref="InferenceResult.Success"/> is false if inference failed).</returns>
         /// <exception cref="ArgumentNullException">Thrown if envelope is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
@@ -53,7 +54,8 @@ namespace Xybrid
         public InferenceResult Run(
             Envelope envelope,
             GenerationConfig config = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            ObservationOptions observation = null)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -63,7 +65,7 @@ namespace Xybrid
 
             using (var cancel = BoltCancellation.From(cancellationToken))
             {
-                return Execute(() => _bolt.Run(envelope.Bolt, ToOptions(config), cancel.Token));
+                return Execute(() => _bolt.Run(envelope.Bolt, ToOptions(config, observation), cancel.Token));
             }
         }
 
@@ -116,6 +118,7 @@ namespace Xybrid
         /// <param name="envelope">The input data for inference.</param>
         /// <param name="context">The conversation context with history.</param>
         /// <param name="config">Optional generation config for LLM parameters. Pass null for model defaults.</param>
+        /// <param name="observation">Optional trace context and trace controls for this run. Pass null for none.</param>
         /// <returns>The inference result.</returns>
         /// <remarks>
         /// The context provides conversation history which is formatted into the prompt
@@ -137,7 +140,8 @@ namespace Xybrid
             Envelope envelope,
             ConversationContext context,
             GenerationConfig config = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            ObservationOptions observation = null)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -152,7 +156,7 @@ namespace Xybrid
             using (var cancel = BoltCancellation.From(cancellationToken))
             {
                 return Execute(() =>
-                    _bolt.RunWithContext(envelope.Bolt, context.Bolt, ToOptions(config), cancel.Token));
+                    _bolt.RunWithContext(envelope.Bolt, context.Bolt, ToOptions(config, observation), cancel.Token));
             }
         }
 
@@ -298,6 +302,7 @@ namespace Xybrid
         /// <param name="envelope">The input data for inference.</param>
         /// <param name="onToken">Callback invoked for each token, on the calling thread.</param>
         /// <param name="config">Optional generation config. Pass null for model defaults.</param>
+        /// <param name="observation">Optional trace context and trace controls for this run. Pass null for none.</param>
         /// <returns>The final inference result after all tokens are emitted.</returns>
         /// <exception cref="ArgumentNullException">Thrown if envelope or onToken is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
@@ -311,7 +316,8 @@ namespace Xybrid
             Envelope envelope,
             Action<StreamToken> onToken,
             GenerationConfig config = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            ObservationOptions observation = null)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -326,7 +332,7 @@ namespace Xybrid
             using (var cancel = BoltCancellation.From(cancellationToken))
             {
                 return Execute(() =>
-                    _bolt.RunStreaming(envelope.Bolt, Forward(onToken), ToOptions(config), cancel.Token));
+                    _bolt.RunStreaming(envelope.Bolt, Forward(onToken), ToOptions(config, observation), cancel.Token));
             }
         }
 
@@ -337,6 +343,7 @@ namespace Xybrid
         /// <param name="context">The conversation context with history.</param>
         /// <param name="onToken">Callback invoked for each token.</param>
         /// <param name="config">Optional generation config. Pass null for model defaults.</param>
+        /// <param name="observation">Optional trace context and trace controls for this run. Pass null for none.</param>
         /// <returns>The final inference result after all tokens are emitted.</returns>
         /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
@@ -351,7 +358,8 @@ namespace Xybrid
             ConversationContext context,
             Action<StreamToken> onToken,
             GenerationConfig config = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            ObservationOptions observation = null)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -370,7 +378,7 @@ namespace Xybrid
             using (var cancel = BoltCancellation.From(cancellationToken))
             {
                 return Execute(() => _bolt.RunStreamingWithContext(
-                    envelope.Bolt, Forward(onToken), context.Bolt, ToOptions(config), cancel.Token));
+                    envelope.Bolt, Forward(onToken), context.Bolt, ToOptions(config, observation), cancel.Token));
             }
         }
 
@@ -526,18 +534,24 @@ namespace Xybrid
         private static VoiceInfo MapVoice(XybridBolt.XybridVoiceInfo voice) =>
             new VoiceInfo(voice.Id, voice.Name, voice.Gender, voice.Language, voice.Style);
 
-        private static XybridBolt.XybridRunOptions? ToOptions(GenerationConfig config)
+        private static XybridBolt.XybridRunOptions? ToOptions(
+            GenerationConfig config,
+            ObservationOptions observation)
         {
-            if (config == null)
+            if (config == null && observation == null)
             {
                 return null;
             }
             return new XybridBolt.XybridRunOptions(
-                config.ToBolt(),
+                config?.ToBolt(),
                 Array.Empty<XybridBolt.XybridAbortSignal>(),
                 false,
                 0u,
-                null);
+                null,
+                observation?.Traceparent,
+                observation?.Tracestate,
+                observation?.ConversationId,
+                observation?.SuppressTrace ?? false);
         }
 
         private static byte[] TtsAudio(InferenceResult result)

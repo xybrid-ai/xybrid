@@ -55,7 +55,58 @@ final class ModelLoaderTests: XCTestCase {
 
         XCTAssertEqual(result.reasoningContent, "thinking")
         XCTAssertNil(sourceCompatible.reasoningContent)
+        XCTAssertNil(result.observation)
+        XCTAssertNil(sourceCompatible.observation)
         XCTAssertEqual(reader.position, writer.data.count)
+    }
+
+    func testResultDecodesObservationTail() {
+        let observation = XybridObservationRef(
+            traceId: "0af7651916cd43dd8448eb211c80319c",
+            spanId: "b7ad6b7169203331"
+        )
+        let traced = XybridResult(
+            envelope: XybridEnvelope(kind: .text(text: "answer"), metadata: []),
+            outputType: .text,
+            modelId: "model",
+            latencyMs: 1,
+            executionTarget: .local,
+            metrics: XybridInferenceMetrics(
+                totalMs: 1,
+                ttftMs: nil,
+                tokensPerSecond: nil,
+                prefillTps: nil,
+                decodeTps: nil,
+                tokensOut: nil,
+                stageLatenciesMs: []
+            ),
+            toolCalls: [],
+            reasoningContent: "thinking",
+            observation: observation
+        )
+        var writer = WireWriter()
+        traced.encode(to: &writer)
+
+        var reader = WireReader(data: writer.data)
+        let decoded = XybridResult.decode(from: &reader)
+
+        XCTAssertEqual(decoded.observation, observation)
+        XCTAssertEqual(decoded.reasoningContent, "thinking")
+        XCTAssertEqual(reader.position, writer.data.count)
+    }
+
+    func testRunOptionsMakeDefaultsEveryUnsetField() {
+        let options = XybridRunOptions.make(conversationId: "conv-1", suppressTrace: true)
+
+        XCTAssertNil(options.generationConfig)
+        XCTAssertEqual(options.abortOn, [])
+        XCTAssertFalse(options.fallbackToCloud)
+        XCTAssertEqual(options.maxGraceTokens, 0)
+        XCTAssertNil(options.correlationId)
+        XCTAssertNil(options.traceparent)
+        XCTAssertNil(options.tracestate)
+        XCTAssertEqual(options.conversationId, "conv-1")
+        XCTAssertTrue(options.suppressTrace)
     }
 
     /// Guards the `hasToolCalls` conveniences. They exist so the branch a

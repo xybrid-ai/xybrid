@@ -1,186 +1,63 @@
-//! Telemetry Integration Test
+//! Demonstrates local telemetry events and explicit OpenTelemetry export.
 //!
-//! This example demonstrates the SDK telemetry integration with the Xybrid
-//! ingest endpoint. It runs a simple TTS pipeline and sends telemetry
-//! events upstream.
+//! Set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` for a Collector,
+//! or `XYBRID_API_KEY` for the Xybrid dashboard. With neither set the example
+//! stays local. A manual span always runs; the TTS inference additionally runs
+//! when its model fixture is available.
 //!
-//! ## Prerequisites
-//! 1. Have a Xybrid telemetry ingest endpoint reachable (production at
-//!    `https://ingest.xybrid.dev`, or your own local endpoint).
-//! 2. Mint an API key in your Xybrid account.
-//! 3. Set environment variables:
-//!    - `XYBRID_API_KEY=your-api-key`
-//!    - `XYBRID_INGEST_URL=http://localhost:8081` (only for local testing
-//!      against a self-hosted ingest endpoint; omit for production).
-//!
-//! ## Usage
 //! ```bash
-//! cargo run --example telemetry_test
+//! cargo run -p xybrid-sdk --example telemetry_test
 //! ```
 
-use std::collections::HashMap;
-use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::testing::model_fixtures;
-use xybrid_sdk::{
-    flush_platform_telemetry, init_platform_telemetry, publish_telemetry_event,
-    shutdown_platform_telemetry, DeviceProfile, TelemetryConfig, TelemetryEvent,
-};
+use xybrid_sdk::observability::{self, KeyValue, StartOptions};
+use xybrid_sdk::{publish_telemetry_event, register_telemetry_sender, ModelLoader, TelemetryEvent};
+
+#[path = "support/observability.rs"]
+mod observability_support;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== Xybrid Telemetry Integration Test ===\n");
+    let export = observability_support::configure("telemetry-test")?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    register_telemetry_sender(tx);
 
-    // Check for API key
-    let api_key = std::env::var("XYBRID_API_KEY").unwrap_or_else(|_| {
-        println!("Note: XYBRID_API_KEY not set, using test key");
-        "sk_test_telemetry_demo".to_string()
-    });
-
-    let endpoint = std::env::var("XYBRID_INGEST_URL")
-        .unwrap_or_else(|_| xybrid_sdk::telemetry::DEFAULT_INGEST_URL.to_string());
-
-    println!("Ingest endpoint: {}", endpoint);
-    println!("API key: {}...\n", &api_key[..api_key.len().min(20)]);
-
-    // Zero-effort path: auto-detect chip, RAM, OS, arch.
-    let zero_effort_config = TelemetryConfig::new(&endpoint, &api_key).with_app_version("0.0.1");
-
-    // Mirage-style path: keep auto-detection and add app-specific context.
-    let config = zero_effort_config
-        .with_device_label("mirage-vault")
-        .with_device_attribute("target_mode", "privacy-strict")
-        .with_batch_size(1) // Flush immediately for testing
-        .with_flush_interval(1);
-
-    let device_preview = DeviceProfile::detect().merged_with(config.device_profile_patch.clone());
-    println!(
-        "Device context preview:\n{}\n",
-        serde_json::to_string_pretty(&serde_json::json!({
-            "device_label": config.device_label.clone(),
-            "device": device_preview,
-        }))?
-    );
-
-    println!("Initializing platform telemetry...");
-    init_platform_telemetry(config);
-
-    // Emit a test event manually
-    println!("Sending test telemetry event...");
-    let test_event = TelemetryEvent {
-        event_type: "TestEvent".to_string(),
-        stage_name: Some("telemetry_test".to_string()),
-        target: Some("local".to_string()),
+    // Local event delivery is available independently of trace export.
+    publish_telemetry_event(TelemetryEvent {
+        event_type: "TestEvent".to_owned(),
+        stage_name: Some("telemetry_test".to_owned()),
+        target: Some("local".to_owned()),
         latency_ms: Some(42),
         error: None,
-        data: Some(r#"{"test": true, "message": "Hello from SDK telemetry test"}"#.to_string()),
+        data: Some(serde_json::json!({"test": true}).to_string()),
         timestamp_ms: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)?
             .as_millis() as u64,
-    };
-    publish_telemetry_event(test_event);
+    });
+    let span = observability::observer().start_span(
+        "telemetry_test",
+        vec![KeyValue::new("demo.target_mode", "privacy-strict")],
+        StartOptions::default(),
+    );
+    span.end();
 
-    // Try to run a simple TTS inference (if model is available)
     if let Some(model_dir) = model_fixtures::model_or_skip("kitten-tts-nano-0.2") {
-        println!("\nRunning TTS inference with telemetry...");
-
-        let metadata_path = model_dir.join("model_metadata.json");
-        if metadata_path.exists() {
-            let metadata: ModelMetadata =
-                serde_json::from_str(&std::fs::read_to_string(&metadata_path)?)?;
-
-            let mut executor = xybrid_core::template_executor::TemplateExecutor::with_base_path(
-                model_dir.to_str().unwrap(),
-            );
-
-            let input = Envelope {
-                kind: EnvelopeKind::Text("Hello, this is a telemetry test.".to_string()),
-                metadata: HashMap::new(),
-            };
-
-            // Emit pipeline start event
-            let start_event = TelemetryEvent {
-                event_type: "PipelineStart".to_string(),
-                stage_name: None,
-                target: None,
-                latency_ms: None,
-                error: None,
-                data: Some(r#"{"stages": ["tts"]}"#.to_string()),
-                timestamp_ms: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64,
-            };
-            publish_telemetry_event(start_event);
-
-            let start = std::time::Instant::now();
-            match executor.execute(&metadata, &input, None) {
-                Ok(output) => {
-                    let latency = start.elapsed().as_millis() as u32;
-                    println!("TTS completed in {}ms", latency);
-
-                    if let EnvelopeKind::Audio(audio) = &output.kind {
-                        println!("Generated {} bytes of audio", audio.len());
-                    }
-
-                    // Emit success event
-                    let complete_event = TelemetryEvent {
-                        event_type: "PipelineComplete".to_string(),
-                        stage_name: Some("tts".to_string()),
-                        target: Some("device".to_string()),
-                        latency_ms: Some(latency),
-                        error: None,
-                        data: None,
-                        timestamp_ms: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis() as u64,
-                    };
-                    publish_telemetry_event(complete_event);
-                }
-                Err(e) => {
-                    println!("TTS failed: {}", e);
-
-                    // Emit error event
-                    let error_event = TelemetryEvent {
-                        event_type: "PipelineError".to_string(),
-                        stage_name: Some("tts".to_string()),
-                        target: Some("device".to_string()),
-                        latency_ms: None,
-                        error: Some(e.to_string()),
-                        data: None,
-                        timestamp_ms: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis() as u64,
-                    };
-                    publish_telemetry_event(error_event);
-                }
-            }
-        } else {
-            println!("Model metadata not found at {:?}", metadata_path);
+        let model = ModelLoader::from_directory(&model_dir)?.load()?;
+        let input = Envelope::new(EnvelopeKind::Text(
+            "Hello, this is an observability test.".to_owned(),
+        ));
+        let result = model.run(&input, None)?;
+        if let Some(audio) = result.audio_bytes() {
+            println!("Generated {} bytes of audio", audio.len());
         }
-    } else {
-        println!("\nNote: kitten-tts model not found, skipping TTS test");
-        println!("Download with: ./integration-tests/download.sh kitten-tts");
-        println!("Only the test event will be sent.");
+        if let Some(reference) = result.observation_ref() {
+            println!("Inference trace: {}", reference.trace_id);
+        }
     }
-
-    // Flush and shutdown
-    println!("\nFlushing telemetry...");
-    flush_platform_telemetry();
-
-    // Give time for HTTP request to complete
-    std::thread::sleep(std::time::Duration::from_secs(2));
-
-    println!("Shutting down telemetry...");
-    shutdown_platform_telemetry();
-
-    println!("\n=== Test Complete ===");
-    println!(
-        "Check the platform console at {}/ to verify events arrived",
-        endpoint.replace("8000", "5173")
-    ); // Assuming console runs on 5173
-
+    for event in rx.try_iter() {
+        println!("Local event: {}", event.event_type);
+    }
+    export.finish()?;
+    println!("Observability shutdown complete");
     Ok(())
 }

@@ -42,8 +42,7 @@ import 'package:xybrid_flutter/xybrid_flutter.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Runs locally with no key. Pass an apiKey to light up the dashboard:
-  //   await Xybrid.init(apiKey: const String.fromEnvironment('XYBRID_API_KEY'));
+  // Runs locally with no key. Configure observability explicitly to export.
   await Xybrid.init();
 
   // Load a TTS model from the registry
@@ -55,10 +54,77 @@ Future<void> main() async {
 }
 ```
 
-Inference runs entirely on-device whether or not you authenticate. Without an
-`apiKey`, telemetry is disabled and the first inference logs a one-shot hint
-pointing at the dashboard (suppress with `XYBRID_QUIET=1`). Get a free key at
-[dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+Inference runs locally without an account. `apiKey` configures cloud authentication;
+export is off until you explicitly configure observability.
+
+## Observability
+
+```dart
+await Xybrid.init(
+  apiKey: const String.fromEnvironment('XYBRID_API_KEY'), // optional cloud auth
+  observability: ObservabilityConfig.xybrid(
+    apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+    metadataOnly: true,
+  ),
+);
+// Or: ObservabilityConfig.otlp(endpoint: 'http://localhost:4318',
+//   serviceName: 'my-app', metadataOnly: true)
+
+final result = await model.run(
+  XybridEnvelope.text('Hello'),
+  options: const RunOptions(observation: ObservationOptions(
+    conversationId: 'conversation-1',
+    // Optional W3C traceparent/tracestate link this run to a caller's span.
+  )),
+);
+final reference = result.observation; // null when untraced/suppressed
+if (reference != null) {
+  XybridObservability.recordFeedback(reference, score: 1.0);
+}
+await XybridObservability.flush(timeoutMs: 5000);
+await XybridObservability.shutdown(timeoutMs: 5000);
+```
+
+Xybrid's preset exports traces only. A Collector receives traces, metrics, and
+logs; feedback/evaluation returns `false` if logs are unavailable. Explicit export
+configuration captures prompts, outputs, and tool payloads by default unless
+`metadataOnly` is set or the native environment disables content. No observability
+credentials are needed for offline inference. Export configuration is independent of cloud
+authentication, and changing either does not change the other's key.
+Legacy `ingestUrl` and `initTelemetry` calls preserve metadata-only export;
+use explicit observability configuration to enable content capture.
+
+The same `RunOptions.observation` works with `runWithContext`, `runStreaming`,
+`runStreamingWithContext`, `runStreamingWithFallback`, and `runTtsStreaming`.
+`suppressTrace: true` skips detailed spans while retaining aggregate metrics. Invalid W3C context is
+ignored by the SDK. Normal and fallback streams merge `observation` and metrics
+into one terminal token, preserving its native index and finish reason.
+Context streams retain their separate metrics/completion token.
+Tool calls are delivered once. Pipeline workflow spans are exported, but the
+current SDK pipeline result exposes no workflow reference; pipeline results
+therefore have `observation == null`. Chunked TTS exports spans automatically,
+and accepts observation options, but the SDK audio-chunk result exposes no trace
+reference.
+
+`XybridObservability.init(config)` replaces an exporter and propagates config
+errors; corrected config can be retried. `shutdown` disables native exporter
+state and is idempotent; a later `init` restarts export. Flush/shutdown run off
+the UI isolate, have bounded timeouts, and surface native lifecycle errors. Counters
+and state are available through `XybridObservability.stats`.
+
+Migration: `Xybrid.init(apiKey: ...)` now configures authentication only. Pass
+`observability:` to enable export. The explicit legacy
+`Xybrid.init(apiKey: ..., ingestUrl: ...)` and `Xybrid.initTelemetry` still start
+a real OTLP trace exporter: bare URLs map to `/v1/traces`, full endpoint paths
+are preserved. Existing custom receivers must accept OTLP instead of legacy
+platform events. Legacy initialization now replaces prior config (the obsolete
+process-wide once-guard is gone); `isTelemetryInitialized` reports actual native
+state, including shutdown. Dedicated `initTelemetry` preserves the current cloud
+key; combined `init(apiKey: ..., ingestUrl: ...)` configures both with the supplied
+key. `resourceTelemetry` keeps configuring CPU/memory
+sampling independently of export (`off`, `boundary`, `summary[:ms]`,
+`debug_local[:ms]`). Invalid modes and malformed intervals now fail before
+export is enabled or replaced.
 
 ## Features
 

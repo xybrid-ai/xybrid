@@ -57,6 +57,29 @@ class ChangeSelectionTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
 
+    def test_js_release_surfaces_run_tooling_and_full_ci(self):
+        for path in (
+            "bindings/web/scripts/check-pack.mjs",
+            "bindings/web/scripts/check-pack.test.mjs",
+            "bindings/web/package.json", "bindings/web/pnpm-lock.yaml",
+            "bindings/web/pnpm-workspace.yaml",
+            "bindings/observability-js/scripts/build.ts",
+            "bindings/observability-js/package.json",
+            "bindings/observability-js/pnpm-lock.yaml",
+            "bindings/observability-js/pnpm-workspace.yaml",
+            "bindings/observability-js/src/version.ts",
+        ):
+            with self.subTest(path=path):
+                outputs = classify("pull_request", pr_files(path))
+                self.assertEqual(outputs["full_ci"], "true")
+                self.assertEqual(outputs["relevant"], "true")
+        for path in (
+            "bindings/web/README.md", "bindings/observability-js/RELEASING.md",
+            "bindings/web/package.json.bak", "bindings/web/src/llm.ts",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
+
     def test_flutter_platform_floors_run_tooling_tests(self):
         for path in (
             "bindings/flutter/ios/xybrid_flutter.podspec",

@@ -3,7 +3,7 @@
 On-device AI for React Native — LLMs, speech recognition, text-to-speech,
 embeddings and vision — backed by the same Rust SDK as Xybrid's Swift, Kotlin,
 Flutter and Unity bindings. Runs offline with no account; add an API key to
-light up cloud fallback and telemetry.
+light up cloud fallback, and an observability config to export traces.
 
 ```ts
 import { Envelope, ModelLoader } from '@xybrid/react-native';
@@ -55,7 +55,7 @@ cd ios && pod install
 
 Local inference needs no setup. Call `initialize` first only when you have
 options — an API key enables the platform features on top of the same local
-runtime: cloud fallback, speculative cloud serving and dashboard telemetry.
+runtime: cloud fallback and speculative cloud serving.
 
 ```ts
 import { Xybrid } from '@xybrid/react-native';
@@ -65,6 +65,40 @@ await Xybrid.initialize({ apiKey: XYBRID_API_KEY });
 
 Options apply once per app process; calling again with different options
 rejects with `xybrid_config_error` (restart the app to change them).
+
+### Observability (OpenTelemetry)
+
+Export is off until you configure it; an API key alone does not enable it.
+Build a config from a preset and call `init()`:
+
+```ts
+import { Observability, ObservabilityConfig } from '@xybrid/react-native';
+
+// Traces to the Xybrid dashboard.
+await ObservabilityConfig.xybrid(XYBRID_API_KEY).setService('my-app', '1.4.0').init();
+
+// Or traces, metrics and logs to your own OpenTelemetry Collector.
+await ObservabilityConfig.otlp('http://collector:4318')
+  .setResourceAttribute('deployment.environment', 'staging')
+  .setMetadataOnly(true) // prompts and outputs are captured unless you opt out
+  .init();
+```
+
+Runs report where they were recorded, and accept a parent trace:
+
+```ts
+const result = await model.run(prompt, { traceparent, conversationId: chatId });
+if (result.observation) {
+  await Observability.recordFeedback(result.observation, { score: 1, comment: 'helpful' });
+}
+await Observability.flush(2000); // e.g. when the app backgrounds
+```
+
+`suppressTrace: true` skips a run's detailed trace (metrics are still
+recorded). Feedback and evaluations (`Observability.recordEvaluation`) need a
+logs signal, so they resolve `false` with the Xybrid preset, which exports
+traces only. `Observability.stats()` reports exported and dropped spans;
+`Observability.shutdown(timeoutMs)` flushes and stops export.
 
 ### Load and run
 

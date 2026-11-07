@@ -1,0 +1,48 @@
+# OpenTelemetry Collector profile: traces → Xybrid, metrics and logs → your
+# own stores, plus optional fan-out of the same traces to Langfuse/Phoenix
+# (combine with langfuse.yaml / phoenix.yaml pipelines as needed).
+#
+# Xybrid stores AI traces only. Send metrics and log events (evaluation
+# results, content-detail events, exceptions) to a metrics/log backend of your
+# choice.
+#
+# Environment:
+#   XYBRID_API_KEY          Xybrid API key
+#   XYBRID_TRACES_ENDPOINT  defaults to https://ingest.xybrid.dev/v1/traces
+#   METRICS_OTLP_ENDPOINT   e.g. Prometheus/Mimir OTLP, Grafana Cloud, Datadog
+#   LOGS_OTLP_ENDPOINT      e.g. Loki OTLP, Elastic, Datadog
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    send_batch_max_size: 256
+
+exporters:
+  otlphttp/xybrid:
+    traces_endpoint: ${env:XYBRID_TRACES_ENDPOINT:-https://ingest.xybrid.dev/v1/traces}
+    headers:
+      Authorization: "Bearer ${env:XYBRID_API_KEY}"
+  otlphttp/metrics:
+    endpoint: ${env:METRICS_OTLP_ENDPOINT}
+  otlphttp/logs:
+    endpoint: ${env:LOGS_OTLP_ENDPOINT}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/xybrid]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/metrics]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/logs]
