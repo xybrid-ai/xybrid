@@ -39,9 +39,8 @@
 [![npm][npm-shield]][npm-url]
 [![Swift Package Manager][spm-shield]][spm-url]
 <br>
-[![Ask DeepWiki][deepwiki-shield]][deepwiki-url]
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/xybrid-ai/xybrid)
 [![Greptile: The War on Bugs][greptile-shield]][greptile-url]
-[![Stars][stars-shield]][stars-url]
 [![Visitors][visitors-shield]][visitors-url]
 
 </p>
@@ -79,12 +78,8 @@
 [spm-url]: https://github.com/xybrid-ai/xybrid
 
 <!-- Community — flat-square -->
-[deepwiki-shield]: https://deepwiki.com/badge.svg
-[deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
 [greptile-shield]: https://www.greptile.com/badge.svg
 [greptile-url]: https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source
-[stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square
-[stars-url]: https://github.com/xybrid-ai/xybrid#star-history
 [twitter-shield]: https://img.shields.io/badge/Follow-%40xybrid__ai-000000?style=for-the-badge&logo=x&logoColor=white
 [twitter-url]: https://x.com/xybrid_ai
 [visitors-shield]: https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid
