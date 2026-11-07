@@ -3234,7 +3234,11 @@ impl ModelLoader {
     }
 
     fn load_from_directory(&self, path: &PathBuf) -> SdkResult<XybridModel> {
-        let handle = Self::create_model_handle(path, self.speculative_enabled())?;
+        // A directory load is local whatever the speculative-cloud preference
+        // says: only `load_speculative` builds a cloud-backed model. The
+        // preference includes the process-global default, so passing it here
+        // would refuse decision models in any app that speculates for chat.
+        let handle = Self::create_model_handle(path, false)?;
 
         Ok(Self::publish_loaded_model(handle))
     }
@@ -3270,6 +3274,9 @@ impl ModelLoader {
         }
     }
 
+    /// Builds the handle for the bundle in `model_dir`. `speculative` is true
+    /// only for the handle a speculative download swaps into a cloud-backed
+    /// model, which must never become a decision model.
     fn create_model_handle(model_dir: &PathBuf, speculative: bool) -> SdkResult<ModelHandle> {
         // Load metadata
         let metadata_path = model_dir.join("model_metadata.json");
@@ -9683,6 +9690,38 @@ mod tests {
         );
         drop(held);
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn speculative_preference_does_not_refuse_a_local_decision_load() {
+        let is_speculation_refusal = |error: &SdkError| {
+            matches!(error, SdkError::UnsupportedModelCapability { capability, .. }
+                if capability == "speculative execution")
+        };
+        let temp_dir = tempfile::tempdir().expect("temporary model directory should exist");
+        let metadata_json =
+            serde_json::to_string(&liquid_metadata()).expect("model metadata should serialize");
+        std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
+            .expect("model metadata should be written");
+        let dir = temp_dir.path().to_path_buf();
+
+        // The load reaches the decision runtime, which fails here only because
+        // the fixture has no weights (or the build has no llama.cpp).
+        let loader = ModelLoader::from_directory(&dir)
+            .expect("fixture directory should be accepted")
+            .with_speculative_cloud(true);
+        let error = match loader.load() {
+            Ok(_) => panic!("the fixture has no weights"),
+            Err(error) => error,
+        };
+        assert!(!is_speculation_refusal(&error), "{error:?}");
+
+        // The handle a speculative download swaps in still refuses decisions.
+        let error = match ModelLoader::create_model_handle(&dir, true) {
+            Ok(_) => panic!("a speculative swap must refuse a decision model"),
+            Err(error) => error,
+        };
+        assert!(is_speculation_refusal(&error), "{error:?}");
     }
 
     #[test]

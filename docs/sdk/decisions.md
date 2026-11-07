@@ -50,9 +50,7 @@ let request = decode_decision_request(r#"{
     }
   }
 }"#)?;
-let model = ModelLoader::from_directory("./d1-model")?
-    .with_speculative_cloud(false)
-    .load()?;
+let model = ModelLoader::from_directory("./d1-model")?.load()?;
 let input = Envelope::decision_request(request);
 let result = model.run(&input, None)?;
 let decisions = result.decisions().ok_or("expected decisions")?;
