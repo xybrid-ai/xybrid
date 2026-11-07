@@ -825,9 +825,9 @@ fn emit_link_and_wrapper(
         .file(wrapper_path)
         .include(llama_cpp_dir.join("include"))
         .include(llama_cpp_dir.join("ggml/include"))
-        // Both src/ and common/ have unicode.h; Jinja needs common's API.
+        // The Jinja closure's headers and nlohmann. llama.cpp's src/ stays
+        // off the path: its unicode.h shadows common's.
         .include(llama_cpp_dir.join("common"))
-        .include(llama_cpp_dir.join("src"))
         .include(llama_cpp_dir.join("vendor"));
     // Audited minimal Jinja closure, pinned by LLAMA_CPP_COMMIT.
     for source in [

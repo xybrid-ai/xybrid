@@ -1434,11 +1434,17 @@ int llama_generate_streaming_c(
 // runtime, value/string helpers, JSON and Unicode. No server/chat application.
 #include "jinja/parser.h"
 #include "json.h"
-#include "llama-ext.h"
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <string>
+
+// llama.cpp exports this only from its internal staging header
+// (src/llama-ext.h), with no public equivalent. Including that header would
+// put llama.cpp's source tree, and a second ggml.h, on every dependent's
+// include path. Declared here with the header's C++ linkage instead; a
+// parameter change upstream fails the link.
+LLAMA_API int32_t llama_model_n_devices(const struct llama_model * model);
 
 namespace {
 constexpr uint32_t decision_context_size = 4096;

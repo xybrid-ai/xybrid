@@ -91,6 +91,11 @@ filegroup(
 # Audited decision renderer closure from the same immutable upstream pin.
 # It links neither common/chat.cpp nor the server application. The model
 # runtime dependency remains selected by wrapper_cc (including Android DL).
+#
+# Only common/ reaches dependents (for jinja/*.h and json.h). wrapper_cc gets
+# ggml.h from the llama build it links; a second copy on its include path
+# redefines every ggml type, so ggml.h and nlohmann stay private below.
+# llama.cpp's src/ is never on the path: its unicode.h shadows common's.
 cc_library(
     name = "llama_decision_jinja",
     copts = ["-std=c++17"] + select({
@@ -105,26 +110,27 @@ cc_library(
         "vendor/llama-cpp/common/jinja/string.cpp",
         "vendor/llama-cpp/common/json.cpp",
         "vendor/llama-cpp/common/unicode.cpp",
-    ],
-    hdrs = glob([
-        "vendor/llama-cpp/common/jinja/*.h",
-        "vendor/llama-cpp/vendor/nlohmann/*.hpp",
-    ]) + [
-        "vendor/llama-cpp/common/json.h",
         "vendor/llama-cpp/common/unicode.h",
-        "vendor/llama-cpp/ggml/include/ggml.h",
-        "vendor/llama-cpp/src/llama-ext.h",
-        "vendor/llama-cpp/src/llama-arch.h",
     ],
-    # common/unicode.h and src/unicode.h expose different APIs. Keep common
-    # first for the Jinja sources, matching Cargo's audited source closure.
+    hdrs = glob(["vendor/llama-cpp/common/jinja/*.h"]) + [
+        "vendor/llama-cpp/common/json.h",
+    ],
+    implementation_deps = [":llama_decision_jinja_private_headers"],
+    includes = ["vendor/llama-cpp/common"],
+    visibility = ["//visibility:public"],
+)
+
+# Headers only the Jinja closure's own sources compile against: ggml.h and
+# nlohmann, both for common/json.cpp.
+cc_library(
+    name = "llama_decision_jinja_private_headers",
+    hdrs = glob(["vendor/llama-cpp/vendor/nlohmann/*.hpp"]) + [
+        "vendor/llama-cpp/ggml/include/ggml.h",
+    ],
     includes = [
-        "vendor/llama-cpp/common",
         "vendor/llama-cpp/ggml/include",
-        "vendor/llama-cpp/src",
         "vendor/llama-cpp/vendor",
     ],
-    visibility = ["//visibility:public"],
 )
 
 # The browser runtime uses the same pinned sources as //:llama. These sources
