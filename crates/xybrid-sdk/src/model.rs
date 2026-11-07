@@ -3665,13 +3665,14 @@ impl XybridModel {
     }
 
     /// Whether this model returns typed decisions through local batch execution.
+    ///
+    /// Reads the output type cached at load, never the model lock, so callers
+    /// (a UI thread starting a stream, a run's fast-fail checks) do not wait
+    /// behind a run in progress. The cache cannot go stale: a decision template
+    /// always loads as [`OutputType::Decisions`], and the speculative handle
+    /// swap, the only later change of template, refuses decision templates.
     pub fn is_decision_model(&self) -> bool {
-        self.handle.read().ok().is_some_and(|handle| {
-            matches!(
-                handle.metadata.execution_template,
-                ExecutionTemplate::Decision(_)
-            )
-        })
+        self.output_type == OutputType::Decisions
     }
 
     /// The candidates a choice scorer appends after the caller's, in order.
@@ -7609,6 +7610,8 @@ mod tests {
         let model_id = metadata.model_id.clone();
         let version = metadata.version.clone();
         let default_generation_config = xybrid_core::execution::model_default_gen_config(&metadata);
+        // As `publish_loaded_model` does: the cached type must match the template.
+        let output_type = ModelLoader::infer_output_type(&metadata);
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
                 executor: Arc::new(Mutex::new(TemplateExecutor::default())),
@@ -7618,7 +7621,7 @@ mod tests {
             })),
             model_id,
             version,
-            output_type: OutputType::Text,
+            output_type,
             supports_streaming: true,
             default_generation_config,
             current_run: Arc::new(Mutex::new(None)),
@@ -9626,6 +9629,60 @@ mod tests {
             async_error,
             SdkError::UnsupportedModelCapability { .. }
         ));
+    }
+
+    #[test]
+    fn decision_checks_do_not_wait_for_a_run_holding_the_model() {
+        use crate::run_options::{AbortPolicy, AbortSignal};
+        let decision = test_model_with_metadata(liquid_metadata());
+        let chat = test_loaded_model(true);
+        // A run in progress holds its model's write lock for its whole length.
+        let held = (
+            decision.handle.write().unwrap(),
+            chat.handle.write().unwrap(),
+        );
+        let (send, recv) = std::sync::mpsc::channel();
+        let (worker_decision, worker_chat) = (decision.clone(), chat.clone());
+        let worker = std::thread::spawn(move || {
+            let cloud_fallback = RunOptions::new()
+                .with_abort_policy(AbortPolicy::default().with_cloud_fallback(true));
+            let memory_critical = RunOptions::new()
+                .with_abort_policy(
+                    AbortPolicy::default().stop_on(AbortSignal::MemoryPressureCritical),
+                )
+                .with_resource_provider(Arc::new(FixedUnitResourceProvider::new(
+                    xybrid_core::device::ResourceSnapshot {
+                        memory_pressure: xybrid_core::device::MemoryPressure::Critical,
+                        ..Default::default()
+                    },
+                )));
+            send.send((
+                worker_decision.is_decision_model(),
+                worker_chat.is_decision_model(),
+                worker_decision.run_with_options(&decision_warmup_request(), &cloud_fallback),
+                worker_chat.run_with_options(&text_envelope("hello"), &memory_critical),
+            ))
+            .unwrap();
+        });
+        let (decision_flag, chat_flag, refused, aborted) = recv
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("decision checks must not wait for the model lock");
+        assert!(decision_flag);
+        assert!(!chat_flag);
+        assert!(matches!(
+            refused,
+            Err(SdkError::UnsupportedModelCapability { .. })
+        ));
+        let aborted = match aborted {
+            Ok(_) => panic!("memory pressure must abort before the run"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(&aborted, SdkError::InferenceError { message, .. } if message.contains("memory_pressure_critical")),
+            "{aborted:?}"
+        );
+        drop(held);
+        worker.join().unwrap();
     }
 
     #[test]
