@@ -1,0 +1,281 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Streaming timing points (first chunk, inter-chunk, first token) are recorded when observed with the dimensions known at that moment: gen_ai.response.model is present once recorded and absent before; error.type never appears on them.",
+  "expect": {
+    "logs": [
+      {
+        "attributes": {
+          "exception.type": "timeout"
+        },
+        "event_name": "gen_ai.client.operation.exception",
+        "severity_number": 13,
+        "span": "late"
+      }
+    ],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "error.type": "timeout",
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "gen_ai.response.model": "gpt-4o-mini-2024-07-18",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 0.2
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "gen_ai.response.model": "gpt-4o-mini-2024-07-18",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 0.3
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.time_per_output_chunk",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "gen_ai.response.model": "gpt-4o-mini-2024-07-18",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 2,
+            "sum": 0.11
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.time_to_first_chunk",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "gen_ai.response.model": "gpt-4o-mini-2024-07-18",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 0.15
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 0.1
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "xybrid.genai.client.inference.time_to_first_token",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "gen_ai.response.model": "gpt-4o-mini-2024-07-18",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 0.1
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 0.05
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "openai",
+          "gen_ai.request.model": "gpt-4o-mini",
+          "gen_ai.request.stream": true,
+          "gen_ai.response.id": "resp-1",
+          "gen_ai.response.model": "gpt-4o-mini-2024-07-18",
+          "gen_ai.response.time_to_first_chunk": 0.15,
+          "server.address": "api.openai.com",
+          "server.port": 443,
+          "xybrid.genai.execution.location": "remote",
+          "xybrid.genai.response.chunk_count": 2,
+          "xybrid.genai.response.time_to_first_token": 0.1,
+          "xybrid.genai.runtime.name": "http"
+        },
+        "end_ms": 300,
+        "id": "early",
+        "kind": "CLIENT",
+        "name": "chat gpt-4o-mini",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "error.type": "timeout",
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "openai",
+          "gen_ai.request.model": "gpt-4o-mini",
+          "gen_ai.request.stream": true,
+          "gen_ai.response.model": "gpt-4o-mini-2024-07-18",
+          "gen_ai.response.time_to_first_chunk": 0.1,
+          "server.address": "api.openai.com",
+          "server.port": 443,
+          "xybrid.genai.execution.location": "remote",
+          "xybrid.genai.response.chunk_count": 2,
+          "xybrid.genai.response.time_to_first_token": 0.05,
+          "xybrid.genai.runtime.name": "http"
+        },
+        "end_ms": 600,
+        "id": "late",
+        "kind": "CLIENT",
+        "name": "chat gpt-4o-mini",
+        "parent": null,
+        "start_ms": 400,
+        "status": {
+          "code": "ERROR",
+          "description": "timeout"
+        },
+        "trace": 1
+      }
+    ]
+  },
+  "name": "streaming_response_model_metrics",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "early",
+      "op": "start_inference",
+      "request": {
+        "location": "remote",
+        "model": "gpt-4o-mini",
+        "operation": "chat",
+        "provider": "openai",
+        "runtime": "http",
+        "server_address": "api.openai.com",
+        "server_port": 443,
+        "stream": true
+      }
+    },
+    {
+      "at_ms": 10,
+      "id": "early",
+      "model": "gpt-4o-mini-2024-07-18",
+      "op": "response",
+      "response_id": "resp-1"
+    },
+    {
+      "at_ms": 100,
+      "id": "early",
+      "op": "first_token"
+    },
+    {
+      "at_ms": 150,
+      "id": "early",
+      "op": "chunk"
+    },
+    {
+      "at_ms": 200,
+      "id": "early",
+      "op": "chunk"
+    },
+    {
+      "at_ms": 300,
+      "id": "early",
+      "op": "end"
+    },
+    {
+      "at_ms": 400,
+      "id": "late",
+      "op": "start_inference",
+      "request": {
+        "location": "remote",
+        "model": "gpt-4o-mini",
+        "operation": "chat",
+        "provider": "openai",
+        "runtime": "http",
+        "server_address": "api.openai.com",
+        "server_port": 443,
+        "stream": true
+      }
+    },
+    {
+      "at_ms": 450,
+      "id": "late",
+      "op": "first_token"
+    },
+    {
+      "at_ms": 500,
+      "id": "late",
+      "op": "chunk"
+    },
+    {
+      "at_ms": 520,
+      "id": "late",
+      "model": "gpt-4o-mini-2024-07-18",
+      "op": "response"
+    },
+    {
+      "at_ms": 560,
+      "id": "late",
+      "op": "chunk"
+    },
+    {
+      "at_ms": 600,
+      "error_type": "timeout",
+      "id": "late",
+      "op": "end_with_error"
+    }
+  ]
+}
