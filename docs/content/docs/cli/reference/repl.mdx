@@ -66,9 +66,10 @@ Search providers are pluggable via environment variables:
 
 | Variable | Values |
 |----------|--------|
-| `XYBRID_SEARCH_PROVIDER` | `wikipedia` (default, keyless) · `tavily` · `brave` |
+| `XYBRID_SEARCH_PROVIDER` | `wikipedia` (default, keyless) · `tavily` · `brave` · `keenable` (keyless) |
 | `TAVILY_API_KEY` | API key when the provider is `tavily` |
 | `BRAVE_API_KEY` | API key when the provider is `brave` |
+| `KEENABLE_API_KEY` | Optional API key when the provider is `keenable` |
 
 Add your own tools with `--tools-file` — each entry maps a JSON-schema'd
 function to a command you author (arguments arrive as JSON on stdin, stdout
