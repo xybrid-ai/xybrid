@@ -273,6 +273,15 @@ pub use result::{
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
 pub use xybrid_core::ir::{Choice, ChoiceRequest, ChoiceScore, ChoiceScores};
+
+/// Decode bounded Liquid SystemOne JSON without changing its order or numeric identity.
+///
+/// The optional wire `model` field never changes the explicitly loaded model.
+/// Errors contain no request text and are non-retryable.
+pub fn decode_decision_request(json: &str) -> SdkResult<DecisionRequest> {
+    xybrid_core::execution::decision::wire::decode(json)
+        .map_err(|error| SdkError::inference_src("Decision request refused", error))
+}
 // Decision models: a state plus typed questions, and one answer per question.
 pub use xybrid_core::ir::{
     AnswerInvariant, DecisionAnswer, DecisionContent, DecisionContentView, DecisionError,

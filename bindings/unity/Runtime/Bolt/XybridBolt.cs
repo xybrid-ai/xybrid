@@ -517,6 +517,74 @@ namespace XybridBolt
     public static partial class XybridBolt
     {
         /// <summary>
+        /// Validate ordered typed decision data and build input for the existing run API.
+        /// </summary>
+        public static global::XybridBolt.XybridEnvelope DecisionRequestEnvelope(global::XybridBolt.XybridDecisionRequest request)
+        {
+            WireWriter requestWriter = new WireWriter();
+            {
+                request.Encode(requestWriter);
+            }
+            byte[] requestBytes = requestWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeDecisionRequestEnvelope(requestBytes, (nuint)requestBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridEnvelope.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Decode bounded Liquid SystemOne JSON without foreign dictionary conversion.
+        /// </summary>
+        public static global::XybridBolt.XybridEnvelope DecisionRequestJsonEnvelope(string json)
+        {
+            WireWriter jsonWriter = new WireWriter();
+            {
+                jsonWriter.WriteString(json);
+            }
+            byte[] jsonBytes = jsonWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeDecisionRequestJsonEnvelope(jsonBytes, (nuint)jsonBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridEnvelope.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
         /// Build the continuation envelope for the turn after the model asked for
         /// tools.
         ///
@@ -1694,6 +1762,12 @@ namespace XybridBolt
 
         [global::System.Runtime.InteropServices.DllImport(LibName, EntryPoint = "boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_free")]
         internal static extern void NativeXybridStreamingSessionPartialsFree(ulong subscription);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_decision_request_envelope")]
+        internal static extern FfiBuf NativeDecisionRequestEnvelope([In] byte[] requestBytes, nuint requestLength, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_decision_request_json_envelope")]
+        internal static extern FfiBuf NativeDecisionRequestJsonEnvelope([In] byte[] jsonBytes, nuint jsonLength, out FfiBuf boltffiResultBuffer);
 
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_has_api_key")]
         [return: MarshalAs(UnmanagedType.I1)]

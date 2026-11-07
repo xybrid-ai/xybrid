@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "state-whitespace",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A whitespace-only text state is printed as is",
+  "covers": [
+    "state-string"
+  ],
+  "request_text": "{\"state\": \"  \\n\\t  \", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "artifact": "d1-2b-hf"
+}

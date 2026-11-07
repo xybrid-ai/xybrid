@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "instructions-object",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Object instructions: compact tojson, keys in request order",
+  "covers": [
+    "instructions-structured",
+    "json-order"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": {\"task\": \"Is this a refund request?\", \"labels\": [\"yes\", \"no\"], \"strict\": true, \"weight\": 0.5}}}}",
+  "artifact": "d1-2b-hf"
+}

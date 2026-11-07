@@ -1056,6 +1056,13 @@ stage's latency.
 
 Universal input/output container.
 
+`Envelope.decisionRequestJson(json)` accepts a bounded Liquid SystemOne JSON string;
+`Envelope.decisionRequest(request)` accepts ordered typed builders. Both use the
+existing model `run` surface. JSON content remains text at foreign boundaries to
+preserve order, signed zero and large integers. Decisions are local-only: streaming,
+history, generation options, cloud fallback and pipelines are refused in text/v1.
+See [native decision examples](../guides/decision-bindings.md) for all SDKs.
+
 **Design Note**: Envelope is task-agnostic. Optional metadata parameters (like `voiceId` and `speed`)
 are passed through to pipeline stages that understand them. Stages that don't need these params
 simply ignore them. This allows a single envelope type to flow through multi-stage pipelines
@@ -1324,6 +1331,14 @@ stages:
 ---
 
 ## 7. Result Types
+
+Decision results expose `decisions` (`Decisions` in C#), containing ordered typed
+answers, `passes` and total `inputTokens`. Distribution probabilities remain f64;
+JSON bridges encode a negative-infinite raw score as `"-Infinity"`. `tokensIn`
+and `tokensOut` read envelope usage metadata (`tokensOut` is zero for decisions). These accessors add no fields to frozen result wire
+records. Swift/Kotlin/Python/Unity use an appended decision envelope variant;
+Flutter ships its new internal result carrier and regenerated Rust/Dart bridge
+together. Actual model/package/device qualification remains a release gate.
 
 > **Audio format**: TTS models produce raw PCM audio bytes (16-bit signed, little-endian).
 > Typical sample rate is 24kHz mono (e.g., Kokoro TTS). The audio is returned as raw bytes,

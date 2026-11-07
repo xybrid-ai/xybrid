@@ -145,6 +145,17 @@ enum XybridCodec {
     let what = "\(kind) envelope"
     let payload: XybridEnvelopeKind
     switch kind {
+    case "decisionRequest":
+      if let json = value(object, "requestJson") {
+        guard value(object, "request") == nil, let json = json as? String else {
+          throw BridgeError.invalidArgument("invalid decision request")
+        }
+        payload = try decisionRequestJsonEnvelope(json: json).kind
+      } else {
+        payload = try decisionRequestEnvelope(request: decodeDecisionRequest(object["request"])).kind
+      }
+    case "decisions":
+      throw BridgeError.invalidArgument("decision results cannot be used as model input")
     case "text":
       payload = .text(text: try string(object, "text", what))
     case "audio":
@@ -187,6 +198,12 @@ enum XybridCodec {
                              uniquingKeysWith: { _, last in last }),
     ]
     switch envelope.kind {
+    case .decisionRequest(let request):
+      out["kind"] = "decisionRequest"
+      out["request"] = encodeDecisionRequest(request)
+    case .decisions(let decisions):
+      out["kind"] = "decisions"
+      out["decisions"] = encodeDecisions(decisions)
     case .text(let text):
       out["kind"] = "text"
       out["text"] = text
@@ -205,6 +222,109 @@ enum XybridCodec {
       out["parts"] = parts.map(encodeEnvelope)
     }
     return out
+  }
+
+  // MARK: - Ordered decisions
+
+  static func decodeDecisionContent(_ any: Any?) throws -> XybridDecisionContent? {
+    guard let any, !(any is NSNull) else { return nil }
+    let o = try object(any, "decision content")
+    switch try string(o, "kind", "decision content") {
+    case "text": return .text(text: try string(o, "text", "decision content"))
+    case "json": return .json(jsonText: try string(o, "jsonText", "decision content"))
+    default: throw BridgeError.invalidArgument("unsupported decision content")
+    }
+  }
+
+  static func decodeDecisionRequest(_ any: Any?) throws -> XybridDecisionRequest {
+    let o = try object(any, "decision request")
+    guard let questions = value(o, "questions") as? [Any], questions.count <= 16 else {
+      throw BridgeError.invalidArgument("invalid decision question count")
+    }
+    return XybridDecisionRequest(state: try decodeDecisionContent(o["state"]), questions: try questions.map { any in
+      let q = try object(any, "decision question")
+      let k = try object(q["kind"], "decision question kind")
+      let kind: XybridDecisionQuestionKind
+      switch try string(k, "kind", "decision question kind") {
+      case "choice":
+        guard let options = value(k, "options") as? [Any], options.count <= 255 else {
+          throw BridgeError.invalidArgument("invalid decision option count")
+        }
+        kind = .choice(options: try options.map { any in
+          let option = try object(any, "decision option")
+          return XybridDecisionOption(key: try string(option, "key", "decision option"),
+            description: try decodeDecisionContent(option["description"]))
+        })
+      case "yesNo":
+        kind = .yesNo(yes: try decodeDecisionContent(k["yes"]), no: try decodeDecisionContent(k["no"]))
+      case "score":
+        guard let levels = value(k, "levels") as? [Any], levels.count <= 255 else {
+          throw BridgeError.invalidArgument("invalid decision level count")
+        }
+        kind = .score(levels: try levels.map { any in
+          let level = try object(any, "decision level")
+          return XybridDecisionLevel(description: try decodeDecisionContent(level["description"]))
+        })
+      default: throw BridgeError.invalidArgument("unsupported decision question kind")
+      }
+      return XybridDecisionQuestion(id: try string(q, "id", "decision question"),
+        instructions: try decodeDecisionContent(q["instructions"]), kind: kind)
+    })
+  }
+
+  static func encodeDecisionContent(_ content: XybridDecisionContent) -> JSObject {
+    switch content {
+    case .text(let text): return ["kind": "text", "text": text]
+    case .json(let json): return ["kind": "json", "jsonText": json]
+    }
+  }
+
+  static func encodeDecisionRequest(_ request: XybridDecisionRequest) -> JSObject {
+    var out: JSObject = ["questions": request.questions.map { q -> JSObject in
+      var kind: JSObject
+      switch q.kind {
+      case .choice(let options):
+        kind = ["kind": "choice", "options": options.map { option -> JSObject in
+          var out: JSObject = ["key": option.key]
+          if let description = option.description { out["description"] = encodeDecisionContent(description) }
+          return out
+        }]
+      case .yesNo(let yes, let no):
+        kind = ["kind": "yesNo"]
+        if let yes { kind["yes"] = encodeDecisionContent(yes) }
+        if let no { kind["no"] = encodeDecisionContent(no) }
+      case .score(let levels):
+        kind = ["kind": "score", "levels": levels.map { level -> JSObject in
+          if let description = level.description { return ["description": encodeDecisionContent(description)] }
+          return [:]
+        }]
+      }
+      var out: JSObject = ["id": q.id, "kind": kind]
+      if let instructions = q.instructions { out["instructions"] = encodeDecisionContent(instructions) }
+      return out
+    }]
+    if let state = request.state { out["state"] = encodeDecisionContent(state) }
+    return out
+  }
+
+  static func encodeDecisions(_ decisions: XybridDecisions) -> JSObject {
+    ["passes": decisions.passes, "inputTokens": decisions.inputTokens,
+     "answers": decisions.answers.map { answer -> JSObject in
+      let value: JSObject
+      switch answer.value {
+      case .choice(let key): value = ["kind": "choice", "key": key]
+      case .yesNo(let pYes): value = ["kind": "yesNo", "pYes": pYes]
+      case .score(let score, let statistic):
+        value = ["kind": "score", "value": score, "statistic": statistic == .median ? "median" : "expected"]
+      }
+      var out: JSObject = ["questionId": answer.questionId, "value": value,
+        "distribution": answer.distribution.map { entry -> JSObject in
+          ["key": entry.key, "rawScore": entry.rawScore == -.infinity ? "-Infinity" : Double(entry.rawScore) as Any,
+           "probability": entry.probability, "origin": entry.origin == .caller ? "caller" : "fixed"]
+        }]
+      if let confidence = answer.confidence { out["confidence"] = confidence }
+      return out
+    }]
   }
 
   // MARK: - Generation and run options
@@ -307,6 +427,7 @@ enum XybridCodec {
     case .audio: return "audio"
     case .embedding: return "embedding"
     case .unknown: return "unknown"
+    case .decisions: return "decisions"
     }
   }
 

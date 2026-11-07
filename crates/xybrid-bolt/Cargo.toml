@@ -63,3 +63,6 @@ asr-whispercpp = ["xybrid-sdk/asr-whispercpp"]
 
 # Opt-in privately staged Kitten engine.
 tts-zzz = ["xybrid-sdk/tts-zzz"]
+
+[dev-dependencies]
+tempfile = "3.10"

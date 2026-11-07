@@ -30,6 +30,12 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     // LFM3: 0.15.0 and earlier lack the `lfm3` architecture, and 0.16.0 loads
     // it without LFM3's prompt format, tool calls or image-token cap.
     ("llamacpp-lfm3", cfg!(feature = "llm-llamacpp")),
+    // Protocol support is separate from architecture support. Artifact/device
+    // qualification is still enforced by the registry's published entries.
+    (
+        "llamacpp-lfm3-d1-text-v1",
+        cfg!(all(feature = "llm-llamacpp", not(target_arch = "wasm32"))),
+    ),
     ("llamacpp-lfm3vl", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-llamacpp", cfg!(feature = "llm-llamacpp")),
     ("llm-llamacpp-vision", cfg!(feature = "llm-llamacpp-vision")),
@@ -166,6 +172,10 @@ mod tests {
 
     #[test]
     fn lfm3_backends_follow_the_llama_cpp_features() {
+        assert_eq!(
+            enabled().contains(&"llamacpp-lfm3-d1-text-v1"),
+            cfg!(all(feature = "llm-llamacpp", not(target_arch = "wasm32")))
+        );
         assert_eq!(
             enabled().contains(&"llamacpp-lfm3"),
             cfg!(feature = "llm-llamacpp")

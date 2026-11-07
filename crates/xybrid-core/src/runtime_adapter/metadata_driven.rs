@@ -83,6 +83,7 @@ impl MetadataDrivenAdapter {
             self.executor = TemplateExecutor::with_base_path(&parent.to_string_lossy());
         }
 
+        self.executor.load_decision(&metadata)?;
         self.current_metadata = Some(metadata);
 
         Ok(())
@@ -94,6 +95,7 @@ impl MetadataDrivenAdapter {
             AdapterError::InvalidInput(format!("Failed to parse metadata JSON: {}", e))
         })?;
 
+        self.executor.load_decision(&metadata)?;
         self.current_metadata = Some(metadata);
 
         Ok(())

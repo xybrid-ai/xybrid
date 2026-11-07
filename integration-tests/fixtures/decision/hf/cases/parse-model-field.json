@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "parse-model-field",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A top-level model field is ignored by both",
+  "covers": [
+    "transport"
+  ],
+  "request_text": "{\"model\": \"d1-2B\", \"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "artifact": "d1-2b-hf"
+}

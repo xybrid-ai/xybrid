@@ -99,6 +99,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse output
     match &output_envelope.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Embedding(output_data) => {
             println!("📊 Output probabilities (after softmax):");
             println!("   Length: {}", output_data.len());

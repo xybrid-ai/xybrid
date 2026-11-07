@@ -86,6 +86,10 @@ pub enum XybridError {
     /// JSON-Schema → GBNF grammar conversion failed (constrained decoding).
     #[error("Grammar error: {0}")]
     Grammar(#[from] GrammarError),
+
+    /// Cooperative cancellation without a partial result.
+    #[error("Execution cancelled")]
+    Cancelled,
 }
 
 /// Errors during model inference.
@@ -152,6 +156,7 @@ impl From<crate::runtime_adapter::AdapterError> for XybridError {
     fn from(e: crate::runtime_adapter::AdapterError) -> Self {
         use crate::runtime_adapter::AdapterError;
         match e {
+            AdapterError::Cancelled => XybridError::Cancelled,
             AdapterError::ModelNotFound(s) => XybridError::NotFound(s),
             AdapterError::MissingArtifact { artifact, path } => {
                 XybridError::MissingArtifact { artifact, path }

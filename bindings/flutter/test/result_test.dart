@@ -5,13 +5,13 @@ import 'package:xybrid_flutter/xybrid_flutter.dart';
 
 const _metrics = FfiInferenceMetrics(totalMs: 10, stageLatenciesMs: []);
 
-FfiResult _ffiResult({
+FfiRunResult _ffiResult({
   ObservationRef? observation,
   String? text,
   String? reasoningContent,
   List<FfiToolCall> toolCalls = const [],
 }) =>
-    FfiResult(
+    FfiRunResult.legacy(FfiResult(
       success: true,
       observation: observation,
       text: text,
@@ -20,7 +20,7 @@ FfiResult _ffiResult({
       executionTarget: FfiExecutionTarget.local,
       metrics: _metrics,
       toolCalls: toolCalls,
-    );
+    ));
 
 void main() {
   test('result exposes its observation reference for feedback', () {

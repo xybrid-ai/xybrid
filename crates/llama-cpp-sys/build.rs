@@ -824,7 +824,25 @@ fn emit_link_and_wrapper(
         .std("c++17")
         .file(wrapper_path)
         .include(llama_cpp_dir.join("include"))
-        .include(llama_cpp_dir.join("ggml/include"));
+        .include(llama_cpp_dir.join("ggml/include"))
+        // Both src/ and common/ have unicode.h; Jinja needs common's API.
+        .include(llama_cpp_dir.join("common"))
+        .include(llama_cpp_dir.join("src"))
+        .include(llama_cpp_dir.join("vendor"));
+    // Audited minimal Jinja closure, pinned by LLAMA_CPP_COMMIT.
+    for source in [
+        "common/jinja/lexer.cpp",
+        "common/jinja/parser.cpp",
+        "common/jinja/runtime.cpp",
+        "common/jinja/value.cpp",
+        "common/jinja/string.cpp",
+        "common/json.cpp",
+        "common/unicode.cpp",
+    ] {
+        let path = llama_cpp_dir.join(source);
+        println!("cargo:rerun-if-changed={}", path.display());
+        wrapper_build.file(path);
+    }
     if vision_enabled {
         wrapper_build
             .include(llama_cpp_dir.join("tools/mtmd"))

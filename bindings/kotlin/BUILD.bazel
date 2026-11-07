@@ -201,6 +201,13 @@ pkg_files(
     renames = {"bazel/R.txt": "R.txt"},
 )
 
+# Android's asset merge carries the complete native licenses into consumer APKs.
+pkg_files(
+    name = "aar_llama_notices",
+    srcs = ["src/main/assets/xybrid/llama/NOTICE"],
+    renames = {"src/main/assets/xybrid/llama/NOTICE": "assets/xybrid/llama/NOTICE"},
+)
+
 # The speech engine's fourteen notices (runtime terms and upstream licenses),
 # packaged only by a --//:tts_zzz=true build, whose arm64-v8a slice links the
 # engine: the exact files the verified arm64 Android slice exports, at
@@ -222,6 +229,7 @@ pkg_zip(
         ":aar_classes",
         ":aar_manifest",
         ":aar_rtxt",
+        ":aar_llama_notices",
     ] + [":jni_bolt_" + abi for abi, _, _, _ in ANDROID_ABIS] +
         [":jni_cxx_" + abi for abi, _, _, _ in ANDROID_ABIS] +
         [":jni_ort_" + abi for abi, _, _, ort_target in ANDROID_ABIS if ort_target] +

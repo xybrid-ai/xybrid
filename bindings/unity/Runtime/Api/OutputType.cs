@@ -26,6 +26,9 @@ namespace Xybrid
         /// <summary>
         /// Unknown or unsupported output type.
         /// </summary>
-        Unknown
+        Unknown,
+
+        /// <summary>Typed decision answers, without generated text.</summary>
+        Decisions
     }
 }

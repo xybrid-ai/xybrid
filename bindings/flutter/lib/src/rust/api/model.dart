@@ -17,7 +17,7 @@ import 'result.dart';
 import 'streaming.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `completion`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `resolved_streaming_run_options`, `sdk_error_message`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `completion`, `decision_io_refusal`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `resolved_streaming_run_options`, `sdk_error_message`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
@@ -40,6 +40,12 @@ abstract class FfiCancellationToken implements RustOpaqueInterface {
 
   static Future<FfiCancellationToken> default_() =>
       XybridRustLib.instance.api.crateApiModelFfiCancellationTokenDefault();
+
+  /// Create a separate FFI handle sharing this token's cancellation flag.
+  ///
+  /// Runs consume their opaque argument. Dart retains the original handle
+  /// and transfers this fork so cancellation remains callable while running.
+  FfiCancellationToken fork();
 
   /// Whether cancellation has been requested on this token.
   bool isCancelled();
@@ -80,9 +86,12 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Pass an optional `config` to control generation parameters.
   /// When `None`, the model's default parameters are used.
-  Future<FfiResult> run(
+  /// Decision requests reject explicit generation parameters. Cancellation
+  /// is checked before preparation, between passes, and by the native engine.
+  Future<FfiRunResult> run(
       {required FfiEnvelope envelope,
       FfiGenerationConfig? config,
+      FfiCancellationToken? cancellationToken,
       FfiRunOptions? options});
 
   /// Run inference with streaming output.
@@ -198,7 +207,7 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Pass an optional `config` to control generation parameters.
   /// When `None`, the model's default parameters are used.
-  Future<FfiResult> runWithContext(
+  Future<FfiRunResult> runWithContext(
       {required FfiEnvelope envelope,
       required FfiConversationContext context,
       FfiGenerationConfig? config,

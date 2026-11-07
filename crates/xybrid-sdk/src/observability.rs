@@ -469,6 +469,15 @@ impl RunSubject {
                     Some("onnx"),
                     false,
                 ),
+                ExecutionTemplate::Decision(_) => (
+                    "predict",
+                    Some("decision".into()),
+                    vec![Modality::Text],
+                    Vec::new(),
+                    None,
+                    Some("gguf"),
+                    false,
+                ),
                 template => {
                     let format = match template {
                         ExecutionTemplate::Onnx { .. } => Some("onnx"),
@@ -1196,6 +1205,9 @@ fn parts(envelope: &Envelope) -> Vec<Part> {
         EnvelopeKind::Embedding(_)
         | EnvelopeKind::ChoiceRequest(_)
         | EnvelopeKind::ChoiceScores(_) => Vec::new(),
+        // Decision state, questions and answers stay out of captured content,
+        // like their errors and Debug output; usage comes from tokens_in/out.
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => Vec::new(),
     }
 }
 

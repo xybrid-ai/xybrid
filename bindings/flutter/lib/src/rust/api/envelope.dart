@@ -25,6 +25,14 @@ abstract class FfiEnvelope implements RustOpaqueInterface {
       XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeAudio(
           bytes: bytes, sampleRate: sampleRate, channels: channels);
 
+  /// Decode a bounded Liquid SystemOne request without a Dart JSON round trip.
+  ///
+  /// The loaded model stays authoritative; an optional wire `model` field
+  /// cannot select a model or change local-only execution policy.
+  static FfiEnvelope decisionRequestJson({required String json}) =>
+      XybridRustLib.instance.api
+          .crateApiEnvelopeFfiEnvelopeDecisionRequestJson(json: json);
+
   /// Create embedding envelope from float vector.
   static FfiEnvelope embedding({required List<double> data}) =>
       XybridRustLib.instance.api

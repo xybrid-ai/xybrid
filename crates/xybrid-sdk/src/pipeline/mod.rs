@@ -99,6 +99,12 @@ use xybrid_core::pipeline_config::PipelineConfig;
 /// Result type for pipeline operations.
 pub type PipelineResult<T> = Result<T, SdkError>;
 
+fn guard_decision_pipeline_input(envelope: &Envelope) -> PipelineResult<()> {
+    xybrid_core::execution::decision::ensure_no_decision_kinds("pipeline", [envelope]).map_err(
+        |error| crate::model::sdk_execution_error("Decision pipeline input refused", error),
+    )
+}
+
 // ============================================================================
 // PipelineRef - Lightweight reference from YAML
 // ============================================================================
@@ -1164,6 +1170,7 @@ impl Pipeline {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> PipelineResult<PipelineExecutionResult> {
+        guard_decision_pipeline_input(envelope)?;
         if !self.is_ready() {
             self.load_models()?;
         }
@@ -1190,6 +1197,7 @@ impl Pipeline {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> PipelineResult<PipelineExecutionResult> {
+        guard_decision_pipeline_input(envelope)?;
         // `Pipeline` shares its handle via `Arc`, so a clone is a cheap
         // `'static + Send` handle we can move into `spawn_blocking`. Running
         // the *whole* operation — preload (a synchronous model download) and
@@ -1439,6 +1447,7 @@ impl Xybrid {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> PipelineResult<PipelineExecutionResult> {
+        guard_decision_pipeline_input(envelope)?;
         let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
         pipeline.run_with_options(envelope, options)
     }
@@ -1514,6 +1523,7 @@ impl Xybrid {
     ) -> PipelineResult<PipelineExecutionResult> {
         use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
 
+        guard_decision_pipeline_input(envelope)?;
         let pipeline_ref = PipelineRef::from_yaml(yaml)?;
         let pipeline = pipeline_ref.load()?;
 
@@ -1718,6 +1728,31 @@ impl Xybrid {
 mod tests {
     use super::*;
     use xybrid_core::orchestrator::routing_engine::{RouteTarget, RoutingDecision};
+
+    #[test]
+    fn decision_pipeline_facades_refuse_before_yaml_parsing_or_resolution() {
+        let input = Envelope::new(EnvelopeKind::MultiPart(vec![Envelope::decision_request(
+            crate::decode_decision_request(
+                r#"{"state":"private-pipeline-canary","questions":{"q":{"type":"noul","instructions":"yes?"}}}"#,
+            )
+            .unwrap(),
+        )]));
+        let options = RunOptions::default();
+        for error in [
+            Xybrid::run_pipeline_with_options("[invalid yaml", &input, &options).unwrap_err(),
+            Xybrid::run_pipeline_streaming_with_options(
+                "[invalid yaml",
+                &input,
+                &options,
+                Box::new(|_| panic!("refused decision must not stream")),
+            )
+            .unwrap_err(),
+        ] {
+            assert!(matches!(error, SdkError::UnsupportedModelCapability { .. }));
+            assert!(!error.is_retryable());
+            assert!(!format!("{error:?}").contains("private-pipeline-canary"));
+        }
+    }
 
     #[test]
     fn test_pipeline_ref_from_yaml() {

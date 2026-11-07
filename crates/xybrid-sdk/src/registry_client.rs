@@ -119,6 +119,7 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
 const ARTIFACT_BACKENDS: &[&str] = &[
     "asr-whispercpp-coreml",
     "llamacpp-lfm3",
+    "llamacpp-lfm3-d1-text-v1",
     "llamacpp-lfm3vl",
     "zzz-phonon-31m",
 ];
@@ -2787,6 +2788,15 @@ mod tests {
         )));
 
         let not_chat = [
+            (
+                "a decision model",
+                variant(
+                    true,
+                    with_template(serde_json::json!({
+                        "type": "Decision", "protocol": "lfm3-d1/text/v1", "model_file": "d1.gguf"
+                    })),
+                ),
+            ),
             ("a bundle", variant(false, gguf())),
             ("missing metadata", variant(true, None)),
             (
@@ -3670,6 +3680,18 @@ mod tests {
             resolve_url("http://r", "whisper", "ios-arm64", &features, None),
             "http://r/v1/models/whisper/resolve?platform=ios-arm64&backends=asr-whispercpp-coreml"
         );
+    }
+
+    #[test]
+    fn decision_protocol_backend_is_sent_independently_of_telemetry_headers() {
+        let url = resolve_url(
+            "http://r",
+            "d1-2b",
+            "linux-x64",
+            &["llm-llamacpp", "llamacpp-lfm3", "llamacpp-lfm3-d1-text-v1"],
+            None,
+        );
+        assert_eq!(url, "http://r/v1/models/d1-2b/resolve?platform=linux-x64&backends=llamacpp-lfm3,llamacpp-lfm3-d1-text-v1");
     }
 
     #[test]

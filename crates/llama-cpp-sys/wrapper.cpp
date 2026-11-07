@@ -52,11 +52,17 @@
 
 // Log levels matching Rust's Severity enum
 // 0 = Silent (no logs), 1 = Error, 2 = Warn, 3 = Info, 4 = Debug
+static std::atomic<unsigned> g_private_native_calls{0};
+struct private_native_scope {
+    private_native_scope() { g_private_native_calls.fetch_add(1, std::memory_order_acq_rel); }
+    ~private_native_scope() { g_private_native_calls.fetch_sub(1, std::memory_order_acq_rel); }
+};
 static std::atomic<int> g_log_verbosity{0};  // Default: silent (suppress all library logs)
 
 // Custom log callback that filters based on verbosity level
 static void xybrid_log_callback(enum ggml_log_level level, const char* text, void* user_data) {
     (void)user_data;  // unused
+    if (g_private_native_calls.load(std::memory_order_acquire) != 0) return;
 
     int verbosity = g_log_verbosity.load(std::memory_order_relaxed);
 
@@ -491,16 +497,16 @@ int llama_tokenize_c(
     bool add_special,
     bool parse_special
 ) {
-    const llama_vocab* vocab = llama_model_get_vocab(model);
-    return llama_tokenize(
-        vocab,
-        text,
-        text_len,
-        tokens,
-        n_tokens_max,
-        add_special,
-        parse_special
-    );
+    if (!model || !text || text_len < 0 || n_tokens_max < 0 || (!tokens && n_tokens_max != 0)) {
+        return (-2147483647 - 1);
+    }
+    // Tokenizer diagnostics in upstream can contain prompt substrings. Suppress
+    // them even when the application enabled native debug logging.
+    private_native_scope silence;
+    try {
+        const llama_vocab* vocab = llama_model_get_vocab(model);
+        return llama_tokenize(vocab, text, text_len, tokens, n_tokens_max, add_special, parse_special);
+    } catch (...) { return (-2147483647 - 1); }
 }
 
 int llama_token_to_piece_c(
@@ -1423,3 +1429,223 @@ int llama_generate_streaming_c(
 }
 
 } // extern "C"
+
+// The only common sources linked by this bridge are the pinned Jinja parser,
+// runtime, value/string helpers, JSON and Unicode. No server/chat application.
+#include "jinja/parser.h"
+#include "json.h"
+#include "llama-ext.h"
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <string>
+
+namespace {
+constexpr uint32_t decision_context_size = 4096;
+constexpr size_t decision_byte_limit = 8 * 1024 * 1024;
+
+int copy_decision_text(const char* text, char* out, size_t capacity) {
+    if (!text) return -1;
+    const size_t size = std::strlen(text);
+    if (size > static_cast<size_t>(std::numeric_limits<int>::max())) return -2;
+    if (out && capacity > size) std::memcpy(out, text, size + 1);
+    return static_cast<int>(size);
+}
+
+struct decision_renderer {
+    std::string source;
+    jinja::program program;
+    explicit decision_renderer(const std::string& text) {
+        jinja::lexer lexer;
+        auto lexed = lexer.tokenize(text);
+        source = lexed.source;
+        program = jinja::parse_from_tokens(lexed);
+    }
+};
+
+struct decision_abort_scope {
+    llama_context* ctx;
+    ~decision_abort_scope() noexcept {
+        // Never retain a Rust callback even when native synchronization throws.
+        try { llama_synchronize(ctx); } catch (...) {}
+        llama_set_abort_callback(ctx, nullptr, nullptr);
+    }
+};
+}
+
+extern "C" {
+llama_model* llama_load_decision_model_c(const char* path_model, bool vocab_only) {
+    if (!path_model) return nullptr;
+    private_native_scope silence;
+    try {
+        // Explicit empty devices list matches the oracle's --device none;
+        // n_gpu_layers=0 by itself still permits offload devices.
+        ggml_backend_dev_t no_devices[] = {nullptr};
+        llama_model_params params = llama_model_default_params();
+        params.devices = no_devices;
+        params.n_gpu_layers = 0;
+        params.vocab_only = vocab_only;
+        return llama_model_load_from_file(path_model, params);
+    } catch (...) { return nullptr; }
+}
+
+int llama_model_metadata_c(const llama_model* model, const char* key, char* out, size_t capacity) {
+    if (!model || !key) return -2;
+    try { return llama_model_meta_val_str(model, key, out, capacity); }
+    catch (...) { return -2; }
+}
+int llama_model_metadata_count_c(const llama_model* model) {
+    if (!model) return -1;
+    try { return llama_model_meta_count(model); }
+    catch (...) { return -1; }
+}
+int llama_model_metadata_key_c(const llama_model* model, int index, char* out, size_t capacity) {
+    if (!model || index < 0) return -2;
+    try { return llama_model_meta_key_by_index(model, index, out, capacity); }
+    catch (...) { return -2; }
+}
+int llama_model_named_template_c(const llama_model* model, const char* name, char* out, size_t capacity) {
+    if (!model || !name) return -2;
+    try { return copy_decision_text(llama_model_chat_template(model, name), out, capacity); }
+    catch (...) { return -2; }
+}
+int llama_vocab_text_c(const llama_model* model, int token, char* out, size_t capacity) {
+    if (!model) return -2;
+    try {
+        const auto* vocab = llama_model_get_vocab(model);
+        if (token < 0 || token >= llama_vocab_n_tokens(vocab)) return -2;
+        return copy_decision_text(llama_vocab_get_text(vocab, token), out, capacity);
+    } catch (...) { return -2; }
+}
+bool llama_vocab_is_control_c(const llama_model* model, int token) {
+    if (!model) return false;
+    try {
+        const auto* vocab = llama_model_get_vocab(model);
+        return token >= 0 && token < llama_vocab_n_tokens(vocab) &&
+            (llama_vocab_get_attr(vocab, token) & LLAMA_TOKEN_ATTR_CONTROL) != 0;
+    } catch (...) { return false; }
+}
+
+bool llama_decision_context_settings_c(const llama_context* ctx, llama_decision_settings_c* settings) {
+    if (!ctx || !settings) return false;
+    try {
+        *settings = {
+            llama_n_ctx(ctx), llama_n_ctx_seq(ctx), llama_n_batch(ctx), llama_n_ubatch(ctx),
+            llama_n_seq_max(ctx), llama_n_threads(const_cast<llama_context*>(ctx)),
+            llama_n_threads_batch(const_cast<llama_context*>(ctx)),
+            llama_model_n_devices(llama_get_model(ctx)), llama_get_causal_attn(ctx),
+            llama_get_memory(ctx) != nullptr
+        };
+        return true;
+    } catch (...) { return false; }
+}
+bool llama_decision_context_valid_c(const llama_context* ctx) {
+    if (!ctx) return false;
+    try {
+        return llama_n_ctx(ctx) == decision_context_size &&
+            llama_n_ctx_seq(ctx) == decision_context_size &&
+            llama_n_batch(ctx) == decision_context_size &&
+            llama_n_ubatch(ctx) == decision_context_size &&
+            llama_n_seq_max(ctx) == 1 && !llama_get_causal_attn(ctx) &&
+            llama_get_memory(ctx) == nullptr &&
+            llama_model_n_devices(llama_get_model(ctx)) == 0 &&
+            llama_n_threads(const_cast<llama_context*>(ctx)) == 4 &&
+            llama_n_threads_batch(const_cast<llama_context*>(ctx)) == 4;
+    } catch (...) { return false; }
+}
+llama_context* llama_decision_context_new_c(llama_model* model) {
+    private_native_scope silence;
+    if (!model) return nullptr;
+    try {
+        if (llama_model_n_devices(model) != 0) return nullptr;
+        auto params = llama_context_default_params();
+        params.n_ctx = decision_context_size;
+        params.n_batch = decision_context_size;
+        params.n_ubatch = decision_context_size;
+        params.n_seq_max = 1;
+        params.n_outputs_max = 1;
+        params.n_outputs_max_per_seq = 1;
+        params.n_threads = 4;
+        params.n_threads_batch = 4;
+        params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+        params.offload_kqv = false;
+        params.op_offload = false;
+        auto* ctx = llama_init_from_model(model, params);
+        if (!llama_decision_context_valid_c(ctx)) {
+            llama_free(ctx);
+            return nullptr;
+        }
+        return ctx;
+    } catch (...) { return nullptr; }
+}
+int llama_decision_evaluate_c(llama_context* ctx, const int32_t* tokens, int n_tokens,
+    const int32_t* labels, int n_labels, float* selected,
+    llama_decision_abort_c abort_callback, void* abort_data) {
+    private_native_scope silence;
+    if (!llama_decision_context_valid_c(ctx) || !tokens || !labels || !selected ||
+        n_tokens <= 0 || n_tokens > static_cast<int>(decision_context_size) || n_labels <= 0) return -1;
+    try {
+        const auto* vocab = llama_model_get_vocab(llama_get_model(ctx));
+        const int n_vocab = llama_vocab_n_tokens(vocab);
+        if (n_labels > n_vocab) return -1;
+        for (int i = 0; i < n_tokens; ++i) if (tokens[i] < 0 || tokens[i] >= n_vocab) return -1;
+        for (int i = 0; i < n_labels; ++i) if (labels[i] < 0 || labels[i] >= n_vocab) return -1;
+        if (abort_callback && abort_callback(abort_data)) return -3;
+        std::unique_ptr<llama_batch_ext, decltype(&llama_batch_ext_free)> batch(
+            llama_batch_ext_init(ctx), llama_batch_ext_free);
+        if (!batch) return -2;
+        for (int i = 0; i < n_tokens; ++i) {
+            const int32_t idx = llama_batch_ext_add_token(batch.get(), 0, tokens[i]);
+            const llama_pos pos = i;
+            if (idx != i || !llama_batch_ext_set_pos(batch.get(), idx, &pos) ||
+                !llama_batch_ext_set_output_logits(batch.get(), idx, i == n_tokens - 1)) return -1;
+        }
+        llama_set_abort_callback(ctx, abort_callback, abort_data);
+        decision_abort_scope clear_callback{ctx};
+        // One process call, no chunks and no reserved next-token slot.
+        const int status = llama_process(ctx, LLAMA_PROCESS_TYPE_DECODE, batch.get());
+        llama_synchronize(ctx);
+        if (abort_callback && abort_callback(abort_data)) return -3;
+        if (status != 0) return -2;
+        const float* logits = llama_get_logits_ith(ctx, n_tokens - 1);
+        if (!logits) return -2;
+        for (int i = 0; i < n_labels; ++i) selected[i] = logits[labels[i]];
+        return 0;
+    } catch (...) { return -2; }
+}
+
+void* llama_decision_renderer_new_c(const char* source, size_t source_len) {
+    if (!source || source_len > 65536) return nullptr;
+    try { return new decision_renderer(std::string(source, source_len)); }
+    catch (...) { return nullptr; }
+}
+void llama_decision_renderer_free_c(void* renderer) {
+    delete static_cast<decision_renderer*>(renderer);
+}
+int llama_decision_renderer_render_c(void* renderer, const char* json, size_t json_len,
+    size_t max_output_bytes, char** output, size_t* output_len) {
+    if (!renderer || !json || !output || !output_len || json_len > decision_byte_limit ||
+        max_output_bytes > decision_byte_limit) return -1;
+    *output = nullptr;
+    *output_len = 0;
+    try {
+        auto* compiled = static_cast<decision_renderer*>(renderer);
+        // Each invocation owns its interpreter/environment; only the immutable
+        // AST survives. Parse uses upstream ordered_json and explicit lengths.
+        const common_json input = common_json::parse(std::string(json, json_len));
+        jinja::context ctx(compiled->source);
+        jinja::global_from_json(ctx, input, false);
+        jinja::runtime runtime(ctx);
+        const auto result = runtime.execute(compiled->program);
+        const std::string rendered = jinja::runtime::gather_string_parts(result)->as_string().str();
+        if (rendered.size() > max_output_bytes) return -3;
+        auto bytes = std::make_unique<char[]>(rendered.size() + 1);
+        std::memcpy(bytes.get(), rendered.data(), rendered.size());
+        bytes[rendered.size()] = '\0';
+        *output_len = rendered.size();
+        *output = bytes.release();
+        return 0;
+    } catch (...) { return -2; }
+}
+void llama_decision_rendered_free_c(char* output) { delete[] output; }
+}

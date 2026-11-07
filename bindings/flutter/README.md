@@ -484,6 +484,57 @@ Full API documentation: [pub.dev/documentation/xybrid_flutter](https://pub.dev/d
 
 The plugin reports `binding=flutter` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).
 
+## Decision requests
+
+Liquid d1 text/JSON models use the existing `run` method and return typed
+decisions without generated text. Load a local directory containing the pinned
+GGUF and its `model_metadata.json` with the `lfm3-d1/text/v1` decision template:
+
+```dart
+final model = await XybridModelLoader.fromDirectory('/models/d1-2b-q4km').load();
+final request = DecisionRequest(
+  state: DecisionContent.jsonText('{"ticket":"Charged twice","order":9007199254740993}'),
+  questions: [
+    DecisionQuestion.choice(
+      id: 'route',
+      instructions: DecisionContent.text('Which team should handle this?'),
+      options: [
+        DecisionOption('billing', description: DecisionContent.text('Payments and refunds')),
+        const DecisionOption('technical'),
+      ],
+    ),
+  ],
+);
+final cancel = CancellationToken();
+final result = await model.run(
+  XybridEnvelope.decisionRequest(request),
+  cancellationToken: cancel,
+);
+final answer = result.decisions!.answers.single;
+final selected = (answer.value as ChoiceDecision).key;
+```
+
+`XybridEnvelope.decisionRequestJson` also accepts bounded Liquid SystemOne JSON
+directly. Keep structured content as JSON text to retain object order, signed
+zero and integers above `2^53`; the native decoder validates it. Questions and
+options retain caller order. Probabilities are full-precision protocol outputs,
+not an application action or abstention policy. Decisions support 1–16 questions,
+choice, yes/no and median ordinal scores, with 4,096 input tokens per question.
+Inference is local-only: streaming, conversation context, generation settings,
+cloud overrides and pipelines are refused. Cancellation applies before and
+between passes and at native abort boundaries. Rust and Dart generated bridge
+artifacts must be shipped together; FRB rejects a content-hash mismatch.
+
+This source integration does not establish packaged-device or numerical
+qualification; those remain release gates documented in the decision plan.
+
+The real bridge smoke test accepts `XYBRID_FLUTTER_NATIVE_LIBRARY` (a matching
+Flutter cdylib) and `XYBRID_DECISION_MODEL_DIR` (the pinned local model directory).
+Run `XYBRID_REQUIRE_MODELS=1 flutter test test/decision_native_test.dart` with
+both paths set to require execution; missing artifacts fail that invocation.
+Ordinary package tests report this smoke test as skipped when artifacts are absent.
+
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE)

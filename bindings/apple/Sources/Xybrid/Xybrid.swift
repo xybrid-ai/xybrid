@@ -1127,11 +1127,9 @@ public extension XybridModel {
     /// whatever the backend reports for a cancelled run — it does not surface
     /// `CancellationError`.
     ///
-    /// Cancellation is checked at token boundaries **while streaming**. A batch
-    /// run is only cancellable before generation starts: once the backend is
-    /// producing, `run_with_options` has no token-aware path to stop it, so the
-    /// call finishes normally. Use the streaming surface when a mid-flight stop
-    /// button matters.
+    /// Decision runs check cancellation before preparation, between passes and
+    /// during native decoding. Other batch runs check it before generation;
+    /// streaming generation checks it at token boundaries.
     func runAsync(
         envelope: XybridEnvelope,
         options: XybridRunOptions? = nil
@@ -1403,6 +1401,22 @@ public extension XybridEnvelope {
 // fields, so we mirror them as computed properties on the bolt type.
 
 public extension XybridResult {
+    /// Typed decision answers in request order, retaining Double probabilities.
+    var decisions: XybridDecisions? {
+        if case .decisions(let decisions) = envelope.kind { return decisions }
+        return nil
+    }
+
+    /// Tokens evaluated across all decision passes (zero tokens are generated).
+    var tokensIn: UInt64? {
+        envelope.metadata.first { $0.key == "tokens_in" }.flatMap { UInt64($0.value) }
+    }
+
+    /// Generated output tokens, always zero for decisions.
+    var tokensOut: UInt64? {
+        envelope.metadata.first { $0.key == "tokens_out" }.flatMap { UInt64($0.value) }
+    }
+
     /// `true` for any result returned from `XybridModel.run`. Bolt
     /// surfaces failures as `throws` rather than a `success` flag; this
     /// flag stays at `true` for shape compatibility with the previous
@@ -1459,6 +1473,16 @@ public extension XybridStreamToken {
 // helpers fold the well-known TTS / ASR metadata keys into entries.
 
 public extension XybridEnvelope {
+    /// Ordered typed decision input, validated by the shared Rust contract.
+    static func decisionRequest(_ request: XybridDecisionRequest) throws -> XybridEnvelope {
+        try decisionRequestEnvelope(request: request)
+    }
+
+    /// Raw Liquid SystemOne JSON. Keep structured content as text to preserve number identity.
+    static func decisionRequestJson(_ json: String) throws -> XybridEnvelope {
+        try decisionRequestJsonEnvelope(json: json)
+    }
+
     /// Creates an audio envelope with format metadata.
     /// - Parameters:
     ///   - pcmData: Raw PCM / WAV bytes.

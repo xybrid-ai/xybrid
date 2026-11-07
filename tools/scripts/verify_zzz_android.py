@@ -165,6 +165,8 @@ GGML_BZL = ROOT / "bazel/ggml/android.bzl"
 GLUE = ROOT / "bindings/kotlin/bazel/jni/jni_glue.c"
 
 NOTICE_ROOT = "assets/xybrid/zzz/"
+LLAMA_NOTICE = "assets/xybrid/llama/NOTICE"
+LLAMA_NOTICE_SOURCE = ROOT / "crates/llama-cpp-sys/NOTICE"
 MARKER = b"zzz engine unavailable"
 ENGINE_PREFIX = "zzz_embed_"
 # Staged engine inputs (zzz_pull.py's slice layout), the isolated engine
@@ -532,17 +534,26 @@ def classify(package: Package, layout: str, report: Report) -> Dict[str, Dict[st
 def check_notices(package: Package, speech: bool, report: Report) -> None:
     notices = PULL.SCHEMA5_NOTICE_FILES
     found = {}
+    llama = package.files.get(LLAMA_NOTICE)
+    if llama is None:
+        report.fail(f"{LLAMA_NOTICE}: missing native notice")
+    elif llama.file_size > MAX_NOTICE or package.copy(llama) != hashlib.sha256(LLAMA_NOTICE_SOURCE.read_bytes()).hexdigest():
+        report.fail(f"{LLAMA_NOTICE}: bytes differ from the pinned native notice")
     for name in sorted(package.files):
-        if name.startswith(NOTICE_ROOT):
+        if name == LLAMA_NOTICE:
+            continue
+        elif name.startswith(NOTICE_ROOT):
             found[name[len(NOTICE_ROOT):]] = package.files[name]
         elif name.startswith("assets/"):
             report.fail(f"{shown(name)}: unexpected asset (only the engine notices "
                         f"ship under {NOTICE_ROOT})")
-    notice_dirs = {"assets", "assets/xybrid", NOTICE_ROOT.rstrip("/")} | {
-        (NOTICE_ROOT + name).rsplit("/", 1)[0] for name in notices}
+    notice_dirs = {"assets", "assets/xybrid", "assets/xybrid/llama"}
+    if speech:
+        notice_dirs |= {NOTICE_ROOT.rstrip("/")} | {
+            (NOTICE_ROOT + name).rsplit("/", 1)[0] for name in notices}
     for directory in sorted(package.directories):
         if directory == "assets" or directory.startswith("assets/"):
-            if not speech or directory not in notice_dirs:
+            if directory not in notice_dirs:
                 report.fail(f"{shown(directory + '/')}: unexpected asset directory")
     if not speech:
         if found:
@@ -731,13 +742,13 @@ def _output_info(name: str, original: zipfile.ZipInfo) -> zipfile.ZipInfo:
 
 
 def pack_dist(aar: Path, output: Path) -> int:
-    """Copy jni/<abi>/* to <abi>/* and assets/xybrid/zzz/** as-is; nothing else."""
+    """Copy ABI libraries and the verified speech/native notice assets unchanged."""
     with Package(aar) as package:
         entries = []
         for name in sorted(package.files):
             if name.startswith("jni/"):
                 entries.append((name[len("jni/"):], package.files[name]))
-            elif name.startswith(NOTICE_ROOT):
+            elif name.startswith(NOTICE_ROOT) or name == LLAMA_NOTICE:
                 entries.append((name, package.files[name]))
         require(entries, f"{aar.name}: no jni/ or {NOTICE_ROOT} entries to package")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
@@ -806,6 +817,7 @@ def stage_gradle(release_zip: Path, kotlin_dir: Path) -> int:
     libs = kotlin_dir / "libs"
     assets = kotlin_dir / "src" / "main" / "assets"
     notices = assets / "xybrid" / "zzz"
+    llama_notice = kotlin_dir / "src" / "main" / LLAMA_NOTICE
     for part in (kotlin_dir / "src", kotlin_dir / "src" / "main"):
         require(_plain_directory(part, part.name), f"{part.name}: missing Kotlin source directory")
     libs_exist = _plain_directory(libs, "libs")
@@ -830,14 +842,24 @@ def stage_gradle(release_zip: Path, kotlin_dir: Path) -> int:
                 relative = Path(current).relative_to(assets).as_posix()
                 for entry in dirnames + filenames:
                     child = entry if relative == "." else f"{relative}/{entry}"
-                    require(child in ("xybrid", "xybrid/zzz") or child.startswith("xybrid/zzz/"),
+                    require(child in ("xybrid", "xybrid/zzz", "xybrid/llama", "xybrid/llama/NOTICE") or child.startswith("xybrid/zzz/"),
                             "src/main/assets: holds other assets, which would ship in the AAR")
                     require(not (Path(current) / entry).is_symlink(), "src/main/assets: holds a link")
             if _plain_directory(assets / "xybrid", "src/main/assets/xybrid") \
                     and _plain_directory(notices, NOTICE_ROOT):
                 existing = _existing_notices(notices)
+        if llama_notice.exists():
+            require(llama_notice.is_file() and llama_notice.read_bytes() == LLAMA_NOTICE_SOURCE.read_bytes(),
+                    "existing native notice differs from the pinned source")
 
         written = 0
+        if not llama_notice.exists():
+            for directory in (assets, assets / "xybrid", assets / "xybrid" / "llama"):
+                if not _plain_directory(directory, "native notice directory"):
+                    directory.mkdir()
+            with os.fdopen(_create(llama_notice, assets), "wb") as target:
+                package.copy(package.files[LLAMA_NOTICE], target)
+            written += 1
         if not libs_exist:
             libs.mkdir()
         for abi in ABIS:

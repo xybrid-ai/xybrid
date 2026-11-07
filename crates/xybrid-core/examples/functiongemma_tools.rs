@@ -74,6 +74,9 @@ fn validated_final_text(response: &Envelope) -> Result<String, Box<dyn std::erro
         return Err("tool-result continuation emitted another tool call".into());
     }
     let text = match &response.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Text(text) => strip_tool_calls(text),
         other => return Err(format!("expected Text output, got {other:?}").into()),
     };
@@ -123,6 +126,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let response = executor.execute(&metadata, &request, Some(&config))?;
     let raw_text = match &response.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Text(text) => text,
         other => return Err(format!("expected Text output, got {other:?}").into()),
     };

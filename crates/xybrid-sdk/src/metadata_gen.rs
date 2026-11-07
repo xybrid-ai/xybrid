@@ -12,7 +12,7 @@
 use crate::model::{SdkError, SdkResult};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek};
 use std::path::Path;
 use xybrid_core::execution::{
     template::GenerationParams, ExecutionTemplate, ModelMetadata, VisionEncoderConfig,
@@ -72,7 +72,9 @@ pub fn inspect_and_generate(
     let gguf_info = model_files
         .iter()
         .find(|f| f.format == ModelFormat::Gguf && !is_gguf_companion_filename(&f.filename))
-        .and_then(|f| read_gguf_metadata(&dir.join(&f.filename)));
+        .map(|f| read_gguf_metadata(&dir.join(&f.filename)))
+        .transpose()?
+        .flatten();
 
     let onnx_info = model_files
         .iter()
@@ -222,7 +224,7 @@ pub fn generate_metadata_for_gguf_file(gguf_path: &Path) -> SdkResult<ModelMetad
         .to_lowercase()
         .replace(' ', "-");
 
-    let gguf_info = read_gguf_metadata(gguf_path);
+    let gguf_info = read_gguf_metadata(gguf_path)?;
 
     let file_info = ModelFileInfo {
         filename: filename.clone(),
@@ -438,6 +440,8 @@ pub(crate) struct GgufInfo {
     pub projector_type: Option<String>,
     pub image_size: Option<u64>,
     pub patch_size: Option<u64>,
+    /// A named decision template or decision calibration metadata is present.
+    pub decision_marked: bool,
 }
 
 fn is_vision_projector_filename(filename: &str) -> bool {
@@ -464,7 +468,13 @@ const GGUF_TYPE_UINT64: u32 = 10;
 const GGUF_TYPE_INT64: u32 = 11;
 const GGUF_TYPE_FLOAT64: u32 = 12;
 
-fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
+fn read_gguf_metadata(path: &Path) -> SdkResult<Option<GgufInfo>> {
+    read_gguf_metadata_inner(path).transpose()
+}
+
+// Unknown/corrupt formats retain the existing best-effort fallback. An
+// explicit inspection limit is an error: partial classification is unsafe.
+fn read_gguf_metadata_inner(path: &Path) -> Option<SdkResult<GgufInfo>> {
     let file = std::fs::File::open(path)
         .map_err(|e| {
             log::debug!(target: "xybrid_sdk", "Failed to open GGUF file: {}", e);
@@ -503,12 +513,19 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
         read_u32_le(&mut reader)? as u64
     };
 
-    // Limit to prevent runaway reads on corrupted files
-    let kv_limit = metadata_kv_count.min(1000);
+    // Match the decision native wrapper's metadata-copy bound. Never turn a
+    // partial header scan into a generative classification.
+    if metadata_kv_count > 65_536 {
+        return Some(Err(SdkError::MetadataInvalid(
+            "GGUF metadata entry count exceeds the inspection limit".into(),
+        )));
+    }
+
     let mut vision_projector_type = None;
 
-    // Read metadata key-value pairs
-    for _ in 0..kv_limit {
+    // Classifying from a prefix can hide a decision marker later in the
+    // header. Read every declared entry, stopping on malformed data or EOF.
+    for _ in 0..metadata_kv_count {
         let key = match read_gguf_string(&mut reader) {
             Some(k) => k,
             None => break,
@@ -520,6 +537,12 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
 
         // We only care about specific keys
         match key.as_str() {
+            k if k == "tokenizer.chat_template.systemone" || k.starts_with("systemone.") => {
+                info.decision_marked = true;
+                if !skip_gguf_value(&mut reader, value_type) {
+                    return None;
+                }
+            }
             "general.architecture" => {
                 if value_type == GGUF_TYPE_STRING {
                     info.architecture = read_gguf_string(&mut reader);
@@ -568,10 +591,8 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
             }
         }
 
-        // Early exit if we have everything we need
-        if info.architecture.is_some() && info.context_length.is_some() {
-            break;
-        }
+        // Decision markers commonly appear after architecture/context keys.
+        // Scan the whole header before classifying the execution protocol.
     }
 
     if info.projector_type.is_none() {
@@ -583,7 +604,7 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
     info.quantization = infer_quantization_from_filename(filename);
 
     log::debug!(target: "xybrid_sdk", "GGUF metadata: {:?}", info);
-    Some(info)
+    Some(Ok(info))
 }
 
 fn infer_quantization_from_filename(filename: &str) -> Option<String> {
@@ -615,7 +636,7 @@ fn read_u64_le<R: Read>(reader: &mut R) -> Option<u64> {
 }
 
 fn read_gguf_string<R: Read>(reader: &mut R) -> Option<String> {
-    let len = read_u64_le(reader)? as usize;
+    let len = usize::try_from(read_u64_le(reader)?).ok()?;
     if len > 1_000_000 {
         return None; // Sanity limit
     }
@@ -653,8 +674,8 @@ fn skip_gguf_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> bool {
         GGUF_TYPE_UINT32 | GGUF_TYPE_INT32 | GGUF_TYPE_FLOAT32 => 4,
         GGUF_TYPE_UINT64 | GGUF_TYPE_INT64 | GGUF_TYPE_FLOAT64 => 8,
         GGUF_TYPE_STRING => {
-            if let Some(len) = read_u64_le(reader) {
-                return reader.seek(SeekFrom::Current(len as i64)).is_ok();
+            if let Some(len) = read_u64_le(reader).and_then(|n| i64::try_from(n).ok()) {
+                return reader.seek_relative(len).is_ok();
             }
             return false;
         }
@@ -668,8 +689,13 @@ fn skip_gguf_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> bool {
                 Some(c) => c,
                 None => return false,
             };
-            let limit = count.min(100_000);
-            for _ in 0..limit {
+            // Returning success after skipping only part of an array loses
+            // header alignment and can hide a later decision marker.
+            // GGUF arrays cannot nest, and the bound covers modern vocabularies.
+            if count > 1_000_000 || elem_type == GGUF_TYPE_ARRAY {
+                return false;
+            }
+            for _ in 0..count {
                 if !skip_gguf_value(reader, elem_type) {
                     return false;
                 }
@@ -678,7 +704,8 @@ fn skip_gguf_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> bool {
         }
         _ => return false,
     };
-    reader.seek(SeekFrom::Current(skip_bytes)).is_ok()
+    // Preserve buffered bytes while walking large vocabulary arrays.
+    reader.seek_relative(skip_bytes).is_ok()
 }
 
 // ============================================================================
@@ -981,6 +1008,11 @@ fn build_metadata(
         .unwrap_or_else(|| "unknown".to_string());
 
     match primary.format {
+        ModelFormat::Gguf if gguf_info.is_some_and(|info| info.decision_marked) => {
+            // A companion projector cannot turn a decision checkpoint into
+            // a generative VLM. Text/v1 validates and loads only the model.
+            build_gguf_metadata(model_id, model_id, primary, &task, card, gguf_info)
+        }
         ModelFormat::Gguf => model_files
             .iter()
             .find(|file| {
@@ -988,6 +1020,8 @@ fn build_metadata(
             })
             .and_then(|projector| {
                 read_gguf_metadata(&cache_dir.join(&projector.filename))
+                    .ok()
+                    .flatten()
                     .filter(|info| {
                         matches!(
                             info.projector_type.as_deref(),
@@ -1173,14 +1207,24 @@ fn build_gguf_metadata(
         .or_else(|| card.and_then(|c| c.model_name.clone()))
         .unwrap_or_else(|| format!("{} (auto-generated from {})", model_id, repo));
 
+    let decision_marked = gguf_info.is_some_and(|info| info.decision_marked);
+    if decision_marked {
+        metadata_map.insert("task".to_string(), serde_json::json!("decision"));
+    }
     ModelMetadata {
         model_id: model_id.to_string(),
         version: "1.0".to_string(),
-        execution_template: ExecutionTemplate::Gguf {
-            model_file: primary.filename.clone(),
-            chat_template: None,
-            context_length,
-            generation_params: None,
+        execution_template: if decision_marked {
+            ExecutionTemplate::Decision(xybrid_core::execution::template::DecisionTemplate::new(
+                primary.filename.clone(),
+            ))
+        } else {
+            ExecutionTemplate::Gguf {
+                model_file: primary.filename.clone(),
+                chat_template: None,
+                context_length,
+                generation_params: None,
+            }
         },
         preprocessing: Vec::new(),
         postprocessing: Vec::new(),
@@ -2349,7 +2393,7 @@ mod tests {
 
         drop(f);
 
-        let info = read_gguf_metadata(&gguf_path).unwrap();
+        let info = read_gguf_metadata(&gguf_path).unwrap().unwrap();
         assert_eq!(info.architecture.as_deref(), Some("llama"));
         assert_eq!(info.context_length, Some(8192));
     }
@@ -2372,7 +2416,10 @@ mod tests {
                 write_gguf_test_string(&mut f, value);
             }
             drop(f);
-            read_gguf_metadata(&gguf_path).unwrap().projector_type
+            read_gguf_metadata(&gguf_path)
+                .unwrap()
+                .unwrap()
+                .projector_type
         }
 
         assert_eq!(
@@ -2398,7 +2445,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("bad.gguf");
         std::fs::write(&path, b"NOT_GGUF_data").unwrap();
-        assert!(read_gguf_metadata(&path).is_none());
+        assert!(read_gguf_metadata(&path).unwrap().is_none());
     }
 
     #[test]
@@ -2559,6 +2606,84 @@ mod tests {
                 .and_then(|value| value.as_u64()),
             Some(262_144)
         );
+    }
+
+    #[test]
+    fn decision_marker_after_context_never_becomes_a_generative_template() {
+        for marker in ["tokenizer.chat_template.systemone", "systemone.temperature"] {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("arbitrary-name.gguf");
+            let mut file = std::fs::File::create(&path).unwrap();
+            file.write_all(b"GGUF").unwrap();
+            file.write_all(&3u32.to_le_bytes()).unwrap();
+            file.write_all(&0u64.to_le_bytes()).unwrap();
+            file.write_all(&1005u64.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, "general.architecture");
+            file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, "lfm3");
+            write_gguf_test_string(&mut file, "lfm3.context_length");
+            file.write_all(&GGUF_TYPE_UINT32.to_le_bytes()).unwrap();
+            file.write_all(&262_144u32.to_le_bytes()).unwrap();
+            // The legacy header sniff stopped after 1,000 metadata entries.
+            for index in 0..1001 {
+                write_gguf_test_string(&mut file, &format!("test.padding.{index}"));
+                file.write_all(&GGUF_TYPE_UINT8.to_le_bytes()).unwrap();
+                file.write_all(&[0]).unwrap();
+            }
+            // d1's vocabulary exceeds the old 100,000-element skip bound.
+            write_gguf_test_string(&mut file, "tokenizer.ggml.tokens");
+            file.write_all(&GGUF_TYPE_ARRAY.to_le_bytes()).unwrap();
+            file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+            file.write_all(&125_000u64.to_le_bytes()).unwrap();
+            file.write_all(&vec![0; 125_000 * 8]).unwrap();
+            write_gguf_test_string(&mut file, marker);
+            file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, "placeholder; validated by native loader");
+            drop(file);
+            let metadata = generate_metadata_for_gguf_file(&path).unwrap();
+            assert!(matches!(
+                metadata.execution_template,
+                ExecutionTemplate::Decision(_)
+            ));
+            assert_eq!(metadata.metadata["task"], "decision");
+            let mut projector = std::fs::File::create(dir.path().join("mmproj.gguf")).unwrap();
+            projector.write_all(b"GGUF").unwrap();
+            projector.write_all(&3u32.to_le_bytes()).unwrap();
+            projector.write_all(&0u64.to_le_bytes()).unwrap();
+            projector.write_all(&1u64.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut projector, "clip.vision.projector_type");
+            projector
+                .write_all(&GGUF_TYPE_STRING.to_le_bytes())
+                .unwrap();
+            write_gguf_test_string(&mut projector, "lfm3vl");
+            drop(projector);
+            let (metadata, _) = inspect_and_generate(dir.path(), "test/d1", None).unwrap();
+            assert!(matches!(
+                metadata.execution_template,
+                ExecutionTemplate::Decision(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn decision_classification_refuses_headers_beyond_the_inspection_limit() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("model.gguf");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(b"GGUF").unwrap();
+        file.write_all(&3u32.to_le_bytes()).unwrap();
+        file.write_all(&0u64.to_le_bytes()).unwrap();
+        file.write_all(&65_537u64.to_le_bytes()).unwrap();
+        drop(file);
+
+        assert!(matches!(
+            generate_metadata_for_gguf_file(&path),
+            Err(SdkError::MetadataInvalid(_))
+        ));
+        assert!(matches!(
+            inspect_and_generate(dir.path(), "test/model", None),
+            Err(SdkError::MetadataInvalid(_))
+        ));
     }
 
     #[test]

@@ -950,10 +950,9 @@ suspend fun XybridModel.Companion.fromHuggingfaceAsync(repo: String): XybridMode
  * alone cannot do that — the run is a blocking native call, so cancellation has
  * to be forwarded, which is what the `await()` catch below does.
  *
- * Cancellation is checked at token boundaries **while streaming**. A batch run
- * is only cancellable before generation starts: once the backend is producing,
- * there is no token-aware batch path to stop it, so the call finishes normally.
- * Use [streamTokens] when a mid-flight stop button matters.
+ * Decision runs check cancellation before preparation, between passes and
+ * during native decoding. Other batch runs check it before generation;
+ * streaming generation checks it at token boundaries.
  */
 suspend fun XybridModel.runAsync(
     envelope: XybridEnvelope,
@@ -1113,6 +1112,18 @@ val XybridResult.success: Boolean get() = true
 /** `true` if the result carries no output (`OutputType.UNKNOWN`). */
 val XybridResult.isFailure: Boolean get() = outputType == XybridOutputType.UNKNOWN
 
+/** Ordered decisions, with Double probabilities and zero generated tokens. */
+val XybridResult.decisions: XybridDecisions?
+    get() = (envelope.kind as? XybridEnvelopeKind.Decisions)?.decisions
+
+/** Total tokens evaluated across decision passes. */
+val XybridResult.tokensIn: ULong?
+    get() = envelope.metadata.firstOrNull { it.key == "tokens_in" }?.value?.toULongOrNull()
+
+/** Generated output tokens, always zero for decisions. */
+val XybridResult.tokensOut: ULong?
+    get() = envelope.metadata.firstOrNull { it.key == "tokens_out" }?.value?.toULongOrNull()
+
 /** Text payload, if the result is `.Text`. `null` otherwise. */
 val XybridResult.text: String?
     get() = (envelope.kind as? XybridEnvelopeKind.Text)?.text
@@ -1150,6 +1161,14 @@ val XybridStreamToken.hasToolCalls: Boolean get() = toolCalls.isNotEmpty()
 
 /** Factory methods for creating [XybridEnvelope] instances. */
 object Envelope {
+    /** Ordered typed decision input, validated by the shared Rust contract. */
+    @JvmStatic
+    fun decisionRequest(request: XybridDecisionRequest): XybridEnvelope = decisionRequestEnvelope(request)
+
+    /** Raw Liquid SystemOne JSON; do not round-trip structured content through a map. */
+    @JvmStatic
+    fun decisionRequestJson(json: String): XybridEnvelope = decisionRequestJsonEnvelope(json)
+
     /**
      * Creates an audio envelope from raw PCM data.
      * @param bytes Raw PCM audio bytes.
