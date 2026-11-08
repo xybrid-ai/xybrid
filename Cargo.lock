@@ -6433,6 +6433,7 @@ dependencies = [
  "image 0.25.10",
  "indicatif 0.17.11",
  "lazy_static",
+ "libc",
  "serde",
  "serde_json",
  "serde_yaml",

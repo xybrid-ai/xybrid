@@ -5,8 +5,8 @@
 //! `XYBRID_CREDENTIALS_FILE` when that is set), never a hostname, MAC address
 //! or hardware fingerprint, and it is never exported as telemetry (no
 //! `device.id`, no resource attribute). If the file cannot be written, or an
-//! existing one is unreadable, an ephemeral random ID is used instead and the
-//! file is left as it is.
+//! existing one is unreadable or belongs to another account, an ephemeral
+//! random ID is used instead and the file is left as it is.
 //!
 //! Recovered from the install-ID helper discarded in #737 (`abeec6e3`).
 
@@ -15,7 +15,7 @@ use std::path::Path;
 
 use uuid::Uuid;
 
-use super::credentials::create_private_dir_all;
+use super::credentials::{create_private_dir_all, owned_by_current_account};
 
 /// Read or create the install ID, falling back to an ephemeral UUID.
 pub(crate) fn get() -> String {
@@ -26,7 +26,17 @@ pub(crate) fn get() -> String {
 }
 
 fn read_id(path: &Path) -> io::Result<Uuid> {
-    let content = std::fs::read_to_string(path)?;
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    // Another account may have planted it in a shared directory.
+    if !owned_by_current_account(&file.metadata()?) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "install ID file belongs to another account",
+        ));
+    }
+    let mut content = String::new();
+    file.read_to_string(&mut content)?;
     let id = Uuid::parse_str(content.trim())
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     if id.get_version() != Some(uuid::Version::Random) {

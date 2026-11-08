@@ -92,6 +92,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-flame = "0.2"
 
+# Credentials store: the running account's uid/gid, to check who owns the
+# store's directory and file before trusting a saved key
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 image = "0.25"
 # Loopback platform API for the connect/auth subprocess tests (same as xybrid-sdk)
