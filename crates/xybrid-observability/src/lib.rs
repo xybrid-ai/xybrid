@@ -34,8 +34,16 @@
 //!
 //! Content (prompts, outputs, tool payloads) is captured on spans by default
 //! once an observer is wired; see [`ContentPolicy`] for metadata-only mode,
-//! redaction hooks, and size limits. The behavioral contract shared with the
-//! JavaScript package is in `CONTRACT.md`.
+//! redaction hooks, declarative [`RedactionRule`]s, and size limits. Content
+//! that cannot be processed safely fails closed: it is omitted and listed in
+//! `xybrid.genai.content.truncated_attributes`.
+//!
+//! Applications that own their providers and log processors should read the
+//! [`wire`] module: JSON `null` in log events travels as an empty bytes value
+//! between the observer and the package's exporter.
+//!
+//! The behavioral contract shared with the JavaScript package is in
+//! `CONTRACT.md`.
 
 #![warn(missing_docs)]
 
@@ -45,8 +53,10 @@ pub mod context;
 pub mod error;
 mod observer;
 mod operation;
+mod preflight;
 pub mod semconv;
 pub mod types;
+pub mod wire;
 
 #[cfg(feature = "otlp")]
 pub mod otlp;
@@ -56,9 +66,9 @@ pub use clock::Clock;
 pub use clock::ManualClock;
 pub use content::{
     ContentCapture, ContentPolicy, InputMessage, MediaMetadata, Modality, OutputMessage, Part,
-    Redactor, SubstringRedactor,
+    RedactionError, RedactionRule, Redactor, SubstringRedactor,
 };
-pub use context::{ObservationContext, ObservationRef};
+pub use context::{normalize_tracestate, ObservationContext, ObservationRef};
 pub use error::{Error, Result};
 pub use observer::{Observer, ObserverBuilder};
 pub use operation::{

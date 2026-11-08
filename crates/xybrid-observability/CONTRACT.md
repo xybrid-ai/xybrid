@@ -624,6 +624,10 @@ nulls arrive as `bytesValue: ""` and JS whole-number doubles as `intValue`.
   otherwise. Every later call returns the same result without new work; a flush
   after shutdown returns the shutdown result. Exporter shutdown never aborts
   in-flight work before the pipeline's shutdown deadline.
+  An export that fails at a deadline capped by shutdown counts as cancelled,
+  regardless of which deadline timer fires first. The Rust packaged pipeline
+  waits for the metrics reader's final export, including when its shutdown
+  timeout exceeds the OpenTelemetry SDK provider's own five-second wait.
 - Rust: `Result<()>` with `Error::Timeout` or `Error::Delivery`, plus
   `force_flush_async`/`shutdown_async`; sync calls are safe inside another Tokio
   runtime. JS: `Promise<boolean>`, `true` only for success, resolved after
@@ -674,6 +678,9 @@ Headers: generic endpoints use `header_policy = merge_environment` —
 programmatic headers, later sources winning per key (case-insensitive), resolved
 once at build. `isolated` endpoints send programmatic headers only. The final
 transport adds only `Content-Type` (and a content encoding if ever used).
+HTTP framing headers and a client's generic default `Accept: */*` are transport
+mechanics. They do not add credentials or merge environment headers into an
+isolated endpoint. A caller-supplied `Accept` remains a programmatic header.
 
 | Variable | env constructor (`OtlpConfig::from_env`, `otlpConfigFromEnv`) | generic programmatic config | Xybrid preset |
 |---|---|---|---|

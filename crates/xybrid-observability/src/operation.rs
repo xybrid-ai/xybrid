@@ -1,6 +1,12 @@
 //! Operation handles. Every handle is `Send + Sync`, records through `&self`,
 //! never performs I/O, and ends at most once. Dropping an un-ended handle
 //! ends it as cancelled.
+//!
+//! Content (governed, schema and prompt variables) is processed when it is
+//! recorded, retained on the operation within the retained-operation budget,
+//! and written once, at end (last write wins; one attribute per key).
+//! Metadata and measurements keep their timing and are written before
+//! content, so span attribute limits drop content first.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -8,19 +14,24 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::SystemTime;
 
 use opentelemetry::logs::{AnyValue, Severity};
-use opentelemetry::trace::{SpanKind, Status, TraceContextExt};
-use opentelemetry::{Array, Context, Key, KeyValue, StringValue, Value as OtelValue};
+use opentelemetry::trace::{SpanId, SpanKind, Status, TraceContextExt, TraceFlags, TraceId};
+use opentelemetry::{Array, Key, KeyValue, StringValue, Value as OtelValue};
+use serde::Serialize;
 use serde_json::Value;
 
-use crate::clock::seconds_between;
-use crate::content::{bound_chars, InputMessage, OutputMessage, Part};
+use crate::clock::{seconds_between, OperationClock};
+use crate::content::{InputMessage, Outcome, OutputMessage, Part, TextBound};
 use crate::context::{ObservationContext, ObservationRef};
-use crate::observer::{json_to_any, push_any, LogEvent, ObserverInner};
-use crate::semconv::{attr, event, op, MAX_ERROR_MESSAGE_CHARS};
+use crate::observer::{push_any, Instruments, LogEvent, ObserverInner, SpanState};
+use crate::preflight;
+use crate::semconv::{
+    attr, event, op, ERROR_MESSAGE_KIND, MAX_ERROR_MESSAGE_CHARS, PREFLIGHT_NODE_BYTES,
+};
 use crate::types::{
     AttemptInfo, ErrorInfo, InferenceRequest, Location, ModelLoadInfo, ResourceSample,
-    StartOptions, ToolCallInfo, Usage,
+    StartOptions, ToolCallInfo, TraceMode, Usage,
 };
+use crate::wire::{json_to_any, otel_to_any};
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -33,9 +44,17 @@ fn kind_for(location: Option<Location>) -> SpanKind {
     }
 }
 
+/// `operation + " " + subject`, built literally (no template expansion); the
+/// operation alone when the subject is absent or empty.
 fn span_name(operation: &str, subject: Option<&str>) -> String {
     match subject {
-        Some(s) if !s.is_empty() => format!("{operation} {s}"),
+        Some(s) if !s.is_empty() => {
+            let mut name = String::with_capacity(operation.len() + 1 + s.len());
+            name.push_str(operation);
+            name.push(' ');
+            name.push_str(s);
+            name
+        }
         _ => operation.to_owned(),
     }
 }
@@ -48,6 +67,10 @@ fn string_array(values: impl IntoIterator<Item = String>) -> OtelValue {
 
 fn u64_attr(key: &'static str, v: u64) -> KeyValue {
     KeyValue::new(key, i64::try_from(v).unwrap_or(i64::MAX))
+}
+
+fn finite(v: Option<f64>) -> Option<f64> {
+    v.filter(|v| v.is_finite())
 }
 
 fn usage_attributes(usage: &Usage) -> Vec<KeyValue> {
@@ -81,7 +104,7 @@ fn usage_attributes(usage: &Usage) -> Vec<KeyValue> {
 
 fn resource_attributes(sample: &ResourceSample) -> Vec<KeyValue> {
     let mut out = Vec::new();
-    if let Some(v) = sample.cpu_utilization {
+    if let Some(v) = finite(sample.cpu_utilization) {
         out.push(KeyValue::new(attr::RESOURCE_CPU_UTILIZATION, v));
     }
     if let Some(v) = sample.memory_used_bytes {
@@ -96,13 +119,13 @@ fn resource_attributes(sample: &ResourceSample) -> Vec<KeyValue> {
     if let Some(v) = &sample.thermal_state {
         out.push(KeyValue::new(attr::RESOURCE_THERMAL_STATE, v.clone()));
     }
-    if let Some(v) = sample.battery_level {
+    if let Some(v) = finite(sample.battery_level) {
         out.push(KeyValue::new(attr::RESOURCE_BATTERY_LEVEL, v));
     }
     if let Some(v) = sample.battery_charging {
         out.push(KeyValue::new(attr::RESOURCE_BATTERY_CHARGING, v));
     }
-    if let Some(v) = sample.accelerator_utilization {
+    if let Some(v) = finite(sample.accelerator_utilization) {
         out.push(KeyValue::new(attr::RESOURCE_ACCELERATOR_UTILIZATION, v));
     }
     if let Some(v) = sample.accelerator_memory_used_bytes {
@@ -111,131 +134,292 @@ fn resource_attributes(sample: &ResourceSample) -> Vec<KeyValue> {
     out
 }
 
-/// State shared by every handle type: the span (if any), timing, and the
-/// end-once guard.
+/// One retained content attribute.
+struct Entry {
+    /// Span value: a compact JSON string, or the text of a prompt variable.
+    span: Option<String>,
+    /// Structured event value.
+    event: Option<Value>,
+    /// Retained-operation bytes charged for this entry.
+    bytes: usize,
+}
+
+/// Content retained by one operation within its budget, plus the
+/// `truncated_attributes` set (first-marked order).
+#[derive(Default)]
+struct Retained {
+    entries: BTreeMap<String, Entry>,
+    bytes: usize,
+    truncated: Vec<String>,
+}
+
+impl Retained {
+    fn mark(&mut self, key: &str) {
+        if !self.truncated.iter().any(|k| k == key) {
+            self.truncated.push(key.to_owned());
+        }
+    }
+
+    fn remove(&mut self, key: &str) {
+        if let Some(entry) = self.entries.remove(key) {
+            self.bytes -= entry.bytes;
+        }
+    }
+
+    /// Applies one pipeline outcome for `key` (last write wins).
+    fn apply(&mut self, key: &str, outcome: Recorded, budget: usize) {
+        self.remove(key);
+        match outcome {
+            Recorded::Dropped => {}
+            Recorded::Failed => self.mark(key),
+            Recorded::Value {
+                span,
+                event,
+                truncated,
+            } => {
+                let node = PREFLIGHT_NODE_BYTES + key.len();
+                let bytes = span.as_ref().map_or(0, |s| node + s.len())
+                    + event.as_ref().map_or(0, |v| {
+                        node.saturating_add(
+                            usize::try_from(preflight::cost_of(v)).unwrap_or(usize::MAX),
+                        )
+                    });
+                if self.bytes.saturating_add(bytes) > budget {
+                    self.mark(key);
+                    return;
+                }
+                if truncated {
+                    self.mark(key);
+                }
+                self.bytes += bytes;
+                self.entries
+                    .insert(key.to_owned(), Entry { span, event, bytes });
+            }
+        }
+    }
+
+    /// Span attributes: metadata (`truncated_attributes`) is written by the
+    /// caller first; these are the content attributes.
+    fn span_attributes(&self) -> Vec<KeyValue> {
+        self.entries
+            .iter()
+            .filter_map(|(k, e)| e.span.clone().map(|s| KeyValue::new(k.clone(), s)))
+            .collect()
+    }
+
+    fn take_event_values(&mut self) -> Vec<(Key, AnyValue)> {
+        std::mem::take(&mut self.entries)
+            .into_iter()
+            .filter_map(|(k, e)| e.event.map(|v| (Key::new(k), json_to_any(v))))
+            .collect()
+    }
+
+    fn has_event_values(&self) -> bool {
+        self.entries.values().any(|e| e.event.is_some())
+    }
+
+    fn truncated_value(&self) -> Option<OtelValue> {
+        (!self.truncated.is_empty()).then(|| string_array(self.truncated.iter().cloned()))
+    }
+
+    fn truncated_any(&self) -> Option<AnyValue> {
+        (!self.truncated.is_empty()).then(|| {
+            AnyValue::ListAny(Box::new(
+                self.truncated.iter().cloned().map(AnyValue::from).collect(),
+            ))
+        })
+    }
+}
+
+/// A content pipeline outcome routed to the enabled destinations.
+enum Recorded {
+    Value {
+        span: Option<String>,
+        event: Option<Value>,
+        truncated: bool,
+    },
+    Dropped,
+    Failed,
+}
+
+/// Where a content value goes, decided before any work (capture gate).
+#[derive(Clone, Copy)]
+struct Destinations {
+    span: bool,
+    event: bool,
+}
+
+impl Destinations {
+    fn any(self) -> bool {
+        self.span || self.event
+    }
+}
+
+/// State shared by every handle type: the span (if any), the operation
+/// clock and the start time.
 struct Core {
     observer: Arc<ObserverInner>,
-    cx: Option<Context>,
+    span: Option<SpanState>,
+    clock: OperationClock,
     start: SystemTime,
 }
 
 impl Core {
     fn now(&self) -> SystemTime {
-        self.observer.clock.now()
+        self.clock.now()
     }
 
     fn set_attributes(&self, attributes: Vec<KeyValue>) {
-        if let Some(cx) = &self.cx {
-            cx.span().set_attributes(attributes);
+        if let Some(s) = &self.span {
+            if !attributes.is_empty() {
+                s.cx.span().set_attributes(attributes);
+            }
         }
     }
 
     fn set_attribute(&self, kv: KeyValue) {
-        if let Some(cx) = &self.cx {
-            cx.span().set_attribute(kv);
+        if let Some(s) = &self.span {
+            s.cx.span().set_attribute(kv);
         }
     }
 
+    /// The context for children: the operation's span, or the parent's
+    /// context passed through by an API-only tracer.
     fn context(&self) -> Option<ObservationContext> {
-        self.cx.as_ref().and_then(ObservationContext::from_otel)
+        self.span
+            .as_ref()
+            .and_then(|s| ObservationContext::from_otel(&s.cx))
+    }
+
+    /// The context of the operation's own span, if it has one.
+    fn own_context(&self) -> Option<ObservationContext> {
+        self.span
+            .as_ref()
+            .filter(|s| s.own)
+            .and_then(|s| ObservationContext::from_otel(&s.cx))
     }
 
     fn observation_ref(&self) -> Option<ObservationRef> {
-        self.context().map(|c| c.observation_ref())
+        self.own_context().map(|c| c.observation_ref())
     }
 
-    fn trace_ids(
-        &self,
-    ) -> Option<(
-        opentelemetry::trace::TraceId,
-        opentelemetry::trace::SpanId,
-        Option<opentelemetry::trace::TraceFlags>,
-    )> {
-        let cx = self.cx.as_ref()?;
-        let span = cx.span();
+    /// Trace context for events: the operation's own span, else none (events
+    /// of span-less operations never attach to the ambient span).
+    fn trace_ids(&self) -> Option<(TraceId, SpanId, Option<TraceFlags>)> {
+        let s = self.span.as_ref().filter(|s| s.own)?;
+        let span = s.cx.span();
         let sc = span.span_context();
-        sc.is_valid()
-            .then(|| (sc.trace_id(), sc.span_id(), Some(sc.trace_flags())))
+        sc.is_valid().then(|| {
+            let flags = if sc.is_sampled() {
+                TraceFlags::SAMPLED
+            } else {
+                TraceFlags::default()
+            };
+            (sc.trace_id(), sc.span_id(), Some(flags))
+        })
     }
 
-    /// Marks the span failed and returns the bounded description.
-    fn fail(&self, error: &ErrorInfo) -> String {
-        let description = error
-            .message
-            .as_ref()
-            .and_then(|m| {
-                match self
-                    .observer
-                    .content
-                    .redact("error.message", Value::String(m.clone()))
-                {
-                    Some(Value::String(s)) => Some(s),
-                    Some(other) => Some(other.to_string()),
-                    None => None,
-                }
-            })
-            .map_or_else(
-                || error.error_type.clone(),
-                |m| bound_chars(&m, MAX_ERROR_MESSAGE_CHARS),
-            );
-        if let Some(cx) = &self.cx {
-            let span = cx.span();
-            span.set_attribute(KeyValue::new(attr::ERROR_TYPE, error.error_type.clone()));
-            span.set_status(Status::error(description.clone()));
-        }
-        description
-    }
-
-    fn end_span(&self, at: SystemTime) {
-        if let Some(cx) = &self.cx {
-            cx.span().end_with_timestamp(at);
+    /// Routes governed content through the capture gate.
+    fn governed(&self, has_details_event: bool) -> Destinations {
+        let capture = self.observer.content.capture();
+        Destinations {
+            span: capture.on_spans(),
+            event: has_details_event && capture.on_events() && self.observer.events.is_some(),
         }
     }
 
-    /// Records a JSON content attribute on the span. Returns the bounded value
-    /// (for events) and whether it was truncated.
-    fn content_json(
+    /// Schema content: recorded on spans in every mode, on events when event
+    /// capture is enabled.
+    fn schema(&self) -> Destinations {
+        let capture = self.observer.content.capture();
+        Destinations {
+            span: true,
+            event: capture.on_events() && self.observer.events.is_some(),
+        }
+    }
+
+    /// Runs the content pipeline for a structured value.
+    fn prepare_json<T: Serialize + ?Sized>(
         &self,
-        key: &'static str,
-        value: Value,
-        on_span: bool,
-    ) -> (Option<Value>, bool) {
-        let prepared = self.observer.content.prepare_json(key, value);
-        if on_span {
-            if let Some(v) = &prepared.value {
-                if let Ok(s) = serde_json::to_string(v) {
-                    self.set_attribute(KeyValue::new(key, s));
-                }
-            }
+        key: &str,
+        value: &T,
+        to: Destinations,
+    ) -> Recorded {
+        match self.observer.content.prepare_json(key, value) {
+            Outcome::Keep(b) => Recorded::Value {
+                span: to.span.then_some(b.json),
+                event: to.event.then_some(b.value),
+                truncated: b.truncated,
+            },
+            Outcome::Dropped => Recorded::Dropped,
+            Outcome::Failed => Recorded::Failed,
         }
-        (prepared.value, prepared.truncated)
+    }
+
+    /// Runs the content pipeline for a plain-string content value.
+    fn prepare_text(&self, key: &str, text: &str, to: Destinations) -> Recorded {
+        let content = &self.observer.content;
+        match content.prepare_text(key, text, content.text_bound()) {
+            Outcome::Keep(b) => Recorded::Value {
+                event: to.event.then(|| Value::String(b.text.clone())),
+                span: to.span.then_some(b.text),
+                truncated: b.truncated,
+            },
+            Outcome::Dropped => Recorded::Dropped,
+            Outcome::Failed => Recorded::Failed,
+        }
+    }
+
+    fn retained_budget(&self) -> usize {
+        self.observer.content.max_retained_operation_bytes()
+    }
+
+    /// Marks the span failed. Returns the error message that survived the
+    /// content pipeline (redaction, rules, 256 code points), if any; the span
+    /// status description falls back to the error type.
+    fn fail(&self, error: &ErrorInfo) -> Option<String> {
+        let message = error.message.as_deref().and_then(|m| {
+            match self.observer.content.prepare_text(
+                ERROR_MESSAGE_KIND,
+                m,
+                TextBound::Chars(MAX_ERROR_MESSAGE_CHARS),
+            ) {
+                Outcome::Keep(b) => Some(b.text),
+                Outcome::Dropped | Outcome::Failed => None,
+            }
+        });
+        if let Some(s) = &self.span {
+            let span = s.cx.span();
+            span.set_attribute(KeyValue::new(attr::ERROR_TYPE, error.error_type.clone()));
+            span.set_status(Status::error(
+                message.clone().unwrap_or_else(|| error.error_type.clone()),
+            ));
+        }
+        message
+    }
+
+    /// Ends the span; it never ends before it starts.
+    fn end_span(&self, at: SystemTime) {
+        if let Some(s) = &self.span {
+            s.cx.span().end_with_timestamp(at.max(self.start));
+        }
     }
 }
 
-/// Inference state guarded by a mutex.
+/// Inference state guarded by a mutex. Streaming state is constant-size.
 #[derive(Default)]
 struct InferenceState {
     ended: bool,
-    first_chunk: Option<SystemTime>,
     last_chunk: Option<SystemTime>,
     chunk_count: u64,
-    first_token: Option<SystemTime>,
+    first_token: bool,
     usage: Usage,
     finish_reasons: Option<Vec<String>>,
     output_recorded: bool,
     response_model: Option<String>,
     response_id: Option<String>,
-    truncated: Vec<String>,
     attempt_count: u32,
-    event_content: Vec<(String, Value)>,
-}
-
-impl InferenceState {
-    fn mark_truncated(&mut self, key: &str) {
-        if !self.truncated.iter().any(|k| k == key) {
-            self.truncated.push(key.to_owned());
-        }
-    }
+    content: Retained,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -243,6 +427,19 @@ enum Category {
     Inference,
     Embeddings,
     Custom,
+}
+
+impl Category {
+    /// Catalog category for `start_inference` names: only
+    /// `catalog.inference_operations` resolve through the catalog; any other
+    /// name is a custom inference operation (generative inference metrics).
+    fn of(operation: &str) -> Self {
+        match operation {
+            op::EMBEDDINGS => Self::Embeddings,
+            op::PREDICT => Self::Custom,
+            _ => Self::Inference,
+        }
+    }
 }
 
 /// A logical inference request. See the crate docs for the span shape.
@@ -260,12 +457,9 @@ impl InferenceOperation {
         request: InferenceRequest,
         mut options: StartOptions,
     ) -> Self {
-        let start = options.start_time.unwrap_or_else(|| observer.clock.now());
-        let category = match request.operation.as_str() {
-            op::EMBEDDINGS => Category::Embeddings,
-            op::PREDICT => Category::Custom,
-            _ => Category::Inference,
-        };
+        let clock = observer.clock.anchor();
+        let start = options.start_time.unwrap_or_else(|| clock.now());
+        let category = Category::of(&request.operation);
         let mut dims = vec![
             KeyValue::new(attr::OPERATION_NAME, request.operation.clone()),
             KeyValue::new(attr::PROVIDER_NAME, request.provider.clone()),
@@ -284,58 +478,59 @@ impl InferenceOperation {
         }
 
         let mut attributes = dims.clone();
-        let mut state = InferenceState::default();
         push_request_attributes(&mut attributes, &request);
-
-        let capture = observer.content.capture();
-        if let Some(prompt) = &request.prompt {
-            if capture.any() {
-                for (name, value) in &prompt.variables {
-                    let key = format!("{}{name}", attr::PROMPT_VARIABLE_PREFIX);
-                    let prepared = observer.content.prepare_text(&key, value.clone());
-                    if prepared.truncated {
-                        state.mark_truncated(&key);
-                    }
-                    if let Some(v) = prepared.value {
-                        if capture.on_spans() {
-                            attributes.push(KeyValue::new(key.clone(), v.clone()));
-                        }
-                        if capture.on_events() {
-                            state.event_content.push((key, Value::String(v)));
-                        }
-                    }
-                }
-            }
-        }
-
         let name = span_name(&request.operation, request.model.as_deref());
-        let cx = observer.start_span(
+        let span = observer.start_span(
             name,
             kind_for(request.location),
             attributes,
             &mut options,
             start,
         );
-        Self {
+        let operation = Self {
             core: Core {
                 observer,
-                cx,
+                span,
+                clock,
                 start,
             },
             request,
             category,
             dims,
-            state: Mutex::new(state),
+            state: Mutex::new(InferenceState::default()),
+        };
+        operation.record_prompt_variables();
+        operation
+    }
+
+    /// Prompt variables are content: processed in ascending name order and
+    /// retained like other content.
+    fn record_prompt_variables(&self) {
+        let Some(prompt) = &self.request.prompt else {
+            return;
+        };
+        let to = self.core.governed(true);
+        if !to.any() {
+            return;
+        }
+        let budget = self.core.retained_budget();
+        for (name, value) in &prompt.variables {
+            let key = format!("{}{name}", attr::PROMPT_VARIABLE_PREFIX);
+            let recorded = self.core.prepare_text(&key, value, to);
+            lock(&self.state).content.apply(&key, recorded, budget);
         }
     }
 
-    /// The context for child operations, `None` when no span was recorded.
+    /// The context for child operations: this operation's span (also when it
+    /// is not sampled), or the parent context passed through by an API-only
+    /// tracer. `None` when tracing is suppressed or no tracer is configured.
     #[must_use]
     pub fn context(&self) -> Option<ObservationContext> {
         self.core.context()
     }
 
-    /// Reference to this operation's span, `None` when no span was recorded.
+    /// Reference to this operation's own span (sampled or not); `None` when
+    /// the operation has no span of its own.
     #[must_use]
     pub fn observation_ref(&self) -> Option<ObservationRef> {
         self.core.observation_ref()
@@ -347,75 +542,78 @@ impl InferenceOperation {
         &self.request
     }
 
-    fn record_content(&self, key: &'static str, value: Value) {
-        let capture = self.core.observer.content.capture();
-        if !capture.any() {
+    /// Whether the operation has reached its first terminal transition.
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
+        self.is_ended()
+    }
+
+    fn is_ended(&self) -> bool {
+        lock(&self.state).ended
+    }
+
+    fn record_content<T: Serialize + ?Sized>(
+        &self,
+        key: &'static str,
+        value: &T,
+        to: Destinations,
+    ) {
+        if !to.any() || self.is_ended() {
             return;
         }
-        let (bounded, truncated) = self.core.content_json(key, value, capture.on_spans());
+        let recorded = self.core.prepare_json(key, value, to);
+        let budget = self.core.retained_budget();
         let mut state = lock(&self.state);
-        if truncated {
-            state.mark_truncated(key);
-        }
-        if capture.on_events() {
-            if let Some(v) = bounded {
-                state.event_content.retain(|(k, _)| k != key);
-                state.event_content.push((key.to_owned(), v));
-            }
+        if !state.ended {
+            state.content.apply(key, recorded, budget);
         }
     }
 
     /// Records the system instructions (content).
     pub fn record_system_instructions(&self, parts: &[Part]) {
-        if let Ok(v) = serde_json::to_value(parts) {
-            self.record_content(attr::SYSTEM_INSTRUCTIONS, v);
-        }
+        self.record_content(attr::SYSTEM_INSTRUCTIONS, parts, self.core.governed(true));
     }
 
     /// Records the input messages (content).
     pub fn record_input_messages(&self, messages: &[InputMessage]) {
-        if let Ok(v) = serde_json::to_value(messages) {
-            self.record_content(attr::INPUT_MESSAGES, v);
-        }
+        self.record_content(attr::INPUT_MESSAGES, messages, self.core.governed(true));
     }
 
     /// Records the output messages (content).
     pub fn record_output_messages(&self, messages: &[OutputMessage]) {
-        lock(&self.state).output_recorded = true;
-        if let Ok(v) = serde_json::to_value(messages) {
-            self.record_content(attr::OUTPUT_MESSAGES, v);
+        {
+            let mut state = lock(&self.state);
+            if state.ended {
+                return;
+            }
+            state.output_recorded = true;
         }
+        self.record_content(attr::OUTPUT_MESSAGES, messages, self.core.governed(true));
     }
 
     /// Records the tool definitions offered to the model. Schema content:
     /// recorded in every capture mode, still redacted and bounded.
     pub fn record_tool_definitions(&self, definitions: &Value) {
-        let capture = self.core.observer.content.capture();
-        let (bounded, truncated) =
-            self.core
-                .content_json(attr::TOOL_DEFINITIONS, definitions.clone(), true);
-        let mut state = lock(&self.state);
-        if truncated {
-            state.mark_truncated(attr::TOOL_DEFINITIONS);
-        }
-        if capture.on_events() {
-            if let Some(v) = bounded {
-                state
-                    .event_content
-                    .retain(|(k, _)| k != attr::TOOL_DEFINITIONS);
-                state
-                    .event_content
-                    .push((attr::TOOL_DEFINITIONS.to_owned(), v));
-            }
-        }
+        self.record_content(attr::TOOL_DEFINITIONS, definitions, self.core.schema());
     }
 
-    /// Marks one decoded output chunk now.
+    fn stream_dims(&self, state: &InferenceState) -> Vec<KeyValue> {
+        let mut dims = self.dims.clone();
+        if let Some(model) = &state.response_model {
+            dims.push(KeyValue::new(attr::RESPONSE_MODEL, model.clone()));
+        }
+        dims
+    }
+
+    /// Marks one delivered output chunk now. A chunk never sets or influences
+    /// first-token time.
     pub fn record_chunk(&self) {
         self.record_chunk_at(self.core.now());
     }
 
-    /// Marks one decoded output chunk at `at`.
+    /// Marks one delivered output chunk at `at`. The first call records the
+    /// time to first chunk; each later call records the time since the
+    /// previous call's timestamp (clamped at zero).
     pub fn record_chunk_at(&self, at: SystemTime) {
         let mut state = lock(&self.state);
         if state.ended {
@@ -425,46 +623,54 @@ impl InferenceOperation {
         let instruments = self.core.observer.instruments.as_ref();
         match state.last_chunk {
             None => {
-                state.first_chunk = Some(at);
                 let ttfc = seconds_between(self.core.start, at);
                 self.core
                     .set_attribute(KeyValue::new(attr::RESPONSE_TIME_TO_FIRST_CHUNK, ttfc));
                 if let Some(i) = instruments {
-                    i.time_to_first_chunk.record(ttfc, &self.dims);
+                    i.time_to_first_chunk
+                        .record(ttfc, &self.stream_dims(&state));
                 }
             }
             Some(previous) => {
                 if let Some(i) = instruments {
                     i.time_per_output_chunk
-                        .record(seconds_between(previous, at), &self.dims);
+                        .record(seconds_between(previous, at), &self.stream_dims(&state));
                 }
             }
         }
         state.last_chunk = Some(at);
     }
 
-    /// Marks the first output token now. Later calls are ignored.
+    /// Records the runtime-measured first output token now. The first call
+    /// wins. Pass only measured times, never a chunk-callback estimate.
     pub fn record_first_token(&self) {
         self.record_first_token_at(self.core.now());
     }
 
-    /// Marks the first output token at `at`. Later calls are ignored.
+    /// Records the runtime-measured first output token at `at`. The first
+    /// call wins; chunks never set it, so a measured time reported after the
+    /// chunks is still recorded.
     pub fn record_first_token_at(&self, at: SystemTime) {
         let mut state = lock(&self.state);
-        if state.ended || state.first_token.is_some() {
+        if state.ended || state.first_token {
             return;
         }
-        state.first_token = Some(at);
+        state.first_token = true;
         let ttft = seconds_between(self.core.start, at);
         self.core
             .set_attribute(KeyValue::new(attr::RESPONSE_TIME_TO_FIRST_TOKEN, ttft));
         if let Some(i) = self.core.observer.instruments.as_ref() {
-            i.time_to_first_token.record(ttft, &self.dims);
+            i.time_to_first_token
+                .record(ttft, &self.stream_dims(&state));
         }
     }
 
     /// Records the runtime's measured mean time per output token, seconds.
+    /// Non-finite values are ignored.
     pub fn record_token_timing(&self, time_per_output_token_s: f64) {
+        if !time_per_output_token_s.is_finite() || self.is_ended() {
+            return;
+        }
         self.core.set_attribute(KeyValue::new(
             attr::RESPONSE_TIME_PER_OUTPUT_TOKEN,
             time_per_output_token_s,
@@ -473,21 +679,33 @@ impl InferenceOperation {
 
     /// Records request usage totals (merged field by field).
     pub fn record_usage(&self, usage: &Usage) {
-        lock(&self.state).usage.merge(usage);
+        let mut state = lock(&self.state);
+        if !state.ended {
+            state.usage.merge(usage);
+        }
     }
 
-    /// Records finish reasons, one per choice.
+    /// Records finish reasons, one per choice (last call wins). An empty
+    /// list clears them: empty lists are never recorded.
     pub fn record_finish_reasons<I, S>(&self, reasons: I)
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        lock(&self.state).finish_reasons = Some(reasons.into_iter().map(Into::into).collect());
+        let reasons: Vec<String> = reasons.into_iter().map(Into::into).collect();
+        let mut state = lock(&self.state);
+        if !state.ended {
+            state.finish_reasons = (!reasons.is_empty()).then_some(reasons);
+        }
     }
 
-    /// Records the response id and/or model.
+    /// Records the response id and/or model. The response model joins the
+    /// metric dimensions from now on (last recorded value wins).
     pub fn record_response(&self, response_id: Option<&str>, model: Option<&str>) {
         let mut state = lock(&self.state);
+        if state.ended {
+            return;
+        }
         if let Some(id) = response_id {
             state.response_id = Some(id.to_owned());
         }
@@ -496,12 +714,13 @@ impl InferenceOperation {
         }
     }
 
-    /// Records a host-measured resource sample.
+    /// Records a host-measured resource sample (non-finite values ignored).
     pub fn record_resource(&self, sample: &ResourceSample) {
         self.core.set_attributes(resource_attributes(sample));
     }
 
-    /// Sets an extra span attribute (adapter extensions).
+    /// Sets an extra span attribute (adapter extensions). Never changes
+    /// metric dimensions.
     pub fn set_attribute(&self, kv: KeyValue) {
         self.core.set_attribute(kv);
     }
@@ -512,14 +731,15 @@ impl InferenceOperation {
         self.start_attempt_at(attempt, self.core.now())
     }
 
-    /// Starts a concrete execution attempt at `at`.
+    /// Starts a concrete execution attempt at `at`. Attempts of an operation
+    /// without a span of its own are suppressed.
     #[must_use]
     pub fn start_attempt_at(&self, attempt: AttemptInfo, at: SystemTime) -> AttemptOperation {
         lock(&self.state).attempt_count += 1;
         AttemptOperation::start(
             self.core.observer.clone(),
             self.request.operation.clone(),
-            self.context(),
+            self.core.own_context(),
             attempt,
             at,
         )
@@ -548,6 +768,11 @@ impl InferenceOperation {
     /// Ends the operation as cancelled now.
     pub fn cancel(&self) {
         self.end_with_error(&ErrorInfo::new("cancelled"));
+    }
+
+    /// Ends the operation as cancelled at `at`.
+    pub fn cancel_at(&self, at: SystemTime) {
+        self.end_with_error_at(&ErrorInfo::new("cancelled"), at);
     }
 
     fn finish(&self, at: SystemTime, error: Option<&ErrorInfo>) {
@@ -584,17 +809,15 @@ impl InferenceOperation {
                 i64::from(state.attempt_count),
             ));
         }
-        if !state.truncated.is_empty() {
-            end_attrs.push(KeyValue::new(
-                attr::CONTENT_TRUNCATED_ATTRIBUTES,
-                string_array(state.truncated.iter().cloned()),
-            ));
+        if let Some(v) = state.content.truncated_value() {
+            end_attrs.push(KeyValue::new(attr::CONTENT_TRUNCATED_ATTRIBUTES, v));
         }
         core.set_attributes(end_attrs);
+        let message = error.map(|e| core.fail(e));
+        core.set_attributes(state.content.span_attributes());
 
-        let description = error.map(|e| core.fail(e));
         self.record_metrics(&state, at, error);
-        self.emit_events(&mut state, at, error, description.as_deref());
+        self.emit_events(&mut state, at, error, message.flatten());
         core.end_span(at);
     }
 
@@ -602,10 +825,7 @@ impl InferenceOperation {
         let Some(instruments) = self.core.observer.instruments.as_ref() else {
             return;
         };
-        let mut base = self.dims.clone();
-        if let Some(model) = &state.response_model {
-            base.push(KeyValue::new(attr::RESPONSE_MODEL, model.clone()));
-        }
+        let base = self.stream_dims(state);
         let mut with_error = base.clone();
         if let Some(e) = error {
             with_error.push(KeyValue::new(attr::ERROR_TYPE, e.error_type.clone()));
@@ -698,26 +918,24 @@ impl InferenceOperation {
         state: &mut InferenceState,
         at: SystemTime,
         error: Option<&ErrorInfo>,
-        description: Option<&str>,
+        message: Option<String>,
     ) {
         let Some(events) = self.core.observer.events.as_ref() else {
             return;
         };
         let trace = self.core.trace_ids();
-        if let (Some(e), Some(description)) =
-            (error.filter(|e| e.error_type != "cancelled"), description)
-        {
+        if let Some(e) = error.filter(|e| e.error_type != "cancelled") {
             let mut attributes = vec![(
                 Key::from_static_str(attr::EXCEPTION_TYPE),
                 AnyValue::from(e.error_type.clone()),
             )];
-            if e.message.is_some() {
-                push_any(
-                    &mut attributes,
-                    attr::EXCEPTION_MESSAGE,
-                    Some(AnyValue::from(description.to_owned())),
-                );
-            }
+            // Only a message that survived redaction is emitted; it is never
+            // replaced by the error type.
+            push_any(
+                &mut attributes,
+                attr::EXCEPTION_MESSAGE,
+                message.map(AnyValue::from),
+            );
             events.emit(LogEvent {
                 name: event::OPERATION_EXCEPTION,
                 severity: Severity::Warn,
@@ -787,22 +1005,13 @@ impl InferenceOperation {
                 Some(AnyValue::from(e.error_type.clone())),
             );
         }
-        for (key, value) in std::mem::take(&mut state.event_content) {
-            attributes.push((Key::new(key), json_to_any(value)));
-        }
-        if !state.truncated.is_empty() {
-            attributes.push((
-                Key::from_static_str(attr::CONTENT_TRUNCATED_ATTRIBUTES),
-                AnyValue::ListAny(Box::new(
-                    state
-                        .truncated
-                        .iter()
-                        .cloned()
-                        .map(AnyValue::from)
-                        .collect(),
-                )),
-            ));
-        }
+        let truncated = state.content.truncated_any();
+        attributes.extend(state.content.take_event_values());
+        push_any(
+            &mut attributes,
+            attr::CONTENT_TRUNCATED_ATTRIBUTES,
+            truncated,
+        );
         events.emit(LogEvent {
             name: event::INFERENCE_DETAILS,
             severity: Severity::Debug,
@@ -828,10 +1037,10 @@ fn push_request_attributes(out: &mut Vec<KeyValue>, request: &InferenceRequest) 
     if let Some(v) = request.max_tokens {
         out.push(KeyValue::new(attr::REQUEST_MAX_TOKENS, v));
     }
-    if let Some(v) = request.temperature {
+    if let Some(v) = finite(request.temperature) {
         out.push(KeyValue::new(attr::REQUEST_TEMPERATURE, v));
     }
-    if let Some(v) = request.top_p {
+    if let Some(v) = finite(request.top_p) {
         out.push(KeyValue::new(attr::REQUEST_TOP_P, v));
     }
     if let Some(v) = request.top_k {
@@ -846,10 +1055,10 @@ fn push_request_attributes(out: &mut Vec<KeyValue>, request: &InferenceRequest) 
             string_array(request.stop_sequences.iter().cloned()),
         ));
     }
-    if let Some(v) = request.frequency_penalty {
+    if let Some(v) = finite(request.frequency_penalty) {
         out.push(KeyValue::new(attr::REQUEST_FREQUENCY_PENALTY, v));
     }
-    if let Some(v) = request.presence_penalty {
+    if let Some(v) = finite(request.presence_penalty) {
         out.push(KeyValue::new(attr::REQUEST_PRESENCE_PENALTY, v));
     }
     if request.stream {
@@ -908,7 +1117,7 @@ fn push_request_attributes(out: &mut Vec<KeyValue>, request: &InferenceRequest) 
 
 impl Drop for InferenceOperation {
     fn drop(&mut self) {
-        if !lock(&self.state).ended {
+        if !self.is_ended() {
             self.cancel();
         }
     }
@@ -939,6 +1148,7 @@ impl AttemptOperation {
         attempt: AttemptInfo,
         start: SystemTime,
     ) -> Self {
+        let clock = observer.clock.anchor();
         let mut dims = vec![
             KeyValue::new(attr::OPERATION_NAME, operation),
             KeyValue::new(attr::PROVIDER_NAME, attempt.provider.clone()),
@@ -970,19 +1180,19 @@ impl AttemptOperation {
         if let Some(port) = attempt.server_port {
             attributes.push(KeyValue::new(attr::SERVER_PORT, port));
         }
-        // An attempt without a recorded parent span stays untraced so it
+        // An attempt without a parent span of its own stays untraced so it
         // never becomes a stray root.
         let mut options = StartOptions {
-            parent: parent.clone(),
             trace: if parent.is_some() {
-                crate::types::TraceMode::Default
+                TraceMode::Default
             } else {
-                crate::types::TraceMode::Suppress
+                TraceMode::Suppress
             },
+            parent,
             start_time: Some(start),
             attributes: Vec::new(),
         };
-        let cx = observer.start_span(
+        let span = observer.start_span(
             format!("attempt {}", attempt.index),
             kind_for(Some(attempt.location)),
             attributes,
@@ -992,7 +1202,8 @@ impl AttemptOperation {
         Self {
             core: Core {
                 observer,
-                cx,
+                span,
+                clock,
                 start,
             },
             dims,
@@ -1006,7 +1217,7 @@ impl AttemptOperation {
         self.core.context()
     }
 
-    /// Reference to this attempt's span.
+    /// Reference to this attempt's own span.
     #[must_use]
     pub fn observation_ref(&self) -> Option<ObservationRef> {
         self.core.observation_ref()
@@ -1014,10 +1225,13 @@ impl AttemptOperation {
 
     /// Records this attempt's own usage.
     pub fn record_usage(&self, usage: &Usage) {
-        lock(&self.state).1.merge(usage);
+        let mut state = lock(&self.state);
+        if !state.0 {
+            state.1.merge(usage);
+        }
     }
 
-    /// Records a resource sample.
+    /// Records a resource sample (non-finite values ignored).
     pub fn record_resource(&self, sample: &ResourceSample) {
         self.core.set_attributes(resource_attributes(sample));
     }
@@ -1047,9 +1261,14 @@ impl AttemptOperation {
         self.finish(at, Some(error));
     }
 
-    /// Ends the attempt as cancelled.
+    /// Ends the attempt as cancelled now.
     pub fn cancel(&self) {
         self.end_with_error(&ErrorInfo::new("cancelled"));
+    }
+
+    /// Ends the attempt as cancelled at `at`.
+    pub fn cancel_at(&self, at: SystemTime) {
+        self.end_with_error_at(&ErrorInfo::new("cancelled"), at);
     }
 
     fn finish(&self, at: SystemTime, error: Option<&ErrorInfo>) {
@@ -1089,116 +1308,129 @@ impl fmt::Debug for AttemptOperation {
     }
 }
 
+#[derive(Default)]
+struct SimpleState {
+    ended: bool,
+    content: Retained,
+}
+
 /// A simple timed operation (workflow, tool, model load).
 struct Simple {
     core: Core,
     dims: Vec<KeyValue>,
-    ended: Mutex<bool>,
-    truncated: Mutex<Vec<String>>,
-    event_content: Mutex<BTreeMap<&'static str, Value>>,
+    state: Mutex<SimpleState>,
 }
 
 impl Simple {
+    fn new(
+        observer: Arc<ObserverInner>,
+        clock: OperationClock,
+        start: SystemTime,
+        span: Option<SpanState>,
+        dims: Vec<KeyValue>,
+    ) -> Self {
+        Self {
+            core: Core {
+                observer,
+                span,
+                clock,
+                start,
+            },
+            dims,
+            state: Mutex::new(SimpleState::default()),
+        }
+    }
+
     fn finish(
         &self,
         at: SystemTime,
         error: Option<&ErrorInfo>,
-        record: impl FnOnce(&crate::observer::Instruments, f64, &[KeyValue]),
+        record: impl FnOnce(&Instruments, f64, &[KeyValue]),
     ) {
-        {
-            let mut ended = lock(&self.ended);
-            if *ended {
-                return;
-            }
-            *ended = true;
+        let mut state = lock(&self.state);
+        if state.ended {
+            return;
         }
-        let truncated = lock(&self.truncated).clone();
-        if !truncated.is_empty() {
-            self.core.set_attribute(KeyValue::new(
-                attr::CONTENT_TRUNCATED_ATTRIBUTES,
-                string_array(truncated.clone()),
-            ));
+        state.ended = true;
+        let core = &self.core;
+        if let Some(v) = state.content.truncated_value() {
+            core.set_attribute(KeyValue::new(attr::CONTENT_TRUNCATED_ATTRIBUTES, v));
         }
         if let Some(e) = error {
-            self.core.fail(e);
+            core.fail(e);
         }
-        if let Some(i) = self.core.observer.instruments.as_ref() {
+        core.set_attributes(state.content.span_attributes());
+        if let Some(i) = core.observer.instruments.as_ref() {
             let mut dims = self.dims.clone();
             if let Some(e) = error {
                 dims.push(KeyValue::new(attr::ERROR_TYPE, e.error_type.clone()));
             }
-            record(i, seconds_between(self.core.start, at), &dims);
+            record(i, seconds_between(core.start, at), &dims);
         }
-        let content = std::mem::take(&mut *lock(&self.event_content));
-        if let Some(events) = self
-            .core
+        if let Some(events) = core
             .observer
             .events
             .as_ref()
-            .filter(|_| !content.is_empty())
+            .filter(|_| state.content.has_event_values())
         {
             let mut attributes: Vec<(Key, AnyValue)> = self
                 .dims
                 .iter()
-                .map(|kv| {
-                    (
-                        kv.key.clone(),
-                        json_to_any(serde_json::Value::String(kv.value.to_string())),
-                    )
-                })
+                .map(|kv| (kv.key.clone(), otel_to_any(&kv.value)))
                 .collect();
-            attributes.extend(
-                content
-                    .into_iter()
-                    .map(|(key, value)| (Key::from_static_str(key), json_to_any(value))),
-            );
+            let truncated = state.content.truncated_any();
+            attributes.extend(state.content.take_event_values());
             if let Some(e) = error {
                 attributes.push((
                     Key::from_static_str(attr::ERROR_TYPE),
                     AnyValue::from(e.error_type.clone()),
                 ));
             }
-            if !truncated.is_empty() {
-                attributes.push((
-                    Key::from_static_str(attr::CONTENT_TRUNCATED_ATTRIBUTES),
-                    AnyValue::ListAny(Box::new(
-                        truncated.into_iter().map(AnyValue::from).collect(),
-                    )),
-                ));
-            }
+            push_any(
+                &mut attributes,
+                attr::CONTENT_TRUNCATED_ATTRIBUTES,
+                truncated,
+            );
             events.emit(LogEvent {
                 name: event::TOOL_DETAILS,
                 severity: Severity::Debug,
                 severity_text: "DEBUG",
                 timestamp: at,
-                trace: self.core.trace_ids(),
+                trace: core.trace_ids(),
                 attributes,
             });
         }
-        self.core.end_span(at);
+        core.end_span(at);
     }
 
     fn is_ended(&self) -> bool {
-        *lock(&self.ended)
+        lock(&self.state).ended
     }
 }
 
 macro_rules! lifecycle {
     ($ty:ident, $record:expr) => {
         impl $ty {
-            /// Context for child operations.
+            /// Context for child operations (see
+            /// [`InferenceOperation::context`]).
             #[must_use]
             pub fn context(&self) -> Option<ObservationContext> {
                 self.simple.core.context()
             }
 
-            /// Reference to this operation's span.
+            /// Reference to this operation's own span (sampled or not).
             #[must_use]
             pub fn observation_ref(&self) -> Option<ObservationRef> {
                 self.simple.core.observation_ref()
             }
 
-            /// Sets an extra span attribute.
+            /// Whether the operation has reached its first terminal transition.
+            #[must_use]
+            pub fn is_finished(&self) -> bool {
+                self.simple.is_ended()
+            }
+
+            /// Sets an extra span attribute. Never changes metric dimensions.
             pub fn set_attribute(&self, kv: KeyValue) {
                 self.simple.core.set_attribute(kv);
             }
@@ -1226,6 +1458,11 @@ macro_rules! lifecycle {
             /// Ends as cancelled now.
             pub fn cancel(&self) {
                 self.end_with_error(&ErrorInfo::new("cancelled"));
+            }
+
+            /// Ends as cancelled at `at`.
+            pub fn cancel_at(&self, at: SystemTime) {
+                self.end_with_error_at(&ErrorInfo::new("cancelled"), at);
             }
         }
 
@@ -1258,12 +1495,13 @@ impl WorkflowOperation {
         name: String,
         mut options: StartOptions,
     ) -> Self {
-        let start = options.start_time.unwrap_or_else(|| observer.clock.now());
+        let clock = observer.clock.anchor();
+        let start = options.start_time.unwrap_or_else(|| clock.now());
         let dims = vec![
             KeyValue::new(attr::OPERATION_NAME, op::INVOKE_WORKFLOW),
             KeyValue::new(attr::WORKFLOW_NAME, name.clone()),
         ];
-        let cx = observer.start_span(
+        let span = observer.start_span(
             span_name(op::INVOKE_WORKFLOW, Some(&name)),
             SpanKind::Internal,
             dims.clone(),
@@ -1271,24 +1509,14 @@ impl WorkflowOperation {
             start,
         );
         Self {
-            simple: Simple {
-                core: Core {
-                    observer,
-                    cx,
-                    start,
-                },
-                dims,
-                ended: Mutex::new(false),
-                truncated: Mutex::new(Vec::new()),
-                event_content: Mutex::new(BTreeMap::new()),
-            },
+            simple: Simple::new(observer, clock, start, span, dims),
         }
     }
 }
 
 lifecycle!(
     WorkflowOperation,
-    |i: &crate::observer::Instruments, d, dims: &[KeyValue]| {
+    |i: &Instruments, d, dims: &[KeyValue]| {
         i.workflow_duration.record(d, dims);
     }
 );
@@ -1304,7 +1532,8 @@ impl ToolOperation {
         call: ToolCallInfo,
         mut options: StartOptions,
     ) -> Self {
-        let start = options.start_time.unwrap_or_else(|| observer.clock.now());
+        let clock = observer.clock.anchor();
+        let start = options.start_time.unwrap_or_else(|| clock.now());
         let mut dims = vec![
             KeyValue::new(attr::OPERATION_NAME, op::EXECUTE_TOOL),
             KeyValue::new(attr::TOOL_NAME, call.name.clone()),
@@ -1319,7 +1548,7 @@ impl ToolOperation {
         if let Some(d) = &call.description {
             attributes.push(KeyValue::new(attr::TOOL_DESCRIPTION, d.clone()));
         }
-        let cx = observer.start_span(
+        let span = observer.start_span(
             span_name(op::EXECUTE_TOOL, Some(&call.name)),
             SpanKind::Internal,
             attributes,
@@ -1327,58 +1556,39 @@ impl ToolOperation {
             start,
         );
         let operation = Self {
-            simple: Simple {
-                core: Core {
-                    observer,
-                    cx,
-                    start,
-                },
-                dims,
-                ended: Mutex::new(false),
-                truncated: Mutex::new(Vec::new()),
-                event_content: Mutex::new(BTreeMap::new()),
-            },
+            simple: Simple::new(observer, clock, start, span, dims),
         };
-        if let Some(args) = call.arguments {
+        if let Some(args) = &call.arguments {
             operation.record_content(attr::TOOL_CALL_ARGUMENTS, args);
         }
         operation
     }
 
-    /// Records the tool result (content).
+    /// Records the tool result (content). Recording again replaces it.
     pub fn record_result(&self, result: &Value) {
-        self.record_content(attr::TOOL_CALL_RESULT, result.clone());
+        self.record_content(attr::TOOL_CALL_RESULT, result);
     }
 
-    fn record_content(&self, key: &'static str, value: Value) {
-        // Serialize recording with finish so no content can arrive after the event.
-        let ended = lock(&self.simple.ended);
-        if *ended {
-            return;
-        }
+    fn record_content(&self, key: &'static str, value: &Value) {
         let core = &self.simple.core;
-        let capture = core.observer.content.capture();
-        if !capture.any() {
+        let to = core.governed(true);
+        if !to.any() || self.simple.is_ended() {
             return;
         }
-        let (bounded, truncated) = core.content_json(key, value, capture.on_spans());
-        if capture.on_events() {
-            if let Some(value) = bounded {
-                lock(&self.simple.event_content).insert(key, value);
-            }
-        }
-        if truncated {
-            lock(&self.simple.truncated).push(key.to_owned());
+        let recorded = core.prepare_json(key, value, to);
+        let budget = core.retained_budget();
+        // Recording is serialized with finish so no content arrives after
+        // the details event.
+        let mut state = lock(&self.simple.state);
+        if !state.ended {
+            state.content.apply(key, recorded, budget);
         }
     }
 }
 
-lifecycle!(
-    ToolOperation,
-    |i: &crate::observer::Instruments, d, dims: &[KeyValue]| {
-        i.tool_duration.record(d, dims);
-    }
-);
+lifecycle!(ToolOperation, |i: &Instruments, d, dims: &[KeyValue]| {
+    i.tool_duration.record(d, dims);
+});
 
 /// Loading a model into a runtime (`load_model {model}`).
 pub struct ModelLoadOperation {
@@ -1391,17 +1601,15 @@ impl ModelLoadOperation {
         info: ModelLoadInfo,
         mut options: StartOptions,
     ) -> Self {
-        let start = options.start_time.unwrap_or_else(|| observer.clock.now());
-        let provider = info
-            .provider
-            .clone()
-            .or_else(|| info.runtime.clone())
-            .unwrap_or_else(|| "unknown".to_owned());
-        let dims = vec![
-            KeyValue::new(attr::OPERATION_NAME, op::LOAD_MODEL),
-            KeyValue::new(attr::PROVIDER_NAME, provider),
-            KeyValue::new(attr::REQUEST_MODEL, info.model.clone()),
-        ];
+        let clock = observer.clock.anchor();
+        let start = options.start_time.unwrap_or_else(|| clock.now());
+        // Provider, else the runtime, else absent (never fabricated).
+        let provider = info.provider.clone().or_else(|| info.runtime.clone());
+        let mut dims = vec![KeyValue::new(attr::OPERATION_NAME, op::LOAD_MODEL)];
+        if let Some(provider) = provider {
+            dims.push(KeyValue::new(attr::PROVIDER_NAME, provider));
+        }
+        dims.push(KeyValue::new(attr::REQUEST_MODEL, info.model.clone()));
         let mut attributes = dims.clone();
         if let Some(v) = &info.runtime {
             attributes.push(KeyValue::new(attr::RUNTIME_NAME, v.clone()));
@@ -1412,7 +1620,7 @@ impl ModelLoadOperation {
         if let Some(v) = info.size_bytes {
             attributes.push(u64_attr(attr::MODEL_SIZE_BYTES, v));
         }
-        let cx = observer.start_span(
+        let span = observer.start_span(
             span_name(op::LOAD_MODEL, Some(&info.model)),
             SpanKind::Internal,
             attributes,
@@ -1420,17 +1628,7 @@ impl ModelLoadOperation {
             start,
         );
         Self {
-            simple: Simple {
-                core: Core {
-                    observer,
-                    cx,
-                    start,
-                },
-                dims,
-                ended: Mutex::new(false),
-                truncated: Mutex::new(Vec::new()),
-                event_content: Mutex::new(BTreeMap::new()),
-            },
+            simple: Simple::new(observer, clock, start, span, dims),
         }
     }
 
@@ -1441,7 +1639,7 @@ impl ModelLoadOperation {
             .set_attribute(KeyValue::new(attr::MODEL_CACHE_HIT, hit));
     }
 
-    /// Records a host-measured resource sample.
+    /// Records a host-measured resource sample (non-finite values ignored).
     pub fn record_resource(&self, sample: &ResourceSample) {
         self.simple.core.set_attributes(resource_attributes(sample));
     }
@@ -1449,7 +1647,7 @@ impl ModelLoadOperation {
 
 lifecycle!(
     ModelLoadOperation,
-    |i: &crate::observer::Instruments, d, dims: &[KeyValue]| {
+    |i: &Instruments, d, dims: &[KeyValue]| {
         i.operation_duration.record(d, dims);
     }
 );
@@ -1469,12 +1667,14 @@ impl SpanOperation {
         attributes: Vec<KeyValue>,
         mut options: StartOptions,
     ) -> Self {
-        let start = options.start_time.unwrap_or_else(|| observer.clock.now());
-        let cx = observer.start_span(name, SpanKind::Internal, attributes, &mut options, start);
+        let clock = observer.clock.anchor();
+        let start = options.start_time.unwrap_or_else(|| clock.now());
+        let span = observer.start_span(name, SpanKind::Internal, attributes, &mut options, start);
         Self {
             core: Core {
                 observer,
-                cx,
+                span,
+                clock,
                 start,
             },
             ended: Mutex::new(false),
@@ -1487,7 +1687,7 @@ impl SpanOperation {
         self.core.context()
     }
 
-    /// Reference to this span.
+    /// Reference to this span (sampled or not).
     #[must_use]
     pub fn observation_ref(&self) -> Option<ObservationRef> {
         self.core.observation_ref()
@@ -1513,6 +1713,16 @@ impl SpanOperation {
         self.finish(self.core.now(), Some(error));
     }
 
+    /// Ends with an error at `at`.
+    pub fn end_with_error_at(&self, error: &ErrorInfo, at: SystemTime) {
+        self.finish(at, Some(error));
+    }
+
+    /// Ends as cancelled now.
+    pub fn cancel(&self) {
+        self.end_with_error(&ErrorInfo::new("cancelled"));
+    }
+
     fn finish(&self, at: SystemTime, error: Option<&ErrorInfo>) {
         {
             let mut ended = lock(&self.ended);
@@ -1531,7 +1741,7 @@ impl SpanOperation {
 impl Drop for SpanOperation {
     fn drop(&mut self) {
         if !*lock(&self.ended) {
-            self.end_with_error(&ErrorInfo::new("cancelled"));
+            self.cancel();
         }
     }
 }
@@ -1545,34 +1755,4 @@ impl fmt::Debug for SpanOperation {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Observer;
-    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
-
-    #[test]
-    fn dropped_generic_spans_are_cancelled_but_explicit_completion_is_preserved() {
-        let spans = InMemorySpanExporter::default();
-        let provider = SdkTracerProvider::builder()
-            .with_simple_exporter(spans.clone())
-            .build();
-        let observer = Observer::builder().tracer_provider(&provider).build();
-        drop(observer.start_span("interrupted", vec![], StartOptions::default()));
-        let completed = observer.start_span("completed", vec![], StartOptions::default());
-        completed.end();
-        drop(completed);
-        let failed = observer.start_span("failed", vec![], StartOptions::default());
-        failed.end_with_error(&ErrorInfo::new("network"));
-        drop(failed);
-        let finished = spans.get_finished_spans().unwrap();
-        assert_eq!(finished.len(), 3);
-        assert!(matches!(finished[0].status, Status::Error { .. }));
-        assert!(finished[0]
-            .attributes
-            .contains(&KeyValue::new(attr::ERROR_TYPE, "cancelled")));
-        assert_eq!(finished[1].status, Status::Unset);
-        assert!(finished[2]
-            .attributes
-            .contains(&KeyValue::new(attr::ERROR_TYPE, "network")));
-    }
-}
+mod tests;
