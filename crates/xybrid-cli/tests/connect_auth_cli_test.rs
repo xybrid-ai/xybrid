@@ -331,7 +331,7 @@ impl Sandbox {
 
     /// The CLI in `dir` with a scrubbed environment.
     fn command_in(&self, dir: &Path, args: &[&str]) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_xybrid"));
+        let mut command = Command::new(xybrid_bin());
         command.args(args).current_dir(dir);
         for name in SCRUBBED {
             command.env_remove(name);
@@ -361,6 +361,24 @@ impl Sandbox {
         command.envs(env.iter().copied());
         command.output().expect("xybrid runs").into()
     }
+}
+
+/// The CLI binary as an absolute path. Cargo sets `CARGO_BIN_EXE_xybrid` to an
+/// absolute path, but Bazel sets it to a runfiles-relative one, which stops
+/// resolving once a command runs in a project directory. Resolved once, against
+/// the directory the test binary started in.
+fn xybrid_bin() -> &'static Path {
+    static BIN: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BIN.get_or_init(|| {
+        let path = PathBuf::from(env!("CARGO_BIN_EXE_xybrid"));
+        if path.is_absolute() {
+            path
+        } else {
+            std::env::current_dir()
+                .expect("the test's working directory")
+                .join(path)
+        }
+    })
 }
 
 #[cfg(unix)]
