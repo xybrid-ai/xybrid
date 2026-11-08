@@ -204,7 +204,6 @@ fn status(
 ) -> Result<(), CliError> {
     let project = project(ctx, allow_custom_host, report)?;
     report.credentials = credentials_report(&project);
-    report.stored = project.stored.as_ref().map(stored_report);
     let resolved = ctx.explicit_key.clone().or_else(|| {
         project.stored.as_ref().map(|credential| ResolvedKey {
             key: credential.api_key.clone(),
@@ -230,15 +229,22 @@ fn status(
             .into();
         return Ok(());
     };
+    // The saved credential describes the key being checked only when it
+    // holds that key, however the key arrived (an explicit XYBRID_API_KEY is
+    // often the saved key exported from the project's .env). Only then do its
+    // deadlines, its claim link and the server's answer go together.
+    let stored = project
+        .stored
+        .clone()
+        .filter(|credential| credential.api_key == resolved.key);
+    report.stored = stored.as_ref().map(stored_report);
     report.key = Some(KeyReport {
         source: KeyReport::source_name(resolved.source),
         preview: Some(key_preview(resolved.key.expose())),
-        scope: resolved.credential.as_ref().and_then(|c| c.scope.clone()),
+        scope: stored.as_ref().and_then(|c| c.scope.clone()),
     });
-    let stored = resolved.credential.clone();
     if show_claim_url {
-        report.claim_url = project
-            .stored
+        report.claim_url = stored
             .as_ref()
             .and_then(|c| claim_url_for(&project.host, c, Utc::now()));
     }
@@ -327,7 +333,7 @@ fn status(
         // Only the platform's own answer proves the key dead: a 401 from a
         // proxy or load balancer in front of it is handled as unknown below.
         Err(failure) if is_invalid_api_key(&failure) => {
-            if resolved.source == KeySource::Credentials {
+            if stored.is_some() {
                 if let Some(store) = &project.store {
                     update_stored(store, &project, &resolved.key, |file| {
                         file.retire(

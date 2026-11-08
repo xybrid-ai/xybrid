@@ -1827,3 +1827,55 @@ fn after_the_claim_deadline_nothing_offers_a_claim() {
     assert_eq!(run.code, Some(1), "{run}");
     assert_eq!(run.json()["error"]["code"], "claim_expired");
 }
+
+/// `auth status` attaches saved details (the claim link, a refreshed
+/// lifecycle) only to the key they belong to, however that key arrived.
+#[test]
+fn auth_status_uses_saved_details_only_for_their_own_key() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    mock_challenge(&server);
+    mock_connect(&server);
+    let url = server.base_url();
+    let console = ("XYBRID_CONSOLE_URL", CONSOLE);
+    assert_eq!(
+        sandbox.run_with(&connect_args(&url), &[console]).code,
+        Some(0)
+    );
+    let args = platform_args(&url, &["auth", "status", "--json", "--show-claim-url"]);
+    let link = format!("{CONSOLE}/claim/{CLAIM_TOKEN}");
+
+    // Another workspace's key: the saved claim link and deadlines are not its own.
+    let other = mock_workspace(&server, SECOND_KEY, workspace(false, false, "none"));
+    let run = sandbox.run_with(&args, &[console, ("XYBRID_API_KEY", SECOND_KEY)]);
+    assert_eq!(run.code, Some(0), "{run}");
+    run.assert_no_secret(SECOND_KEY);
+    assert!(!run.stdout.contains(CLAIM_TOKEN), "{run}");
+    let report = run.json();
+    assert_eq!(report["key"]["source"], "env");
+    assert_eq!(report["claim_url"], Value::Null);
+    assert_eq!(report["stored"], Value::Null);
+    other.assert_hits(1);
+
+    // The saved key exported into the environment is that credential.
+    let mut unclaimed = mock_workspace(&server, KEY, workspace(false, false, "none"));
+    let run = sandbox.run_with(&args, &[console, ("XYBRID_API_KEY", KEY)]);
+    assert_eq!(run.code, Some(0), "{run}");
+    run.assert_no_secret(KEY);
+    let report = run.json();
+    assert_eq!(report["key"]["source"], "env");
+    assert_eq!(report["claim_url"], link);
+    assert!(report["stored"]["key_expires_at"].is_string(), "{run}");
+    unclaimed.assert_hits(1);
+    unclaimed.delete();
+
+    // A claim made in the console is saved through it as well.
+    let claimed = mock_workspace(&server, KEY, workspace(false, true, "none"));
+    let run = sandbox.run_with(&args, &[console, ("XYBRID_API_KEY", KEY)]);
+    assert_eq!(run.code, Some(0), "{run}");
+    let report = run.json();
+    assert_eq!(report["claim_url"], Value::Null, "claimed: {run}");
+    claimed.assert_hits(1);
+    assert_eq!(sandbox.credentials()["credentials"][0]["claimed"], true);
+}
