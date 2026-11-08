@@ -39,7 +39,7 @@
 [![Swift Package Manager][spm-shield]][spm-url]
 <br>
 [![Ask DeepWiki][deepwiki-shield]][deepwiki-url]
-[![Stars][stars-shield]][stars-url]
+[![Greptile: The War on Bugs][greptile-shield]][greptile-url]
 [![Visitors][visitors-shield]][visitors-url]
 
 </p>
@@ -75,10 +75,12 @@
 [spm-url]: https://github.com/xybrid-ai/xybrid
 
 <!-- Community — flat-square -->
-[deepwiki-shield]: https://deepwiki.com/badge.svg
+<!-- DeepWiki's own badge.svg sits behind a bot checkpoint that GitHub's image
+     proxy can't pass; this is the same badge rendered by shields.io. -->
+[deepwiki-shield]: https://img.shields.io/badge/Ask_DeepWiki-007EC6?labelColor=black&logo=data%3Aimage%2Fpng%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAAsVBMVEVHcEwmWMYZy38Akt0gwZoSaFIbYssUmr4gwJkBlN4WbNE4acofwZkBj9k4aMkBk94WgM0bsIM4aMkewJc2ZMM3Z8cbvIwYpHsewJYAftgBkt0fvpgBkt0cv44cv5wzYckAjtsCk90pasUboXsgwJkfwpYfwJg4aMoct44yXswAkd0BkN84Z8cBktwduZIjcO85lM4hwZo5acoBleA6a88iyaABmOQ8b9QhxZ0CnOoizaOW4DOvAAAAMHRSTlMAKCfW%2FAgWA%2F7%2FDfvMc9j7MU%2Frj3XBcRW%2FJMbe7kUxjI%2FlUzzz6tPQkJ%2BjVmW1oeulmmslAAAByUlEQVQ4y32Tia6jIBSGUVFcqliXtlq73rm3d50ERNC%2B%2F4PNQetoptMeE0PgC%2F9%2FFhCaBSH9Hz2J%2BONgPDl2DolSUWY%2FPL8oEQRCfPxHpFc3Ah5wHoiI6I05NXgjAOgQF3Jn1Dlo4XMPDDes09UE2d%2BREvl3lijBg4CrHNmrbcM2u9u5nwsRcAFfFHFY5sZ607Yua3GqpQiKE6G9cZHZThblZ4T2mLnMxde3ATASMUj72o0Pbs1fADDcLHqAjEDugJ3lC%2BztMGYTADcoLaFyH%2B02DP9%2BWS4ahrXE4laALFKcq8vZfscNY8312mxfr27bLJZjnsYhSDIHmUxLu9h9N%2Fep%2B7pazwoZQw%2B1Nwi33epu7c2p8RooeqCdAHMGoOJIq3CUwIMEniRIaHVe3ZVnO2Vgsh1MstEkQUXVUc%2BjXfk3zbemxS6%2BpQmlPtUeALJ8VKj4JHvAelBqFFdSS3h1SPzQKr%2F%2BaRa0%2B0cCIWtJLauG5U%2FfbgyG01uiNqQhyzA8ddKj1OvK28AsZyN3DKE4X6AEWrU1jJx9N7RFpdPxpHU%2FtMOQG9SjfTp3Yz8KgRVKpfx88Dqhpseq606h%2F%2Bzxfh6LJ8eEDKWbxx9XEDwqzP1SVgAAAABJRU5ErkJggg%3D%3D
 [deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
-[stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square
-[stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
+[greptile-shield]: https://www.greptile.com/badge.svg
+[greptile-url]: https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source
 [twitter-shield]: https://img.shields.io/badge/Follow-%40xybrid__ai-000000?style=for-the-badge&logo=x&logoColor=white
 [twitter-url]: https://x.com/xybrid_ai
 [visitors-shield]: https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid
