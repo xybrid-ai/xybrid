@@ -14,7 +14,8 @@
 //!    before each POST, so a crash or a lost response retries the same
 //!    request instead of creating a second workspace.
 //! 3. **Save** the credential privately, then write the key and a comment
-//!    with the claim command and dates (never the token) to the project file.
+//!    with the claim command and dates (never the token) to the project file,
+//!    after checking again that Git neither tracks it nor stopped ignoring it.
 //!
 //! `connect` never starts an exporter and never prints the raw key. Its JSON
 //! and exit codes are documented in [`crate::platform::report`].
@@ -281,7 +282,7 @@ fn connect(
         client: PlatformClient::new(host.clone()),
         host,
         root,
-        in_repository: repo.is_some(),
+        repo,
         target,
         gitignore_updated,
         store,
@@ -301,14 +302,33 @@ fn connect(
         if session.fresh_pending(PendingKind::Connect).is_some() {
             return session.provision();
         }
+        // Likewise a project request that may already have added this
+        // project: it is retried in the workspace it was sent to, whatever
+        // the store offers now (another repository may have connected a newer
+        // workspace, recorded a claim or logged out meanwhile).
+        let resumed = session
+            .fresh_pending(PendingKind::Project)
+            .and_then(|pending| pending.claim_token);
+        if let Some(claim_token) = &resumed {
+            let member = session
+                .file
+                .workspace_member(session.host.origin(), claim_token)
+                .cloned();
+            if session.add_project(claim_token.clone(), member.as_ref())? {
+                return Ok(());
+            }
+        }
         let now = Utc::now();
         if let Some(workspace) = session
             .file
             .workspace_for_new_project(session.host.origin(), &session.root, now)
+            .filter(|w| w.claim_token.as_ref() != resumed.as_ref())
             .cloned()
         {
-            if session.add_project(workspace)? {
-                return Ok(());
+            if let Some(claim_token) = workspace.claim_token.clone() {
+                if session.add_project(claim_token, Some(&workspace))? {
+                    return Ok(());
+                }
             }
         }
     }
@@ -555,6 +575,10 @@ impl EnvTarget {
 enum Failed {
     /// Boxed: an [`ApiFailure`] carries the whole error body.
     Api(Box<ApiFailure>),
+    /// A provisioning POST got no usable answer (transport failure, 5xx, a
+    /// malformed 2xx): it may have been applied, and its retry state is kept
+    /// so the next run repeats it instead of creating another.
+    Unanswered(Box<ApiFailure>),
     Cli(CliError),
 }
 
@@ -579,7 +603,8 @@ struct Session<'a> {
     client: PlatformClient,
     host: PlatformHost,
     root: PathBuf,
-    in_repository: bool,
+    /// The repository `connect` runs in (and `--write-env` belongs to).
+    repo: Option<Repository>,
     target: Option<EnvTarget>,
     gitignore_updated: bool,
     store: Store,
@@ -704,22 +729,34 @@ impl Session<'_> {
     }
 
     /// Add a project for this repository to another repository's unclaimed
-    /// workspace. Returns `false` to fall through to a new workspace.
-    fn add_project(&mut self, workspace: Credential) -> Result<bool, CliError> {
-        let Some(claim_token) = workspace.claim_token.clone() else {
-            return Ok(false);
-        };
+    /// workspace, through its claim token. `member` is the saved credential
+    /// of a repository in that workspace, when one is still saved. Returns
+    /// `false` to fall through to a new workspace.
+    fn add_project(
+        &mut self,
+        claim_token: Secret,
+        member: Option<&Credential>,
+    ) -> Result<bool, CliError> {
         match self.request_project(&claim_token) {
             Ok(provision) => {
                 self.store_provision(provision, Some(claim_token), true)?;
                 Ok(true)
             }
             Err(Failed::Cli(err)) => Err(err),
+            Err(Failed::Unanswered(failure)) => {
+                self.report_failure(&failure, Some(PendingKind::Project));
+                Ok(true)
+            }
             Err(Failed::Api(failure)) => match failure.code() {
-                Some("workspace_expired") => {
-                    self.report_other_workspace_expired(&workspace);
-                    Ok(true)
-                }
+                Some("workspace_expired") => match member {
+                    Some(workspace) => {
+                        self.report_other_workspace_expired(workspace);
+                        Ok(true)
+                    }
+                    // No repository here uses it any more, so there is
+                    // nothing to claim it from: start a new workspace.
+                    None => Ok(false),
+                },
                 Some("workspace_claimed") => {
                     self.update_workspace_entries(&claim_token, |c| c.claimed = true)?;
                     Ok(false)
@@ -730,7 +767,7 @@ impl Session<'_> {
                 }
                 Some("project_limit_reached") => Ok(false),
                 _ => {
-                    self.report_failure(&failure);
+                    self.report_failure(&failure, None);
                     Ok(true)
                 }
             },
@@ -745,7 +782,11 @@ impl Session<'_> {
             }
             Err(Failed::Cli(err)) => Err(err),
             Err(Failed::Api(failure)) => {
-                self.report_failure(&failure);
+                self.report_failure(&failure, None);
+                Ok(())
+            }
+            Err(Failed::Unanswered(failure)) => {
+                self.report_failure(&failure, Some(PendingKind::Connect));
                 Ok(())
             }
         }
@@ -903,22 +944,11 @@ impl Session<'_> {
                  is saved privately in {store})"
             )
         };
-        let (file, retry) = match &self.target {
-            Some(target) => (
-                target.display.clone(),
-                format!(
-                    "`xybrid{} connect --write-env {}{}`",
-                    host_flags(&self.host),
-                    target.display,
-                    if self.host.is_custom() {
-                        " --allow-custom-host"
-                    } else {
-                        ""
-                    }
-                ),
-            ),
-            None => ("the project file".into(), "`xybrid connect`".into()),
-        };
+        let file = self
+            .target
+            .as_ref()
+            .map_or_else(|| "the project file".to_string(), |t| t.display.clone());
+        let retry = self.rerun_command();
         self.report.status = Status::Error;
         self.report.error = Some(crate::platform::report::ErrorReport {
             code: err.code.to_string(),
@@ -931,6 +961,22 @@ impl Session<'_> {
             ensure_period(&err.message),
             self.claim_sentences(credential)
         );
+    }
+
+    /// This `connect` as a command to run again: same host and project file.
+    fn rerun_command(&self) -> String {
+        let mut command = format!("`xybrid{} connect", host_flags(&self.host));
+        if let Some(target) = &self.target {
+            command.push_str(&format!(" --write-env {}", target.display));
+            if self.args.env_name.is_some() {
+                command.push_str(&format!(" --env-name {}", target.variable));
+            }
+        }
+        if self.host.is_custom() {
+            command.push_str(" --allow-custom-host");
+        }
+        command.push('`');
+        command
     }
 
     /// Where the app finds the key once this run succeeds.
@@ -946,7 +992,7 @@ impl Session<'_> {
     }
 
     fn ignore_note(&self) -> &'static str {
-        match (self.in_repository, self.target.is_some()) {
+        match (self.repo.is_some(), self.target.is_some()) {
             (true, true) => " (gitignored)",
             (false, true) => " (not in a Git repository, so not gitignored)",
             _ => "",
@@ -965,6 +1011,12 @@ impl Session<'_> {
     }
 
     /// Write the key into `--write-env` unless it gained a value meanwhile.
+    ///
+    /// Preflight checked that Git neither tracks nor fails to ignore the
+    /// file, but platform requests and proof of work take a while: a checkout
+    /// or a `.gitignore` edit may have changed that since. Both are checked
+    /// again right before the key goes in, and the write is refused if either
+    /// fails (the key is already saved privately).
     fn write_project_file(&mut self, credential: &Credential) -> Result<bool, CliError> {
         let Some(target) = &self.target else {
             return Ok(false);
@@ -973,27 +1025,57 @@ impl Session<'_> {
         let lookup = env_file::lookup(target.format, &text, &target.variable);
         let mut report = target.report(
             Some(false),
-            self.in_repository,
+            self.repo.is_some(),
             self.gitignore_updated,
             Vec::new(),
         );
-        let written = if lookup == Lookup::Present {
+        if lookup == Lookup::Present {
             report.already_configured = true;
-            false
-        } else {
-            let updated = env_file::upsert(
-                target.format,
-                &text,
-                &target.variable,
-                credential.api_key.expose(),
-                &file_comment(credential),
-            )?;
-            env_file::write_atomic(&target.path, &updated)?;
-            report.written = true;
-            true
-        };
+            self.report.env_file = Some(report);
+            return Ok(false);
+        }
+        if let (Some(repo), Some(relative)) = (&self.repo, target.relative.as_deref()) {
+            let refusal = if repo.is_tracked(relative)? {
+                report.tracked = Some(true);
+                report.gitignored = false;
+                Some(CliError::new(
+                    "env_file_tracked",
+                    format!(
+                        "{} became tracked by Git while connecting, so a key written there \
+                         would be committed; nothing was written to it. Untrack it or choose \
+                         another --write-env file",
+                        target.display
+                    ),
+                ))
+            } else if !repo.is_ignored(relative)? {
+                report.gitignored = false;
+                Some(CliError::new(
+                    "env_file_not_ignored",
+                    format!(
+                        "{} stopped being ignored by Git while connecting (its .gitignore entry \
+                         changed); nothing was written to it",
+                        target.display
+                    ),
+                ))
+            } else {
+                None
+            };
+            if let Some(err) = refusal {
+                self.report.env_file = Some(report);
+                return Err(err);
+            }
+        }
+        let updated = env_file::upsert(
+            target.format,
+            &text,
+            &target.variable,
+            credential.api_key.expose(),
+            &file_comment(credential),
+        )?;
+        env_file::write_atomic(&target.path, &updated)?;
+        report.written = true;
         self.report.env_file = Some(report);
-        Ok(written)
+        Ok(true)
     }
 
     fn claim_sentences(&self, credential: &Credential) -> String {
@@ -1091,14 +1173,38 @@ impl Session<'_> {
         outcome.apply(self.report);
     }
 
-    fn report_failure(&mut self, failure: &ApiFailure) {
+    /// Report a platform failure. `unanswered` names the provisioning POST
+    /// whose answer never arrived (see [`Failed::Unanswered`]): it may have
+    /// been applied, so the report says so and how to recover it.
+    fn report_failure(&mut self, failure: &ApiFailure, unanswered: Option<PendingKind>) {
+        let recover = format!(
+            "Run {} again within the next few minutes: it repeats the same request, so it picks \
+             up what was created instead of creating another.",
+            self.rerun_command()
+        );
         match failure {
             ApiFailure::Offline(_) => {
                 self.report.status = Status::Offline;
-                self.report.tell_the_user = "Couldn't reach Xybrid from this environment, so \
-                    no workspace was created. On-device inference works without a key. Run \
-                    `xybrid connect` again later to see traces in the console."
-                    .into();
+                self.report.tell_the_user = match unanswered {
+                    Some(kind) => format!(
+                        "Didn't get an answer from Xybrid, so {} {recover} On-device inference \
+                         works without a key.",
+                        match kind {
+                            PendingKind::Connect => {
+                                "a workspace may already have been created for this project."
+                            }
+                            PendingKind::Project => {
+                                "this project may already have been added to the provisional \
+                                 workspace."
+                            }
+                        }
+                    ),
+                    // Nothing that creates a workspace was sent.
+                    None => "Couldn't reach Xybrid from this environment, so no workspace was \
+                             created. On-device inference works without a key. Run `xybrid \
+                             connect` again later to see traces in the console."
+                        .into(),
+                };
             }
             ApiFailure::Status { details, .. } if failure.code() == Some("agent_signup_closed") => {
                 self.report.status = Status::SignupClosed;
@@ -1137,9 +1243,14 @@ impl Session<'_> {
                     message: failure.describe(),
                 });
                 self.report.tell_the_user = format!(
-                    "Couldn't connect this project to the Xybrid console: {} On-device inference \
-                     works without it.",
-                    ensure_period(&failure.describe())
+                    "Couldn't connect this project to the Xybrid console: {}{} On-device \
+                     inference works without it.",
+                    ensure_period(&failure.describe()),
+                    if unanswered.is_some() {
+                        format!(" The request may still have been applied. {recover}")
+                    } else {
+                        String::new()
+                    }
                 );
             }
         }
@@ -1276,14 +1387,13 @@ impl Session<'_> {
                     std::thread::sleep(retry_delay(&failure));
                 }
                 _ => {
-                    if !failure.outcome_unknown() {
-                        self.file.clear_pending(
-                            self.host.origin(),
-                            &self.root,
-                            PendingKind::Connect,
-                        );
-                        self.save()?;
+                    if failure.outcome_unknown() {
+                        // Kept: the next run repeats this request.
+                        return Err(Failed::Unanswered(Box::new(failure)));
                     }
+                    self.file
+                        .clear_pending(self.host.origin(), &self.root, PendingKind::Connect);
+                    self.save()?;
                     return Err(failure.into());
                 }
             }
@@ -1319,14 +1429,13 @@ impl Session<'_> {
                     std::thread::sleep(retry_delay(&failure));
                 }
                 _ => {
-                    if !failure.outcome_unknown() {
-                        self.file.clear_pending(
-                            self.host.origin(),
-                            &self.root,
-                            PendingKind::Project,
-                        );
-                        self.save()?;
+                    if failure.outcome_unknown() {
+                        // Kept: the next run repeats this request.
+                        return Err(Failed::Unanswered(Box::new(failure)));
                     }
+                    self.file
+                        .clear_pending(self.host.origin(), &self.root, PendingKind::Project);
+                    self.save()?;
                     return Err(failure.into());
                 }
             }

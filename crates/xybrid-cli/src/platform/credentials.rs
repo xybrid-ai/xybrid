@@ -304,6 +304,19 @@ impl CredentialsFile {
             .max_by_key(|c| c.created_at)
     }
 
+    /// The newest saved credential on this host whose workspace `claim_token`
+    /// claims: a repository already in that workspace, whatever its state.
+    pub(crate) fn workspace_member(
+        &self,
+        origin: &str,
+        claim_token: &Secret,
+    ) -> Option<&Credential> {
+        self.credentials
+            .iter()
+            .filter(|c| c.platform_origin == origin && c.claim_token.as_ref() == Some(claim_token))
+            .max_by_key(|c| c.created_at)
+    }
+
     /// The newest retired credential for this host and repository that can
     /// still be claimed: the recovery path after the platform rejected a key.
     pub(crate) fn retired_claimable(

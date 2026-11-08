@@ -9,6 +9,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::{SecondsFormat, Utc};
@@ -301,6 +303,17 @@ impl Sandbox {
     fn credentials(&self) -> Value {
         let text = std::fs::read_to_string(self.credentials_path()).expect("credentials file");
         serde_json::from_str(&text).expect("credentials JSON")
+    }
+
+    /// Rewrite the saved store in place (its private permissions are kept).
+    fn edit_credentials(&self, edit: impl FnOnce(&mut Value)) {
+        let mut credentials = self.credentials();
+        edit(&mut credentials);
+        std::fs::write(
+            self.credentials_path(),
+            serde_json::to_vec_pretty(&credentials).unwrap(),
+        )
+        .unwrap();
     }
 
     fn git(&self, dir: &Path, args: &[&str]) -> Output {
@@ -736,10 +749,10 @@ fn an_unreachable_platform_exits_4() {
     assert_eq!(run.code, Some(4), "{run}");
     let report = run.json();
     assert_eq!(report["status"], "offline");
-    assert!(report["tell_the_user"]
-        .as_str()
-        .unwrap()
-        .contains("On-device inference works"));
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert!(tell.contains("On-device inference works"), "{tell}");
+    // Nothing was sent that could have created one.
+    assert!(tell.contains("no workspace was created"), "{tell}");
 
     let run = sandbox.run_with(
         &platform_args(&url, &["auth", "status", "--json"]),
@@ -1828,6 +1841,96 @@ fn after_the_claim_deadline_nothing_offers_a_claim() {
     assert_eq!(run.json()["error"]["code"], "claim_expired");
 }
 
+/// A `/v1/agent/projects` answer lost on the way back is retried in the
+/// workspace it was sent to, even when the store now offers a newer one: the
+/// project may already exist there.
+#[test]
+fn a_lost_project_answer_is_retried_in_its_own_workspace() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    mock_challenge(&server);
+    let connect = mock_connect(&server);
+    let mut failing = server.mock(|when, then| {
+        when.method(POST).path("/v1/agent/projects");
+        then.status(502).body("bad gateway");
+    });
+    let url = server.base_url();
+    assert_eq!(sandbox.run(&connect_args(&url)).code, Some(0));
+
+    let mobile = sandbox.another_project("mobile");
+    let run: Run = sandbox
+        .command_in(&mobile, &connect_args(&url))
+        .output()
+        .unwrap()
+        .into();
+    assert_eq!(run.code, Some(1), "{run}");
+    failing.assert_hits(1);
+    failing.delete();
+    let pending = sandbox.credentials()["pending"][0].clone();
+    assert_eq!(pending["kind"], "project");
+    assert_eq!(pending["claim_token"], CLAIM_TOKEN);
+    let idempotency_key = pending["idempotency_key"].as_str().unwrap().to_string();
+
+    // Meanwhile another repository connected a newer unclaimed workspace.
+    let web = sandbox.another_project("web");
+    sandbox.edit_credentials(|credentials| {
+        let mut newer = credentials["credentials"][0].clone();
+        newer["repository_root"] = json!(web.display().to_string());
+        newer["api_key"] = json!(SECOND_KEY);
+        newer["claim_token"] = json!(SECOND_CLAIM_TOKEN);
+        newer["created_at"] = json!(iso(1));
+        credentials["credentials"]
+            .as_array_mut()
+            .unwrap()
+            .push(newer);
+    });
+
+    let retry = server.mock(|when, then| {
+        when.method(POST)
+            .path("/v1/agent/projects")
+            .header("Idempotency-Key", idempotency_key.as_str())
+            .json_body_partial(json!({"claim_token": CLAIM_TOKEN}).to_string());
+        let mut body = provision(PROJECT_KEY, None, 7, true);
+        body["project"] = named("mobile", "mobile");
+        then.status(200).json_body(body);
+    });
+    let elsewhere = server.mock(|when, then| {
+        when.method(POST)
+            .path("/v1/agent/projects")
+            .json_body_partial(json!({"claim_token": SECOND_CLAIM_TOKEN}).to_string());
+        then.status(201)
+            .json_body(provision(PROJECT_KEY, None, 7, false));
+    });
+    let run: Run = sandbox
+        .command_in(&mobile, &connect_args(&url))
+        .output()
+        .unwrap()
+        .into();
+    assert_eq!(run.code, Some(0), "{run}");
+    run.assert_no_secret(PROJECT_KEY);
+    let report = run.json();
+    assert_eq!(report["status"], "created");
+    assert_eq!(
+        report["workspace"]["new_project_in_existing_workspace"],
+        true
+    );
+    assert_eq!(report["workspace"]["replayed"], true);
+    retry.assert_hits(1);
+    elsewhere.assert_hits(0);
+    connect.assert_hits(1);
+    let credentials = sandbox.credentials();
+    assert_eq!(credentials["pending"], json!([]));
+    let saved = credentials["credentials"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["repository_root"] == json!(mobile.display().to_string()))
+        .expect("mobile's credential");
+    assert_eq!(saved["api_key"], PROJECT_KEY);
+    assert_eq!(saved["claim_token"], CLAIM_TOKEN);
+}
+
 /// `auth status` attaches saved details (the claim link, a refreshed
 /// lifecycle) only to the key they belong to, however that key arrived.
 #[test]
@@ -1880,6 +1983,89 @@ fn auth_status_uses_saved_details_only_for_their_own_key() {
     assert_eq!(sandbox.credentials()["credentials"][0]["claimed"], true);
 }
 
+/// The project file is checked again right before the key goes in: if Git
+/// starts tracking it, or stops ignoring it, while the platform answers,
+/// nothing is written and the privately saved key is reported instead.
+#[test]
+fn a_project_file_git_picks_up_during_connect_never_gets_the_key() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let env_path = sandbox.project.join(".env");
+    std::fs::write(&env_path, "PUBLIC_FLAG=1\n").unwrap();
+    let server = MockServer::start();
+    mock_challenge(&server);
+    let slow = server.mock(|when, then| {
+        when.method(POST).path("/v1/agent/connect");
+        then.status(201)
+            .delay(Duration::from_secs(3))
+            .json_body(provision(KEY, Some(CLAIM_TOKEN), 7, false));
+    });
+    let url = server.base_url();
+
+    // A checkout (here `git add -f`) starts tracking .env meanwhile.
+    let child = sandbox
+        .command(&connect_args(&url))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for_hits(&slow, 1);
+    let add = sandbox.git(&sandbox.project, &["add", "-f", ".env"]);
+    assert!(add.status.success(), "git add -f .env");
+    let run: Run = child.wait_with_output().unwrap().into();
+    assert_eq!(run.code, Some(1), "{run}");
+    run.assert_no_secret(KEY);
+    let report = run.json();
+    assert_eq!(report["status"], "error");
+    assert_eq!(report["error"]["code"], "env_file_tracked");
+    assert_eq!(report["env_file"]["tracked"], true);
+    assert_eq!(report["env_file"]["gitignored"], false);
+    assert_eq!(report["env_file"]["written"], false);
+    assert_eq!(report["credentials"]["saved"], true);
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert!(
+        tell.contains("Created the provisional Xybrid workspace"),
+        "{tell}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&env_path).unwrap(),
+        "PUBLIC_FLAG=1\n"
+    );
+    assert_eq!(sandbox.credentials()["credentials"][0]["api_key"], KEY);
+
+    // Untracked again, but its .gitignore entry goes while the saved key is
+    // checked.
+    let rm = sandbox.git(&sandbox.project, &["rm", "-q", "--cached", ".env"]);
+    assert!(rm.status.success(), "git rm --cached .env");
+    let status = server.mock(|when, then| {
+        when.method(GET).path("/v1/agent/workspace");
+        then.status(200)
+            .delay(Duration::from_secs(3))
+            .json_body(workspace(false, false, "none"));
+    });
+    let child = sandbox
+        .command(&connect_args(&url))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for_hits(&status, 1);
+    std::fs::write(sandbox.project.join(".gitignore"), "").unwrap();
+    let run: Run = child.wait_with_output().unwrap().into();
+    assert_eq!(run.code, Some(1), "{run}");
+    run.assert_no_secret(KEY);
+    let report = run.json();
+    assert_eq!(report["error"]["code"], "env_file_not_ignored");
+    assert_eq!(report["env_file"]["tracked"], false);
+    assert_eq!(report["env_file"]["gitignored"], false);
+    assert_eq!(report["env_file"]["written"], false);
+    assert_eq!(
+        std::fs::read_to_string(&env_path).unwrap(),
+        "PUBLIC_FLAG=1\n"
+    );
+    slow.assert_hits(1);
+}
+
 /// Several empty assignments of the variable leave no single line to fill
 /// (the app reads one of them, depending on its loader): refused before
 /// anything is created or changed.
@@ -1907,6 +2093,88 @@ fn a_variable_assigned_on_several_empty_lines_is_refused_up_front() {
         std::fs::read_to_string(sandbox.project.join(".env")).unwrap(),
         text
     );
+}
+
+/// A loopback platform that serves the challenge but closes the connection
+/// on every other request without answering, as when the answer to a
+/// provisioning POST is lost. Returns its URL and how many such requests
+/// arrived.
+fn platform_dropping_answers() -> (String, Arc<AtomicUsize>) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&dropped);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { continue };
+            let mut reader = BufReader::new(&stream);
+            let mut request = String::new();
+            if reader.read_line(&mut request).is_err() {
+                continue;
+            }
+            let mut length = 0;
+            loop {
+                let mut header = String::new();
+                if reader.read_line(&mut header).unwrap_or(0) == 0 || header == "\r\n" {
+                    break;
+                }
+                if let Some((name, value)) = header.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse().unwrap_or(0);
+                    }
+                }
+            }
+            let mut body = vec![0; length];
+            let _ = reader.read_exact(&mut body);
+            if request.starts_with("GET /v1/agent/challenge ") {
+                let body = json!({
+                    "challenge": CHALLENGE,
+                    "difficulty": 8,
+                    "expires_at": iso(0),
+                    "algorithm": "sha256-leading-zero-bits",
+                })
+                .to_string();
+                let mut out = &stream;
+                let _ = out.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \
+                         {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+            } else {
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+            // Dropping the stream closes the connection unanswered.
+        }
+    });
+    (url, dropped)
+}
+
+#[test]
+fn a_lost_answer_is_reported_as_unknown_and_kept_for_the_retry() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let (url, dropped) = platform_dropping_answers();
+
+    let run = sandbox.run(&connect_args(&url));
+    assert_eq!(run.code, Some(4), "{run}");
+    let report = run.json();
+    assert_eq!(report["status"], "offline");
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert!(!tell.contains("no workspace was created"), "{tell}");
+    assert!(tell.contains("may already have been created"), "{tell}");
+    assert!(
+        tell.contains(&format!(
+            "`xybrid --platform-url {url} connect --write-env .env --allow-custom-host`"
+        )),
+        "{tell}"
+    );
+    assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    let pending = &sandbox.credentials()["pending"][0];
+    assert_eq!(pending["kind"], "connect");
 }
 
 /// Write `contents` to a new file only this account can read.
