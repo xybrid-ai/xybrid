@@ -753,6 +753,12 @@ fn an_unreachable_platform_exits_4() {
     assert!(tell.contains("On-device inference works"), "{tell}");
     // Nothing was sent that could have created one.
     assert!(tell.contains("no workspace was created"), "{tell}");
+    assert!(
+        tell.contains(&format!(
+            "`xybrid --platform-url {url} connect --write-env .env --allow-custom-host`"
+        )),
+        "{tell}"
+    );
 
     let run = sandbox.run_with(
         &platform_args(&url, &["auth", "status", "--json"]),
@@ -834,6 +840,32 @@ fn a_tracked_env_file_is_refused_with_untracked_alternatives() {
         std::fs::read_to_string(sandbox.project.join(".env")).unwrap(),
         "PUBLIC_FLAG=1\n"
     );
+
+    // From a subdirectory the suggested command names the file as
+    // --write-env did; the report keeps it repository-relative.
+    let web = sandbox.project.join("apps").join("web");
+    std::fs::create_dir_all(&web).unwrap();
+    std::fs::write(web.join(".env"), "PUBLIC_FLAG=1\n").unwrap();
+    assert!(sandbox.git(&web, &["add", ".env"]).status.success());
+    let run: Run = sandbox
+        .command_in(&web, &connect_args(&url))
+        .output()
+        .expect("xybrid runs")
+        .into();
+    assert_eq!(run.code, Some(6), "{run}");
+    let report = run.json();
+    assert_eq!(
+        report["env_file"]["suggestions"],
+        json!(["apps/web/.env.local"])
+    );
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert!(
+        tell.contains(&format!(
+            "`xybrid --platform-url {url} connect --write-env .env.local --allow-custom-host`"
+        )),
+        "{tell}"
+    );
+    challenge.assert_hits(0);
 
     // A file that is not an assignment file (e.g. a raw-key resource) is refused.
     std::fs::create_dir(sandbox.project.join("Assets")).unwrap();
@@ -2175,6 +2207,141 @@ fn a_lost_answer_is_reported_as_unknown_and_kept_for_the_retry() {
     assert_eq!(dropped.load(Ordering::SeqCst), 1);
     let pending = &sandbox.credentials()["pending"][0];
     assert_eq!(pending["kind"], "connect");
+}
+
+/// The command a report tells the user to run (`Run \`xybrid …\``), as CLI
+/// arguments without the leading `xybrid`.
+fn suggested_rerun(tell: &str) -> Vec<String> {
+    let start = tell
+        .find("Run `")
+        .unwrap_or_else(|| panic!("no command to run: {tell}"))
+        + "Run `".len();
+    let end = start + tell[start..].find('`').expect("closing backtick");
+    let mut words = tell[start..end].split_whitespace().map(str::to_string);
+    assert_eq!(words.next().as_deref(), Some("xybrid"), "{tell}");
+    words.collect()
+}
+
+/// A POST answered `502`: the platform may have applied it.
+fn mock_connect_unanswered(server: &MockServer) -> Mock<'_> {
+    server.mock(|when, then| {
+        when.method(POST).path("/v1/agent/connect");
+        then.status(502).body("bad gateway");
+    })
+}
+
+/// After a lost `connect --new` answer the suggested command repeats that
+/// request: it keeps `--new`, so the saved key of the old workspace is not
+/// reused instead, and `--allow-ci`, so CI doesn't skip it.
+#[test]
+fn the_suggested_rerun_repeats_a_lost_new_workspace_request() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    let mut first = mock_connect(&server);
+    let url = server.base_url();
+    let run = sandbox.run(&platform_args(&url, &["connect", "--json"]));
+    assert_eq!(run.code, Some(0), "{run}");
+    first.assert_hits(1);
+    first.delete();
+
+    let mut failing = mock_connect_unanswered(&server);
+    let ci = [("CI", "true")];
+    let run = sandbox.run_with(
+        &platform_args(&url, &["connect", "--new", "--allow-ci", "--json"]),
+        &ci,
+    );
+    assert_eq!(run.code, Some(1), "{run}");
+    let report = run.json();
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert!(tell.contains("may still have been applied"), "{tell}");
+    let rerun = suggested_rerun(tell);
+    assert_eq!(
+        rerun.join(" "),
+        format!("--platform-url {url} connect --new --allow-ci --allow-custom-host")
+    );
+    failing.assert_hits(1);
+    failing.delete();
+    let pending = sandbox.credentials()["pending"][0].clone();
+    assert_eq!(pending["kind"], "connect");
+    let idempotency_key = pending["idempotency_key"].as_str().unwrap().to_string();
+
+    // The platform had created the workspace: the suggested command gets it
+    // back, still in CI, without touching the old workspace's key.
+    let retry = server.mock(|when, then| {
+        when.method(POST)
+            .path("/v1/agent/connect")
+            .header("Idempotency-Key", idempotency_key.as_str());
+        then.status(200)
+            .json_body(provision(SECOND_KEY, Some(SECOND_CLAIM_TOKEN), 7, true));
+    });
+    let reuse = mock_workspace(&server, KEY, workspace(false, false, "none"));
+    let mut args: Vec<&str> = rerun.iter().map(String::as_str).collect();
+    args.push("--json");
+    let run = sandbox.run_with(&args, &ci);
+    assert_eq!(run.code, Some(0), "{run}");
+    let report = run.json();
+    assert_eq!(report["status"], "created");
+    assert_eq!(report["workspace"]["replayed"], true);
+    retry.assert_hits(1);
+    reuse.assert_hits(0);
+    challenge.assert_hits(2);
+    let credentials = sandbox.credentials();
+    assert_eq!(credentials["pending"], json!([]));
+    assert_eq!(credentials["credentials"][0]["api_key"], SECOND_KEY);
+}
+
+/// `--write-env` in a suggested command is the path as given, so the
+/// command works from the subdirectory `connect` ran in.
+#[test]
+fn the_suggested_rerun_works_from_the_directory_connect_ran_in() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let web = sandbox.project.join("apps").join("web");
+    std::fs::create_dir_all(&web).unwrap();
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    let mut failing = mock_connect_unanswered(&server);
+    let url = server.base_url();
+    let in_web = |args: &[&str]| -> Run {
+        sandbox
+            .command_in(&web, args)
+            .output()
+            .expect("xybrid runs")
+            .into()
+    };
+
+    let run = in_web(&platform_args(
+        &url,
+        &["connect", "--write-env", ".env", "--json"],
+    ));
+    assert_eq!(run.code, Some(1), "{run}");
+    let report = run.json();
+    assert_eq!(report["env_file"]["path"], "apps/web/.env");
+    let rerun = suggested_rerun(report["tell_the_user"].as_str().unwrap());
+    assert_eq!(
+        rerun.join(" "),
+        format!("--platform-url {url} connect --write-env .env --allow-custom-host")
+    );
+    failing.delete();
+
+    let retry = server.mock(|when, then| {
+        when.method(POST).path("/v1/agent/connect");
+        then.status(200)
+            .json_body(provision(KEY, Some(CLAIM_TOKEN), 7, true));
+    });
+    let mut args: Vec<&str> = rerun.iter().map(String::as_str).collect();
+    args.push("--json");
+    let run = in_web(&args);
+    assert_eq!(run.code, Some(0), "{run}");
+    let report = run.json();
+    assert_eq!(report["status"], "created");
+    assert_eq!(report["env_file"]["written"], true);
+    retry.assert_hits(1);
+    challenge.assert_hits(1);
+    let env = std::fs::read_to_string(web.join(".env")).unwrap();
+    assert!(env.contains(&format!("XYBRID_API_KEY={KEY}")), "{env}");
 }
 
 /// Write `contents` to a new file only this account can read.

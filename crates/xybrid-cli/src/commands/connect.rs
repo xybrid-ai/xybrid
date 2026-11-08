@@ -166,9 +166,20 @@ fn connect(
             let suggestions = target.suggestions(repo);
             report.status = Status::EnvFileTracked;
             report.env_file = Some(target.report(Some(true), false, false, suggestions.clone()));
+            // `suggestions` are repository-relative, like `env_file.path`;
+            // the command names the file the way `--write-env` did.
             let alternative = suggestions
                 .first()
-                .map(|s| format!(" such as {s} (`xybrid connect --write-env {s}`)"))
+                .map(|s| {
+                    let name = s.rsplit('/').next().unwrap_or(s);
+                    let path = args
+                        .write_env
+                        .as_deref()
+                        .and_then(Path::parent)
+                        .map_or_else(|| PathBuf::from(name), |dir| dir.join(name));
+                    let command = connect_command(&host, args, Some(&path), true);
+                    format!(" such as {s} ({command})")
+                })
                 .unwrap_or_default();
             report.tell_the_user = format!(
                 "Didn't connect: {} is tracked by Git, so a key written there would be \
@@ -948,7 +959,7 @@ impl Session<'_> {
             .target
             .as_ref()
             .map_or_else(|| "the project file".to_string(), |t| t.display.clone());
-        let retry = self.rerun_command();
+        let retry = self.rerun_command(false);
         self.report.status = Status::Error;
         self.report.error = Some(crate::platform::report::ErrorReport {
             code: err.code.to_string(),
@@ -963,20 +974,17 @@ impl Session<'_> {
         );
     }
 
-    /// This `connect` as a command to run again: same host and project file.
-    fn rerun_command(&self) -> String {
-        let mut command = format!("`xybrid{} connect", host_flags(&self.host));
-        if let Some(target) = &self.target {
-            command.push_str(&format!(" --write-env {}", target.display));
-            if self.args.env_name.is_some() {
-                command.push_str(&format!(" --env-name {}", target.variable));
-            }
-        }
-        if self.host.is_custom() {
-            command.push_str(" --allow-custom-host");
-        }
-        command.push('`');
-        command
+    /// This `connect` as a command to run again from the same directory.
+    /// `repeat_new` keeps `--new`, for a rerun that must repeat a request
+    /// whose answer was lost; a rerun that should reuse the credential this
+    /// run saved drops it.
+    fn rerun_command(&self, repeat_new: bool) -> String {
+        connect_command(
+            &self.host,
+            self.args,
+            self.args.write_env.as_deref(),
+            repeat_new,
+        )
     }
 
     /// Where the app finds the key once this run succeeds.
@@ -1177,10 +1185,13 @@ impl Session<'_> {
     /// whose answer never arrived (see [`Failed::Unanswered`]): it may have
     /// been applied, so the report says so and how to recover it.
     fn report_failure(&mut self, failure: &ApiFailure, unanswered: Option<PendingKind>) {
+        // No credential was saved, so a rerun with the same flags (`--new`
+        // included) takes the same path: a kept request is repeated rather
+        // than the old workspace's saved key reused.
+        let rerun = self.rerun_command(true);
         let recover = format!(
-            "Run {} again within the next few minutes: it repeats the same request, so it picks \
-             up what was created instead of creating another.",
-            self.rerun_command()
+            "Run {rerun} again within the next few minutes: it repeats the same request, so it \
+             picks up what was created instead of creating another."
         );
         match failure {
             ApiFailure::Offline(_) => {
@@ -1200,10 +1211,11 @@ impl Session<'_> {
                         }
                     ),
                     // Nothing that creates a workspace was sent.
-                    None => "Couldn't reach Xybrid from this environment, so no workspace was \
-                             created. On-device inference works without a key. Run `xybrid \
-                             connect` again later to see traces in the console."
-                        .into(),
+                    None => format!(
+                        "Couldn't reach Xybrid from this environment, so no workspace was \
+                         created. On-device inference works without a key. Run {rerun} again \
+                         later to see traces in the console."
+                    ),
                 };
             }
             ApiFailure::Status { details, .. } if failure.code() == Some("agent_signup_closed") => {
@@ -1751,6 +1763,37 @@ pub(crate) fn host_flags(host: &PlatformHost) -> String {
     }
 }
 
+/// `xybrid connect` as a copy-pasteable command, in backticks, to run from
+/// the directory this one ran in. It keeps the flags that decide what
+/// `connect` does: the host, `--write-env` (the path as given, or
+/// `write_env`), `--env-name`, `--allow-ci`, `--allow-custom-host`, and
+/// `--new` when `repeat_new`.
+fn connect_command(
+    host: &PlatformHost,
+    args: &ConnectArgs,
+    write_env: Option<&Path>,
+    repeat_new: bool,
+) -> String {
+    let mut command = format!("`xybrid{} connect", host_flags(host));
+    if repeat_new && args.new {
+        command.push_str(" --new");
+    }
+    if let Some(path) = write_env {
+        command.push_str(&format!(" --write-env {}", path.display()));
+        if let Some(name) = &args.env_name {
+            command.push_str(&format!(" --env-name {name}"));
+        }
+    }
+    if args.allow_ci {
+        command.push_str(" --allow-ci");
+    }
+    if host.is_custom() {
+        command.push_str(" --allow-custom-host");
+    }
+    command.push('`');
+    command
+}
+
 /// Where the app finds the key, for the `wire_init` and `verify` steps.
 enum KeyHome<'a> {
     /// The `--write-env` file holds the key `connect` saved.
@@ -1881,6 +1924,39 @@ mod tests {
         assert!(!comment.contains(&token));
         assert!(!comment.contains("/claim/"));
         assert!(comment.contains("xybrid auth claim"));
+    }
+
+    #[test]
+    fn suggested_commands_keep_the_flags_that_decide_the_outcome() {
+        let host = PlatformHost::parse("http://127.0.0.1:8080").unwrap();
+        let args = ConnectArgs {
+            agent: Some("claude-code".into()),
+            write_env: Some(PathBuf::from("config/.env")),
+            env_name: Some("EXPO_PUBLIC_XYBRID_API_KEY".into()),
+            project_name: Some("demo".into()),
+            new: true,
+            allow_ci: true,
+            allow_custom_host: true,
+            json: true,
+        };
+        // Repeating a lost request keeps --new: without it the saved key of
+        // the old workspace would be reused instead.
+        assert_eq!(
+            connect_command(&host, &args, args.write_env.as_deref(), true),
+            "`xybrid --platform-url http://127.0.0.1:8080 connect --new --write-env config/.env \
+             --env-name EXPO_PUBLIC_XYBRID_API_KEY --allow-ci --allow-custom-host`"
+        );
+        // Once a credential is saved, a rerun must reuse it, never replace it.
+        assert_eq!(
+            connect_command(&host, &args, args.write_env.as_deref(), false),
+            "`xybrid --platform-url http://127.0.0.1:8080 connect --write-env config/.env \
+             --env-name EXPO_PUBLIC_XYBRID_API_KEY --allow-ci --allow-custom-host`"
+        );
+        let production = PlatformHost::parse(host::PRODUCTION_API).unwrap();
+        assert_eq!(
+            connect_command(&production, &ConnectArgs::default(), None, true),
+            "`xybrid connect`"
+        );
     }
 
     #[test]
