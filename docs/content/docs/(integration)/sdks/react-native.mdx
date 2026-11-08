@@ -41,15 +41,25 @@ On the iOS Simulator, llama.cpp runs on the CPU to avoid invalid special-token o
 
 ## Initialization
 
-Local inference needs no setup. Pass an API key to enable cloud fallback, speculative cloud serving and [dashboard](https://dashboard.xybrid.dev) telemetry on top of the same local runtime:
+Local inference needs no setup. Pass an API key for cloud fallback and
+speculative cloud serving, then opt into [dashboard](https://dashboard.xybrid.dev)
+trace export separately:
 
 ```ts
-import { Xybrid } from '@xybrid/react-native';
+import { Xybrid, ObservabilityConfig } from '@xybrid/react-native';
 
 await Xybrid.initialize({ apiKey: XYBRID_API_KEY });
+await ObservabilityConfig.xybrid(XYBRID_API_KEY).setMetadataOnly(true).init();
 ```
 
 Options apply once per app process; a later call with different options rejects with `xybrid_config_error`.
+
+Observability can be replaced with another explicit configuration. An API key
+alone never enables export. The example records metadata only; enabled export
+captures governed text by default. `ObservabilityConfig.otlp('http://collector:4318')`
+configures traces, metrics and logs without a Xybrid key. Observation references
+use `{trace_id, span_id}`. Flush/shutdown delivery failures use
+`xybrid_telemetry_delivery`; retrying an inference does not recover its export.
 
 ## Run a model
 

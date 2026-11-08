@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Application-owned observability sessions and typed workflow, tool, inference
+  and model-load handles, with explicit parents, first-terminal-wins completion
+  and cancellation on last-owner disposal.
+- Observation controls and returned references across model loads, pipelines,
+  streamed TTS and live ASR, including native bindings and React Native cleanup.
+- Caller-owned device IDs, declarative redaction and opt-in third-party context
+  propagation. Export remains explicitly configured and offline use stays available.
+
+### Changed
+
+- Portable observability contract v2 preserves numeric/null wire types and
+  unsampled references, bounds retained content and delivery queues, and cancels
+  HTTP work on lifecycle deadlines. Per-signal counters report delivery outcomes.
+- JavaScript exporter support covers aligned OpenTelemetry 3.0/0.300 and
+  3.1/0.301 families. The core entry point stays independent of SDK packages.
+- CLI traces are scoped to each operation; `--trace-export PATH` explicitly
+  writes an artifact. See `docs/sdk/observability-coverage.md` for migration and
+  execution coverage.
+
+### Migration
+
+- Analyze saved traces with `xybrid trace FILE`; the session/latest selectors
+  were removed. `--trace-export PATH` now writes OTLP/JSON instead of Chrome
+  trace JSON.
+- Observability stats now contain per-signal accepted, exported, dropped,
+  failed and pending counters. Update consumers of the previous flat fields.
+- Rust streamed TTS returns `TtsStreamResult` (core summary plus observation),
+  and ASR flush returns a transcription result carrying its session reference.
+  Public streaming, stage and pipeline result records gained observation fields;
+  update exhaustive struct literals and serialized-result consumers.
+- Invalid explicit W3C parents are rejected. Validate caller-supplied
+  `traceparent` values before passing observation options.
+- React Native observation references use `{trace_id, span_id}`. Replace reads
+  of `traceId` and `spanId` with the corresponding snake-case fields.
+- Unity `Pipeline.Run` and `Model.Stream` accept optional observation controls.
+  Recompile assemblies using the wrappers to pick up the changed signatures.
+- Python observation context managers classify interruption and cancellation
+  separately from application errors. Release still cancels unfinished work
+  without flushing.
+- Delivery failures from flush/shutdown use `TelemetryDelivery` in native
+  bindings. Inspect delivery stats or retry export; do not rerun inference to
+  recover a missing acknowledgement.
+
 ## [0.17.0] - 2026-11-05
 
 ### Added

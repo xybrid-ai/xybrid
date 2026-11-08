@@ -71,10 +71,18 @@ trace/span reference needed by `record_feedback` and `record_evaluation`. It can
 be absent when tracing is disabled or suppressed. Those reporting APIs require
 a configured logs destination; the Xybrid preset configures only traces.
 
-Pipeline calls and TTS audio/chunk summaries are observed, but their public
-result shapes do not yet expose the same inference observation reference.
-Applications needing a durable reference for surrounding work can explicitly
-start an observed workflow with the portable API and retain its reference.
+Pipeline results expose the workflow reference; each stage result exposes its
+logical inference reference. SDK streamed-TTS results wrap the core summary and
+its inference reference. Models expose an immutable `load_observation_ref()`;
+reloads and lazy materialization create separate load observations under the
+operation that triggered them. ASR partials carry the actual decoder execution
+reference, while terminal transcription results carry the session workflow
+reference. Returning a cached partial does not count another inference.
+
+References use `{trace_id, span_id}`. A valid unsampled operation retains its
+reference; explicit trace suppression has none. References identify observations
+and do not prove that export succeeded. See the
+[binding and execution matrix](observability-coverage.md) for surface details.
 
 ## Local capture is independent
 

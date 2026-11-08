@@ -40,15 +40,26 @@ void main() async {
 }
 ```
 
-Inference runs entirely on-device whether or not you authenticate. Pass an `apiKey` to light up the [dashboard](https://dashboard.xybrid.dev) — that single call starts the telemetry exporter, and your `model.run()` / `pipeline.run()` calls automatically emit execution traces:
+Local inference is available without authentication. An `apiKey` configures
+cloud access. To send execution traces to the [dashboard](https://dashboard.xybrid.dev),
+also configure observability explicitly:
 
 ```dart
 await Xybrid.init(
   apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+  observability: ObservabilityConfig.xybrid(
+    apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+    metadataOnly: true,
+  ),
 );
 ```
 
-Without a key, telemetry is disabled and the first inference logs a one-shot hint pointing at the dashboard (suppress with the `XYBRID_QUIET=1` environment variable). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev). For a self-hosted dashboard, also pass `ingestUrl`; for CPU/memory sampling, pass `resourceTelemetry`.
+An API key alone does not enable export. The example selects metadata-only
+capture; otherwise enabled observability captures governed text by default.
+Use `ObservabilityConfig.otlp(endpoint: 'http://collector:4318')` for a Collector
+without Xybrid authentication. CPU/memory sampling is separately configured
+with `resourceTelemetry`. `ingestUrl` remains a legacy explicit opt-in to OTLP
+trace export; new integrations should use `observability`.
 
 `Xybrid.init()` also subscribes to OS battery state on iOS and Android via `battery_plus` and forwards each reading to the routing engine.
 
@@ -138,10 +149,11 @@ Main entry point for the SDK.
 ```dart
 class Xybrid {
   static Future<void> init({
-    String? apiKey,            // authenticates telemetry; omit to run anonymously
+    String? apiKey,            // cloud authentication; does not enable export
     String? gatewayUrl,        // override the LLM gateway URL
     String? ingestUrl,         // override the telemetry ingest URL (self-hosting)
     String? resourceTelemetry, // enable CPU/memory sampling
+    ObservabilityConfig? observability, // explicit OTLP export configuration
   });
   static bool get isInitialized;
   static void setApiKey(String apiKey);
