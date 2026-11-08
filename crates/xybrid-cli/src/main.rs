@@ -278,8 +278,9 @@ enum Commands {
 
         /// Serve from the cloud while the registry model downloads, instead of
         /// blocking on the download. Requires a key (--api-key, XYBRID_API_KEY
-        /// or `xybrid connect`'s saved key) and a registry --model. Chat models only: the registry is asked first,
-        /// and any other model downloads, then runs locally.
+        /// or `xybrid connect`'s saved key) and a registry --model. Chat models
+        /// only: the registry is asked first, and any other model downloads,
+        /// then runs locally.
         #[arg(long)]
         speculative_cloud: bool,
     },
@@ -331,9 +332,8 @@ enum Commands {
         /// Serve from the cloud while the registry model downloads in the
         /// background, then switch to local once ready. Requires a key
         /// (--api-key, XYBRID_API_KEY or `xybrid connect`'s saved key) and a
-        /// registry --model. Chat models only: the
-        /// registry is asked first, and any other model downloads, then runs
-        /// locally.
+        /// registry --model. Chat models only: the registry is asked first, and
+        /// any other model downloads, then runs locally.
         #[arg(long)]
         speculative_cloud: bool,
 
@@ -665,7 +665,8 @@ fn trace_endpoint(cli: &Cli, key: &ResolvedKey, host: Option<&PlatformHost>) -> 
             .clone()
             .unwrap_or_else(|| XYBRID_TRACES_ENDPOINT.to_string())),
         KeySource::Credentials => {
-            let host = host.context("a saved key always belongs to a parsed platform host")?;
+            let host =
+                host.expect("the resolver only returns a saved key for a parsed platform host");
             match cli.traces_endpoint.as_deref() {
                 Some(endpoint) if host::trace_endpoint_allowed(host, endpoint) => {
                     Ok(endpoint.to_string())
