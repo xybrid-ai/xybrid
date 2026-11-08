@@ -15,6 +15,7 @@ import type {
   SelectedAccelerator,
   TraceOptions,
 } from "../types.ts";
+import { epochClock } from "./clock.ts";
 import { isAbortError } from "./loading.ts";
 import type { GenerateObservationContext, LoadMetrics, RunMetrics } from "./protocol.ts";
 import type { GenerationTelemetry } from "./runtime.ts";
@@ -22,9 +23,6 @@ import type { GenerationTelemetry } from "./runtime.ts";
 /** llama.cpp serves local GGUF generation: it is both the provider and the runtime. */
 const RUNTIME = "llama.cpp";
 const ACCELERATOR_ATTRIBUTE = "xybrid.genai.accelerator";
-
-/** Wall-clock epoch milliseconds, the time base shared with the worker. */
-export const epochNow = (): number => performance.timeOrigin + performance.now();
 
 /** Application-owned telemetry must never interrupt runtime work or cleanup. */
 export const observeSafely = <T>(action: () => T): T | undefined => {
@@ -49,11 +47,18 @@ const validateTraceOptions = (value: unknown, name: string): TraceOptions | unde
   const parent = value["parent"];
   if (
     parent !== undefined &&
+    parent !== null &&
     typeof parent !== "string" &&
-    !(isObject(parent) && typeof parent["toTraceparent"] === "function")
+    !(
+      isObject(parent) &&
+      (typeof parent["traceparent"] === "string" ||
+        (typeof parent["traceId"] === "string" &&
+          typeof parent["spanId"] === "string" &&
+          typeof parent["traceFlags"] === "number"))
+    )
   ) {
     throw new RuntimeConfigurationError(
-      `${name}.parent must be an ObservationContext or a traceparent string.`,
+      `${name}.parent must be an ObservationContext, a traceparent string, a serialized context or context fields.`,
     );
   }
   const tracestate = value["tracestate"];
@@ -129,6 +134,7 @@ export const recordLoad = <
   model: string,
   startedAtMs: number,
   outcome: { readonly session: T } | { readonly error: unknown },
+  completedAtMs: number,
 ): ObservationRef | undefined => {
   const session = "session" in outcome ? outcome.session : undefined;
   const operation = observeSafely(() =>
@@ -149,14 +155,14 @@ export const recordLoad = <
     observeSafely(() =>
       operation.recordResource({ memoryUsedBytes: session.loaded.memory.allocatedBytes }),
     );
-    observeSafely(() => operation.end(epochNow()));
+    observeSafely(() => operation.end(completedAtMs));
   } else if ("error" in outcome && isAbortError(outcome.error)) {
-    observeSafely(() => operation.cancel(epochNow()));
+    observeSafely(() => operation.cancel(completedAtMs));
   } else if ("error" in outcome) {
     // Download errors can embed signed URLs, userinfo and other credentials. Keep
     // the original error for the caller, but never hand its message to telemetry.
     observeSafely(() =>
-      operation.endWithError({ errorType: errorType(outcome.error) }, epochNow()),
+      operation.endWithError({ errorType: errorType(outcome.error) }, completedAtMs),
     );
   }
   return observeSafely(() => operation.observationRef());
@@ -179,6 +185,7 @@ export class GenerationObservation {
   readonly #captureText: boolean;
   readonly #maxTokens: number;
   readonly #engineTiming: boolean;
+  readonly #clock = epochClock();
   #text = "";
   #completedAtMs: number | undefined;
 
@@ -243,7 +250,7 @@ export class GenerationObservation {
   delta(text: string): void {
     if (this.#captureText) this.#text += text;
     if (!this.#engineTiming && text.length > 0) {
-      observeSafely(() => this.#operation?.recordChunk(epochNow()));
+      observeSafely(() => this.#operation?.recordChunk(this.#clock()));
     }
   }
 
@@ -257,7 +264,7 @@ export class GenerationObservation {
   ): ObservationRef | undefined {
     const operation = this.#operation;
     if (operation === undefined) return undefined;
-    const at = this.#completedAtMs ?? epochNow();
+    const at = this.#completedAtMs ?? this.#clock();
     if (run !== undefined) {
       observeSafely(() =>
         operation.recordUsage({ inputTokens: run.promptTokens, outputTokens: run.generatedTokens }),
