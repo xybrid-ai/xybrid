@@ -124,8 +124,11 @@ export const countDataPoints = (metrics: ResourceMetrics): number => {
 
 // Conservative estimates (CONTRACT.md "Lifecycle and delivery"). The constants bound the
 // OTLP/JSON encoding (the larger of the two): JSON-escaped string lengths, field names, and
-// decimal numbers; protobuf is always smaller. The item base covers scope metadata and
-// ordinary resource overhead; shared application resource attributes are not charged per item.
+// decimal numbers; protobuf is always smaller. Every item is charged its own instrumentation
+// scope (name, version, schema URL, attributes), as in the Rust estimator: distinct scopes can be
+// as large as item attributes, and grouping happens only after admission. The item base covers
+// fixed field overhead and ordinary resource overhead; shared application resource attributes
+// are not charged per item.
 const ITEM_BASE = 1024;
 const EVENT_BASE = 128;
 const LINK_BASE = 192;
@@ -199,10 +202,29 @@ const attributesBytes = (attributes: Attributes | undefined): number => {
 const optionalString = (value: string | undefined): number =>
   typeof value === "string" ? jsonStringBytes(value) : 0;
 
+/** Scope fields the OTLP encoders write (`attributes` for any scope that carries them, e.g. logs). */
+type ScopeLike = {
+  readonly name: string;
+  readonly version?: string | undefined;
+  readonly schemaUrl?: string | undefined;
+  readonly attributes?: Attributes | undefined;
+};
+
+/** Encoded size of an item's instrumentation scope, charged per item. */
+const scopeBytes = (scope: ScopeLike | undefined): number =>
+  scope === undefined
+    ? 0
+    : ATTRIBUTE_OVERHEAD +
+      optionalString(scope.name) +
+      optionalString(scope.version) +
+      optionalString(scope.schemaUrl) +
+      attributesBytes(scope.attributes);
+
 /** Conservative encoded size of a span's share of a request (never below the encoded size). */
 export const estimateSpanBytes = (span: ReadableSpan): number => {
   let bytes =
     ITEM_BASE +
+    scopeBytes(span.instrumentationScope) +
     jsonStringBytes(span.name) +
     optionalString(span.status?.message) +
     optionalString(span.spanContext().traceState?.serialize()) +
@@ -222,6 +244,7 @@ export const estimateSpanBytes = (span: ReadableSpan): number => {
 /** Conservative encoded size of a log record's share of a request. */
 export const estimateLogBytes = (record: ReadableLogRecord): number =>
   ITEM_BASE +
+  scopeBytes(record.instrumentationScope) +
   (record.body === undefined ? 0 : valueBytes(record.body, 1, new Set())) +
   optionalString(record.severityText) +
   optionalString(record.eventName) +

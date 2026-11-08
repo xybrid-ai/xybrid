@@ -314,8 +314,13 @@ bounded and exact as the contract requires.
 The core's API peer range is `^1.9.0`; its provider inputs are structural.
 This package declares optional 3.0/3.1 SDK peer ranges. npm may accept
 conflicting optional peers; the OTLP boundary also rejects an unsupported SDK
-at runtime. CI installs a valid API 1.9 + SDK 2.x baseline before checking this
-rejection, so an unrelated API peer conflict cannot make the check pass.
+at runtime: every `/otlp` entry point throws `TypeError` ("requires OpenTelemetry
+SDK 3.0 or 3.1") before creating a timer or provider. CI first installs a
+complete, valid API 1.9 + SDK 2.x tree (core, resources, sdk-trace, sdk-logs,
+sdk-metrics, otlp-transformer), so an unrelated conflict or missing module
+cannot make the check pass. It then requires npm to refuse the package with a
+peer conflict (or to accept it), installs it anyway, and checks that each entry
+point throws that exact error.
 SDK 2.x installation compatibility is not supported by this release. The core
 reads the global logger provider from `@opentelemetry/api` when present and from
 `@opentelemetry/api-logs` otherwise.

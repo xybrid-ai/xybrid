@@ -78,7 +78,8 @@ for (const name of ["core", "resources", "sdk-trace", "sdk-logs", "sdk-metrics",
     run(process.execPath, [join(dir, "node_modules/typescript/bin/tsc"), "--noEmit"], dir);
     console.log(`Packed consumer and full suite passed: SDK ${sdk}, transformer ${transformer}`);
   }
-  // This API/SDK combination is valid on its own: rejection must come from our package.
+  // SDK 2.x (D33). A complete API 1.9 + SDK 2.x tree, valid on its own, so any rejection
+  // below comes from our package and not from an unrelated conflict or a missing module.
   const unsupported = join(temp, "unsupported");
   await mkdir(unsupported);
   const legacy = {
@@ -86,53 +87,80 @@ for (const name of ["core", "resources", "sdk-trace", "sdk-logs", "sdk-metrics",
     type: "module",
     dependencies: {
       "@opentelemetry/api": "1.9.0",
-      "@opentelemetry/core": "2.6.0",
+      "@opentelemetry/core": "2.12.0",
+      "@opentelemetry/resources": "2.12.0",
       "@opentelemetry/sdk-trace": "2.12.0",
+      "@opentelemetry/sdk-logs": "0.223.0",
+      "@opentelemetry/sdk-metrics": "2.12.0",
+      "@opentelemetry/otlp-transformer": "0.223.0",
     },
   };
+  const npmInstall = ["install", "--ignore-scripts", "--no-audit", "--no-fund"];
   await writeFile(join(unsupported, "package.json"), JSON.stringify(legacy));
-  run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], unsupported);
+  run("npm", npmInstall, unsupported);
   run(
     process.execPath,
-    ["--input-type=module", "-e", 'await import("@opentelemetry/sdk-trace");'],
+    [
+      "--input-type=module",
+      "-e",
+      `for (const name of ["core", "resources", "sdk-trace", "sdk-logs", "sdk-metrics", "otlp-transformer"])
+  await import("@opentelemetry/" + name);`,
+    ],
     unsupported,
   );
+  // Leg 1, npm's peer check: refusing the package must be a peer conflict naming it.
   legacy.dependencies["@xybrid/observability"] = `file:${archive}`;
   await writeFile(join(unsupported, "package.json"), JSON.stringify(legacy));
-  const installed = spawnSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], {
-    cwd: unsupported,
-    encoding: "utf8",
-  });
-  if (installed.error) throw installed.error;
-  if (installed.status !== 0) {
+  const strict = spawnSync("npm", npmInstall, { cwd: unsupported, encoding: "utf8" });
+  if (strict.error) throw strict.error;
+  let peerCheck = "npm accepted the conflicting optional peers";
+  if (strict.status !== 0) {
     assert.match(
-      installed.stderr,
+      strict.stderr,
       /ERESOLVE/,
-      "only a package peer conflict is an acceptable rejection",
+      "only a package peer conflict is an acceptable refusal",
     );
-  } else {
-    // npm can accept incompatible optional peers; the OTLP boundary must reject SDK 2.x too.
-    const loaded = spawnSync(
-      process.execPath,
-      [
-        "--input-type=module",
-        "-e",
-        `
-      const { createOtlpPipeline } = await import("@xybrid/observability/otlp");
-      await createOtlpPipeline({ environment: null }).shutdown();
-    `,
-      ],
-      { cwd: unsupported, encoding: "utf8" },
-    );
-    if (loaded.error) throw loaded.error;
-    assert.notEqual(loaded.status, 0, "OTLP must reject a realistic SDK 2.x consumer");
     assert.match(
-      loaded.stderr,
-      /OpenTelemetry|opentelemetry/,
-      "rejection must identify the incompatible SDK",
+      strict.stderr,
+      /@xybrid\/observability/,
+      "the peer conflict must name the package",
     );
+    peerCheck = "npm refuses the package's peers (ERESOLVE)";
+    // Leg 2 needs the tree npm could also accept: force it in, as other installers do.
+    run("npm", [...npmInstall, "--legacy-peer-deps"], unsupported);
   }
-  console.log("Realistic SDK 2.x baseline installs; the package's OTLP boundary rejects it.");
+  // Leg 2, always: with SDK 2.x loaded, every OTLP entry point throws the package's own
+  // rejection. A missing module, link error or other exception fails this check.
+  run(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `import assert from "node:assert/strict";
+import { SDK_INFO } from "@opentelemetry/core";
+assert.match(SDK_INFO["telemetry.sdk.version"], /^2\\./);
+const otlp = await import("@xybrid/observability/otlp");
+const options = {
+  environment: null,
+  traces: { endpoint: "http://127.0.0.1:1/v1/traces" },
+  metrics: { endpoint: "http://127.0.0.1:1/v1/metrics" },
+  logs: { endpoint: "http://127.0.0.1:1/v1/logs" },
+};
+const message = "@xybrid/observability/otlp requires OpenTelemetry SDK 3.0 or 3.1.";
+const entries = {
+  createOtlpPipeline: () => otlp.createOtlpPipeline(options),
+  createOtlpExporters: () => otlp.createOtlpExporters(options),
+  OtlpTraceExporter: () => new otlp.OtlpTraceExporter(options),
+  OtlpLogExporter: () => new otlp.OtlpLogExporter(options),
+  OtlpMetricExporter: () => new otlp.OtlpMetricExporter(options),
+};
+for (const [name, construct] of Object.entries(entries)) {
+  assert.throws(construct, (error) => error instanceof TypeError && error.message === message, name);
+}`,
+    ],
+    unsupported,
+  );
+  console.log(`SDK 2.x baseline installs alone; ${peerCheck}; every OTLP entry point rejects it.`);
 } finally {
   await rm(temp, { recursive: true, force: true });
 }

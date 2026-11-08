@@ -349,6 +349,80 @@ describe("bounded buffers (R-BUF-1, R-BUF-2, R-CNT-5)", () => {
     await loggerProvider.shutdown();
   });
 
+  test("estimates charge every scope field: large names, versions, schema URLs, attributes", async () => {
+    const spans = new InMemorySpanExporter();
+    const logs = new InMemoryLogRecordExporter();
+    const tracerProvider = new TracerProvider({
+      spanProcessors: [new SimpleSpanProcessor({ exporter: spans })],
+    });
+    const loggerProvider = new LoggerProvider({
+      processors: [new SimpleLogRecordProcessor({ exporter: logs })],
+    });
+    // Each field alone outgrows the item base, so dropping any one of them is caught.
+    for (const size of [5_000, 20_000]) {
+      const long = (fill: string): string => fill.repeat(size);
+      const scopes: [string, string | undefined, string | undefined, string | undefined][] = [
+        [long("n"), undefined, undefined, undefined],
+        ["n", long("v"), undefined, undefined],
+        ["n", undefined, `https://schema.example/${long("s")}`, undefined],
+        ["n", undefined, undefined, long("a")],
+        [long("n"), long("v"), `https://schema.example/${long("s")}`, long("a")],
+      ];
+      for (const [name, version, schemaUrl, attribute] of scopes) {
+        const schema = schemaUrl === undefined ? {} : { schemaUrl };
+        tracerProvider.getTracer(name, version, schema).startSpan("s").end();
+        loggerProvider
+          .getLogger(name, version, {
+            ...schema,
+            ...(attribute === undefined ? {} : { attributes: { scope: attribute } }),
+          })
+          .emit({ body: "b" });
+      }
+    }
+    const finishedSpans = spans.getFinishedSpans();
+    const finishedLogs = logs.getFinishedLogRecords();
+    expect(finishedSpans).toHaveLength(10);
+    expect(finishedLogs).toHaveLength(10);
+    for (const protocol of PROTOCOLS) {
+      for (const item of finishedSpans) {
+        expect(estimateSpanBytes(item)).toBeGreaterThanOrEqual(
+          traceEncoder(protocol)([item]).length,
+        );
+      }
+      for (const item of finishedLogs) {
+        expect(estimateLogBytes(item)).toBeGreaterThanOrEqual(logEncoder(protocol)([item]).length);
+      }
+    }
+    await tracerProvider.shutdown();
+    await loggerProvider.shutdown();
+  });
+
+  test("large distinct scopes saturate the byte budget for spans and logs", async () => {
+    const server = await startServer(() => ({ hang: true }));
+    const pipeline = track(
+      createOtlpPipeline({
+        traces: { endpoint: `${server.url}/v1/traces` },
+        logs: { endpoint: `${server.url}/v1/logs` },
+        batch: { maxBufferedBytes: 10_000, scheduledDelayMs: 60_000 },
+      }),
+      server,
+    );
+    const tracerProvider = pipeline.tracerProvider;
+    const loggerProvider = pipeline.loggerProvider;
+    if (tracerProvider === undefined || loggerProvider === undefined) {
+      throw new Error("expected tracer and logger providers");
+    }
+    // Small items whose only weight is a 6,000-character scope name: one fits in 10,000 bytes.
+    for (let index = 0; index < 5; index += 1) {
+      const scope = `${index}${"x".repeat(6_000)}`;
+      tracerProvider.getTracer(scope).startSpan("s").end();
+      loggerProvider.getLogger(scope).emit({ body: "b" });
+    }
+    const expected = { accepted: 5, exported: 0, dropped: 4, failed: 0, pending: 1 };
+    expect(pipeline.stats().traces).toEqual(expected);
+    expect(pipeline.stats().logs).toEqual(expected);
+  });
+
   test("queue full, byte budget full and after shutdown all count dropped and accepted (logs too)", async () => {
     const server = await startServer(() => ({ hang: true }));
     const pipeline = createOtlpPipeline({

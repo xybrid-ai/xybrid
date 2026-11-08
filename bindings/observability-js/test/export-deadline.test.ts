@@ -1,5 +1,6 @@
 // Regressions for absolute export deadlines, independent flush barriers and item accounting.
 import { afterEach, describe, expect, test } from "bun:test";
+import { DEFAULTS } from "../src/catalog.ts";
 import { createOtlpPipeline, type OtlpPipeline } from "../src/otlp/index.ts";
 import { pause, startServer, type TestServer } from "./support/otlp-server.ts";
 
@@ -156,6 +157,38 @@ describe("R-DEADLINE-4 2xx with slow body", () => {
     expect(await p.forceFlush(3000)).toBe(true);
     expect(p.stats().traces.exported).toBe(1);
   });
+  // A partial success is only honoured if the client read it: a body one byte over the cap
+  // must be ignored (both spans exported); one exactly at the cap must still count.
+  for (const [extra, honoured] of [
+    [0, true],
+    [1, false],
+  ] as const) {
+    test(`a partial-success body of 64 KiB${extra === 0 ? "" : " + 1 byte"} is ${honoured ? "honoured" : "not read"}`, async () => {
+      const json = '{"partialSuccess":{"rejectedSpans":"1"}}';
+      // Trailing whitespace keeps the JSON valid, so only the read cap can discard it.
+      const body = json + " ".repeat(DEFAULTS.max_response_body_bytes - json.length + extra);
+      expect(body.length).toBe(64 * 1024 + extra);
+      const server = await startServer(() => ({ status: 200, body }));
+      const p = track(
+        createOtlpPipeline({
+          traces: { endpoint: `${server.url}/v1/traces`, protocol: "http/json" },
+          batch: { scheduledDelayMs: 60_000 },
+        }),
+        server,
+      );
+      span(p, "a");
+      span(p, "b");
+      expect(await p.forceFlush(3000)).toBe(!honoured);
+      expect(server.requests).toHaveLength(1);
+      expect(p.stats().traces).toEqual({
+        accepted: 2,
+        exported: honoured ? 1 : 2,
+        dropped: 0,
+        failed: honoured ? 1 : 0,
+        pending: 0,
+      });
+    });
+  }
 });
 
 describe("R-CFG-6 all redirect codes", () => {

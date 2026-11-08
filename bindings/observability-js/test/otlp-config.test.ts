@@ -1,12 +1,15 @@
 // Configuration boundaries: header isolation and merging, the environment constructor, resource
-// variables, and limit validation before any timer (R-CFG-1..5).
+// variables, limit validation before any timer (R-CFG-1..5), and the runtime SDK version check.
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { fileURLToPath } from "node:url";
+import { SDK_INFO } from "@opentelemetry/core";
 import { DEFAULTS } from "../src/catalog.ts";
 import { resolveOtlpOptions } from "../src/otlp/config.ts";
 import {
   createOtlpExporters,
   createOtlpPipeline,
+  OtlpLogExporter,
+  OtlpMetricExporter,
   type OtlpPipeline,
   type OtlpPipelineOptions,
   OtlpTraceExporter,
@@ -453,5 +456,78 @@ describe("limits are validated before any timer (R-CFG-5)", () => {
     expect(await pipeline.forceFlush(Number.NaN)).toBe(true);
     expect(await pipeline.forceFlush(-5)).toBe(true);
     expect(await pipeline.shutdown(Number.POSITIVE_INFINITY)).toBe(true);
+  });
+});
+
+describe("an unsupported OpenTelemetry SDK is rejected at runtime (D33)", () => {
+  // npm can accept conflicting optional peers, so the OTLP boundary checks the SDK that
+  // actually loaded. `SDK_INFO` is what `@opentelemetry/core` reports for that SDK.
+  const VERSION_KEY = "telemetry.sdk.version";
+  const options: OtlpPipelineOptions = {
+    environment: null,
+    traces: { endpoint: "http://127.0.0.1:1/v1/traces" },
+    metrics: { endpoint: "http://127.0.0.1:1/v1/metrics" },
+    logs: { endpoint: "http://127.0.0.1:1/v1/logs" },
+  };
+  const withSdkVersion = <T>(version: string, run: () => T): T => {
+    const previous = SDK_INFO[VERSION_KEY];
+    SDK_INFO[VERSION_KEY] = version;
+    try {
+      return run();
+    } finally {
+      SDK_INFO[VERSION_KEY] = previous;
+    }
+  };
+
+  test("every OTLP entry point throws before any timer or controller exists", () => {
+    const timeouts = spyOn(globalThis, "setTimeout");
+    const intervals = spyOn(globalThis, "setInterval");
+    const OriginalAbortController = globalThis.AbortController;
+    let controllers = 0;
+    globalThis.AbortController = class extends OriginalAbortController {
+      constructor() {
+        super();
+        controllers += 1;
+      }
+    };
+    try {
+      for (const version of ["2.12.0", "2.6.0", "3.2.0", "3.10.0", "4.0.0", "30.0.0", ""]) {
+        for (const construct of [
+          () => resolveOtlpOptions(options),
+          () => createOtlpPipeline(options),
+          () => createOtlpExporters(options),
+          () => new OtlpTraceExporter(options),
+          () => new OtlpLogExporter(options),
+          () => new OtlpMetricExporter(options),
+        ]) {
+          let error: unknown;
+          withSdkVersion(version, () => {
+            try {
+              construct();
+            } catch (caught) {
+              error = caught;
+            }
+          });
+          expect(error).toBeInstanceOf(TypeError);
+          expect((error as Error).message).toBe(
+            "@xybrid/observability/otlp requires OpenTelemetry SDK 3.0 or 3.1.",
+          );
+        }
+      }
+      expect(timeouts).not.toHaveBeenCalled();
+      expect(intervals).not.toHaveBeenCalled();
+      expect(controllers).toBe(0);
+    } finally {
+      timeouts.mockRestore();
+      intervals.mockRestore();
+      globalThis.AbortController = OriginalAbortController;
+    }
+  });
+
+  test("SDK 3.0.x and 3.1.x pass the check", () => {
+    for (const version of ["3.0.0", "3.0.7", "3.1.0", "3.1.12"]) {
+      const resolved = withSdkVersion(version, () => resolveOtlpOptions(options));
+      expect(resolved.traces?.url).toBe("http://127.0.0.1:1/v1/traces");
+    }
   });
 });
