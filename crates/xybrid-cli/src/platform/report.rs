@@ -12,7 +12,7 @@
 //! | 4 | `offline` |
 //! | 5 | `ci_skipped`, `opted_out` |
 //! | 6 | `env_file_tracked` |
-//! | 7 | `workspace_expired` |
+//! | 7 | `workspace_expired` (still claimable; past the claim deadline it is `error` with `claim_expired`) |
 //! | 1 | `error` / `not_connected` (`error.code` says why) |
 
 use chrono::{DateTime, Utc};

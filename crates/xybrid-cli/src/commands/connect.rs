@@ -32,7 +32,7 @@ use crate::platform::client::{
 };
 use crate::platform::credentials::{
     Credential, CredentialsFile, EnvFileRecord, NamedRef, PendingKind, PendingRequest, Secret,
-    Store, StoreLock,
+    Store, StoreLock, CREDENTIALS_FILE_ENV,
 };
 use crate::platform::env_file::{self, EnvFormat, Lookup};
 use crate::platform::git::{self, Repository};
@@ -42,7 +42,7 @@ use crate::platform::report::{
     ensure_period, CredentialsReport, EnvFileReport, KeyReport, NextStep, PlatformReport, Report,
     Status, VerificationReport, WorkspaceReport,
 };
-use crate::platform::resolve::ResolvedKey;
+use crate::platform::resolve::{KeySource, ResolvedKey};
 use crate::platform::{ci_marker, install_id, key_preview, opt_out, pow, CliError};
 
 /// How long to wait for another `xybrid connect` holding the store lock.
@@ -191,6 +191,7 @@ fn connect(
                 let ignored = is_ignored(repo.as_ref(), target)?;
                 report.env_file = Some(target.report(Some(false), ignored, false, Vec::new()));
             }
+            report.next_steps = next_steps(&host, KeyHome::Explicit(key.source));
             report.tell_the_user = format!(
                 "This environment already provides a Xybrid key ({}); `xybrid connect` changed \
                  nothing. Run `xybrid auth status` to check it.",
@@ -231,6 +232,7 @@ fn connect(
             scope: None,
         });
         report.env_file = Some(target.report(Some(false), repo.is_some(), updated, Vec::new()));
+        report.next_steps = next_steps(&host, KeyHome::UnsavedFile(target));
         report.tell_the_user = format!(
             "{} already sets {}; `xybrid connect` never replaces it and changed nothing{}.",
             target.display,
@@ -246,7 +248,7 @@ fn connect(
 
     // Recovery state must be writable before anything is created remotely.
     let store = Store::locate()?;
-    guard_store_location(&store, repo.as_ref())?;
+    guard_store_location(&store)?;
     let lock = store.lock(STORE_LOCK_TIMEOUT)?;
     let loaded = lock.load()?;
     report.credentials = Some(CredentialsReport {
@@ -331,30 +333,79 @@ fn holds_saved_key(host: &PlatformHost, root: &Path, target: &EnvTarget) -> bool
     )
 }
 
-/// Make sure an in-repository credentials file can't be committed.
-fn guard_store_location(store: &Store, repo: Option<&Repository>) -> Result<(), CliError> {
-    let Some(repo) = repo else {
+/// Keep a credentials store that sits in a Git working tree (any repository,
+/// not only this project's) out of commits. Its directory also receives the
+/// lock, the install ID, notice dates and any corrupt copy, so the whole
+/// directory is ignored; a repository root, or a directory holding tracked
+/// files, is refused instead.
+fn guard_store_location(store: &Store) -> Result<(), CliError> {
+    let Some(directory) = store.path().parent().and_then(canonical_lenient) else {
         return Ok(());
     };
-    let parent = store
-        .path()
-        .parent()
-        .and_then(|p| git::canonicalize(p).ok());
-    let (Some(parent), Some(name)) = (parent, store.path().file_name()) else {
+    let Some(root) = directory
+        .ancestors()
+        .find(|dir| dir.exists())
+        .and_then(git::repository_root)
+    else {
         return Ok(());
     };
-    let Some(relative) = git::relative_slash_path(repo.root(), &parent.join(name)) else {
-        return Ok(());
+    let Some(relative) = git::relative_slash_path(&root, &directory) else {
+        return Err(CliError::new(
+            "credentials_in_repository",
+            format!(
+                "{} would keep the credentials file directly in the Git repository {}; point \
+                 {CREDENTIALS_FILE_ENV} to a directory of its own (outside the repository, or \
+                 e.g. .xybrid/credentials.json)",
+                store.path().display(),
+                root.display()
+            ),
+        ));
     };
+    let repo = Repository::at(root);
     if repo.is_tracked(&relative)? {
         return Err(CliError::new(
             "credentials_tracked",
-            format!("The credentials file {relative} is tracked by Git; point XYBRID_CREDENTIALS_FILE elsewhere"),
+            format!(
+                "The credentials directory {relative} holds files tracked by Git; point \
+                 {CREDENTIALS_FILE_ENV} to a directory of its own"
+            ),
         ));
     }
     repo.ensure_ignored(&relative)?;
-    repo.ensure_ignored(&format!("{relative}.lock"))?;
     Ok(())
+}
+
+/// `path` with its longest existing prefix canonicalized and the rest kept,
+/// so a directory `lock` has yet to create is placed correctly. `None` if a
+/// missing component is not a plain name.
+fn canonical_lenient(path: &Path) -> Option<PathBuf> {
+    let mut missing = Vec::new();
+    let mut existing = path;
+    loop {
+        if let Ok(canonical) = git::canonicalize(existing) {
+            return Some(
+                missing
+                    .iter()
+                    .rev()
+                    .fold(canonical, |dir, part| dir.join(part)),
+            );
+        }
+        missing.push(existing.file_name()?);
+        existing = existing.parent()?;
+    }
+}
+
+/// `path` is outside the repository `connect` runs in (`root`).
+fn outside_repository(path: &Path, root: Option<&Path>) -> CliError {
+    let root = root.map_or_else(String::new, |r| format!(" ({})", r.display()));
+    CliError::new(
+        "env_file_outside_repository",
+        format!(
+            "{} is outside this Git repository{root}, so it can't be gitignored here; choose a \
+             file inside it",
+            path.display()
+        ),
+    )
 }
 
 fn is_ignored(repo: Option<&Repository>, target: &EnvTarget) -> Result<bool, CliError> {
@@ -400,17 +451,38 @@ impl EnvTarget {
         let format = EnvFormat::require_for_path(&path)?;
         let variable = env_name.unwrap_or(format.default_variable()).to_string();
         format.validate_variable(&variable)?;
+        // The file's own repository decides whether it is tracked and where it
+        // is ignored. Only the repository `connect` runs in is checked and
+        // gitignored, so a file in any other one (a nested repository, or a
+        // repository below a directory that is not one) is refused.
+        let own_repository = git::repository_root(&parent);
+        if own_repository.as_deref() != repo.map(Repository::root) {
+            let Some(own) = own_repository else {
+                return Err(outside_repository(&path, repo.map(Repository::root)));
+            };
+            let here = match repo {
+                Some(repo) => format!(
+                    "this command runs in the repository {}",
+                    repo.root().display()
+                ),
+                None => format!("{} is not in a Git repository", cwd.display()),
+            };
+            return Err(CliError::new(
+                "env_file_outside_repository",
+                format!(
+                    "{} belongs to the Git repository {}, but {here}, so it can't be checked or \
+                     gitignored from here. Run `xybrid connect` from {}",
+                    path.display(),
+                    own.display(),
+                    own.display()
+                ),
+            ));
+        }
         let relative = match repo {
-            Some(repo) => Some(git::relative_slash_path(repo.root(), &path).ok_or_else(|| {
-                CliError::new(
-                    "env_file_outside_repository",
-                    format!(
-                        "{} is outside this Git repository ({}), so it can't be gitignored here",
-                        path.display(),
-                        repo.root().display()
-                    ),
-                )
-            })?),
+            Some(repo) => Some(
+                git::relative_slash_path(repo.root(), &path)
+                    .ok_or_else(|| outside_repository(&path, Some(repo.root())))?,
+            ),
             None => None,
         };
         let lookup = env_file::read(&path)?.map_or(Lookup::Absent, |text| {
@@ -525,6 +597,9 @@ impl Session<'_> {
             Ok(status) => {
                 let credential = refresh_credential(credential, &status);
                 self.file.put(credential.clone(), Utc::now());
+                if let (true, Some(token)) = (status.claimed, &credential.claim_token) {
+                    self.file.mark_claimed(token);
+                }
                 self.save()?;
                 self.report.workspace = Some(workspace_from_server(&status));
                 self.report.verification = Some(VerificationReport::from_server(
@@ -541,7 +616,9 @@ impl Session<'_> {
                 self.report_expired(&credential);
                 Ok(())
             }
-            Err(failure @ ApiFailure::Status { status: 401, .. }) => {
+            // Only the platform's own answer proves the key dead: a 401 from
+            // a proxy or load balancer says nothing about it.
+            Err(failure) if is_invalid_api_key(&failure) => {
                 self.file.retire(
                     self.host.origin(),
                     &self.root,
@@ -578,13 +655,6 @@ impl Session<'_> {
     }
 
     fn finish_existing(mut self, mut credential: Credential) -> Result<(), CliError> {
-        let written = self.write_project_file(&credential)?;
-        if written {
-            credential.env_file = self.env_record();
-            self.file.put(credential.clone(), Utc::now());
-            self.save()?;
-        }
-        self.report.status = Status::Existing;
         self.report.key = Some(KeyReport {
             source: "credentials",
             preview: Some(key_preview(credential.api_key.expose())),
@@ -595,7 +665,20 @@ impl Session<'_> {
         if self.report.verification.is_none() {
             self.report.verification = Some(VerificationReport::not_checked());
         }
-        self.report.next_steps = next_steps(&self.host, self.target.as_ref());
+        let written = match self.write_project_file(&credential) {
+            Ok(written) => written,
+            Err(err) => {
+                self.project_file_failed(&err, &credential, false);
+                return Ok(());
+            }
+        };
+        if written {
+            credential.env_file = self.env_record();
+            self.file.put(credential.clone(), Utc::now());
+            self.save()?;
+        }
+        self.report.status = Status::Existing;
+        self.report.next_steps = next_steps(&self.host, self.key_home());
         let name = org_name(&credential);
         let file_note = match (&self.target, written) {
             (Some(target), true) => format!(
@@ -631,8 +714,7 @@ impl Session<'_> {
             Err(Failed::Cli(err)) => Err(err),
             Err(Failed::Api(failure)) => match failure.code() {
                 Some("workspace_expired") => {
-                    self.report.workspace = Some(workspace_from_credential(&workspace, "stored"));
-                    self.report_expired(&workspace);
+                    self.report_other_workspace_expired(&workspace);
                     Ok(true)
                 }
                 Some("workspace_claimed") => {
@@ -734,9 +816,15 @@ impl Session<'_> {
         self.mark_saved(&credential);
         self.report.claim_url = claim_url_for(&self.host, &credential, now);
         self.report.verification = Some(VerificationReport::not_checked());
-        self.report.next_steps = next_steps(&self.host, self.target.as_ref());
+        self.report.next_steps = next_steps(&self.host, self.key_home());
 
-        let written = self.write_project_file(&credential)?;
+        let written = match self.write_project_file(&credential) {
+            Ok(written) => written,
+            Err(err) => {
+                self.project_file_failed(&err, &credential, true);
+                return Ok(());
+            }
+        };
         if written {
             credential.env_file = self.env_record();
             self.file.put(credential.clone(), now);
@@ -793,6 +881,58 @@ impl Session<'_> {
         }
         self.report.tell_the_user = tell;
         Ok(())
+    }
+
+    /// The project file could not be written after the credential was saved.
+    /// Fail without hiding what exists: the workspace, the privately saved
+    /// key, its claim link, and how to finish.
+    fn project_file_failed(&mut self, err: &CliError, credential: &Credential, created: bool) {
+        let name = org_name(credential);
+        let store = self.store.path().display().to_string();
+        let done = if created {
+            format!(
+                "Created the provisional Xybrid workspace \u{201c}{name}\u{201d} and saved its \
+                 restricted key privately in {store}"
+            )
+        } else {
+            format!(
+                "This project is connected to the Xybrid workspace \u{201c}{name}\u{201d} (its key \
+                 is saved privately in {store})"
+            )
+        };
+        let (file, retry) = match &self.target {
+            Some(target) => (
+                target.display.clone(),
+                format!(
+                    "`xybrid{} connect --write-env {}{}`",
+                    host_flags(&self.host),
+                    target.display,
+                    if self.host.is_custom() {
+                        " --allow-custom-host"
+                    } else {
+                        ""
+                    }
+                ),
+            ),
+            None => ("the project file".into(), "`xybrid connect`".into()),
+        };
+        self.report.status = Status::Error;
+        self.report.error = Some(crate::platform::report::ErrorReport {
+            code: err.code.to_string(),
+            message: err.message.clone(),
+        });
+        self.report.next_steps = Vec::new();
+        self.report.tell_the_user = format!(
+            "{done}, but couldn't write it to {file}: {} Fix that and run {retry} again; it \
+             reuses the saved key instead of creating another workspace.{}",
+            ensure_period(&err.message),
+            self.claim_sentences(credential)
+        );
+    }
+
+    /// Where the app finds the key once this run succeeds.
+    fn key_home(&self) -> KeyHome<'_> {
+        self.target.as_ref().map_or(KeyHome::Store, KeyHome::File)
     }
 
     fn mark_saved(&mut self, credential: &Credential) {
@@ -894,7 +1034,6 @@ impl Session<'_> {
 
     fn report_expired(&mut self, credential: &Credential) {
         let now = Utc::now();
-        self.report.status = Status::WorkspaceExpired;
         self.report.key = Some(KeyReport {
             source: "credentials",
             preview: Some(key_preview(credential.api_key.expose())),
@@ -902,24 +1041,51 @@ impl Session<'_> {
         });
         self.mark_saved(credential);
         self.report.claim_url = claim_url_for(&self.host, credential, now);
-        let name = org_name(credential);
-        let stopped = credential
-            .key_expires_at
-            .map(|at| format!(" on {}", human_date(at)))
-            .unwrap_or_default();
-        let restore = match (&self.report.claim_url, credential.claim_expires_at) {
-            (Some(url), Some(deadline)) => format!(
-                " Claim it with GitHub by {} to restore the key: {url} (private link; also \
-                 `xybrid auth claim`).",
-                human_date(deadline)
-            ),
-            _ => " Its claim link is not saved on this machine.".to_string(),
-        };
-        self.report.tell_the_user = format!(
-            "The provisional Xybrid workspace \u{201c}{name}\u{201d} expired{stopped}: \
-             its key no longer reaches the platform.{restore} To start over with a new workspace \
-             instead, run `xybrid connect --new`. On-device inference keeps working."
+        let lead = format!(
+            "The provisional Xybrid workspace \u{201c}{}\u{201d} expired{}: its key no longer \
+             reaches the platform.",
+            org_name(credential),
+            stopped_on(credential.key_expires_at)
         );
+        let outcome = expired_outcome(
+            &lead,
+            credential.claim_expires_at,
+            credential.claim_token.is_some(),
+            self.report.claim_url.as_deref(),
+            "`xybrid auth claim`",
+            now,
+        );
+        outcome.apply(self.report);
+    }
+
+    /// Another repository's unclaimed workspace, which this project would
+    /// have joined, expired. Nothing was saved for this project, and its key
+    /// is not this project's.
+    fn report_other_workspace_expired(&mut self, workspace: &Credential) {
+        let now = Utc::now();
+        let other = workspace.repository_root.display().to_string();
+        self.report.workspace = Some(WorkspaceReport {
+            project: None,
+            ..workspace_from_credential(workspace, "stored")
+        });
+        self.report.key = None;
+        self.report.claim_url = claim_url_for(&self.host, workspace, now);
+        let lead = format!(
+            "This project wasn't added to the provisional Xybrid workspace \u{201c}{}\u{201d} \
+             that {other} uses, because the workspace expired{}: its key no longer reaches the \
+             platform.",
+            org_name(workspace),
+            stopped_on(workspace.key_expires_at)
+        );
+        let outcome = expired_outcome(
+            &lead,
+            workspace.claim_expires_at,
+            workspace.claim_token.is_some(),
+            self.report.claim_url.as_deref(),
+            &format!("`xybrid auth claim` in {other}"),
+            now,
+        );
+        outcome.apply(self.report);
     }
 
     fn report_failure(&mut self, failure: &ApiFailure) {
@@ -1350,6 +1516,104 @@ pub(crate) fn workspace_from_credential(
     }
 }
 
+/// How to report an expired provisional workspace.
+pub(crate) struct ExpiredOutcome {
+    status: Status,
+    error: Option<crate::platform::report::ErrorReport>,
+    tell: String,
+}
+
+impl ExpiredOutcome {
+    pub(crate) fn apply(self, report: &mut Report) {
+        report.status = self.status;
+        report.error = self.error;
+        report.tell_the_user = self.tell;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn status_for_test(&self) -> Status {
+        self.status
+    }
+
+    #[cfg(test)]
+    pub(crate) fn tell_for_test(&self) -> &str {
+        &self.tell
+    }
+}
+
+/// The outcome for an expired provisional workspace, after `lead` (which
+/// says what expired). While it can still be claimed: `workspace_expired`
+/// (exit 7) with how to restore the key. Once the claim deadline passed,
+/// nothing restores it: an error (`claim_expired`, exit 1).
+pub(crate) fn expired_outcome(
+    lead: &str,
+    claim_deadline: Option<DateTime<Utc>>,
+    has_token: bool,
+    claim_url: Option<&str>,
+    claim_command: &str,
+    now: DateTime<Utc>,
+) -> ExpiredOutcome {
+    const LOCAL: &str = " On-device inference keeps working.";
+    if let Some(deadline) = claim_deadline.filter(|at| now >= *at) {
+        let ended = human_date(deadline);
+        return ExpiredOutcome {
+            status: Status::Error,
+            error: Some(crate::platform::report::ErrorReport {
+                code: "claim_expired".into(),
+                message: format!(
+                    "The workspace expired and its claim period ended on {ended}; it can no \
+                     longer be claimed"
+                ),
+            }),
+            tell: format!(
+                "{lead} Its claim period ended on {ended}, so it can no longer be claimed and is \
+                 scheduled for deletion. Run `xybrid connect --new` to create a new \
+                 workspace.{LOCAL}"
+            ),
+        };
+    }
+    let by = claim_deadline
+        .map(|at| format!(" by {}", human_date(at)))
+        .unwrap_or_default();
+    let restore = match (claim_url, has_token, claim_deadline) {
+        (Some(url), _, _) => format!(
+            " Claim it with GitHub{by} to restore the key: {url} (private link; also \
+             {claim_command})."
+        ),
+        (None, true, _) => {
+            format!(" Claim it with GitHub{by} to restore the key: run {claim_command}.")
+        }
+        (None, false, Some(at)) => format!(
+            " It can be claimed until {} with its claim link, which is not saved on this machine.",
+            human_date(at)
+        ),
+        (None, false, None) => " Its claim link is not saved on this machine.".into(),
+    };
+    ExpiredOutcome {
+        status: Status::WorkspaceExpired,
+        error: None,
+        tell: format!(
+            "{lead}{restore} To start over with a new workspace instead, run `xybrid connect \
+             --new`.{LOCAL}"
+        ),
+    }
+}
+
+/// ` on <date>` for a known key deadline.
+pub(crate) fn stopped_on(key_deadline: Option<DateTime<Utc>>) -> String {
+    key_deadline
+        .map(|at| format!(" on {}", human_date(at)))
+        .unwrap_or_default()
+}
+
+/// The platform's own `401 invalid_api_key`: the key is unknown or revoked.
+/// Any other 401 (a proxy, load balancer or auth layer in front of it) is not
+/// evidence about the key.
+pub(crate) fn is_invalid_api_key(failure: &ApiFailure) -> bool {
+    matches!(failure, ApiFailure::Status { status: 401, .. })
+        && failure.code() == Some("invalid_api_key")
+}
+
 /// `401 workspace_expired` (or the `X-Xybrid-Workspace: expired` marker).
 pub(crate) fn is_workspace_expired(failure: &ApiFailure) -> bool {
     match failure {
@@ -1375,7 +1639,19 @@ pub(crate) fn host_flags(host: &PlatformHost) -> String {
     }
 }
 
-fn next_steps(host: &PlatformHost, target: Option<&EnvTarget>) -> Vec<NextStep> {
+/// Where the app finds the key, for the `wire_init` and `verify` steps.
+enum KeyHome<'a> {
+    /// The `--write-env` file holds the key `connect` saved.
+    File(&'a EnvTarget),
+    /// The file already held a key `connect` did not save.
+    UnsavedFile(&'a EnvTarget),
+    /// Only the private credentials store holds it.
+    Store,
+    /// `--api-key` or `XYBRID_API_KEY`.
+    Explicit(KeySource),
+}
+
+fn next_steps(host: &PlatformHost, home: KeyHome<'_>) -> Vec<NextStep> {
     let flags = host_flags(host);
     let allow = if host.is_custom() {
         " --allow-custom-host"
@@ -1387,11 +1663,26 @@ fn next_steps(host: &PlatformHost, target: Option<&EnvTarget>) -> Vec<NextStep> 
     } else {
         ""
     };
-    let source = match target {
-        Some(target) => format!("read {} from {}", target.variable, target.display),
-        None => "read the key from your app's own configuration (the CLI uses the saved \
-                 credentials)"
+    let source = match &home {
+        KeyHome::File(target) | KeyHome::UnsavedFile(target) => {
+            format!("read {} from {}", target.variable, target.display)
+        }
+        KeyHome::Store => "read the key from your app's own configuration (the CLI uses the saved \
+                           credentials)"
             .to_string(),
+        KeyHome::Explicit(KeySource::Env) => {
+            "read XYBRID_API_KEY from the environment the app already uses".to_string()
+        }
+        KeyHome::Explicit(_) => "read the key from your app's own configuration".to_string(),
+    };
+    let verify_note = match &home {
+        KeyHome::UnsavedFile(target) => format!(
+            " `xybrid connect` did not save that key, so run the check with XYBRID_API_KEY set \
+             to {} from {} (never print it).",
+            target.variable, target.display
+        ),
+        KeyHome::Explicit(KeySource::Flag) => " Pass the same --api-key to the check.".to_string(),
+        _ => String::new(),
     };
     vec![
         NextStep {
@@ -1410,10 +1701,11 @@ fn next_steps(host: &PlatformHost, target: Option<&EnvTarget>) -> Vec<NextStep> 
         },
         NextStep {
             kind: "verify",
-            summary: "After one real inference has flushed, check that a trace was stored for \
-                      this project: verification.traces_received is true only then. none or \
-                      unavailable is not success."
-                .into(),
+            summary: format!(
+                "After one real inference has flushed, check that a trace was stored for this \
+                 project: verification.traces_received is true only then. none or unavailable \
+                 is not success.{verify_note}"
+            ),
             command: Some(format!("xybrid{flags} auth status{allow} --json")),
         },
         NextStep {

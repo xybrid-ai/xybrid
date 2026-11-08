@@ -634,7 +634,9 @@ fn auth_status_claim_and_logout_use_the_saved_credentials() {
     let run = sandbox.run(&platform_args(&url, &["auth", "status", "--json"]));
     assert_eq!(run.code, Some(1), "{run}");
     assert_eq!(run.json()["status"], "not_connected");
-    status.assert_hits(2);
+    // `auth claim` asked the platform once (the workspace may have been
+    // claimed in the console); nothing after logout did.
+    status.assert_hits(3);
 }
 
 #[test]
@@ -651,6 +653,8 @@ fn an_existing_environment_key_is_never_replaced() {
     let report = run.json();
     assert_eq!(report["status"], "existing");
     assert_eq!(report["key"]["source"], "env");
+    // Export may still need wiring: the agent is told how, and how to verify.
+    assert_eq!(next_step_kinds(&report), ["wire_init", "verify", "relay"]);
     challenge.assert_hits(0);
     assert!(!sandbox.project.join(".env").exists());
 
@@ -664,8 +668,15 @@ fn an_existing_environment_key_is_never_replaced() {
     let run = sandbox.run(&connect_args(&url));
     assert_eq!(run.code, Some(0), "{run}");
     run.assert_no_secret(SECOND_KEY);
-    assert_eq!(run.json()["status"], "existing");
-    assert_eq!(run.json()["key"]["source"], "env_file");
+    let report = run.json();
+    assert_eq!(report["status"], "existing");
+    assert_eq!(report["key"]["source"], "env_file");
+    assert_eq!(next_step_kinds(&report), ["wire_init", "verify", "relay"]);
+    let verify = report["next_steps"][1]["summary"].as_str().unwrap();
+    assert!(
+        verify.contains("did not save that key"),
+        "the check needs that file's key: {verify}"
+    );
     let mut new = connect_args(&url);
     new.push("--new");
     let run = sandbox.run(&new);
@@ -1307,6 +1318,23 @@ fn json_mode_prints_no_hints_even_with_otlp_configured() {
     let run = sandbox.run_with(&["init", "--yes", empty], &otlp);
     assert!(run.stderr.contains("Observability enabled"), "{run}");
     assert!(!run.stdout.contains("Observability enabled"), "{run}");
+
+    // An OTLP endpoint the exporter rejects: in JSON mode its warning must not
+    // land on either stream; otherwise it goes to stderr, never stdout.
+    let broken = [("OTEL_EXPORTER_OTLP_ENDPOINT", "not a url")];
+    let run = sandbox.run_with(&["init", "--json", "--yes", empty], &broken);
+    assert_eq!(run.code, Some(1), "{run}");
+    assert!(run.stdout.trim().is_empty(), "{run}");
+    let error: Value = serde_json::from_str(run.stderr.trim())
+        .unwrap_or_else(|_| panic!("stderr is only the JSON error: {run}"));
+    assert_eq!(error["status"], "error");
+
+    let run = sandbox.run_with(&["init", "--yes", empty], &broken);
+    assert!(
+        run.stderr.contains("Observability was not started"),
+        "{run}"
+    );
+    assert!(!run.stdout.contains("Observability"), "{run}");
 }
 
 #[test]
@@ -1332,4 +1360,470 @@ fn outside_a_repository_the_file_is_honestly_not_gitignored() {
         "{run}"
     );
     assert!(!sandbox.project.join(".gitignore").exists());
+}
+
+#[test]
+fn a_file_in_another_repository_is_refused_not_written() {
+    require_git!();
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    let url = server.base_url();
+    let write_env = |sandbox: &Sandbox, target: &str| -> Run {
+        sandbox.run(&platform_args(
+            &url,
+            &["connect", "--write-env", target, "--json"],
+        ))
+    };
+
+    // From a directory that is not a repository into an app's repository,
+    // whose .env Git tracks.
+    let sandbox = Sandbox::new_without_git();
+    let app = sandbox.project.join("app");
+    std::fs::create_dir_all(&app).unwrap();
+    sandbox.git(&app, &["init", "-q"]);
+    std::fs::write(app.join(".env"), "PUBLIC_FLAG=1\n").unwrap();
+    assert!(sandbox.git(&app, &["add", ".env"]).status.success());
+    let run = write_env(&sandbox, "app/.env");
+    assert_eq!(run.code, Some(1), "{run}");
+    let report = run.json();
+    assert_eq!(report["error"]["code"], "env_file_outside_repository");
+    let message = report["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains(&format!("Run `xybrid connect` from {}", app.display())),
+        "{message}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(app.join(".env")).unwrap(),
+        "PUBLIC_FLAG=1\n"
+    );
+    assert!(!app.join(".gitignore").exists());
+    assert!(!sandbox.credentials_path().exists());
+
+    // From one repository into an independent repository nested in it: the
+    // outer repository's checks and .gitignore say nothing about that file.
+    let sandbox = Sandbox::new();
+    let nested = sandbox.project.join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    sandbox.git(&nested, &["init", "-q"]);
+    std::fs::write(nested.join(".env"), "PUBLIC_FLAG=1\n").unwrap();
+    assert!(sandbox.git(&nested, &["add", ".env"]).status.success());
+    let run = write_env(&sandbox, "nested/.env");
+    assert_eq!(run.code, Some(1), "{run}");
+    assert_eq!(run.json()["error"]["code"], "env_file_outside_repository");
+    assert_eq!(
+        std::fs::read_to_string(nested.join(".env")).unwrap(),
+        "PUBLIC_FLAG=1\n"
+    );
+    assert!(
+        !sandbox.project.join(".gitignore").exists(),
+        "the outer repository is left alone"
+    );
+    challenge.assert_hits(0);
+}
+
+#[test]
+fn only_the_platforms_own_401_sets_a_saved_key_aside() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    mock_connect(&server);
+    let url = server.base_url();
+    assert_eq!(sandbox.run(&connect_args(&url)).code, Some(0));
+
+    // A proxy or load balancer in front of the platform answers 401: that
+    // says nothing about the key.
+    let proxy = server.mock(|when, then| {
+        when.method(GET).path("/v1/agent/workspace");
+        then.status(401)
+            .header("Content-Type", "text/html")
+            .body("<html><body>401 Authorization Required</body></html>");
+    });
+    let run = sandbox.run(&platform_args(&url, &["auth", "status", "--json"]));
+    assert_eq!(run.code, Some(1), "{run}");
+    run.assert_no_secret(KEY);
+    let report = run.json();
+    assert_eq!(report["status"], "error");
+    assert_ne!(report["error"]["code"], "stored_credential_rejected");
+    assert_eq!(report["verification"]["state"], "unavailable");
+
+    let run = sandbox.run(&connect_args(&url));
+    assert_eq!(run.code, Some(0), "{run}");
+    let report = run.json();
+    assert_eq!(report["status"], "existing");
+    assert_eq!(report["verification"]["state"], "unavailable");
+    proxy.assert_hits(2);
+    challenge.assert_hits(1);
+    let credentials = sandbox.credentials();
+    assert_eq!(credentials["credentials"][0]["api_key"], KEY);
+    assert_eq!(credentials["retired"], json!([]));
+}
+
+#[test]
+fn a_claim_made_in_the_console_reaches_every_repository_of_the_workspace() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    mock_challenge(&server);
+    mock_connect(&server);
+    server.mock(|when, then| {
+        when.method(POST).path("/v1/agent/projects");
+        let mut body = provision(PROJECT_KEY, None, 7, false);
+        body["project"] = named("mobile", "mobile");
+        then.status(201).json_body(body);
+    });
+    let url = server.base_url();
+    let console = [("XYBRID_CONSOLE_URL", CONSOLE)];
+    assert_eq!(
+        sandbox.run_with(&connect_args(&url), &console).code,
+        Some(0)
+    );
+    let mobile = sandbox.another_project("mobile");
+    let run: Run = sandbox
+        .command_in(&mobile, &connect_args(&url))
+        .envs(console)
+        .output()
+        .unwrap()
+        .into();
+    assert_eq!(run.code, Some(0), "{run}");
+
+    // The user claimed it in the console; only the platform knows so far.
+    let claimed = mock_workspace(&server, KEY, workspace(false, true, "none"));
+    let run = sandbox.run_with(
+        &platform_args(&url, &["auth", "claim", "--no-browser", "--json"]),
+        &console,
+    );
+    assert_eq!(run.code, Some(0), "{run}");
+    let report = run.json();
+    assert_eq!(report["status"], "claimed");
+    assert_eq!(report["claim_url"], Value::Null);
+    assert_eq!(report["workspace"]["lifecycle_source"], "server");
+    claimed.assert_hits(1);
+    let claimed_flags: Vec<bool> = sandbox.credentials()["credentials"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["claimed"].as_bool().unwrap())
+        .collect();
+    assert_eq!(claimed_flags, [true, true], "both repositories");
+
+    // No claim reminder in either repository: not just not today, none due.
+    for dir in [&sandbox.project, &mobile] {
+        let run: Run = sandbox
+            .command_in(dir, &["--platform-url", &url, "telemetry", "status"])
+            .output()
+            .unwrap()
+            .into();
+        assert!(!run.stderr.contains("xybrid auth claim"), "{run}");
+    }
+    assert!(!sandbox.state.join("notices.json").exists());
+}
+
+#[test]
+fn the_claim_reminder_follows_the_saved_key_from_the_environment() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    mock_challenge(&server);
+    mock_connect(&server);
+    let url = server.base_url();
+    assert_eq!(sandbox.run(&connect_args(&url)).code, Some(0));
+    let args = ["--platform-url", url.as_str(), "telemetry", "status"];
+
+    // Another key is in use: the saved workspace's deadlines are not its own.
+    let run = sandbox.run_with(&args, &[("XYBRID_API_KEY", SECOND_KEY)]);
+    assert!(!run.stderr.contains("xybrid auth claim"), "{run}");
+
+    // The saved key exported from the project's .env (direnv, dotenv-cli).
+    let run = sandbox.run_with(&args, &[("XYBRID_API_KEY", KEY)]);
+    assert!(run.stderr.contains("xybrid auth claim"), "{run}");
+    assert!(run.stderr.contains("when last checked"), "{run}");
+    run.assert_no_secret(KEY);
+}
+
+/// The output of `id <flag>` as a number.
+#[cfg(unix)]
+fn id(flag: &str) -> u32 {
+    let output = Command::new("id").arg(flag).output().expect("id runs");
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .expect("numeric id")
+}
+
+/// Without XYBRID_CREDENTIALS_FILE, in a ~/.xybrid an earlier `xybrid run`
+/// already created with the umask (the SDK's model cache lives there).
+#[cfg(unix)]
+#[test]
+fn the_default_store_works_in_an_existing_private_group_directory() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    mock_connect(&server);
+    mock_workspace(&server, KEY, workspace(false, false, "none"));
+    let url = server.base_url();
+    let xybrid = sandbox.home.join(".xybrid");
+    std::fs::create_dir_all(xybrid.join("cache").join("models")).unwrap();
+    std::fs::write(xybrid.join("install-id"), format!("{INSTALL_ID}\n")).unwrap();
+    let chmod = |mode: u32| {
+        std::fs::set_permissions(&xybrid, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    let connect = || -> Run {
+        let mut command = sandbox.command(&connect_args(&url));
+        command.env_remove("XYBRID_CREDENTIALS_FILE");
+        command.output().unwrap().into()
+    };
+    let store = xybrid.join("credentials.json");
+
+    // Writable by every account: refused before any request, with the fix.
+    chmod(0o777);
+    let run = connect();
+    assert_eq!(run.code, Some(1), "{run}");
+    let report = run.json();
+    assert_eq!(report["error"]["code"], "credentials_unsafe");
+    let message = report["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains(&format!("chmod go-w {}", xybrid.display())),
+        "{message}"
+    );
+    challenge.assert_hits(0);
+
+    // Group-writable, as a 002 umask leaves it: accepted when the group is
+    // the user's own private group, else refused with the same fix.
+    chmod(0o775);
+    let gid = std::fs::metadata(&xybrid).unwrap().gid();
+    let private_group = gid == id("-g") && id("-g") == id("-u");
+    let run = connect();
+    if private_group {
+        assert_eq!(run.code, Some(0), "{run}");
+        let report = run.json();
+        assert_eq!(report["status"], "created");
+        assert_eq!(report["credentials"]["path"], store.display().to_string());
+        let mode = std::fs::metadata(&store).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        run.assert_no_secret(KEY);
+    } else {
+        assert_eq!(run.code, Some(1), "{run}");
+        let report = run.json();
+        assert_eq!(report["error"]["code"], "credentials_unsafe");
+        let message = report["error"]["message"].as_str().unwrap();
+        assert!(message.contains("chmod go-w"), "{message}");
+        challenge.assert_hits(0);
+    }
+
+    // Not group-writable: always accepted (the saved key is reused if any).
+    chmod(0o755);
+    let run = connect();
+    assert_eq!(run.code, Some(0), "{run}");
+    let expected = if private_group { "existing" } else { "created" };
+    assert_eq!(run.json()["status"], expected, "{run}");
+    challenge.assert_hits(1);
+    assert!(store.exists());
+}
+
+#[test]
+fn another_repositorys_expired_workspace_is_reported_without_its_facts() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    let connect = mock_connect(&server);
+    let projects = server.mock(|when, then| {
+        when.method(POST).path("/v1/agent/projects");
+        then.status(403).json_body(json!({
+            "error": "workspace_expired",
+            "message": "This workspace's keys have expired. Claim it to keep using it.",
+            "claim_expires_at": iso(6),
+        }));
+    });
+    let url = server.base_url();
+    let console = [("XYBRID_CONSOLE_URL", CONSOLE)];
+    assert_eq!(
+        sandbox.run_with(&connect_args(&url), &console).code,
+        Some(0)
+    );
+
+    let mobile = sandbox.another_project("mobile");
+    let run: Run = sandbox
+        .command_in(&mobile, &connect_args(&url))
+        .envs(console)
+        .output()
+        .unwrap()
+        .into();
+    assert_eq!(run.code, Some(7), "{run}");
+    run.assert_no_secret(KEY);
+    let report = run.json();
+    assert_eq!(report["status"], "workspace_expired");
+    assert_eq!(report["key"], Value::Null, "the other repository's key");
+    assert_eq!(report["credentials"]["saved"], false);
+    assert_eq!(report["credentials"]["recovery"], false);
+    assert_eq!(report["workspace"]["project"], Value::Null);
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert!(
+        tell.contains(&format!(
+            "`xybrid auth claim` in {}",
+            sandbox.project.display()
+        )),
+        "{tell}"
+    );
+    projects.assert_hits(1);
+    challenge.assert_hits(1);
+    connect.assert_hits(1);
+    let roots: Vec<Value> = sandbox.credentials()["credentials"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["repository_root"].clone())
+        .collect();
+    assert_eq!(roots, [json!(sandbox.project.display().to_string())]);
+}
+
+#[test]
+fn a_project_file_that_fails_after_provisioning_still_reports_the_workspace() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    let slow = server.mock(|when, then| {
+        when.method(POST).path("/v1/agent/connect");
+        then.status(201)
+            .delay(Duration::from_secs(2))
+            .json_body(provision(KEY, Some(CLAIM_TOKEN), 7, false));
+    });
+    let url = server.base_url();
+
+    let child = sandbox
+        .command(&connect_args(&url))
+        .env("XYBRID_CONSOLE_URL", CONSOLE)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for_hits(&slow, 1);
+    // While the workspace is being created, .env becomes unwritable.
+    std::fs::create_dir(sandbox.project.join(".env")).unwrap();
+    let run: Run = child.wait_with_output().unwrap().into();
+    assert_eq!(run.code, Some(1), "{run}");
+    run.assert_no_secret(KEY);
+    let report = run.json();
+    assert_eq!(report["status"], "error");
+    assert_eq!(report["error"]["code"], "env_file_unwritable");
+    assert_eq!(report["credentials"]["saved"], true);
+    let link = format!("{CONSOLE}/claim/{CLAIM_TOKEN}");
+    assert_eq!(report["claim_url"], link);
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert!(
+        tell.contains("Created the provisional Xybrid workspace"),
+        "{tell}"
+    );
+    assert!(tell.contains(&link), "{tell}");
+    assert!(tell.contains("reuses the saved key"), "{tell}");
+
+    // Once fixed, the next run reuses the saved key: no second workspace.
+    std::fs::remove_dir(sandbox.project.join(".env")).unwrap();
+    let status = mock_workspace(&server, KEY, workspace(false, false, "none"));
+    let run = sandbox.run(&connect_args(&url));
+    assert_eq!(run.code, Some(0), "{run}");
+    let report = run.json();
+    assert_eq!(report["status"], "existing");
+    assert_eq!(report["env_file"]["written"], true);
+    status.assert_hits(1);
+    slow.assert_hits(1);
+    challenge.assert_hits(1);
+    let env = std::fs::read_to_string(sandbox.project.join(".env")).unwrap();
+    assert!(env.contains(&format!("XYBRID_API_KEY={KEY}")), "{env}");
+}
+
+#[test]
+fn a_credentials_store_inside_the_repository_is_kept_out_of_git() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    mock_connect(&server);
+    let url = server.base_url();
+
+    // Directly in the repository root: refused before anything is created.
+    let at_root = sandbox.project.join("credentials.json");
+    let run = sandbox.run_with(
+        &connect_args(&url),
+        &[("XYBRID_CREDENTIALS_FILE", at_root.to_str().unwrap())],
+    );
+    assert_eq!(run.code, Some(1), "{run}");
+    assert_eq!(run.json()["error"]["code"], "credentials_in_repository");
+    challenge.assert_hits(0);
+    assert!(!at_root.exists());
+
+    // In a directory of its own: that whole directory is ignored, since the
+    // lock, install ID, notice dates and any corrupt copy land there too.
+    let state = sandbox.project.join(".xybrid");
+    create_private_dir(&state);
+    std::fs::write(state.join("install-id"), format!("{INSTALL_ID}\n")).unwrap();
+    let store = state.join("credentials.json");
+    let run = sandbox.run_with(
+        &connect_args(&url),
+        &[("XYBRID_CREDENTIALS_FILE", store.to_str().unwrap())],
+    );
+    assert_eq!(run.code, Some(0), "{run}");
+    assert!(store.exists());
+    let gitignore = std::fs::read_to_string(sandbox.project.join(".gitignore")).unwrap();
+    assert!(gitignore.lines().any(|l| l == "/.xybrid"), "{gitignore}");
+    std::fs::write(
+        state.join("credentials.json.corrupt-20260101T000000.000Z"),
+        "{}",
+    )
+    .unwrap();
+    let status = sandbox.git(
+        &sandbox.project,
+        &["status", "--porcelain", "--untracked-files=all"],
+    );
+    let listing = String::from_utf8_lossy(&status.stdout);
+    assert!(!listing.contains(".xybrid/"), "{listing}");
+    assert!(listing.contains(".gitignore"), "{listing}");
+}
+
+#[test]
+fn after_the_claim_deadline_nothing_offers_a_claim() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    mock_challenge(&server);
+    mock_connect(&server);
+    let url = server.base_url();
+    let console = [("XYBRID_CONSOLE_URL", CONSOLE)];
+    assert_eq!(
+        sandbox.run_with(&connect_args(&url), &console).code,
+        Some(0)
+    );
+    // Expired, and the claim period is over too (purge pending).
+    let mut body = workspace(true, false, "none");
+    body["key_expires_at"] = json!(iso(-8));
+    body["claim_expires_at"] = json!(iso(-1));
+    mock_workspace(&server, KEY, body);
+
+    for args in [
+        connect_args(&url),
+        platform_args(&url, &["auth", "status", "--json", "--show-claim-url"]),
+    ] {
+        let run = sandbox.run_with(&args, &console);
+        assert_eq!(run.code, Some(1), "{args:?}: {run}");
+        run.assert_no_secret(KEY);
+        let report = run.json();
+        assert_eq!(report["status"], "error", "{args:?}");
+        assert_eq!(report["error"]["code"], "claim_expired", "{args:?}");
+        assert_eq!(report["claim_url"], Value::Null, "{args:?}");
+        let tell = report["tell_the_user"].as_str().unwrap();
+        assert!(tell.contains("claim period ended"), "{tell}");
+        assert!(!tell.contains("xybrid auth claim"), "{tell}");
+        assert!(!tell.contains(CLAIM_TOKEN), "{tell}");
+        assert!(tell.contains("xybrid connect --new"), "{tell}");
+    }
+    let run = sandbox.run(&platform_args(
+        &url,
+        &["auth", "claim", "--no-browser", "--json"],
+    ));
+    assert_eq!(run.code, Some(1), "{run}");
+    assert_eq!(run.json()["error"]["code"], "claim_expired");
 }

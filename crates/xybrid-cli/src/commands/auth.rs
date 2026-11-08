@@ -17,11 +17,12 @@ use chrono::Utc;
 use clap::Subcommand;
 
 use super::connect::{
-    self, claim_url_for, is_workspace_expired, platform_host, refresh_credential,
-    workspace_from_credential, workspace_from_server, ConnectArgs, PlatformArgs,
+    self, claim_url_for, expired_outcome, is_invalid_api_key, is_workspace_expired, platform_host,
+    refresh_credential, stopped_on, workspace_from_credential, workspace_from_server, ConnectArgs,
+    PlatformArgs,
 };
-use crate::platform::client::{ApiFailure, PlatformClient};
-use crate::platform::credentials::{Credential, Store};
+use crate::platform::client::{ApiFailure, PlatformClient, WorkspaceStatus};
+use crate::platform::credentials::{Credential, CredentialsFile, Secret, Store};
 use crate::platform::env_file::{self, EnvFormat, Lookup};
 use crate::platform::git;
 use crate::platform::host::PlatformHost;
@@ -255,9 +256,7 @@ fn status(
             if let (Some(credential), Some(store)) = (&stored, &project.store) {
                 let refreshed = refresh_credential(credential.clone(), &workspace);
                 if refreshed != *credential {
-                    update_stored(store, &project, |file| {
-                        file.put(refreshed.clone(), Utc::now());
-                    });
+                    store_refresh(store, &project, &credential.api_key, &workspace);
                 }
                 if show_claim_url {
                     report.claim_url = claim_url_for(&project.host, &refreshed, Utc::now());
@@ -265,13 +264,14 @@ fn status(
             }
             let name = workspace.organization.name.clone();
             if workspace.expired {
-                report.status = Status::WorkspaceExpired;
-                report.tell_the_user = expired_copy(
+                expired_copy(
                     &name,
                     workspace.key_expires_at,
                     workspace.claim_expires_at,
                     stored.as_ref(),
-                );
+                    report.claim_url.as_deref(),
+                )
+                .apply(report);
                 return Ok(());
             }
             report.status = Status::Connected;
@@ -313,20 +313,23 @@ fn status(
             let name = fallback
                 .and_then(|c| c.organization.as_ref())
                 .map_or_else(|| "this project's workspace".into(), |o| o.name.clone());
-            report.status = Status::WorkspaceExpired;
             report.workspace = fallback.map(|c| workspace_from_credential(c, "stored"));
             report.verification = Some(VerificationReport::state("unavailable"));
-            report.tell_the_user = expired_copy(
+            expired_copy(
                 &name,
                 fallback.and_then(|c| c.key_expires_at),
                 fallback.and_then(|c| c.claim_expires_at),
                 fallback,
-            );
+                report.claim_url.as_deref(),
+            )
+            .apply(report);
         }
-        Err(failure @ ApiFailure::Status { status: 401, .. }) => {
+        // Only the platform's own answer proves the key dead: a 401 from a
+        // proxy or load balancer in front of it is handled as unknown below.
+        Err(failure) if is_invalid_api_key(&failure) => {
             if resolved.source == KeySource::Credentials {
                 if let Some(store) = &project.store {
-                    update_stored(store, &project, |file| {
+                    update_stored(store, &project, &resolved.key, |file| {
                         file.retire(
                             project.host.origin(),
                             &project.root,
@@ -406,36 +409,33 @@ fn expired_copy(
     key_deadline: Option<chrono::DateTime<Utc>>,
     claim_deadline: Option<chrono::DateTime<Utc>>,
     stored: Option<&Credential>,
-) -> String {
-    let stopped = key_deadline
-        .map(|at| format!(" on {}", human_date(at)))
-        .unwrap_or_default();
-    let claim = match (
+    claim_url: Option<&str>,
+) -> connect::ExpiredOutcome {
+    let lead = format!(
+        "The provisional Xybrid workspace \u{201c}{name}\u{201d} expired{}: its key no longer \
+         reaches the platform.",
+        stopped_on(key_deadline)
+    );
+    expired_outcome(
+        &lead,
         claim_deadline,
         stored.is_some_and(|c| c.claim_token.is_some()),
-    ) {
-        (Some(deadline), true) => format!(
-            " Claim it with GitHub by {} to restore the key: run `xybrid auth claim`.",
-            human_date(deadline)
-        ),
-        (Some(deadline), false) => format!(
-            " It can be claimed until {} with its claim link, which is not saved on this machine.",
-            human_date(deadline)
-        ),
-        _ => String::new(),
-    };
-    format!(
-        "The provisional Xybrid workspace \u{201c}{name}\u{201d} expired{stopped}: its key no longer \
-         reaches the platform.{claim} On-device inference keeps working."
+        claim_url,
+        "`xybrid auth claim`",
+        Utc::now(),
     )
 }
 
-/// Apply `update` to the store under its lock. Best effort: status output
-/// does not depend on it.
+/// Apply `update` to the store under its lock, but only while the entry for
+/// this host and repository still holds `checked`, the key whose server answer
+/// prompted the update: another `xybrid` process may have saved a different
+/// key (for example `connect --new`) while the request was in flight. Best
+/// effort: status output does not depend on it.
 fn update_stored(
     store: &Store,
-    _project: &Project,
-    update: impl FnOnce(&mut crate::platform::credentials::CredentialsFile),
+    project: &Project,
+    checked: &Secret,
+    update: impl FnOnce(&mut CredentialsFile),
 ) {
     let Ok(lock) = store.lock(STORE_LOCK_TIMEOUT) else {
         return;
@@ -444,8 +444,29 @@ fn update_stored(
         return;
     };
     let mut file = loaded.file;
+    if !file.holds_key(project.host.origin(), &project.root, checked) {
+        return;
+    }
     update(&mut file);
     let _ = lock.save(&file);
+}
+
+/// Fold the server's answer about `checked` into the stored entry as it is
+/// now (not as it was read before the request), and record a claim for every
+/// repository sharing the workspace.
+fn store_refresh(store: &Store, project: &Project, checked: &Secret, workspace: &WorkspaceStatus) {
+    update_stored(store, project, checked, |file| {
+        let Some(current) = file.find(project.host.origin(), &project.root).cloned() else {
+            return;
+        };
+        let refreshed = refresh_credential(current, workspace);
+        if let (true, Some(token)) = (workspace.claimed, refreshed.claim_token.clone()) {
+            file.put(refreshed, Utc::now());
+            file.mark_claimed(&token);
+        } else {
+            file.put(refreshed, Utc::now());
+        }
+    });
 }
 
 fn claim(
@@ -456,8 +477,8 @@ fn claim(
     report: &mut Report,
 ) -> Result<(), CliError> {
     let project = project(ctx, allow_custom_host, report)?;
-    if let Some(err) = project.store_warning {
-        return Err(err);
+    if let Some(err) = &project.store_warning {
+        return Err(err.clone());
     }
     report.credentials = credentials_report(&project);
     let now = Utc::now();
@@ -474,8 +495,23 @@ fn claim(
             ),
         ));
     };
+    // The saved state may predate a claim made in the console, so ask the
+    // platform first (it keeps answering a claimed or expired key). If it
+    // can't be asked, the saved state decides.
+    let mut credential = credential.clone();
+    report.workspace = Some(workspace_from_credential(&credential, "stored"));
+    if !quarantined && !credential.claimed {
+        let client = PlatformClient::new(project.host.clone());
+        if let Ok(status) = client.workspace(&credential.api_key) {
+            if let Some(store) = &project.store {
+                store_refresh(store, &project, &credential.api_key, &status);
+            }
+            credential = refresh_credential(credential, &status);
+            report.workspace = Some(workspace_from_server(&status));
+        }
+    }
+    let credential = &credential;
     report.stored = Some(stored_report(credential));
-    report.workspace = Some(workspace_from_credential(credential, "stored"));
     report.key = Some(KeyReport {
         source: "credentials",
         preview: Some(key_preview(credential.api_key.expose())),
@@ -672,4 +708,153 @@ fn logout(
 
 fn still_configures(path: &Path, format: EnvFormat, variable: &str) -> bool {
     matches!(env_file::read(path), Ok(Some(text)) if env_file::lookup(format, &text, variable) == Lookup::Present)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::credentials::tests::private_path;
+    use crate::platform::credentials::NamedRef;
+
+    const ORIGIN: &str = "https://api.xybrid.dev";
+
+    fn credential(key: &str) -> Credential {
+        let now = Utc::now();
+        Credential {
+            platform_origin: ORIGIN.into(),
+            repository_root: "/repo".into(),
+            api_key: Secret::new(key),
+            scope: Some("client".into()),
+            organization: Some(NamedRef {
+                slug: "my-app".into(),
+                name: "my-app".into(),
+            }),
+            project: None,
+            key_expires_at: Some(now + chrono::Duration::days(7)),
+            claim_expires_at: Some(now + chrono::Duration::days(14)),
+            claim_token: Some(Secret::new("t".repeat(43))),
+            source: None,
+            console_origin: None,
+            env_file: None,
+            claimed: false,
+            terms_url: None,
+            privacy_url: None,
+            created_at: now,
+        }
+    }
+
+    fn save(store: &Store, update: impl FnOnce(&mut CredentialsFile)) {
+        let lock = store.lock(STORE_LOCK_TIMEOUT).unwrap();
+        let mut file = lock.load().unwrap().file;
+        update(&mut file);
+        lock.save(&file).unwrap();
+    }
+
+    fn project(store: &Store) -> Project {
+        Project {
+            host: PlatformHost::parse(ORIGIN).unwrap(),
+            store: Some(store.clone()),
+            root: "/repo".into(),
+            stored: None,
+            quarantined: None,
+            store_warning: None,
+        }
+    }
+
+    /// `auth status` read K1, then `connect --new` saved K2 while the server
+    /// was answering about K1: the answer must not touch K2.
+    #[test]
+    fn a_late_answer_never_retires_or_replaces_a_key_saved_meanwhile() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(private_path(&dir));
+        save(&store, |file| {
+            file.put(credential("sk_live_K1"), Utc::now())
+        });
+        let checked = store
+            .read()
+            .unwrap()
+            .find(ORIGIN, Path::new("/repo"))
+            .unwrap()
+            .api_key
+            .clone();
+        // The concurrent `connect --new`.
+        save(&store, |file| {
+            file.put(credential("sk_live_K2"), Utc::now())
+        });
+        let project = project(&store);
+
+        // 401 for K1: retiring now would retire K2.
+        update_stored(&store, &project, &checked, |file| {
+            file.retire(ORIGIN, Path::new("/repo"), "rejected", Utc::now());
+        });
+        // 200 for K1: putting the refreshed K1 back would replace K2.
+        update_stored(&store, &project, &checked, |file| {
+            file.put(credential("sk_live_K1"), Utc::now());
+        });
+
+        let file = store.read().unwrap();
+        let active = file.find(ORIGIN, Path::new("/repo")).unwrap();
+        assert_eq!(active.api_key.expose(), "sk_live_K2");
+        let retired: Vec<(&str, &str)> = file
+            .retired
+            .iter()
+            .map(|r| (r.reason.as_str(), r.credential.api_key.expose()))
+            .collect();
+        assert_eq!(retired, [("replaced", "sk_live_K1")]);
+
+        // With the same key still saved, the update applies.
+        let current = Secret::new("sk_live_K2");
+        update_stored(&store, &project, &current, |file| {
+            file.retire(ORIGIN, Path::new("/repo"), "rejected", Utc::now());
+        });
+        assert!(store
+            .read()
+            .unwrap()
+            .find(ORIGIN, Path::new("/repo"))
+            .is_none());
+    }
+
+    #[test]
+    fn expiry_copy_tells_an_ended_claim_period_from_a_missing_link() {
+        let now = Utc::now();
+        let day = chrono::Duration::days(1);
+        let mut stored = credential("sk_live_K1");
+
+        let open = expired_copy(
+            "my-app",
+            Some(now - day),
+            Some(now + day),
+            Some(&stored),
+            None,
+        );
+        assert_eq!(open.status_for_test(), Status::WorkspaceExpired);
+        assert!(open.tell_for_test().contains("xybrid auth claim"));
+
+        let ended = expired_copy(
+            "my-app",
+            Some(now - day * 8),
+            Some(now - day),
+            Some(&stored),
+            None,
+        );
+        assert_eq!(ended.status_for_test(), Status::Error);
+        let tell = ended.tell_for_test();
+        assert!(tell.contains("claim period ended"), "{tell}");
+        assert!(
+            !tell.contains("xybrid auth claim"),
+            "nothing to claim: {tell}"
+        );
+        assert!(tell.contains("xybrid connect --new"), "{tell}");
+
+        stored.claim_token = None;
+        let lost = expired_copy(
+            "my-app",
+            Some(now - day),
+            Some(now + day),
+            Some(&stored),
+            None,
+        );
+        assert_eq!(lost.status_for_test(), Status::WorkspaceExpired);
+        assert!(lost.tell_for_test().contains("not saved on this machine"));
+    }
 }
