@@ -80,8 +80,8 @@ struct Cli {
     #[arg(long, global = true)]
     observability: bool,
 
-    /// Full OTLP trace URL for --observability (default: https://ingest.xybrid.dev/v1/traces,
-    /// or the platform's pinned ingest URL for a saved key)
+    /// Full OTLP trace URL for --observability (default: the ingest URL pinned to
+    /// --platform-url for production or staging, else https://ingest.xybrid.dev/v1/traces)
     #[arg(long, global = true, requires = "observability")]
     traces_endpoint: Option<String>,
 
@@ -410,7 +410,7 @@ enum Commands {
     /// the claim link in private credentials (`xybrid auth claim`). It never
     /// enables trace export and never prints the key. Exit codes: 0 created or
     /// existing, 3 signup closed, 4 offline, 5 CI or opted out, 6 project file
-    /// tracked by Git, 7 workspace expired, 1 error.
+    /// tracked by Git, 7 workspace expired but still claimable, 1 error.
     Connect(commands::connect::ConnectArgs),
     /// Inspect, recover or forget this project's Xybrid credentials
     Auth {
@@ -493,16 +493,26 @@ fn main() -> Result<()> {
     configure_cloud_auth(key.as_ref(), host.as_ref());
 
     let json = cli.command.json_output();
-    let observability_enabled =
-        init_observability(&cli, key.as_ref(), host.as_ref(), store_warning.as_deref())?;
+    let observability_enabled = init_observability(
+        &cli,
+        key.as_ref(),
+        host.as_ref(),
+        store_warning.as_deref(),
+        json,
+    )?;
     if observability_enabled && !cli.quiet && !json {
         // stderr: stdout belongs to the command's own output.
         ui::hint_stderr("Observability enabled");
     }
+    // The reminder follows the project's saved credential whenever it is the
+    // key in use, including when it arrives through XYBRID_API_KEY (an
+    // exported .env) or --api-key.
     platform::notices::maybe_claim_reminder(
-        key.as_ref()
-            .filter(|key| key.source == KeySource::Credentials)
-            .and_then(|key| key.credential.as_ref()),
+        || {
+            key.as_ref().and_then(|key| {
+                resolve::stored_matching(key, host.as_ref(), project_root.as_deref())
+            })
+        },
         cli.quiet,
         json,
     );
@@ -514,7 +524,9 @@ fn main() -> Result<()> {
 
     if observability_enabled {
         if let Err(error) = xybrid_sdk::shutdown_observability(Duration::from_secs(5)) {
-            ui::warning(&format!("Observability shutdown failed: {error}"));
+            if !json {
+                ui::warning_stderr(&format!("Observability shutdown failed: {error}"));
+            }
         }
     }
 
@@ -655,14 +667,20 @@ fn configure_cloud_auth(key: Option<&ResolvedKey>, host: Option<&PlatformHost>) 
 
 /// Where `--observability` sends traces with `key`.
 ///
-/// An explicit key (flag or environment) keeps the documented default and
-/// any `--traces-endpoint`. A saved key only goes to its platform's pinned
-/// ingest endpoint, or to a `--traces-endpoint` on that platform.
+/// An explicit key (flag or environment) goes to `--traces-endpoint` when
+/// given, else to the ingest endpoint pinned to a production or staging
+/// `--platform-url` (a staging key belongs to staging ingest), else to the
+/// documented production default. A saved key only goes to its platform's
+/// pinned ingest endpoint, or to a `--traces-endpoint` on that platform.
 fn trace_endpoint(cli: &Cli, key: &ResolvedKey, host: Option<&PlatformHost>) -> Result<String> {
     match key.source {
         KeySource::Flag | KeySource::Env => Ok(cli
             .traces_endpoint
             .clone()
+            .or_else(|| {
+                host.and_then(PlatformHost::traces_endpoint)
+                    .map(str::to_string)
+            })
             .unwrap_or_else(|| XYBRID_TRACES_ENDPOINT.to_string())),
         KeySource::Credentials => {
             let host =
@@ -724,11 +742,14 @@ fn observability_config(
 }
 
 /// Start explicit or environment-configured export. Returns whether it runs.
+/// A failure to start is a warning on stderr, and silent in JSON mode, where
+/// both streams belong to the command's JSON.
 fn init_observability(
     cli: &Cli,
     key: Option<&ResolvedKey>,
     host: Option<&PlatformHost>,
     store_warning: Option<&str>,
+    json: bool,
 ) -> Result<bool> {
     if platform::otel_sdk_disabled() {
         return Ok(false);
@@ -745,7 +766,9 @@ fn init_observability(
     match xybrid_sdk::init_observability(ObservabilityConfig::otlp(config)) {
         Ok(()) => Ok(true),
         Err(error) => {
-            ui::warning(&format!("Observability was not started: {error}"));
+            if !json {
+                ui::warning_stderr(&format!("Observability was not started: {error}"));
+            }
             Ok(false)
         }
     }
@@ -1306,6 +1329,61 @@ mod tests {
         assert_eq!(
             config.traces.unwrap().endpoint,
             "http://localhost:8081/v1/traces"
+        );
+    }
+
+    #[test]
+    fn an_explicit_key_follows_a_pinned_platform_to_its_ingest() {
+        let prod = PlatformHost::parse("https://api.xybrid.dev").unwrap();
+        let staging = PlatformHost::parse("https://staging.api.xybrid.dev").unwrap();
+        let custom = PlatformHost::parse("https://gateway.example.test").unwrap();
+        for (host, endpoint) in [
+            (&prod, XYBRID_TRACES_ENDPOINT),
+            (&staging, "https://staging.ingest.xybrid.dev/v1/traces"),
+            // A custom host has no pinned ingest: the documented default.
+            (&custom, XYBRID_TRACES_ENDPOINT),
+        ] {
+            let platform = host.origin().to_string();
+            let cli = parse_observability_args(&[
+                "xybrid",
+                "--api-key",
+                "staging-key",
+                "--platform-url",
+                &platform,
+                "--observability",
+                "trace",
+            ])
+            .unwrap();
+            let config = observability_config(&cli, flag_key(&cli).as_ref(), Some(host), None)
+                .unwrap()
+                .unwrap();
+            let traces = config.traces.unwrap();
+            assert_eq!(traces.endpoint, endpoint, "{platform}");
+            assert_eq!(
+                traces.headers,
+                [("Authorization".into(), "Bearer staging-key".into())]
+            );
+        }
+
+        // An explicit --traces-endpoint still wins, on any platform.
+        let cli = parse_observability_args(&[
+            "xybrid",
+            "--api-key",
+            "staging-key",
+            "--platform-url",
+            "https://staging.api.xybrid.dev",
+            "--observability",
+            "--traces-endpoint",
+            "https://collector.example.test/v1/traces",
+            "trace",
+        ])
+        .unwrap();
+        let config = observability_config(&cli, flag_key(&cli).as_ref(), Some(&staging), None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            config.traces.unwrap().endpoint,
+            "https://collector.example.test/v1/traces"
         );
     }
 

@@ -1,9 +1,12 @@
 //! Daily stderr notices: the claim reminder and the no-export tip.
 //!
 //! Both go to stderr at most once per local day (state in
-//! `~/.xybrid/notices.json`, which holds no secrets; see [`super::state_dir`]) and are suppressed by
-//! `--quiet`, JSON output, CI and `XYBRID_QUIET`. The reminder comes from the
-//! stored deadlines of the current project's credential; the tip explains
+//! `~/.xybrid/notices.json`, which holds no secrets; see [`super::state_dir`])
+//! and are suppressed by `--quiet`, JSON output, CI and `XYBRID_QUIET`. The
+//! reminder runs on every command except `connect` and `auth`, from the
+//! stored deadlines of the current project's credential (also when the same
+//! key arrives through `--api-key` or `XYBRID_API_KEY`); it never calls the
+//! platform, so it says the state is as of the last check. The tip explains
 //! that a key alone exports nothing.
 
 use std::path::PathBuf;
@@ -11,7 +14,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Local, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::credentials::{create_private_dir_all, Credential};
+use super::credentials::{create_private_dir_all, owned_by_current_account, Credential};
 use super::{ci_marker, xybrid_quiet};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -49,16 +52,20 @@ pub(crate) fn claim_reminder_text(credential: &Credential, now: DateTime<Utc>) -
         .map_or("this project", |o| o.name.as_str());
     let key_deadline = credential.key_expires_at?;
     let claim_deadline = credential.claim_expires_at?;
+    // Saved state, refreshed only by `connect` and `auth status|claim`: a
+    // claim made in the console since then is not known here, so say so.
     Some(if now < key_deadline {
         format!(
-            "Unclaimed Xybrid workspace \"{name}\": its key stops working on {} unless you \
-             claim it. Claim it: xybrid auth claim",
+            "Xybrid workspace \"{name}\" was unclaimed when last checked: its key stops working \
+             on {} unless you claim it. Claim it: xybrid auth claim (already claimed? `xybrid \
+             auth status` updates this)",
             human_date(key_deadline)
         )
     } else {
         format!(
-            "Xybrid workspace \"{name}\" is unclaimed and its key stopped on {}. Claim it by {} \
-             to restore it: xybrid auth claim",
+            "Xybrid workspace \"{name}\" was unclaimed when last checked and its key stopped on \
+             {}. Claim it by {} to restore it: xybrid auth claim (already claimed? `xybrid auth \
+             status` updates this)",
             human_date(key_deadline),
             human_date(claim_deadline)
         )
@@ -73,12 +80,17 @@ pub(crate) fn export_tip_text() -> &'static str {
      OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content to send metadata only."
 }
 
-/// Print the claim reminder to stderr once a day.
-pub(crate) fn maybe_claim_reminder(credential: Option<&Credential>, quiet: bool, json: bool) {
+/// Print the claim reminder to stderr once a day. `credential` (the saved
+/// credential behind the key in use) is only looked up when not suppressed.
+pub(crate) fn maybe_claim_reminder(
+    credential: impl FnOnce() -> Option<Credential>,
+    quiet: bool,
+    json: bool,
+) {
     if suppressed(quiet, json) {
         return;
     }
-    let Some(text) = credential.and_then(|c| claim_reminder_text(c, Utc::now())) else {
+    let Some(text) = credential().and_then(|c| claim_reminder_text(&c, Utc::now())) else {
         return;
     };
     if take_daily_slot(Notice::ClaimReminder) {
@@ -100,6 +112,19 @@ fn state_path() -> Option<PathBuf> {
     super::state_dir().map(|directory| directory.join("notices.json"))
 }
 
+/// The notice state, if this account wrote it: a file another account
+/// planted in a shared directory must not silence the reminder.
+fn read_own(path: &std::path::Path) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    if !owned_by_current_account(&file.metadata().ok()?) {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
 /// Whether `notice` has not been shown today; records it as shown. If the
 /// state cannot be saved, the notice is shown anyway.
 fn take_daily_slot(notice: Notice) -> bool {
@@ -107,8 +132,7 @@ fn take_daily_slot(notice: Notice) -> bool {
     let Some(path) = state_path() else {
         return true;
     };
-    let mut state: NoticeState = std::fs::read(&path)
-        .ok()
+    let mut state: NoticeState = read_own(&path)
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default();
     let slot = match notice {
@@ -168,6 +192,14 @@ mod tests {
         let cred = credential(now);
         let before = claim_reminder_text(&cred, now).unwrap();
         assert!(before.contains("stops working on"), "{before}");
+        assert!(
+            before.contains("when last checked"),
+            "saved state: {before}"
+        );
+        assert!(
+            before.contains("xybrid auth status"),
+            "how to refresh: {before}"
+        );
         assert!(before.contains("xybrid auth claim"));
         assert!(!before.contains(&"t".repeat(43)), "never the claim token");
 

@@ -63,6 +63,25 @@ pub(crate) fn stored(
     Ok(store.read()?.find(host.origin(), root).cloned())
 }
 
+/// The saved credential behind `key`: its own for a stored key, else the one
+/// saved for this origin and repository when it holds the same key (an
+/// exported project `.env`, say), so the claim reminder still sees the saved
+/// deadlines. Best effort: an unreadable store is no credential.
+pub(crate) fn stored_matching(
+    key: &ResolvedKey,
+    host: Option<&PlatformHost>,
+    root: Option<&Path>,
+) -> Option<Credential> {
+    if let Some(credential) = &key.credential {
+        return Some(credential.clone());
+    }
+    let store = Store::locate().ok()?;
+    stored(&store, host?, root?)
+        .ok()
+        .flatten()
+        .filter(|credential| credential.api_key == key.key)
+}
+
 /// Flag, then environment, then stored credentials. A store that cannot be
 /// read is reported as a warning, never as a missing key silently.
 pub(crate) fn resolve(
