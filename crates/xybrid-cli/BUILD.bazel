@@ -42,12 +42,15 @@ rust_binary(
 # resolver, and the `connect` / `auth` building blocks under src/platform/
 # (proof-of-work vectors, the credentials store's locking and corruption
 # handling, env-file writers, host pinning). `crate = ` inherits srcs, edition,
-# crate_features and deps; the inline tests need no dev-dependency. The Git
-# cases skip themselves where no `git` binary is installed.
+# crate_features and deps; `deps` here ADDS the one dev-dependency the inline
+# tests use (image, for the PNG fixtures in commands/run.rs and
+# commands/repl.rs). The Git cases skip themselves where no `git` binary is
+# installed.
 rust_test(
     name = "xybrid_test",
     version = XYBRID_VERSION,
     crate = ":xybrid",
+    deps = ["@crates//:image"],
 )
 
 # Integration tests. Every one of these spawns the built CLI, locating it through
