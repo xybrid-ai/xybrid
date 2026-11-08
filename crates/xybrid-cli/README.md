@@ -83,7 +83,11 @@ xybrid connect --agent claude-code --write-env .env --json
   Otherwise the key is written to the `--write-env` file (dotenv,
   `local.properties` as `xybrid.apiKey`, or an `.xcconfig`; `--env-name
   EXPO_PUBLIC_XYBRID_API_KEY` for Expo), which is added to `.gitignore` and
-  checked with `git check-ignore`.
+  checked with `git check-ignore`. A file whose loaders could disagree about
+  the variable is refused (`env_file_ambiguous`): several empty assignments,
+  or one inside a quoted dotenv value spanning lines, a line continued with a
+  trailing backslash, or an xcconfig `/* */` block (Xcode has no block
+  comments).
 - The key, claim link and deadlines are kept in `~/.xybrid/credentials.json`
   (`0600`, per platform host and repository; `XYBRID_CREDENTIALS_FILE` moves
   it, and a directory inside a repository is gitignored whole). The store is

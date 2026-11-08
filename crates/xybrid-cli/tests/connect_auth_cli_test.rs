@@ -2362,6 +2362,39 @@ fn the_suggested_rerun_works_from_the_directory_connect_ran_in() {
     assert!(env.contains(&format!("XYBRID_API_KEY={KEY}")), "{env}");
 }
 
+/// A key line inside a construct that loaders read differently (an xcconfig
+/// `/* */` block, a continued properties line, a dotenv value spanning
+/// lines) is refused before anything is created or changed.
+#[test]
+fn a_key_line_in_a_multi_line_construct_is_refused_up_front() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    let url = server.base_url();
+    for (file, text) in [
+        ("Secrets.xcconfig", "/*\nXYBRID_API_KEY =\n*/\n"),
+        ("local.properties", "sdk.dir=/sdk \\\nxybrid.apiKey=\n"),
+        (".env", "CERT=\"-----BEGIN\nXYBRID_API_KEY=\n-----END\"\n"),
+    ] {
+        let path = sandbox.project.join(file);
+        std::fs::write(&path, text).unwrap();
+        let run = sandbox.run(&platform_args(
+            &url,
+            &["connect", "--write-env", file, "--json"],
+        ));
+        assert_eq!(run.code, Some(1), "{run}");
+        let report = run.json();
+        assert_eq!(report["error"]["code"], "env_file_ambiguous", "{run}");
+        let message = report["error"]["message"].as_str().unwrap();
+        assert!(message.contains(file), "{message}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+    challenge.assert_hits(0);
+    assert!(!sandbox.credentials_path().exists());
+    assert!(!sandbox.project.join(".gitignore").exists());
+}
+
 /// Write `contents` to a new file only this account can read.
 fn write_private_file(path: &Path, contents: &str) {
     use std::io::Write;

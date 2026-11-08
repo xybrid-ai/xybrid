@@ -23,7 +23,7 @@ use super::connect::{
 };
 use crate::platform::client::{ApiFailure, PlatformClient, WorkspaceStatus};
 use crate::platform::credentials::{Credential, CredentialsFile, Secret, Store};
-use crate::platform::env_file::{self, EnvFormat, Lookup};
+use crate::platform::env_file::{self, EnvFormat};
 use crate::platform::git;
 use crate::platform::host::PlatformHost;
 use crate::platform::notices::human_date;
@@ -713,7 +713,7 @@ fn logout(
 }
 
 fn still_configures(path: &Path, format: EnvFormat, variable: &str) -> bool {
-    matches!(env_file::read(path), Ok(Some(text)) if env_file::lookup(format, &text, variable) == Lookup::Present)
+    matches!(env_file::read(path), Ok(Some(text)) if env_file::may_assign(format, &text, variable))
 }
 
 #[cfg(test)]

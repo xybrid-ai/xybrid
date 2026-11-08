@@ -16,6 +16,22 @@
 //! Any other file name is refused: a raw-key resource (for example a Unity
 //! text asset) is not an assignment file, and writing `NAME=value` into one
 //! would only look configured.
+//!
+//! A line that loaders read differently is neither filled nor trusted. When
+//! the variable is set in or at the edge of one of these multi-line
+//! constructs, or the file ends inside one (an appended key would land in
+//! it), the file is refused as ambiguous:
+//!
+//! | Format | Construct | How readings differ |
+//! |---|---|---|
+//! | dotenv | a quoted value left open at the end of its line | Node's and Python's dotenv run it to the closing quote on a later line; line-based loaders end it with the line |
+//! | Java properties | a line ending in an odd number of backslashes | `java.util.Properties` joins the next line to it; a line reader does not |
+//! | xcconfig | a value ending in a backslash | Xcode's current parser joins the next line to it; earlier parsers and line readers do not |
+//! | xcconfig | a `/* … */` block | Xcode has no block comments: it rejects the lines starting with `/*` and reads the assignments up to `*/` as live, which the block marks as commented out |
+//!
+//! The xcconfig rules follow Xcode's parser (swift-build's
+//! `MacroConfigFileParser`): only `//` starts a comment, and a value whose
+//! last character is `\` continues on the next line.
 
 use std::path::Path;
 
@@ -239,54 +255,317 @@ pub(crate) enum Lookup {
     Absent,
     /// Assigned an empty value on one line: it may be filled in.
     Empty,
-    /// Assigned an empty value on more than one line: which one an
-    /// application reads depends on its loader (most take the last), so none
-    /// is filled.
-    Ambiguous,
+    /// No line can be filled, nor the file appended to, safely.
+    Ambiguous(Ambiguity),
     /// Assigned a nonempty value: never replaced.
     Present,
 }
 
+/// Why a project file is [`Lookup::Ambiguous`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ambiguity {
+    /// The variable is assigned an empty value on more than one line, and
+    /// no value elsewhere: which one an application reads depends on its
+    /// loader (most take the last), so none is filled.
+    SeveralEmpty,
+    /// It is set in or at the edge of a dotenv quoted value spanning lines,
+    /// or the file ends inside one.
+    QuotedLines,
+    /// It is set on a line a trailing backslash joins to the next, or on a
+    /// line so joined, or the file ends with such a backslash.
+    Continuation,
+    /// It is set in or at the edge of an xcconfig `/* … */` block, or the
+    /// file ends inside one.
+    BlockComment,
+}
+
 /// How `text` assigns `name`. Values are never returned.
+///
+/// A line in a multi-line construct that could assign `name` makes the file
+/// ambiguous even when another line holds a value: which one wins depends on
+/// how the construct is read.
 pub(crate) fn lookup(format: EnvFormat, text: &str, name: &str) -> Lookup {
-    let mut empty = 0_usize;
-    for line in text.lines() {
-        if let Some(assignment) = format.parse_assignment(line) {
-            if assignment.name == name {
-                if !format.value_is_empty(assignment.value) {
-                    return Lookup::Present;
+    let mut scanner = Scanner::new(format);
+    let (mut empty, mut present, mut unclear) = (0_usize, false, None);
+    for line in lines(text) {
+        match scanner.read(line) {
+            Line::Clear(Some(assignment)) if assignment.name == name => {
+                if format.value_is_empty(assignment.value) {
+                    empty += 1;
+                } else {
+                    present = true;
                 }
-                empty += 1;
             }
+            Line::Unclear(why, readings) if readings.iter().flatten().any(|a| a.name == name) => {
+                unclear.get_or_insert(why);
+            }
+            _ => {}
         }
     }
-    match empty {
-        0 => Lookup::Absent,
-        1 => Lookup::Empty,
-        _ => Lookup::Ambiguous,
+    match (unclear, present, empty) {
+        (Some(why), _, _) => Lookup::Ambiguous(why),
+        (None, true, _) => Lookup::Present,
+        // Appending after an open construct would land inside it.
+        (None, false, 0) => scanner.open().map_or(Lookup::Absent, Lookup::Ambiguous),
+        (None, false, 1) => Lookup::Empty,
+        (None, false, _) => Lookup::Ambiguous(Ambiguity::SeveralEmpty),
     }
 }
 
 /// The error for a [`Lookup::Ambiguous`] file, named `file`.
-pub(crate) fn ambiguous(file: &str, name: &str) -> CliError {
-    CliError::new(
-        "env_file_ambiguous",
-        format!(
+pub(crate) fn ambiguous(file: &str, name: &str, why: Ambiguity) -> CliError {
+    let message = match why {
+        Ambiguity::SeveralEmpty => format!(
             "{file} assigns {name} an empty value on more than one line, and which one the app \
              reads depends on its loader; keep a single {name} line or choose another \
              --write-env file"
         ),
-    )
+        Ambiguity::QuotedLines => format!(
+            "{file} has a quoted value spanning several lines that holds or sets {name}, or that \
+             never closes, and dotenv loaders disagree on where such a value ends; set {name} \
+             on a line of its own outside any quoted value, or choose another --write-env file"
+        ),
+        Ambiguity::Continuation => format!(
+            "{file} sets {name} on a line that a trailing backslash joins to another, or ends \
+             with such a backslash, and loaders disagree on which lines that joins; set {name} \
+             on a line of its own, or choose another --write-env file"
+        ),
+        Ambiguity::BlockComment => format!(
+            "{file} sets {name} in or next to a /* */ block, or leaves one open. Xcode has no \
+             block comments: it reads an assignment inside one as live although the block \
+             marks it as commented out. Comment lines out with // instead, or choose another \
+             --write-env file"
+        ),
+    };
+    CliError::new("env_file_ambiguous", message)
 }
 
 /// Whether `text` assigns exactly `value` to `name` (for example, the key a
-/// previous `xybrid connect` wrote). The value itself is never returned.
+/// previous `xybrid connect` wrote) on a line every loader reads the same
+/// way. The value itself is never returned.
 pub(crate) fn assigns(format: EnvFormat, text: &str, name: &str, value: &str) -> bool {
-    text.lines().any(|line| {
-        format
-            .parse_assignment(line)
-            .is_some_and(|a| a.name == name && format.value(a.value) == value)
+    let mut scanner = Scanner::new(format);
+    lines(text).any(|line| {
+        matches!(
+            scanner.read(line),
+            Line::Clear(Some(a)) if a.name == name && format.value(a.value) == value
+        )
     })
+}
+
+/// Whether some reading of `text` may give `name` a nonempty value: a line
+/// every loader reads the same way assigns one, or a line in a multi-line
+/// construct could assign it anything at all. Unlike [`lookup`], this never
+/// takes an ambiguous file as unset (for telling the user a file may still
+/// configure a key).
+pub(crate) fn may_assign(format: EnvFormat, text: &str, name: &str) -> bool {
+    let mut scanner = Scanner::new(format);
+    lines(text).any(|line| match scanner.read(line) {
+        Line::Clear(reading) => {
+            reading.is_some_and(|a| a.name == name && !format.value_is_empty(a.value))
+        }
+        Line::Unclear(_, readings) => readings
+            .iter()
+            .flatten()
+            .any(|a| a.name == name && !a.value.trim().is_empty()),
+    })
+}
+
+/// The lines of `text` without their endings, as [`upsert`] rewrites them.
+fn lines(text: &str) -> impl Iterator<Item = &str> {
+    text.split_inclusive('\n')
+        .map(|line| line.trim_end_matches(['\n', '\r']))
+}
+
+/// How one line reads.
+enum Line<'a> {
+    /// The same for every loader: this assignment, or none.
+    Clear(Option<Assignment<'a>>),
+    /// In or at the edge of a multi-line construct: the assignments the line
+    /// could be, depending on how a loader reads the construct.
+    Unclear(Ambiguity, [Option<Assignment<'a>>; 2]),
+}
+
+/// The construct a line starts in, after the lines before it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State {
+    Plain,
+    /// Inside a dotenv value opened by this quote.
+    Quoted(char),
+    /// Joined to the line before by its trailing backslash.
+    Continued,
+    /// Inside an xcconfig `/* … */` block.
+    BlockComment,
+}
+
+/// Reads a file's lines in order, following its format's multi-line
+/// constructs (see the module documentation).
+struct Scanner {
+    format: EnvFormat,
+    state: State,
+}
+
+impl Scanner {
+    fn new(format: EnvFormat) -> Self {
+        Self {
+            format,
+            state: State::Plain,
+        }
+    }
+
+    /// The construct the lines read so far end inside, if any.
+    fn open(&self) -> Option<Ambiguity> {
+        match self.state {
+            State::Plain => None,
+            State::Quoted(_) => Some(Ambiguity::QuotedLines),
+            State::Continued => Some(Ambiguity::Continuation),
+            State::BlockComment => Some(Ambiguity::BlockComment),
+        }
+    }
+
+    /// The next line, without its ending.
+    fn read<'a>(&mut self, line: &'a str) -> Line<'a> {
+        match self.format {
+            EnvFormat::Dotenv => self.read_dotenv(line),
+            EnvFormat::Properties => self.read_properties(line),
+            EnvFormat::Xcconfig => self.read_xcconfig(line),
+        }
+    }
+
+    /// A value opened by `"`, `'` or a backtick and not closed on its line
+    /// runs to the next unescaped matching quote for Node's and Python's
+    /// dotenv; a line-based loader ends it with the line.
+    fn read_dotenv<'a>(&mut self, line: &'a str) -> Line<'a> {
+        let reading = EnvFormat::Dotenv.parse_assignment(line);
+        if let State::Quoted(quote) = self.state {
+            if closing_quote(line, quote).is_some() {
+                self.state = State::Plain;
+            }
+            return Line::Unclear(Ambiguity::QuotedLines, [reading, None]);
+        }
+        let Some(assignment) = reading else {
+            return Line::Clear(None);
+        };
+        let value = assignment.value.trim_start();
+        match value.chars().next() {
+            Some(quote @ ('"' | '\'' | '`')) if closing_quote(&value[1..], quote).is_none() => {
+                self.state = State::Quoted(quote);
+                Line::Unclear(Ambiguity::QuotedLines, [Some(assignment), None])
+            }
+            _ => Line::Clear(Some(assignment)),
+        }
+    }
+
+    /// A line ending in an odd number of backslashes continues on the next,
+    /// as `java.util.Properties` reads it: the next line's leading blanks are
+    /// skipped, a blank line ends the continuation, and a comment line never
+    /// continues.
+    fn read_properties<'a>(&mut self, line: &'a str) -> Line<'a> {
+        let reading = EnvFormat::Properties.parse_assignment(line);
+        let rest = line.trim_start_matches([' ', '\t', '\x0c']);
+        let continues = (line.len() - line.trim_end_matches('\\').len()) % 2 == 1;
+        if self.state == State::Continued {
+            if rest.is_empty() {
+                self.state = State::Plain;
+                return Line::Clear(None);
+            }
+            if !continues {
+                self.state = State::Plain;
+            }
+            return Line::Unclear(Ambiguity::Continuation, [reading, None]);
+        }
+        if rest.is_empty() || rest.starts_with(['#', '!']) {
+            return Line::Clear(None);
+        }
+        if continues {
+            self.state = State::Continued;
+            return Line::Unclear(Ambiguity::Continuation, [reading, None]);
+        }
+        Line::Clear(reading)
+    }
+
+    /// Xcode joins a value ending in a backslash to the next line, up to a
+    /// line holding only blanks or a `//` comment; earlier parsers and line
+    /// readers don't. Xcode has no block comments: it rejects a line starting
+    /// with `/*` and reads the lines after it as usual, while the author
+    /// meant everything up to `*/` as commented out.
+    fn read_xcconfig<'a>(&mut self, line: &'a str) -> Line<'a> {
+        let format = EnvFormat::Xcconfig;
+        let reading = format.parse_assignment(line);
+        match self.state {
+            State::BlockComment => {
+                // What follows `*/` is what the author meant to be live.
+                let after = line.find("*/").map(|at| {
+                    self.state = State::Plain;
+                    &line[at + 2..]
+                });
+                let meant = after.and_then(|rest| format.parse_assignment(rest));
+                return Line::Unclear(Ambiguity::BlockComment, [reading, meant]);
+            }
+            State::Continued => {
+                let rest = line.split("//").next().unwrap_or(line);
+                if rest.trim().is_empty() {
+                    self.state = State::Plain;
+                    return Line::Clear(None);
+                }
+                if !continues_xcconfig(rest) {
+                    self.state = State::Plain;
+                }
+                return Line::Unclear(Ambiguity::Continuation, [reading, None]);
+            }
+            State::Plain | State::Quoted(_) => {}
+        }
+        if let Some(comment) = line.trim_start().strip_prefix("/*") {
+            let after = match comment.find("*/") {
+                Some(at) => &comment[at + 2..],
+                None => {
+                    self.state = State::BlockComment;
+                    ""
+                }
+            };
+            return Line::Unclear(
+                Ambiguity::BlockComment,
+                [format.parse_assignment(after), None],
+            );
+        }
+        let Some(assignment) = reading else {
+            return Line::Clear(None);
+        };
+        if continues_xcconfig(assignment.value) {
+            self.state = State::Continued;
+            return Line::Unclear(Ambiguity::Continuation, [Some(assignment), None]);
+        }
+        // Xcode reads `/* … */` in a value as part of it.
+        if assignment.value.contains("/*") || assignment.value.contains("*/") {
+            return Line::Unclear(Ambiguity::BlockComment, [Some(assignment), None]);
+        }
+        Line::Clear(Some(assignment))
+    }
+}
+
+/// Whether an xcconfig value (its `//` comment removed) continues on the
+/// next line: after trailing blanks and one optional `;`, it ends in `\`.
+fn continues_xcconfig(value: &str) -> bool {
+    let value = value.trim_end();
+    value
+        .strip_suffix(';')
+        .map_or(value, str::trim_end)
+        .ends_with('\\')
+}
+
+/// Where the first `quote` in `text` that no backslash escapes is.
+fn closing_quote(text: &str, quote: char) -> Option<usize> {
+    let mut chars = text.char_indices();
+    while let Some((at, c)) = chars.next() {
+        if c == quote {
+            return Some(at);
+        }
+        // `\"` is an escaped quote; any other backslash stands for itself.
+        if c == '\\' && text[at + 1..].starts_with(quote) {
+            chars.next();
+        }
+    }
+    None
 }
 
 /// `text` with `name` set to `key` and `comment` above it, everything else
@@ -319,7 +598,7 @@ pub(crate) fn upsert(
             "env_file_has_key",
             format!("{name} already has a value; it is never replaced"),
         )),
-        Lookup::Ambiguous => Err(ambiguous("the file", name)),
+        Lookup::Ambiguous(why) => Err(ambiguous("the file", name, why)),
         Lookup::Absent => {
             let mut out = text.to_string();
             if !out.is_empty() && !out.ends_with('\n') {
@@ -334,14 +613,19 @@ pub(crate) fn upsert(
             Ok(out)
         }
         Lookup::Empty => {
-            // `lookup` found exactly one empty assignment: fill that line.
+            // `lookup` found exactly one empty assignment, on a line every
+            // loader reads the same way: fill that line.
+            let mut scanner = Scanner::new(format);
             let mut out = String::with_capacity(text.len() + block.len() + key.len());
             for line in text.split_inclusive('\n') {
                 let content = line.trim_end_matches(['\n', '\r']);
                 let ending = &line[content.len()..];
-                let target = format
-                    .parse_assignment(content)
-                    .filter(|a| a.name == name && format.value_is_empty(a.value));
+                let target = match scanner.read(content) {
+                    Line::Clear(Some(a)) if a.name == name && format.value_is_empty(a.value) => {
+                        Some(a)
+                    }
+                    _ => None,
+                };
                 if let Some(target) = target {
                     let export =
                         format == EnvFormat::Dotenv && strip_export(content.trim_start()).is_some();
@@ -642,7 +926,11 @@ mod tests {
             ),
         ] {
             let name = format.default_variable();
-            assert_eq!(lookup(format, text, name), Lookup::Ambiguous, "{text}");
+            assert_eq!(
+                lookup(format, text, name),
+                Lookup::Ambiguous(Ambiguity::SeveralEmpty),
+                "{text}"
+            );
             let err = upsert(format, text, name, KEY, &comment()).unwrap_err();
             assert_eq!(err.code, "env_file_ambiguous", "{text}");
             assert!(err.message.contains(name), "{}", err.message);
@@ -658,7 +946,7 @@ mod tests {
             Lookup::Present
         );
         assert_eq!(
-            ambiguous(".env", "XYBRID_API_KEY").code,
+            ambiguous(".env", "XYBRID_API_KEY", Ambiguity::SeveralEmpty).code,
             "env_file_ambiguous"
         );
     }
@@ -804,6 +1092,205 @@ mod tests {
             ),
             Lookup::Absent
         );
+    }
+
+    /// Asserts that `format` reads `text` as `expected` for its default
+    /// variable, and that `upsert` refuses an ambiguous file untouched.
+    fn assert_lookup(format: EnvFormat, text: &str, expected: Lookup) {
+        let name = format.default_variable();
+        assert_eq!(lookup(format, text, name), expected, "{text:?}");
+        if let Lookup::Ambiguous(why) = expected {
+            let err = upsert(format, text, name, KEY, &comment()).unwrap_err();
+            assert_eq!(err, ambiguous("the file", name, why), "{text:?}");
+        }
+    }
+
+    /// Xcode has no block comments: it rejects a line starting with `/*` and
+    /// reads the lines after it as live. A key line in such a block is meant
+    /// as commented out but read as set, so it is neither filled nor taken
+    /// as a configured key.
+    #[test]
+    fn xcconfig_block_comments_around_the_key_are_refused() {
+        let blocked = Lookup::Ambiguous(Ambiguity::BlockComment);
+        for text in [
+            "/*\nXYBRID_API_KEY =\n*/\n",
+            "/*\nXYBRID_API_KEY = old\n*/\n",
+            "PRODUCT_NAME = MyApp\n  /* disabled:\n  XYBRID_API_KEY[config=Debug] =\n  */\n",
+            "/*\n * notes\n */ XYBRID_API_KEY =\n",
+            "/* note */ XYBRID_API_KEY = old\n",
+            "XYBRID_API_KEY = /* set me */\n",
+            // A value elsewhere doesn't settle it: Xcode reads both lines.
+            "XYBRID_API_KEY = abc\n/*\nXYBRID_API_KEY =\n*/\n",
+            // Appending after an open block would put the key inside it.
+            "PRODUCT_NAME = MyApp\n/* notes\n",
+        ] {
+            assert_lookup(EnvFormat::Xcconfig, text, blocked);
+        }
+        // A one-line block is not an assignment for Xcode or its author.
+        let text = "/* XYBRID_API_KEY = old */\nPRODUCT_NAME = MyApp\n";
+        assert_lookup(EnvFormat::Xcconfig, text, Lookup::Absent);
+        let out = upsert(EnvFormat::Xcconfig, text, "XYBRID_API_KEY", KEY, &[]).unwrap();
+        assert_eq!(out, format!("{text}\nXYBRID_API_KEY = {KEY}\n"));
+        // A block elsewhere leaves a plain line to fill.
+        let text = "/*\nPRODUCT_NAME = Old\n*/\nXYBRID_API_KEY =\n";
+        assert_lookup(EnvFormat::Xcconfig, text, Lookup::Empty);
+        let out = upsert(EnvFormat::Xcconfig, text, "XYBRID_API_KEY", KEY, &[]).unwrap();
+        assert_eq!(
+            out,
+            format!("/*\nPRODUCT_NAME = Old\n*/\nXYBRID_API_KEY = {KEY}\n")
+        );
+        // `/*` inside another setting's value is part of that value.
+        let text = "HEADER_SEARCH_PATHS = $(SRCROOT)/**\nXYBRID_API_KEY =\n";
+        assert_lookup(EnvFormat::Xcconfig, text, Lookup::Empty);
+        assert_lookup(
+            EnvFormat::Xcconfig,
+            "HEADER_SEARCH_PATHS = $(SRCROOT)/**\n",
+            Lookup::Absent,
+        );
+    }
+
+    /// Xcode joins a value ending in `\` to the next line; earlier parsers
+    /// and line readers don't, so a key line on either side is refused.
+    #[test]
+    fn continued_xcconfig_values_are_refused_around_the_key() {
+        let continued = Lookup::Ambiguous(Ambiguity::Continuation);
+        for text in [
+            "OTHER_FLAGS = -a \\\nXYBRID_API_KEY =\n",
+            "OTHER_FLAGS = -a \\ // note\n  XYBRID_API_KEY = abc\n",
+            "OTHER_FLAGS = -a \\;\nXYBRID_API_KEY =\n",
+            "OTHER_FLAGS = -a \\\n  -b \\\n  XYBRID_API_KEY =\n",
+            "XYBRID_API_KEY = \\\n  $(SECRET)\n",
+            "XYBRID_API_KEY = abc\nOTHER_FLAGS = -a \\\nXYBRID_API_KEY =\n",
+            "OTHER_FLAGS = -a \\",
+        ] {
+            assert_lookup(EnvFormat::Xcconfig, text, continued);
+        }
+        // The join ends at a line without `\`, or at a blank or comment line.
+        for gap in ["  -b\n", "\n", "// end\n"] {
+            let text = format!("OTHER_FLAGS = -a \\\n{gap}XYBRID_API_KEY =\n");
+            assert_lookup(EnvFormat::Xcconfig, &text, Lookup::Empty);
+            let out = upsert(EnvFormat::Xcconfig, &text, "XYBRID_API_KEY", KEY, &[]).unwrap();
+            assert_eq!(
+                out,
+                format!("OTHER_FLAGS = -a \\\n{gap}XYBRID_API_KEY = {KEY}\n")
+            );
+        }
+    }
+
+    /// `java.util.Properties` joins a line ending in an odd number of
+    /// backslashes to the next one; a line reader doesn't.
+    #[test]
+    fn continued_properties_lines_are_refused_around_the_key() {
+        let continued = Lookup::Ambiguous(Ambiguity::Continuation);
+        for text in [
+            "other = foo \\\nxybrid.apiKey=\n",
+            "other = foo \\\n  xybrid.apiKey=abc\n",
+            "other = a \\\\\\\nxybrid.apiKey=\n",
+            "xybrid.apiKey = \\\n  abc\n",
+            "xybrid.apiKey = abc\nother = \\\nxybrid.apiKey\n",
+            "other = foo \\",
+        ] {
+            assert_lookup(EnvFormat::Properties, text, continued);
+        }
+        // An escaped backslash, a comment and a blank line don't continue.
+        for (before, after) in [
+            ("sdk.dir = C:\\\\\n", ""),
+            ("# note \\\n", ""),
+            ("other = foo \\\n", "\n"),
+        ] {
+            let text = format!("{before}{after}xybrid.apiKey=\n");
+            assert_lookup(EnvFormat::Properties, &text, Lookup::Empty);
+            let out = upsert(EnvFormat::Properties, &text, "xybrid.apiKey", KEY, &[]).unwrap();
+            assert_eq!(out, format!("{before}{after}xybrid.apiKey={KEY}\n"));
+        }
+    }
+
+    /// Node's and Python's dotenv run a quoted value to its closing quote on
+    /// a later line; line-based loaders end it with the line.
+    #[test]
+    fn dotenv_quoted_values_spanning_lines_are_refused_around_the_key() {
+        let quoted = Lookup::Ambiguous(Ambiguity::QuotedLines);
+        for text in [
+            "CERT=\"-----BEGIN\nXYBRID_API_KEY=\n-----END\"\n",
+            "CERT='-----BEGIN\nexport XYBRID_API_KEY=abc\n-----END'\n",
+            "CERT=`one\nXYBRID_API_KEY=\n`\n",
+            "A=\"x\\\"\nXYBRID_API_KEY=\n\"\n",
+            "XYBRID_API_KEY=\"\nabc\"\n",
+            "CERT=\"open\nXYBRID_API_KEY=\"x\"\n",
+            "XYBRID_API_KEY=abc\nCERT=\"\nXYBRID_API_KEY=\n\"\n",
+            "CERT=\"-----BEGIN\n",
+        ] {
+            assert_lookup(EnvFormat::Dotenv, text, quoted);
+        }
+        // A value closed on its line, a commented quote, or a closed block
+        // elsewhere leaves a plain line to fill.
+        for before in [
+            "A=\"one line\" # \"quoted\"\n",
+            "A='it''s'\n",
+            "# CERT=\"open\n",
+            "CERT=\"-----BEGIN\nMIIE==\n-----END\"\n",
+        ] {
+            let text = format!("{before}XYBRID_API_KEY=\n");
+            assert_lookup(EnvFormat::Dotenv, &text, Lookup::Empty);
+            let out = upsert(EnvFormat::Dotenv, &text, "XYBRID_API_KEY", KEY, &[]).unwrap();
+            assert_eq!(out, format!("{before}XYBRID_API_KEY={KEY}\n"));
+        }
+        // A line inside a quoted value never counts as the saved key.
+        let text = format!("CERT=\"\nXYBRID_API_KEY={KEY}\n\"\n");
+        assert!(!assigns(EnvFormat::Dotenv, &text, "XYBRID_API_KEY", KEY));
+    }
+
+    /// Logout asks whether a file may still configure the key: a file too
+    /// ambiguous to write into is not taken as unset.
+    #[test]
+    fn a_key_may_still_be_assigned_in_an_ambiguous_file() {
+        for (format, text) in [
+            (EnvFormat::Dotenv, format!("XYBRID_API_KEY={KEY}\n")),
+            (EnvFormat::Dotenv, "XYBRID_API_KEY=\"\nabc\"\n".into()),
+            (
+                EnvFormat::Dotenv,
+                format!("XYBRID_API_KEY={KEY}\nCERT=\"\n"),
+            ),
+            (
+                EnvFormat::Properties,
+                "other = \\\nxybrid.apiKey=abc\n".into(),
+            ),
+            (EnvFormat::Xcconfig, "/*\nXYBRID_API_KEY = abc\n*/\n".into()),
+            (
+                EnvFormat::Xcconfig,
+                "XYBRID_API_KEY = \\\n  $(SECRET)\n".into(),
+            ),
+        ] {
+            let name = format.default_variable();
+            assert!(may_assign(format, &text, name), "{text:?}");
+        }
+        for (format, text) in [
+            (EnvFormat::Dotenv, "XYBRID_API_KEY=\n# XYBRID_API_KEY=abc\n"),
+            (EnvFormat::Dotenv, "OTHER=1\nCERT=\"\n"),
+            (EnvFormat::Xcconfig, "/*\nXYBRID_API_KEY =\n*/\n"),
+            (EnvFormat::Xcconfig, "/* XYBRID_API_KEY = abc */\n"),
+        ] {
+            let name = format.default_variable();
+            assert!(!may_assign(format, text, name), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn ambiguity_errors_name_the_file_and_variable() {
+        for why in [
+            Ambiguity::SeveralEmpty,
+            Ambiguity::QuotedLines,
+            Ambiguity::Continuation,
+            Ambiguity::BlockComment,
+        ] {
+            let err = ambiguous("ios/Secrets.xcconfig", "XYBRID_API_KEY", why);
+            assert_eq!(err.code, "env_file_ambiguous");
+            assert!(err.message.contains("ios/Secrets.xcconfig"), "{why:?}");
+            assert!(err.message.contains("XYBRID_API_KEY"), "{why:?}");
+        }
+        assert!(ambiguous("a", "B", Ambiguity::BlockComment)
+            .message
+            .contains("Xcode has no block comments"));
     }
 
     #[test]
