@@ -1879,3 +1879,51 @@ fn auth_status_uses_saved_details_only_for_their_own_key() {
     claimed.assert_hits(1);
     assert_eq!(sandbox.credentials()["credentials"][0]["claimed"], true);
 }
+
+/// Write `contents` to a new file only this account can read.
+fn write_private_file(path: &Path, contents: &str) {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options
+        .open(path)
+        .and_then(|mut file| file.write_all(contents.as_bytes()))
+        .unwrap();
+}
+
+/// A store that can't be trusted or read keeps local commands working, but
+/// they say on stderr that its saved key is ignored.
+#[test]
+fn an_unreadable_store_is_reported_not_silently_ignored() {
+    let sandbox = Sandbox::new_without_git();
+    write_private_file(&sandbox.credentials_path(), "{ not json");
+    const WARNING: &str = "Ignoring saved Xybrid credentials";
+
+    let run = sandbox.run(&["telemetry", "status"]);
+    assert_eq!(run.code, Some(0), "{run}");
+    assert_eq!(run.stderr.matches(WARNING).count(), 1, "{run}");
+    assert!(!run.stdout.contains(WARNING), "stderr only: {run}");
+
+    let run = sandbox.run(&["--quiet", "telemetry", "status"]);
+    assert_eq!(run.code, Some(0), "{run}");
+    assert!(!run.stderr.contains(WARNING), "{run}");
+
+    // `--observability` fails without the key and says why, once.
+    let run = sandbox.run(&["--observability", "telemetry", "status"]);
+    assert_eq!(run.code, Some(1), "{run}");
+    assert_eq!(run.stderr.matches(WARNING).count(), 1, "{run}");
+
+    // JSON mode: stderr holds only the JSON error.
+    let empty = sandbox.project.join("no-model");
+    std::fs::create_dir_all(&empty).unwrap();
+    let run = sandbox.run(&["init", "--json", "--yes", empty.to_str().unwrap()]);
+    assert_eq!(run.code, Some(1), "{run}");
+    let error: Value = serde_json::from_str(run.stderr.trim())
+        .unwrap_or_else(|_| panic!("stderr is only the JSON error: {run}"));
+    assert_eq!(error["status"], "error");
+}

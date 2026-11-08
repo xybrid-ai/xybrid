@@ -500,6 +500,15 @@ fn main() -> Result<()> {
         store_warning.as_deref(),
         json,
     )?;
+    // A store that can't be trusted or read keeps local commands working
+    // without its key, but never silently: cloud calls that would have used
+    // the key fail without it. (When `--observability` needs the key, its
+    // error above already carries this.) stderr only, as below.
+    if let Some(warning) = store_warning.as_deref() {
+        if !cli.quiet && !json {
+            ui::warning_stderr(warning);
+        }
+    }
     if observability_enabled && !cli.quiet && !json {
         // stderr: stdout belongs to the command's own output.
         ui::hint_stderr("Observability enabled");
