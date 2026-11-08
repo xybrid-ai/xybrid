@@ -2524,6 +2524,11 @@ fn a_key_line_in_a_multi_line_construct_is_refused_up_front() {
     let url = server.base_url();
     for (file, text) in [
         ("Secrets.xcconfig", "/*\nXYBRID_API_KEY =\n*/\n"),
+        // A block reopened after `*/` on the same line.
+        (
+            "Secrets.xcconfig",
+            "/* Secrets */ /* disabled until launch:\nXYBRID_API_KEY = old_placeholder\n*/\n",
+        ),
         ("local.properties", "sdk.dir=/sdk \\\nxybrid.apiKey=\n"),
         (".env", "CERT=\"-----BEGIN\nXYBRID_API_KEY=\n-----END\"\n"),
     ] {
@@ -2543,6 +2548,38 @@ fn a_key_line_in_a_multi_line_construct_is_refused_up_front() {
     challenge.assert_hits(0);
     assert!(!sandbox.credentials_path().exists());
     assert!(!sandbox.project.join(".gitignore").exists());
+}
+
+/// A file whose last line ends in a trailing backslash still takes the key:
+/// the blank line written before it ends the join for every loader that
+/// makes one.
+#[test]
+fn a_file_ending_in_a_continued_line_takes_an_appended_key() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    let connect = mock_connect(&server);
+    let url = server.base_url();
+    let text = "sdk.dir=/opt/android/sdk\\\n";
+    let path = sandbox.project.join("local.properties");
+    std::fs::write(&path, text).unwrap();
+
+    let run = sandbox.run(&platform_args(
+        &url,
+        &["connect", "--write-env", "local.properties", "--json"],
+    ));
+    assert_eq!(run.code, Some(0), "{run}");
+    run.assert_no_secret(KEY);
+    assert_eq!(run.json()["env_file"]["written"], true, "{run}");
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(written.starts_with(&format!("{text}\n# ")), "{written:?}");
+    assert!(
+        written.ends_with(&format!("\nxybrid.apiKey={KEY}\n")),
+        "{written:?}"
+    );
+    challenge.assert_hits(1);
+    connect.assert_hits(1);
 }
 
 /// Write `contents` to a new file only this account can read.

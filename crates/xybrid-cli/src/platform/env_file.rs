@@ -19,8 +19,10 @@
 //!
 //! A line that loaders read differently is neither filled nor trusted. When
 //! the variable is set in or at the edge of one of these multi-line
-//! constructs, or the file ends inside one (an appended key would land in
-//! it), the file is refused as ambiguous:
+//! constructs, or the file ends inside a quoted value or a block (an appended
+//! key would land in it), the file is refused as ambiguous. A file ending in
+//! a trailing backslash still takes an appended key: the blank line written
+//! before it ends the join.
 //!
 //! | Format | Construct | How readings differ |
 //! |---|---|---|
@@ -272,7 +274,7 @@ pub(crate) enum Ambiguity {
     /// or the file ends inside one.
     QuotedLines,
     /// It is set on a line a trailing backslash joins to the next, or on a
-    /// line so joined, or the file ends with such a backslash.
+    /// line so joined.
     Continuation,
     /// It is set in or at the edge of an xcconfig `/* … */` block, or the
     /// file ends inside one.
@@ -305,7 +307,8 @@ pub(crate) fn lookup(format: EnvFormat, text: &str, name: &str) -> Lookup {
     match (unclear, present, empty) {
         (Some(why), _, _) => Lookup::Ambiguous(why),
         (None, true, _) => Lookup::Present,
-        // Appending after an open construct would land inside it.
+        // `upsert` appends after a blank line, so only a construct a blank
+        // line does not close (see `Scanner::open`) would take the key in.
         (None, false, 0) => scanner.open().map_or(Lookup::Absent, Lookup::Ambiguous),
         (None, false, 1) => Lookup::Empty,
         (None, false, _) => Lookup::Ambiguous(Ambiguity::SeveralEmpty),
@@ -326,9 +329,9 @@ pub(crate) fn ambiguous(file: &str, name: &str, why: Ambiguity) -> CliError {
              on a line of its own outside any quoted value, or choose another --write-env file"
         ),
         Ambiguity::Continuation => format!(
-            "{file} sets {name} on a line that a trailing backslash joins to another, or ends \
-             with such a backslash, and loaders disagree on which lines that joins; set {name} \
-             on a line of its own, or choose another --write-env file"
+            "{file} sets {name} on a line that a trailing backslash joins to another, and \
+             loaders disagree on which lines that joins; set {name} on a line of its own, or \
+             choose another --write-env file"
         ),
         Ambiguity::BlockComment => format!(
             "{file} sets {name} in or next to a /* */ block, or leaves one open. Xcode has no \
@@ -413,12 +416,14 @@ impl Scanner {
         }
     }
 
-    /// The construct the lines read so far end inside, if any.
+    /// The construct the lines read so far end inside that a blank line
+    /// does not close, if any. A quoted value or a block runs on past one;
+    /// a blank line ends a trailing backslash's join in every loader that
+    /// makes it (`java.util.Properties`, Xcode's parser).
     fn open(&self) -> Option<Ambiguity> {
         match self.state {
-            State::Plain => None,
+            State::Plain | State::Continued => None,
             State::Quoted(_) => Some(Ambiguity::QuotedLines),
-            State::Continued => Some(Ambiguity::Continuation),
             State::BlockComment => Some(Ambiguity::BlockComment),
         }
     }
@@ -494,12 +499,13 @@ impl Scanner {
         let reading = format.parse_assignment(line);
         match self.state {
             State::BlockComment => {
-                // What follows `*/` is what the author meant to be live.
-                let after = line.find("*/").map(|at| {
+                // What follows `*/` is what the author meant to be live,
+                // unless another block opens there.
+                let meant = line.find("*/").and_then(|at| {
                     self.state = State::Plain;
-                    &line[at + 2..]
+                    let rest = &line[at + 2..];
+                    format.parse_assignment(self.after_blocks(rest).unwrap_or(rest))
                 });
-                let meant = after.and_then(|rest| format.parse_assignment(rest));
                 return Line::Unclear(Ambiguity::BlockComment, [reading, meant]);
             }
             State::Continued => {
@@ -511,21 +517,19 @@ impl Scanner {
                 if !continues_xcconfig(rest) {
                     self.state = State::Plain;
                 }
-                return Line::Unclear(Ambiguity::Continuation, [reading, None]);
+                // A line reader starts a line here, so a `/*` opens a block
+                // for the author as on any other line.
+                let meant = self
+                    .after_blocks(line)
+                    .and_then(|rest| format.parse_assignment(rest));
+                return Line::Unclear(Ambiguity::Continuation, [reading, meant]);
             }
             State::Plain | State::Quoted(_) => {}
         }
-        if let Some(comment) = line.trim_start().strip_prefix("/*") {
-            let after = match comment.find("*/") {
-                Some(at) => &comment[at + 2..],
-                None => {
-                    self.state = State::BlockComment;
-                    ""
-                }
-            };
+        if let Some(rest) = self.after_blocks(line) {
             return Line::Unclear(
                 Ambiguity::BlockComment,
-                [format.parse_assignment(after), None],
+                [format.parse_assignment(rest), None],
             );
         }
         let Some(assignment) = reading else {
@@ -540,6 +544,26 @@ impl Scanner {
             return Line::Unclear(Ambiguity::BlockComment, [Some(assignment), None]);
         }
         Line::Clear(Some(assignment))
+    }
+
+    /// For xcconfig text outside any block (a line, or what follows a `*/`)
+    /// that starts with `/*`: the rest after every `/* … */` block in a row,
+    /// which the author meant to be live. A block left open puts the scanner
+    /// in [`State::BlockComment`], and nothing follows it. `None` if `text`
+    /// does not start with a block.
+    fn after_blocks<'a>(&mut self, text: &'a str) -> Option<&'a str> {
+        let mut rest = text.trim_start().strip_prefix("/*")?;
+        loop {
+            let Some(at) = rest.find("*/") else {
+                self.state = State::BlockComment;
+                return Some("");
+            };
+            rest = &rest[at + 2..];
+            match rest.trim_start().strip_prefix("/*") {
+                Some(next) => rest = next,
+                None => return Some(rest),
+            }
+        }
     }
 }
 
@@ -604,6 +628,8 @@ pub(crate) fn upsert(
             if !out.is_empty() && !out.ends_with('\n') {
                 out.push_str(newline);
             }
+            // The blank line also ends a join by a trailing backslash on the
+            // last line, which `lookup` relies on to allow appending.
             if !out.trim().is_empty() {
                 out.push_str(newline);
             }
@@ -1123,9 +1149,30 @@ mod tests {
             "XYBRID_API_KEY = abc\n/*\nXYBRID_API_KEY =\n*/\n",
             // Appending after an open block would put the key inside it.
             "PRODUCT_NAME = MyApp\n/* notes\n",
+            // A block reopened after `*/` on the same line.
+            "/* Secrets */ /* disabled until launch:\nXYBRID_API_KEY = old\n*/\n",
+            "/* Secrets */ /* disabled until launch:\nXYBRID_API_KEY =\n*/\n",
+            "/*\nheader\n*/ /* second block\nXYBRID_API_KEY = old\n*/\n",
+            "/*\nheader\n*/ /* a */ /* second block\nXYBRID_API_KEY =\n*/\n",
+            "/* a */ /* b */ XYBRID_API_KEY = old\n",
+            "/* a */ /* b\n",
+            "/*\nheader\n*/ /* b\n",
+            // A block opened on the line a continued value joins: a line
+            // reader starts a line there, and so does the author.
+            "FOO = a \\\n/* start\nXYBRID_API_KEY =\n*/\n",
+            "FOO = a \\\n/* start \\\nXYBRID_API_KEY =\n*/\n",
+            "FOO = a \\\n/* start\n",
         ] {
             assert_lookup(EnvFormat::Xcconfig, text, blocked);
         }
+        // Blocks closed on their line leave the next line plain.
+        let text = "/* a */ /* b */\n/*\nc\n*/ /* d */\nXYBRID_API_KEY =\n";
+        assert_lookup(EnvFormat::Xcconfig, text, Lookup::Empty);
+        let out = upsert(EnvFormat::Xcconfig, text, "XYBRID_API_KEY", KEY, &[]).unwrap();
+        assert_eq!(
+            out,
+            format!("/* a */ /* b */\n/*\nc\n*/ /* d */\nXYBRID_API_KEY = {KEY}\n")
+        );
         // A one-line block is not an assignment for Xcode or its author.
         let text = "/* XYBRID_API_KEY = old */\nPRODUCT_NAME = MyApp\n";
         assert_lookup(EnvFormat::Xcconfig, text, Lookup::Absent);
@@ -1161,9 +1208,27 @@ mod tests {
             "OTHER_FLAGS = -a \\\n  -b \\\n  XYBRID_API_KEY =\n",
             "XYBRID_API_KEY = \\\n  $(SECRET)\n",
             "XYBRID_API_KEY = abc\nOTHER_FLAGS = -a \\\nXYBRID_API_KEY =\n",
-            "OTHER_FLAGS = -a \\",
+            // Joined for Xcode, after a block for the author.
+            "FOO = a \\\n/* a */ XYBRID_API_KEY =\n",
+            // A block closed on a joined line keeps the join going.
+            "FOO = a \\\n/* a */ \\\nXYBRID_API_KEY =\n",
         ] {
             assert_lookup(EnvFormat::Xcconfig, text, continued);
+        }
+        // A file ending in a continued value takes an appended key: the
+        // blank line written before it ends the join.
+        for text in ["OTHER_LDFLAGS = -ObjC \\\n", "OTHER_LDFLAGS = -ObjC \\"] {
+            assert_lookup(EnvFormat::Xcconfig, text, Lookup::Absent);
+            let out = upsert(EnvFormat::Xcconfig, text, "XYBRID_API_KEY", KEY, &[]).unwrap();
+            assert_eq!(
+                out,
+                format!("OTHER_LDFLAGS = -ObjC \\\n\nXYBRID_API_KEY = {KEY}\n")
+            );
+            assert_eq!(
+                lookup(EnvFormat::Xcconfig, &out, "XYBRID_API_KEY"),
+                Lookup::Present
+            );
+            assert!(assigns(EnvFormat::Xcconfig, &out, "XYBRID_API_KEY", KEY));
         }
         // The join ends at a line without `\`, or at a blank or comment line.
         for gap in ["  -b\n", "\n", "// end\n"] {
@@ -1188,9 +1253,38 @@ mod tests {
             "other = a \\\\\\\nxybrid.apiKey=\n",
             "xybrid.apiKey = \\\n  abc\n",
             "xybrid.apiKey = abc\nother = \\\nxybrid.apiKey\n",
-            "other = foo \\",
         ] {
             assert_lookup(EnvFormat::Properties, text, continued);
+        }
+        // A file ending in a continued line takes an appended key: the blank
+        // line written before it ends the join for `java.util.Properties`.
+        for (text, newline) in [
+            ("sdk.dir=/opt/android/sdk\\\n", "\n"),
+            ("sdk.dir=/opt/android/sdk\\", "\n"),
+            ("sdk.dir=/opt/android/sdk\\\r\n", "\r\n"),
+        ] {
+            assert_lookup(EnvFormat::Properties, text, Lookup::Absent);
+            let out = upsert(
+                EnvFormat::Properties,
+                text,
+                "xybrid.apiKey",
+                KEY,
+                &comment(),
+            )
+            .unwrap();
+            assert!(
+                out.starts_with(&format!("sdk.dir=/opt/android/sdk\\{newline}{newline}# ")),
+                "{out:?}"
+            );
+            assert!(
+                out.ends_with(&format!("xybrid.apiKey={KEY}{newline}")),
+                "{out:?}"
+            );
+            assert_eq!(
+                lookup(EnvFormat::Properties, &out, "xybrid.apiKey"),
+                Lookup::Present
+            );
+            assert!(assigns(EnvFormat::Properties, &out, "xybrid.apiKey", KEY));
         }
         // An escaped backslash, a comment and a blank line don't continue.
         for (before, after) in [
@@ -1256,6 +1350,14 @@ mod tests {
                 "other = \\\nxybrid.apiKey=abc\n".into(),
             ),
             (EnvFormat::Xcconfig, "/*\nXYBRID_API_KEY = abc\n*/\n".into()),
+            (
+                EnvFormat::Xcconfig,
+                "/* a */ /* b\nXYBRID_API_KEY = abc\n*/\n".into(),
+            ),
+            (
+                EnvFormat::Xcconfig,
+                "FOO = a \\\n/* a */ XYBRID_API_KEY = abc\n".into(),
+            ),
             (
                 EnvFormat::Xcconfig,
                 "XYBRID_API_KEY = \\\n  $(SECRET)\n".into(),
