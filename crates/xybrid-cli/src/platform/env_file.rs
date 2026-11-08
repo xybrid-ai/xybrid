@@ -130,10 +130,15 @@ impl EnvFormat {
                 Some(plain(name.trim(), value))
             }
             EnvFormat::Properties => {
-                if line.starts_with('#') || line.starts_with('!') {
+                if line.is_empty() || line.starts_with('#') || line.starts_with('!') {
                     return None;
                 }
-                let end = line.find(['=', ':', ' ', '\t'])?;
+                // As `java.util.Properties` reads it: the key ends at the
+                // first `=`, `:` or blank, and a line holding only a key sets
+                // it to the empty string.
+                let end = line
+                    .find(['=', ':', ' ', '\t', '\x0c'])
+                    .unwrap_or(line.len());
                 let (name, rest) = line.split_at(end);
                 let rest = rest.trim_start();
                 let rest = rest.strip_prefix(['=', ':']).map_or(rest, str::trim_start);
@@ -629,6 +634,8 @@ mod tests {
                 "XYBRID_API_KEY=\nA=1\nexport XYBRID_API_KEY=\"\"\n",
             ),
             (EnvFormat::Properties, "xybrid.apiKey=\nsdk.dir=/sdk\nxybrid.apiKey :\n"),
+            // A bare key is an empty assignment, and the one Java reads last.
+            (EnvFormat::Properties, "xybrid.apiKey=\nsdk.dir=/sdk\nxybrid.apiKey\n"),
             (
                 EnvFormat::Xcconfig,
                 "XYBRID_API_KEY =\nPRODUCT_NAME = MyApp\nXYBRID_API_KEY[config=Release] = // later\n",
@@ -726,6 +733,35 @@ mod tests {
             lookup(EnvFormat::Properties, "xybrid.apiKey=", "xybrid.apiKey"),
             Lookup::Empty
         );
+    }
+
+    /// `java.util.Properties` reads a line holding only a key (blanks around
+    /// it allowed) as that key set to the empty string.
+    #[test]
+    fn a_bare_properties_key_is_an_empty_assignment() {
+        for line in [
+            "xybrid.apiKey",
+            "  xybrid.apiKey",
+            "xybrid.apiKey\t",
+            "\x0cxybrid.apiKey",
+        ] {
+            assert_eq!(
+                lookup(EnvFormat::Properties, line, "xybrid.apiKey"),
+                Lookup::Empty,
+                "{line:?}"
+            );
+            let text = format!("sdk.dir=/sdk\n{line}\nother=1\n");
+            let out = upsert(EnvFormat::Properties, &text, "xybrid.apiKey", KEY, &[]).unwrap();
+            assert_eq!(out, format!("sdk.dir=/sdk\nxybrid.apiKey={KEY}\nother=1\n"));
+        }
+        // Blank lines and other bare keys assign nothing to it.
+        for text in ["", "   ", "\n\t\n", "xybrid.apiKeyOld", "xybrid"] {
+            assert_eq!(
+                lookup(EnvFormat::Properties, text, "xybrid.apiKey"),
+                Lookup::Absent,
+                "{text:?}"
+            );
+        }
     }
 
     #[test]
