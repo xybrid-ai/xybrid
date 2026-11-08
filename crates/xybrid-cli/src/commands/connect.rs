@@ -245,6 +245,9 @@ fn connect(
         );
         return Ok(());
     }
+    if let Some(target) = target.as_ref().filter(|t| t.lookup == Lookup::Ambiguous) {
+        return Err(env_file::ambiguous(&target.display, &target.variable));
+    }
 
     // Recovery state must be writable before anything is created remotely.
     let store = Store::locate()?;

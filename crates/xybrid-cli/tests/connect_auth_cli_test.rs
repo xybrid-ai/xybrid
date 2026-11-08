@@ -1880,6 +1880,35 @@ fn auth_status_uses_saved_details_only_for_their_own_key() {
     assert_eq!(sandbox.credentials()["credentials"][0]["claimed"], true);
 }
 
+/// Several empty assignments of the variable leave no single line to fill
+/// (the app reads one of them, depending on its loader): refused before
+/// anything is created or changed.
+#[test]
+fn a_variable_assigned_on_several_empty_lines_is_refused_up_front() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    let url = server.base_url();
+    let text = "XYBRID_API_KEY=\nOTHER=1\nXYBRID_API_KEY=\n";
+    std::fs::write(sandbox.project.join(".env"), text).unwrap();
+
+    let run = sandbox.run(&connect_args(&url));
+    assert_eq!(run.code, Some(1), "{run}");
+    let report = run.json();
+    assert_eq!(report["status"], "error");
+    assert_eq!(report["error"]["code"], "env_file_ambiguous");
+    let message = report["error"]["message"].as_str().unwrap();
+    assert!(message.contains(".env"), "{message}");
+    challenge.assert_hits(0);
+    assert!(!sandbox.credentials_path().exists());
+    assert!(!sandbox.project.join(".gitignore").exists());
+    assert_eq!(
+        std::fs::read_to_string(sandbox.project.join(".env")).unwrap(),
+        text
+    );
+}
+
 /// Write `contents` to a new file only this account can read.
 fn write_private_file(path: &Path, contents: &str) {
     use std::io::Write;

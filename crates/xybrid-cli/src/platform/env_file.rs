@@ -10,6 +10,9 @@
 //! `--env-name EXPO_PUBLIC_XYBRID_API_KEY`. Unrelated lines are preserved
 //! byte for byte, a nonempty value is never replaced, and the comment above
 //! the key carries the claim command and dates, never the claim token or link.
+//! A single empty assignment is filled in place, keeping an xcconfig
+//! condition such as `[config=Debug]`; several empty assignments are refused,
+//! since which one an application reads depends on its loader.
 //! Any other file name is refused: a raw-key resource (for example a Unity
 //! text asset) is not an assignment file, and writing `NAME=value` into one
 //! would only look configured.
@@ -101,16 +104,22 @@ impl EnvFormat {
         }
     }
 
-    fn assignment(self, name: &str, key: &str) -> String {
+    /// `name` set to `key`, under an xcconfig `condition` (empty for none).
+    fn assignment(self, name: &str, condition: &str, key: &str) -> String {
         match self {
             EnvFormat::Dotenv | EnvFormat::Properties => format!("{name}={key}"),
-            EnvFormat::Xcconfig => format!("{name} = {key}"),
+            EnvFormat::Xcconfig => format!("{name}{condition} = {key}"),
         }
     }
 
-    /// The name and raw value assigned on `line`, if it is an assignment.
-    fn parse_assignment(self, line: &str) -> Option<(&str, &str)> {
+    /// The assignment on `line`, if it is one.
+    fn parse_assignment(self, line: &str) -> Option<Assignment<'_>> {
         let line = line.trim_start();
+        let plain = |name, value| Assignment {
+            name,
+            condition: "",
+            value,
+        };
         match self {
             EnvFormat::Dotenv => {
                 if line.starts_with('#') {
@@ -118,7 +127,7 @@ impl EnvFormat {
                 }
                 let line = strip_export(line).unwrap_or(line);
                 let (name, value) = line.split_once('=')?;
-                Some((name.trim(), value))
+                Some(plain(name.trim(), value))
             }
             EnvFormat::Properties => {
                 if line.starts_with('#') || line.starts_with('!') {
@@ -128,22 +137,32 @@ impl EnvFormat {
                 let (name, rest) = line.split_at(end);
                 let rest = rest.trim_start();
                 let rest = rest.strip_prefix(['=', ':']).map_or(rest, str::trim_start);
-                Some((name, rest))
+                Some(plain(name, rest))
             }
             EnvFormat::Xcconfig => {
                 if line.starts_with("//") || line.starts_with('#') {
                     return None;
                 }
-                // `NAME[config=Debug] = value` sets NAME conditionally; the
-                // condition may itself contain `=`.
-                let search_from = match (line.find('['), line.find('=')) {
-                    (Some(open), Some(eq)) if open < eq => line[open..].find(']')? + open,
-                    _ => 0,
+                // `NAME[config=Debug][sdk=iphoneos*] = value` sets NAME
+                // conditionally; each condition may itself contain `=`.
+                let mut from = 0;
+                let eq = loop {
+                    let eq = line[from..].find('=')? + from;
+                    match line[from..eq].find('[') {
+                        Some(open) => from = line[from + open..].find(']')? + from + open + 1,
+                        None => break eq,
+                    }
                 };
-                let eq = line[search_from..].find('=')? + search_from;
-                let (name, value) = (&line[..eq], &line[eq + 1..]);
-                let name = name.split('[').next().unwrap_or(name).trim();
-                Some((name, value.split("//").next().unwrap_or(value)))
+                let (left, value) = (&line[..eq], &line[eq + 1..]);
+                let (name, condition) = match left.find('[') {
+                    Some(open) => (left[..open].trim(), left[open..].trim()),
+                    None => (left.trim(), ""),
+                };
+                Some(Assignment {
+                    name,
+                    condition,
+                    value: value.split("//").next().unwrap_or(value),
+                })
             }
         }
     }
@@ -190,6 +209,17 @@ impl EnvFormat {
     }
 }
 
+/// One assignment line.
+struct Assignment<'a> {
+    name: &'a str,
+    /// An xcconfig build-setting condition such as `[config=Debug]`,
+    /// verbatim (empty elsewhere): filling the line keeps it, so the key
+    /// reaches only the builds the line was written for.
+    condition: &'a str,
+    /// The raw value: quotes and comments not yet removed.
+    value: &'a str,
+}
+
 /// The rest of a dotenv line after an `export ` prefix.
 fn strip_export(line: &str) -> Option<&str> {
     line.strip_prefix("export")
@@ -202,26 +232,46 @@ fn strip_export(line: &str) -> Option<&str> {
 pub(crate) enum Lookup {
     /// The variable is not assigned.
     Absent,
-    /// Assigned an empty value: it may be filled in.
+    /// Assigned an empty value on one line: it may be filled in.
     Empty,
+    /// Assigned an empty value on more than one line: which one an
+    /// application reads depends on its loader (most take the last), so none
+    /// is filled.
+    Ambiguous,
     /// Assigned a nonempty value: never replaced.
     Present,
 }
 
 /// How `text` assigns `name`. Values are never returned.
 pub(crate) fn lookup(format: EnvFormat, text: &str, name: &str) -> Lookup {
-    let mut result = Lookup::Absent;
+    let mut empty = 0_usize;
     for line in text.lines() {
-        if let Some((assigned, value)) = format.parse_assignment(line) {
-            if assigned == name {
-                if !format.value_is_empty(value) {
+        if let Some(assignment) = format.parse_assignment(line) {
+            if assignment.name == name {
+                if !format.value_is_empty(assignment.value) {
                     return Lookup::Present;
                 }
-                result = Lookup::Empty;
+                empty += 1;
             }
         }
     }
-    result
+    match empty {
+        0 => Lookup::Absent,
+        1 => Lookup::Empty,
+        _ => Lookup::Ambiguous,
+    }
+}
+
+/// The error for a [`Lookup::Ambiguous`] file, named `file`.
+pub(crate) fn ambiguous(file: &str, name: &str) -> CliError {
+    CliError::new(
+        "env_file_ambiguous",
+        format!(
+            "{file} assigns {name} an empty value on more than one line, and which one the app \
+             reads depends on its loader; keep a single {name} line or choose another \
+             --write-env file"
+        ),
+    )
 }
 
 /// Whether `text` assigns exactly `value` to `name` (for example, the key a
@@ -230,13 +280,14 @@ pub(crate) fn assigns(format: EnvFormat, text: &str, name: &str, value: &str) ->
     text.lines().any(|line| {
         format
             .parse_assignment(line)
-            .is_some_and(|(assigned, raw)| assigned == name && format.value(raw) == value)
+            .is_some_and(|a| a.name == name && format.value(a.value) == value)
     })
 }
 
 /// `text` with `name` set to `key` and `comment` above it, everything else
-/// unchanged. An empty assignment is filled in place; otherwise the block is
-/// appended. Fails if a nonempty value exists.
+/// unchanged. A single empty assignment is filled in place (keeping an
+/// xcconfig condition); otherwise the block is appended. Fails if a nonempty
+/// value exists, or if several empty assignments leave no single line to fill.
 pub(crate) fn upsert(
     format: EnvFormat,
     text: &str,
@@ -258,13 +309,12 @@ pub(crate) fn upsert(
         block.push_str(clean.trim());
         block.push_str(newline);
     }
-    let assignment = format.assignment(name, key);
-
     match lookup(format, text, name) {
         Lookup::Present => Err(CliError::new(
             "env_file_has_key",
             format!("{name} already has a value; it is never replaced"),
         )),
+        Lookup::Ambiguous => Err(ambiguous("the file", name)),
         Lookup::Absent => {
             let mut out = text.to_string();
             if !out.is_empty() && !out.ends_with('\n') {
@@ -274,29 +324,27 @@ pub(crate) fn upsert(
                 out.push_str(newline);
             }
             out.push_str(&block);
-            out.push_str(&assignment);
+            out.push_str(&format.assignment(name, "", key));
             out.push_str(newline);
             Ok(out)
         }
         Lookup::Empty => {
+            // `lookup` found exactly one empty assignment: fill that line.
             let mut out = String::with_capacity(text.len() + block.len() + key.len());
-            let mut replaced = false;
             for line in text.split_inclusive('\n') {
                 let content = line.trim_end_matches(['\n', '\r']);
                 let ending = &line[content.len()..];
-                let is_target = !replaced
-                    && format
-                        .parse_assignment(content)
-                        .is_some_and(|(n, v)| n == name && format.value_is_empty(v));
-                if is_target {
-                    replaced = true;
+                let target = format
+                    .parse_assignment(content)
+                    .filter(|a| a.name == name && format.value_is_empty(a.value));
+                if let Some(target) = target {
                     let export =
                         format == EnvFormat::Dotenv && strip_export(content.trim_start()).is_some();
                     out.push_str(&block);
                     if export {
                         out.push_str("export ");
                     }
-                    out.push_str(&assignment);
+                    out.push_str(&format.assignment(name, target.condition, key));
                     out.push_str(if ending.is_empty() { newline } else { ending });
                 } else {
                     out.push_str(line);
@@ -568,6 +616,77 @@ mod tests {
                  export XYBRID_API_KEY={KEY}\r\nB=2\r\n"
             )
         );
+    }
+
+    /// Loaders differ on which repeated assignment wins (most take the last),
+    /// so filling one could leave the app reading an empty one: refused in
+    /// every format, the file left as it was.
+    #[test]
+    fn several_empty_assignments_are_refused_in_every_format() {
+        for (format, text) in [
+            (
+                EnvFormat::Dotenv,
+                "XYBRID_API_KEY=\nA=1\nexport XYBRID_API_KEY=\"\"\n",
+            ),
+            (EnvFormat::Properties, "xybrid.apiKey=\nsdk.dir=/sdk\nxybrid.apiKey :\n"),
+            (
+                EnvFormat::Xcconfig,
+                "XYBRID_API_KEY =\nPRODUCT_NAME = MyApp\nXYBRID_API_KEY[config=Release] = // later\n",
+            ),
+        ] {
+            let name = format.default_variable();
+            assert_eq!(lookup(format, text, name), Lookup::Ambiguous, "{text}");
+            let err = upsert(format, text, name, KEY, &comment()).unwrap_err();
+            assert_eq!(err.code, "env_file_ambiguous", "{text}");
+            assert!(err.message.contains(name), "{}", err.message);
+            assert!(!err.message.contains(KEY));
+        }
+        // A value anywhere is still a configured key, never replaced.
+        assert_eq!(
+            lookup(
+                EnvFormat::Dotenv,
+                "XYBRID_API_KEY=\nXYBRID_API_KEY=abc\nXYBRID_API_KEY=\n",
+                "XYBRID_API_KEY"
+            ),
+            Lookup::Present
+        );
+        assert_eq!(
+            ambiguous(".env", "XYBRID_API_KEY").code,
+            "env_file_ambiguous"
+        );
+    }
+
+    /// `NAME[config=Debug] =` is meant for Debug builds only: filling it keeps
+    /// the condition, so the key never reaches Release.
+    #[test]
+    fn a_conditional_xcconfig_assignment_keeps_its_condition() {
+        for (line, filled) in [
+            (
+                "XYBRID_API_KEY[config=Debug] =",
+                format!("XYBRID_API_KEY[config=Debug] = {KEY}"),
+            ),
+            (
+                "  XYBRID_API_KEY[config=Debug][sdk=iphoneos*] = // filled in later",
+                format!("XYBRID_API_KEY[config=Debug][sdk=iphoneos*] = {KEY}"),
+            ),
+            ("XYBRID_API_KEY =", format!("XYBRID_API_KEY = {KEY}")),
+        ] {
+            let text = format!("PRODUCT_NAME = MyApp\n{line}\nOTHER = 1\n");
+            let out = upsert(EnvFormat::Xcconfig, &text, "XYBRID_API_KEY", KEY, &[]).unwrap();
+            assert_eq!(
+                out,
+                format!("PRODUCT_NAME = MyApp\n{filled}\nOTHER = 1\n"),
+                "{line}"
+            );
+            assert!(assigns(EnvFormat::Xcconfig, &out, "XYBRID_API_KEY", KEY));
+        }
+        // Every condition is skipped before the assignment's own `=`.
+        let line = "XYBRID_API_KEY[config=Debug][sdk=iphoneos*] = abc // note";
+        assert_eq!(
+            lookup(EnvFormat::Xcconfig, line, "XYBRID_API_KEY"),
+            Lookup::Present
+        );
+        assert!(assigns(EnvFormat::Xcconfig, line, "XYBRID_API_KEY", "abc"));
     }
 
     #[test]
