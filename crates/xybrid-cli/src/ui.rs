@@ -284,6 +284,11 @@ pub fn hint(msg: &str) {
     println!("  {} {}", dim("›"), dim(msg));
 }
 
+/// Print an info/hint message on stderr, keeping stdout for command output.
+pub fn hint_stderr(msg: &str) {
+    eprintln!("  {} {}", dim("›"), dim(msg));
+}
+
 // ── Table ────────────────────────────────────────────────────
 
 /// A simple column-aligned table.
