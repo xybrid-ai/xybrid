@@ -50,6 +50,8 @@ pub struct PartialResult {
     pub chunk_index: u64,
     /// Audio duration covered by this result
     pub audio_duration_ms: u64,
+    /// The most recent actual decoder execution. Cached reads keep this reference.
+    pub decoder_observation: Option<crate::ObservationRef>,
 }
 
 impl From<CorePartialResult> for PartialResult {
@@ -59,6 +61,7 @@ impl From<CorePartialResult> for PartialResult {
             is_stable: result.is_stable,
             chunk_index: result.chunk_sequence,
             audio_duration_ms: result.audio_duration.as_millis() as u64,
+            decoder_observation: None,
         }
     }
 }
@@ -72,6 +75,8 @@ pub struct TranscriptionResult {
     pub duration_ms: u64,
     /// Number of chunks processed
     pub chunks_processed: u64,
+    /// The workflow covering this utterance.
+    pub observation: Option<crate::ObservationRef>,
 }
 
 /// Statistics for a streaming session.
@@ -108,6 +113,7 @@ impl From<CoreStreamStats> for StreamStats {
 struct StreamHandle {
     session: StreamSession,
     model_id: String,
+    observation: Arc<crate::observability::AsrObservation>,
 }
 
 /// Real-time streaming session for ASR.
@@ -156,14 +162,22 @@ impl XybridStream {
         config: CoreStreamConfig,
         model_id: &str,
         executor: Arc<Mutex<TemplateExecutor>>,
+        options: Option<&crate::observability::ObservationOptions>,
+        metadata: Option<&xybrid_core::execution::ModelMetadata>,
     ) -> Result<Self, SdkError> {
-        let session = StreamSession::with_executor(model_dir, config, executor)
+        let mut session = StreamSession::with_executor(model_dir, config, executor)
             .map_err(|e| SdkError::load_src("Failed to create stream session", e))?;
 
+        let observation = crate::observability::AsrObservation::for_model(
+            options,
+            metadata.map(|metadata| (model_id, metadata)),
+        );
+        session.set_decoder_observer(observation.clone());
         Ok(Self {
             handle: Arc::new(RwLock::new(StreamHandle {
                 session,
                 model_id: model_id.to_string(),
+                observation,
             })),
         })
     }
@@ -224,10 +238,13 @@ impl XybridStream {
             .write()
             .map_err(|_| SdkError::inference("Failed to acquire stream lock"))?;
 
-        handle
+        let (_context, scope) = handle.observation.warmup_span();
+        let result = handle
             .session
             .warmup()
-            .map_err(|e| SdkError::inference_src("Warm-up failed", e))
+            .map_err(|e| SdkError::inference_src("Warm-up failed", e));
+        scope.end(&result);
+        result
     }
 
     /// Feed audio samples to the stream.
@@ -245,21 +262,29 @@ impl XybridStream {
             .write()
             .map_err(|_| SdkError::inference("Failed to acquire stream lock"))?;
 
+        let _context = handle.observation.enter_feed();
         handle
             .session
             .feed(samples)
             .map_err(|e| SdkError::inference_src("Feed failed", e))?;
 
         // Get partial result if available
-        Ok(handle.session.partial_result().map(|p| p.into()))
+        Ok(handle.session.partial_result().map(|p| {
+            let mut partial = PartialResult::from(p);
+            partial.decoder_observation = handle.observation.decoder_reference();
+            partial
+        }))
     }
 
     /// Get the current partial result without feeding new samples.
     pub fn partial_result(&self) -> Option<PartialResult> {
-        self.handle
-            .read()
-            .ok()
-            .and_then(|h| h.session.partial_result().map(|p| p.into()))
+        self.handle.read().ok().and_then(|h| {
+            h.session.partial_result().map(|p| {
+                let mut partial = PartialResult::from(p);
+                partial.decoder_observation = h.observation.decoder_reference();
+                partial
+            })
+        })
     }
 
     /// End the stream and get the final transcription.
@@ -272,10 +297,13 @@ impl XybridStream {
             .write()
             .map_err(|_| SdkError::inference("Failed to acquire stream lock"))?;
 
+        let _context = handle.observation.enter();
         let text = handle
             .session
             .flush()
-            .map_err(|e| SdkError::inference_src("Flush failed", e))?;
+            .map_err(|e| SdkError::inference_src("Flush failed", e));
+        let observation = handle.observation.finish(&text);
+        let text = text?;
 
         let stats = handle.session.stats();
 
@@ -283,6 +311,7 @@ impl XybridStream {
             text,
             duration_ms: stats.audio_duration.as_millis() as u64,
             chunks_processed: stats.chunks_processed,
+            observation,
         })
     }
 
@@ -298,6 +327,7 @@ impl XybridStream {
             .map_err(|_| SdkError::inference("Failed to acquire stream lock"))?;
 
         handle.session.reset();
+        handle.observation.reset();
         Ok(())
     }
 }

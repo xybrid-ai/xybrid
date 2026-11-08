@@ -29,6 +29,10 @@ mod commands;
 mod tracing_viz;
 pub mod ui;
 
+/// Serializes tests that install the process-wide default observability session.
+#[cfg(test)]
+pub(crate) static OBSERVABILITY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 use commands::{CacheCommand, ModelsCommand, TelemetryCommand};
 
 use anyhow::{Context, Result};
@@ -252,7 +256,7 @@ enum Commands {
         #[arg(long, value_name = "N", value_parser = parse_max_tokens)]
         max_tokens: Option<usize>,
 
-        /// Export trace to JSON file (Chrome trace format)
+        /// Write an OTLP/JSON artifact (includes governed content; use no_content for metadata only)
         #[arg(long, value_name = "FILE")]
         trace_export: Option<PathBuf>,
 
@@ -327,17 +331,12 @@ enum Commands {
         #[arg(long, value_name = "FILE")]
         tools_file: Option<PathBuf>,
     },
-    /// Trace and analyze telemetry logs from a session
+    /// Analyze an OTLP/JSON trace artifact produced by --trace-export
     Trace {
-        /// Session ID to load telemetry logs for
-        #[arg(short, long, value_name = "ID", conflicts_with = "latest")]
-        session: Option<String>,
-
-        /// Load the most recent session
-        #[arg(long)]
-        latest: bool,
-
-        /// Export trace summary to JSON file
+        /// OTLP/JSON trace artifact
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+        /// Export the content-free summary to JSON
         #[arg(long, value_name = "FILE")]
         export: Option<PathBuf>,
     },
@@ -413,14 +412,62 @@ fn main() -> Result<()> {
 
     configure_log_level(&cli);
 
-    let observability_enabled = init_observability(&cli);
-    if observability_enabled && !cli.quiet {
-        ui::hint("Observability enabled");
+    if let Some(key) = &cli.api_key {
+        xybrid_sdk::set_api_key(key);
+    }
+    let (render_trace, trace_path) = match &cli.command {
+        Commands::Run {
+            trace,
+            trace_export,
+            ..
+        } => (*trace, trace_export.clone()),
+        _ => (false, None),
+    };
+    // OTEL_SDK_DISABLED disables export on every path; a requested local
+    // trace (--trace / --trace-export) still renders and writes in-process.
+    let sdk_disabled = otel_sdk_disabled();
+    let local_capture = if render_trace || trace_path.is_some() {
+        let requested = observability_config(&cli, OtlpConfig::from_env());
+        if sdk_disabled && requested.is_some() && !cli.quiet {
+            ui::status("OTEL_SDK_DISABLED is set: the trace stays local, nothing is exported");
+        }
+        Some(tracing_viz::LocalCapture::configure(
+            requested.filter(|_| !sdk_disabled),
+            cli.device_id.as_deref(),
+        )?)
+    } else {
+        None
+    };
+    // `telemetry status` only reports configuration: it starts no exporter.
+    let reports_only = matches!(cli.command, Commands::Telemetry { .. });
+    let exporting = match &local_capture {
+        Some(capture) => capture.exports(),
+        None if reports_only => false,
+        None => init_observability(&cli),
+    };
+    if exporting && !cli.quiet {
+        ui::status("Observability enabled");
     }
 
+    let root = local_capture.as_ref().map(tracing_viz::LocalCapture::begin);
+    let scope = root.as_ref().map(|root| root.enter());
     let result = run_command(cli);
+    drop(scope);
+    if let Some(root) = &root {
+        if result.is_ok() {
+            root.end();
+        } else {
+            root.end_with_error(&xybrid_sdk::observability::ErrorInfo::new("command_error"));
+        }
+    }
+    if let Some(capture) = &local_capture {
+        capture.finish(render_trace, trace_path.as_deref())?;
+        if let Err(error) = capture.shutdown() {
+            ui::warning(&format!("Observability shutdown failed: {error}"));
+        }
+    }
 
-    if observability_enabled {
+    if exporting && local_capture.is_none() {
         if let Err(error) = xybrid_sdk::shutdown_observability(Duration::from_secs(5)) {
             ui::warning(&format!("Observability shutdown failed: {error}"));
         }
@@ -538,6 +585,11 @@ fn observability_config(cli: &Cli, environment: Option<OtlpConfig>) -> Option<Ot
     Some(config.with_service("xybrid-cli", Some(env!("CARGO_PKG_VERSION").into())))
 }
 
+/// Whether `OTEL_SDK_DISABLED=true` turns OpenTelemetry export off.
+pub(crate) fn otel_sdk_disabled() -> bool {
+    std::env::var("OTEL_SDK_DISABLED").is_ok_and(|value| value.trim().eq_ignore_ascii_case("true"))
+}
+
 /// Configure cloud authentication independently from optional observability.
 fn init_observability(cli: &Cli) -> bool {
     if let Some(ref api_key) = cli.api_key {
@@ -547,15 +599,16 @@ fn init_observability(cli: &Cli) -> bool {
         // in-memory cell that CloudConfig::resolve_api_key reads.
         xybrid_sdk::set_api_key(api_key);
     }
-    if std::env::var("OTEL_SDK_DISABLED")
-        .is_ok_and(|value| value.trim().eq_ignore_ascii_case("true"))
-    {
+    if otel_sdk_disabled() {
         return false;
     }
     let Some(config) = observability_config(cli, OtlpConfig::from_env()) else {
         return false;
     };
-    match xybrid_sdk::init_observability(ObservabilityConfig::otlp(config)) {
+    match xybrid_sdk::init_observability(
+        ObservabilityConfig::otlp(config)
+            .resource_telemetry(commands::telemetry::CLI_RESOURCE_TELEMETRY),
+    ) {
         Ok(()) => true,
         Err(error) => {
             ui::warning(&format!("Observability was not started: {error}"));
@@ -567,6 +620,8 @@ fn init_observability(cli: &Cli) -> bool {
 #[allow(clippy::too_many_arguments)]
 fn run_command(cli: Cli) -> Result<()> {
     let verbose = cli.verbose;
+    let telemetry_config = observability_config(&cli, OtlpConfig::from_env());
+    let telemetry_explicit = cli.observability;
     // Point the SDK's cloud gateway at the requested endpoint, so cloud calls
     // (speculative cloud, reactive fallback) don't silently fall back to
     // the production default (`api.xybrid.dev`) and 401 with a staging key.
@@ -635,13 +690,10 @@ fn run_command(cli: Cli) -> Result<()> {
             trace,
             show_reasoning,
             max_tokens,
-            trace_export,
+            // Captured and written by the command owner in `main`.
+            trace_export: _,
             speculative_cloud,
         } => {
-            if trace {
-                tracing_viz::reset_collector();
-            }
-
             if let Some(gguf_path) = model_file {
                 return commands::run::run_model_file(
                     &gguf_path,
@@ -655,7 +707,6 @@ fn run_command(cli: Cli) -> Result<()> {
                     trace,
                     show_reasoning,
                     max_tokens,
-                    trace_export.as_ref(),
                 );
             }
 
@@ -694,7 +745,6 @@ fn run_command(cli: Cli) -> Result<()> {
                     trace,
                     show_reasoning,
                     max_tokens,
-                    trace_export.as_ref(),
                 );
             }
 
@@ -711,7 +761,6 @@ fn run_command(cli: Cli) -> Result<()> {
                     trace,
                     show_reasoning,
                     max_tokens,
-                    trace_export.as_ref(),
                 );
             }
 
@@ -728,7 +777,6 @@ fn run_command(cli: Cli) -> Result<()> {
                     trace,
                     show_reasoning,
                     max_tokens,
-                    trace_export.as_ref(),
                 );
             }
 
@@ -745,7 +793,6 @@ fn run_command(cli: Cli) -> Result<()> {
                     trace,
                     show_reasoning,
                     max_tokens,
-                    trace_export.as_ref(),
                 );
             }
 
@@ -763,7 +810,6 @@ fn run_command(cli: Cli) -> Result<()> {
                 trace,
                 show_reasoning,
                 max_tokens,
-                trace_export.as_ref(),
             )
         }
         Commands::Repl {
@@ -796,23 +842,7 @@ fn run_command(cli: Cli) -> Result<()> {
             tools_file,
             verbose,
         }),
-        Commands::Trace {
-            session,
-            latest,
-            export,
-        } => {
-            let session_id = if latest {
-                commands::trace::find_latest_session()?
-            } else {
-                session
-            };
-            if session_id.is_none() && latest {
-                return Err(anyhow::anyhow!(
-                    "No sessions found. Use --session <id> to specify a session."
-                ));
-            }
-            commands::trace::trace_session(session_id, export.as_deref())
-        }
+        Commands::Trace { file, export } => commands::trace::analyze(&file, export.as_deref()),
         Commands::Pack {
             name,
             version,
@@ -824,7 +854,11 @@ fn run_command(cli: Cli) -> Result<()> {
             output,
             platform,
         } => commands::bundle::handle_bundle_command(&model, output, platform.as_deref()),
-        Commands::Telemetry { command } => commands::telemetry::handle_telemetry_command(command),
+        Commands::Telemetry { command } => commands::telemetry::handle_telemetry_command(
+            command,
+            telemetry_config,
+            telemetry_explicit,
+        ),
     }
 }
 
@@ -894,7 +928,7 @@ mod tests {
 
     #[test]
     fn cloud_authentication_alone_does_not_enable_export() {
-        let cli = parse_observability_args(&["xybrid", "--api-key", "cloud-key", "trace"])
+        let cli = parse_observability_args(&["xybrid", "--api-key", "cloud-key", "models", "list"])
             .expect("cloud authentication is optional");
         assert!(observability_config(&cli, None).is_none());
     }
@@ -908,7 +942,8 @@ mod tests {
             "--observability",
             "--platform-url",
             "https://gateway.example.test",
-            "trace",
+            "models",
+            "list",
         ])
         .expect("explicit tracing should parse");
         let config =
@@ -940,7 +975,8 @@ mod tests {
             "https://collector.example.test/custom/traces",
             "--device-id",
             "test-device",
-            "trace",
+            "models",
+            "list",
         ])
         .expect("custom tracing should parse");
         let config = observability_config(&cli, None).expect("trace configuration");
@@ -960,8 +996,8 @@ mod tests {
     #[test]
     fn standard_otlp_config_does_not_inherit_cloud_credentials() {
         for args in [
-            vec!["xybrid", "trace"],
-            vec!["xybrid", "--api-key", "cloud-key", "trace"],
+            vec!["xybrid", "models", "list"],
+            vec!["xybrid", "--api-key", "cloud-key", "models", "list"],
         ] {
             let cli = parse_observability_args(&args).expect("cloud credentials are optional");
             let collector = OtlpConfig::collector("http://localhost:4318");
@@ -975,14 +1011,15 @@ mod tests {
     #[test]
     fn trace_flags_require_explicit_authentication_and_opt_in() {
         for args in [
-            vec!["xybrid", "--observability", "trace"],
+            vec!["xybrid", "--observability", "models", "list"],
             vec![
                 "xybrid",
                 "--api-key",
                 "cloud-key",
                 "--traces-endpoint",
                 "http://localhost:4318/v1/traces",
-                "trace",
+                "models",
+                "list",
             ],
         ] {
             let Err(error) = parse_observability_args(&args) else {

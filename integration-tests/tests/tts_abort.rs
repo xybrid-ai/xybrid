@@ -94,6 +94,7 @@ fn kitten_resource_abort_interrupts_compute_and_keeps_the_session_reusable() {
             AbortSignal::ThermalCritical,
             ResourceSnapshot {
                 thermal_state: ThermalState::Critical,
+                thermal_measured: true,
                 ..Default::default()
             },
             false,
@@ -213,6 +214,7 @@ fn onnx_final_packet_pressure_keeps_completion_but_remaining_work_can_abort() {
             AbortSignal::ThermalCritical,
             ResourceSnapshot {
                 thermal_state: ThermalState::Critical,
+                thermal_measured: true,
                 ..Default::default()
             },
         ),

@@ -223,6 +223,11 @@ impl SpanCollector {
 /// first stage). Implementations must be cheap: they run on the inference
 /// thread.
 pub trait TraceRecorder: Send + Sync {
+    /// Optional concrete recorder access for the layer that installed it.
+    /// Core never interprets the extension or depends on its owner's types.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
     /// Starts a stage and returns its id.
     fn start_span(&self, name: &str, parent: Option<u64>) -> u64;
     /// Ends a stage.
@@ -234,6 +239,10 @@ pub trait TraceRecorder: Send + Sync {
     /// Recorders without a trace return `None`.
     fn trace_headers(&self, _id: Option<u64>) -> Option<TraceHeaders> {
         None
+    }
+    /// Whether trace context may leave the Xybrid runtime for this provider origin.
+    fn allows_provider_context(&self, _origin: &str) -> bool {
+        false
     }
 }
 
@@ -355,6 +364,45 @@ pub fn add_metadata(key: impl Into<String>, value: impl Into<String>) {
     });
 }
 
+/// Id of the innermost open stage of this thread's current recorder, if any.
+///
+/// Lets the layer that installed the recorder parent work started inside an
+/// open stage to that stage rather than to the recorder's root.
+pub fn current_span_id() -> Option<u64> {
+    CURRENT.with(|c| c.borrow().last().and_then(|t| t.stack.last().copied()))
+}
+
+/// Prefix of the stage core opens around loading weights into a runtime.
+///
+/// The full stage name is `model_load:<runtime>`, where `<runtime>` is the
+/// runtime's wire label (`llamacpp`, `ort`, `whispercpp`, `zzz`, ...). Core
+/// opens it only when a load actually happens (a cache miss), so a warm
+/// runtime reports no load.
+pub const MODEL_LOAD_STAGE_PREFIX: &str = "model_load:";
+
+/// Metadata key with which core marks the innermost stage as failed
+/// (value `"error"`); see [`mark_stage_failed`].
+pub const STAGE_OUTCOME_KEY: &str = "outcome";
+
+/// Marks the innermost open stage as failed without exporting why: the
+/// recorder only learns that the stage's work (for example a model load)
+/// did not succeed.
+pub fn mark_stage_failed() {
+    add_metadata(STAGE_OUTCOME_KEY, "error");
+}
+
+/// Opens a [`MODEL_LOAD_STAGE_PREFIX`] stage for `runtime`, or a no-op guard
+/// when no recorder is installed.
+pub fn model_load_stage(runtime: &str) -> SpanGuard {
+    if !is_tracing_enabled() {
+        return SpanGuard {
+            id: 0,
+            active: false,
+        };
+    }
+    SpanGuard::new(format!("{MODEL_LOAD_STAGE_PREFIX}{runtime}"))
+}
+
 /// W3C trace headers for an outbound request made from the innermost open
 /// stage on this thread, so remote spans join the run's trace.
 pub fn current_trace_headers() -> Option<TraceHeaders> {
@@ -382,6 +430,39 @@ pub fn inject_trace_headers(request: ureq::Request) -> ureq::Request {
             }
         }
         None => request,
+    }
+}
+
+/// Canonical HTTP(S) origin for an explicit provider propagation allowlist.
+/// Credentials, query strings, fragments and non-root paths are rejected.
+pub fn provider_origin(origin: &str) -> Option<String> {
+    let url = url::Url::parse(origin).ok()?;
+    (matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && matches!(url.path(), "" | "/"))
+    .then(|| url.origin().ascii_serialization())
+}
+
+/// Injects context only when the current session explicitly permits this provider.
+/// Xybrid-owned hops use [`inject_trace_headers`] directly.
+pub fn inject_provider_trace_headers(request: ureq::Request) -> ureq::Request {
+    let permitted = url::Url::parse(request.url()).ok().is_some_and(|url| {
+        CURRENT.with(|c| {
+            c.borrow().last().is_some_and(|trace| {
+                trace
+                    .recorder
+                    .allows_provider_context(&url.origin().ascii_serialization())
+            })
+        })
+    });
+    if permitted {
+        inject_trace_headers(request)
+    } else {
+        request
     }
 }
 
@@ -542,6 +623,31 @@ mod tests {
     }
 
     #[test]
+    fn current_span_id_and_model_load_stage_follow_the_innermost_stage() {
+        assert_eq!(current_span_id(), None);
+        let inactive = model_load_stage("ort");
+        assert_eq!(inactive.id(), 0);
+        drop(inactive);
+        let trace = capture();
+        assert_eq!(current_span_id(), None);
+        let outer = SpanGuard::new("outer");
+        assert_eq!(current_span_id(), Some(outer.id()));
+        {
+            let load = model_load_stage("llamacpp");
+            assert_eq!(current_span_id(), Some(load.id()));
+        }
+        assert_eq!(current_span_id(), Some(outer.id()));
+        drop(outer);
+        let names: Vec<String> = trace
+            .recorder()
+            .spans()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(names, ["outer", "model_load:llamacpp"]);
+    }
+
+    #[test]
     fn test_disabled_collector() {
         let mut collector = SpanCollector::with_enabled(false);
 
@@ -650,5 +756,63 @@ mod tests {
         let _g = SpanGuard::new("outer-only");
         drop(_g);
         assert_eq!(outer.recorder().spans().len(), 1);
+    }
+    #[test]
+    fn provider_headers_require_an_exact_allowed_origin() {
+        struct Recorder;
+        impl TraceRecorder for Recorder {
+            fn start_span(&self, _: &str, _: Option<u64>) -> u64 {
+                1
+            }
+            fn end_span(&self, _: u64) {}
+            fn add_metadata(&self, _: u64, _: &str, _: &str) {}
+            fn allows_provider_context(&self, origin: &str) -> bool {
+                origin == "https://allowed.example"
+            }
+            fn trace_headers(&self, _: Option<u64>) -> Option<TraceHeaders> {
+                Some(TraceHeaders {
+                    traceparent: "00-11111111111111111111111111111111-2222222222222222-01".into(),
+                    tracestate: Some("xy=a".into()),
+                })
+            }
+        }
+        let _scope = RecorderScope::install(Arc::new(Recorder));
+        for url in [
+            "https://other.example/v1",
+            "https://allowed.example.evil/v1",
+            "http://allowed.example/v1",
+            "https://allowed.example:444/v1",
+        ] {
+            assert!(inject_provider_trace_headers(ureq::get(url))
+                .header("traceparent")
+                .is_none());
+        }
+        let request =
+            inject_provider_trace_headers(ureq::get("https://allowed.example:443/v1/chat"));
+        assert!(request.header("traceparent").is_some());
+        assert_eq!(request.header("tracestate"), Some("xy=a"));
+        assert!(
+            inject_trace_headers(ureq::get("https://self-hosted.xybrid/v1"))
+                .header("traceparent")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn provider_origin_rejects_ambiguous_allowlist_entries() {
+        assert_eq!(
+            provider_origin("https://ALLOWED.example:443/"),
+            Some("https://allowed.example".into())
+        );
+        for origin in [
+            "ftp://example.com",
+            "https://u:p@example.com",
+            "https://example.com/path",
+            "https://example.com?x=1",
+            "https://example.com#fragment",
+            "example.com",
+        ] {
+            assert!(provider_origin(origin).is_none(), "{origin}");
+        }
     }
 }

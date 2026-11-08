@@ -1269,6 +1269,7 @@ mod tests {
             available_mem_min_mb: Some(512),
             memory_pressure_peak: xybrid_core::device::MemoryPressure::Critical,
             thermal_state_peak: xybrid_core::device::ThermalState::Hot,
+            thermal_measured: true,
             battery_pct_end: Some(51),
             sample_count: 3,
             sampling_mode: "debug_local".to_string(),

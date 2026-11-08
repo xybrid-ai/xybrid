@@ -285,7 +285,8 @@ pub use xybrid_core::ir::{
 pub use xybrid_core::ir::PhonemeTiming;
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)
 pub use observability::{
-    flush_observability, init_observability, shutdown_observability, ObservabilityConfig,
+    flush_observability, flush_observability_async, init_observability, shutdown_observability,
+    shutdown_observability_async, CapturedContext, ObservabilityConfig, ObservabilitySession,
     ObservationContext, ObservationOptions, ObservationRef,
 };
 pub use streaming::{FfiPartialResult, FfiStreamState, FfiStreamStats, FfiStreamingConfig};
@@ -935,6 +936,9 @@ pub struct PipelineResult {
     pub total_latency_ms: u32,
     /// Final output envelope kind
     pub final_output: String,
+    /// Reference of the run's `invoke_workflow` operation, when traced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observation_ref: Option<ObservationRef>,
 }
 
 /// Legacy error type for pipeline YAML execution (kept for backward compatibility).
@@ -1029,14 +1033,23 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
     let mut orchestrator = Orchestrator::new();
     let orchestrator_bridge = telemetry::subscribe_orchestrator_events(&orchestrator);
 
-    // Execute the pipeline
+    // Execute the pipeline as one observed workflow.
     let start_time = std::time::Instant::now();
-    let results: Vec<StageExecutionResult> = orchestrator
-        .execute_pipeline(&stages, &input, &metrics, &availability_fn)
-        .map_err(|e| {
-            orchestrator_bridge.drain();
-            PipelineConfigError::ExecutionError(format!("{}", e))
-        })?;
+    let workflow = observability::WorkflowScope::start(
+        config.name.as_deref().unwrap_or("pipeline"),
+        &RunOptions::default(),
+    );
+    let executed = orchestrator.execute_pipeline(&stages, &input, &metrics, &availability_fn);
+    let observation_ref = workflow.end(
+        &executed
+            .as_ref()
+            .map(|_| ())
+            .map_err(|e| SdkError::pipeline(e.to_string())),
+    );
+    let results: Vec<StageExecutionResult> = executed.map_err(|e| {
+        orchestrator_bridge.drain();
+        PipelineConfigError::ExecutionError(format!("{}", e))
+    })?;
     orchestrator_bridge.drain();
     let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
@@ -1062,6 +1075,7 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
         stages: stage_timings,
         total_latency_ms,
         final_output,
+        observation_ref,
     })
 }
 
@@ -1145,15 +1159,26 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
     let mut orchestrator = Orchestrator::new();
     let orchestrator_bridge = telemetry::subscribe_orchestrator_events(&orchestrator);
 
-    // Execute the pipeline asynchronously
+    // Execute the pipeline asynchronously as one observed workflow; its
+    // context is installed on every poll, never held across an await.
     let start_time = std::time::Instant::now();
-    let results: Vec<StageExecutionResult> = orchestrator
-        .execute_pipeline_async(&stages, &input, &metrics, &availability_fn)
-        .await
-        .map_err(|e| {
-            orchestrator_bridge.drain();
-            PipelineConfigError::ExecutionError(format!("{}", e))
-        })?;
+    let workflow = observability::AsyncWorkflow::start(
+        config.name.as_deref().unwrap_or("pipeline"),
+        &RunOptions::default(),
+    );
+    let executed = workflow
+        .instrument(orchestrator.execute_pipeline_async(
+            &stages,
+            &input,
+            &metrics,
+            &availability_fn,
+        ))
+        .await;
+    let observation_ref = workflow.end(&executed);
+    let results: Vec<StageExecutionResult> = executed.map_err(|e| {
+        orchestrator_bridge.drain();
+        PipelineConfigError::ExecutionError(format!("{}", e))
+    })?;
     orchestrator_bridge.drain();
     let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
@@ -1179,6 +1204,7 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
         stages: stage_timings,
         total_latency_ms,
         final_output,
+        observation_ref,
     })
 }
 
