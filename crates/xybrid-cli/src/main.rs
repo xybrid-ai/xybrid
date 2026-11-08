@@ -58,8 +58,8 @@ use xybrid_sdk::SdkError;
 #[command(about = "Xybrid CLI - Run hybrid cloud-edge AI inference pipelines", long_about = None)]
 struct Cli {
     /// Platform API key for cloud access (does not enable observability by
-    /// itself). Without it, XYBRID_API_KEY, then the key `xybrid connect` saved
-    /// for this platform host and repository, is used
+    /// itself). When neither this nor XYBRID_API_KEY is set, the key `xybrid
+    /// connect` saved for this platform host and repository is used
     #[arg(long, global = true, env = "XYBRID_API_KEY")]
     api_key: Option<String>,
 

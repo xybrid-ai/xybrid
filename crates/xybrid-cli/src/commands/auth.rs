@@ -245,6 +245,9 @@ fn status(
     let client = PlatformClient::new(project.host.clone());
     match client.workspace(&resolved.key) {
         Ok(workspace) => {
+            if let Some(key) = &mut report.key {
+                key.scope = workspace.scope.clone().or(key.scope.take());
+            }
             report.workspace = Some(workspace_from_server(&workspace));
             report.verification = Some(VerificationReport::from_server(
                 workspace.verification.as_ref(),

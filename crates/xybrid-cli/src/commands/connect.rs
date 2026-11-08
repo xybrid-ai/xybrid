@@ -478,8 +478,15 @@ impl EnvTarget {
 
 /// Why provisioning stopped.
 enum Failed {
-    Api(ApiFailure),
+    /// Boxed: an [`ApiFailure`] carries the whole error body.
+    Api(Box<ApiFailure>),
     Cli(CliError),
+}
+
+impl From<ApiFailure> for Failed {
+    fn from(failure: ApiFailure) -> Self {
+        Failed::Api(Box::new(failure))
+    }
 }
 
 impl From<CliError> for Failed {
@@ -1017,7 +1024,7 @@ impl Session<'_> {
 
     /// Fetch and solve a challenge into `pending`, then persist it.
     fn solve_into(&mut self, pending: &mut PendingRequest) -> Result<(), Failed> {
-        let challenge = self.client.challenge().map_err(Failed::Api)?;
+        let challenge = self.client.challenge()?;
         if let Some(algorithm) = &challenge.algorithm {
             if algorithm != pow::ALGORITHM {
                 return Err(CliError::new(
@@ -1031,7 +1038,7 @@ impl Session<'_> {
             || challenge.challenge.len() > 512
             || challenge.challenge.chars().any(char::is_control)
         {
-            return Err(Failed::Api(ApiFailure::Invalid(
+            return Err(Failed::from(ApiFailure::Invalid(
                 "malformed challenge".into(),
             )));
         }
@@ -1108,7 +1115,7 @@ impl Session<'_> {
                         );
                         self.save()?;
                     }
-                    return Err(Failed::Api(failure));
+                    return Err(failure.into());
                 }
             }
         }
@@ -1151,7 +1158,7 @@ impl Session<'_> {
                         );
                         self.save()?;
                     }
-                    return Err(Failed::Api(failure));
+                    return Err(failure.into());
                 }
             }
         }
