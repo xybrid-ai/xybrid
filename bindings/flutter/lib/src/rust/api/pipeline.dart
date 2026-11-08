@@ -14,7 +14,7 @@ import 'observability.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'result.dart';
 
-// These functions are ignored because they are not marked as `pub`: `final_execution_target`, `pipeline_ffi_result`
+// These functions are ignored because they are not marked as `pub`: `final_execution_target`, `pipeline_ffi_result`, `pipeline_options`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>
 abstract class FfiPipeline implements RustOpaqueInterface {
@@ -45,7 +45,8 @@ abstract class FfiPipeline implements RustOpaqueInterface {
 
   /// Execute the pipeline with the given input envelope.
   ///
-  /// Returns the inference result from the final stage.
+  /// Returns the final output with the workflow reference and each stage inference reference.
+  /// Observation controls apply to the entire pipeline and are validated before execution.
   ///
   /// LLM-specific metric fields (`ttft_ms`, `tokens_per_second`,
   /// `prefill_tps`, `decode_tps`, `tokens_out`) are parsed from the
@@ -54,7 +55,8 @@ abstract class FfiPipeline implements RustOpaqueInterface {
   /// produces a TTS envelope and the LLM metrics are not surfaced here.
   /// Hoisting them from intermediate stages is a follow-up at the SDK
   /// layer.
-  Future<FfiResult> run({required FfiEnvelope envelope});
+  Future<FfiResult> run(
+      {required FfiEnvelope envelope, FfiObservationOptions? observation});
 
   /// Get the number of stages in the pipeline.
   BigInt stageCount();

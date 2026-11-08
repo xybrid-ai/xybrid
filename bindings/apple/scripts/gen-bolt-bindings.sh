@@ -85,6 +85,18 @@ source = source.replace(
     "        reasoningContent: String? = nil,\n        observation: XybridObservationRef? = nil\n    ) {",
 )
 
+# Default only constructor parameters, never fields or decoder expressions.
+# Nested records remain a versioned wire contract with the native library.
+for field, ty, expected in (
+    ("observation", "XybridObservationRef", 3),
+    ("observation", "XybridObservationOptions", 1),
+    ("decoderObservation", "XybridObservationRef", 1),
+):
+    pattern = rf"(        {field}: {ty}\?)(\n    \) \{{)"
+    source, count = re.subn(pattern, r"\1 = nil\2", source)
+    if count != expected:
+        raise SystemExit(f"error: expected {expected} optional {field}: {ty} constructor tails, found {count}")
+
 decoder = '''    @inlinable static func decode(from reader: inout WireReader) -> XybridResult {
         XybridResult(
             envelope: XybridEnvelope.decode(from: &reader),

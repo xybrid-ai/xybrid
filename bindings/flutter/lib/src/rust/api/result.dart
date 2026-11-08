@@ -156,13 +156,18 @@ class FfiStageLatency {
   final String stageId;
   final int latencyMs;
 
+  /// Inference reference for this stage, when tracing is available.
+  final FfiObservationRef? observation;
+
   const FfiStageLatency({
     required this.stageId,
     required this.latencyMs,
+    this.observation,
   });
 
   @override
-  int get hashCode => stageId.hashCode ^ latencyMs.hashCode;
+  int get hashCode =>
+      stageId.hashCode ^ latencyMs.hashCode ^ observation.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -170,5 +175,6 @@ class FfiStageLatency {
       other is FfiStageLatency &&
           runtimeType == other.runtimeType &&
           stageId == other.stageId &&
-          latencyMs == other.latencyMs;
+          latencyMs == other.latencyMs &&
+          observation == other.observation;
 }

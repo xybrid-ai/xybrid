@@ -77,6 +77,7 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
 pub mod context;
 pub mod device;
 pub mod envelope;
+pub mod manual_observation;
 pub mod model;
 pub mod observability;
 pub mod pipeline;

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* Observation controls for loading and live ASR; decoder/session, pipeline and
+  streamed-TTS references. Typed manual workflow/tool/inference/load handles
+  support explicit completion, failure and cancellation.
+* Caller-owned device IDs, ordered native redaction rules and explicit provider
+  propagation origins. Generated FRB glue updated for these fields.
 * Added explicit OpenTelemetry export configuration, exporter stats, bounded
   flush/shutdown, and feedback/evaluation APIs through `XybridObservability`.
   `RunOptions.observation` forwards W3C context, conversation IDs and trace

@@ -8,8 +8,11 @@ namespace Xybrid
     /// and trace suppression.
     /// </summary>
     /// <remarks>
-    /// Pass to <see cref="Model.Run(Envelope, GenerationConfig, System.Threading.CancellationToken, ObservationOptions)"/>
-    /// or <c>RunStreaming</c>. Has no effect until export is enabled with
+    /// Pass to <see cref="Model.Run(Envelope, GenerationConfig, System.Threading.CancellationToken, ObservationOptions)"/>,
+    /// <c>RunStreaming</c>, <c>RunTtsStreaming</c>, <see cref="Pipeline.Run(Envelope, ObservationOptions)"/>,
+    /// <see cref="ModelLoader.Load(ObservationOptions)"/>, <c>Model.Stream</c>
+    /// or a manual observation such as <see cref="WorkflowObservation.Start"/>.
+    /// Has no effect until export is enabled with
     /// <see cref="XybridClient.InitializeObservability"/>.
     /// </remarks>
     /// <example>
@@ -43,5 +46,36 @@ namespace Xybrid
         /// Skips the detailed trace for this run; metrics are still recorded.
         /// </summary>
         public bool SuppressTrace { get; set; }
+
+        /// <summary>
+        /// The generated record, for APIs that take <see cref="XybridBolt.XybridObservationOptions"/>
+        /// directly (for example a hand-built <see cref="XybridBolt.XybridStreamingConfig"/>).
+        /// </summary>
+        public XybridBolt.XybridObservationOptions ToBolt() =>
+            new XybridBolt.XybridObservationOptions(Traceparent, Tracestate, ConversationId, SuppressTrace);
+
+        /// <summary>
+        /// Run options carrying <paramref name="config"/> and <paramref name="observation"/>;
+        /// null when neither is set, so the native defaults apply.
+        /// </summary>
+        internal static XybridBolt.XybridRunOptions? ToRunOptions(
+            GenerationConfig config,
+            ObservationOptions observation)
+        {
+            if (config == null && observation == null)
+            {
+                return null;
+            }
+            return new XybridBolt.XybridRunOptions(
+                config?.ToBolt(),
+                System.Array.Empty<XybridBolt.XybridAbortSignal>(),
+                false,
+                0u,
+                null,
+                observation?.Traceparent,
+                observation?.Tracestate,
+                observation?.ConversationId,
+                observation?.SuppressTrace ?? false);
+        }
     }
 }

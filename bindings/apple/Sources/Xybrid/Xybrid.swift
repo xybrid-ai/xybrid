@@ -499,6 +499,38 @@ public extension Xybrid {
     /// ``recordFeedback(for:score:label:comment:)`` and
     /// ``recordEvaluation(for:name:score:label:explanation:)``.
     enum Observability {
+        /// Manual operations retain their original SDK session. Pass `context()` to children.
+        public static func startWorkflow(_ name: String, options: XybridObservationOptions? = nil) throws -> XybridWorkflowObservation {
+            try XybridWorkflowObservation(name: name, options: options)
+        }
+        public static func startTool(_ call: XybridToolCallInfo, options: XybridObservationOptions? = nil) throws -> XybridToolObservation {
+            try XybridToolObservation(call: call, options: options)
+        }
+        public static func startInference(_ request: XybridInferenceRequest, options: XybridObservationOptions? = nil) throws -> XybridInferenceObservation {
+            try XybridInferenceObservation(request: request, options: options)
+        }
+        public static func startModelLoad(_ info: XybridModelLoadInfo, options: XybridObservationOptions? = nil) throws -> XybridModelLoadObservation {
+            try XybridModelLoadObservation(info: info, options: options)
+        }
+        /// Completes on return, cancels on task cancellation, and records a safe error label on throw.
+        public static func withWorkflow<T>(_ name: String, options: XybridObservationOptions? = nil,
+                                           body: (XybridWorkflowObservation) async throws -> T) async throws -> T {
+            let operation = try startWorkflow(name, options: options)
+            do {
+                try Task.checkCancellation()
+                let result = try await body(operation)
+                try Task.checkCancellation()
+                operation.complete()
+                return result
+            } catch is CancellationError {
+                operation.cancel()
+                throw CancellationError()
+            } catch {
+                operation.fail(errorType: "application_error", message: nil)
+                throw error
+            }
+        }
+
         /// The Xybrid dashboard's OTLP trace endpoint, used by ``xybrid(apiKey:)``.
         public static var defaultTracesEndpoint: String {
             observabilityDefaultTracesEndpoint()
@@ -926,6 +958,7 @@ public extension XybridModel {
     /// try session.feed(samples: pcm)
     /// // when the user stops talking:
     /// let transcript = try session.flush()
+    /// label.text = transcript.text   // transcript.observation references the session
     /// ```
     ///
     /// - Parameter config: chunking options. The default is fixed-window
@@ -1023,7 +1056,10 @@ public extension XybridPipeline {
 
     /// Run every stage without blocking the calling thread or actor.
     ///
-    /// Of `options`, only `correlationId` applies to a pipeline run; setting
+    /// Of `options`, `correlationId` and the observation controls
+    /// (`traceparent`, `tracestate`, `conversationId`, `suppressTrace`) apply to
+    /// a pipeline run: ``XybridPipelineResult/observation`` references its
+    /// workflow and each ``XybridStageResult/observation`` its stage. Setting
     /// `generationConfig` or `abortOn` throws ``XybridError/configError(message:)``.
     func runAsync(
         envelope: XybridEnvelope,
@@ -1228,7 +1264,8 @@ public extension XybridStreamingConfig {
             vad: .off,
             vadThreshold: 0.5,
             language: nil,
-            audioCtx: nil
+            audioCtx: nil,
+            observation: nil
         )
     }
 
@@ -1246,18 +1283,30 @@ public extension XybridStreamingConfig {
     ///   - language: language hint such as `"en"`; `nil` uses the model default.
     ///   - threshold: VAD sensitivity, 0.0–1.0. Lower catches quieter speech
     ///     and more background noise with it.
+    ///   - observation: parent trace context, conversation id and trace
+    ///     suppression for the session's workflow; `nil` for none.
     static func voiceActivity(
         modelDir: String,
         language: String? = nil,
-        threshold: Float = 0.5
+        threshold: Float = 0.5,
+        observation: XybridObservationOptions? = nil
     ) -> XybridStreamingConfig {
         XybridStreamingConfig(
             sampleRate: 16_000,
             vad: .enabled(modelDir: modelDir),
             vadThreshold: threshold,
             language: language,
-            audioCtx: nil
+            audioCtx: nil,
+            observation: observation
         )
+    }
+
+    /// This config with its observation controls replaced, for example
+    /// `.default.observed(by: context.childOptions)`.
+    func observed(by observation: XybridObservationOptions?) -> XybridStreamingConfig {
+        var config = self
+        config.observation = observation
+        return config
     }
 }
 
@@ -1613,6 +1662,8 @@ extension XybridError: LocalizedError {
             return "Invalid image: \(message)"
         case .cancelled(let message):
             return "Cancelled: \(message)"
+        case .telemetryDelivery(let message):
+            return "Telemetry delivery failed: \(message)"
         }
     }
 }
@@ -1631,5 +1682,31 @@ extension XybridError: LocalizedError {
 extension FfiError: LocalizedError {
     public var errorDescription: String? {
         message.isEmpty ? "Unknown FFI error" : message
+    }
+}
+
+public extension XybridObservationOptions {
+    static func make(traceparent: String? = nil, tracestate: String? = nil,
+                     conversationId: String? = nil, suppressTrace: Bool = false) -> Self {
+        Self(traceparent: traceparent, tracestate: tracestate,
+             conversationId: conversationId, suppressTrace: suppressTrace)
+    }
+}
+public extension XybridObservationContext {
+    /// Explicit parent controls for a child, including an unsampled parent.
+    var childOptions: XybridObservationOptions {
+        .make(traceparent: traceparent, tracestate: tracestate)
+    }
+}
+public extension XybridObservabilityConfig {
+    @discardableResult func deviceId(_ id: String) -> Self { setDeviceId(id: id); return self }
+    @discardableResult func propagateContext(to origin: String) throws -> Self {
+        try allowProviderContext(origin: origin); return self
+    }
+    @discardableResult func redactLiteral(_ find: String, replacement: String) throws -> Self {
+        try addLiteralRedaction(find: find, replacement: replacement); return self
+    }
+    @discardableResult func omitContent(_ key: String) throws -> Self {
+        try omitContentAttribute(key: key); return self
     }
 }

@@ -1339,6 +1339,9 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_download_from_registry_with_platform")]
         internal static extern ulong NativeXybridDownloadFromRegistryWithPlatform([In] byte[] idBytes, nuint idLength, [In] byte[] platformBytes, nuint platformLength);
 
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_inference_observation_new")]
+        internal static extern FfiBuf NativeXybridInferenceObservationNew([In] byte[] requestBytes, nuint requestLength, [In] byte[] optionsBytes, nuint optionsLength, out ulong boltffiHandle);
+
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_bundle")]
         internal static extern FfiBuf NativeXybridModelFromBundle([In] byte[] pathBytes, nuint pathLength, out ulong boltffiHandle);
 
@@ -1360,6 +1363,12 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_registry_speculative")]
         internal static extern FfiBuf NativeXybridModelFromRegistrySpeculative([In] byte[] idBytes, nuint idLength, out ulong boltffiHandle);
 
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_load")]
+        internal static extern FfiBuf NativeXybridModelLoad([In] byte[] sourceBytes, nuint sourceLength, [In] byte[] observationBytes, nuint observationLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_load_observation_new")]
+        internal static extern FfiBuf NativeXybridModelLoadObservationNew([In] byte[] infoBytes, nuint infoLength, [In] byte[] optionsBytes, nuint optionsLength, out ulong boltffiHandle);
+
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_observability_config_otlp")]
         internal static extern ulong NativeXybridObservabilityConfigOtlp([In] byte[] endpointBytes, nuint endpointLength);
 
@@ -1377,6 +1386,12 @@ namespace XybridBolt
 
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_streaming_session_for_model")]
         internal static extern FfiBuf NativeXybridStreamingSessionForModel(ulong model, [In] byte[] configBytes, nuint configLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_tool_observation_new")]
+        internal static extern FfiBuf NativeXybridToolObservationNew([In] byte[] callBytes, nuint callLength, [In] byte[] optionsBytes, nuint optionsLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_workflow_observation_new")]
+        internal static extern FfiBuf NativeXybridWorkflowObservationNew([In] byte[] nameBytes, nuint nameLength, [In] byte[] optionsBytes, nuint optionsLength, out ulong boltffiHandle);
 
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_bundle_extract")]
         internal static extern FfiBuf NativeXybridBundleExtract(ulong receiver, [In] byte[] outputDirBytes, nuint outputDirLength);
@@ -1454,6 +1469,52 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_download_status")]
         internal static extern FfiBuf NativeXybridDownloadStatus(ulong receiver);
 
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_cancel")]
+        internal static extern FfiStatus NativeXybridInferenceObservationCancel(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_complete")]
+        internal static extern FfiStatus NativeXybridInferenceObservationComplete(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_context")]
+        internal static extern FfiBuf NativeXybridInferenceObservationContext(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_fail")]
+        internal static extern FfiStatus NativeXybridInferenceObservationFail(ulong receiver, [In] byte[] errorTypeBytes, nuint errorTypeLength, [In] byte[] messageBytes, nuint messageLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_is_finished")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridInferenceObservationIsFinished(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_observation_ref")]
+        internal static extern FfiBuf NativeXybridInferenceObservationObservationRef(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_chunk")]
+        internal static extern FfiStatus NativeXybridInferenceObservationRecordChunk(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_finish_reasons")]
+        internal static extern FfiStatus NativeXybridInferenceObservationRecordFinishReasons(ulong receiver, [In] byte[] reasonsBytes, nuint reasonsLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_first_token")]
+        internal static extern FfiBuf NativeXybridInferenceObservationRecordFirstToken(ulong receiver, [In] byte[] atEpochMsBytes, nuint atEpochMsLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_input_messages")]
+        internal static extern FfiBuf NativeXybridInferenceObservationRecordInputMessages(ulong receiver, [In] byte[] messagesJsonBytes, nuint messagesJsonLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_output_messages")]
+        internal static extern FfiBuf NativeXybridInferenceObservationRecordOutputMessages(ulong receiver, [In] byte[] messagesJsonBytes, nuint messagesJsonLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_response")]
+        internal static extern FfiStatus NativeXybridInferenceObservationRecordResponse(ulong receiver, [In] byte[] responseIdBytes, nuint responseIdLength, [In] byte[] modelBytes, nuint modelLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_system_instructions")]
+        internal static extern FfiBuf NativeXybridInferenceObservationRecordSystemInstructions(ulong receiver, [In] byte[] partsJsonBytes, nuint partsJsonLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_tool_definitions")]
+        internal static extern FfiBuf NativeXybridInferenceObservationRecordToolDefinitions(ulong receiver, [In] byte[] definitionsJsonBytes, nuint definitionsJsonLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_usage")]
+        internal static extern FfiStatus NativeXybridInferenceObservationRecordUsage(ulong receiver, [In] byte[] usageBytes, nuint usageLength);
+
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_await_download")]
         internal static extern FfiBuf NativeXybridModelAwaitDownload(ulong receiver, ulong timeoutMs);
 
@@ -1481,6 +1542,31 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_is_loaded")]
         [return: MarshalAs(UnmanagedType.I1)]
         internal static extern bool NativeXybridModelIsLoaded(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_cancel")]
+        internal static extern FfiStatus NativeXybridModelLoadObservationCancel(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_complete")]
+        internal static extern FfiStatus NativeXybridModelLoadObservationComplete(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_context")]
+        internal static extern FfiBuf NativeXybridModelLoadObservationContext(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_fail")]
+        internal static extern FfiStatus NativeXybridModelLoadObservationFail(ulong receiver, [In] byte[] errorTypeBytes, nuint errorTypeLength, [In] byte[] messageBytes, nuint messageLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_is_finished")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridModelLoadObservationIsFinished(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_observation_ref")]
+        internal static extern FfiBuf NativeXybridModelLoadObservationObservationRef(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_record_cache_hit")]
+        internal static extern FfiStatus NativeXybridModelLoadObservationRecordCacheHit(ulong receiver, [MarshalAs(UnmanagedType.I1)] bool hit);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_ref")]
+        internal static extern FfiBuf NativeXybridModelLoadObservationRef(ulong receiver);
 
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_model_id")]
         internal static extern FfiBuf NativeXybridModelModelId(ulong receiver);
@@ -1535,8 +1621,20 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_warmup")]
         internal static extern FfiBuf NativeXybridModelWarmup(ulong receiver);
 
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_observability_config_add_literal_redaction")]
+        internal static extern FfiBuf NativeXybridObservabilityConfigAddLiteralRedaction(ulong receiver, [In] byte[] findBytes, nuint findLength, [In] byte[] replacementBytes, nuint replacementLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_observability_config_allow_provider_context")]
+        internal static extern FfiBuf NativeXybridObservabilityConfigAllowProviderContext(ulong receiver, [In] byte[] originBytes, nuint originLength);
+
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_observability_config_init")]
         internal static extern FfiBuf NativeXybridObservabilityConfigInit(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_observability_config_omit_content_attribute")]
+        internal static extern FfiBuf NativeXybridObservabilityConfigOmitContentAttribute(ulong receiver, [In] byte[] keyBytes, nuint keyLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_device_id")]
+        internal static extern FfiStatus NativeXybridObservabilityConfigSetDeviceId(ulong receiver, [In] byte[] idBytes, nuint idLength);
 
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_header")]
         internal static extern FfiStatus NativeXybridObservabilityConfigSetHeader(ulong receiver, [In] byte[] nameBytes, nuint nameLength, [In] byte[] valueBytes, nuint valueLength);
@@ -1590,6 +1688,47 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_streaming_session_reset")]
         internal static extern FfiBuf NativeXybridStreamingSessionReset(ulong receiver);
 
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_tool_observation_cancel")]
+        internal static extern FfiStatus NativeXybridToolObservationCancel(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_tool_observation_complete")]
+        internal static extern FfiStatus NativeXybridToolObservationComplete(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_tool_observation_context")]
+        internal static extern FfiBuf NativeXybridToolObservationContext(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_tool_observation_fail")]
+        internal static extern FfiStatus NativeXybridToolObservationFail(ulong receiver, [In] byte[] errorTypeBytes, nuint errorTypeLength, [In] byte[] messageBytes, nuint messageLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_tool_observation_is_finished")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridToolObservationIsFinished(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_tool_observation_observation_ref")]
+        internal static extern FfiBuf NativeXybridToolObservationObservationRef(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_tool_observation_record_result")]
+        internal static extern FfiBuf NativeXybridToolObservationRecordResult(ulong receiver, [In] byte[] resultJsonBytes, nuint resultJsonLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_cancel")]
+        internal static extern FfiStatus NativeXybridWorkflowObservationCancel(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_complete")]
+        internal static extern FfiStatus NativeXybridWorkflowObservationComplete(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_context")]
+        internal static extern FfiBuf NativeXybridWorkflowObservationContext(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_fail")]
+        internal static extern FfiStatus NativeXybridWorkflowObservationFail(ulong receiver, [In] byte[] errorTypeBytes, nuint errorTypeLength, [In] byte[] messageBytes, nuint messageLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_is_finished")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridWorkflowObservationIsFinished(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_observation_ref")]
+        internal static extern FfiBuf NativeXybridWorkflowObservationObservationRef(ulong receiver);
+
         [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_bundle")]
         internal static extern void NativeXybridBundleRelease(ulong handle);
 
@@ -1602,8 +1741,14 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_download")]
         internal static extern void NativeXybridDownloadRelease(ulong handle);
 
+        [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_inference_observation")]
+        internal static extern void NativeXybridInferenceObservationRelease(ulong handle);
+
         [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_model")]
         internal static extern void NativeXybridModelRelease(ulong handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_model_load_observation")]
+        internal static extern void NativeXybridModelLoadObservationRelease(ulong handle);
 
         [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_observability_config")]
         internal static extern void NativeXybridObservabilityConfigRelease(ulong handle);
@@ -1613,6 +1758,12 @@ namespace XybridBolt
 
         [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_streaming_session")]
         internal static extern void NativeXybridStreamingSessionRelease(ulong handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_tool_observation")]
+        internal static extern void NativeXybridToolObservationRelease(ulong handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_workflow_observation")]
+        internal static extern void NativeXybridWorkflowObservationRelease(ulong handle);
 
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_cache_clear")]
         internal static extern FfiBuf NativeCacheClear(out uint boltffiResult);

@@ -70,6 +70,38 @@ Collector exporting traces, metrics, and logs, use
 capture content by default; call `set_metadata_only(True)` to exclude it.
 `observability_flush(5000)` flushes without stopping export.
 
+`observability_stats()` reports `accepted`, `exported`, `dropped`, `failed` and
+`pending` counts per signal (`traces`, `logs`, `metrics`). When a flush or
+shutdown cannot deliver everything it raises `xybrid.TelemetryDelivery`: the
+inference already succeeded, so do not rerun it.
+
+Runs, pipelines and loads take an explicit W3C parent through `traceparent` on
+`XybridRunOptions` or `XybridObservationOptions`, and return references
+(`result.observation`, each pipeline stage's `observation`,
+`model.load_observation_ref()`). For work Xybrid does not execute itself, start
+a manual operation and pass its `context()` to children. As a context manager
+it completes on success, fails with the label `application_error` (never the
+exception text) on an exception, and cancels on `KeyboardInterrupt` or task
+cancellation; closing or collecting an unfinished one cancels it without
+flushing. The first terminal call wins.
+
+```python
+with xybrid.XybridWorkflowObservation("answer-question", None) as workflow:
+    context = workflow.context()  # None while export is off
+    child = None if context is None else xybrid.XybridObservationOptions(
+        traceparent=context.traceparent,
+        tracestate=context.tracestate,
+        conversation_id=None,
+        suppress_trace=False,
+    )
+    call = xybrid.XybridToolCallInfo("search", None, None, None, '{"q": "otel"}')
+    with xybrid.XybridToolObservation(call, child) as tool:
+        tool.record_result('{"hits": 3}')
+```
+
+[`examples/observability.py`](examples/observability.py) runs this against a
+local Collector without downloading a model.
+
 The retained `init(api_key="...", ingest_url="https://collector.example")`
 compatibility form explicitly enables **metadata-only OTLP traces**, using that
 API key for both cloud authentication and export. A base ingest URL maps to

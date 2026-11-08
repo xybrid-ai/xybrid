@@ -6,6 +6,7 @@ library;
 
 import 'envelope.dart';
 import 'model_loader.dart';
+import 'observability.dart';
 import 'result.dart';
 import 'rust/api/pipeline.dart';
 
@@ -92,9 +93,11 @@ class XybridPipeline {
   /// Returns [XybridResult] containing output from the final stage.
   ///
   /// Throws [XybridException] if execution fails.
-  Future<XybridResult> run(XybridEnvelope envelope) async {
+  Future<XybridResult> run(XybridEnvelope envelope,
+      {ObservationOptions? observation}) async {
     try {
-      final ffiResult = await _inner.run(envelope: envelope.inner);
+      final ffiResult = await _inner.run(
+          envelope: envelope.inner, observation: observation?.toFfi());
       return XybridResult.fromFfi(ffiResult);
     } catch (e) {
       throw XybridException('Pipeline execution failed: $e');

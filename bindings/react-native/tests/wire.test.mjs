@@ -149,9 +149,9 @@ test('results expose the lossless envelope plus payload shortcuts', () => {
     metrics,
     toolCalls: [{ id: '1', name: 'f', argumentsJson: '{}' }],
     reasoningContent: 'thinking',
-    observation: { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16) },
+    observation: { trace_id: 'a'.repeat(32), span_id: 'b'.repeat(16) },
   });
-  assert.deepEqual(text.observation, { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16) });
+  assert.deepEqual(text.observation, { trace_id: 'a'.repeat(32), span_id: 'b'.repeat(16) });
   assert.equal(text.text, 'hello');
   assert.equal(text.envelope.role, 'assistant');
   assert.equal(text.reasoningContent, 'thinking');

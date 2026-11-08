@@ -2,6 +2,28 @@
 use flutter_rust_bridge::frb;
 use xybrid_ffi_facade as facade;
 
+/// Parent and content-correlation controls shared by load and ASR APIs.
+#[derive(Clone, Debug, Default)]
+pub struct FfiObservationOptions {
+    pub traceparent: Option<String>,
+    pub tracestate: Option<String>,
+    pub conversation_id: Option<String>,
+    pub suppress_trace: bool,
+}
+
+impl FfiObservationOptions {
+    pub(crate) fn to_sdk(&self) -> Result<Option<xybrid_sdk::ObservationOptions>, String> {
+        facade::ObservationControls {
+            traceparent: self.traceparent.clone(),
+            tracestate: self.tracestate.clone(),
+            conversation_id: self.conversation_id.clone(),
+            suppress_trace: self.suppress_trace,
+        }
+        .to_sdk()
+        .map_err(|e| e.to_string())
+    }
+}
+
 /// Export configuration. Set exactly one of `api_key` (Xybrid traces) or
 /// `endpoint` (Collector traces, metrics and logs). Content is captured by
 /// default; set `metadata_only` to exclude prompts, outputs and tool payloads.
@@ -17,6 +39,15 @@ pub struct FfiObservabilityConfig {
     pub metadata_only: bool,
     pub max_content_bytes: Option<u32>,
     pub live_trace_interval_ms: Option<u32>,
+    pub device_id: Option<String>,
+    pub redaction_rules: Vec<FfiRedactionRule>,
+    pub provider_origins: Vec<String>,
+}
+
+/// Ordered literal replacement, or exact governed attribute omission.
+pub enum FfiRedactionRule {
+    ReplaceLiteral { find: String, replacement: String },
+    OmitAttribute { key: String },
 }
 
 impl FfiObservabilityConfig {
@@ -53,6 +84,25 @@ impl FfiObservabilityConfig {
         for (key, value) in &self.resource_attributes {
             handle.set_resource_attribute(key.clone(), value.clone());
         }
+        if let Some(id) = &self.device_id {
+            handle.set_device_id(id.clone());
+        }
+        for origin in &self.provider_origins {
+            handle
+                .allow_provider_context(origin.clone())
+                .map_err(|e| e.to_string())?;
+        }
+        for rule in &self.redaction_rules {
+            match rule {
+                FfiRedactionRule::ReplaceLiteral { find, replacement } => {
+                    handle.add_literal_redaction(find.clone(), replacement.clone())
+                }
+                FfiRedactionRule::OmitAttribute { key } => {
+                    handle.omit_content_attribute(key.clone())
+                }
+            }
+            .map_err(|e| e.to_string())?;
+        }
         handle.set_metadata_only(self.metadata_only);
         if let Some(bytes) = self.max_content_bytes {
             handle.set_max_content_bytes(bytes);
@@ -87,12 +137,34 @@ impl FfiObservationRef {
     }
 }
 
+/// Delivery counts for a single signal. Pending includes queued and in-flight items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FfiSignalStats {
+    pub accepted: u64,
+    pub exported: u64,
+    pub dropped: u64,
+    pub failed: u64,
+    pub pending: u64,
+}
+
+impl From<facade::SignalStats> for FfiSignalStats {
+    fn from(s: facade::SignalStats) -> Self {
+        Self {
+            accepted: s.accepted,
+            exported: s.exported,
+            dropped: s.dropped,
+            failed: s.failed,
+            pending: s.pending,
+        }
+    }
+}
+
 /// Delivery counters (zero when no packaged exporter is active).
 pub struct FfiObservabilityStats {
     pub enabled: bool,
-    pub spans_exported: u64,
-    pub spans_dropped: u64,
-    pub export_failures: u64,
+    pub traces: FfiSignalStats,
+    pub logs: FfiSignalStats,
+    pub metrics: FfiSignalStats,
 }
 
 /// Start exporting, replacing the previous configuration. Configuration
@@ -110,9 +182,9 @@ pub fn observability_stats() -> FfiObservabilityStats {
     let stats = facade::observability_stats();
     FfiObservabilityStats {
         enabled: stats.enabled,
-        spans_exported: stats.spans_exported,
-        spans_dropped: stats.spans_dropped,
-        export_failures: stats.export_failures,
+        traces: stats.traces.into(),
+        logs: stats.logs.into(),
+        metrics: stats.metrics.into(),
     }
 }
 
@@ -174,6 +246,9 @@ mod tests {
             metadata_only: false,
             max_content_bytes: None,
             live_trace_interval_ms: None,
+            device_id: None,
+            redaction_rules: Vec::new(),
+            provider_origins: Vec::new(),
         }
     }
 

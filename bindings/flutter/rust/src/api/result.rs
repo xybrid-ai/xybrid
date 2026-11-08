@@ -14,6 +14,8 @@ use super::observability::FfiObservationRef;
 pub struct FfiStageLatency {
     pub stage_id: String,
     pub latency_ms: u32,
+    /// Inference reference for this stage, when tracing is available.
+    pub observation: Option<FfiObservationRef>,
 }
 
 impl FfiStageLatency {
@@ -21,6 +23,7 @@ impl FfiStageLatency {
         Self {
             stage_id: s.stage_id.clone(),
             latency_ms: s.latency_ms,
+            observation: None,
         }
     }
 }

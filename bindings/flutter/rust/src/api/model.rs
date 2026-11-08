@@ -578,9 +578,50 @@ pub enum FfiTtsStreamEvent {
     /// One synthesized chunk: raw 16-bit LE PCM and its sample rate (Hz).
     AudioChunk { pcm: Vec<u8>, sample_rate: u32 },
     /// Synthesis completed.
-    Complete,
+    Complete(FfiTtsStreamResult),
     /// An error occurred during synthesis.
     Error(String),
+}
+
+/// Terminal synthesis status and counters, including partial cancellation.
+#[derive(Clone)]
+pub struct FfiTtsStreamResult {
+    pub status: FfiTtsStatus,
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub samples: u64,
+    pub chunks: u32,
+    pub limited_chunks: u32,
+    pub observation: Option<super::observability::FfiObservationRef>,
+}
+
+#[derive(Clone)]
+pub enum FfiTtsStatus {
+    Completed,
+    Cancelled,
+    Limited,
+}
+
+impl From<xybrid_sdk::result::TtsStreamResult> for FfiTtsStreamResult {
+    fn from(result: xybrid_sdk::result::TtsStreamResult) -> Self {
+        use xybrid_core::execution::TtsStatus;
+        Self {
+            status: match result.status {
+                TtsStatus::Completed => FfiTtsStatus::Completed,
+                TtsStatus::Cancelled => FfiTtsStatus::Cancelled,
+                TtsStatus::Limited => FfiTtsStatus::Limited,
+            },
+            sample_rate: result.sample_rate,
+            channels: result.channels,
+            samples: result.samples,
+            chunks: result.chunks,
+            limited_chunks: result.limited_chunks,
+            observation: result
+                .observation
+                .as_ref()
+                .map(super::observability::FfiObservationRef::from_sdk),
+        }
+    }
 }
 
 /// Token received during streaming inference.
@@ -736,6 +777,18 @@ impl From<xybrid_sdk::StreamEvent> for FfiStreamEvent {
 }
 
 impl FfiModelLoader {
+    /// Clone this loader with validated observation controls.
+    #[frb(sync)]
+    pub fn with_observation(
+        &self,
+        options: super::observability::FfiObservationOptions,
+    ) -> Result<Self, String> {
+        let mut loader = self.0.clone();
+        if let Some(options) = options.to_sdk()? {
+            loader = loader.observation(options);
+        }
+        Ok(Self(loader))
+    }
     #[frb(sync)]
     pub fn from_registry(model_id: String) -> FfiModelLoader {
         FfiModelLoader(ModelLoader::from_registry(&model_id))
@@ -836,6 +889,14 @@ impl FfiModelLoader {
 }
 
 impl FfiModel {
+    /// Immutable reference for the load that created this model.
+    #[frb(sync)]
+    pub fn load_observation_ref(&self) -> Option<super::observability::FfiObservationRef> {
+        self.0
+            .load_observation_ref()
+            .map(super::observability::FfiObservationRef::from_sdk)
+    }
+
     /// Whether runs are currently answered by the cloud because the local
     /// weights are not ready yet. `false` for ordinary local models.
     ///
@@ -1154,23 +1215,9 @@ impl FfiModel {
             match result {
                 Ok(summary) => {
                     reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    // A cancelled run (barge-in via sink-close, or the caller
-                    // cancelling the token) stopped early — don't surface it as a
-                    // successful Complete. On sink-close the add would no-op
-                    // anyway, but a token-only cancel keeps the sink open.
-                    let cancelled = cancel_handle
-                        .as_ref()
-                        .map(|h| h.0.is_cancelled())
-                        .unwrap_or(false);
-                    if summary.status == xybrid_core::execution::TtsStatus::Limited {
-                        let _ = sink.add(FfiTtsStreamEvent::Error(
-                            "TTS output limited; partial audio delivered".into(),
-                        ));
-                    } else if !cancelled
-                        && summary.status != xybrid_core::execution::TtsStatus::Cancelled
-                    {
-                        let _ = sink.add(FfiTtsStreamEvent::Complete);
-                    }
+                    // Terminal status distinguishes completed, limited and
+                    // cancelled synthesis while retaining counters/reference.
+                    let _ = sink.add(FfiTtsStreamEvent::Complete(summary.into()));
                 }
                 Err(e) => {
                     let _ = sink.add(FfiTtsStreamEvent::Error(sdk_error_message(e)));
@@ -1583,9 +1630,7 @@ mod tests {
         options.suppress_trace = false;
         assert!(options
             .to_sdk_with_cancellation_over(None, GenerationConfig::default(), None)
-            .unwrap()
-            .observation
-            .is_none());
+            .is_err());
     }
 
     #[test]

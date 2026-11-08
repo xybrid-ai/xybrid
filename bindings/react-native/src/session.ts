@@ -1,6 +1,6 @@
 import NativeXybrid from './NativeXybrid';
 import { float32ToBase64 } from './base64';
-import type { PartialResult } from './types';
+import type { PartialResult, TranscriptionResult } from './types';
 
 /**
  * A live ASR session: feed microphone PCM in, read partial transcripts out.
@@ -50,8 +50,8 @@ export class StreamingSession {
    * Drain the buffered audio and return the complete transcript. The session
    * is over afterwards.
    */
-  flush(): Promise<string> {
-    return NativeXybrid.sessionFlush(this.handle);
+  async flush(): Promise<TranscriptionResult> {
+    return await NativeXybrid.sessionFlush(this.handle) as TranscriptionResult;
   }
 
   /** Start over on fresh audio without reloading the model. */

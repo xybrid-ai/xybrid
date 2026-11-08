@@ -5,6 +5,14 @@ import 'package:xybrid_flutter/src/rust/api/observability.dart';
 import 'package:xybrid_flutter/src/rust/frb_generated.dart';
 import 'package:xybrid_flutter/xybrid_flutter.dart';
 
+FfiSignalStats _signalStats() => FfiSignalStats(
+      accepted: BigInt.zero,
+      exported: BigInt.zero,
+      dropped: BigInt.zero,
+      failed: BigInt.zero,
+      pending: BigInt.zero,
+    );
+
 class _ObserverApi implements XybridRustLibApi {
   FfiObservabilityConfig? config;
   String? apiKey;
@@ -29,9 +37,9 @@ class _ObserverApi implements XybridRustLibApi {
   FfiObservabilityStats crateApiObservabilityObservabilityStats() =>
       FfiObservabilityStats(
         enabled: enabled,
-        spansExported: BigInt.zero,
-        spansDropped: BigInt.zero,
-        exportFailures: BigInt.zero,
+        traces: _signalStats(),
+        logs: _signalStats(),
+        metrics: _signalStats(),
       );
 
   @override
