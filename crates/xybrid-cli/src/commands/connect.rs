@@ -200,7 +200,16 @@ fn connect(
         }
     }
 
-    if let Some(target) = target.as_ref().filter(|t| t.lookup == Lookup::Present) {
+    // A key already in the project file is never replaced. If it is the key
+    // saved for this project, carry on to check it with the platform.
+    let file_holds_saved_key = !args.new
+        && target
+            .as_ref()
+            .is_some_and(|t| t.lookup == Lookup::Present && holds_saved_key(&host, &root, t));
+    if let Some(target) = target
+        .as_ref()
+        .filter(|t| t.lookup == Lookup::Present && !file_holds_saved_key)
+    {
         if args.new {
             return Err(CliError::new(
                 "env_file_has_key",
@@ -256,6 +265,9 @@ fn connect(
             gitignore_updated =
                 repo.ensure_ignored(target.relative.as_deref().unwrap_or_default())?;
         }
+        // Reported even if provisioning fails below: .gitignore may have changed.
+        report.env_file =
+            Some(target.report(Some(false), repo.is_some(), gitignore_updated, Vec::new()));
     }
 
     let mut session = Session {
@@ -279,6 +291,11 @@ fn connect(
         {
             return session.reuse(credential);
         }
+        // A connect that may already have created this project's workspace
+        // (crash, lost response) is retried before anything else.
+        if session.fresh_pending(PendingKind::Connect).is_some() {
+            return session.provision();
+        }
         let now = Utc::now();
         if let Some(workspace) = session
             .file
@@ -291,6 +308,27 @@ fn connect(
         }
     }
     session.provision()
+}
+
+/// Whether `target` assigns the key saved for this host and repository.
+/// An unreadable store or file counts as no.
+fn holds_saved_key(host: &PlatformHost, root: &Path, target: &EnvTarget) -> bool {
+    let Some(credential) = Store::locate()
+        .and_then(|store| store.read())
+        .ok()
+        .and_then(|file| file.find(host.origin(), root).cloned())
+    else {
+        return false;
+    };
+    matches!(
+        env_file::read(&target.path),
+        Ok(Some(text)) if env_file::assigns(
+            target.format,
+            &text,
+            &target.variable,
+            credential.api_key.expose(),
+        )
+    )
 }
 
 /// Make sure an in-repository credentials file can't be committed.
@@ -508,8 +546,9 @@ impl Session<'_> {
                     "stored_credential_rejected",
                     format!(
                         "The saved key for this project was rejected by {} ({}); it may have \
-                         been revoked or its workspace deleted. It was moved aside in {}. Run \
-                         `xybrid connect --new` to create a new workspace",
+                         been revoked or its workspace deleted. It was set aside in {}. If the \
+                         workspace can still be claimed, `xybrid auth claim` shows its saved \
+                         link; otherwise run `xybrid connect --new` to create a new workspace",
                         self.host.origin(),
                         failure.describe(),
                         self.store.path().display()
@@ -870,7 +909,7 @@ impl Session<'_> {
             _ => " Its claim link is not saved on this machine.".to_string(),
         };
         self.report.tell_the_user = format!(
-            "The provisional Xybrid workspace \u{201c}{name}\u{201d} for this project expired{stopped}: \
+            "The provisional Xybrid workspace \u{201c}{name}\u{201d} expired{stopped}: \
              its key no longer reaches the platform.{restore} To start over with a new workspace \
              instead, run `xybrid connect --new`. On-device inference keeps working."
         );

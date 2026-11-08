@@ -270,6 +270,21 @@ impl CredentialsFile {
             .max_by_key(|c| c.created_at)
     }
 
+    /// The newest retired credential for this host and repository that can
+    /// still be claimed: the recovery path after the platform rejected a key.
+    pub(crate) fn retired_claimable(
+        &self,
+        origin: &str,
+        root: &Path,
+        now: DateTime<Utc>,
+    ) -> Option<&Credential> {
+        self.retired
+            .iter()
+            .rev()
+            .map(|r| &r.credential)
+            .find(|c| c.matches(origin, root) && c.claimable(now))
+    }
+
     fn index(&self, origin: &str, root: &Path) -> Option<usize> {
         self.credentials
             .iter()
@@ -672,6 +687,16 @@ pub(crate) mod tests {
         assert_eq!(file.retired[0].reason, "replaced");
         assert_eq!(file.retired[0].credential.api_key.expose(), "sk_live_a");
 
+        assert_eq!(
+            file.retired_claimable(ORIGIN, Path::new("/a"), at(10))
+                .unwrap()
+                .api_key
+                .expose(),
+            "sk_live_a"
+        );
+        assert!(file
+            .retired_claimable(ORIGIN, Path::new("/a"), at(15 * 86_400))
+            .is_none());
         assert!(file.remove(ORIGIN, Path::new("/a")).is_some());
         assert!(file.retired.is_empty(), "logout forgets retired copies too");
         assert!(file.find(ORIGIN, Path::new("/a")).is_none());

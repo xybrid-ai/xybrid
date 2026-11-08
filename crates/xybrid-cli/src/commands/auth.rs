@@ -131,6 +131,8 @@ struct Project {
     store: Option<Store>,
     root: std::path::PathBuf,
     stored: Option<Credential>,
+    /// A rejected (quarantined) credential whose claim link still works.
+    quarantined: Option<Credential>,
     store_warning: Option<CliError>,
 }
 
@@ -148,21 +150,25 @@ fn project(
         )
     })?;
     let root = git::project_root(&cwd)?;
-    let (store, stored, store_warning) = match Store::locate() {
+    let (store, stored, quarantined, store_warning) = match Store::locate() {
         Ok(store) => match store.read() {
             Ok(file) => {
                 let stored = file.find(host.origin(), &root).cloned();
-                (Some(store), stored, None)
+                let quarantined = file
+                    .retired_claimable(host.origin(), &root, Utc::now())
+                    .cloned();
+                (Some(store), stored, quarantined, None)
             }
-            Err(err) => (Some(store), None, Some(err)),
+            Err(err) => (Some(store), None, None, Some(err)),
         },
-        Err(err) => (None, None, Some(err)),
+        Err(err) => (None, None, None, Some(err)),
     };
     Ok(Project {
         host,
         store,
         root,
         stored,
+        quarantined,
         store_warning,
     })
 }
@@ -330,8 +336,9 @@ fn status(
                     "stored_credential_rejected",
                     format!(
                         "The saved key for this project was rejected ({}); it may have been \
-                         revoked or its workspace deleted. It was moved aside. If you still have \
-                         the claim link, use it; otherwise run `xybrid connect --new`",
+                         revoked or its workspace deleted. It was set aside. If the workspace \
+                         can still be claimed, `xybrid auth claim` shows its saved link; \
+                         otherwise run `xybrid connect --new`",
                         failure.describe()
                     ),
                 ));
@@ -451,7 +458,8 @@ fn claim(
     }
     report.credentials = credentials_report(&project);
     let now = Utc::now();
-    let Some(credential) = project.stored.as_ref() else {
+    let quarantined = project.stored.is_none() && project.quarantined.is_some();
+    let Some(credential) = project.stored.as_ref().or(project.quarantined.as_ref()) else {
         return Err(CliError::new(
             "claim_unavailable",
             format!(
@@ -531,9 +539,15 @@ fn claim(
     } else {
         ""
     };
+    let set_aside = if quarantined {
+        " The platform rejected this project's saved key, so it was set aside; this is the last \
+         claim link saved for it, and claiming works only if the workspace still exists."
+    } else {
+        ""
+    };
     report.tell_the_user = format!(
         "Claim the Xybrid workspace \u{201c}{name}\u{201d} with GitHub{deadline}: {url} (this link \
-         is private: don't put it in commits, PRs or issues).{expired}"
+         is private: don't put it in commits, PRs or issues).{expired}{set_aside}"
     );
     Ok(())
 }

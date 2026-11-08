@@ -148,6 +148,27 @@ impl EnvFormat {
         }
     }
 
+    /// The value of an assignment as an application would read it: quotes,
+    /// inline comments and surrounding blanks removed.
+    fn value(self, raw: &str) -> &str {
+        let value = raw.trim();
+        match self {
+            EnvFormat::Dotenv => {
+                for quote in ['"', '\''] {
+                    if let Some(inner) = value.strip_prefix(quote) {
+                        return inner.split(quote).next().unwrap_or("").trim();
+                    }
+                }
+                match value.find(" #") {
+                    Some(at) => value[..at].trim(),
+                    None if value.starts_with('#') => "",
+                    None => value,
+                }
+            }
+            EnvFormat::Properties | EnvFormat::Xcconfig => value,
+        }
+    }
+
     fn value_is_empty(self, raw: &str) -> bool {
         let value = raw.trim();
         match self {
@@ -201,6 +222,16 @@ pub(crate) fn lookup(format: EnvFormat, text: &str, name: &str) -> Lookup {
         }
     }
     result
+}
+
+/// Whether `text` assigns exactly `value` to `name` (for example, the key a
+/// previous `xybrid connect` wrote). The value itself is never returned.
+pub(crate) fn assigns(format: EnvFormat, text: &str, name: &str, value: &str) -> bool {
+    text.lines().any(|line| {
+        format
+            .parse_assignment(line)
+            .is_some_and(|(assigned, raw)| assigned == name && format.value(raw) == value)
+    })
 }
 
 /// `text` with `name` set to `key` and `comment` above it, everything else
@@ -495,6 +526,34 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn assignments_are_compared_as_applications_read_them() {
+        for (format, text) in [
+            (EnvFormat::Dotenv, format!("XYBRID_API_KEY={KEY}")),
+            (
+                EnvFormat::Dotenv,
+                format!("export XYBRID_API_KEY=\"{KEY}\" # note"),
+            ),
+            (EnvFormat::Dotenv, format!("XYBRID_API_KEY='{KEY}'")),
+            (EnvFormat::Properties, format!("xybrid.apiKey = {KEY}")),
+            (
+                EnvFormat::Xcconfig,
+                format!("XYBRID_API_KEY = {KEY} // note"),
+            ),
+        ] {
+            let name = format.default_variable();
+            assert!(assigns(format, &text, name, KEY), "{text}");
+            assert!(!assigns(format, &text, name, "sk_live_other"), "{text}");
+            assert!(!assigns(format, &text, "OTHER", KEY), "{text}");
+        }
+        assert!(!assigns(
+            EnvFormat::Dotenv,
+            &format!("# XYBRID_API_KEY={KEY}"),
+            "XYBRID_API_KEY",
+            KEY
+        ));
     }
 
     #[test]
