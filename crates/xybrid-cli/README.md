@@ -49,10 +49,12 @@ xybrid run --huggingface "unsloth/SmolLM2-360M-Instruct-GGUF:Q4_K_M" --input-tex
 
 ## Observability
 
-Cloud authentication (`--api-key` or `XYBRID_API_KEY`) does not enable export.
-Add `--observability` to send traces to `https://ingest.xybrid.dev/v1/traces`.
-Use `--traces-endpoint` with that flag for a custom full trace URL; the cloud
-gateway selected by `--platform-url` remains independent.
+Cloud authentication (`--api-key`, `XYBRID_API_KEY`, or the key `xybrid connect`
+saved for this project) does not enable export. Add `--observability` to send
+traces to `https://ingest.xybrid.dev/v1/traces`; it fails with a clear error when
+no key resolves. Use `--traces-endpoint` with that flag for a custom full trace
+URL; the cloud gateway selected by `--platform-url` remains independent. A saved
+key is only ever sent to its own platform's ingest endpoint.
 
 For an OpenTelemetry Collector, set `OTEL_EXPORTER_OTLP_ENDPOINT` or the
 per-signal `OTEL_EXPORTER_OTLP_*_ENDPOINT` variables instead. Collector export
@@ -60,6 +62,46 @@ does not require a Xybrid API key. `OTEL_SDK_DISABLED=true` disables export in
 either mode. The CLI flushes and shuts down its exporter when a command ends.
 Enabled observability captures prompts and outputs by default. Set
 `OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content` for metadata only.
+
+## Connect a project (coding agents)
+
+`xybrid connect` gives a project a provisional, claimable Xybrid workspace
+without a browser or an account. It is meant for coding agents setting up an
+app for a user:
+
+```bash
+xybrid connect --agent claude-code --write-env .env --json
+```
+
+- It skips itself in CI (`--allow-ci` overrides only that) and when
+  `XYBRID_TELEMETRY_OPTOUT`, `DO_NOT_TRACK` or `OTEL_SDK_DISABLED=true` is set.
+- An existing key (flag, `XYBRID_API_KEY`, a value in the file) is never
+  replaced. A file tracked by Git is refused. Otherwise the key is written to
+  the `--write-env` file (dotenv, `local.properties` as `xybrid.apiKey`, or an
+  `.xcconfig`; `--env-name EXPO_PUBLIC_XYBRID_API_KEY` for Expo), which is
+  added to `.gitignore` and checked with `git check-ignore`.
+- The key, claim link and deadlines are kept in `~/.xybrid/credentials.json`
+  (`0600`, per platform host and repository; `XYBRID_CREDENTIALS_FILE` moves
+  it). Output never contains the raw key.
+- It does not enable trace export: wire the app's observability explicitly,
+  with metadata-only content.
+
+| Exit | Status |
+|---|---|
+| 0 | `created`, `existing` |
+| 3 | `signup_closed` |
+| 4 | `offline` |
+| 5 | `ci_skipped`, `opted_out` |
+| 6 | `env_file_tracked` |
+| 7 | `workspace_expired` |
+| 1 | `error` (see `error.code`) |
+
+`xybrid auth status [--json] [--show-claim-url]` reports the key's source, the
+workspace lifecycle and whether traces from this project have been stored.
+`xybrid auth claim` shows (and on a terminal opens) the private claim link.
+`xybrid auth logout` forgets the saved credentials; it does not revoke the key.
+`--platform-url` selects production (default) or staging; any other host needs
+`--allow-custom-host` and HTTPS unless it is localhost.
 
 ## Documentation
 
