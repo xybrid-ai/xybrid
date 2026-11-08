@@ -332,7 +332,31 @@ impl Sandbox {
     /// The CLI in `dir` with a scrubbed environment.
     fn command_in(&self, dir: &Path, args: &[&str]) -> Command {
         let mut command = Command::new(xybrid_bin());
-        command.args(args).current_dir(dir);
+        command.args(args);
+        self.sandboxed(command, dir)
+    }
+
+    /// `script` run by `sh -c` in the project, where `xybrid` is this CLI,
+    /// with the environment of [`Sandbox::command_in`]: a command the CLI
+    /// suggested, pasted into a shell.
+    #[cfg(unix)]
+    fn sh(&self, script: &str) -> Run {
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(format!(
+                "xybrid() {{ \"$XYBRID_TEST_BIN\" \"$@\"; }}; {script}"
+            ))
+            .env("XYBRID_TEST_BIN", xybrid_bin());
+        self.sandboxed(command, &self.project)
+            .output()
+            .expect("sh runs")
+            .into()
+    }
+
+    /// `command` in `dir` with a scrubbed environment.
+    fn sandboxed(&self, mut command: Command, dir: &Path) -> Command {
+        command.current_dir(dir);
         for name in SCRUBBED {
             command.env_remove(name);
         }
@@ -2228,7 +2252,7 @@ fn a_lost_answer_is_reported_as_unknown_and_kept_for_the_retry() {
 }
 
 /// The command a report tells the user to run (`Run \`xybrid …\``), as CLI
-/// arguments without the leading `xybrid`.
+/// arguments without the leading `xybrid`. Its values are plain words.
 fn suggested_rerun(tell: &str) -> Vec<String> {
     let start = tell
         .find("Run `")
@@ -2238,6 +2262,17 @@ fn suggested_rerun(tell: &str) -> Vec<String> {
     let mut words = tell[start..end].split_whitespace().map(str::to_string);
     assert_eq!(words.next().as_deref(), Some("xybrid"), "{tell}");
     words.collect()
+}
+
+/// The first `xybrid` command a report shows, as printed (without the
+/// backticks around it).
+fn suggested_command(tell: &str) -> String {
+    let start = tell
+        .find("`xybrid ")
+        .unwrap_or_else(|| panic!("no command: {tell}"))
+        + 1;
+    let end = start + tell[start..].find('`').expect("closing backtick");
+    tell[start..end].to_string()
 }
 
 /// A POST answered `502`: the platform may have applied it.
@@ -2360,6 +2395,121 @@ fn the_suggested_rerun_works_from_the_directory_connect_ran_in() {
     challenge.assert_hits(1);
     let env = std::fs::read_to_string(web.join(".env")).unwrap();
     assert!(env.contains(&format!("XYBRID_API_KEY={KEY}")), "{env}");
+}
+
+/// Suggested commands are pasted into a shell. A path holding a space, a
+/// quote and `$HOME` stays one argument, so the pasted command repeats the
+/// run: here the untracked alternative to a tracked file, then the retry of
+/// its lost answer, each run through `sh -c` exactly as printed.
+#[cfg(unix)]
+#[test]
+fn suggested_commands_with_spaced_paths_run_as_printed_in_sh() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let dir = sandbox.project.join("My App's $HOME");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".env"), "PUBLIC_FLAG=1\n").unwrap();
+    assert!(sandbox.git(&dir, &["add", ".env"]).status.success());
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    let mut failing = mock_connect_unanswered(&server);
+    let url = server.base_url();
+
+    let run = sandbox.run(&platform_args(
+        &url,
+        &["connect", "--write-env", "My App's $HOME/.env", "--json"],
+    ));
+    assert_eq!(run.code, Some(6), "{run}");
+    let alternative = suggested_command(run.json()["tell_the_user"].as_str().unwrap());
+    assert_eq!(
+        alternative,
+        format!(
+            "xybrid --platform-url {url} connect --write-env 'My App'\\''s $HOME/.env.local' \
+             --allow-custom-host"
+        )
+    );
+    challenge.assert_hits(0);
+
+    // The alternative, pasted: its answer is lost, and the retry it suggests
+    // is the same command.
+    let run = sandbox.sh(&format!("{alternative} --json"));
+    assert_eq!(run.code, Some(1), "{run}");
+    let report = run.json();
+    assert_eq!(report["env_file"]["path"], "My App's $HOME/.env.local");
+    let rerun = suggested_command(report["tell_the_user"].as_str().unwrap());
+    assert_eq!(rerun, alternative);
+    failing.assert_hits(1);
+    failing.delete();
+
+    let retry = server.mock(|when, then| {
+        when.method(POST).path("/v1/agent/connect");
+        then.status(200)
+            .json_body(provision(KEY, Some(CLAIM_TOKEN), 7, true));
+    });
+    let run = sandbox.sh(&format!("{rerun} --json"));
+    assert_eq!(run.code, Some(0), "{run}");
+    let report = run.json();
+    assert_eq!(report["status"], "created");
+    assert_eq!(report["env_file"]["path"], "My App's $HOME/.env.local");
+    assert_eq!(report["env_file"]["written"], true);
+    retry.assert_hits(1);
+    challenge.assert_hits(1);
+    let env = std::fs::read_to_string(dir.join(".env.local")).unwrap();
+    assert!(env.contains(&format!("XYBRID_API_KEY={KEY}")), "{env}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join(".env")).unwrap(),
+        "PUBLIC_FLAG=1\n"
+    );
+}
+
+/// A value no shell can be given safely (here a backtick, which would also
+/// end the code span a command is shown in) gets no suggested command: the
+/// report names the file, or the flags to repeat, and says why.
+#[test]
+fn an_unquotable_path_gets_no_suggested_command() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let dir = sandbox.project.join("a`b");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".env"), "PUBLIC_FLAG=1\n").unwrap();
+    assert!(sandbox.git(&dir, &["add", ".env"]).status.success());
+    let server = MockServer::start();
+    let challenge = mock_challenge(&server);
+    let failing = mock_connect_unanswered(&server);
+    let url = server.base_url();
+    let unshown =
+        "no command is shown because the --write-env value can't be quoted safely for this shell";
+
+    let run = sandbox.run(&platform_args(
+        &url,
+        &["connect", "--write-env", "a`b/.env", "--json"],
+    ));
+    assert_eq!(run.code, Some(6), "{run}");
+    let tell = run.json()["tell_the_user"].as_str().unwrap().to_string();
+    assert!(
+        tell.contains(&format!(
+            "such as a`b/.env.local (pass it to --write-env; {unshown})"
+        )),
+        "{tell}"
+    );
+    assert!(!tell.contains("`xybrid --platform-url"), "{tell}");
+    challenge.assert_hits(0);
+
+    let run = sandbox.run(&platform_args(
+        &url,
+        &["connect", "--write-env", "a`b/.env.local", "--json"],
+    ));
+    assert_eq!(run.code, Some(1), "{run}");
+    let tell = run.json()["tell_the_user"].as_str().unwrap().to_string();
+    assert!(
+        tell.contains(&format!(
+            "Run `xybrid connect` again with the same flags ({unshown}) within the next few \
+             minutes"
+        )),
+        "{tell}"
+    );
+    failing.assert_hits(1);
+    challenge.assert_hits(1);
 }
 
 /// A key line inside a construct that loaders read differently (an xcconfig

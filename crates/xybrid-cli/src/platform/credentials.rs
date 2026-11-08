@@ -755,16 +755,7 @@ pub(crate) fn owned_by_current_account(_metadata: &std::fs::Metadata) -> bool {
 /// `path` as one POSIX shell word, for copy-pasteable fixes.
 #[cfg(unix)]
 fn shell_quote(path: &Path) -> String {
-    let raw = path.display().to_string();
-    if !raw.is_empty()
-        && raw
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"/._-+".contains(&b))
-    {
-        raw
-    } else {
-        format!("'{}'", raw.replace('\'', "'\\''"))
-    }
+    super::shell::posix_quote(&path.display().to_string())
 }
 
 fn lock_path(path: &Path) -> PathBuf {

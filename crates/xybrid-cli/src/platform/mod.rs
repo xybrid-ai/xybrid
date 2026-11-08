@@ -17,6 +17,7 @@
 //! | [`resolve`] | The one key resolver: flag, then env, then stored credentials |
 //! | [`notices`] | The daily claim reminder and the no-export tip (stderr only) |
 //! | [`report`] | The JSON/human result shared by `connect` and `auth`, and exit codes |
+//! | [`shell`] | Quoting values into the commands the CLI suggests |
 //!
 //! Nothing here starts an exporter: provisioning a key and exporting traces
 //! are separate decisions, and `--observability` stays explicit.
@@ -31,6 +32,7 @@ pub(crate) mod notices;
 pub(crate) mod pow;
 pub(crate) mod report;
 pub(crate) mod resolve;
+pub(crate) mod shell;
 
 use std::fmt;
 

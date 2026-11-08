@@ -44,7 +44,7 @@ use crate::platform::report::{
     Status, VerificationReport, WorkspaceReport,
 };
 use crate::platform::resolve::{KeySource, ResolvedKey};
-use crate::platform::{ci_marker, install_id, key_preview, opt_out, pow, CliError};
+use crate::platform::{ci_marker, install_id, key_preview, opt_out, pow, shell, CliError};
 
 /// How long to wait for another `xybrid connect` holding the store lock.
 const STORE_LOCK_TIMEOUT: Duration = Duration::from_secs(90);
@@ -177,8 +177,13 @@ fn connect(
                         .as_deref()
                         .and_then(Path::parent)
                         .map_or_else(|| PathBuf::from(name), |dir| dir.join(name));
-                    let command = connect_command(&host, args, Some(&path), true);
-                    format!(" such as {s} ({command})")
+                    match connect_command(&host, args, Some(&path), true) {
+                        Ok(command) => format!(" such as {s} ({command})"),
+                        Err(unquotable) => format!(
+                            " such as {s} (pass it to --write-env; no command is shown because {})",
+                            unquotable.reason()
+                        ),
+                    }
                 })
                 .unwrap_or_default();
             report.tell_the_user = format!(
@@ -961,7 +966,7 @@ impl Session<'_> {
             .target
             .as_ref()
             .map_or_else(|| "the project file".to_string(), |t| t.display.clone());
-        let retry = self.rerun_command(false);
+        let retry = self.rerun(false);
         self.report.status = Status::Error;
         self.report.error = Some(crate::platform::report::ErrorReport {
             code: err.code.to_string(),
@@ -969,24 +974,25 @@ impl Session<'_> {
         });
         self.report.next_steps = Vec::new();
         self.report.tell_the_user = format!(
-            "{done}, but couldn't write it to {file}: {} Fix that and run {retry} again; it \
-             reuses the saved key instead of creating another workspace.{}",
+            "{done}, but couldn't write it to {file}: {} Fix that and run {retry}; it reuses \
+             the saved key instead of creating another workspace.{}",
             ensure_period(&err.message),
             self.claim_sentences(credential)
         );
     }
 
-    /// This `connect` as a command to run again from the same directory.
-    /// `repeat_new` keeps `--new`, for a rerun that must repeat a request
-    /// whose answer was lost; a rerun that should reuse the credential this
-    /// run saved drops it.
-    fn rerun_command(&self, repeat_new: bool) -> String {
-        connect_command(
+    /// How to run this `connect` again from the same directory (see
+    /// [`run_again`]). `repeat_new` keeps `--new`, for a rerun that must
+    /// repeat a request whose answer was lost; a rerun that should reuse the
+    /// credential this run saved drops it.
+    fn rerun(&self, repeat_new: bool) -> String {
+        let command = connect_command(
             &self.host,
             self.args,
             self.args.write_env.as_deref(),
             repeat_new,
-        )
+        );
+        run_again(command, self.args.new && !repeat_new)
     }
 
     /// Where the app finds the key once this run succeeds.
@@ -1190,10 +1196,10 @@ impl Session<'_> {
         // No credential was saved, so a rerun with the same flags (`--new`
         // included) takes the same path: a kept request is repeated rather
         // than the old workspace's saved key reused.
-        let rerun = self.rerun_command(true);
+        let rerun = self.rerun(true);
         let recover = format!(
-            "Run {rerun} again within the next few minutes: it repeats the same request, so it \
-             picks up what was created instead of creating another."
+            "Run {rerun} within the next few minutes: it repeats the same request, so it picks \
+             up what was created instead of creating another."
         );
         match failure {
             ApiFailure::Offline(_) => {
@@ -1215,8 +1221,8 @@ impl Session<'_> {
                     // Nothing that creates a workspace was sent.
                     None => format!(
                         "Couldn't reach Xybrid from this environment, so no workspace was \
-                         created. On-device inference works without a key. Run {rerun} again \
-                         later to see traces in the console."
+                         created. On-device inference works without a key. Run {rerun} later \
+                         to see traces in the console."
                     ),
                 };
             }
@@ -1757,33 +1763,58 @@ pub(crate) fn is_workspace_expired(failure: &ApiFailure) -> bool {
     }
 }
 
-/// Global flags that select this host, for copy-pasteable commands.
-pub(crate) fn host_flags(host: &PlatformHost) -> String {
-    match host.environment() {
-        crate::platform::host::Environment::Production => String::new(),
-        _ => format!(" --platform-url {}", host.origin()),
+/// A flag whose value can't be written safely into a command for this
+/// platform's shell (see [`shell`]), so no command is suggested.
+#[derive(Debug, PartialEq, Eq)]
+struct Unquotable(&'static str);
+
+impl Unquotable {
+    /// Why the report shows no command.
+    fn reason(&self) -> String {
+        format!("the {} value can't be quoted safely for this shell", self.0)
     }
+}
+
+/// ` flag value`, the value quoted as one word for this platform's shell.
+fn push_flag(command: &mut String, flag: &'static str, value: &str) -> Result<(), Unquotable> {
+    let words = shell::flag(flag, value).ok_or(Unquotable(flag))?;
+    command.push(' ');
+    command.push_str(&words);
+    Ok(())
+}
+
+/// Global flags that select this host, for copy-pasteable commands.
+fn host_flags(host: &PlatformHost) -> Result<String, Unquotable> {
+    let mut flags = String::new();
+    if host.environment() != crate::platform::host::Environment::Production {
+        push_flag(&mut flags, "--platform-url", host.origin())?;
+    }
+    Ok(flags)
 }
 
 /// `xybrid connect` as a copy-pasteable command, in backticks, to run from
 /// the directory this one ran in. It keeps the flags that decide what
 /// `connect` does: the host, `--write-env` (the path as given, or
 /// `write_env`), `--env-name`, `--allow-ci`, `--allow-custom-host`, and
-/// `--new` when `repeat_new`.
+/// `--new` when `repeat_new`. Each value is one word of this platform's
+/// shell; a value that can't be written safely there (see [`shell`]) is an
+/// error, so no command is shown rather than one that runs something else.
 fn connect_command(
     host: &PlatformHost,
     args: &ConnectArgs,
     write_env: Option<&Path>,
     repeat_new: bool,
-) -> String {
-    let mut command = format!("`xybrid{} connect", host_flags(host));
+) -> Result<String, Unquotable> {
+    let mut command = format!("`xybrid{} connect", host_flags(host)?);
     if repeat_new && args.new {
         command.push_str(" --new");
     }
     if let Some(path) = write_env {
-        command.push_str(&format!(" --write-env {}", path.display()));
+        // A path that isn't Unicode can't be shown without changing it.
+        let path = path.to_str().ok_or(Unquotable("--write-env"))?;
+        push_flag(&mut command, "--write-env", path)?;
         if let Some(name) = &args.env_name {
-            command.push_str(&format!(" --env-name {name}"));
+            push_flag(&mut command, "--env-name", name)?;
         }
     }
     if args.allow_ci {
@@ -1793,7 +1824,22 @@ fn connect_command(
         command.push_str(" --allow-custom-host");
     }
     command.push('`');
-    command
+    Ok(command)
+}
+
+/// `connect` to run again, for a sentence such as "Run {…} within the next
+/// few minutes": `command` followed by "again", or, when a value can't be
+/// written safely for this shell, the flags to repeat (all of them, except
+/// `--new` when `drops_new`).
+fn run_again(command: Result<String, Unquotable>, drops_new: bool) -> String {
+    match command {
+        Ok(command) => format!("{command} again"),
+        Err(unquotable) => format!(
+            "`xybrid connect` again with the same flags{} (no command is shown because {})",
+            if drops_new { " except --new" } else { "" },
+            unquotable.reason()
+        ),
+    }
 }
 
 /// Where the app finds the key, for the `wire_init` and `verify` steps.
@@ -1809,7 +1855,13 @@ enum KeyHome<'a> {
 }
 
 fn next_steps(host: &PlatformHost, home: KeyHome<'_>) -> Vec<NextStep> {
+    // A host that can't be written safely for this shell gets no commands.
     let flags = host_flags(host);
+    let unshown = flags
+        .as_ref()
+        .err()
+        .map(|unquotable| format!(" No command is shown because {}.", unquotable.reason()))
+        .unwrap_or_default();
     let allow = if host.is_custom() {
         " --allow-custom-host"
     } else {
@@ -1849,21 +1901,26 @@ fn next_steps(host: &PlatformHost, home: KeyHome<'_>) -> Vec<NextStep> {
                  it to the SDK's Xybrid observability preset (ObservabilityConfig::xybrid with a \
                  metadata-only content policy, or the binding's equivalent). The key alone \
                  exports nothing. Never hard-code or print it. Keep any observability the app \
-                 already owns."
+                 already owns.{unshown}"
             ),
-            command: Some(format!(
-                "OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content xybrid{flags} \
-                 --observability{traces} run --model <model-id> --input-text \"hello\""
-            )),
+            command: flags.as_ref().ok().map(|flags| {
+                format!(
+                    "OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content xybrid{flags} \
+                     --observability{traces} run --model <model-id> --input-text \"hello\""
+                )
+            }),
         },
         NextStep {
             kind: "verify",
             summary: format!(
                 "After one real inference has flushed, check that a trace was stored for this \
                  project: verification.traces_received is true only then. none or unavailable \
-                 is not success.{verify_note}"
+                 is not success.{verify_note}{unshown}"
             ),
-            command: Some(format!("xybrid{flags} auth status{allow} --json")),
+            command: flags
+                .as_ref()
+                .ok()
+                .map(|flags| format!("xybrid{flags} auth status{allow} --json")),
         },
         NextStep {
             kind: "relay",
@@ -1944,21 +2001,135 @@ mod tests {
         // Repeating a lost request keeps --new: without it the saved key of
         // the old workspace would be reused instead.
         assert_eq!(
-            connect_command(&host, &args, args.write_env.as_deref(), true),
+            connect_command(&host, &args, args.write_env.as_deref(), true).unwrap(),
             "`xybrid --platform-url http://127.0.0.1:8080 connect --new --write-env config/.env \
              --env-name EXPO_PUBLIC_XYBRID_API_KEY --allow-ci --allow-custom-host`"
         );
         // Once a credential is saved, a rerun must reuse it, never replace it.
         assert_eq!(
-            connect_command(&host, &args, args.write_env.as_deref(), false),
+            connect_command(&host, &args, args.write_env.as_deref(), false).unwrap(),
             "`xybrid --platform-url http://127.0.0.1:8080 connect --write-env config/.env \
              --env-name EXPO_PUBLIC_XYBRID_API_KEY --allow-ci --allow-custom-host`"
         );
         let production = PlatformHost::parse(host::PRODUCTION_API).unwrap();
         assert_eq!(
-            connect_command(&production, &ConnectArgs::default(), None, true),
+            connect_command(&production, &ConnectArgs::default(), None, true).unwrap(),
             "`xybrid connect`"
         );
+    }
+
+    /// `word` as this platform's shell quotes it (see `shell`).
+    fn quoted(word: &str) -> String {
+        if cfg!(windows) {
+            format!("\"{word}\"")
+        } else {
+            format!("'{word}'")
+        }
+    }
+
+    /// Every user-supplied value is one shell word, so a pasted command
+    /// repeats the run instead of splitting a path or expanding `$HOME`.
+    #[test]
+    fn suggested_commands_quote_each_value_as_one_word() {
+        let production = PlatformHost::parse(host::PRODUCTION_API).unwrap();
+        let args = ConnectArgs::default();
+        for path in ["ios/My App/Secrets.xcconfig", "My (App)/a&b.env"] {
+            assert_eq!(
+                connect_command(&production, &args, Some(Path::new(path)), true).unwrap(),
+                format!("`xybrid connect --write-env {}`", quoted(path))
+            );
+        }
+        #[cfg(unix)]
+        assert_eq!(
+            connect_command(&production, &args, Some(Path::new("it's $HOME/.env")), true).unwrap(),
+            "`xybrid connect --write-env 'it'\\''s $HOME/.env'`"
+        );
+        // A host origin may hold shell syntax too: brackets of an IPv6
+        // address, or `$(…)` in a hostname.
+        for origin in ["http://[::1]:8080", "https://a$(id).example"] {
+            let host = PlatformHost::parse(origin).unwrap();
+            let command = connect_command(&host, &args, None, true);
+            if cfg!(windows) && origin.contains('$') {
+                assert_eq!(command, Err(Unquotable("--platform-url")));
+            } else {
+                assert_eq!(
+                    command.unwrap(),
+                    format!(
+                        "`xybrid --platform-url {} connect --allow-custom-host`",
+                        quoted(origin)
+                    )
+                );
+            }
+        }
+        // A value starting with `-` stays attached to its flag.
+        assert_eq!(
+            connect_command(&production, &args, Some(Path::new("-x/.env")), true).unwrap(),
+            format!("`xybrid connect {}`", quoted("--write-env=-x/.env"))
+        );
+    }
+
+    /// A value that can't be written safely is not shown as a command: the
+    /// copy names the flags to repeat instead.
+    #[test]
+    fn an_unquotable_value_suggests_no_command() {
+        let production = PlatformHost::parse(host::PRODUCTION_API).unwrap();
+        let args = ConnectArgs::default();
+        for path in ["a\nb/.env", "a`b/.env", "a\u{202e}b/.env"] {
+            assert_eq!(
+                connect_command(&production, &args, Some(Path::new(path)), true),
+                Err(Unquotable("--write-env")),
+                "{path:?}"
+            );
+        }
+        #[cfg(windows)]
+        for path in ["%USERPROFILE%/.env", "$HOME/.env", "a\"b/.env"] {
+            assert_eq!(
+                connect_command(&production, &args, Some(Path::new(path)), true),
+                Err(Unquotable("--write-env")),
+                "{path:?}"
+            );
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let path = Path::new(std::ffi::OsStr::from_bytes(b"caf\xe9/.env"));
+            assert_eq!(
+                connect_command(&production, &args, Some(path), true),
+                Err(Unquotable("--write-env"))
+            );
+        }
+        // The copy says which flags to repeat, and that none is shown.
+        assert_eq!(
+            run_again(Err(Unquotable("--write-env")), false),
+            "`xybrid connect` again with the same flags (no command is shown because the \
+             --write-env value can't be quoted safely for this shell)"
+        );
+        assert!(run_again(Err(Unquotable("--write-env")), true)
+            .starts_with("`xybrid connect` again with the same flags except --new ("));
+        assert_eq!(
+            run_again(Ok("`xybrid connect`".into()), true),
+            "`xybrid connect` again"
+        );
+        // A host origin can hold a backtick: the next steps keep their
+        // summaries, say why, and show no command.
+        let host = PlatformHost::parse("https://a`b.example").unwrap();
+        assert_eq!(
+            connect_command(&host, &args, None, true),
+            Err(Unquotable("--platform-url"))
+        );
+        for step in next_steps(&host, KeyHome::Store) {
+            assert_eq!(step.command, None, "{}", step.kind);
+            if step.kind != "relay" {
+                assert!(
+                    step.summary.ends_with(
+                        " No command is shown because the --platform-url value can't be quoted \
+                         safely for this shell."
+                    ),
+                    "{}",
+                    step.summary
+                );
+            }
+        }
     }
 
     #[test]
