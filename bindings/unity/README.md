@@ -506,6 +506,22 @@ using (var workflow = WorkflowObservation.Start("answer-question"))
 [examples/unity/Observability](../../examples/unity/Observability/README.md)
 for the mobile lifecycle wiring.
 
+For contributors: `Tests/Editor/ObservabilityRuntimeScenarioTests.cs` runs the
+repository's shared observability scenario
+([`tools/scripts/observability_capture/scenario.md`](../../tools/scripts/observability_capture/scenario.md))
+through this API in the Editor. It is ignored unless it is given a receiver,
+through `XYBRID_SCENARIO_*` environment variables or `-xybridScenario*` Editor
+arguments. `.github/workflows/unity-editor.yml` runs it on Linux. To run it on
+your machine, stage the host native as that workflow does, then let the driver
+start the receiver, launch the Editor and check the capture:
+
+```bash
+python3 tools/scripts/observability_capture/run_scenario.py --binding unity --out-dir out/unity -- \
+  <path-to-Unity-editor> -batchmode -projectPath tools/unity-runtime-smoke \
+  -runTests -testPlatform EditMode -testCategory ObservabilityRuntimeScenario \
+  -testResults "$PWD/out/unity/editmode-results.xml"
+```
+
 ## Registry Telemetry
 
 The Unity binding reports `binding=unity` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).

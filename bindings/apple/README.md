@@ -139,6 +139,28 @@ try await Xybrid.Observability.withWorkflow("answer-question") { workflow in
 `withWorkflow` completes on return, cancels on `CancellationError`, and fails
 with the label `application_error` (never the error text) otherwise.
 
+`Tests/XybridTests/ObservabilityRuntimeTests.swift` runs the shared
+[observability runtime scenario](../../tools/scripts/observability_capture/scenario.md)
+through this API against a local OTLP receiver. It skips unless the scenario
+driver supplies the receiver, which CI's `Observability runtime scenario (iOS
+Simulator)` job in `build-apple.yml` does. To run it on a Mac, with the local
+xcframework unzipped (see below) and a booted simulator:
+
+```bash
+./bindings/apple/scripts/set-natives-mode.sh --set-local
+SIM_ID=<booted simulator UDID>   # xcrun simctl list devices booted
+python3 tools/scripts/observability_capture/run_scenario.py --binding swift --out-dir out/swift -- \
+  env "TEST_RUNNER_XYBRID_SCENARIO_ENDPOINT={endpoint}" \
+      "TEST_RUNNER_XYBRID_SCENARIO_EXPECTATIONS={expectations}" \
+      "TEST_RUNNER_XYBRID_SCENARIO_WORKDIR={workdir}" \
+  xcodebuild test -scheme Xybrid -destination "platform=iOS Simulator,id=$SIM_ID" \
+    -only-testing:XybridTests/ObservabilityRuntimeTests CODE_SIGNING_ALLOWED=NO
+./bindings/apple/scripts/set-natives-mode.sh --set-remote   # before committing
+```
+
+`xcodebuild` passes a variable to the simulator's test runner only with the
+`TEST_RUNNER_` prefix, which it strips.
+
 ### Available Types
 
 | Type | Description |
