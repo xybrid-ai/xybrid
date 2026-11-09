@@ -37,15 +37,18 @@ LOG="$OUT_DIR/xcodebuild-test.log"
 mkdir -p "$OUT_DIR"
 
 status=0
-(cd "$ROOT" && xcodebuild test-without-building \
+# xcodebuild forwards only TEST_RUNNER_-prefixed environment variables to the
+# test runner (prefix stripped); build settings would not reach it.
+(cd "$ROOT" && env \
+    TEST_RUNNER_XYBRID_SCENARIO_DEVICE=1 \
+    "TEST_RUNNER_XYBRID_SCENARIO_ENDPOINT=$ENDPOINT" \
+    "TEST_RUNNER_XYBRID_SCENARIO_SPEC_BASE64=$(base64 < "$SPEC" | tr -d '\n')" \
+    xcodebuild test-without-building \
     -scheme Xybrid \
     -destination "platform=iOS,id=$DEVICE" \
     -derivedDataPath "$DERIVED" \
     -only-testing:XybridTests/ObservabilityRuntimeTests \
-    -skipPackagePluginValidation \
-    TEST_RUNNER_XYBRID_SCENARIO_DEVICE=1 \
-    "TEST_RUNNER_XYBRID_SCENARIO_ENDPOINT=$ENDPOINT" \
-    "TEST_RUNNER_XYBRID_SCENARIO_SPEC_BASE64=$(base64 < "$SPEC" | tr -d '\n')") \
+    -skipPackagePluginValidation) \
     > "$LOG" 2>&1 || status=$?
 grep -E "Test Case|Executed|error:|XCTSkip|skipped" "$LOG" | tail -20 || true
 
