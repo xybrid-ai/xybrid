@@ -54,6 +54,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writes an artifact. See `docs/sdk/observability-coverage.md` for migration and
   execution coverage.
 
+### Fixed
+
+- Cloud calls no longer sleep for whatever `Retry-After` a server sends. A 429
+  whose error code or type is `insufficient_quota` (a spent quota, such as an
+  unclaimed agent workspace's) fails at once with the server's message instead
+  of being retried, and repeats of it no longer open the gateway circuit
+  breaker, so a long-lived `Cloud` keeps returning that message rather than
+  "try again later". Other waits are honored up to
+  `xybrid_core::http::MAX_RETRY_AFTER` (60 s per call, in total); a longer
+  `Retry-After` returns the rate-limit error at once. `Retry-After` is read as
+  seconds or as an HTTP-date (`xybrid_core::http::parse_retry_after`), so a
+  far-off date gives up at once instead of waiting a 60 s default. Registry
+  calls (across every registry URL they try) and model downloads follow the
+  same bound.
+- An opened circuit breaker recovers after its open duration instead of
+  refusing every later call until reset. The gateway client and registry calls
+  took a half-open circuit's only test request twice (once to fail fast, once
+  for the attempt), so the probe was never sent. Nor is that request kept any
+  longer by a retried call that gives up on a long `Retry-After`, or by a
+  registry probe that ends offline (it is given back) or with a compatibility
+  refusal (it closes the circuit). `CircuitBreaker::is_refusing` checks without
+  taking a request, and `CircuitBreaker::release` gives one back.
+- A registry call whose failures open a URL's circuit (three 5xx, or one 429)
+  now moves on to the next registry URL instead of failing with "circuit
+  open", and without first sleeping out a `Retry-After` for a retry the open
+  circuit would refuse. When no URL answers, the call reports the registry's
+  own error, so a 429 surfaces as `RateLimited` with its `Retry-After`.
+
 ### Migration
 
 - Analyze saved traces with `xybrid trace FILE`; the session/latest selectors
