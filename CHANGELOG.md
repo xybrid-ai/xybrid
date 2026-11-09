@@ -39,10 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cloud calls no longer sleep for whatever `Retry-After` a server sends. A 429
   whose error code or type is `insufficient_quota` (a spent quota, such as an
   unclaimed agent workspace's) fails at once with the server's message instead
-  of being retried. Other waits are honored up to
+  of being retried, and repeats of it no longer open the gateway circuit
+  breaker, so a long-lived `Cloud` keeps returning that message rather than
+  "try again later". Other waits are honored up to
   `xybrid_core::http::MAX_RETRY_AFTER` (60 s per call, in total); a longer
-  `Retry-After` returns the rate-limit error at once. Registry and
-  model-download retries follow the same bound.
+  `Retry-After` returns the rate-limit error at once. `Retry-After` is read as
+  seconds or as an HTTP-date (`xybrid_core::http::parse_retry_after`), so a
+  far-off date gives up at once instead of waiting a 60 s default. Registry
+  calls (across every registry URL they try) and model downloads follow the
+  same bound.
 
 ### Migration
 
