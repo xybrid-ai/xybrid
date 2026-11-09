@@ -577,50 +577,82 @@ impl ContentPolicy {
 
     /// Applies the replacement rules to every string value. Fails when the
     /// result's preflight cost exceeds the traversal budget, or when one
-    /// string alone outgrows it while its rules are applied (bounded work).
+    /// string alone outgrows it while its rules are applied (amendment A1).
+    ///
+    /// Both conditions depend only on each string's own rule results and on
+    /// the final cost, so the outcome never depends on the order strings are
+    /// visited. The walk also keeps a lower bound of the final cost
+    /// (amendment A9): the structural cost (every node, key and scalar, plus
+    /// 16 per string), plus the final length of each string already
+    /// rewritten, plus the least length each other string can end with (its
+    /// current length when no rule shrinks text, else zero). A rule rebuilds a
+    /// string only while that bound, with the string at the least length it
+    /// can end with after the rule, fits the budget, so nothing more is built
+    /// once the strings already rewritten prove the value over budget. The
+    /// bound never decreases and equals the final cost after the last string,
+    /// so failing on it never changes an outcome.
     fn apply_replacements(&self, value: &mut Value, cost: u64) -> std::result::Result<(), Failure> {
-        if !self
+        let rules: Vec<(&str, &str)> = self
             .rules
             .iter()
-            .any(|r| matches!(r, RedactionRule::ReplaceLiteral { .. }))
-        {
+            .filter_map(|r| match r {
+                RedactionRule::ReplaceLiteral { find, replace } => {
+                    Some((find.as_str(), replace.as_str()))
+                }
+                RedactionRule::OmitAttribute { .. } => None,
+            })
+            .collect();
+        if rules.is_empty() {
             return Ok(());
         }
-        let budget = self.traversal();
-        let mut total = i128::from(cost);
+        let shrinks = rules
+            .iter()
+            .any(|(find, replace)| replace.len() < find.len());
+        // The least final length of a string that is `len` bytes long now.
+        let least = |len: usize| if shrinks { 0 } else { len as i128 };
+        let per_string = self.traversal();
+        let budget = i128::from(per_string);
+        // Lower bound of the final cost before any string is rewritten.
+        let mut bound = i128::from(cost);
+        if shrinks {
+            bound -= string_bytes(value) as i128;
+        }
         let mut overflow = false;
         map_strings(value, &mut |s| {
             if overflow {
                 return;
             }
-            let before = s.len();
-            for rule in self.rules.iter() {
-                if let RedactionRule::ReplaceLiteral { find, replace } = rule {
-                    // Amendment A1 (b): the string's cost after this rule is
-                    // computed from the match count before the new string is
-                    // built, so an expanding rule never allocates beyond the
-                    // budget (work stays bounded by the input size).
-                    let matches = s.matches(find.as_str()).count();
-                    if matches == 0 {
-                        continue;
+            // This string's share of the bound is recomputed from its result.
+            bound -= least(s.len());
+            for &(find, replace) in &rules {
+                // Amendment A1 (b): the string's cost after this rule is
+                // computed from the match count before the new string is
+                // built, so an expanding rule never allocates beyond the
+                // budget for one string.
+                let matches = s.matches(find).count();
+                if matches == 0 {
+                    continue;
+                }
+                let grown = matches
+                    .checked_mul(replace.len())
+                    .and_then(|added| (s.len() - matches * find.len()).checked_add(added));
+                match grown {
+                    Some(len)
+                        if preflight_len_cost(len) <= per_string
+                            && bound + least(len) <= budget =>
+                    {
+                        *s = s.replace(find, replace);
                     }
-                    let grown = matches
-                        .checked_mul(replace.len())
-                        .and_then(|added| (s.len() - matches * find.len()).checked_add(added));
-                    match grown {
-                        Some(len) if preflight_len_cost(len) <= budget => {
-                            *s = s.replace(find.as_str(), replace);
-                        }
-                        _ => {
-                            overflow = true;
-                            return;
-                        }
+                    _ => {
+                        overflow = true;
+                        return;
                     }
                 }
             }
-            total += s.len() as i128 - before as i128;
+            bound += s.len() as i128;
         });
-        if overflow || total > i128::from(budget) {
+        // After the last string the bound is the final cost.
+        if overflow || bound > budget {
             return Err(Failure::RulesBudget);
         }
         Ok(())
@@ -892,6 +924,20 @@ fn map_strings(value: &mut Value, f: &mut impl FnMut(&mut String)) {
         Value::Array(items) => items.iter_mut().for_each(|v| map_strings(v, f)),
         Value::Object(map) => map.values_mut().for_each(|v| map_strings(v, f)),
         _ => {}
+    }
+}
+
+/// Total UTF-8 bytes of every JSON string value (object keys excluded).
+fn string_bytes(value: &Value) -> usize {
+    match value {
+        Value::String(s) => s.len(),
+        Value::Array(items) => items
+            .iter()
+            .fold(0, |sum, v| sum.saturating_add(string_bytes(v))),
+        Value::Object(map) => map
+            .values()
+            .fold(0, |sum, v| sum.saturating_add(string_bytes(v))),
+        _ => 0,
     }
 }
 
@@ -1457,5 +1503,182 @@ mod tests {
             expand.prepare_json("k", &json!(["x"])),
             Outcome::Keep(_)
         ));
+    }
+
+    /// The amendment A1 checks before the A9 early exit: every string is
+    /// rewritten, then the final cost is compared once.
+    fn reference_replacements(
+        rules: &[RedactionRule],
+        budget: u64,
+        mut value: Value,
+        cost: u64,
+    ) -> Option<Value> {
+        let mut total = i128::from(cost);
+        let mut overflow = false;
+        map_strings(&mut value, &mut |s| {
+            if overflow {
+                return;
+            }
+            let before = s.len();
+            for rule in rules {
+                let RedactionRule::ReplaceLiteral { find, replace } = rule else {
+                    continue;
+                };
+                let matches = s.matches(find.as_str()).count();
+                if matches == 0 {
+                    continue;
+                }
+                let len = s.len() - matches * find.len() + matches * replace.len();
+                if preflight_len_cost(len) > budget {
+                    overflow = true;
+                    return;
+                }
+                *s = s.replace(find.as_str(), replace);
+            }
+            total += s.len() as i128 - before as i128;
+        });
+        (!overflow && total <= i128::from(budget)).then_some(value)
+    }
+
+    fn replace(find: &str, with: &str) -> RedactionRule {
+        RedactionRule::replace_literal(find, with).unwrap()
+    }
+
+    /// Runs the rules alone (no hook, no truncation) under `budget`.
+    fn run_rules(rules: &[RedactionRule], budget: u64, value: &Value) -> Option<Value> {
+        let policy = ContentPolicy::default()
+            .with_max_traversal_bytes(budget as usize)
+            .with_rules(rules.iter().cloned());
+        let mut out = value.clone();
+        policy
+            .apply_replacements(&mut out, preflight::cost_of(value))
+            .ok()
+            .map(|()| out)
+    }
+
+    #[test]
+    fn the_early_exit_keeps_every_outcome_of_the_final_cost_check() {
+        // Amendment A9: stopping on the lower bound never changes an outcome.
+        // Rule sets that only grow, only shrink, grow then shrink (the bound
+        // then counts other strings as empty), and an omit rule mixed in.
+        let rule_sets: Vec<Vec<RedactionRule>> = vec![
+            vec![replace("a", "bbbb")],
+            vec![replace("ab", "c")],
+            vec![replace("a", "bbbbbbbb"), replace("bbbb", "")],
+            vec![replace("b", ""), replace("a", "xyz"), replace("z", "zz")],
+            vec![
+                RedactionRule::omit_attribute("k").unwrap(),
+                replace("c", "cc"),
+                replace("q", "q"),
+            ],
+        ];
+        // Deterministic documents: arrays and objects of strings over a small
+        // alphabet, plus scalars, so every rule matches somewhere.
+        let mut seed = 0x2545_f491_u64;
+        let mut next = move |n: u64| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % n
+        };
+        let mut outcomes = [0_usize; 2];
+        for doc in 0..60 {
+            let strings: Vec<Value> = (0..1 + next(12))
+                .map(|_| {
+                    let len = next(40) as usize;
+                    let text: String = (0..len)
+                        .map(|_| ['a', 'b', 'c', 'z', ' '][next(5) as usize])
+                        .collect();
+                    Value::String(text)
+                })
+                .collect();
+            let value = if doc % 2 == 0 {
+                json!({"n": 1, "list": strings, "nested": {"s": "abab", "t": true}})
+            } else {
+                Value::Array(strings)
+            };
+            let cost = preflight::cost_of(&value);
+            for rules in &rule_sets {
+                // Budgets around the final cost and the largest intermediate.
+                let reach = reference_replacements(rules, u64::MAX, value.clone(), cost)
+                    .map(|v| preflight::cost_of(&v))
+                    .unwrap();
+                let mut budgets = vec![cost, cost + 1, reach.saturating_sub(1), reach, reach + 1];
+                budgets.extend((0..6).map(|_| cost + next(reach.max(cost) - cost + 64)));
+                for budget in budgets.into_iter().filter(|b| *b >= cost) {
+                    let expected = reference_replacements(rules, budget, value.clone(), cost);
+                    assert_eq!(
+                        run_rules(rules, budget, &value),
+                        expected,
+                        "doc {doc}, budget {budget}, rules {rules:?}"
+                    );
+                    outcomes[usize::from(expected.is_some())] += 1;
+                }
+            }
+        }
+        // Both outcomes are exercised, many times each.
+        assert!(outcomes[0] > 200 && outcomes[1] > 200, "{outcomes:?}");
+    }
+
+    #[test]
+    fn the_rules_outcome_does_not_depend_on_string_order() {
+        // One string expands, another shrinks; only the final cost decides.
+        let rules = [replace("x", "yyyy"), replace("zz", "")];
+        let grow = json!("x".repeat(10));
+        let shrink = json!("z".repeat(20));
+        let forward = Value::Array(vec![grow.clone(), shrink.clone()]);
+        let backward = Value::Array(vec![shrink, grow]);
+        let cost = preflight::cost_of(&forward);
+        // Final: 16 + (16 + 40) + (16 + 0) = 88; preflight was 16 + 26 + 36 = 78.
+        assert_eq!(cost, 78);
+        for budget in [78, 87, 88, 89] {
+            let a = run_rules(&rules, budget, &forward);
+            let b = run_rules(&rules, budget, &backward);
+            assert_eq!(a.is_some(), budget >= 88, "budget {budget}");
+            assert_eq!(a.is_some(), b.is_some(), "budget {budget}");
+        }
+    }
+
+    #[test]
+    fn a_document_over_budget_builds_nothing_once_its_rewritten_strings_prove_it() {
+        // Amendment A9. 600 strings of 480 `a` cost 600 * 496 + 16 = 297,616,
+        // under the 491,520 default; each would grow to 480,000 bytes, which
+        // passes the per-string guard on its own.
+        let value = Value::Array(vec![json!("a".repeat(480)); 600]);
+        let policy = ContentPolicy::default().with_rule(replace("a", &"b".repeat(1000)));
+        let cost = preflight::cost_of(&value);
+        assert!(cost <= policy.traversal());
+        let mut out = value.clone();
+        assert!(policy.apply_replacements(&mut out, cost).is_err());
+        // No rule shrinks text, so the bound fails before the first rewritten
+        // string is built: nothing changed.
+        assert_eq!(out, value, "a string was rewritten before failing closed");
+
+        // With a rule that can shrink text the other strings may end empty,
+        // so rewritten strings are built and only their final lengths count.
+        // The structural cost is 297,616 - 600 * 480 = 9,616; each rewritten
+        // string adds 480,000, so after the second one the bound is over
+        // budget and the third is never built.
+        let policy = policy.with_rule(replace("\u{0}", ""));
+        let mut out = value.clone();
+        assert!(policy.apply_replacements(&mut out, cost).is_err());
+        let Value::Array(items) = &out else {
+            unreachable!()
+        };
+        let rewritten = items.iter().filter(|s| **s != value[0]).count();
+        assert_eq!(rewritten, 2, "a string was built after the bound failed");
+
+        // A growth spread over many strings stops part way: each string grows
+        // from 480 to 1,920 bytes, and 600 * 1,440 more bytes exceed the
+        // budget; the first string whose growth would cross it is not built.
+        let policy = ContentPolicy::default().with_rule(replace("a", "bbbb"));
+        let mut out = value.clone();
+        assert!(policy.apply_replacements(&mut out, cost).is_err());
+        let Value::Array(items) = &out else {
+            unreachable!()
+        };
+        let rewritten = items.iter().filter(|s| **s != value[0]).count();
+        let room = (policy.traversal() - cost) / 1440;
+        assert_eq!(rewritten as u64, room, "only strings that fit were built");
     }
 }

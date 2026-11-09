@@ -445,7 +445,22 @@ comment is processed in this order:
 6. **Validation** of the callback's output: JSON data only, depth <= 128, cost <=
    `max_traversal_bytes`, a string for string kinds.
 7. **Replacement rules** in order; the result's cost must stay <=
-   `max_traversal_bytes`.
+   `max_traversal_bytes`. The value fails closed when (a) its final cost
+   exceeds the budget, or (b) one string alone, after any rule, would cost
+   more than the budget (`16 + utf8_len`, computed from the match count before
+   the string is rebuilt). The outcome depends on nothing else, in particular
+   not on the order in which strings or object members are visited. An
+   implementation may stop as soon as a lower bound of the final cost exceeds
+   the budget, because that cannot change the outcome. Rust does. Its bound is
+   the structural cost (16 per string included), plus the final length of each
+   string already rewritten, plus the least length each remaining string can
+   end with: its current length when no rule's `replace` is shorter than its
+   `find`, else 0. Rust rebuilds a string only while that bound, with the
+   string at the least length it can end with after the rule, fits the
+   budget. When no rule shrinks text, the rewritten text it holds therefore
+   stays within the budget; otherwise within about two budgets. Strings
+   rewritten before the bound fails can still expand and shrink back, each
+   intermediate bounded by (b). JS checks (a) once, after every string.
 8. **Truncation** (unchanged algorithm below; error messages are bounded to 256
    code points instead).
 9. **Retained-operation budget**: content retained by one operation may not

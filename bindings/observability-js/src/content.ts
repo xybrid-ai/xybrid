@@ -528,7 +528,17 @@ const occurrences = (text: string, find: string): number => {
   return count;
 };
 
-type ReplaceRule = Extract<RedactionRule, { type: "replace_literal" }>;
+export type ReplaceRule = Extract<RedactionRule, { type: "replace_literal" }>;
+
+/** Total UTF-8 bytes of every string value of `value` (object keys excluded). */
+const stringBytes = (value: JsonValue): number => {
+  if (typeof value === "string") return utf8Length(value);
+  if (value === null || typeof value !== "object") return 0;
+  let total = 0;
+  for (const item of Array.isArray(value) ? value : Object.values(value))
+    total += stringBytes(item);
+  return total;
+};
 
 /**
  * Applies the replacement rules in order to every string value of `value` (owned by the caller
@@ -537,26 +547,38 @@ type ReplaceRule = Extract<RedactionRule, { type: "replace_literal" }>;
  * would cost more than the traversal budget (checked before that string is built), or when the
  * final document cost exceeds it. Both checks are independent of traversal order (contract
  * amendment A1), so Rust and JS agree whatever order they visit object members in.
+ *
+ * The walk also keeps a lower bound of the final cost (amendment A9): the structural cost plus
+ * the final length of each string already rewritten plus the least length every other string
+ * can end with (its current length when no rule shrinks text, else zero). A rule rebuilds a
+ * string only while that bound fits the budget, so nothing more is built once the strings
+ * already rewritten prove the document over budget. The bound never decreases and equals the
+ * final cost after the last string, so stopping on it never changes an outcome.
  */
-const applyReplacements = (
+export const applyReplacements = (
   value: JsonValue,
   rules: readonly ReplaceRule[],
   startCost: number,
   limit: number,
 ): JsonValue => {
-  let cost = startCost;
+  const shrinks = rules.some((rule) => utf8Length(rule.replace) < utf8Length(rule.find));
+  // The least final length of a string that is `length` bytes long now.
+  const least = (length: number): number => (shrinks ? 0 : length);
+  let bound = shrinks ? startCost - stringBytes(value) : startCost;
   const rewrite = (text: string): string => {
     let result = text;
     let length = utf8Length(text);
+    // This string's share of the bound is recomputed from its result.
+    bound -= least(length);
     for (const rule of rules) {
       const count = occurrences(result, rule.find);
       if (count === 0) continue;
       const next = length + count * (utf8Length(rule.replace) - utf8Length(rule.find));
-      if (NODE + next > limit) throw new Failure("rules");
+      if (NODE + next > limit || bound + least(next) > limit) throw new Failure("rules");
       result = result.split(rule.find).join(rule.replace);
-      cost += next - length;
       length = next;
     }
+    bound += length;
     return result;
   };
   const visit = (node: JsonValue): JsonValue => {
@@ -574,7 +596,8 @@ const applyReplacements = (
     return record;
   };
   const result = visit(value);
-  if (cost > limit) throw new Failure("rules");
+  // After the last string the bound is the final cost.
+  if (bound > limit) throw new Failure("rules");
   return result;
 };
 

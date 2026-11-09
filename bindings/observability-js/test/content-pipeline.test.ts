@@ -2,7 +2,7 @@
 // content-9, content-10, content-11).
 import { afterEach, describe, expect, test } from "bun:test";
 import { DiagLogLevel, diag } from "@opentelemetry/api";
-import { ContentProcessor, jsonCost } from "../src/content.ts";
+import { applyReplacements, ContentProcessor, jsonCost } from "../src/content.ts";
 import {
   boundJson,
   DEFAULTS,
@@ -530,4 +530,35 @@ test("the traversal budget is the preflight cost of the canonical form, at the b
       kept ? { kind: "value", value: canonical } : { kind: "failed", reason: "traversal" },
     );
   }
+});
+
+describe("replacement rules stop building once the document is provably over budget (A9)", () => {
+  const expand = [{ type: "replace_literal", find: "a", replace: "b".repeat(100) }] as const;
+
+  test("an expanding rule over many strings rebuilds only a few before failing", () => {
+    // 1,000 strings of 10 bytes each fit (26,016 of 30,000), and each one alone still fits after
+    // the rule (1,016), but every rewrite adds 990 bytes, so the document is over budget after a
+    // handful. Without the bound every string would be rebuilt before the final check.
+    const doc: JsonValue[] = Array.from({ length: 1000 }, () => "a".repeat(10));
+    expect(() => applyReplacements(doc, expand, jsonCost(doc), 30_000)).toThrow();
+    const rebuilt = doc.filter((item) => item !== "a".repeat(10)).length;
+    expect(rebuilt).toBeGreaterThan(0);
+    expect(rebuilt).toBeLessThanOrEqual(5);
+  });
+
+  test("outcomes are unchanged within budget and with shrinking rules", () => {
+    const doc: JsonValue = { a: "aaa", b: ["xaxa", "y"], c: { d: "a" } };
+    const out = applyReplacements(structuredClone(doc), expand, jsonCost(doc), 10_000);
+    expect(out).toEqual({
+      a: "b".repeat(300),
+      b: [`x${"b".repeat(100)}x${"b".repeat(100)}`, "y"],
+      c: { d: "b".repeat(100) },
+    });
+    const grow = { type: "replace_literal", find: "a", replace: "aaaa" } as const;
+    const shrink = { type: "replace_literal", find: "aaaa", replace: "" } as const;
+    const many: JsonValue[] = Array.from({ length: 50 }, () => "a".repeat(20));
+    // Expands to 80 bytes then shrinks to nothing: the final cost fits, so nothing fails.
+    const shrunk = applyReplacements(structuredClone(many), [grow, shrink], jsonCost(many), 2_000);
+    expect(shrunk).toEqual(Array.from({ length: 50 }, () => ""));
+  });
 });
