@@ -1894,6 +1894,19 @@ mod tests {
             (server, url)
         }
 
+        /// A loopback gateway is not the configured Xybrid platform gateway,
+        /// so it receives the run's context only once the session allowlists
+        /// its origin (the mock above requires `traceparent`).
+        fn allowing(
+            server: &MockServer,
+        ) -> (
+            crate::observability::ObservabilitySession,
+            Memory,
+            opentelemetry_sdk::trace::SdkTracerProvider,
+        ) {
+            memory_session_allowing(&[&server.base_url()])
+        }
+
         fn cloud_yaml(gateway: &str) -> String {
             format!(
                 "name: rust-observed\nstages:\n  - id: draft\n    model: loopback-model\n    target: cloud\n    provider: openai\n    gateway_url: \"{gateway}\"\n    api_key: local-test-only\n    timeout_ms: 5000\n"
@@ -1913,8 +1926,8 @@ mod tests {
 
         #[test]
         fn streaming_fallback_reuses_one_workflow_and_caller_controls() {
-            let (_server, url) = gateway();
-            let (session, memory, _provider) = memory_session();
+            let (server, url) = gateway();
+            let (session, memory, _provider) = allowing(&server);
             let parent = ObservationContext::from_traceparent(
                 "00-5bf92f3577b34da6a3ce929d0e0e4736-2222222222222222-01",
                 None,
@@ -1951,8 +1964,8 @@ mod tests {
 
         #[test]
         fn pipeline_runs_return_workflow_and_stage_references_that_export() {
-            let (_server, url) = gateway();
-            let (session, memory, _provider) = memory_session();
+            let (server, url) = gateway();
+            let (session, memory, _provider) = allowing(&server);
             let parent = ObservationContext::from_traceparent(
                 "00-5bf92f3577b34da6a3ce929d0e0e4736-2222222222222222-01",
                 None,
@@ -2024,7 +2037,7 @@ mod tests {
         #[test]
         fn a_bundle_present_stage_routed_to_cloud_is_a_remote_client_inference() {
             let (server, url) = gateway();
-            let (session, memory, _provider) = memory_session();
+            let (session, memory, _provider) = allowing(&server);
             let bundle = tempfile::tempdir().unwrap();
             let mut metadata =
                 xybrid_core::execution::ModelMetadata::onnx("bundle-model", "1.0", "model.onnx");
@@ -2120,8 +2133,8 @@ mod tests {
 
         #[test]
         fn pipeline_warmup_records_loads_but_no_workflow_inference_or_input() {
-            let (_server, url) = gateway();
-            let (session, memory, _provider) = memory_session();
+            let (server, url) = gateway();
+            let (session, memory, _provider) = allowing(&server);
             let pipeline = PipelineRef::from_yaml(&cloud_yaml(&url))
                 .unwrap()
                 .load()

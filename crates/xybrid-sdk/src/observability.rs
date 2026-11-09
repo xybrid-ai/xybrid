@@ -689,7 +689,8 @@ pub(crate) struct RunObservation {
     started: SystemTime,
     subject: RunSubject,
     server: Option<(Option<String>, Option<i64>)>,
-    attempts: std::sync::atomic::AtomicU32,
+    /// Shared with attempt recorders, whose transport retries start attempts too.
+    attempts: Arc<std::sync::atomic::AtomicU32>,
 }
 
 /// Records streamed chunks from token callbacks (which must be `Send`).
@@ -718,9 +719,10 @@ pub(crate) struct AttemptSpec<'a> {
 
 /// One concrete execution attempt of a run (speculative cloud leg, reactive
 /// fallback). Outbound requests made on this thread while it lives carry the
-/// attempt's trace context; stages become its children.
+/// attempt's trace context; stages become its children. A transport retry
+/// inside it becomes the run's next (`retry`) attempt (see [`AttemptChain`]).
 pub(crate) struct AttemptScope {
-    op: AttemptOperation,
+    chain: Arc<AttemptChain>,
     stages: Arc<StageRecorder>,
     parent_stages: Arc<StageRecorder>,
     started: SystemTime,
@@ -736,6 +738,8 @@ impl AttemptScope {
 
     fn end_with_output<T>(mut self, result: &SdkResult<T>, output: Option<&Envelope>) {
         self._scope.take();
+        // The live attempt: the initial one, or the last retry core started.
+        let op = self.chain.finish();
         let mut h = self.stages.harvest();
         if let Some(output) = output {
             // Runtime envelopes may carry the only usage report. Absorb it
@@ -753,8 +757,8 @@ impl AttemptScope {
             cache_read_input_tokens: h.cached_tokens,
             ..Usage::default()
         };
-        if !usage.is_empty() {
-            self.op.record_usage(&usage);
+        if let Some(op) = op.as_ref().filter(|_| !usage.is_empty()) {
+            op.record_usage(&usage);
         }
         // Runtime TTFT is relative to this attempt, never the earlier logical
         // start. Failed attempts cannot establish delivered-token timing.
@@ -765,11 +769,92 @@ impl AttemptScope {
                 .map(|offset| offset.as_secs_f64() * 1000.0 + ms)
         });
         self.parent_stages.merge(&h);
+        let Some(op) = op else {
+            return;
+        };
         match result {
-            Ok(_) => self.op.end(),
-            Err(SdkError::Cancelled { .. }) => self.op.cancel(),
-            Err(e) => self.op.end_with_error(&error_info(e)),
+            Ok(_) => op.end(),
+            Err(SdkError::Cancelled { .. }) => op.cancel(),
+            Err(e) => op.end_with_error(&error_info(e)),
         }
+    }
+}
+
+/// The live attempt behind an attempt recorder.
+///
+/// Core reports each transport retry it makes inside the attempt
+/// ([`xybrid_core::tracing::record_request_retry`]); the live attempt then
+/// ends as failed with the try's error class and the run's next attempt
+/// (reason `retry`, same target) replaces it. Requests and stages started
+/// afterwards use the new attempt's context, so every try has its own parent
+/// span and `traceparent`. Stages already open stay under the attempt they
+/// started in.
+pub(crate) struct AttemptChain {
+    run: Arc<InferenceOperation>,
+    counter: Arc<std::sync::atomic::AtomicU32>,
+    /// The first attempt's target; retries keep it with a new index and reason.
+    target: AttemptInfo,
+    observer: Observer,
+    /// The live attempt and when it started.
+    live: Mutex<Option<(AttemptOperation, SystemTime)>>,
+}
+
+impl AttemptChain {
+    /// Starts the chain's first attempt (`target`) at `started`.
+    fn new(
+        run: &Arc<InferenceOperation>,
+        counter: &Arc<std::sync::atomic::AtomicU32>,
+        target: AttemptInfo,
+        observer: &Observer,
+        started: SystemTime,
+    ) -> Self {
+        Self {
+            live: Mutex::new(Some((
+                run.start_attempt_at(target.clone(), started),
+                started,
+            ))),
+            run: run.clone(),
+            counter: counter.clone(),
+            target,
+            observer: observer.clone(),
+        }
+    }
+
+    fn live(&self) -> std::sync::MutexGuard<'_, Option<(AttemptOperation, SystemTime)>> {
+        self.live
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Context of the live attempt, for its stages and outbound requests.
+    fn context(&self) -> Option<ObservationContext> {
+        self.live().as_ref().and_then(|(op, _)| op.context())
+    }
+
+    /// Ends the live attempt as failed when its try failed (`failed_at`) and
+    /// starts the next `retry` attempt now, so the backoff between the two
+    /// belongs to neither. A no-op once the attempt scope has finished.
+    fn retry(&self, error_type: &str, failed_at: std::time::Instant) {
+        let mut live = self.live();
+        let Some((failed, started)) = live.take() else {
+            return;
+        };
+        let now = self.observer.now();
+        let failed_end = now
+            .checked_sub(failed_at.elapsed())
+            .map_or(now, |end| end.max(started).min(now));
+        failed.end_with_error_at(&ErrorInfo::new(error_type), failed_end);
+        let mut next = self.target.clone();
+        next.index = self
+            .counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        next.reason = AttemptReason::Retry;
+        *live = Some((self.run.start_attempt_at(next, now), now));
+    }
+
+    /// Takes the live attempt for its final outcome.
+    fn finish(&self) -> Option<AttemptOperation> {
+        self.live().take().map(|(op, _)| op)
     }
 }
 
@@ -1044,7 +1129,7 @@ impl RunObservation {
             started,
             subject,
             server,
-            attempts: std::sync::atomic::AtomicU32::new(0),
+            attempts: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
     }
 
@@ -1065,7 +1150,7 @@ impl RunObservation {
             Location::Local => (None, None),
         };
         let started = self.stages.observer.now();
-        let op = self.op.start_attempt(AttemptInfo {
+        let target = AttemptInfo {
             index,
             reason: spec.reason,
             provider: spec
@@ -1084,18 +1169,26 @@ impl RunObservation {
             },
             server_address,
             server_port,
-        });
+        };
+        let chain = Arc::new(AttemptChain::new(
+            &self.op,
+            &self.attempts,
+            target,
+            &self.stages.observer,
+            started,
+        ));
         let mut stages = StageRecorder::for_session(
             self.stages.session.clone(),
-            op.context(),
+            chain.context(),
             self.stages.suppressed,
         );
         stages.load = self.stages.load.clone();
         stages.conversation_id = self.stages.conversation_id.clone();
+        stages.attempt = Some(chain.clone());
         let stages = Arc::new(stages);
         let scope = RecorderScope::install(stages.clone());
         AttemptScope {
-            op,
+            chain,
             stages,
             parent_stages: self.stages.clone(),
             started,
@@ -1535,6 +1628,12 @@ fn output_message(output: &Envelope) -> Option<OutputMessage> {
 }
 
 /// Converts a measured resource summary to a portable sample.
+///
+/// `cpu_peak_pct`, `available_mem_min_mb` and `memory_pressure_peak` are not
+/// exported: the contract's resource catalog has no peak-CPU, available-memory
+/// or memory-pressure attribute, and `memory.used_bytes` (system memory in
+/// use) cannot be derived from available memory without the device total,
+/// which the summary does not carry.
 pub(crate) fn resource_sample(summary: &ResourceUsageSummary) -> ResourceSample {
     ResourceSample {
         cpu_utilization: summary.cpu_avg_pct.map(|p| f64::from(p) / 100.0),
@@ -1996,13 +2095,15 @@ pub struct StageCapture {
     load: Option<Arc<LoadSubject>>,
     conversation_id: Option<String>,
     active_load: Option<Arc<ActiveLoad>>,
+    /// Set on an attempt's recorder: its root follows the live attempt.
+    attempt: Option<Arc<AttemptChain>>,
 }
 
 impl fmt::Debug for StageCapture {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StageCapture")
             .field("suppressed", &self.suppressed)
-            .field("root", &self.root)
+            .field("root", &self.root())
             .field("model", &self.load.as_ref().map(|l| l.model.as_str()))
             .finish_non_exhaustive()
     }
@@ -2051,6 +2152,16 @@ impl StageCapture {
             load: None,
             conversation_id: conversation_id(None),
             active_load: None,
+            attempt: None,
+        }
+    }
+
+    /// Parent of stages without an open parent stage and of outbound
+    /// requests: the live attempt for an attempt's recorder, else the root.
+    fn root(&self) -> Option<ObservationContext> {
+        match &self.attempt {
+            Some(attempt) => attempt.context(),
+            None => self.root.clone(),
         }
     }
 
@@ -2122,7 +2233,7 @@ impl StageCapture {
                 .map(SpanOperation::context)
                 .or_else(|| self.loads().get(&id).map(|load| load.operation.context()))
         })
-        .unwrap_or_else(|| self.root.clone())
+        .unwrap_or_else(|| self.root())
     }
 }
 
@@ -2134,7 +2245,7 @@ impl TraceRecorder for StageCapture {
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let parent_cx = match parent {
             Some(p) => self.context_of(Some(p)),
-            None => self.root.clone(),
+            None => self.root(),
         };
         let mut options = match parent_cx {
             Some(cx) => StartOptions::child_of(cx),
@@ -2234,10 +2345,16 @@ impl TraceRecorder for StageCapture {
         self.session.allows_provider_context(origin)
     }
 
+    fn retry_request(&self, _id: Option<u64>, error_type: &str, failed_at: std::time::Instant) {
+        if let Some(attempt) = &self.attempt {
+            attempt.retry(error_type, failed_at);
+        }
+    }
+
     fn trace_headers(&self, _id: Option<u64>) -> Option<TraceHeaders> {
         // Network children belong to the enclosing run/attempt, not an
         // INTERNAL preprocessing stage that happens to be open at the call.
-        let cx = self.root.clone()?;
+        let cx = self.root()?;
         Some(TraceHeaders {
             traceparent: cx.to_traceparent(),
             tracestate: cx.tracestate().map(str::to_owned),
@@ -2711,6 +2828,11 @@ impl AsyncWorkflow {
         Self { op, recorder }
     }
 
+    /// The workflow's context, the parent of its stages.
+    pub(crate) fn context(&self) -> Option<ObservationContext> {
+        self.op.context()
+    }
+
     pub(crate) fn instrument<F: std::future::Future>(&self, future: F) -> Instrumented<F> {
         Instrumented {
             recorder: self.recorder.clone(),
@@ -2806,6 +2928,34 @@ pub(crate) mod test_support {
             .build();
         let observer = Observer::builder().tracer_provider(&provider).build();
         (ObservabilitySession::borrowed(observer), memory, provider)
+    }
+
+    /// [`memory_session`] whose session allowlists trace context to each of
+    /// `origins` (third-party HTTP(S) origins such as a loopback gateway).
+    pub(crate) fn memory_session_allowing(
+        origins: &[&str],
+    ) -> (ObservabilitySession, Memory, SdkTracerProvider) {
+        let memory = Memory::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(memory.clone())
+            .build();
+        let mut config = ObservabilityConfig::with_observer(
+            Observer::builder().tracer_provider(&provider).build(),
+        );
+        for origin in origins {
+            config = config
+                .propagate_context_to(origin)
+                .expect("test origins are HTTP(S) origins");
+        }
+        (ObservabilitySession::new(config).unwrap(), memory, provider)
+    }
+
+    /// Serializes tests that replace the process-wide default session, so
+    /// parallel test threads never observe each other's defaults.
+    pub(crate) fn default_session_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub(crate) fn attr(span: &SpanData, key: &str) -> Option<String> {
@@ -4129,8 +4279,13 @@ mod tests {
             {
                 let _first = xybrid_core::tracing::SpanGuard::new("before-yield");
             }
+            // Core's `pipeline:` guard in `execute_pipeline_async` is held
+            // across its awaits: the poll that drops it runs under a fresh
+            // scope, yet the stage still ends (not cancelled after the run).
+            let held = xybrid_core::tracing::SpanGuard::new("held-across-yield");
             tokio::task::yield_now().await;
             let _second = xybrid_core::tracing::SpanGuard::new("after-yield");
+            drop(held);
             Ok::<(), String>(())
         });
         assert_send(&future);
@@ -4144,11 +4299,17 @@ mod tests {
         for name in ["before-yield", "after-yield"] {
             assert_eq!(parent_id(&memory.named(name)), reference.span_id);
         }
-        assert_eq!(memory.by_ref(&reference).name, "invoke_workflow legacy");
+        let workflow_span = memory.by_ref(&reference);
+        assert_eq!(workflow_span.name, "invoke_workflow legacy");
+        let held = memory.named("held-across-yield");
+        assert_eq!(parent_id(&held), reference.span_id);
+        assert_eq!(attr(&held, semconv::attr::ERROR_TYPE), None);
+        assert!(held.end_time <= workflow_span.end_time);
     }
 
     #[test]
     fn replaced_helper_sessions_shut_down_now_unless_pinned() {
+        let _default = test_support::default_session_lock();
         // Unpinned: the previous pipeline exports before replacement returns.
         let (config, exports, first) = collector();
         let unpinned = ObservabilitySession::new(ObservabilityConfig::otlp(config)).unwrap();
@@ -4533,6 +4694,7 @@ mod tests {
 
     #[test]
     fn sessions_remain_pinned_across_default_replacement_and_worker_hops() {
+        let _default = test_support::default_session_lock();
         let (config, exports, collector) = collector();
         let original =
             ObservabilitySession::new(ObservabilityConfig::otlp(config).device_attributes(false))

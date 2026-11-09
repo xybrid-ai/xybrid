@@ -197,6 +197,38 @@ fn execution_refs_content_rules_and_last_owner_cancellation_reach_otlp() {
     let tts_ref = terminal.observation.unwrap();
     assert!(stream.next().is_none());
 
+    // Governed content: tool definitions are schema content recorded in every
+    // capture mode, so only the omit rule can keep them off the export, while
+    // other content on the same span still exports.
+    let governed = InferenceObservation::start(
+        InferenceRequest {
+            operation: "chat".into(),
+            provider: "openai".into(),
+            model: Some("governed-model".into()),
+            ..Default::default()
+        },
+        child.clone(),
+    )
+    .unwrap();
+    let governed_ref = governed.observation_ref().unwrap();
+    governed
+        .record_system_instructions(r#"[{"type":"text","content":"governed instructions"}]"#.into())
+        .unwrap();
+    governed
+        .record_tool_definitions(r#"[{"type":"function","name":"governed_tool"}]"#.into())
+        .unwrap();
+    governed.complete();
+
+    // An origin the config never allowlisted: the pipeline still reaches it,
+    // but the run's context does not.
+    let unlisted = Receiver::start();
+    let unlisted_yaml = format!("name: unlisted-pipeline\nstages:\n  - id: draft\n    model: loopback-model\n    target: cloud\n    provider: openai\n    gateway_url: \"{}/gateway/v1\"\n    api_key: local-test-key\n    timeout_ms: 5000\n", unlisted.url());
+    let unlisted_result = Pipeline::from_yaml(unlisted_yaml)
+        .unwrap()
+        .run(Envelope::text("unlisted input".into()), options.clone())
+        .unwrap();
+    assert_eq!(unlisted_result.stages[0].text(), Some("secret answer"));
+
     let yaml = format!("name: facade-pipeline\nstages:\n  - id: draft\n    model: loopback-model\n    target: cloud\n    provider: openai\n    gateway_url: \"{}/gateway/v1\"\n    api_key: local-test-key\n    timeout_ms: 5000\n", receiver.url());
     let pipeline = Pipeline::from_yaml(yaml).unwrap();
     let result = pipeline
@@ -253,6 +285,29 @@ fn execution_refs_content_rules_and_last_owner_cancellation_reach_otlp() {
         attr(attempt, "server.port").unwrap()["intValue"],
         receiver.address.port().to_string()
     );
+    let governed_span = by_ref(&governed_ref);
+    assert!(
+        attr(governed_span, "gen_ai.system_instructions").unwrap()["stringValue"]
+            .as_str()
+            .unwrap()
+            .contains("governed instructions")
+    );
+    assert!(
+        attr(governed_span, "gen_ai.tool.definitions").is_none(),
+        "the omit rule removes exactly its attribute"
+    );
+    {
+        let unlisted_requests = unlisted.requests.lock().unwrap();
+        let (_, unlisted_headers, _) = unlisted_requests
+            .iter()
+            .find(|(p, _, _)| p.contains("chat/completions"))
+            .unwrap();
+        assert!(
+            unlisted_headers.iter().all(|(k, _)| k != "traceparent"),
+            "a provider origin outside the allowlist receives no context: {unlisted_headers:?}"
+        );
+    }
+    // The allowlisted origin receives the stage attempt's context.
     let requests = receiver.requests.lock().unwrap();
     let (_, headers, _) = requests
         .iter()
@@ -273,6 +328,7 @@ fn execution_refs_content_rules_and_last_owner_cancellation_reach_otlp() {
         .collect::<String>();
     assert!(!exported.contains("secret"));
     assert!(exported.contains("[redacted]"));
+    assert!(!exported.contains("governed_tool"));
     assert!(exported.contains("facade-test-device"));
     drop(requests);
     observability_shutdown(5000).unwrap();
