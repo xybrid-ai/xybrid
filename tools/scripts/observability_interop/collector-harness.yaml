@@ -1,0 +1,56 @@
+# Harness overlay, added by run_interop.py after the destination profile:
+#
+#   otelcol-contrib --config <profile>.yaml [--config sinks.yaml
+#       --config collector-sinks-json.yaml] --config collector-harness.yaml
+#
+# It changes nothing in the profile's own pipelines. It only
+#   - binds the OTLP/HTTP receiver to loopback on the harness port,
+#   - adds three pipelines that copy every received signal, before any
+#     destination mapping, to the harness's capture server as OTLP/JSON: the
+#     ground truth that destination readback is compared with,
+#   - exposes the Collector's own metrics (sent / failed per exporter) on a
+#     loopback Prometheus endpoint, read once the workloads are done.
+#
+# Environment (set by run_interop.py):
+#   INTEROP_COLLECTOR_PORT          OTLP/HTTP receiver port (interop.env: 4318)
+#   INTEROP_COLLECTOR_METRICS_PORT  Collector self-metrics port (18888)
+#   INTEROP_CAPTURE_ENDPOINT        http://127.0.0.1:<capture port>
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:${env:INTEROP_COLLECTOR_PORT}
+
+processors:
+  batch/interop_capture: {}
+
+exporters:
+  otlphttp/interop_capture:
+    endpoint: ${env:INTEROP_CAPTURE_ENDPOINT}
+    encoding: json
+    compression: none
+
+service:
+  telemetry:
+    metrics:
+      level: detailed
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: ${env:INTEROP_COLLECTOR_METRICS_PORT}
+  pipelines:
+    traces/interop_capture:
+      receivers: [otlp]
+      processors: [batch/interop_capture]
+      exporters: [otlphttp/interop_capture]
+    metrics/interop_capture:
+      receivers: [otlp]
+      processors: [batch/interop_capture]
+      exporters: [otlphttp/interop_capture]
+    logs/interop_capture:
+      receivers: [otlp]
+      processors: [batch/interop_capture]
+      exporters: [otlphttp/interop_capture]

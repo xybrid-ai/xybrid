@@ -47,3 +47,12 @@ otelcol-contrib validate --config xybrid.yaml --config sinks.yaml
 
 Moving to a newer Collector means re-running that validation for every
 combination in the table above and updating this pin.
+
+## Interop acceptance
+
+[`tools/scripts/observability_interop/`](../../../tools/scripts/observability_interop/)
+runs real producers (the Rust and JS examples and the Python binding) through
+this pinned Collector into Langfuse, Phoenix and Xybrid staging, and checks
+each backend's API answer against what the Collector received.
+`run_interop.py --validate-profiles` runs the validation above for every
+combination.

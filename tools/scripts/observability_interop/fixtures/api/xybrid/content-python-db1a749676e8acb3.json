@@ -1,0 +1,14 @@
+{
+ "bytes": 211,
+ "span_id": "db1a749676e8acb3",
+ "storage": "object",
+ "trace_id": "78793a707974686f6e00000000000000",
+ "values": {
+  "gen_ai.tool.call.arguments": {
+   "stringValue": "{\"query\":\"weather\",\"token\":\"[scenario-redacted]\"}"
+  },
+  "gen_ai.tool.call.result": {
+   "stringValue": "{\"answer\":\"sunny\",\"echo\":\"[scenario-redacted]\"}"
+  }
+ }
+}

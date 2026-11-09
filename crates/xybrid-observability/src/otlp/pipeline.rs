@@ -277,6 +277,19 @@ impl ObservabilityPipeline {
         }
     }
 
+    /// Library-owned bytes held for delivery now, per signal: the running
+    /// totals the `max_buffered_bytes` budget admits against (benchmark and
+    /// test diagnostics; not process memory).
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn buffered_bytes(&self) -> super::stats::BufferedBytes {
+        super::stats::BufferedBytes {
+            traces: self.traces.as_ref().map_or(0, |b| b.buffered_bytes()),
+            logs: self.logs.as_ref().map_or(0, |b| b.buffered_bytes()),
+            metrics: self.metrics.as_ref().map_or(0, |m| m.buffered_bytes()),
+        }
+    }
+
     /// Exports the items pending now (and takes a metrics collection),
     /// waiting at most `timeout`. Items accepted after the call are not
     /// waited for. After shutdown started, returns the shutdown result.

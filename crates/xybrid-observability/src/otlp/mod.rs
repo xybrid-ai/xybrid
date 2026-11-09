@@ -60,6 +60,8 @@ pub use config::{
 };
 pub use export::{exporters, OtlpExporters, OtlpLogExporter, OtlpMetricExporter, OtlpSpanExporter};
 pub use pipeline::ObservabilityPipeline;
+#[cfg(feature = "test-util")]
+pub use stats::BufferedBytes;
 pub use stats::{PipelineStats, SignalStats};
 
 /// Catalog defaults (`catalog.defaults`) of the OTLP transport.

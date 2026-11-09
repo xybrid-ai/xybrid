@@ -32,6 +32,7 @@
   ],
   "scripts": {
     "build": "bun run scripts/build.ts",
+    "bench": "node --expose-gc scripts/bench.mjs",
     "example": "bun run examples/node-basic.ts",
     "fixtures:dump": "bun run scripts/dump-fixtures.ts",
     "lint": "biome check .",

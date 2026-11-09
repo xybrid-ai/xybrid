@@ -133,4 +133,12 @@ if (target !== undefined) {
   observer.recordFeedback(target, { score: 1, label: "thumbs_up", comment: "helpful" });
   console.log(`trace ${target.trace_id} span ${target.span_id}`);
 }
+// The reference of each operation by role, as JSON: what an application keeps to find its
+// telemetry in a backend later.
+const refs = {
+  workflow: workflow.observationRef() ?? null,
+  inference: target ?? null,
+  tool: tool.observationRef() ?? null,
+};
+console.log(`observation refs: ${JSON.stringify(refs)}`);
 await shutdown();

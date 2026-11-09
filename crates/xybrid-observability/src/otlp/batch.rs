@@ -226,6 +226,13 @@ impl<C: BatchCodec> Batcher<C> {
         lock(&self.state).stats
     }
 
+    /// Queued plus in-flight estimated bytes (the admission byte budget's
+    /// running total).
+    #[cfg(feature = "test-util")]
+    pub(crate) fn buffered_bytes(&self) -> u64 {
+        lock(&self.state).bytes
+    }
+
     pub(crate) fn is_closed(&self) -> bool {
         lock(&self.state).closed
     }

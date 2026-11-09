@@ -345,6 +345,7 @@ pnpm pack:release     # pack and verify the archive in an isolated consumer
 pnpm test:families   # real packed consumers: aligned 3.0 + 3.1; core-only; unsupported 2.x
 pnpm fixtures:dump    # normalized fixture output → .context/fixture-output/js/
 pnpm example          # examples/node-basic.ts (console, or OTLP when OTEL_EXPORTER_OTLP_* is set)
+pnpm bench            # overhead vs disabled, content pipeline cost (after pnpm build; see tools/scripts/observability_perf)
 ```
 
 ## Releases

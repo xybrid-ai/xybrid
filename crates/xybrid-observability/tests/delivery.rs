@@ -624,6 +624,39 @@ fn the_byte_budget_drops_items_beyond_it() {
     }
 }
 
+#[cfg(feature = "test-util")]
+#[test]
+fn buffered_bytes_report_the_byte_budget_running_total() {
+    // The benchmark diagnostic behind the saturation bench's peak
+    // library-owned bytes: against an endpoint that never answers, the
+    // admitted items stay counted (queued plus in flight) within the budget,
+    // and shutdown releases them.
+    let server = Server::always(Action::Hang);
+    let config = server
+        .traces_config(Protocol::HttpProtobuf)
+        .with_logs(Some(server.endpoint("logs", Protocol::HttpProtobuf)))
+        .with_batch(BatchLimits {
+            max_buffered_bytes: 10_000,
+            scheduled_delay: Duration::from_secs(60),
+            ..BatchLimits::default()
+        });
+    let pipeline = ObservabilityPipeline::build(config).unwrap();
+    assert_eq!(pipeline.buffered_bytes().traces, 0);
+    spans(&pipeline, 5, 3000);
+    let names: Vec<String> = (0..5).map(|i| format!("log-{i}")).collect();
+    logs(&pipeline, &names, 3000);
+    let held = pipeline.buffered_bytes();
+    for (signal, bytes) in [("traces", held.traces), ("logs", held.logs)] {
+        assert!(bytes > 6000 && bytes <= 10_000, "{signal}: {bytes}");
+    }
+    assert_eq!(held.metrics, 0, "metrics not configured");
+    let _ = pipeline.shutdown(Duration::from_millis(200));
+    assert_eq!(
+        pipeline.buffered_bytes(),
+        xybrid_observability::otlp::BufferedBytes::default()
+    );
+}
+
 fn large_distinct_scope(index: usize) -> InstrumentationScope {
     InstrumentationScope::builder(format!("scope-{index}-{}", "n".repeat(6000)))
         .with_version("v".repeat(128))

@@ -229,6 +229,12 @@ impl ExporterShared {
         lock(&self.state).stats
     }
 
+    /// In-flight estimated bytes (the admission byte budget's running total).
+    #[cfg(feature = "test-util")]
+    pub(crate) fn buffered_bytes(&self) -> u64 {
+        lock(&self.state).buffered
+    }
+
     pub(crate) fn is_closed(&self) -> bool {
         lock(&self.state).closed
     }

@@ -48,6 +48,22 @@ pub struct PipelineStats {
     pub metrics: SignalStats,
 }
 
+/// Library-owned bytes held for delivery, per signal: queued plus in-flight
+/// estimated bytes, the figure `max_buffered_bytes` bounds (a conservative
+/// per-item estimate computed at admission, not process memory). Benchmark
+/// and test diagnostics (feature `test-util`); zeros for unconfigured
+/// signals.
+#[cfg(feature = "test-util")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BufferedBytes {
+    /// Spans queued or in flight.
+    pub traces: u64,
+    /// Log records queued or in flight.
+    pub logs: u64,
+    /// Metric collections in flight.
+    pub metrics: u64,
+}
+
 /// Terminal outcomes of a group of items.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Outcome {
