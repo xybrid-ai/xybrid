@@ -375,7 +375,10 @@ fn a_stalled_failure_body_keeps_the_retry_budget() {
     assert_eq!(server.count(), 3);
     let seen = recorder.seen();
     assert_eq!(recorder.statuses("traces"), [503, 503, 200]);
-    assert_eq!(seen[0].body, None, "a stalled body is unreadable, not waited for");
+    assert_eq!(
+        seen[0].body, None,
+        "a stalled body is unreadable, not waited for"
+    );
     let stats = pipeline.stats().traces;
     assert_eq!((stats.exported, stats.failed), (1, 0));
 }
