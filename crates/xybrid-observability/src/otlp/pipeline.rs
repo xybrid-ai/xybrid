@@ -6,6 +6,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
@@ -46,6 +47,12 @@ fn stopped(operation: &'static str) -> Error {
         operation,
         message: "the transport stopped before the operation completed".into(),
     }
+}
+
+/// Whether a provider shutdown in step e left the provider shut down. One the
+/// application already shut down is: whatever that shutdown lost is counted.
+fn provider_shut_down(result: OTelSdkResult) -> bool {
+    matches!(result, Ok(()) | Err(OTelSdkError::AlreadyShutdown))
 }
 
 fn delta(now: SignalStats, before: SignalStats) -> Losses {
@@ -313,7 +320,8 @@ impl ObservabilityPipeline {
     /// [`Error::Timeout`] when work had to be cancelled at the deadline (or
     /// the final metrics collection did not complete by then),
     /// [`Error::Delivery`] when an item pending at the call failed or was
-    /// dropped.
+    /// dropped, [`Error::Lifecycle`] when a provider failed to shut down (an
+    /// application span processor returned an error or panicked).
     pub fn shutdown(&self, timeout: Duration) -> Result<()> {
         let (completion, first) = self.start_shutdown(timeout);
         let result = if first {
@@ -587,20 +595,27 @@ impl ObservabilityPipeline {
             // e. Shut the providers down. Our processors have settled and
             // return at once; an application's processor may block, so this
             // never runs on the transport's worker thread, and it is bounded.
+            // Our processors fail only with what `cancelled` and `losses`
+            // already hold, so a failure the result does not otherwise explain
+            // comes from an application processor.
+            let mut providers_failed = false;
             if tracer.is_some() || logger.is_some() {
                 let provider_until =
                     tokio_after(tokio::time::Instant::now().max(until), SETTLE_GRACE);
                 let budget = provider_until.saturating_duration_since(tokio::time::Instant::now());
                 let task = tokio::task::spawn_blocking(move || {
-                    if let Some(p) = tracer {
-                        let _ = p.shutdown_with_timeout(budget);
-                    }
-                    if let Some(p) = logger {
-                        let _ = p.shutdown_with_timeout(budget);
-                    }
+                    // The logger carries only our processor: shut it down
+                    // first, so an application span processor that panics
+                    // cannot skip it.
+                    let logs = logger.map(|p| p.shutdown_with_timeout(budget));
+                    let traces = tracer.map(|p| p.shutdown_with_timeout(budget));
+                    [logs, traces].into_iter().flatten().all(provider_shut_down)
                 });
-                if tokio::time::timeout_at(provider_until, task).await.is_err() {
-                    cancelled = true;
+                match tokio::time::timeout_at(provider_until, task).await {
+                    Err(_) => cancelled = true,
+                    Ok(Ok(shut_down)) => providers_failed = !shut_down,
+                    // A processor panicked (or the task was cancelled).
+                    Ok(Err(_)) => providers_failed = true,
                 }
             }
 
@@ -611,6 +626,13 @@ impl ObservabilityPipeline {
                     operation: "shutdown",
                     failed: losses.failed,
                     dropped: losses.dropped,
+                })
+            } else if providers_failed {
+                // The processor's own error text is not ours to forward: it
+                // may carry payloads or credentials.
+                Err(Error::Lifecycle {
+                    operation: "shutdown",
+                    message: "a span processor failed to shut down".into(),
                 })
             } else {
                 Ok(())

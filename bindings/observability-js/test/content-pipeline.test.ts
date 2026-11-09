@@ -265,6 +265,41 @@ describe("preflight, clone and callback validation (D17, D18, R-CONTENT-3, conte
     }
   });
 
+  test("callback outputs whose inspection throws fail closed instead of throwing", () => {
+    const throwingThen = Object.defineProperty({}, ["th", "en"].join(""), {
+      get() {
+        throw new Error("private-then-getter");
+      },
+    });
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    const promise = Promise.resolve("private");
+    Object.defineProperty(promise, "constructor", {
+      get() {
+        throw new Error("private-constructor-getter");
+      },
+    });
+    for (const output of [throwingThen, revoked.proxy, promise]) {
+      const { observer, spans } = createHarness({ content: { redact: () => output as never } });
+      const tool = observer.startTool({ name: "t" });
+      expect(() => tool.recordResult({ value: 1 })).not.toThrow();
+      tool.end();
+      const processor = new ContentProcessor({
+        maxTraversalBytes: 1 << 20,
+        redactor: () => output as never,
+      });
+      expect(processor.process("gen_ai.tool.call.result", { value: 1 }, "json")).toEqual({
+        kind: "failed",
+        reason: "redactor_output",
+      });
+      const attributes = spans.getFinishedSpans()[0]?.attributes ?? {};
+      expect(attributes["gen_ai.tool.call.result"]).toBeUndefined();
+      expect(attributes["xybrid.genai.content.truncated_attributes"]).toEqual([
+        "gen_ai.tool.call.result",
+      ]);
+    }
+  });
+
   test("the redactor sees a canonical copy, never the caller's object", () => {
     const input = { nested: { secret: "private" } };
     const { observer, spans } = createHarness({

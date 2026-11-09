@@ -438,6 +438,15 @@ const isThenable = (value: unknown): boolean =>
   typeof (value as { then?: unknown }).then === "function";
 
 /**
+ * Keeps a thenable callback output from surfacing as an unhandled rejection. Never throws: the
+ * resolve function turns a throwing `then` into a rejection, where `Promise.resolve` would read a
+ * native promise's `constructor` synchronously.
+ */
+const silenceRejection = (output: unknown): void => {
+  new Promise((resolve) => resolve(output)).catch(() => undefined);
+};
+
+/**
  * Validates and copies callback output: only `null`, booleans, finite numbers, strings, arrays
  * and plain objects (object members that are `undefined` are skipped, as `JSON.stringify` does),
  * no cycles, depth <= 128, cost <= the traversal budget.
@@ -665,15 +674,16 @@ export class ContentProcessor {
         return { kind: "failed", reason: "redactor_error" };
       }
       if (output === undefined) return { kind: "dropped" };
-      if (isThenable(output)) {
-        // A rejected promise must not surface as an unhandled rejection.
-        Promise.resolve(output).catch(() => undefined);
-        return { kind: "failed", reason: "redactor_output" };
-      }
-      if (shape === "string" && typeof output !== "string") {
-        return { kind: "failed", reason: "redactor_output" };
-      }
       try {
+        // Inspecting the output can run caller code (a `then` getter, a revoked proxy): a throw
+        // fails this value closed instead of escaping into the recording call.
+        if (isThenable(output)) {
+          silenceRejection(output);
+          return { kind: "failed", reason: "redactor_output" };
+        }
+        if (shape === "string" && typeof output !== "string") {
+          return { kind: "failed", reason: "redactor_output" };
+        }
         const walk = new OutputWalk(this.#limit);
         value = walk.value(output, 0);
         cost = walk.cost;

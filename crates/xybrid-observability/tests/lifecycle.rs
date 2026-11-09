@@ -16,7 +16,7 @@ use opentelemetry::trace::{Span as _, Tracer as _, TracerProvider as _};
 use opentelemetry::Context;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::any_value::Value as Wire;
-use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{
     InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor, Span, SpanData, SpanExporter,
     SpanProcessor,
@@ -565,6 +565,69 @@ fn a_blocking_application_processor_cannot_hold_the_shutdown() {
     // Bounded by the deadline plus one settle grace (1 s), not by the
     // processor and not by the caller's extra wait.
     assert!(elapsed < Duration::from_millis(1900), "{elapsed:?}");
+    assert_eq!(pipeline.stats().traces.exported, 1);
+}
+
+/// An application processor whose shutdown fails: returns an error, or
+/// panics.
+#[derive(Debug)]
+struct Failing {
+    panics: bool,
+}
+
+impl SpanProcessor for Failing {
+    fn on_start(&self, _span: &mut Span, _cx: &Context) {}
+
+    fn on_end(&self, _span: SpanData) {}
+
+    fn force_flush(&self) -> OTelSdkResult {
+        Ok(())
+    }
+
+    fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+        assert!(!self.panics, "application processor panicked on shutdown");
+        Err(OTelSdkError::InternalFailure(
+            "private processor detail".into(),
+        ))
+    }
+}
+
+#[test]
+fn a_failing_application_processor_makes_shutdown_fail_and_is_remembered() {
+    // D30.5: the result is truthful even when every item was delivered.
+    for panics in [false, true] {
+        let server = Server::ok();
+        let pipeline = ObservabilityPipeline::build_with_span_processor(
+            server.traces_config(Protocol::HttpProtobuf),
+            Failing { panics },
+        )
+        .unwrap();
+        inference(&pipeline.observer());
+        let result = pipeline.shutdown(Duration::from_secs(5));
+        let Err(Error::Lifecycle { operation, message }) = &result else {
+            panic!("panics={panics}: expected a lifecycle failure, got {result:?}");
+        };
+        assert_eq!(*operation, "shutdown");
+        assert!(
+            !message.contains("private"),
+            "application error text stays out of the result: {message}"
+        );
+        assert_eq!(pipeline.stats().traces.exported, 1, "panics={panics}");
+        // Every later call (and a flush) returns the first call's result.
+        assert_eq!(text(&pipeline.shutdown(Duration::ZERO)), text(&result));
+        assert_eq!(text(&pipeline.force_flush(Duration::ZERO)), text(&result));
+    }
+
+    // A provider the application already shut down is not a failure.
+    let server = Server::ok();
+    let pipeline = ObservabilityPipeline::build_with_span_processor(
+        server.traces_config(Protocol::HttpProtobuf),
+        SimpleSpanProcessor::new(InMemorySpanExporter::default()),
+    )
+    .unwrap();
+    inference(&pipeline.observer());
+    pipeline.tracer_provider().unwrap().shutdown().unwrap();
+    pipeline.shutdown(Duration::from_secs(5)).unwrap();
     assert_eq!(pipeline.stats().traces.exported, 1);
 }
 

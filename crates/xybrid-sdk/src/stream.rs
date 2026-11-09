@@ -263,10 +263,13 @@ impl XybridStream {
             .map_err(|_| SdkError::inference("Failed to acquire stream lock"))?;
 
         let _context = handle.observation.enter_feed();
-        handle
-            .session
-            .feed(samples)
-            .map_err(|e| SdkError::inference_src("Feed failed", e))?;
+        if let Err(e) = handle.session.feed(samples) {
+            // The utterance stays open, but its workflow ends failed at flush:
+            // this chunk's audio is gone.
+            let error = SdkError::inference_src("Feed failed", e);
+            handle.observation.record_feed_failure(&error);
+            return Err(error);
+        }
 
         // Get partial result if available
         Ok(handle.session.partial_result().map(|p| {
@@ -374,5 +377,67 @@ mod tests {
         assert!(result.is_stable);
         assert_eq!(result.chunk_index, 5);
         assert_eq!(result.audio_duration_ms, 1500);
+    }
+
+    /// A failed feed has already lost its chunk (the core extracts it before
+    /// decoding), so the utterance's workflow ends failed even when the final
+    /// flush succeeds. The stream keeps accepting audio, and `reset` starts
+    /// the next utterance clean.
+    #[test]
+    fn a_lost_chunk_fails_the_utterance_even_when_flush_succeeds() {
+        use crate::observability::test_support::{attr, memory_session};
+        use crate::observability::{semconv, ObservationOptions};
+        use xybrid_core::execution::ModelMetadata;
+
+        let dir = tempfile::tempdir().unwrap();
+        // No weights on disk: a decode fails after its chunk left the buffer.
+        let metadata = ModelMetadata::onnx("asr", "1", "missing.onnx");
+        std::fs::write(
+            dir.path().join("model_metadata.json"),
+            serde_json::to_vec(&metadata).unwrap(),
+        )
+        .unwrap();
+        let mut config = CoreStreamConfig::default();
+        // Without overlap, one whole chunk leaves nothing for flush to decode.
+        config.buffer_config.overlap_secs = 0.0;
+        let (session, memory, _provider) = memory_session();
+        let options = ObservationOptions::default().with_session(&session);
+        let executor = Arc::new(Mutex::new(TemplateExecutor::with_base_path(
+            dir.path().to_str().unwrap(),
+        )));
+        let stream = XybridStream::new(
+            dir.path(),
+            config,
+            "asr",
+            executor,
+            Some(&options),
+            Some(&metadata),
+        )
+        .unwrap();
+
+        // One 5 s chunk at 16 kHz is extracted, and its decode fails.
+        assert!(stream.feed(&[0.0; 80_000]).is_err());
+        // The utterance stays open and the stream keeps accepting audio.
+        assert!(matches!(stream.feed(&[]), Ok(None)));
+        let lost = stream
+            .flush()
+            .expect("nothing is left to decode")
+            .observation
+            .expect("the utterance is observed");
+        assert_eq!(
+            attr(&memory.by_ref(&lost), semconv::attr::ERROR_TYPE).as_deref(),
+            Some("inference_error"),
+            "a lost chunk fails the utterance"
+        );
+
+        stream.reset().unwrap();
+        assert!(matches!(stream.feed(&[]), Ok(None)));
+        let clean = stream.flush().unwrap().observation.unwrap();
+        assert_ne!(clean, lost);
+        assert_eq!(
+            attr(&memory.by_ref(&clean), semconv::attr::ERROR_TYPE),
+            None,
+            "reset forgets the discarded utterance's failure"
+        );
     }
 }

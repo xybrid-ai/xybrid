@@ -2,8 +2,10 @@
 //!
 //! One `invoke_workflow asr_session` per utterance, started by the first
 //! `feed` (never by opening or warming a stream), ended by `flush` and
-//! cancelled by `reset` or by dropping the stream. Each real decoder execution
-//! is a child inference; cached partials record nothing.
+//! cancelled by `reset` or by dropping the stream. A `feed` that fails has
+//! already lost its audio, so it fails the utterance even when the final
+//! `flush` succeeds; the stream keeps transcribing. Each real decoder
+//! execution is a child inference; cached partials record nothing.
 use super::*;
 use xybrid_core::streaming::{DecoderObservation, DecoderObserver, StreamResult};
 
@@ -17,6 +19,10 @@ pub(crate) struct AsrObservation {
     workflow: Mutex<Option<WorkflowOperation>>,
     reference: Mutex<Option<ObservationRef>>,
     decoder: Mutex<Option<ObservationRef>>,
+    /// First failed `feed` of the open utterance. The core extracts a chunk
+    /// from its buffer before decoding it, so that audio never reaches the
+    /// transcript and a successful `flush` cannot make the utterance whole.
+    failure: Mutex<Option<ErrorInfo>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -55,6 +61,7 @@ impl AsrObservation {
             workflow: Mutex::new(None),
             reference: Mutex::new(None),
             decoder: Mutex::new(None),
+            failure: Mutex::new(None),
         })
     }
 
@@ -90,6 +97,14 @@ impl AsrObservation {
         }
         *lock(&self.reference) = None;
         *lock(&self.decoder) = None;
+        *lock(&self.failure) = None;
+    }
+
+    /// Remembers a failed `feed` against the open utterance without ending it:
+    /// the stream keeps transcribing, and [`Self::finish`] reports the first
+    /// failure unless the flush itself fails.
+    pub(crate) fn record_feed_failure(&self, error: &SdkError) {
+        lock(&self.failure).get_or_insert_with(|| error_info(error));
     }
 
     fn scope(&self) -> RecorderScope {
@@ -137,13 +152,16 @@ impl AsrObservation {
         lock(&self.reference).clone()
     }
 
-    /// Ends the utterance with the flush outcome. Repeated flushes return the
-    /// cached reference; a flush with nothing fed returns `None`.
+    /// Ends the utterance with the flush outcome, or with the first failed
+    /// `feed` when the flush succeeds (that audio is lost). Repeated flushes
+    /// return the cached reference; a flush with nothing fed returns `None`.
     pub(crate) fn finish<T>(&self, result: &SdkResult<T>) -> Option<ObservationRef> {
+        let failure = lock(&self.failure).take();
         if let Some(op) = lock(&self.workflow).take() {
-            match result {
-                Ok(_) => op.end(),
-                Err(e) => op.end_with_error(&error_info(e)),
+            match (result, failure) {
+                (Err(e), _) => op.end_with_error(&error_info(e)),
+                (Ok(_), Some(lost)) => op.end_with_error(&lost),
+                (Ok(_), None) => op.end(),
             }
         }
         self.reference()
