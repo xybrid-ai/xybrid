@@ -123,13 +123,11 @@ impl<'a> ExportResponse<'a> {
         headers.get(name)?.to_str().ok()
     }
 
-    /// Every visible-ASCII value of header `name` (case-insensitive), in order.
-    pub fn header_values(&self, name: &str) -> impl Iterator<Item = &'a str> + 'a {
+    /// Every value of header `name` (case-insensitive), in order, as raw
+    /// bytes: an adapter can tell a malformed value from an absent one.
+    pub fn header_values(&self, name: &str) -> impl Iterator<Item = &'a [u8]> + 'a {
         let headers: &'a HeaderMap = self.headers;
-        headers
-            .get_all(name)
-            .iter()
-            .filter_map(|value| value.to_str().ok())
+        headers.get_all(name).iter().map(|value| value.as_bytes())
     }
 
     /// The response body, at most `max_response_body_bytes` of it; `None`
@@ -396,7 +394,11 @@ mod tests {
         assert_eq!(view.header("X-Test"), Some("one"));
         assert_eq!(
             view.header_values("x-test").collect::<Vec<_>>(),
-            ["one", "two"]
+            [&b"one"[..], b"two"]
+        );
+        assert_eq!(
+            view.header_values("x-bad").collect::<Vec<_>>(),
+            [&b"\xff"[..]]
         );
         assert_eq!(view.header("x-bad"), None);
         assert_eq!(view.header("bad name"), None);

@@ -530,6 +530,9 @@ pub fn publish_cloud_retry(
 /// wired through config because the nudge fires when no config was provided.
 const OBSERVABILITY_DOCS_URL: &str = "https://docs.xybrid.dev/sdk/observability";
 
+/// The console that issues project keys (the dashboard origin is retired).
+const CONSOLE_URL: &str = "https://console.xybrid.dev";
+
 /// Once-guard for [`maybe_emit_dev_nudge`].
 static DEV_NUDGE: std::sync::Once = std::sync::Once::new();
 
@@ -544,11 +547,7 @@ pub(crate) fn maybe_emit_dev_nudge() {
         if !should_emit_dev_nudge(crate::observability::is_enabled(), quiet.as_deref()) {
             return;
         }
-        log::info!(
-            target: "xybrid_sdk",
-            "observability export is not configured; traces stay local. See {} to send traces to Xybrid or any OpenTelemetry backend.",
-            OBSERVABILITY_DOCS_URL,
-        );
+        log::info!(target: "xybrid_sdk", "{}", dev_nudge_text());
     });
 }
 
@@ -557,9 +556,30 @@ fn should_emit_dev_nudge(observability_enabled: bool, quiet: Option<&str>) -> bo
     quiet != Some("1") && !observability_enabled
 }
 
+/// The nudge: export is explicit, and a key (from `xybrid connect` or the
+/// console) only authenticates until it is handed to the Xybrid preset.
+fn dev_nudge_text() -> String {
+    format!(
+        "observability export is not configured; traces stay local. To send them to Xybrid, \
+         get a project key with `xybrid connect` (or from {CONSOLE_URL}) and pass it to \
+         ObservabilityConfig::xybrid; a key alone exports nothing. Any OpenTelemetry backend \
+         works through ObservabilityConfig::otlp. See {OBSERVABILITY_DOCS_URL}"
+    )
+}
+
 #[cfg(test)]
 mod dev_nudge_tests {
-    use super::should_emit_dev_nudge;
+    use super::{dev_nudge_text, should_emit_dev_nudge};
+
+    #[test]
+    fn the_nudge_points_at_connect_and_the_console_never_at_key_only_export() {
+        let text = dev_nudge_text();
+        assert!(text.contains("xybrid connect"), "{text}");
+        assert!(text.contains("https://console.xybrid.dev"), "{text}");
+        assert!(text.contains("ObservabilityConfig::xybrid"), "{text}");
+        assert!(text.contains("a key alone exports nothing"), "{text}");
+        assert!(!text.contains("dashboard.xybrid.dev"), "{text}");
+    }
 
     #[test]
     fn emits_when_observability_is_not_configured() {
