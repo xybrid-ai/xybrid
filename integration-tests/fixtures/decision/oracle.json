@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "llama_cpp": {
+    "commit": "8642541b255bfb5dc39cd351a178be09013a55d6",
+    "path": "vendor/llama-cpp",
+    "routines": "tools/server/server-decision.cpp, linked unmodified from the server-context library"
+  },
+  "oracle": {
+    "tool": "tools/conformance/decision",
+    "sources": {
+      "CMakeLists.txt": "06ffbe1864b132cbef95bf3ec33ec1b2ab22910dbaecb2051aba3ae0c7004565",
+      "identity.cmake": "26b05a73fdc47b8f06e03806544bf19406fd6f440165b5ce31a0ddcead87eb29",
+      "oracle.cpp": "814fa577941d72e8816612aa30c4f0ba437cb5a84db1847834cdb99540b84707",
+      "test_access.h": "41d4b5ed68279a1957eb72edd18fdef41b4e5f0e504b19ee4453155ba3f91cd1",
+      "build.sh": "19bb0f1f204b722d6c61bdae8d3002e1d5aa768df2e97a0dc1675d26618efa75",
+      "cases.py": "27aef08e3deb0ffa66a782148ede27c2f31d429919822019f22390acf5d66e94",
+      "oracle.py": "8a2beed183b87f9e4d833c4e2fcb67cce348a82e864f97cb55a734cfae4dd731"
+    }
+  },
+  "collector": {
+    "official": true,
+    "developer_run": false,
+    "problems": []
+  },
+  "build": {
+    "identity_version": 1,
+    "fingerprint": "01ef0d0d3aa0a38042d77578dc7f6e05f5205d02ff986912f5cef59bcc4acf86",
+    "llama_cpp_dir": "vendor/llama-cpp",
+    "llama_cpp": {
+      "checkout": "git",
+      "commit": "8642541b255bfb5dc39cd351a178be09013a55d6",
+      "dirty": false
+    },
+    "tool_files": {
+      "CMakeLists.txt": "06ffbe1864b132cbef95bf3ec33ec1b2ab22910dbaecb2051aba3ae0c7004565",
+      "identity.cmake": "26b05a73fdc47b8f06e03806544bf19406fd6f440165b5ce31a0ddcead87eb29",
+      "oracle.cpp": "814fa577941d72e8816612aa30c4f0ba437cb5a84db1847834cdb99540b84707",
+      "test_access.h": "41d4b5ed68279a1957eb72edd18fdef41b4e5f0e504b19ee4453155ba3f91cd1"
+    },
+    "upstream_files": {
+      "tools/server/server-decision.cpp": "86379ffbf753cbe4ae90cebd60d5df62cda44cf37459e4e1de2db081fec8652b",
+      "tools/server/server-decision.h": "b2badfb6dfa7514208875bdaa2fb52061d65e313bfc6c1c586cafbb2560a1710",
+      "tools/server/server-context.cpp": "26acff2657377779f0b48317c043c97b6e9022eaf89d8d956d8ae2a8b2e6e38d",
+      "tools/server/server.cpp": "d4d343db7c1b648eb5358ae2b87966a5f78ce5c9b245c7fbfe9827ba6971f08b",
+      "tools/server/server-common.cpp": "b686729ed7d098e2f0c3da1ba28325d0e6d30721dab09f71cb9b53f342710ddb"
+    },
+    "build": {
+      "system": "Linux",
+      "processor": "x86_64",
+      "build_type": "Release",
+      "c_compiler": "GNU 11.5.0",
+      "cxx_compiler": "GNU 11.5.0",
+      "c_flags": " -O3 -DNDEBUG",
+      "cxx_flags": " -O3 -DNDEBUG",
+      "exe_linker_flags": " ",
+      "backends": ["cpu"],
+      "options": {
+        "BUILD_SHARED_LIBS": "OFF",
+        "GGML_ACCELERATE": "OFF",
+        "GGML_AMX_BF16": "OFF",
+        "GGML_AMX_INT8": "OFF",
+        "GGML_AMX_TILE": "OFF",
+        "GGML_AVX": "ON",
+        "GGML_AVX2": "ON",
+        "GGML_AVX512": "OFF",
+        "GGML_AVX512_BF16": "OFF",
+        "GGML_AVX512_VBMI": "OFF",
+        "GGML_AVX512_VNNI": "OFF",
+        "GGML_AVX_VNNI": "OFF",
+        "GGML_BACKEND_DL": "OFF",
+        "GGML_BLAS": "OFF",
+        "GGML_BMI2": "ON",
+        "GGML_CANN": "OFF",
+        "GGML_CPU": "ON",
+        "GGML_CPU_ALL_VARIANTS": "OFF",
+        "GGML_CPU_ARM_ARCH": "",
+        "GGML_CPU_HBM": "OFF",
+        "GGML_CPU_KLEIDIAI": "OFF",
+        "GGML_CPU_REPACK": "ON",
+        "GGML_CUDA": "OFF",
+        "GGML_ET": "OFF",
+        "GGML_F16C": "ON",
+        "GGML_FMA": "ON",
+        "GGML_GPROF": "OFF",
+        "GGML_HEXAGON": "OFF",
+        "GGML_HIP": "OFF",
+        "GGML_LLAMAFILE": "ON",
+        "GGML_LTO": "OFF",
+        "GGML_METAL": "OFF",
+        "GGML_MUSA": "OFF",
+        "GGML_NATIVE": "OFF",
+        "GGML_OPENCL": "OFF",
+        "GGML_OPENMP": "OFF",
+        "GGML_OPENVINO": "OFF",
+        "GGML_RPC": "OFF",
+        "GGML_SANITIZE_ADDRESS": "OFF",
+        "GGML_SANITIZE_THREAD": "OFF",
+        "GGML_SANITIZE_UNDEFINED": "OFF",
+        "GGML_SCHED_NO_REALLOC": "OFF",
+        "GGML_SSE42": "ON",
+        "GGML_STATIC": "OFF",
+        "GGML_SYCL": "OFF",
+        "GGML_VIRTGPU": "OFF",
+        "GGML_VIRTGPU_BACKEND": "OFF",
+        "GGML_VULKAN": "OFF",
+        "GGML_WEBGPU": "OFF",
+        "GGML_ZDNN": "OFF",
+        "GGML_ZENDNN": "OFF",
+        "LLAMA_LLGUIDANCE": "OFF",
+        "LLAMA_SANITIZE_ADDRESS": "OFF",
+        "LLAMA_SANITIZE_THREAD": "OFF",
+        "LLAMA_SANITIZE_UNDEFINED": "OFF"
+      }
+    }
+  },
+  "settings": {
+    "cpu-t4-fa-off": {
+      "llama_server_args": ["-c", "4096", "-b", "4096", "-ub", "4096", "-np", "1", "-t", "4", "-tb", "4", "-fa", "off", "-ngl", "0", "--device", "none", "-fit", "off"],
+      "context": {
+        "n_ctx": 4096,
+        "n_batch": 4096,
+        "n_ubatch": 4096,
+        "n_seq_max": 1,
+        "n_outputs_max": 1,
+        "n_outputs_max_per_seq": 1,
+        "n_gpu_layers": 0,
+        "offload_devices": "none",
+        "n_threads": 4,
+        "n_threads_batch": 4,
+        "flash_attn": "off",
+        "causal_attn": false,
+        "memory": false
+      },
+      "oracle_devices": [
+        {
+          "name": "CPU",
+          "type": "cpu"
+        }
+      ],
+      "model_devices": [],
+      "server_devices": []
+    }
+  },
+  "platform": {
+    "system": "Linux",
+    "machine": "x86_64",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.90GHz",
+    "libc": "glibc 2.34"
+  },
+  "artifacts": {
+    "d1-2b-q4km": {
+      "architecture": "lfm3",
+      "decision_type": "lfm3-d1",
+      "decision_metadata": {
+        "lfm3.decision.type": "lfm3-d1",
+        "lfm3.decision.temperature.choice": "1.337398",
+        "lfm3.decision.temperature.noul": "1.337398",
+        "lfm3.decision.temperature.score": "1.337398"
+      },
+      "temperatures": {
+        "choice": "0x3fab2fdc",
+        "noul": "0x3fab2fdc",
+        "score": "0x3fab2fdc"
+      },
+      "score_bias": {},
+      "n_vocab": 128000,
+      "add_bos": false,
+      "template_sha256": "ee5fc62461a9bbbcb8389c57f4cd2cd694ccb0dec19521576bd1419049490d8b",
+      "template": "<|startoftext|><|im_start|>user\n{% for image in images %}{{ image }}{% endfor %}{% if state is not none %}{% if state is string %}{{ state }}{% else %}{{ state | tojson(indent=2) }}{% endif %}{{ '\\n\\n\\nQUESTION:\\n' }}{% endif %}{{ instructions if instructions is string else instructions | tojson }}{% if type == 'choice' %}{{ '\\n\\nOptions:\\n' }}{% for o in options %}{{ o.label }} {% if o.description %}{{ o.description if o.description is string else o.description | tojson }}{% else %}{{ o.key | replace('_', ' ') }}{% endif %}{% if not loop.last %}{{ '\\n' }}{% endif %}{% endfor %}{{ '\\n\\nReply with the option code only.' }}{% elif type == 'noul' %}{% set ns = namespace(criteria=false) %}{% for o in options %}{% if o.description is not none %}{% set ns.criteria = true %}{% endif %}{% endfor %}{% if ns.criteria %}{% for o in options %}{{ '\\nYes: ' if o.key == 'true' else '\\nNo: ' }}{% if o.description is none %}None{% else %}{{ o.description if o.description is string else o.description | tojson }}{% endif %}{% endfor %}{% endif %}{{ '\\n\\nReply with yes or no only.' }}{% else %}{{ '\\n\\n' }}{% for o in options %}{{ o.key }} {{ o.description if o.description is string else o.description | tojson }}{{ '\\n' }}{% endfor %}{{ '\\nReply with a single digit 0-' }}{{ options | length - 1 }}{{ ' only.' }}{% endif %}{{ '<|im_end|>\\n<|im_start|>assistant\\n' }}<think></think>",
+      "control_spellings": {
+        "count": 124,
+        "sha256": "7cb928f61b47149d6bb4af5684b02809bf8c8361f7a57802d2b19e9afe53925b",
+        "longest_first": ["<|img_row_10_col_10|>", "<|img_row_1_col_10|>", "<|img_row_2_col_10|>", "<|img_row_3_col_10|>", "<|img_row_4_col_10|>", "<|img_row_5_col_10|>", "<|img_row_6_col_10|>", "<|img_row_7_col_10|>", "<|img_row_8_col_10|>", "<|img_row_9_col_10|>", "<|img_row_10_col_1|>", "<|img_row_10_col_2|>", "<|img_row_10_col_3|>", "<|img_row_10_col_4|>", "<|img_row_10_col_5|>", "<|img_row_10_col_6|>", "<|img_row_10_col_7|>", "<|img_row_10_col_8|>", "<|img_row_10_col_9|>", "<|tool_list_start|>", "<|tool_call_start|>", "<|img_row_1_col_1|>", "<|img_row_1_col_2|>", "<|img_row_1_col_3|>", "<|img_row_1_col_4|>", "<|img_row_1_col_5|>", "<|img_row_1_col_6|>", "<|img_row_1_col_7|>", "<|img_row_1_col_8|>", "<|img_row_1_col_9|>", "<|img_row_2_col_1|>", "<|img_row_2_col_2|>", "<|img_row_2_col_3|>", "<|img_row_2_col_4|>", "<|img_row_2_col_5|>", "<|img_row_2_col_6|>", "<|img_row_2_col_7|>", "<|img_row_2_col_8|>", "<|img_row_2_col_9|>", "<|img_row_3_col_1|>", "<|img_row_3_col_2|>", "<|img_row_3_col_3|>", "<|img_row_3_col_4|>", "<|img_row_3_col_5|>", "<|img_row_3_col_6|>", "<|img_row_3_col_7|>", "<|img_row_3_col_8|>", "<|img_row_3_col_9|>", "<|img_row_4_col_1|>", "<|img_row_4_col_2|>", "<|img_row_4_col_3|>", "<|img_row_4_col_4|>", "<|img_row_4_col_5|>", "<|img_row_4_col_6|>", "<|img_row_4_col_7|>", "<|img_row_4_col_8|>", "<|img_row_4_col_9|>", "<|img_row_5_col_1|>", "<|img_row_5_col_2|>", "<|img_row_5_col_3|>", "<|img_row_5_col_4|>", "<|img_row_5_col_5|>", "<|img_row_5_col_6|>", "<|img_row_5_col_7|>", "<|img_row_5_col_8|>", "<|img_row_5_col_9|>", "<|img_row_6_col_1|>", "<|img_row_6_col_2|>", "<|img_row_6_col_3|>", "<|img_row_6_col_4|>", "<|img_row_6_col_5|>", "<|img_row_6_col_6|>", "<|img_row_6_col_7|>", "<|img_row_6_col_8|>", "<|img_row_6_col_9|>", "<|img_row_7_col_1|>", "<|img_row_7_col_2|>", "<|img_row_7_col_3|>", "<|img_row_7_col_4|>", "<|img_row_7_col_5|>", "<|img_row_7_col_6|>", "<|img_row_7_col_7|>", "<|img_row_7_col_8|>", "<|img_row_7_col_9|>", "<|img_row_8_col_1|>", "<|img_row_8_col_2|>", "<|img_row_8_col_3|>", "<|img_row_8_col_4|>", "<|img_row_8_col_5|>", "<|img_row_8_col_6|>", "<|img_row_8_col_7|>", "<|img_row_8_col_8|>", "<|img_row_8_col_9|>", "<|img_row_9_col_1|>", "<|img_row_9_col_2|>", "<|img_row_9_col_3|>", "<|img_row_9_col_4|>", "<|img_row_9_col_5|>", "<|img_row_9_col_6|>", "<|img_row_9_col_7|>", "<|img_row_9_col_8|>", "<|img_row_9_col_9|>", "<|tool_list_end|>", "<|tool_call_end|>", "<|img_thumbnail|>", "<|vision_start|>", "<|startoftext|>", "<|image_split|>", "<|audio_start|>", "<|mixed_start|>", "<|vision_end|>", "<|text_start|>", "<|endoftext|>", "<|mixed_end|>", "<|im_start|>", "<|text_end|>", "<|fim_pre|>", "<|fim_mid|>", "<|fim_suf|>", "<|im_end|>", "<|video|>", "<|image|>", "<|pad|>", "<image>"]
+      }
+    }
+  }
+}

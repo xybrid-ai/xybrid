@@ -173,10 +173,8 @@ mod tests {
     // These cases pin the chat-context cost-attribution path: the wire `backend`
     // label that lands on the currently-open span when
     // `execute_with_context_impl` / `execute_streaming_with_context_impl` bypass
-    // the outer `execute:<model_id>` span. They share state with the global
-    // span collector, so a process-wide mutex serialises them — `cargo test`
-    // parallelises within a binary and these would otherwise stomp each other's
-    // reset/measure window.
+    // the outer `execute:<model_id>` span. Each test captures stages on its own
+    // thread, so they run in parallel without sharing state.
 
     fn gguf_metadata(backend_hint: Option<&str>) -> ModelMetadata {
         let mut bundle_metadata = HashMap::new();
@@ -206,14 +204,12 @@ mod tests {
     }
 
     fn capture_span_metadata(span_name: &str, metadata: &ModelMetadata) -> HashMap<String, String> {
-        tracing::init_tracing(true);
-        tracing::reset_tracing();
+        let stage_trace = tracing::capture();
         {
             let _guard = tracing::SpanGuard::new(span_name);
             stamp_llm_span_cost_attribution(metadata);
         }
-        let json = tracing::get_stages_json();
-        tracing::reset_tracing();
+        let json = stage_trace.stages_json();
 
         let span = json["spans"]
             .as_array()
@@ -231,7 +227,6 @@ mod tests {
 
     #[test]
     fn unannotated_gguf_stamps_llamacpp_default() {
-        let _lock = crate::tracing::test_lock();
         let captured = capture_span_metadata("execute:test", &gguf_metadata(None));
         assert_eq!(
             captured.get("backend").map(String::as_str),
@@ -242,7 +237,6 @@ mod tests {
 
     #[test]
     fn mistralrs_hint_wins_on_gguf() {
-        let _lock = crate::tracing::test_lock();
         let captured = capture_span_metadata("execute:test", &gguf_metadata(Some("mistralrs")));
         assert_eq!(
             captured.get("backend").map(String::as_str),
@@ -252,7 +246,6 @@ mod tests {
 
     #[test]
     fn legacy_mistral_alias_normalises_to_mistralrs() {
-        let _lock = crate::tracing::test_lock();
         let captured = capture_span_metadata("execute:test", &gguf_metadata(Some("mistral")));
         assert_eq!(
             captured.get("backend").map(String::as_str),
@@ -263,7 +256,6 @@ mod tests {
 
     #[test]
     fn quantization_stamped_from_gguf_filename() {
-        let _lock = crate::tracing::test_lock();
         let mut metadata = gguf_metadata(None);
         metadata.execution_template = ExecutionTemplate::Gguf {
             model_file: "tinyllama-1.1b-chat-q4_k_m.gguf".into(),
@@ -335,15 +327,13 @@ mod tests {
         let adapter = crate::runtime_adapter::llm::LlmRuntimeAdapter::with_backend(Box::new(
             WireLabelStub(wire_label),
         ));
-        tracing::init_tracing(true);
-        tracing::reset_tracing();
+        let stage_trace = tracing::capture();
         {
             let _guard = tracing::SpanGuard::new("execute:test");
             stamp_llm_span_cost_attribution(metadata);
             stamp_llm_runtime_backend(&adapter);
         }
-        let json = tracing::get_stages_json();
-        tracing::reset_tracing();
+        let json = stage_trace.stages_json();
 
         let span = json["spans"]
             .as_array()
@@ -365,7 +355,6 @@ mod tests {
 
     #[test]
     fn runtime_wire_label_overwrites_template_default() {
-        let _lock = crate::tracing::test_lock();
         // Template default for unannotated GGUF is `llamacpp`, but
         // the runtime selected by cargo feature is mistral.rs. The
         // overwrite must flip the stamp to ground truth so the
@@ -380,7 +369,6 @@ mod tests {
 
     #[test]
     fn runtime_overwrite_preserves_template_default_when_label_absent() {
-        let _lock = crate::tracing::test_lock();
         // Mock/test backends return None from wire_label so the
         // template-derived stamp survives — anything else would
         // erase ground truth that the template *did* carry.
@@ -415,14 +403,12 @@ mod tests {
         output: &crate::runtime_adapter::llm::GenerationOutput,
         backend_name: &str,
     ) -> HashMap<String, String> {
-        tracing::init_tracing(true);
-        tracing::reset_tracing();
+        let stage_trace = tracing::capture();
         {
             let _guard = tracing::SpanGuard::new("execute:test");
             mirror_llm_metrics_to_span(output, backend_name, None);
         }
-        let json = tracing::get_stages_json();
-        tracing::reset_tracing();
+        let json = stage_trace.stages_json();
 
         let span = json["spans"]
             .as_array()
@@ -444,7 +430,6 @@ mod tests {
 
     #[test]
     fn mirror_emits_canonical_tokens_out() {
-        let _lock = tracing::test_lock();
         // The local LLM paths bypass `LlmRuntimeAdapter::execute`, so the
         // analytics span extractor's canonical `tokens_out` key must be stamped
         // here too — equal to `tokens_generated` by construction.

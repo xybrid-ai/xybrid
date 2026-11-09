@@ -9,8 +9,10 @@ import type {
   GenerationConfig,
   InferenceResult,
   ModelInfo,
+  ObservationOptions,
   StreamToken,
   StreamingConfig,
+  TtsAudioChunk,
   VoiceInfo,
 } from './types';
 import {
@@ -38,8 +40,16 @@ export interface RunOptions {
   fallbackToCloud?: boolean;
   /** Tokens to emit after an abort signal before stopping. */
   maxGraceTokens?: number;
-  /** Correlation id threaded into telemetry for this call. */
+  /** Correlation id recorded on this call's trace. */
   correlationId?: string;
+  /** W3C `traceparent` of your span: the run's trace becomes its child. */
+  traceparent?: string;
+  /** W3C `tracestate` accompanying `traceparent`. */
+  tracestate?: string;
+  /** Your own conversation id, recorded on the run's trace. */
+  conversationId?: string;
+  /** Skip the detailed trace for this run; metrics are still recorded. */
+  suppressTrace?: boolean;
   /**
    * Seed the run with this conversation's history (multi-turn chat). The
    * context is not modified: push the turns you want to keep yourself.
@@ -85,7 +95,7 @@ function toWireSource(source: ModelSource): { kind: string; value: string; revis
  * resolves, downloads if needed, and loads it.
  */
 export class ModelLoader {
-  private constructor(readonly source: ModelSource) {}
+  private constructor(readonly source: ModelSource, private readonly observation?: ObservationOptions) {}
 
   /** Describe any source. */
   static from(source: ModelSource): ModelLoader {
@@ -132,7 +142,16 @@ export class ModelLoader {
 
   /** Resolve, download if needed, and load. Rejects with a typed `xybrid_*` code. */
   async load(): Promise<Model> {
-    return new Model(await NativeXybrid.loadModel(toWireSource(this.source)));
+    const source = toWireSource(this.source);
+    return new Model(await NativeXybrid.loadModel({
+      ...source,
+      ...(this.observation ? { observation: this.observation } : {}),
+    }));
+  }
+
+  /** Clone this loader with explicit parent, suppression and correlation controls. */
+  withObservation(observation: ObservationOptions): ModelLoader {
+    return new ModelLoader(this.source, { ...observation });
   }
 
   /**
@@ -182,6 +201,32 @@ export class Model {
   /** Whether the weights are resident (false after {@link unload} until the next run). */
   isLoaded(): Promise<boolean> {
     return NativeXybrid.isLoaded(this.handle);
+  }
+
+  /** Stream speech packets; the terminal inference result carries the observation reference. */
+  async *runTtsStreaming(
+    envelope: Envelope,
+    options: RunOptions = {},
+  ): AsyncGenerator<TtsAudioChunk, InferenceResult | undefined, void> {
+    const wireEnvelope = toWireEnvelope(envelope);
+    const cancel = await bindCancel(options.signal);
+    let stream: string | null = null;
+    try {
+      stream = await NativeXybrid.streamStart(
+        this.handle, wireEnvelope,
+        toWireRunOptions(options, { context: options.context?.handle, cancel: cancel.token }),
+      );
+      for (;;) {
+        const event = await NativeXybrid.streamNext(stream) as WireStreamEvent | null;
+        if (event == null) return undefined;
+        if (event.kind === 'audio') yield event.audio;
+        else if (event.kind === 'complete') return fromWireResult(event.result);
+        else throw new Error('Speech stream returned a non-audio event');
+      }
+    } finally {
+      if (stream !== null) await NativeXybrid.dispose(stream).catch(() => {});
+      await cancel.release();
+    }
   }
 
   /**

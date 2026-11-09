@@ -26,15 +26,17 @@ namespace XybridBolt
     /// Generation figures (TTFT, tokens per second) when this stage is a
     /// language model; `total_ms` is the stage latency.
     /// </param>
+    /// <param name="Observation">The logical inference performed by this stage, when observed.</param>
     public readonly struct XybridStageResult
     {
-        public XybridStageResult(string StageId, XybridEnvelope Envelope, XybridOutputType OutputType, uint LatencyMs, XybridExecutionTarget ExecutionTarget, XybridInferenceMetrics Metrics) { this.StageId = StageId; this.Envelope = Envelope; this.OutputType = OutputType; this.LatencyMs = LatencyMs; this.ExecutionTarget = ExecutionTarget; this.Metrics = Metrics; }
+        public XybridStageResult(string StageId, XybridEnvelope Envelope, XybridOutputType OutputType, uint LatencyMs, XybridExecutionTarget ExecutionTarget, XybridInferenceMetrics Metrics, XybridObservationRef? Observation = null) { this.StageId = StageId; this.Envelope = Envelope; this.OutputType = OutputType; this.LatencyMs = LatencyMs; this.ExecutionTarget = ExecutionTarget; this.Metrics = Metrics; this.Observation = Observation; }
         public string StageId { get; }
         public XybridEnvelope Envelope { get; }
         public XybridOutputType OutputType { get; }
         public uint LatencyMs { get; }
         public XybridExecutionTarget ExecutionTarget { get; }
         public XybridInferenceMetrics Metrics { get; }
+        public XybridObservationRef? Observation { get; }
 
         internal static XybridStageResult Decode(WireReader reader) =>
             new XybridStageResult(
@@ -43,7 +45,8 @@ namespace XybridBolt
                 (XybridOutputType)reader.ReadI32(),
                 reader.ReadU32(),
                 (XybridExecutionTarget)reader.ReadI32(),
-                XybridInferenceMetrics.Decode(reader)
+                XybridInferenceMetrics.Decode(reader),
+                reader.ReadU8() == 0 ? default(XybridObservationRef?) : XybridObservationRef.Decode(reader)
             );
 
         internal void Encode(WireWriter writer)
@@ -65,6 +68,17 @@ namespace XybridBolt
             }
             {
                 this.Metrics.Encode(writer);
+            }
+            {
+                if (this.Observation is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    boltffiValue0.Encode(writer);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
             }
         }
 

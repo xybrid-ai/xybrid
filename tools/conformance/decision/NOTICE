@@ -1,0 +1,43 @@
+Upstream decision oracle: third-party material
+
+This directory builds and links llama.cpp from vendor/llama-cpp, unmodified.
+Its own files repeat small parts of llama.cpp at commit
+8642541b255bfb5dc39cd351a178be09013a55d6:
+
+- oracle.cpp mirrors server code it cannot call:
+  - the prompt-size checks of a slot that cannot split its prompt, with their
+    error messages (tools/server/server-context.cpp, update_slots, the
+    !slot.can_split() branch at line 4058);
+  - the max over each label group in send_decision
+    (tools/server/server-context.cpp, line 2526);
+  - the image-input refusal of the /v1/systemone handler
+    (tools/server/server-context.cpp, line 6618);
+  - the exception-to-status mapping of ex_wrapper (tools/server/server.cpp,
+    line 61) and the status and type names of format_error_response
+    (tools/server/server-common.cpp, line 93).
+- test_access.h repeats the signatures of private members of
+  server_decision_context (tools/server/server-decision.h).
+
+llama.cpp is distributed under the MIT License:
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

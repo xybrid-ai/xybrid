@@ -3,6 +3,19 @@
 
 from __future__ import annotations
 
+import sys
+
+# Check before importing verifier dependencies or touching any private inputs.
+# In particular, hashlib.file_digest is only available starting in Python 3.11.
+if sys.version_info < (3, 11):
+    print(
+        "zzz-pull: Python 3.11+ is required "
+        f"(found {sys.version_info[0]}.{sys.version_info[1]}); "
+        "invoke this tool with Python 3.11+ or set XYBRID_ZZZ_PYTHON for Cargo builds",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
 import argparse
 import hashlib
 import json
@@ -11,7 +24,6 @@ import re
 import shutil
 import stat
 import subprocess
-import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass
@@ -206,8 +218,22 @@ def select_pin(target: str, manifest: Path = DEFAULT_MANIFEST) -> Pin:
     return Pin(tag, entry)
 
 
+def receipt_target_mismatch(receipt: dict, pin: Pin) -> str | None:
+    # Only names from the public target table may enter diagnostics. A receipt
+    # may be unverified, malformed, or contain private data in any other field.
+    for target, zig_target in ZIG_TARGETS.items():
+        if receipt.get("target") == zig_target and target != pin.entry["target"]:
+            return (
+                f"receipt target mismatch: requested '{pin.entry['target']}', "
+                f"provided '{target}'"
+            )
+    return None
+
+
 def validate_receipt(receipt: dict, metadata: dict, pin: Pin) -> None:
     entry = pin.entry
+    mismatch = receipt_target_mismatch(receipt, pin)
+    require(mismatch is None, mismatch or "receipt mismatch: target")
     if entry["receipt_schema"] == 5:
         expect(receipt, "notice_files", pin.notices, "receipt")
     else:
@@ -397,7 +423,24 @@ def verify_staged(path: Path, pin: Pin) -> Path:
                 )
                 found.add(relative)
     require(found == expected, "missing staged payload or pinned archive")
-    hashes = inspect_archive(path / STAGED_ARCHIVE, pin)
+    try:
+        hashes = inspect_archive(path / STAGED_ARCHIVE, pin)
+    except StageError as error:
+        if str(error) == "archive checksum mismatch":
+            # A wrong single-slice override otherwise fails at its checksum,
+            # before the verifier can explain which target was supplied. Read
+            # only a bounded receipt for a diagnostic hint, never for acceptance.
+            try:
+                with open_regular(path / "RECEIPT.json") as source:
+                    data = source.read(MAX_JSON_BYTES + 1)
+                require(len(data) <= MAX_JSON_BYTES, "metadata exceeds size limit")
+                receipt = json_object(data, "receipt")
+                mismatch = receipt_target_mismatch(receipt, pin)
+            except (OSError, ValueError):
+                mismatch = None
+            if mismatch:
+                raise StageError(mismatch) from None
+        raise
     for name, expected_hash in hashes.items():
         with open_regular(path / name) as source:
             require(
@@ -405,6 +448,28 @@ def verify_staged(path: Path, pin: Pin) -> Path:
                 "staged payload differs from pinned archive",
             )
     return path.absolute()
+
+
+def verify_prebuilt(path: Path, pin: Pin) -> Path:
+    """Accept a single slice or a private root with Rust-target children."""
+    require(
+        not path.is_symlink() and path.is_dir(), "missing or unsafe staged directory"
+    )
+    child = path / pin.entry["target"]
+    if child.exists() or child.is_symlink():
+        require(
+            not path.stat().st_mode & 0o077,
+            "prebuilt root requires private permissions (0700)",
+        )
+        # An explicitly supplied child always wins, even if it is invalid.
+        # Never fetch or fall back to a different target on verification failure.
+        return verify_staged(child, pin)
+    require(
+        (path / "RECEIPT.json").exists(),
+        f"missing prebuilt slice for requested target '{pin.entry['target']}'; "
+        "expected a verified slice or a private root/<Rust target> directory",
+    )
+    return verify_staged(path, pin)
 
 
 def github_environment(use_gh_auth: bool) -> tuple[str, dict[str, str]]:
@@ -589,7 +654,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--verify-only",
         action="store_true",
-        help="Verify XYBRID_ZZZ_PREBUILT_DIR without fetching or staging.",
+        help="Verify XYBRID_ZZZ_PREBUILT_DIR (a slice or private root/<Rust target>) without fetching or staging.",
     )
     args = parser.parse_args(argv)
     try:
@@ -599,7 +664,7 @@ def main(argv: list[str] | None = None) -> int:
             not (prebuilt and args.archive), "choose a staged override or local archive"
         )
         if prebuilt:
-            result = verify_staged(Path(prebuilt), pin)
+            result = verify_prebuilt(Path(prebuilt), pin)
         else:
             require(
                 not args.verify_only, "--verify-only requires XYBRID_ZZZ_PREBUILT_DIR"

@@ -407,6 +407,7 @@ mod tests {
             quantization: "q1_0_g128".to_string(),
             size_bytes: 1,
             sha256: "a".repeat(64),
+            min_os: Vec::new(),
             artifacts: Vec::new(),
             file_sha256: Default::default(),
             passthrough,

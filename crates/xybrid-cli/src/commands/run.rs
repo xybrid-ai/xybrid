@@ -2,7 +2,9 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use anyhow::{anyhow, Context, Result};
+mod observability;
+
+use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -51,7 +53,6 @@ pub(crate) fn run_pipeline(
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     let _pipeline_span = if trace_enabled {
         Some(crate::tracing_viz::SpanGuard::new("pipeline_execution"))
@@ -88,9 +89,7 @@ pub(crate) fn run_pipeline(
         &availability_fn,
         policy_path,
         output_path,
-        trace_enabled,
         show_reasoning,
-        trace_export,
     )
 }
 
@@ -759,9 +758,7 @@ fn execute_pipeline(
     availability_fn: &dyn Fn(&str) -> LocalAvailability,
     policy_path: Option<&PathBuf>,
     output_path: Option<&PathBuf>,
-    trace_enabled: bool,
     show_reasoning: bool,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     let mut orchestrator = Orchestrator::new();
 
@@ -780,7 +777,9 @@ fn execute_pipeline(
     let sp = ui::spinner("Executing pipeline...");
 
     let bridge = xybrid_sdk::bridge_orchestrator_events(&orchestrator);
-    let execution_result = orchestrator.execute_pipeline(stages, input, metrics, availability_fn);
+    let execution_result = observability::workflow("pipeline", || {
+        orchestrator.execute_pipeline(stages, input, metrics, availability_fn)
+    });
     drop(orchestrator);
     bridge
         .join()
@@ -790,7 +789,6 @@ fn execute_pipeline(
         Ok(results) => {
             sp.finish_and_clear();
             print_pipeline_results(&results, output_path, show_reasoning)?;
-            print_trace_output(trace_enabled, trace_export)?;
             Ok(())
         }
         Err(e) => {
@@ -936,24 +934,6 @@ fn save_pipeline_output(
     Ok(())
 }
 
-fn print_trace_output(trace_enabled: bool, trace_export: Option<&PathBuf>) -> Result<()> {
-    if trace_enabled {
-        println!("{}", crate::tracing_viz::render_trace());
-
-        if let Some(export_path) = trace_export {
-            let json = crate::tracing_viz::GLOBAL_COLLECTOR
-                .lock()
-                .map_err(|_| anyhow!("Trace collector lock poisoned"))?
-                .to_chrome_trace_json();
-            fs::write(export_path, json)
-                .with_context(|| format!("Failed to export trace to {}", export_path.display()))?;
-            ui::ok(&format!("Trace exported to {}", export_path.display()));
-        }
-    }
-
-    Ok(())
-}
-
 fn duration_millis_u64(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
@@ -983,76 +963,71 @@ pub(crate) fn run_bundle(
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
-    if trace_enabled {
-        crate::tracing_viz::reset_collector();
-    }
     let _bundle_span = if trace_enabled {
         Some(crate::tracing_viz::SpanGuard::new("bundle_execution"))
     } else {
         None
     };
 
-    let trace_id = uuid::Uuid::new_v4();
-    xybrid_sdk::set_telemetry_pipeline_context(None, Some(trace_id));
+    observability::workflow("bundle_execution", || {
+        ui::header("Run · Bundle");
+        ui::kv("Bundle", &bundle_path.display().to_string());
 
-    ui::header("Run · Bundle");
-    ui::kv("Bundle", &bundle_path.display().to_string());
+        if !bundle_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Bundle file not found: {}",
+                bundle_path.display()
+            ));
+        }
 
-    if !bundle_path.exists() {
-        return Err(anyhow::anyhow!(
-            "Bundle file not found: {}",
-            bundle_path.display()
-        ));
-    }
+        let sp = ui::spinner("Loading and extracting bundle...");
+        let cache =
+            xybrid_sdk::cache::CacheManager::new().context("Failed to create cache manager")?;
+        let extract_dir = cache
+            .ensure_extracted(bundle_path)
+            .context("Failed to extract bundle")?;
+        sp.finish_and_clear();
 
-    let sp = ui::spinner("Loading and extracting bundle...");
-    let cache = xybrid_sdk::cache::CacheManager::new().context("Failed to create cache manager")?;
-    let extract_dir = cache
-        .ensure_extracted(bundle_path)
-        .context("Failed to extract bundle")?;
-    sp.finish_and_clear();
+        let (metadata, input) = prepare_bundle_execution(
+            &extract_dir,
+            input_audio,
+            input_text,
+            input_images,
+            choices,
+            voice,
+            dry_run,
+            backend_override,
+            max_tokens,
+        )?;
 
-    let (metadata, input) = prepare_bundle_execution(
-        &extract_dir,
-        input_audio,
-        input_text,
-        input_images,
-        choices,
-        voice,
-        dry_run,
-        backend_override,
-        max_tokens,
-    )?;
+        emit_pipeline_start_event(&metadata, &bundle_path.display().to_string());
 
-    emit_pipeline_start_event(&metadata, &bundle_path.display().to_string());
+        if dry_run {
+            ui::section("Dry Run");
+            println!();
+            ui::ok("Bundle is valid and ready for execution");
+            ui::hint("Use without --dry-run to run inference");
+            println!();
+            return Ok(());
+        }
 
-    if dry_run {
-        ui::section("Dry Run");
-        println!();
-        ui::ok("Bundle is valid and ready for execution");
-        ui::hint("Use without --dry-run to run inference");
-        println!();
-        return Ok(());
-    }
-
-    let input = input.ok_or_else(|| {
+        let input = input.ok_or_else(|| {
         anyhow::anyhow!("No input provided. Use --input-audio <file>, --input-text <text>, or --input-image <file>")
     })?;
 
-    let (output, elapsed) = run_inference(&extract_dir, &metadata, &input, trace_enabled)?;
+        let (output, elapsed) = run_inference(&extract_dir, &metadata, &input, trace_enabled)?;
 
-    print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
-    print_llm_trace_block(&output, trace_enabled);
-    emit_pipeline_complete_event(&metadata, &output, elapsed);
+        print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
+        print_llm_trace_block(&output, trace_enabled);
+        emit_pipeline_complete_event(&metadata, &output, elapsed);
 
-    if trace_enabled {
-        drop(_bundle_span);
-        print_trace_output(trace_enabled, trace_export)?;
-    }
+        if trace_enabled {
+            drop(_bundle_span);
+        }
 
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Print the per-inference LLM telemetry block populated by the adapter's
@@ -1112,170 +1087,164 @@ pub(crate) fn run_model(
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
-    if trace_enabled {
-        crate::tracing_viz::reset_collector();
-    }
     let _model_span = if trace_enabled {
         Some(crate::tracing_viz::SpanGuard::new("model_execution"))
     } else {
         None
     };
 
-    let trace_id = uuid::Uuid::new_v4();
-    xybrid_sdk::set_telemetry_pipeline_context(None, Some(trace_id));
+    observability::workflow("model_execution", || {
+        ui::header(&format!("Run · {}", model_id));
 
-    ui::header(&format!("Run · {}", model_id));
+        let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
 
-    let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
-
-    let _fetch_span = if trace_enabled {
-        Some(crate::tracing_viz::SpanGuard::new("registry_fetch"))
-    } else {
-        None
-    };
-    let selector_cfg = SelectorCfg::current();
-    let format =
-        registry_format_for_stage_backend(&client, model_id, backend_override, &selector_cfg)?;
-
-    // Offline-first: if the model has already been downloaded and extracted,
-    // skip the registry entirely. This keeps `xybrid run` working when the
-    // machine is offline (or the registry is unreachable) for any model that
-    // was previously fetched.
-    let cached_dir = if let Some(format) = format {
-        client.resolve_offline_with_format(model_id, format)
-    } else {
-        client.resolve_offline(model_id)
-    };
-    let extract_dir = if let Some(cached_dir) = cached_dir {
-        println!();
-        ui::ok("Using locally cached model");
-        ui::kv("Location", &cached_dir.display().to_string());
-        println!();
-        drop(_fetch_span);
-        cached_dir
-    } else {
-        let resolved = if let Some(format) = format {
-            client.resolve_with_format(model_id, platform, format)
+        let _fetch_span = if trace_enabled {
+            Some(crate::tracing_viz::SpanGuard::new("registry_fetch"))
         } else {
-            client.resolve(model_id, platform)
-        }
-        .context(format!(
-            "Failed to resolve model '{}' from registry",
-            model_id
-        ))?;
+            None
+        };
+        let selector_cfg = SelectorCfg::current();
+        let format =
+            registry_format_for_stage_backend(&client, model_id, backend_override, &selector_cfg)?;
 
-        println!();
-        ui::kv("Repository", &resolved.hf_repo);
-        ui::kv("File", &resolved.file);
-        ui::kv("Size", &format_size(resolved.size_bytes));
-        ui::kv(
-            "Format",
-            &format!("{} ({})", resolved.format, resolved.quantization),
-        );
-
-        if let Some(format) = format {
-            let pb = ui::download_bar(resolved.size_bytes, model_id);
-            let dir = client
-                .fetch_extracted_with_format(model_id, platform, format, |status| {
-                    ui::apply_download_status(&pb, &status);
-                })
-                .context(format!(
-                    "Failed to fetch model '{}' from registry",
-                    model_id
-                ))?;
-            pb.finish_and_clear();
-            ui::ok(&format!("Downloaded {}", model_id));
-            ui::kv("Location", &dir.display().to_string());
-            println!();
-            drop(_fetch_span);
-            dir
-        } else if resolved.passthrough {
-            // Passthrough models (e.g., GGUF): download raw file + write metadata directly
-            let pb = ui::download_bar(resolved.size_bytes, model_id);
-            let dir = client
-                .fetch_extracted(model_id, platform, |status| {
-                    ui::apply_download_status(&pb, &status);
-                })
-                .context(format!(
-                    "Failed to fetch passthrough model '{}' from registry",
-                    model_id
-                ))?;
-            pb.finish_and_clear();
-            ui::ok(&format!("Downloaded {}", model_id));
-            ui::kv("Location", &dir.display().to_string());
-            println!();
-            drop(_fetch_span);
-            dir
+        // Offline-first: if the model has already been downloaded and extracted,
+        // skip the registry entirely. This keeps `xybrid run` working when the
+        // machine is offline (or the registry is unreachable) for any model that
+        // was previously fetched.
+        let cached_dir = if let Some(format) = format {
+            client.resolve_offline_with_format(model_id, format)
         } else {
-            // Standard .xyb bundle flow
-            let bundle_path = fetch_or_cache(&client, model_id, platform, &resolved)?;
-            ui::kv("Location", &bundle_path.display().to_string());
+            client.resolve_offline(model_id)
+        };
+        let extract_dir = if let Some(cached_dir) = cached_dir {
+            println!();
+            ui::ok("Using locally cached model");
+            ui::kv("Location", &cached_dir.display().to_string());
             println!();
             drop(_fetch_span);
+            cached_dir
+        } else {
+            let resolved = if let Some(format) = format {
+                client.resolve_with_format(model_id, platform, format)
+            } else {
+                client.resolve(model_id, platform)
+            }
+            .context(format!(
+                "Failed to resolve model '{}' from registry",
+                model_id
+            ))?;
 
-            let sp = ui::spinner("Loading and extracting bundle...");
-            let cache =
-                xybrid_sdk::cache::CacheManager::new().context("Failed to create cache manager")?;
-            let dir = cache
-                .ensure_extracted(&bundle_path)
-                .context("Failed to extract bundle")?;
-            sp.finish_and_clear();
-            dir
+            println!();
+            ui::kv("Repository", &resolved.hf_repo);
+            ui::kv("File", &resolved.file);
+            ui::kv("Size", &format_size(resolved.size_bytes));
+            ui::kv(
+                "Format",
+                &format!("{} ({})", resolved.format, resolved.quantization),
+            );
+
+            if let Some(format) = format {
+                let pb = ui::download_bar(resolved.size_bytes, model_id);
+                let dir = client
+                    .fetch_extracted_with_format(model_id, platform, format, |status| {
+                        ui::apply_download_status(&pb, &status);
+                    })
+                    .context(format!(
+                        "Failed to fetch model '{}' from registry",
+                        model_id
+                    ))?;
+                pb.finish_and_clear();
+                ui::ok(&format!("Downloaded {}", model_id));
+                ui::kv("Location", &dir.display().to_string());
+                println!();
+                drop(_fetch_span);
+                dir
+            } else if resolved.passthrough {
+                // Passthrough models (e.g., GGUF): download raw file + write metadata directly
+                let pb = ui::download_bar(resolved.size_bytes, model_id);
+                let dir = client
+                    .fetch_extracted(model_id, platform, |status| {
+                        ui::apply_download_status(&pb, &status);
+                    })
+                    .context(format!(
+                        "Failed to fetch passthrough model '{}' from registry",
+                        model_id
+                    ))?;
+                pb.finish_and_clear();
+                ui::ok(&format!("Downloaded {}", model_id));
+                ui::kv("Location", &dir.display().to_string());
+                println!();
+                drop(_fetch_span);
+                dir
+            } else {
+                // Standard .xyb bundle flow
+                let bundle_path = fetch_or_cache(&client, model_id, platform, &resolved)?;
+                ui::kv("Location", &bundle_path.display().to_string());
+                println!();
+                drop(_fetch_span);
+
+                let sp = ui::spinner("Loading and extracting bundle...");
+                let cache = xybrid_sdk::cache::CacheManager::new()
+                    .context("Failed to create cache manager")?;
+                let dir = cache
+                    .ensure_extracted(&bundle_path)
+                    .context("Failed to extract bundle")?;
+                sp.finish_and_clear();
+                dir
+            }
+        };
+
+        let (metadata, input) = prepare_bundle_execution(
+            &extract_dir,
+            input_audio,
+            input_text,
+            input_images,
+            choices,
+            voice,
+            dry_run,
+            backend_override,
+            max_tokens,
+        )?;
+
+        emit_pipeline_start_event(&metadata, "registry");
+
+        if dry_run {
+            if speculative_cloud
+                && matches!(
+                    metadata.execution_template,
+                    ExecutionTemplate::ChoiceScorer { .. }
+                )
+            {
+                return Err(choice_scorer_refusal(
+                    &metadata.model_id,
+                    SPECULATIVE_CLOUD_STREAMS,
+                ));
+            }
+            ui::section("Dry Run");
+            println!();
+            ui::ok("Model is valid and ready for execution");
+            ui::hint("Use without --dry-run to run inference");
+            println!();
+            return Ok(());
         }
-    };
 
-    let (metadata, input) = prepare_bundle_execution(
-        &extract_dir,
-        input_audio,
-        input_text,
-        input_images,
-        choices,
-        voice,
-        dry_run,
-        backend_override,
-        max_tokens,
-    )?;
-
-    emit_pipeline_start_event(&metadata, "registry");
-
-    if dry_run {
-        if speculative_cloud
-            && matches!(
-                metadata.execution_template,
-                ExecutionTemplate::ChoiceScorer { .. }
-            )
-        {
-            return Err(choice_scorer_refusal(
-                &metadata.model_id,
-                SPECULATIVE_CLOUD_STREAMS,
-            ));
-        }
-        ui::section("Dry Run");
-        println!();
-        ui::ok("Model is valid and ready for execution");
-        ui::hint("Use without --dry-run to run inference");
-        println!();
-        return Ok(());
-    }
-
-    let input = input.ok_or_else(|| {
+        let input = input.ok_or_else(|| {
         anyhow::anyhow!("No input provided. Use --input-audio <file>, --input-text <text>, or --input-image <file>")
     })?;
 
-    let (output, elapsed) = run_inference(&extract_dir, &metadata, &input, trace_enabled)?;
+        let (output, elapsed) = run_inference(&extract_dir, &metadata, &input, trace_enabled)?;
 
-    print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
-    print_llm_trace_block(&output, trace_enabled);
-    emit_pipeline_complete_event(&metadata, &output, elapsed);
+        print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
+        print_llm_trace_block(&output, trace_enabled);
+        emit_pipeline_complete_event(&metadata, &output, elapsed);
 
-    if trace_enabled {
-        drop(_model_span);
-        print_trace_output(trace_enabled, trace_export)?;
-    }
+        if trace_enabled {
+            drop(_model_span);
+        }
 
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Run a one-shot registry-model inference with speculative cloud fallback:
@@ -1366,12 +1335,7 @@ pub(crate) fn run_directory(
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
-    if trace_enabled {
-        crate::tracing_viz::reset_collector();
-    }
-
     ui::header("Run · Local Directory");
     ui::kv("Directory", &dir.display().to_string());
 
@@ -1412,10 +1376,6 @@ pub(crate) fn run_directory(
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
-    if trace_enabled {
-        print_trace_output(trace_enabled, trace_export)?;
-    }
-
     Ok(())
 }
 
@@ -1433,12 +1393,7 @@ pub(crate) fn run_huggingface(
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
-    if trace_enabled {
-        crate::tracing_viz::reset_collector();
-    }
-
     ui::header(&format!("Run · HuggingFace · {}", repo));
 
     let sp = ui::spinner("Loading from HuggingFace...");
@@ -1501,10 +1456,6 @@ pub(crate) fn run_huggingface(
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
-    if trace_enabled {
-        print_trace_output(trace_enabled, trace_export)?;
-    }
-
     Ok(())
 }
 
@@ -1522,12 +1473,7 @@ pub(crate) fn run_model_file(
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
-    if trace_enabled {
-        crate::tracing_viz::reset_collector();
-    }
-
     let gguf_path = gguf_path
         .canonicalize()
         .with_context(|| format!("GGUF file not found: {}", gguf_path.display()))?;
@@ -1605,10 +1551,6 @@ pub(crate) fn run_model_file(
     print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
-
-    if trace_enabled {
-        print_trace_output(trace_enabled, trace_export)?;
-    }
 
     Ok(())
 }
@@ -1847,9 +1789,9 @@ fn run_inference(
     };
 
     let start_time = std::time::Instant::now();
-    let output = executor
-        .execute(metadata, input, None)
-        .context("Inference failed")?;
+    let output =
+        observability::inference(metadata, input, || executor.execute(metadata, input, None))
+            .context("Inference failed")?;
     let elapsed = start_time.elapsed();
 
     sp.finish_and_clear();

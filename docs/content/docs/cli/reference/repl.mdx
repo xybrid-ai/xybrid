@@ -21,7 +21,7 @@ xybrid repl --config <pipeline.yaml>
 | Option | Description |
 |--------|-------------|
 | `--model` | Model ID from the registry (e.g. `lfm2.5-350m`) |
-| `--model-file` | Path to a local GGUF file (metadata auto-generated if missing) |
+| `--model-file` | Path to a local GGUF file. Without a `model_metadata.json` beside it, one is generated with the context capped at 4,096 tokens; raise its `context_length` for longer sessions |
 | `--huggingface` | HuggingFace repo, `:VARIANT` selects a GGUF quantization |
 | `--config` | Pipeline YAML (multi-stage sessions) |
 | `--system` | System prompt for the assistant |

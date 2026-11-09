@@ -31,6 +31,9 @@
 //! [`xybrid-bolt`]: https://docs.rs/xybrid-bolt
 //! [`xybrid-ffi`]: https://docs.rs/xybrid-ffi
 
+mod observability_operations;
+pub use observability_operations::*;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
@@ -123,6 +126,10 @@ pub enum Error {
     Cancelled {
         message: String,
     },
+    /// Telemetry delivery is incomplete or unknown; do not rerun inference.
+    TelemetryDelivery {
+        message: String,
+    },
 }
 
 impl Error {
@@ -155,6 +162,7 @@ impl Error {
             Error::UnsupportedBackendCapability { .. } => 21,
             Error::InvalidImage { .. } => 22,
             Error::Cancelled { .. } => 23,
+            Error::TelemetryDelivery { .. } => 24,
         }
     }
 
@@ -209,6 +217,9 @@ impl std::fmt::Display for Error {
             }
             Error::InvalidImage { message } => write!(f, "Invalid image input: {message}"),
             Error::Cancelled { message } => write!(f, "Cancelled: {message}"),
+            Error::TelemetryDelivery { message } => {
+                write!(f, "Telemetry delivery failed: {message}")
+            }
         }
     }
 }
@@ -233,6 +244,11 @@ impl From<sdk::SdkError> for Error {
             };
         match err {
             sdk::SdkError::ModelNotFound(id) => Error::ModelNotFound { id },
+            // Keep the existing foreign error surface while preserving the
+            // registry code, runtime version and required floor in the message.
+            err @ sdk::SdkError::OsVersionUnsupported { .. } => Error::ConfigError {
+                message: err.to_string(),
+            },
             sdk::SdkError::DirectoryNotFound(path) => Error::DirectoryNotFound { path },
             sdk::SdkError::MetadataNotFound(path) => Error::MetadataNotFound { path },
             sdk::SdkError::MetadataInvalid(message) => Error::MetadataInvalid { message },
@@ -248,6 +264,7 @@ impl From<sdk::SdkError> for Error {
             sdk::SdkError::StreamingNotSupported => Error::StreamingNotSupported,
             sdk::SdkError::NotLoaded => Error::NotLoaded,
             sdk::SdkError::ConfigError(message) => Error::ConfigError { message },
+            sdk::SdkError::TelemetryDelivery(message) => Error::TelemetryDelivery { message },
             sdk::SdkError::NetworkError { message, source } => Error::NetworkError {
                 message: with_cause(message, source),
             },
@@ -1072,9 +1089,68 @@ pub struct RunOptions {
     pub max_grace_tokens: u32,
 
     pub correlation_id: Option<String>,
+
+    // Observation, flattened:
+    /// W3C `traceparent` of the caller's span; the run becomes its child.
+    /// Invalid values are rejected before execution.
+    pub traceparent: Option<String>,
+    /// W3C `tracestate` accompanying `traceparent`.
+    pub tracestate: Option<String>,
+    /// Caller-owned conversation id recorded on the run.
+    pub conversation_id: Option<String>,
+    /// Skip the detailed trace for this run (metrics are still recorded).
+    pub suppress_trace: bool,
+}
+
+/// Observation controls shared by load, pipeline, inference and ASR entry points.
+#[derive(Debug, Clone, Default)]
+pub struct ObservationControls {
+    pub traceparent: Option<String>,
+    pub tracestate: Option<String>,
+    pub conversation_id: Option<String>,
+    pub suppress_trace: bool,
+}
+
+impl ObservationControls {
+    /// Validate explicit context before starting any work.
+    pub fn to_sdk(&self) -> Result<Option<sdk::ObservationOptions>> {
+        let parent =
+            self.traceparent
+                .as_deref()
+                .map(|tp| {
+                    sdk::ObservationContext::from_traceparent(tp, self.tracestate.as_deref())
+                        .map_err(|e| Error::ConfigError {
+                            message: e.to_string(),
+                        })
+                })
+                .transpose()?;
+        if parent.is_none() && self.conversation_id.is_none() && !self.suppress_trace {
+            return Ok(None);
+        }
+        Ok(Some(sdk::ObservationOptions {
+            parent,
+            conversation_id: self.conversation_id.clone(),
+            trace: if self.suppress_trace {
+                sdk::observability::TraceMode::Suppress
+            } else {
+                sdk::observability::TraceMode::Default
+            },
+            ..sdk::ObservationOptions::default()
+        }))
+    }
 }
 
 impl RunOptions {
+    fn observation(&self) -> Result<Option<sdk::ObservationOptions>> {
+        ObservationControls {
+            traceparent: self.traceparent.clone(),
+            tracestate: self.tracestate.clone(),
+            conversation_id: self.conversation_id.clone(),
+            suppress_trace: self.suppress_trace,
+        }
+        .to_sdk()
+    }
+
     /// Materialize the SDK type over global defaults.
     ///
     /// Run paths with a model in scope should prefer [`Self::to_sdk_over`].
@@ -1119,6 +1195,9 @@ impl RunOptions {
         }
         if let Some(cid) = &self.correlation_id {
             opts = opts.with_correlation_id(cid.clone());
+        }
+        if let Some(observation) = self.observation()? {
+            opts = opts.with_observation(observation);
         }
         if let Some(tok) = cancel {
             opts = opts.with_cancellation_token(tok.inner.clone());
@@ -1255,6 +1334,33 @@ pub struct InferenceResult {
     /// The raw tool-call block stays in [`text`](Self::text) untouched, and
     /// malformed model output yields an empty vec rather than an error.
     pub tool_calls: Vec<ToolCall>,
+    /// Trace and span ids (lowercase hex) of the run's inference span, for
+    /// linking feedback and evaluations. `None` when the run was not traced.
+    pub observation: Option<ObservationRef>,
+}
+
+/// Trace and span ids of a recorded operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservationRef {
+    /// 32 lowercase hex digits.
+    pub trace_id: String,
+    /// 16 lowercase hex digits.
+    pub span_id: String,
+}
+
+impl ObservationRef {
+    fn from_sdk(r: &sdk::ObservationRef) -> Self {
+        Self {
+            trace_id: r.trace_id.clone(),
+            span_id: r.span_id.clone(),
+        }
+    }
+
+    fn to_sdk(&self) -> Result<sdk::ObservationRef> {
+        sdk::ObservationRef::new(&self.trace_id, &self.span_id).map_err(|e| Error::ConfigError {
+            message: format!("invalid observation reference: {e}"),
+        })
+    }
 }
 
 /// Where a result was produced — the observed fact, not a routing preference.
@@ -1422,9 +1528,13 @@ impl StreamingSession {
         produce: impl FnOnce(SyncSender<StreamEvent>) + Send + 'static,
     ) -> std::io::Result<Arc<Self>> {
         let (sender, receiver) = mpsc::sync_channel(STREAM_CHANNEL_CAPACITY);
+        let context = sdk::observability::CapturedContext::capture();
         std::thread::Builder::new()
             .name("xybrid-stream".into())
-            .spawn(move || produce(sender))?;
+            .spawn(move || {
+                let _context = context.enter();
+                produce(sender)
+            })?;
         Ok(Arc::new(Self {
             receiver: Mutex::new(receiver),
             audio_cancel: None,
@@ -1509,6 +1619,7 @@ impl InferenceResult {
             .into_iter()
             .map(ToolCall::from_sdk)
             .collect();
+        let observation = result.observation_ref().map(ObservationRef::from_sdk);
         let envelope = Envelope::try_from_sdk(result.into_envelope())?;
         Ok(Self {
             envelope,
@@ -1518,6 +1629,7 @@ impl InferenceResult {
             execution_target,
             metrics,
             tool_calls,
+            observation,
         })
     }
 
@@ -1600,6 +1712,7 @@ pub struct StageResult {
     /// language model; `total_ms` is the stage latency and
     /// `stage_latencies_ms` is empty.
     pub metrics: InferenceMetrics,
+    pub observation: Option<ObservationRef>,
 }
 
 impl StageResult {
@@ -1608,6 +1721,7 @@ impl StageResult {
             sdk::InferenceMetrics::from_metadata(&stage.output.metadata, stage.latency_ms);
         let envelope = Envelope::try_from_sdk(stage.output)?;
         Ok(Self {
+            observation: stage.observation_ref.as_ref().map(ObservationRef::from_sdk),
             execution_target: ExecutionTarget::from_pipeline_target(&stage.target),
             output_type: OutputType::of_envelope(&envelope.kind),
             envelope,
@@ -1637,6 +1751,7 @@ pub struct PipelineResult {
     pub latency_ms: u32,
     /// Every executed stage, in order.
     pub stages: Vec<StageResult>,
+    pub observation: Option<ObservationRef>,
 }
 
 impl PipelineResult {
@@ -1645,6 +1760,10 @@ impl PipelineResult {
     /// of its outputs missing.
     fn try_from_sdk(result: sdk::PipelineExecutionResult) -> Result<Self> {
         Ok(Self {
+            observation: result
+                .observation_ref
+                .as_ref()
+                .map(ObservationRef::from_sdk),
             envelope: Envelope::try_from_sdk(result.output)?,
             output_type: OutputType::from_sdk(result.output_type),
             latency_ms: result.total_latency_ms,
@@ -1710,8 +1829,8 @@ impl Pipeline {
 
     /// Execute every stage, downloading any missing models first.
     ///
-    /// Of [`RunOptions`], only `correlation_id` applies to a pipeline run: it
-    /// is copied onto the run's telemetry.
+    /// Observation controls apply to the workflow and every stage;
+    /// `correlation_id` is copied onto the run's telemetry.
     ///
     /// # Errors
     ///
@@ -1757,6 +1876,7 @@ fn pipeline_run_options(options: RunOptions) -> Result<sdk::RunOptions> {
         });
     }
     let mut sdk_options = sdk::RunOptions::new();
+    sdk_options.observation = options.observation()?;
     if let Some(correlation_id) = options.correlation_id {
         sdk_options = sdk_options.with_correlation_id(correlation_id);
     }
@@ -1984,6 +2104,16 @@ impl ModelLoader {
         self.inner.source_type().to_string()
     }
 
+    /// A loader with validated controls for its next load operation.
+    pub fn with_observation(&self, controls: ObservationControls) -> Result<Arc<Self>> {
+        let observation = controls.to_sdk()?;
+        let mut inner = self.inner.clone();
+        if let Some(observation) = observation {
+            inner = inner.observation(observation);
+        }
+        Ok(Arc::new(Self { inner }))
+    }
+
     /// Synchronous load. For UI hosts use [`load_async`](Self::load_async).
     pub fn load(&self) -> Result<Arc<XybridModel>> {
         let model = self.inner.load().map_err(Error::from)?;
@@ -2098,6 +2228,13 @@ pub struct XybridModel {
 }
 
 impl XybridModel {
+    /// The immutable observation of the operation that originally loaded this model.
+    pub fn load_observation_ref(&self) -> Option<ObservationRef> {
+        self.inner
+            .load_observation_ref()
+            .map(ObservationRef::from_sdk)
+    }
+
     // -- Identity / capability accessors ------------------------------------
 
     pub fn model_id(&self) -> String {
@@ -2317,6 +2454,7 @@ impl XybridModel {
         let options =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
         let model = self.inner.clone();
+        let context = sdk::observability::CapturedContext::capture();
 
         if model.output_type() == sdk::OutputType::Audio {
             let token = options.cancellation_token.clone().unwrap_or_default();
@@ -2327,6 +2465,7 @@ impl XybridModel {
             std::thread::Builder::new()
                 .name("xybrid-tts-stream".into())
                 .spawn(move || {
+                    let _context = context.enter();
                     let started = std::time::Instant::now();
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         model.run_tts_streaming(&envelope, &options, |packet| {
@@ -2339,13 +2478,20 @@ impl XybridModel {
                         })
                     }));
                     let terminal = match result {
-                        Ok(result) => StreamEvent::terminal(result.map(|summary| {
-                            sdk::InferenceResult::new(
-                                summary.into_envelope(),
-                                model.model_id(),
-                                started.elapsed().as_millis() as u32,
-                            )
-                        })),
+                        Ok(result) => match result.map_err(Error::from).and_then(|summary| {
+                            let mut result =
+                                InferenceResult::try_from_sdk(sdk::InferenceResult::new(
+                                    summary.summary.into_envelope(),
+                                    model.model_id(),
+                                    started.elapsed().as_millis() as u32,
+                                ))?;
+                            result.observation =
+                                summary.observation.as_ref().map(ObservationRef::from_sdk);
+                            Ok(result)
+                        }) {
+                            Ok(result) => StreamEvent::Complete(result),
+                            Err(error) => StreamEvent::Error(error),
+                        },
                         Err(_) => StreamEvent::Error(Error::InferenceError {
                             message: "TTS worker panicked".into(),
                         }),
@@ -2500,6 +2646,7 @@ pub struct StreamingConfig {
     pub language: Option<String>,
     /// Whisper encoder context in mel frames; `None` uses the model default.
     pub audio_ctx: Option<u32>,
+    pub observation: Option<ObservationControls>,
 }
 
 impl Default for StreamingConfig {
@@ -2510,6 +2657,7 @@ impl Default for StreamingConfig {
             vad_threshold: 0.5,
             language: None,
             audio_ctx: None,
+            observation: None,
         }
     }
 }
@@ -2535,6 +2683,12 @@ impl StreamingConfig {
             vad_model_dir,
             language: self.language.clone(),
             audio_ctx: self.audio_ctx,
+            observation: self
+                .observation
+                .as_ref()
+                .map(ObservationControls::to_sdk)
+                .transpose()?
+                .flatten(),
         })
     }
 }
@@ -2550,6 +2704,7 @@ pub struct PartialResult {
     pub chunk_sequence: u64,
     /// Audio covered so far, in milliseconds.
     pub audio_duration_ms: u64,
+    pub decoder_observation: Option<ObservationRef>,
 }
 
 impl From<sdk::PartialResult> for PartialResult {
@@ -2559,6 +2714,26 @@ impl From<sdk::PartialResult> for PartialResult {
             is_stable: p.is_stable,
             chunk_sequence: p.chunk_index,
             audio_duration_ms: p.audio_duration_ms,
+            decoder_observation: p.decoder_observation.as_ref().map(ObservationRef::from_sdk),
+        }
+    }
+}
+
+/// Final transcription and the workflow that produced it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptionResult {
+    pub text: String,
+    pub duration_ms: u64,
+    pub chunks_processed: u64,
+    pub observation: Option<ObservationRef>,
+}
+impl From<sdk::TranscriptionResult> for TranscriptionResult {
+    fn from(result: sdk::TranscriptionResult) -> Self {
+        Self {
+            text: result.text,
+            duration_ms: result.duration_ms,
+            chunks_processed: result.chunks_processed,
+            observation: result.observation.as_ref().map(ObservationRef::from_sdk),
         }
     }
 }
@@ -2632,7 +2807,7 @@ impl AsrFanout {
 /// Commands applied, in order, by the session's worker thread.
 enum AsrCommand {
     Feed(Vec<f32>),
-    Flush(SyncSender<Result<String>>),
+    Flush(SyncSender<Result<TranscriptionResult>>),
     Reset(SyncSender<Result<()>>),
 }
 
@@ -2724,7 +2899,7 @@ impl AsrSession {
     /// The session is over afterwards — further [`Self::feed`] calls fail and
     /// observers have seen [`AsrEvent::Finished`]. Blocks until the worker
     /// finishes the last chunk, so call it off a UI thread.
-    pub fn flush(&self) -> Result<String> {
+    pub fn flush(&self) -> Result<TranscriptionResult> {
         let (reply, answer) = mpsc::sync_channel(1);
         self.send(AsrCommand::Flush(reply))?;
         // The worker always replies before exiting; a receive error means it
@@ -2893,12 +3068,11 @@ fn asr_worker(stream: sdk::XybridStream, commands: Receiver<AsrCommand>, state: 
                 }
             },
             AsrCommand::Flush(reply) => {
-                let outcome = stream
-                    .flush()
-                    .map(|r| r.text)
-                    .map_err(|e| Error::InferenceError {
+                let outcome = stream.flush().map(TranscriptionResult::from).map_err(|e| {
+                    Error::InferenceError {
                         message: format!("ASR flush failed: {}", error_chain(&e)),
-                    });
+                    }
+                });
                 let _ = reply.send(outcome);
                 break; // session finalized
             }
@@ -3060,21 +3234,18 @@ pub fn cache_clear() -> Result<u32> {
 /// One-stop SDK initialization for platform bindings.
 ///
 /// Wraps [`sdk::init()`]'s builder so every foreign-language SDK gets the
-/// same unified setup: pass an API key to start the telemetry exporter,
-/// override the LLM gateway and/or telemetry ingest URL, and `.run()` the
-/// configuration. Omitting `api_key` runs anonymously (local inference,
-/// no exporter) — the same semantics as the Rust builder.
+/// same unified setup: pass an API key for cloud routing, override the LLM
+/// gateway URL, and `.run()` the configuration. Omitting `api_key` runs
+/// anonymously (local inference) — the same semantics as the Rust builder.
+/// Observability export is configured separately with
+/// [`ObservabilityConfigHandle`]; an API key alone never starts it.
 ///
 /// Blank strings are treated as absent so hosts can forward empty
 /// `String.fromEnvironment` / `BuildConfig` values without accidentally
 /// configuring anything. This is the canonical init path the Swift
-/// `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
-/// `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
-pub fn configure_runtime(
-    api_key: Option<String>,
-    gateway_url: Option<String>,
-    ingest_url: Option<String>,
-) {
+/// `Xybrid.initialize(apiKey:gatewayUrl:)` and Kotlin
+/// `Xybrid.init(context, apiKey, gatewayUrl)` wrappers call.
+pub fn configure_runtime(api_key: Option<String>, gateway_url: Option<String>) {
     let non_blank = |value: Option<String>| {
         value
             .map(|v| v.trim().to_string())
@@ -3087,9 +3258,6 @@ pub fn configure_runtime(
     }
     if let Some(gateway) = non_blank(gateway_url) {
         builder = builder.gateway_url(gateway);
-    }
-    if let Some(ingest) = non_blank(ingest_url) {
-        builder = builder.ingest_url(ingest);
     }
     builder.run();
 }
@@ -3226,184 +3394,376 @@ pub fn is_auto_release_enabled() -> bool {
 }
 
 // ============================================================================
-// Telemetry (advanced config + lifecycle)
+// Observability (OpenTelemetry export config + lifecycle)
 // ============================================================================
 //
-// The apiKey-only fast path runs through [`configure_runtime`]
-// (`sdk::init().api_key().run()`). This handle exposes the *advanced* knobs —
-// batch size, flush interval, device label/attributes — that the platform SDKs
-// surface via a fluent `TelemetryConfig` builder, plus the process-global
-// init/flush/shutdown lifecycle. It mirrors the pre-bolt C ABI's telemetry
-// surface so the Unity/C# binding can move onto bolt without losing capability.
-//
-// Telemetry *events* never cross the FFI boundary — they are exported
-// Rust→network. Only this config/lifecycle control plane does.
-
-/// Tracks whether [`telemetry_init`] has run without a matching
-/// [`telemetry_shutdown`], so a second init is rejected instead of silently
-/// leaking the prior sender. Mirrors the pre-bolt C ABI's gate.
-static TELEMETRY_INITIALIZED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-/// The SDK's default telemetry ingest endpoint.
-///
-/// Bindings display this alongside a freshly created config so callers can read
-/// the resolved endpoint back without a round-trip setter.
-pub fn telemetry_default_endpoint() -> String {
-    sdk::telemetry::DEFAULT_INGEST_URL.to_string()
-}
+// Export is off until a host builds an [`ObservabilityConfigHandle`] and calls
+// [`ObservabilityConfigHandle::init`]. Spans, metrics, and logs never cross the
+// FFI boundary — they are exported Rust→network. Only this control plane, run
+// options' trace context, result references, and feedback do.
 
 /// The SDK version string, sourced from `CARGO_PKG_VERSION` at compile time.
 pub fn version() -> String {
     sdk::SDK_VERSION.to_string()
 }
 
-/// Interior-mutable holder for a telemetry configuration under construction.
-///
-/// Generator crates wrap this in `Arc<Self>` for opaque-handle semantics. The
-/// [`sdk::telemetry::TelemetryConfig`] is held behind a `Mutex<Option<_>>` so
-/// foreign callers can mutate it through a shared `&self` (FFI handle methods
-/// only ever receive a shared reference), and so [`telemetry_init`] can `take`
-/// it — leaving the handle empty — matching the pre-bolt consume-on-init
-/// contract. The mutex is uncontended in normal usage: a config is built by one
-/// host thread.
-pub struct TelemetryConfigHandle {
-    inner: Mutex<Option<sdk::telemetry::TelemetryConfig>>,
+/// The default Xybrid OTLP trace endpoint.
+pub fn observability_default_traces_endpoint() -> String {
+    sdk::observability::XYBRID_TRACES_ENDPOINT.to_string()
 }
 
-impl TelemetryConfigHandle {
-    /// A new config bound to the default ingest endpoint and the given API key.
-    pub fn new(api_key: String) -> Arc<Self> {
-        Arc::new(Self {
-            inner: Mutex::new(Some(sdk::telemetry::TelemetryConfig::new(
-                sdk::telemetry::DEFAULT_INGEST_URL,
-                api_key,
-            ))),
-        })
-    }
+#[derive(Debug, Clone)]
+enum ExportTarget {
+    Xybrid { api_key: String },
+    Otlp { endpoint: String },
+}
 
-    /// Override the ingest endpoint (self-hosted collector / non-prod).
-    pub fn set_endpoint(&self, endpoint: String) {
-        self.with_config(|config| config.endpoint = endpoint);
-    }
+#[derive(Debug, Clone)]
+struct ObservabilityDraft {
+    target: ExportTarget,
+    traces_endpoint: Option<String>,
+    headers: Vec<(String, String)>,
+    json: bool,
+    service_name: Option<String>,
+    service_version: Option<String>,
+    resource_attributes: Vec<(String, String)>,
+    metadata_only: bool,
+    max_content_bytes: Option<u32>,
+    live_trace_interval_ms: Option<u32>,
+    device_id: Option<String>,
+    redaction_rules: Vec<sdk::observability::RedactionRule>,
+    provider_origins: Vec<String>,
+}
 
-    /// Set the app version reported with every event.
-    pub fn set_app_version(&self, version: String) {
-        self.with_config(|config| config.app_version = Some(version));
-    }
-
-    /// Set the human-friendly device label reported with every event.
-    pub fn set_device_label(&self, label: String) {
-        self.with_config(|config| config.device_label = Some(label));
-    }
-
-    /// Attach an app-provided device attribute (stored under `device.custom`).
-    pub fn set_device_attribute(&self, key: String, value: String) {
-        self.with_config(|config| {
-            config.device_profile_patch.custom.insert(key, value);
-        });
-    }
-
-    /// Set the number of events buffered before a flush.
-    pub fn set_batch_size(&self, batch_size: u32) {
-        self.with_config(|config| config.batch_size = batch_size as usize);
-    }
-
-    /// Set the background flush interval, in seconds.
-    pub fn set_flush_interval_secs(&self, secs: u32) {
-        self.with_config(|config| config.flush_interval_secs = secs as u64);
-    }
-
-    /// Apply `f` to the in-progress config. A no-op after the config has been
-    /// consumed by [`telemetry_init`] — mirroring the pre-bolt setters, which
-    /// no-op once the handle is gone.
-    fn with_config(&self, f: impl FnOnce(&mut sdk::telemetry::TelemetryConfig)) {
-        if let Some(config) = self.lock().as_mut() {
-            f(config);
+impl ObservabilityDraft {
+    fn new(target: ExportTarget) -> Self {
+        Self {
+            target,
+            traces_endpoint: None,
+            headers: Vec::new(),
+            json: false,
+            service_name: None,
+            service_version: None,
+            resource_attributes: Vec::new(),
+            metadata_only: false,
+            max_content_bytes: None,
+            live_trace_interval_ms: None,
+            device_id: None,
+            redaction_rules: Vec::new(),
+            provider_origins: Vec::new(),
         }
     }
 
-    /// Take the built config out, leaving the handle empty.
-    fn take(&self) -> Option<sdk::telemetry::TelemetryConfig> {
-        self.lock().take()
+    fn build(self) -> sdk::ObservabilityConfig {
+        use sdk::observability::{ContentPolicy, KeyValue, OtlpConfig, Protocol};
+        let mut otlp = match &self.target {
+            ExportTarget::Xybrid { api_key } => match &self.traces_endpoint {
+                Some(endpoint) => OtlpConfig::xybrid_traces_to(endpoint, api_key),
+                None => OtlpConfig::xybrid_traces(api_key),
+            },
+            ExportTarget::Otlp { endpoint } => {
+                let mut config = OtlpConfig::collector(endpoint);
+                if let (Some(endpoint), Some(traces)) =
+                    (&self.traces_endpoint, config.traces.as_mut())
+                {
+                    traces.endpoint = endpoint.clone();
+                }
+                config
+            }
+        };
+        for signal in [&mut otlp.traces, &mut otlp.metrics, &mut otlp.logs]
+            .into_iter()
+            .flatten()
+        {
+            signal.headers.extend(self.headers.iter().cloned());
+            if self.json {
+                signal.protocol = Protocol::HttpJson;
+            }
+        }
+        if let Some(name) = self.service_name {
+            otlp = otlp.with_service(name, self.service_version);
+        }
+        for (key, value) in self.resource_attributes {
+            otlp = otlp.with_resource_attribute(KeyValue::new(key, value));
+        }
+        let mut content = if self.metadata_only {
+            ContentPolicy::metadata_only()
+        } else {
+            ContentPolicy::from_env()
+        };
+        if let Some(bytes) = self.max_content_bytes {
+            content = content.with_max_attribute_bytes(bytes as usize);
+        }
+        let mut config =
+            sdk::ObservabilityConfig::otlp(otlp).content(content.with_rules(self.redaction_rules));
+        for origin in self.provider_origins {
+            config = config
+                .propagate_context_to(&origin)
+                .expect("draft origins were validated by allow_provider_context");
+        }
+        if let Some(id) = self.device_id {
+            config = config.device_id(id);
+        }
+        if let Some(ms) = self.live_trace_interval_ms {
+            config = config.live_trace_interval(std::time::Duration::from_millis(u64::from(ms)));
+        }
+        config
+    }
+}
+
+/// Interior-mutable observability configuration under construction.
+///
+/// Generator crates wrap this in `Arc<Self>` for opaque-handle semantics; FFI
+/// handle methods only receive `&self`, hence the mutex. [`Self::init`] takes
+/// the draft, leaving the handle empty (setters then no-op).
+pub struct ObservabilityConfigHandle {
+    inner: Mutex<Option<ObservabilityDraft>>,
+}
+
+impl ObservabilityConfigHandle {
+    /// Traces to the Xybrid dashboard, authenticated with `api_key`. Metrics
+    /// and logs are not sent (route them through a Collector with
+    /// [`Self::otlp`]).
+    pub fn xybrid(api_key: String) -> Arc<Self> {
+        Self::with(ExportTarget::Xybrid { api_key })
     }
 
-    /// Lock the inner slot, recovering the guard if the mutex is poisoned (a
-    /// panic at the FFI boundary would abort the host app over a recoverable
-    /// condition — matches the codebase-wide poison-recovery convention).
-    fn lock(&self) -> std::sync::MutexGuard<'_, Option<sdk::telemetry::TelemetryConfig>> {
+    /// Traces, metrics, and logs to an OTLP/HTTP endpoint such as an
+    /// OpenTelemetry Collector (`http://host:4318`).
+    pub fn otlp(endpoint: String) -> Arc<Self> {
+        Self::with(ExportTarget::Otlp { endpoint })
+    }
+
+    fn with(target: ExportTarget) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(Some(ObservabilityDraft::new(target))),
+        })
+    }
+
+    /// Override the full trace endpoint URL (staging, self-hosted).
+    pub fn set_traces_endpoint(&self, endpoint: String) {
+        self.with_draft(|d| d.traces_endpoint = Some(endpoint));
+    }
+
+    /// Add an HTTP header sent with every export request.
+    pub fn set_header(&self, name: String, value: String) {
+        self.with_draft(|d| d.headers.push((name, value)));
+    }
+
+    /// Send OTLP JSON instead of protobuf.
+    pub fn set_json_protocol(&self, json: bool) {
+        self.with_draft(|d| d.json = json);
+    }
+
+    /// Set the reported service (app) name and version.
+    pub fn set_service(&self, name: String, version: Option<String>) {
+        self.with_draft(|d| {
+            d.service_name = Some(name);
+            d.service_version = version;
+        });
+    }
+
+    /// Attach a resource attribute (for example `deployment.environment`).
+    pub fn set_resource_attribute(&self, key: String, value: String) {
+        self.with_draft(|d| d.resource_attributes.push((key, value)));
+    }
+
+    /// Record metadata only: no prompts, outputs, or tool payloads.
+    pub fn set_metadata_only(&self, metadata_only: bool) {
+        self.with_draft(|d| d.metadata_only = metadata_only);
+    }
+
+    /// Maximum bytes per captured content attribute (longer content is
+    /// truncated with a marker).
+    pub fn set_max_content_bytes(&self, bytes: u32) {
+        self.with_draft(|d| d.max_content_bytes = Some(bytes));
+    }
+
+    /// Allows trace context to one exact third-party HTTP(S) origin.
+    pub fn allow_provider_context(&self, origin: String) -> Result<()> {
+        let _ = sdk::observability::ObservabilityConfig::with_observer(
+            sdk::observability::Observer::disabled(),
+        )
+        .propagate_context_to(&origin)?;
+        self.with_draft(|d| d.provider_origins.push(origin));
+        Ok(())
+    }
+
+    /// Sets a caller-owned device identifier.
+    pub fn set_device_id(&self, id: String) {
+        self.with_draft(|d| d.device_id = Some(id));
+    }
+
+    /// Appends a literal replacement. Rules apply in insertion order to string values.
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] for an empty search string.
+    pub fn add_literal_redaction(&self, find: String, replacement: String) -> Result<()> {
+        let rule =
+            sdk::observability::RedactionRule::replace_literal(find, replacement).map_err(|e| {
+                Error::ConfigError {
+                    message: e.to_string(),
+                }
+            })?;
+        self.with_draft(|d| d.redaction_rules.push(rule));
+        Ok(())
+    }
+
+    /// Omits exactly one governed content attribute key.
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] for an empty key.
+    pub fn omit_content_attribute(&self, key: String) -> Result<()> {
+        let rule = sdk::observability::RedactionRule::omit_attribute(key).map_err(|e| {
+            Error::ConfigError {
+                message: e.to_string(),
+            }
+        })?;
+        self.with_draft(|d| d.redaction_rules.push(rule));
+        Ok(())
+    }
+
+    /// Minimum interval between traced frames of one live session.
+    pub fn set_live_trace_interval_ms(&self, ms: u32) {
+        self.with_draft(|d| d.live_trace_interval_ms = Some(ms));
+    }
+
+    /// Start exporting with this configuration, replacing any previous one.
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] if the handle was already consumed or the
+    /// configuration is rejected.
+    pub fn init(&self) -> Result<()> {
+        let draft = self.lock().take().ok_or_else(|| Error::ConfigError {
+            message: "observability config already consumed".to_string(),
+        })?;
+        sdk::observability::init_observability(draft.build()).map_err(Error::from)
+    }
+
+    fn with_draft(&self, f: impl FnOnce(&mut ObservabilityDraft)) {
+        if let Some(draft) = self.lock().as_mut() {
+            f(draft);
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<ObservabilityDraft>> {
         self.inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
-/// Start the process-global telemetry exporter from a built config.
-///
-/// Consumes the config held by `handle`: subsequent setter calls become no-ops
-/// and a second `telemetry_init` on the same handle errors. This is the
-/// advanced entry point; the apiKey-only path is [`configure_runtime`].
+/// Delivery counts for a single signal. Pending includes queued and in-flight items.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SignalStats {
+    pub accepted: u64,
+    pub exported: u64,
+    pub dropped: u64,
+    pub failed: u64,
+    pub pending: u64,
+}
+
+impl From<sdk::observability::SignalStats> for SignalStats {
+    fn from(s: sdk::observability::SignalStats) -> Self {
+        Self {
+            accepted: s.accepted,
+            exported: s.exported,
+            dropped: s.dropped,
+            failed: s.failed,
+            pending: s.pending,
+        }
+    }
+}
+
+/// Delivery counters of the observability pipeline.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ObservabilityStats {
+    pub enabled: bool,
+    pub traces: SignalStats,
+    pub logs: SignalStats,
+    pub metrics: SignalStats,
+}
+
+/// Current delivery counters (all zero when observability is off).
+pub fn observability_stats() -> ObservabilityStats {
+    let enabled = sdk::observability::is_enabled();
+    sdk::observability::stats().map_or(
+        ObservabilityStats {
+            enabled,
+            ..ObservabilityStats::default()
+        },
+        |s| ObservabilityStats {
+            enabled,
+            traces: s.traces.into(),
+            logs: s.logs.into(),
+            metrics: s.metrics.into(),
+        },
+    )
+}
+
+/// Export queued telemetry, waiting at most `timeout_ms`.
 ///
 /// # Errors
-/// [`Error::ConfigError`] if the handle was already consumed, or if telemetry
-/// is already initialized without an intervening [`telemetry_shutdown`].
-pub fn telemetry_init(handle: &TelemetryConfigHandle) -> Result<()> {
-    // Reclaim the built config first — the pre-bolt C ABI always consumes the
-    // handle on init, success or failure.
-    let config = handle.take().ok_or_else(|| Error::ConfigError {
-        message: "telemetry config already consumed".to_string(),
-    })?;
-
-    // Gate against double-init: only the false→true transition wins. On
-    // contention, drop `config` (freeing the second sender's resources) and
-    // error without touching the live exporter.
-    if TELEMETRY_INITIALIZED
-        .compare_exchange(
-            false,
-            true,
-            std::sync::atomic::Ordering::AcqRel,
-            std::sync::atomic::Ordering::Acquire,
-        )
-        .is_err()
-    {
-        return Err(Error::ConfigError {
-            message: "telemetry already initialized; call shutdown before reinitializing"
-                .to_string(),
-        });
-    }
-
-    // Roll the gate back if init panics so a later init can retry — mirrors the
-    // pre-bolt C ABI. Without this, a panicked init wedges the gate at `true`
-    // with no live exporter: every later `telemetry_init` reports "already
-    // initialized" until the process restarts, and `telemetry_shutdown` has no
-    // real sender to stop. Catching here also keeps a recoverable
-    // telemetry-setup failure from unwinding across the FFI boundary and
-    // aborting the host app.
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        sdk::telemetry::init_platform_telemetry(config);
-    }));
-    if outcome.is_err() {
-        TELEMETRY_INITIALIZED.store(false, std::sync::atomic::Ordering::Release);
-        return Err(Error::ConfigError {
-            message: "telemetry init panicked".to_string(),
-        });
-    }
-
-    Ok(())
+/// [`Error::Timeout`]-style error when the bound is exceeded.
+pub fn observability_flush(timeout_ms: u32) -> Result<()> {
+    sdk::flush_observability(std::time::Duration::from_millis(u64::from(timeout_ms)))
+        .map_err(Error::from)
 }
 
-/// Flush pending telemetry events. Safe before init / after shutdown — the SDK
-/// no-ops when the exporter is absent.
-pub fn telemetry_flush() {
-    sdk::telemetry::flush_platform_telemetry();
+/// Flush and stop exporting, waiting at most `timeout_ms`. Idempotent.
+///
+/// # Errors
+/// When the bound is exceeded.
+pub fn observability_shutdown(timeout_ms: u32) -> Result<()> {
+    sdk::shutdown_observability(std::time::Duration::from_millis(u64::from(timeout_ms)))
+        .map_err(Error::from)
 }
 
-/// Shut down the telemetry exporter. Idempotent: a call before init, or a
-/// second call, no-ops without touching the SDK.
-pub fn telemetry_shutdown() {
-    if TELEMETRY_INITIALIZED.swap(false, std::sync::atomic::Ordering::AcqRel) {
-        sdk::telemetry::shutdown_platform_telemetry();
-    }
+/// Record end-user feedback on a run (see [`InferenceResult::observation`]).
+/// Returns `false` when no logs signal is configured.
+///
+/// # Errors
+/// When `target` is not a valid trace/span id pair.
+pub fn observability_record_feedback(
+    target: &ObservationRef,
+    score: Option<f64>,
+    label: Option<String>,
+    comment: Option<String>,
+) -> Result<bool> {
+    let feedback = sdk::observability::Feedback {
+        score,
+        label,
+        comment,
+    };
+    Ok(sdk::observability::record_feedback(
+        &target.to_sdk()?,
+        &feedback,
+    ))
+}
+
+/// Record an evaluation result on a run. Returns `false` when no logs signal
+/// is configured.
+///
+/// # Errors
+/// When `target` is not a valid trace/span id pair.
+pub fn observability_record_evaluation(
+    target: &ObservationRef,
+    name: String,
+    score_value: Option<f64>,
+    score_label: Option<String>,
+    explanation: Option<String>,
+) -> Result<bool> {
+    let evaluation = sdk::observability::Evaluation {
+        name,
+        score_value,
+        score_label,
+        explanation,
+        response_id: None,
+    };
+    Ok(sdk::observability::record_evaluation(
+        &target.to_sdk()?,
+        &evaluation,
+    ))
 }
 
 // ============================================================================
@@ -3529,6 +3889,10 @@ mod tests {
             fallback_to_cloud: false,
             max_grace_tokens: 0,
             correlation_id: None,
+            traceparent: None,
+            tracestate: None,
+            conversation_id: None,
+            suppress_trace: false,
         }
     }
 
@@ -3698,6 +4062,18 @@ mod tests {
     }
 
     #[test]
+    fn telemetry_delivery_preserves_message_and_appended_code() {
+        let error = Error::from(sdk::SdkError::TelemetryDelivery(
+            "acknowledgement lost".into(),
+        ));
+        assert_eq!(error.code(), 24);
+        assert!(!error.is_retryable());
+        assert!(
+            matches!(error, Error::TelemetryDelivery { message } if message == "acknowledgement lost")
+        );
+    }
+
+    #[test]
     fn error_is_retryable_matches_sdk_semantics() {
         assert!(Error::NetworkError {
             message: "x".into()
@@ -3748,6 +4124,7 @@ stages:
         metadata: HashMap<String, String>,
     ) -> sdk::PipelineStageTiming {
         sdk::PipelineStageTiming {
+            observation_ref: None,
             name: name.into(),
             latency_ms: 40,
             target: target.into(),
@@ -3764,6 +4141,7 @@ stages:
         llm_metadata.insert("ttft_ms".into(), "12".into());
         let tts_audio = sdk::ir::EnvelopeKind::Audio(vec![1, 2, 3]);
         let sdk_result = sdk::PipelineExecutionResult {
+            observation_ref: None,
             name: Some("assistant".into()),
             stages: vec![
                 sdk_stage(
@@ -3808,6 +4186,47 @@ stages:
         assert_eq!(result.stages[2].output_type, OutputType::Audio);
         assert_eq!(result.stages[2].envelope.kind, result.envelope.kind);
         assert!(result.stage("missing").is_none());
+    }
+
+    #[test]
+    fn pipeline_and_asr_conversions_keep_their_own_references() {
+        let workflow = sdk::ObservationRef {
+            trace_id: "4bf92f3577b34da6a3ce929d0e0e4736".into(),
+            span_id: "00f067aa0ba902b7".into(),
+        };
+        let inference = sdk::ObservationRef {
+            span_id: "11f067aa0ba902b7".into(),
+            ..workflow.clone()
+        };
+        let mut stage = sdk_stage(
+            "draft",
+            "cloud",
+            sdk::ir::EnvelopeKind::Text("answer".into()),
+            HashMap::new(),
+        );
+        stage.observation_ref = Some(inference.clone());
+        let result = PipelineResult::try_from_sdk(sdk::PipelineExecutionResult {
+            observation_ref: Some(workflow.clone()),
+            name: None,
+            total_latency_ms: 40,
+            output_type: sdk::OutputType::Text,
+            output: stage.output.clone(),
+            stages: vec![stage],
+        })
+        .unwrap();
+        let reference = result.observation.unwrap();
+        assert_eq!(reference.trace_id, workflow.trace_id);
+        assert_eq!(reference.span_id, workflow.span_id);
+        let reference = result.stages[0].observation.as_ref().unwrap();
+        assert_eq!(reference.span_id, inference.span_id);
+        let transcription = TranscriptionResult::from(sdk::TranscriptionResult {
+            text: "transcript".into(),
+            duration_ms: 125,
+            chunks_processed: 2,
+            observation: Some(workflow.clone()),
+        });
+        assert_eq!(transcription.text, "transcript");
+        assert_eq!(transcription.observation.unwrap().span_id, workflow.span_id);
     }
 
     #[test]
@@ -3872,6 +4291,28 @@ stages:
         match Error::from(sdk_err) {
             Error::IoError { message } => assert!(message.contains("disk on fire")),
             other => panic!("expected IoError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn os_compatibility_refusal_keeps_its_diagnostic_at_the_foreign_boundary() {
+        let error = Error::from(sdk::SdkError::OsVersionUnsupported {
+            model_id: "phonon-31m-en".into(),
+            platform: "ios-arm64".into(),
+            os: "ios-15.7".into(),
+            min_os: vec!["ios-16.0".into()],
+            message: "This model needs iOS 16 or later".into(),
+        });
+        assert!(matches!(error, Error::ConfigError { .. }));
+        assert_eq!(error.code(), 10);
+        for detail in [
+            "OS_VERSION_UNSUPPORTED",
+            "phonon-31m-en",
+            "ios-15.7",
+            "ios-16.0",
+            "This model needs iOS 16 or later",
+        ] {
+            assert!(error.to_string().contains(detail));
         }
     }
 
@@ -4016,6 +4457,7 @@ stages:
             execution_target: ExecutionTarget::Local,
             metrics: InferenceMetrics::default(),
             tool_calls: Vec::new(),
+            observation: None,
         }
     }
 
@@ -4200,6 +4642,7 @@ stages:
             fallback_to_cloud: true,
             max_grace_tokens: 16,
             correlation_id: Some("trace-1".into()),
+            ..bare_run_options()
         };
         let sdk_opts = opts
             .to_sdk(Some(&cancel))
@@ -4712,6 +5155,7 @@ stages:
         let mut camera = sdk_stage("camera", "local", text(), HashMap::new());
         camera.output = raw_pixel_image();
         let stage_output = sdk::PipelineExecutionResult {
+            observation_ref: None,
             name: None,
             stages: vec![camera, sdk_stage("llm", "local", text(), HashMap::new())],
             total_latency_ms: 80,
@@ -4721,6 +5165,7 @@ stages:
         assert_unconvertible(PipelineResult::try_from_sdk(stage_output));
 
         let final_output = sdk::PipelineExecutionResult {
+            observation_ref: None,
             name: None,
             stages: vec![sdk_stage("llm", "local", text(), HashMap::new())],
             total_latency_ms: 40,
@@ -4835,7 +5280,10 @@ stages:
     /// neither.
     #[test]
     fn every_name_a_binding_registers_is_accepted() {
-        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let repo = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+        )
+        .join("../..");
         let roots = [repo.join("bindings"), repo.join("crates/xybrid-bolt/src")];
         if !roots.iter().all(|root| root.is_dir()) {
             eprintln!("skipped: no bindings/ checkout at {}", repo.display());
@@ -4937,10 +5385,10 @@ stages:
     }
 
     #[test]
-    fn telemetry_default_endpoint_matches_sdk() {
+    fn default_traces_endpoint_matches_sdk() {
         assert_eq!(
-            telemetry_default_endpoint(),
-            sdk::telemetry::DEFAULT_INGEST_URL
+            observability_default_traces_endpoint(),
+            sdk::observability::XYBRID_TRACES_ENDPOINT
         );
     }
 
@@ -4951,42 +5399,69 @@ stages:
     }
 
     #[test]
-    fn telemetry_builder_maps_to_sdk_fields_and_consumes() {
-        let handle = TelemetryConfigHandle::new("secret-key".into());
+    fn observability_builder_maps_to_sdk_config_and_consumes() {
+        let handle = ObservabilityConfigHandle::otlp("http://collector.internal:4318".into());
+        handle.set_header("x-team".into(), "ml".into());
+        handle.set_json_protocol(true);
+        handle.set_service("demo-app".into(), Some("1.2.3".into()));
+        handle.set_resource_attribute("deployment.environment".into(), "staging".into());
+        handle.set_metadata_only(true);
+        handle.set_live_trace_interval_ms(250);
 
-        // A fresh config defaults its endpoint to the ingest URL (bindings read
-        // this back before init).
-        assert_eq!(
-            handle.lock().as_ref().unwrap().endpoint,
-            sdk::telemetry::DEFAULT_INGEST_URL
+        let draft = handle.lock().take().expect("draft present before init");
+        let debug = format!("{:?}", draft.clone().build());
+        assert!(
+            debug.contains("http://collector.internal:4318/v1/traces"),
+            "{debug}"
         );
+        assert!(debug.contains("x-team"), "{debug}");
+        assert!(debug.contains("HttpJson"), "{debug}");
+        assert!(debug.contains("demo-app"), "{debug}");
+        assert!(debug.contains("staging"), "{debug}");
+        assert!(debug.contains("250ms"), "{debug}");
 
-        handle.set_endpoint("https://collector.internal".into());
-        handle.set_app_version("1.2.3".into());
-        handle.set_device_label("Test Device".into());
-        handle.set_device_attribute("ring".into(), "canary".into());
-        handle.set_batch_size(64);
-        handle.set_flush_interval_secs(30);
+        // Consumed: later setters no-op and init reports the misuse.
+        handle.set_header("ignored".into(), "x".into());
+        assert!(handle.lock().is_none());
+        assert!(handle.init().is_err());
+    }
 
-        // `telemetry_init` takes the config out; assert every setter landed on the
-        // matching SDK field — this is the wire the C#/Unity builder relies on.
-        let config = handle.take().expect("config present before init");
-        assert_eq!(config.endpoint, "https://collector.internal");
-        assert_eq!(config.api_key, "secret-key");
-        assert_eq!(config.app_version.as_deref(), Some("1.2.3"));
-        assert_eq!(config.device_label.as_deref(), Some("Test Device"));
-        assert_eq!(
-            config.device_profile_patch.custom.get("ring"),
-            Some(&"canary".to_string())
+    #[test]
+    fn xybrid_preset_targets_traces_only() {
+        let handle = ObservabilityConfigHandle::xybrid("xy_test".into());
+        handle.set_traces_endpoint("https://ingest.staging.example/v1/traces".into());
+        let debug = format!("{:?}", handle.lock().take().unwrap().build());
+        assert!(
+            debug.contains("https://ingest.staging.example/v1/traces"),
+            "{debug}"
         );
-        assert_eq!(config.batch_size, 64);
-        assert_eq!(config.flush_interval_secs, 30);
+        assert!(debug.contains("metrics: None"), "{debug}");
+        assert!(debug.contains("logs: None"), "{debug}");
+    }
 
-        // Consumed: a second take yields nothing and later setters no-op rather
-        // than panic (mirrors the pre-bolt consume-on-init contract).
-        assert!(handle.take().is_none());
-        handle.set_endpoint("ignored".into());
-        assert!(handle.take().is_none());
+    #[test]
+    fn run_options_carry_trace_context() {
+        let opts = RunOptions {
+            traceparent: Some("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01".into()),
+            conversation_id: Some("conv-1".into()),
+            ..bare_run_options()
+        };
+        let observation = opts
+            .to_sdk(None)
+            .unwrap()
+            .observation
+            .expect("observation set");
+        assert_eq!(
+            observation.parent.unwrap().trace_id(),
+            "0af7651916cd43dd8448eb211c80319c"
+        );
+        assert_eq!(observation.conversation_id.as_deref(), Some("conv-1"));
+        // Invalid explicit parents must fail before execution.
+        let opts = RunOptions {
+            traceparent: Some("garbage".into()),
+            ..bare_run_options()
+        };
+        assert!(opts.to_sdk(None).is_err());
     }
 
     /// Build a partial with just the fields the fanout cares about.
@@ -4996,6 +5471,7 @@ stages:
             is_stable: false,
             chunk_sequence: sequence,
             audio_duration_ms: sequence * 100,
+            decoder_observation: None,
         }
     }
 

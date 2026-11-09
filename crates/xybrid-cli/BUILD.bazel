@@ -38,6 +38,21 @@ rust_binary(
     visibility = ["//visibility:public"],
 )
 
+# Inline `#[cfg(test)] mod tests` of the binary crate: clap parsing, the key
+# resolver, and the `connect` / `auth` building blocks under src/platform/
+# (proof-of-work vectors, the credentials store's locking and corruption
+# handling, env-file writers, host pinning). `crate = ` inherits srcs, edition,
+# crate_features and deps; `deps` here ADDS the one dev-dependency the inline
+# tests use (image, for the PNG fixtures in commands/run.rs and
+# commands/repl.rs). The Git cases skip themselves where no `git` binary is
+# installed.
+rust_test(
+    name = "xybrid_test",
+    version = XYBRID_VERSION,
+    crate = ":xybrid",
+    deps = ["@crates//:image"],
+)
+
 # Integration tests. Every one of these spawns the built CLI, locating it through
 # `env!("CARGO_BIN_EXE_xybrid")`.
 #
@@ -56,6 +71,15 @@ _CLI_INTEGRATION_TESTS = {
         "@crates//:serde_json",
         "@crates//:tempfile",
     ],
+    # `connect` / `auth` against a loopback httpmock platform, in an isolated
+    # HOME / XYBRID_CREDENTIALS_FILE / Git configuration. Cases that need Git
+    # skip themselves without it.
+    "connect_auth_cli_test": [
+        "@crates//:chrono",
+        "@crates//:httpmock",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
     "init_json_test": [
         "@crates//:serde_json",
         "@crates//:tempfile",
@@ -64,7 +88,10 @@ _CLI_INTEGRATION_TESTS = {
         "//crates/xybrid-core:xybrid-core",
         "@crates//:tempfile",
     ],
-    "telemetry_status_test": [],
+    "telemetry_status_test": [
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
     "vlm_cli_test": [
         "//crates/xybrid-core:xybrid-core",
         "@crates//:image",

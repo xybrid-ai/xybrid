@@ -247,6 +247,40 @@ class ZzzPullTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr.decode())
         self.assertTrue(Path(result.stdout.decode().strip()).is_dir())
 
+    def test_python_version_is_checked_before_imports_or_inputs(self):
+        runner = """
+import runpy
+import sys
+script, version = sys.argv[1:]
+sys.version_info = (*map(int, version.split('.')), 0, 'final', 0)
+sys.argv = [script, '--help']
+runpy.run_path(script, run_name='__main__')
+"""
+        for version in ("3.8", "3.9", "3.10", "3.11"):
+            with self.subTest(version=version):
+                result = subprocess.run(
+                    [sys.executable, "-I", "-c", runner,
+                     str(VERIFIER_DIR / "zzz_pull.py"), version],
+                    env={**os.environ, **self.environment,
+                         "XYBRID_ZZZ_PREBUILT_DIR": str(self.root / "private-input")},
+                    capture_output=True,
+                    check=False,
+                )
+                error = result.stderr.decode()
+                if version == "3.11":
+                    self.assertEqual(0, result.returncode, error)
+                    self.assertIn(b"--verify-only", result.stdout)
+                else:
+                    self.assertEqual(1, result.returncode)
+                    self.assertEqual(b"", result.stdout)
+                    self.assertIn("Python 3.11+ is required", error)
+                    self.assertIn(f"found {version}", error)
+                    self.assertIn("XYBRID_ZZZ_PYTHON", error)
+                    self.assertNotIn("Traceback", error)
+                    self.assertNotIn("AttributeError", error)
+                for private in (*self.environment.values(), str(self.root)):
+                    self.assertNotIn(private, error)
+
     def test_committed_manifest_carries_only_the_public_keys(self):
         self.assertEqual(
             {"schema_version", "engine", "release_tag", "archives"},
@@ -1012,6 +1046,136 @@ class ZzzPullTests(unittest.TestCase):
                 self.assertEqual(
                     1, zzz.main(["--target", self.target, "--verify-only"])
                 )
+
+    def run_prebuilt(self, target, path, *, verify_only=True):
+        select_pin = zzz.select_pin
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {**self.environment,
+                            "XYBRID_ZZZ_PREBUILT_DIR": str(path)}, clear=True),
+            mock.patch.object(zzz, "select_pin", side_effect=lambda requested:
+                              select_pin(requested, self.manifest)),
+            mock.patch.object(zzz, "fetch_archive") as fetch,
+            mock.patch.object(zzz, "stage_archive") as stage,
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            result = zzz.main(["--target", target] +
+                              (["--verify-only"] if verify_only else []))
+        fetch.assert_not_called()
+        stage.assert_not_called()
+        for private in (*self.environment.values(), str(self.root)):
+            self.assertNotIn(private, stderr.getvalue())
+        if result:
+            self.assertEqual("", stdout.getvalue())
+        return result, stdout.getvalue().strip(), stderr.getvalue()
+
+    def test_prebuilt_root_selects_and_reverifies_each_requested_target(self):
+        self.use_schema5()
+        root = self.root / "prebuilt"
+        root.mkdir(mode=0o700)
+        targets = (self.target, "aarch64-linux-android")
+        for target in targets:
+            archive, pin = self.make_archive(target=target)
+            staged = zzz.stage_archive(archive, pin, self.root / "staged")
+            staged.rename(root / target)
+        for target in targets:
+            for verify_only in (False, True):
+                with self.subTest(target=target, verify_only=verify_only):
+                    result, selected, error = self.run_prebuilt(
+                        target, root, verify_only=verify_only
+                    )
+                    self.assertEqual(0, result, error)
+                    self.assertEqual(str(root / target), selected)
+            (root / target / "lib/libzzz_embed.a").write_bytes(b"tampered")
+            result, _, error = self.run_prebuilt(target, root)
+            self.assertEqual(1, result)
+            self.assertIn("differs from pinned archive", error)
+
+    def test_prebuilt_root_missing_target_fails_without_fetching(self):
+        archive, pin = self.make_archive()
+        root = self.root / "prebuilt"
+        root.mkdir(mode=0o700)
+        zzz.stage_archive(archive, pin, self.root / "staged").rename(root / self.target)
+        result, _, error = self.run_prebuilt("aarch64-linux-android", root)
+        self.assertEqual(1, result)
+        self.assertIn("missing prebuilt slice", error)
+        self.assertIn("requested target 'aarch64-linux-android'", error)
+
+    def test_invalid_target_child_never_falls_back_to_single_slice(self):
+        archive, pin = self.make_archive()
+        root = zzz.stage_archive(archive, pin, self.root / "staged")
+        child = root / self.target
+        for kind in ("empty", "file", "link", "broken-link"):
+            with self.subTest(kind=kind):
+                if kind == "empty":
+                    child.mkdir(mode=0o700)
+                elif kind == "file":
+                    child.write_bytes(b"not a slice")
+                else:
+                    child.symlink_to(root if kind == "link" else root / "missing")
+                result, _, _ = self.run_prebuilt(self.target, root)
+                self.assertEqual(1, result)
+                if kind == "empty":
+                    child.rmdir()
+                else:
+                    child.unlink()
+        result, selected, error = self.run_prebuilt(self.target, root)
+        self.assertEqual(0, result, error)
+        self.assertEqual(str(root), selected)
+
+    def test_prebuilt_root_and_child_must_remain_private_and_unlinked(self):
+        archive, pin = self.make_archive()
+        root = self.root / "prebuilt"
+        root.mkdir(mode=0o700)
+        child = root / self.target
+        zzz.stage_archive(archive, pin, self.root / "staged").rename(child)
+        for path in (root, child):
+            with self.subTest(public=path.name):
+                path.chmod(0o755)
+                result, _, error = self.run_prebuilt(self.target, root)
+                self.assertEqual(1, result)
+                self.assertIn("private permissions", error)
+                path.chmod(0o700)
+        linked = self.root / "linked-prebuilt"
+        linked.symlink_to(root)
+        result, _, error = self.run_prebuilt(self.target, linked)
+        self.assertEqual(1, result)
+        self.assertIn("unsafe staged directory", error)
+
+    def test_wrong_single_slice_or_named_child_reports_both_targets(self):
+        archive, pin = self.make_archive()
+        staged = zzz.stage_archive(archive, pin, self.root / "staged")
+        requested = "aarch64-linux-android"
+        root = self.root / "prebuilt"
+        root.mkdir(mode=0o700)
+        for path in (staged, root):
+            if path == root:
+                staged.rename(root / requested)
+            result, _, error = self.run_prebuilt(requested, path)
+            self.assertEqual(1, result)
+            self.assertIn(f"requested '{requested}'", error)
+            self.assertIn(f"provided '{self.target}'", error)
+
+    def test_unverified_receipt_values_cannot_leak_through_target_diagnostics(self):
+        archive, pin = self.make_archive()
+        staged = zzz.stage_archive(archive, pin, self.root / "staged")
+        for value in ("fake-private-token", {"private": "fake-private-token"},
+                      ["fake-private-token"]):
+            with self.subTest(value=value):
+                (staged / "RECEIPT.json").write_text(json.dumps({"target": value}))
+                result, _, error = self.run_prebuilt("aarch64-linux-android", staged)
+                self.assertEqual(1, result)
+                self.assertIn("archive checksum mismatch", error)
+                self.assertNotIn("provided", error)
+        # A forged receipt claiming the requested target cannot make an
+        # incompatible archive pass its independently pinned checksum.
+        (staged / "RECEIPT.json").write_text(json.dumps({
+            "target": zzz.ZIG_TARGETS["aarch64-linux-android"]
+        }))
+        result, _, error = self.run_prebuilt("aarch64-linux-android", staged)
+        self.assertEqual(1, result)
+        self.assertIn("archive checksum mismatch", error)
 
     def test_unsupported_and_duplicate_pins_are_rejected(self):
         with self.assertRaisesRegex(zzz.StageError, "unsupported"):

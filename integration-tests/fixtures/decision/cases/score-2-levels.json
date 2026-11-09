@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "id": "score-2-levels",
+  "profile": "lfm3-d1/text/v1",
+  "title": "The fewest levels: 2",
+  "covers": ["score-2-levels"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"How urgent is this?\", \"criteria\": [\"Not urgent\", \"Urgent\"]}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "score",
+          "keys": ["0", "1"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nHow urgent is this?\n\n0 Not urgent\n1 Urgent\n\nReply with a single digit 0-1 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 3522, 30648, 355, 532, 64929, 24, 4023, 30648, 207, 25, 8131, 6727, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 25, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 49,
+          "select": [24, 25]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x41388886", "0x40f7be09"]
+      ],
+      "scores": [
+        ["0x41388886", "0x40f7be09"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "score",
+          "score": 0.0,
+          "legend": {
+            "0": "Not urgent",
+            "1": "Urgent"
+          },
+          "probabilities": {
+            "0": 0.94453262199061228,
+            "1": 0.055467378009387634
+          },
+          "confidence": 0.94453262199061228
+        }
+      },
+      "usage": {
+        "input_tokens": 50,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

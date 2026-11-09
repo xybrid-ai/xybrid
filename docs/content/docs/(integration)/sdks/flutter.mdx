@@ -5,13 +5,25 @@ description: On-device ML inference for Flutter applications
 
 The Flutter SDK (`xybrid_flutter`) provides Dart bindings to the Xybrid Rust core via FFI, enabling on-device ML inference in mobile and desktop applications.
 
+## Requirements
+
+- iOS 16.0+
+- macOS 14.0+ on Apple Silicon
+- Android 9 / API 28+
+
+The precompiled native libraries are built for these versions. For releases after 0.16.0 the plugin also declares them, so an app that targets an older version fails at build time. Raise your app's minimums:
+
+- **Android**: set `minSdk = 28` or higher in `defaultConfig` of `android/app/build.gradle.kts`. Flutter's default, `flutter.minSdkVersion`, is lower.
+- **iOS**: set `platform :ios, '16.0'` in `ios/Podfile` and the Runner target's iOS Deployment Target to 16.0 in Xcode.
+- **macOS**: set `platform :osx, '14.0'` in `macos/Podfile` and the Runner target's macOS Deployment Target to 14.0 in Xcode.
+
 ## Installation
 
 Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.13.1
+  xybrid_flutter: ^0.17.0
 ```
 
 ## Initialization
@@ -28,15 +40,26 @@ void main() async {
 }
 ```
 
-Inference runs entirely on-device whether or not you authenticate. Pass an `apiKey` to light up the [dashboard](https://dashboard.xybrid.dev) — that single call starts the telemetry exporter, and your `model.run()` / `pipeline.run()` calls automatically emit execution traces:
+Local inference is available without authentication. An `apiKey` configures
+cloud access. To send execution traces to the [dashboard](https://dashboard.xybrid.dev),
+also configure observability explicitly:
 
 ```dart
 await Xybrid.init(
   apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+  observability: ObservabilityConfig.xybrid(
+    apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+    metadataOnly: true,
+  ),
 );
 ```
 
-Without a key, telemetry is disabled and the first inference logs a one-shot hint pointing at the dashboard (suppress with the `XYBRID_QUIET=1` environment variable). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev). For a self-hosted dashboard, also pass `ingestUrl`; for CPU/memory sampling, pass `resourceTelemetry`.
+An API key alone does not enable export. The example selects metadata-only
+capture; otherwise enabled observability captures governed text by default.
+Use `ObservabilityConfig.otlp(endpoint: 'http://collector:4318')` for a Collector
+without Xybrid authentication. CPU/memory sampling is separately configured
+with `resourceTelemetry`. `ingestUrl` remains a legacy explicit opt-in to OTLP
+trace export; new integrations should use `observability`.
 
 `Xybrid.init()` also subscribes to OS battery state on iOS and Android via `battery_plus` and forwards each reading to the routing engine.
 
@@ -75,6 +98,23 @@ final envelope = XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000);
 final result = await model.run(envelope);
 print(result.text); // "Hello, how are you?"
 ```
+
+For live transcription, open a session and feed PCM float32 mono 16 kHz as it
+arrives. `flush()` ends the session and returns an `FfiTranscriptionResult`:
+the transcript in `text`, plus `durationMs`, `chunksProcessed` and the
+session's `observation` reference.
+
+```dart
+final session = await XybridStreamSession.fromModel(model);
+session.partials.listen((partial) => caption = partial.text); // listen first
+session.feed(samples);
+final transcript = (await session.flush()).text;
+```
+
+<Callout type="warn">
+Earlier releases returned the transcript from `flush()` as a `String`. Read
+`.text` from the result instead.
+</Callout>
 
 ## LLM Chat with Streaming
 
@@ -126,10 +166,11 @@ Main entry point for the SDK.
 ```dart
 class Xybrid {
   static Future<void> init({
-    String? apiKey,            // authenticates telemetry; omit to run anonymously
+    String? apiKey,            // cloud authentication; does not enable export
     String? gatewayUrl,        // override the LLM gateway URL
     String? ingestUrl,         // override the telemetry ingest URL (self-hosting)
     String? resourceTelemetry, // enable CPU/memory sampling
+    ObservabilityConfig? observability, // explicit OTLP export configuration
   });
   static bool get isInitialized;
   static void setApiKey(String apiKey);
@@ -276,7 +317,7 @@ class XybridPipeline {
   int get stageCount;
   List<String> get stageNames;
 
-  Future<XybridResult> run(XybridEnvelope envelope);
+  Future<XybridResult> run(XybridEnvelope envelope, {ObservationOptions? observation});
 }
 ```
 
@@ -298,6 +339,10 @@ final result = await pipeline.run(
 // Result is TTS audio from the final stage
 final wav = result.audioAsWav();
 ```
+
+`observation:` takes the same `ObservationOptions` as `RunOptions.observation`.
+`result.observation` is the pipeline's workflow reference, and
+`result.metrics.stageLatenciesMs[i].observation` is each stage's inference reference.
 
 ---
 

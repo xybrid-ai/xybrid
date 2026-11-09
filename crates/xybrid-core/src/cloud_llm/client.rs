@@ -134,9 +134,7 @@ impl LlmClient {
 
         let url = format!("{}/chat/completions", self.config.effective_base_url());
 
-        let response = self
-            .agent
-            .post(&url)
+        let response = crate::tracing::inject_provider_trace_headers(self.agent.post(&url))
             .set("Authorization", &format!("Bearer {}", api_key))
             .set("Content-Type", "application/json")
             .send_json(&body);
@@ -216,9 +214,7 @@ impl LlmClient {
 
         let url = format!("{}/messages", self.config.effective_base_url());
 
-        let response = self
-            .agent
-            .post(&url)
+        let response = crate::tracing::inject_provider_trace_headers(self.agent.post(&url))
             .set("x-api-key", &api_key)
             .set("anthropic-version", "2023-06-01")
             .set("Content-Type", "application/json")

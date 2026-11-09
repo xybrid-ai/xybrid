@@ -505,9 +505,10 @@ patch, draft GitHub Release, the release PR, the tag, and the crates.io / pub.de
 
 ```bash
 git switch -c release/v<version> origin/master
-just bump-version <version>     # syncs every manifest: Cargo, pubspec, Unity
-                                # (+ its README install pins), Kotlin,
-                                # Package.swift sdkVersion, Python pyproject
+just bump-version <version>     # syncs every manifest: Cargo, pubspec, Unity,
+                                # Kotlin, Package.swift sdkVersion, Python
+                                # pyproject, and the install-snippet pins in
+                                # the READMEs and docs pages (install_pins.py)
 ./bindings/apple/scripts/set-natives-mode.sh --set-remote   # useLocalNatives=false
 # fill the CHANGELOG entry for <version> (and bindings/flutter/CHANGELOG.md)
 git commit -am "bump: <version>" && git push -u origin release/v<version>
@@ -533,10 +534,30 @@ Pushing `release/v*` triggers `release-prep.yml`, which:
   not committed). Run `bindings/apple/scripts/set-natives-mode.sh --set-remote`
   before committing — remote (`false`) is the canonical committed state.
 
+Install snippets in the READMEs and docs pages that name a release are pins in
+`PINS` (`tools/scripts/install_pins.py`). A new snippet shape, or a new page
+carrying one, gets an entry there or no bump rewrites it. CI's `Version sync`
+job runs `version-sync.sh --check` and `test_install_pins.py` on every PR,
+docs-only ones included: a stale or dropped pin fails, and so does a known shape
+on an unlisted page or a package named with a version no pin owns. Pins follow
+prereleases too: an rc release PR merges to master, so until the final release
+the READMEs on master and docs.xybrid.dev say to install the rc.
+
 `just bump-version` only rewrites the workspace `version`; it does **not** touch
 internal path-dep `version = "..."` pins (e.g. `xybrid-sdk`/`xybrid-core` in
 sibling `Cargo.toml`s). If those drift, lockfile regen fails under `^0.1.x` —
 update them to match and re-run `cargo update -w` when bumping.
+
+**Native changes after the bump need a Flutter crate edit.** cargokit names
+the Flutter precompiled release after a hash of `bindings/flutter/rust` alone,
+and release-prep reuses whatever that release already holds. If anything the
+library is built from (any `Cargo.toml`, workspace crates, `vendor/` gitlinks,
+Bazel config) changes on a release branch after the bump, a master merge
+included, or you rebase or re-cut the branch after release-prep ran, change a
+line of `bindings/flutter/rust/Cargo.toml` too. The Verify release branch job
+runs `tools/scripts/check_flutter_precompiled_inputs.py`, which fails on the
+first case from history and on most of the second from the release's
+publication date.
 
 **llama.cpp stable updates (POC).** `llamacpp-update.yml` checks official
 `vX.Y.Z` releases daily and opens one version-specific update PR at a time.

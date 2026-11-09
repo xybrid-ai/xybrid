@@ -125,6 +125,54 @@ pub(crate) fn run_query(
     max_tokens: Option<usize>,
     verbose: u8,
 ) -> Result<QueryOutcome> {
+    let operation = xybrid_sdk::observability::start_workflow("repl_turn", &Default::default());
+    let scope = operation.enter();
+    let result = run_query_inner(QueryArgs {
+        model,
+        context,
+        question,
+        toolbox,
+        system_prompt,
+        stream,
+        show_reasoning,
+        max_tokens,
+        verbose,
+    });
+    drop(scope);
+    match &result {
+        Ok(_) => operation.end(),
+        Err(_) => {
+            operation.end_with_error(&xybrid_sdk::observability::ErrorInfo::new("repl_error"))
+        }
+    }
+    result
+}
+
+/// [`run_query`]'s inputs, carried into the turn's observed scope.
+struct QueryArgs<'a> {
+    model: &'a XybridModel,
+    context: Option<&'a ConversationContext>,
+    question: &'a str,
+    toolbox: Option<&'a ToolBox>,
+    system_prompt: Option<&'a str>,
+    stream: bool,
+    show_reasoning: bool,
+    max_tokens: Option<usize>,
+    verbose: u8,
+}
+
+fn run_query_inner(args: QueryArgs<'_>) -> Result<QueryOutcome> {
+    let QueryArgs {
+        model,
+        context,
+        question,
+        toolbox,
+        system_prompt,
+        stream,
+        show_reasoning,
+        max_tokens,
+        verbose,
+    } = args;
     // Keeping `None` when no session option is set preserves the executor's
     // no-config path; otherwise layering starts from the same resolved defaults.
     let config = (toolbox.is_some() || max_tokens.is_some()).then(|| {
@@ -432,6 +480,11 @@ fn execute_and_display(
     findings: &mut Vec<String>,
 ) -> (ToolCallResult, bool) {
     let label = tools::display_call(call);
+    let mut info = xybrid_sdk::observability::ToolCallInfo::new(&call.function.name);
+    info.call_id = Some(call.id.clone());
+    info.tool_type = Some("function".into());
+    info.arguments = serde_json::from_str(&call.function.arguments).ok();
+    let observation = xybrid_sdk::observability::start_tool(info, &Default::default());
 
     // Small models re-issue the same call instead of answering. Return a
     // machine-shaped duplicate marker instead of hitting the network again
@@ -451,12 +504,24 @@ fn execute_and_display(
                 "detail": "this exact call already ran; its results are in the notes",
             }),
         };
+        observation.set_attribute(xybrid_sdk::observability::KeyValue::new(
+            "xybrid.tool.skipped",
+            "duplicate",
+        ));
+        observation.record_result(&result.content);
+        observation.end();
         return (result, false);
     }
 
     let spinner = ui::spinner(&format!("⚙ {label}"));
     let started = Instant::now();
     let result = toolbox.execute(call);
+    observation.record_result(&result.content);
+    if result.content.get("error").is_some() {
+        observation.end_with_error(&xybrid_sdk::observability::ErrorInfo::new("tool_error"));
+    } else {
+        observation.end();
+    }
     spinner.finish_and_clear();
     let elapsed_ms = started.elapsed().as_millis();
 
@@ -565,6 +630,56 @@ fn preview_line(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repl_tool_executions_and_duplicates_are_tool_operations() {
+        let _lock = crate::OBSERVABILITY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let capture = crate::tracing_viz::LocalCapture::configure(None, None).unwrap();
+        let root = capture.begin();
+        let toolbox = ToolBox {
+            provider: tools::SearchProvider::Wikipedia,
+            user_tools: Vec::new(),
+        };
+        let call: xybrid_core::gateway::ToolCall = serde_json::from_value(serde_json::json!({
+            "id": "call_7", "type": "function",
+            "function": {"name": "current_time", "arguments": "{}"}
+        }))
+        .unwrap();
+        let mut seen = HashSet::new();
+        let mut findings = Vec::new();
+        {
+            let _scope = root.enter();
+            execute_and_display(&call, &toolbox, &mut seen, &mut findings);
+            execute_and_display(&call, &toolbox, &mut seen, &mut findings);
+        }
+        root.end();
+        let tools: Vec<_> = capture
+            .captured()
+            .into_iter()
+            .filter(|s| s.name == "execute_tool current_time")
+            .collect();
+        assert_eq!(tools.len(), 2);
+        let attribute = |span: &opentelemetry_sdk::trace::SpanData, key: &str| {
+            span.attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == key)
+                .map(|kv| kv.value.to_string())
+        };
+        for tool in &tools {
+            assert_eq!(
+                attribute(tool, "gen_ai.tool.call.id").as_deref(),
+                Some("call_7")
+            );
+            assert!(attribute(tool, "gen_ai.tool.call.result").is_some());
+        }
+        assert_eq!(attribute(&tools[0], "xybrid.tool.skipped"), None);
+        assert_eq!(
+            attribute(&tools[1], "xybrid.tool.skipped").as_deref(),
+            Some("duplicate")
+        );
+    }
 
     fn test_tool() -> Tool {
         Tool::function(

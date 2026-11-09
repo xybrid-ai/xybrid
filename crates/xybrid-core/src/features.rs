@@ -24,6 +24,13 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     ("candle-cuda", cfg!(feature = "candle-cuda")),
     ("candle-metal", cfg!(feature = "candle-metal")),
     ("espeak", cfg!(feature = "espeak")),
+    // The registry serves `lfm3-1.7b` only to clients that list
+    // `llamacpp-lfm3`, and `lfm3-vl-2b` only to those that list
+    // `llamacpp-lfm3vl`. Older builds report `llm-llamacpp` too but can't run
+    // LFM3: 0.15.0 and earlier lack the `lfm3` architecture, and 0.16.0 loads
+    // it without LFM3's prompt format, tool calls or image-token cap.
+    ("llamacpp-lfm3", cfg!(feature = "llm-llamacpp")),
+    ("llamacpp-lfm3vl", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-llamacpp", cfg!(feature = "llm-llamacpp")),
     ("llm-llamacpp-vision", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-mistral", cfg!(feature = "llm-mistral")),
@@ -176,6 +183,18 @@ mod tests {
     #[test]
     fn llm_mlx_runtime_branch_is_exercised() {
         assert!(enabled().contains(&"llm-mlx-runtime"));
+    }
+
+    #[test]
+    fn lfm3_backends_follow_the_llama_cpp_features() {
+        assert_eq!(
+            enabled().contains(&"llamacpp-lfm3"),
+            cfg!(feature = "llm-llamacpp")
+        );
+        assert_eq!(
+            enabled().contains(&"llamacpp-lfm3vl"),
+            cfg!(feature = "llm-llamacpp-vision")
+        );
     }
 
     #[cfg(feature = "asr-whispercpp")]

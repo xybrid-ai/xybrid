@@ -1,0 +1,143 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "A streaming request that times out after partial output: error.type, bounded status message, finish reason error, exception event, no fabricated usage.",
+  "expect": {
+    "logs": [
+      {
+        "attributes": {
+          "exception.message": "generation exceeded 5s deadline",
+          "exception.type": "timeout"
+        },
+        "event_name": "gen_ai.client.operation.exception",
+        "severity_number": 13,
+        "span": "chat"
+      }
+    ],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "error.type": "timeout",
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 5.0
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.time_to_first_chunk",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.1
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "error.type": "timeout",
+          "gen_ai.operation.name": "chat",
+          "gen_ai.output.messages": [
+            {
+              "finish_reason": "error",
+              "parts": [
+                {
+                  "content": "Partial",
+                  "type": "text"
+                }
+              ],
+              "role": "assistant"
+            }
+          ],
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "gen_ai.request.stream": true,
+          "gen_ai.response.finish_reasons": [
+            "error"
+          ],
+          "gen_ai.response.time_to_first_chunk": 0.1,
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.response.chunk_count": 1,
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 5000,
+        "id": "chat",
+        "kind": "INTERNAL",
+        "name": "chat tiny",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "ERROR",
+          "description": "generation exceeded 5s deadline"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "inference_error_partial_stream",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp",
+        "stream": true
+      }
+    },
+    {
+      "at_ms": 100,
+      "id": "chat",
+      "op": "chunk"
+    },
+    {
+      "at_ms": 100,
+      "id": "chat",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "error",
+          "parts": [
+            {
+              "content": "Partial",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 5000,
+      "error_type": "timeout",
+      "id": "chat",
+      "message": "generation exceeded 5s deadline",
+      "op": "end_with_error"
+    }
+  ]
+}

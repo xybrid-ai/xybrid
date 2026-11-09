@@ -1,9 +1,9 @@
 use anyhow::{bail, Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 pub fn run(registry_url: Option<String>) -> Result<()> {
-    let root = project_root();
+    let root = project_root()?;
     let download_script = root.join("integration-tests/download.sh");
 
     if !download_script.exists() {
@@ -40,10 +40,12 @@ pub fn run(registry_url: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn project_root() -> PathBuf {
-    Path::new(&env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(1)
-        .unwrap()
-        .to_path_buf()
+fn project_root() -> Result<PathBuf> {
+    let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR")
+        .context("CARGO_MANIFEST_DIR is not set; run this command with cargo xtask")?;
+    std::path::absolute(manifest_dir)
+        .context("resolve xtask manifest directory")?
+        .parent()
+        .context("xtask must be inside the workspace root")
+        .map(PathBuf::from)
 }

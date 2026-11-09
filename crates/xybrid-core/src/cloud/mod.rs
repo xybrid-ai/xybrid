@@ -61,7 +61,9 @@ mod config;
 mod error;
 
 pub use client::Cloud;
-pub(crate) use client::{openai_chat_body, parse_gateway_usage, MissingModel};
+pub(crate) use client::{
+    inject_transport_trace_headers, openai_chat_body, parse_gateway_usage, MissingModel,
+};
 pub use completion::{CompletionRequest, CompletionResponse, Message, Role, ThinkingMode, Usage};
 pub use config::{
     has_xybrid_api_key, set_xybrid_api_key, set_xybrid_gateway_url, set_xybrid_platform_url,

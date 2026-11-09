@@ -42,6 +42,20 @@ impl std::error::Error for StreamError {}
 /// Result type for streaming operations.
 pub type StreamResult<T> = Result<T, StreamError>;
 
+/// Optional caller-owned scope around actual ASR decoder executions.
+/// Cached partial reads never invoke this hook. Implementations do no I/O.
+pub trait DecoderObserver: Send + Sync {
+    /// Starts a scope on the decoder's executing thread.
+    fn start(&self, metadata: &ModelMetadata, input: &Envelope)
+        -> Box<dyn DecoderObservation + '_>;
+}
+
+/// A decoder scope; completion and destruction happen on its original thread.
+pub trait DecoderObservation {
+    /// Finalize from the actual execution outcome.
+    fn finish(self: Box<Self>, result: &StreamResult<Envelope>);
+}
+
 /// VAD (Voice Activity Detection) configuration for smart chunking.
 #[derive(Debug, Clone)]
 pub struct VadStreamConfig {
@@ -383,6 +397,7 @@ pub struct StreamSession {
     last_error: Option<String>,
     /// Callback for partial results
     on_partial: Option<Arc<dyn Fn(PartialResult) + Send + Sync>>,
+    decoder_observer: Option<Arc<dyn DecoderObserver>>,
     /// VAD session for smart chunking (optional)
     vad: Option<VadSession>,
     /// Accumulated samples for VAD-based segmentation
@@ -486,6 +501,7 @@ impl StreamSession {
                         state: StreamState::Idle,
                         last_error: None,
                         on_partial: None,
+                        decoder_observer: None,
                         vad: None,
                         vad_buffer: Vec::new(),
                         vad_speech_start: None,
@@ -522,10 +538,16 @@ impl StreamSession {
             state: StreamState::Idle,
             last_error: None,
             on_partial: None,
+            decoder_observer: None,
             vad,
             vad_buffer: Vec::new(),
             vad_speech_start: None,
         })
+    }
+
+    /// Set the scope factory used only when a decoder actually executes.
+    pub fn set_decoder_observer(&mut self, observer: Arc<dyn DecoderObserver>) {
+        self.decoder_observer = Some(observer);
     }
 
     /// Infer optimal buffer configuration from model metadata.
@@ -812,12 +834,29 @@ impl StreamSession {
             .inference_envelope(wav_bytes, self.detected_language.as_deref());
 
         // Execute through TemplateExecutor (handles ONNX, Candle, etc.)
+        let observation = self
+            .decoder_observer
+            .as_ref()
+            .map(|o| o.start(&self.metadata, &envelope));
         let output = self
             .executor
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .execute(&self.metadata, &envelope, None)
-            .map_err(|e| StreamError::InferenceError(format!("Execution failed: {}", e)))?;
+            .map_err(|e| StreamError::InferenceError(format!("Execution failed: {}", e)))
+            .and_then(|output| {
+                if matches!(output.kind, EnvelopeKind::Text(_)) {
+                    Ok(output)
+                } else {
+                    Err(StreamError::InferenceError(
+                        "Model did not return text output".into(),
+                    ))
+                }
+            });
+        if let Some(observation) = observation {
+            observation.finish(&output);
+        }
+        let output = output?;
 
         // Extract text from output
         let text = match output.kind {
@@ -889,6 +928,78 @@ pub struct StreamStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug, Default)]
+    struct DecodeCounts {
+        started: std::sync::atomic::AtomicUsize,
+        failed: std::sync::atomic::AtomicUsize,
+    }
+
+    impl DecoderObserver for Arc<DecodeCounts> {
+        fn start(
+            &self,
+            _metadata: &ModelMetadata,
+            input: &Envelope,
+        ) -> Box<dyn DecoderObservation + '_> {
+            assert!(matches!(input.kind, EnvelopeKind::Audio(_)));
+            self.started
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::new(self.clone())
+        }
+    }
+
+    impl DecoderObservation for Arc<DecodeCounts> {
+        fn finish(self: Box<Self>, result: &StreamResult<Envelope>) {
+            assert!(matches!(result, Err(StreamError::InferenceError(_))));
+            self.failed
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn decoder_hook_counts_executions_and_failures_but_not_cached_partials_or_warmup() {
+        use std::sync::atomic::Ordering;
+        let dir = tempfile::tempdir().unwrap();
+        let metadata = ModelMetadata::onnx("weightless-asr", "1.0", "missing.onnx");
+        std::fs::write(
+            dir.path().join("model_metadata.json"),
+            serde_json::to_vec(&metadata).unwrap(),
+        )
+        .unwrap();
+        let mut session = StreamSession::new(dir.path(), StreamConfig::default()).unwrap();
+        let counts = Arc::new(DecodeCounts::default());
+        session.set_decoder_observer(Arc::new(counts.clone()));
+        // Warmup executes the adapter but is deliberately not a decoder inference.
+        assert!(session.warmup().is_err());
+        session.feed(&[0.0; 16]).unwrap();
+        for _ in 0..3 {
+            let _ = session.partial_result();
+        }
+        assert_eq!(counts.started.load(Ordering::SeqCst), 0);
+        let short = AudioChunk {
+            samples: vec![0.0; 16],
+            start_time: Duration::ZERO,
+            end_time: Duration::from_millis(1),
+            sequence: 0,
+            is_final: false,
+        };
+        session.process_chunk(short.clone()).unwrap();
+        assert_eq!(counts.started.load(Ordering::SeqCst), 0);
+        // Final short chunks do decode; missing weights give a real, model-free failure.
+        assert!(session
+            .process_chunk(AudioChunk {
+                is_final: true,
+                ..short
+            })
+            .is_err());
+        assert_eq!(counts.started.load(Ordering::SeqCst), 1);
+        assert_eq!(counts.failed.load(Ordering::SeqCst), 1);
+        for _ in 0..3 {
+            let _ = session.partial_result();
+        }
+        session.reset();
+        assert_eq!(counts.started.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn test_stream_config_defaults() {

@@ -1227,21 +1227,21 @@ mixin _$FfiTtsStreamEvent {
   @optionalTypeArgs
   TResult when<TResult extends Object?>({
     required TResult Function(Uint8List pcm, int sampleRate) audioChunk,
-    required TResult Function() complete,
+    required TResult Function(FfiTtsStreamResult field0) complete,
     required TResult Function(String field0) error,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
     TResult? Function(Uint8List pcm, int sampleRate)? audioChunk,
-    TResult? Function()? complete,
+    TResult? Function(FfiTtsStreamResult field0)? complete,
     TResult? Function(String field0)? error,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
     TResult Function(Uint8List pcm, int sampleRate)? audioChunk,
-    TResult Function()? complete,
+    TResult Function(FfiTtsStreamResult field0)? complete,
     TResult Function(String field0)? error,
     required TResult orElse(),
   }) =>
@@ -1377,7 +1377,7 @@ class _$FfiTtsStreamEvent_AudioChunkImpl extends FfiTtsStreamEvent_AudioChunk {
   @optionalTypeArgs
   TResult when<TResult extends Object?>({
     required TResult Function(Uint8List pcm, int sampleRate) audioChunk,
-    required TResult Function() complete,
+    required TResult Function(FfiTtsStreamResult field0) complete,
     required TResult Function(String field0) error,
   }) {
     return audioChunk(pcm, sampleRate);
@@ -1387,7 +1387,7 @@ class _$FfiTtsStreamEvent_AudioChunkImpl extends FfiTtsStreamEvent_AudioChunk {
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
     TResult? Function(Uint8List pcm, int sampleRate)? audioChunk,
-    TResult? Function()? complete,
+    TResult? Function(FfiTtsStreamResult field0)? complete,
     TResult? Function(String field0)? error,
   }) {
     return audioChunk?.call(pcm, sampleRate);
@@ -1397,7 +1397,7 @@ class _$FfiTtsStreamEvent_AudioChunkImpl extends FfiTtsStreamEvent_AudioChunk {
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
     TResult Function(Uint8List pcm, int sampleRate)? audioChunk,
-    TResult Function()? complete,
+    TResult Function(FfiTtsStreamResult field0)? complete,
     TResult Function(String field0)? error,
     required TResult orElse(),
   }) {
@@ -1465,6 +1465,8 @@ abstract class _$$FfiTtsStreamEvent_CompleteImplCopyWith<$Res> {
           _$FfiTtsStreamEvent_CompleteImpl value,
           $Res Function(_$FfiTtsStreamEvent_CompleteImpl) then) =
       __$$FfiTtsStreamEvent_CompleteImplCopyWithImpl<$Res>;
+  @useResult
+  $Res call({FfiTtsStreamResult field0});
 }
 
 /// @nodoc
@@ -1479,58 +1481,83 @@ class __$$FfiTtsStreamEvent_CompleteImplCopyWithImpl<$Res>
 
   /// Create a copy of FfiTtsStreamEvent
   /// with the given fields replaced by the non-null parameter values.
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? field0 = null,
+  }) {
+    return _then(_$FfiTtsStreamEvent_CompleteImpl(
+      null == field0
+          ? _value.field0
+          : field0 // ignore: cast_nullable_to_non_nullable
+              as FfiTtsStreamResult,
+    ));
+  }
 }
 
 /// @nodoc
 
 class _$FfiTtsStreamEvent_CompleteImpl extends FfiTtsStreamEvent_Complete {
-  const _$FfiTtsStreamEvent_CompleteImpl() : super._();
+  const _$FfiTtsStreamEvent_CompleteImpl(this.field0) : super._();
+
+  @override
+  final FfiTtsStreamResult field0;
 
   @override
   String toString() {
-    return 'FfiTtsStreamEvent.complete()';
+    return 'FfiTtsStreamEvent.complete(field0: $field0)';
   }
 
   @override
   bool operator ==(Object other) {
     return identical(this, other) ||
         (other.runtimeType == runtimeType &&
-            other is _$FfiTtsStreamEvent_CompleteImpl);
+            other is _$FfiTtsStreamEvent_CompleteImpl &&
+            (identical(other.field0, field0) || other.field0 == field0));
   }
 
   @override
-  int get hashCode => runtimeType.hashCode;
+  int get hashCode => Object.hash(runtimeType, field0);
+
+  /// Create a copy of FfiTtsStreamEvent
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  @override
+  @pragma('vm:prefer-inline')
+  _$$FfiTtsStreamEvent_CompleteImplCopyWith<_$FfiTtsStreamEvent_CompleteImpl>
+      get copyWith => __$$FfiTtsStreamEvent_CompleteImplCopyWithImpl<
+          _$FfiTtsStreamEvent_CompleteImpl>(this, _$identity);
 
   @override
   @optionalTypeArgs
   TResult when<TResult extends Object?>({
     required TResult Function(Uint8List pcm, int sampleRate) audioChunk,
-    required TResult Function() complete,
+    required TResult Function(FfiTtsStreamResult field0) complete,
     required TResult Function(String field0) error,
   }) {
-    return complete();
+    return complete(field0);
   }
 
   @override
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
     TResult? Function(Uint8List pcm, int sampleRate)? audioChunk,
-    TResult? Function()? complete,
+    TResult? Function(FfiTtsStreamResult field0)? complete,
     TResult? Function(String field0)? error,
   }) {
-    return complete?.call();
+    return complete?.call(field0);
   }
 
   @override
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
     TResult Function(Uint8List pcm, int sampleRate)? audioChunk,
-    TResult Function()? complete,
+    TResult Function(FfiTtsStreamResult field0)? complete,
     TResult Function(String field0)? error,
     required TResult orElse(),
   }) {
     if (complete != null) {
-      return complete();
+      return complete(field0);
     }
     return orElse();
   }
@@ -1571,8 +1598,17 @@ class _$FfiTtsStreamEvent_CompleteImpl extends FfiTtsStreamEvent_Complete {
 }
 
 abstract class FfiTtsStreamEvent_Complete extends FfiTtsStreamEvent {
-  const factory FfiTtsStreamEvent_Complete() = _$FfiTtsStreamEvent_CompleteImpl;
+  const factory FfiTtsStreamEvent_Complete(final FfiTtsStreamResult field0) =
+      _$FfiTtsStreamEvent_CompleteImpl;
   const FfiTtsStreamEvent_Complete._() : super._();
+
+  FfiTtsStreamResult get field0;
+
+  /// Create a copy of FfiTtsStreamEvent
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  _$$FfiTtsStreamEvent_CompleteImplCopyWith<_$FfiTtsStreamEvent_CompleteImpl>
+      get copyWith => throw _privateConstructorUsedError;
 }
 
 /// @nodoc
@@ -1647,7 +1683,7 @@ class _$FfiTtsStreamEvent_ErrorImpl extends FfiTtsStreamEvent_Error {
   @optionalTypeArgs
   TResult when<TResult extends Object?>({
     required TResult Function(Uint8List pcm, int sampleRate) audioChunk,
-    required TResult Function() complete,
+    required TResult Function(FfiTtsStreamResult field0) complete,
     required TResult Function(String field0) error,
   }) {
     return error(field0);
@@ -1657,7 +1693,7 @@ class _$FfiTtsStreamEvent_ErrorImpl extends FfiTtsStreamEvent_Error {
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
     TResult? Function(Uint8List pcm, int sampleRate)? audioChunk,
-    TResult? Function()? complete,
+    TResult? Function(FfiTtsStreamResult field0)? complete,
     TResult? Function(String field0)? error,
   }) {
     return error?.call(field0);
@@ -1667,7 +1703,7 @@ class _$FfiTtsStreamEvent_ErrorImpl extends FfiTtsStreamEvent_Error {
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
     TResult Function(Uint8List pcm, int sampleRate)? audioChunk,
-    TResult Function()? complete,
+    TResult Function(FfiTtsStreamResult field0)? complete,
     TResult Function(String field0)? error,
     required TResult orElse(),
   }) {

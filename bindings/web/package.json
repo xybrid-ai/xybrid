@@ -1,6 +1,6 @@
 {
   "name": "@xybrid/web",
-  "version": "0.15.0",
+  "version": "0.17.0",
   "type": "module",
   "description": "Browser GGUF inference using Xybrid's Rust runtime and llama.cpp, with WASM SIMD and WebGPU.",
   "main": "./dist/index.js",
@@ -21,20 +21,25 @@
   "scripts": {
     "build": "bun run scripts/build.ts",
     "build:example": "vite build --config example/vite.config.ts",
+    "demo:release": "bun run scripts/serve-release.ts",
     "dev": "vite --config example/vite.config.ts",
     "dev:example": "vite --config example/vite.config.ts",
-    "demo:release": "bun run scripts/serve-release.ts",
     "example:assets": "bun run example/scripts/prepare-assets.ts",
     "lint": "biome check .",
+    "observability:prepare": "node scripts/prepare-observability.mjs",
     "pack:release": "node scripts/check-pack.mjs",
-    "runtime:build": "bun run scripts/build-runtime.ts",
-    "size": "bun run scripts/measure-size.ts",
+    "prebuild": "node scripts/prepare-observability.mjs",
     "prebuild:example": "bun run example:assets",
     "predev": "bun run example:assets",
     "predev:example": "bun run example:assets",
-    "test": "bun test test/metadata.test.ts test/llm.test.ts test/registry.test.ts test/huggingface.test.ts",
+    "pretest": "node scripts/prepare-observability.mjs",
+    "pretypecheck": "node scripts/prepare-observability.mjs",
+    "runtime:build": "bun run scripts/build-runtime.ts",
+    "size": "bun run scripts/measure-size.ts",
+    "test": "bun test test/clock.test.ts test/metadata.test.ts test/llm.test.ts test/registry.test.ts test/huggingface.test.ts test/observability.test.ts",
     "test:browser": "playwright test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:release": "node --test scripts/check-pack.test.mjs"
   },
   "repository": {
     "type": "git",
@@ -50,12 +55,18 @@
     "access": "public"
   },
   "dependencies": {
+    "@xybrid/observability": "0.17.0",
     "hash-wasm": "^4.12.0",
     "ky": "^1.9.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
+    "@opentelemetry/api": "1.10.0",
+    "@opentelemetry/api-logs": "0.223.0",
+    "@opentelemetry/sdk-logs": "3.0.0",
+    "@opentelemetry/sdk-metrics": "3.0.0",
+    "@opentelemetry/sdk-trace": "3.0.0",
     "@playwright/test": "1.61.1",
     "@types/bun": "^1.2.0",
     "@types/node": "^24.0.0",

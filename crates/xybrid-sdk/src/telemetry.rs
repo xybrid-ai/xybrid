@@ -1,43 +1,29 @@
-//! Telemetry event bridge - Converts OrchestratorEvent to TelemetryEvent
+//! Domain telemetry events.
 //!
-//! This module bridges events from the orchestrator's event bus to the
-//! telemetry stream used by Flutter and other consumers. It also supports
-//! exporting telemetry to the Xybrid Platform for analytics and monitoring.
-//!
-//! # Span Collection
-//!
-//! This module integrates with `xybrid_core::tracing` to capture execution spans.
-//! When a pipeline completes, the span tree is automatically included in the
-//! `PipelineComplete` telemetry event and sent to the Platform for visualization.
-//!
-//! # Resilience Features
-//!
-//! The HTTP exporter includes production-hardening features:
-//! - **Circuit breaker**: Prevents hammering failing endpoints
-//! - **Automatic retry**: Exponential backoff with jitter for transient failures
-//! - **Failed event queue**: Retries failed events in the background
+//! In-process subscribers (Flutter's event stream, host apps, the CLI) receive
+//! [`TelemetryEvent`]s describing model completions, pipeline stages, routing
+//! decisions, cloud fallback, and downloads. This stream never leaves the
+//! process: export to an observability backend is handled by
+//! [`crate::observability`] (OpenTelemetry), which is configured separately and
+//! explicitly.
 //!
 //! # Orchestrator Bridge Context
 //!
 //! Producers attach context at orchestrator event publish time; bridge threads
-//! must not assume telemetry task-local or thread-local state is available when
-//! they drain events later.
+//! must not assume task-local or thread-local state is available when they
+//! drain events later.
 
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Mutex;
+use std::sync::RwLock;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use uuid::Uuid;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub use xybrid_core::device::DeviceProfile;
 use xybrid_core::device::{ResourceMonitor, ResourceTelemetryMode, ResourceUsageSummary};
 use xybrid_core::event_bus::{EventContext, OrchestratorEvent};
 use xybrid_core::execution::listener::{self as execution_listener, ExecutionEvent};
-use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
 use xybrid_core::orchestrator::routing_engine::LocalReliabilityHint;
-use xybrid_core::tracing as core_tracing;
 
 /// Telemetry event type (simplified for FFI)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,249 +49,8 @@ pub type TelemetrySender = mpsc::Sender<TelemetryEvent>;
 
 static TELEMETRY_SENDERS: Mutex<Vec<TelemetrySender>> = Mutex::new(Vec::new());
 
-// ============================================================================
-// HTTP Platform Exporter
-// ============================================================================
-
-/// Default telemetry ingest URL
-pub const DEFAULT_INGEST_URL: &str = "https://ingest.xybrid.dev";
-
-/// Maximum number of events to keep in the failed queue
-const MAX_FAILED_QUEUE_SIZE: usize = 1000;
-
-/// Connection timeout for telemetry requests (5 seconds)
-const CONNECT_TIMEOUT_MS: u64 = 5000;
-
-/// Request timeout for telemetry requests (10 seconds)
-const REQUEST_TIMEOUT_MS: u64 = 10000;
-
-/// Bounded timeout for the eager `ExecutionStarted` flush on the execution
-/// hot path. Long enough for a healthy ingest round-trip, short enough that
-/// a slow or unreachable endpoint can't stall inference startup — unlike the
-/// retry+backoff `flush()`, which can block for
-/// `max_retries × (backoff + REQUEST_TIMEOUT_MS)`.
-const STARTED_EVENT_FLUSH_TIMEOUT_MS: u64 = 750;
-
-/// Configuration for the HTTP telemetry exporter
-#[derive(Debug, Clone)]
-pub struct TelemetryConfig {
-    /// Platform API endpoint URL (e.g., "https://api.xybrid.dev")
-    pub endpoint: String,
-    /// API key for authentication
-    pub api_key: String,
-    /// Session ID for grouping events (generated if not provided)
-    pub session_id: Uuid,
-    /// Device identifier
-    pub device_id: Option<String>,
-    /// Platform name (e.g., "ios", "android", "macos")
-    pub platform: Option<String>,
-    /// App version string
-    pub app_version: Option<String>,
-    /// Batch size before flushing (default: 10)
-    pub batch_size: usize,
-    /// Flush interval in seconds (default: 5)
-    pub flush_interval_secs: u64,
-    /// Maximum retry attempts for failed batches (default: 3)
-    pub max_retries: u32,
-    /// Enable retry queue for failed events (default: true)
-    pub enable_retry_queue: bool,
-
-    /// Human-friendly device label (e.g. "Sami's MacBook Pro"). Shown in the
-    /// dashboard alongside the stable `device_id`.
-    pub device_label: Option<String>,
-    /// Full `DeviceProfile` override. When `Some`, fields win over both the
-    /// auto-detected profile and any partial patch.
-    pub device_profile_override: Option<DeviceProfile>,
-    /// Partial hardware overrides. Merged onto the auto-detected profile.
-    pub device_profile_patch: DeviceProfile,
-    /// When `true` (default), the exporter probes local hardware at init and
-    /// populates the `device` substructure on every event.
-    pub auto_hardware_detection: bool,
-    /// When `true`, the exporter includes the machine's hostname in the
-    /// `device` substructure. Off by default because hostnames are PII.
-    pub capture_hostname: bool,
-    /// Internal: set to `true` only when the caller supplied `device_id`
-    /// explicitly via `with_device(...)`. Distinguishes caller-supplied
-    /// identifiers from the auto-wired default so the opt-out path can
-    /// suppress the latter without dropping the former.
-    #[doc(hidden)]
-    pub device_id_explicit: bool,
-
-    /// Resource telemetry mode. Defaults to `Off` so existing callers see no
-    /// behavior change. Enable via [`TelemetryConfig::with_resource_telemetry`]
-    /// — authenticated deployments typically use
-    /// `ResourceTelemetryMode::summary()`. Respected by `init_platform_telemetry`
-    /// which pre-warms the process-wide [`xybrid_core::device::ResourceMonitor`]
-    /// so the first inference does not pay a sysinfo cold-read cost.
-    pub resource_telemetry: ResourceTelemetryMode,
-}
-
-impl Default for TelemetryConfig {
-    fn default() -> Self {
-        let device = crate::device::Device::current();
-        Self {
-            endpoint: String::new(),
-            api_key: String::new(),
-            session_id: Uuid::new_v4(),
-            device_id: Some(device.id.clone()),
-            platform: Some(device.platform.clone()),
-            app_version: None,
-            batch_size: 10,
-            flush_interval_secs: 5,
-            max_retries: 3,
-            enable_retry_queue: true,
-            device_label: None,
-            device_profile_override: None,
-            device_profile_patch: DeviceProfile::default(),
-            auto_hardware_detection: true,
-            capture_hostname: false,
-            device_id_explicit: false,
-            resource_telemetry: ResourceTelemetryMode::Off,
-        }
-    }
-}
-
-impl TelemetryConfig {
-    /// Create a new config with endpoint and API key
-    pub fn new(endpoint: impl Into<String>, api_key: impl Into<String>) -> Self {
-        Self {
-            endpoint: endpoint.into(),
-            api_key: api_key.into(),
-            ..Default::default()
-        }
-    }
-
-    /// Set the session ID
-    pub fn with_session_id(mut self, session_id: Uuid) -> Self {
-        self.session_id = session_id;
-        self
-    }
-
-    /// Set device metadata.
-    ///
-    /// Sets both the `device_id` (stable identifier) and `platform` (OS family
-    /// string). Independent of the hardware profile; auto-detection keeps
-    /// running unless you opt out via `with_auto_hardware_detection(false)`.
-    pub fn with_device(
-        mut self,
-        device_id: impl Into<String>,
-        platform: impl Into<String>,
-    ) -> Self {
-        self.device_id = Some(device_id.into());
-        self.platform = Some(platform.into());
-        self.device_id_explicit = true;
-        self
-    }
-
-    /// Override only the platform string (device ID remains auto-detected).
-    pub fn with_platform(mut self, platform: impl Into<String>) -> Self {
-        self.platform = Some(platform.into());
-        self
-    }
-
-    /// Set app version
-    pub fn with_app_version(mut self, version: impl Into<String>) -> Self {
-        self.app_version = Some(version.into());
-        self
-    }
-
-    /// Set batch size
-    pub fn with_batch_size(mut self, size: usize) -> Self {
-        self.batch_size = size;
-        self
-    }
-
-    /// Set flush interval
-    pub fn with_flush_interval(mut self, secs: u64) -> Self {
-        self.flush_interval_secs = secs;
-        self
-    }
-
-    /// Set a human-friendly label for this device. Example: `"Sami's MacBook Pro"`.
-    ///
-    /// The label is shown in the console alongside the stable `device_id`.
-    pub fn with_device_label(mut self, label: impl Into<String>) -> Self {
-        self.device_label = Some(label.into());
-        self
-    }
-
-    /// Supply the complete `DeviceProfile` emitted on the wire. Disables
-    /// automatic hardware detection so any field left as `None` stays `None`
-    /// — callers wanting to opt out of leaking OS / chip / RAM just omit
-    /// those fields. For partial overlays onto auto-detected values, use the
-    /// `with_hardware_*` field-specific builders instead.
-    pub fn with_hardware(mut self, profile: DeviceProfile) -> Self {
-        self.device_profile_override = Some(profile);
-        self.auto_hardware_detection = false;
-        self
-    }
-
-    /// Override the detected chip family / CPU brand.
-    pub fn with_hardware_chip(mut self, chip: impl Into<String>) -> Self {
-        self.device_profile_patch.chip_family = Some(chip.into());
-        self
-    }
-
-    /// Override the detected RAM (gigabytes).
-    pub fn with_hardware_ram_gb(mut self, gb: u32) -> Self {
-        self.device_profile_patch.ram_gb = Some(gb);
-        self
-    }
-
-    /// Override the detected OS name and version.
-    pub fn with_hardware_os(mut self, os: impl Into<String>, version: impl Into<String>) -> Self {
-        self.device_profile_patch.os = Some(os.into());
-        self.device_profile_patch.os_version = Some(version.into());
-        self
-    }
-
-    /// Override the detected CPU architecture (e.g. `"arm64"`, `"x86_64"`).
-    pub fn with_hardware_arch(mut self, arch: impl Into<String>) -> Self {
-        self.device_profile_patch.arch = Some(arch.into());
-        self
-    }
-
-    /// Add an arbitrary app-provided attribute, stored under `device.custom`
-    /// on the wire event.
-    pub fn with_device_attribute(
-        mut self,
-        key: impl Into<String>,
-        value: impl Into<String>,
-    ) -> Self {
-        self.device_profile_patch
-            .custom
-            .insert(key.into(), value.into());
-        self
-    }
-
-    /// Opt out of all hardware auto-detection. When `false`, the `device`
-    /// substructure only contains fields the app supplies explicitly.
-    pub fn with_auto_hardware_detection(mut self, enabled: bool) -> Self {
-        self.auto_hardware_detection = enabled;
-        self
-    }
-
-    /// Opt into hostname capture. Off by default because hostnames like
-    /// `Samis-MacBook` are effectively PII and make the payload identify
-    /// a person rather than a piece of hardware.
-    pub fn with_hostname_capture(mut self, enabled: bool) -> Self {
-        self.capture_hostname = enabled;
-        self
-    }
-
-    /// Enable per-inference resource telemetry (CPU, memory, process RSS,
-    /// pressure, thermal, battery). Sibling to the existing cache-token and
-    /// LLM-metric fields on the wire; fully documented at
-    /// `docs/sdk/resource-telemetry.md`.
-    ///
-    /// Authenticated deployments typically want
-    /// `ResourceTelemetryMode::summary()`. Omitting the call keeps the default
-    /// `Off` so existing callers see no behavior change.
-    pub fn with_resource_telemetry(mut self, mode: ResourceTelemetryMode) -> Self {
-        self.resource_telemetry = mode.normalized();
-        self
-    }
-}
+const CONTEXT_PIPELINE_ID_KEY: &str = "__xybrid_pipeline_id";
+const CONTEXT_TRACE_ID_KEY: &str = "__xybrid_trace_id";
 
 /// Read the `XYBRID_RESOURCE_TELEMETRY` env var, if set. Recognized values:
 /// `off`, `boundary`, `summary`, `summary:<ms>`, `debug_local`,
@@ -313,6 +58,10 @@ impl TelemetryConfig {
 /// use their configured default.
 fn resource_mode_from_env() -> Option<ResourceTelemetryMode> {
     let raw = std::env::var("XYBRID_RESOURCE_TELEMETRY").ok()?;
+    parse_resource_telemetry_mode(&raw)
+}
+
+fn parse_resource_telemetry_mode(raw: &str) -> Option<ResourceTelemetryMode> {
     let lower = raw.trim().to_ascii_lowercase();
     let (head, interval) = match lower.split_once(':') {
         Some((h, t)) => (h, t.parse::<u32>().ok()),
@@ -333,1251 +82,17 @@ fn resource_mode_from_env() -> Option<ResourceTelemetryMode> {
     Some(mode.normalized())
 }
 
-/// Event payload for platform API (matches IngestTelemetryEvent)
-#[derive(Debug, Clone, Serialize)]
-struct PlatformEvent {
-    session_id: Uuid,
-    event_type: String,
-    payload: serde_json::Value,
-    // SDK self-identification. Always present so the backend can slice
-    // telemetry by SDK version (regression analysis) and by binding
-    // (adoption / per-platform performance). `sdk_version` is the
-    // `xybrid-sdk` crate version (compile-time `CARGO_PKG_VERSION`);
-    // `binding` is the process-global identifier set by the platform
-    // binding (`cli`/`flutter`/`kotlin`/`python`/`react-native`/`swift`/
-    // `unity`), defaulting to `rust` when nothing has called `set_binding`.
-    sdk_version: String,
-    binding: String,
-    // `device_id` honors the opt-out contract: when the SDK clears it
-    // because the caller opted out of hardware detection without supplying
-    // an explicit id, the wire event omits the field entirely rather than
-    // emitting `"device_id": null`. Some ingest schemas treat absent vs
-    // null-but-present differently, so this matters.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    device_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    device_label: Option<String>,
-    platform: Option<String>,
-    app_version: Option<String>,
-    /// Hardware + OS snapshot. `None` when the app has opted out of
-    /// auto-detection and supplied no explicit overrides.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    device: Option<DeviceProfile>,
-    timestamp: Option<String>,
-    pipeline_id: Option<Uuid>,
-    trace_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    correlation_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    outcome_category: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    abort_reason: Option<String>,
-    stages: Option<serde_json::Value>,
-}
-
-/// Batch payload for platform API
-#[derive(Debug, Serialize)]
-struct PlatformEventBatch {
-    events: Vec<PlatformEvent>,
-}
-
-const CONTEXT_PIPELINE_ID_KEY: &str = "__xybrid_pipeline_id";
-const CONTEXT_TRACE_ID_KEY: &str = "__xybrid_trace_id";
-
-/// HTTP telemetry exporter that sends events to the Xybrid Platform
-///
-/// # Resilience Features
-///
-/// - **Circuit breaker**: Opens after 3 consecutive failures, stays open for 30s
-/// - **Automatic retry**: Up to 3 attempts with exponential backoff
-/// - **Failed event queue**: Stores up to 1000 failed events for later retry
-pub struct HttpTelemetryExporter {
-    config: TelemetryConfig,
-    device_profile: Option<DeviceProfile>,
-    buffer: Arc<Mutex<Vec<TelemetryEvent>>>,
-    running: Arc<AtomicBool>,
-    /// Current pipeline context for enriching events
-    pipeline_id: Arc<RwLock<Option<Uuid>>>,
-    trace_id: Arc<RwLock<Option<Uuid>>>,
-    /// HTTP agent with timeouts configured
-    agent: ureq::Agent,
-    /// Circuit breaker for the telemetry endpoint
-    circuit: Arc<CircuitBreaker>,
-    /// Retry policy for batch submissions
-    retry_policy: RetryPolicy,
-    /// Queue for failed events that will be retried
-    failed_queue: Arc<Mutex<VecDeque<PlatformEvent>>>,
-    /// Counter for dropped events (when queue is full)
-    dropped_count: Arc<AtomicU32>,
-    /// Monotonic count of events ever moved into `buffer` (via the channel
-    /// handoff or a direct `push`). Never decremented on drain/flush, so the
-    /// `ExecutionStarted` fast path can wait for *its* event's handoff by
-    /// observing this counter grow past a pre-publish baseline rather than
-    /// trusting a non-empty buffer (which a stale event would already satisfy).
-    ingested: Arc<AtomicU64>,
-}
-
-impl HttpTelemetryExporter {
-    /// Create a new HTTP exporter with the given configuration.
-    pub fn new(mut config: TelemetryConfig) -> Self {
-        let device_profile = resolve_device_profile(&config);
-        // Privacy opt-out contract: when the caller disabled hardware
-        // auto-detection and did not explicitly supply an identifier via
-        // `with_device(...)`, suppress the `device_id` that
-        // `TelemetryConfig::default()` auto-wired from `Device::current()`.
-        // Explicit non-hardware context (labels, attributes, hostname capture)
-        // no longer re-enables the default identifier — the caller must opt
-        // back in via `with_device(...)`. `platform` is kept because it's an
-        // OS family string, not PII.
-        if !config.auto_hardware_detection && !config.device_id_explicit {
-            config.device_id = None;
-        }
-
-        // Create HTTP agent with timeouts
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_millis(CONNECT_TIMEOUT_MS))
-            .timeout(Duration::from_millis(REQUEST_TIMEOUT_MS))
-            .build();
-
-        // Circuit breaker: open after 3 failures, stay open for 30s
-        let circuit = Arc::new(CircuitBreaker::new(CircuitConfig::default()));
-
-        // Retry policy with configurable max attempts
-        let retry_policy = RetryPolicy {
-            max_attempts: config.max_retries,
-            initial_delay_ms: 500,
-            max_delay_ms: 5000,
-            jitter_factor: 0.3,
-        };
-
-        Self {
-            config,
-            device_profile,
-            buffer: Arc::new(Mutex::new(Vec::new())),
-            running: Arc::new(AtomicBool::new(false)),
-            pipeline_id: Arc::new(RwLock::new(None)),
-            trace_id: Arc::new(RwLock::new(None)),
-            agent,
-            circuit,
-            retry_policy,
-            failed_queue: Arc::new(Mutex::new(VecDeque::new())),
-            dropped_count: Arc::new(AtomicU32::new(0)),
-            ingested: Arc::new(AtomicU64::new(0)),
-        }
-    }
-
-    /// Monotonic count of events that have entered the batch buffer.
-    ///
-    /// Used by the `ExecutionStarted` fast path to detect that a
-    /// just-published event has completed the async channel→buffer handoff
-    /// before triggering the eager flush.
-    pub fn ingested_count(&self) -> u64 {
-        self.ingested.load(Ordering::Acquire)
-    }
-
-    /// Create from environment variables
-    ///
-    /// Reads:
-    /// - `XYBRID_API_KEY` - Required API key
-    /// - `XYBRID_INGEST_URL` - Ingest endpoint (default: https://ingest.xybrid.dev)
-    /// - `XYBRID_PLATFORM_URL` - Legacy fallback (deprecated)
-    pub fn from_env() -> Option<Self> {
-        let api_key = std::env::var("XYBRID_API_KEY").ok()?;
-        // Try new env var first, then legacy, then default
-        let endpoint = std::env::var("XYBRID_INGEST_URL")
-            .or_else(|_| std::env::var("XYBRID_PLATFORM_URL"))
-            .unwrap_or_else(|_| DEFAULT_INGEST_URL.to_string());
-
-        let config = TelemetryConfig::new(endpoint, api_key);
-        Some(Self::new(config))
-    }
-
-    /// Set the current pipeline context for event enrichment
-    pub fn set_pipeline_context(&self, pipeline_id: Option<Uuid>, trace_id: Option<Uuid>) {
-        if let Ok(mut pid) = self.pipeline_id.write() {
-            *pid = pipeline_id;
-        }
-        if let Ok(mut tid) = self.trace_id.write() {
-            *tid = trace_id;
-        }
-    }
-
-    /// Check if the circuit breaker is open (blocking requests).
-    pub fn is_circuit_open(&self) -> bool {
-        self.circuit.is_open()
-    }
-
-    /// Reset the circuit breaker to closed state.
-    pub fn reset_circuit(&self) {
-        self.circuit.reset();
-    }
-
-    /// Get the number of events waiting in the failed queue.
-    pub fn failed_queue_size(&self) -> usize {
-        self.failed_queue.lock().map(|q| q.len()).unwrap_or(0)
-    }
-
-    /// Get the number of events that were dropped due to queue overflow.
-    pub fn dropped_count(&self) -> u32 {
-        self.dropped_count.load(Ordering::Relaxed)
-    }
-
-    /// Start the background flush thread
-    pub fn start(&self) {
-        if self.running.swap(true, Ordering::SeqCst) {
-            return; // Already running
-        }
-
-        let buffer = Arc::clone(&self.buffer);
-        let running = Arc::clone(&self.running);
-        let config = self.config.clone();
-        let device_profile = self.device_profile.clone();
-        let flush_interval = Duration::from_secs(config.flush_interval_secs);
-        let pipeline_id = Arc::clone(&self.pipeline_id);
-        let trace_id = Arc::clone(&self.trace_id);
-        let agent = self.agent.clone();
-        let circuit = Arc::clone(&self.circuit);
-        let retry_policy = self.retry_policy.clone();
-        let failed_queue = Arc::clone(&self.failed_queue);
-        let dropped_count = Arc::clone(&self.dropped_count);
-
-        thread::spawn(move || {
-            while running.load(Ordering::SeqCst) {
-                thread::sleep(flush_interval);
-
-                // First, try to send any failed events from the queue
-                if config.enable_retry_queue {
-                    retry_failed_events(&failed_queue, &config, &agent, &circuit, &retry_policy);
-                }
-
-                // Then flush the current buffer
-                flush_buffer_with_retry(
-                    &buffer,
-                    &config,
-                    device_profile.as_ref(),
-                    &pipeline_id,
-                    &trace_id,
-                    &agent,
-                    &circuit,
-                    &retry_policy,
-                    &failed_queue,
-                    &dropped_count,
-                );
-            }
-        });
-    }
-
-    /// Stop the background flush thread
-    pub fn stop(&self) {
-        self.running.store(false, Ordering::SeqCst);
-        // Final flush with retry
-        flush_buffer_with_retry(
-            &self.buffer,
-            &self.config,
-            self.device_profile.as_ref(),
-            &self.pipeline_id,
-            &self.trace_id,
-            &self.agent,
-            &self.circuit,
-            &self.retry_policy,
-            &self.failed_queue,
-            &self.dropped_count,
-        );
-    }
-
-    /// Add an event to the buffer
-    pub fn push(&self, event: TelemetryEvent) {
-        // Telemetry is a background concern that must degrade, not crash the
-        // inference path: recover from a poisoned buffer/queue lock instead of
-        // panicking (matches `register_telemetry_sender`'s graceful handling).
-        let mut buffer = self.buffer.lock().unwrap_or_else(|p| p.into_inner());
-        buffer.push(event);
-        self.ingested.fetch_add(1, Ordering::Release);
-
-        // Flush if buffer is full
-        if buffer.len() >= self.config.batch_size {
-            let events: Vec<TelemetryEvent> = buffer.drain(..).collect();
-            drop(buffer); // Release lock before HTTP call
-            send_batch_with_retry(
-                &events,
-                &self.config,
-                self.device_profile.as_ref(),
-                &self.pipeline_id,
-                &self.trace_id,
-                &self.agent,
-                &self.circuit,
-                &self.retry_policy,
-                &self.failed_queue,
-                &self.dropped_count,
-            );
-        }
-    }
-
-    /// Force flush all buffered events
-    pub fn flush(&self) {
-        flush_buffer_with_retry(
-            &self.buffer,
-            &self.config,
-            self.device_profile.as_ref(),
-            &self.pipeline_id,
-            &self.trace_id,
-            &self.agent,
-            &self.circuit,
-            &self.retry_policy,
-            &self.failed_queue,
-            &self.dropped_count,
-        );
-    }
-
-    /// Best-effort synchronous flush bounded by `timeout`.
-    ///
-    /// Designed for shutdown / panic / signal-handler paths where the
-    /// normal retry+backoff loop in [`flush`] would block too long. Drains
-    /// the buffer once, builds a single batch, and sends it with HTTP
-    /// timeouts capped at `timeout`. No retries, no circuit-breaker block,
-    /// no failed-queue requeue — if the call fails the events are dropped.
-    ///
-    /// Safe to call from a panic hook: holds the buffer mutex only long
-    /// enough to drain it, uses a dedicated short-timeout agent so we don't
-    /// stall the unwinding thread, and never re-enters
-    /// `publish_telemetry_event` (which would risk recursive panics).
-    pub fn flush_blocking(&self, timeout: Duration) {
-        if self.config.endpoint.is_empty() || self.config.api_key.is_empty() {
-            return;
-        }
-
-        // Drain the buffer under a short lock. Recover from poison so a
-        // panic in another component doesn't permanently block shutdown
-        // telemetry.
-        let events: Vec<TelemetryEvent> = match self.buffer.lock() {
-            Ok(mut buf) => buf.drain(..).collect(),
-            Err(poisoned) => poisoned.into_inner().drain(..).collect(),
-        };
-
-        if events.is_empty() {
-            return;
-        }
-
-        let pid = self.pipeline_id.read().ok().and_then(|g| *g);
-        let tid = self.trace_id.read().ok().and_then(|g| *g);
-
-        let platform_events: Vec<PlatformEvent> = events
-            .iter()
-            .map(|e| {
-                convert_to_platform_event(e, &self.config, self.device_profile.as_ref(), pid, tid)
-            })
-            .collect();
-
-        let batch = PlatformEventBatch {
-            events: platform_events,
-        };
-
-        let url = format!(
-            "{}/v1/events/batch",
-            self.config.endpoint.trim_end_matches('/')
-        );
-
-        // Dedicated agent with the caller's timeout so we never wait
-        // longer than the deadline. The default exporter agent has a
-        // 10-second request timeout that would defeat the purpose here.
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(timeout)
-            .timeout(timeout)
-            .build();
-
-        let _ = agent
-            .post(&url)
-            .set("Authorization", &format!("Bearer {}", self.config.api_key))
-            .set("Content-Type", "application/json")
-            .send_json(&batch);
-    }
-
-    /// Create a telemetry sender that feeds into this exporter
-    pub fn create_sender(&self) -> TelemetrySender {
-        let (tx, rx) = mpsc::channel::<TelemetryEvent>();
-        let buffer = Arc::clone(&self.buffer);
-        let batch_size = self.config.batch_size;
-        let config = self.config.clone();
-        let device_profile = self.device_profile.clone();
-        let pipeline_id = Arc::clone(&self.pipeline_id);
-        let trace_id = Arc::clone(&self.trace_id);
-        let agent = self.agent.clone();
-        let circuit = Arc::clone(&self.circuit);
-        let retry_policy = self.retry_policy.clone();
-        let failed_queue = Arc::clone(&self.failed_queue);
-        let dropped_count = Arc::clone(&self.dropped_count);
-        let ingested = Arc::clone(&self.ingested);
-
-        thread::spawn(move || {
-            for event in rx {
-                let mut buf = buffer.lock().unwrap_or_else(|p| p.into_inner());
-                buf.push(event);
-                ingested.fetch_add(1, Ordering::Release);
-
-                if buf.len() >= batch_size {
-                    let events: Vec<TelemetryEvent> = buf.drain(..).collect();
-                    drop(buf);
-                    send_batch_with_retry(
-                        &events,
-                        &config,
-                        device_profile.as_ref(),
-                        &pipeline_id,
-                        &trace_id,
-                        &agent,
-                        &circuit,
-                        &retry_policy,
-                        &failed_queue,
-                        &dropped_count,
-                    );
-                }
-            }
-        });
-
-        tx
-    }
-}
-
-impl Drop for HttpTelemetryExporter {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-
-/// Flush all buffered events to the platform with retry logic.
-fn flush_buffer_with_retry(
-    buffer: &Arc<Mutex<Vec<TelemetryEvent>>>,
-    config: &TelemetryConfig,
-    device_profile: Option<&DeviceProfile>,
-    pipeline_id: &Arc<RwLock<Option<Uuid>>>,
-    trace_id: &Arc<RwLock<Option<Uuid>>>,
-    agent: &ureq::Agent,
-    circuit: &Arc<CircuitBreaker>,
-    retry_policy: &RetryPolicy,
-    failed_queue: &Arc<Mutex<VecDeque<PlatformEvent>>>,
-    dropped_count: &Arc<AtomicU32>,
-) {
-    let events: Vec<TelemetryEvent> = {
-        let mut buf = buffer.lock().unwrap_or_else(|p| p.into_inner());
-        buf.drain(..).collect()
-    };
-
-    if !events.is_empty() {
-        send_batch_with_retry(
-            &events,
-            config,
-            device_profile,
-            pipeline_id,
-            trace_id,
-            agent,
-            circuit,
-            retry_policy,
-            failed_queue,
-            dropped_count,
-        );
-    }
-}
-
-/// Send a batch of events to the platform API with retry and circuit breaker.
-fn send_batch_with_retry(
-    events: &[TelemetryEvent],
-    config: &TelemetryConfig,
-    device_profile: Option<&DeviceProfile>,
-    pipeline_id: &Arc<RwLock<Option<Uuid>>>,
-    trace_id: &Arc<RwLock<Option<Uuid>>>,
-    agent: &ureq::Agent,
-    circuit: &Arc<CircuitBreaker>,
-    retry_policy: &RetryPolicy,
-    failed_queue: &Arc<Mutex<VecDeque<PlatformEvent>>>,
-    dropped_count: &Arc<AtomicU32>,
-) {
-    if events.is_empty() || config.endpoint.is_empty() || config.api_key.is_empty() {
-        return;
-    }
-
-    // Check circuit breaker
-    if !circuit.can_execute() {
-        // Circuit is open, queue events for later
-        if config.enable_retry_queue {
-            let pid = pipeline_id.read().ok().and_then(|g| *g);
-            let tid = trace_id.read().ok().and_then(|g| *g);
-            let platform_events: Vec<PlatformEvent> = events
-                .iter()
-                .map(|e| convert_to_platform_event(e, config, device_profile, pid, tid))
-                .collect();
-            queue_failed_events(platform_events, failed_queue, dropped_count);
-        }
-        return;
-    }
-
-    let pid = pipeline_id.read().ok().and_then(|g| *g);
-    let tid = trace_id.read().ok().and_then(|g| *g);
-
-    let platform_events: Vec<PlatformEvent> = events
-        .iter()
-        .map(|e| convert_to_platform_event(e, config, device_profile, pid, tid))
-        .collect();
-
-    // Try to send with retry
-    let result = send_batch_inner(&platform_events, config, agent, circuit, retry_policy);
-
-    if let Err(failed_events) = result {
-        // Queue failed events for later retry
-        if config.enable_retry_queue {
-            queue_failed_events(failed_events, failed_queue, dropped_count);
-        }
-    }
-}
-
-/// Inner send function that returns the events on failure for queueing.
-fn send_batch_inner(
-    events: &[PlatformEvent],
-    config: &TelemetryConfig,
-    agent: &ureq::Agent,
-    circuit: &Arc<CircuitBreaker>,
-    retry_policy: &RetryPolicy,
-) -> Result<(), Vec<PlatformEvent>> {
-    let batch = PlatformEventBatch {
-        events: events.to_vec(),
-    };
-
-    let url = format!("{}/v1/events/batch", config.endpoint.trim_end_matches('/'));
-
-    for attempt in 0..retry_policy.max_attempts {
-        // Calculate delay for this attempt
-        let delay = retry_policy.delay_for_attempt(attempt);
-        if !delay.is_zero() {
-            std::thread::sleep(delay);
-        }
-
-        // Check circuit breaker again
-        if !circuit.can_execute() {
-            return Err(events.to_vec());
-        }
-
-        // Send HTTP request
-        let result = agent
-            .post(&url)
-            .set("Authorization", &format!("Bearer {}", config.api_key))
-            .set("Content-Type", "application/json")
-            .send_json(&batch);
-
-        match result {
-            Ok(response) => {
-                let status = response.status();
-                if status == 200 || status == 201 {
-                    circuit.record_success();
-                    return Ok(());
-                } else if is_retryable_status(status) {
-                    circuit.record_failure();
-                    // Continue to retry
-                } else {
-                    // Non-retryable error (4xx client errors)
-                    circuit.record_success(); // Don't trip circuit for client errors
-                    log::warn!(
-                        target: "xybrid_telemetry",
-                        "Platform returned status {}",
-                        status
-                    );
-                    return Ok(()); // Don't retry or queue client errors
-                }
-            }
-            Err(ureq::Error::Status(status, _)) => {
-                if status == 429 {
-                    circuit.record_rate_limited();
-                } else if is_retryable_status(status) {
-                    circuit.record_failure();
-                } else {
-                    // Non-retryable status
-                    circuit.record_success();
-                    log::warn!(
-                        target: "xybrid_telemetry",
-                        "Platform returned status {}",
-                        status
-                    );
-                    return Ok(());
-                }
-            }
-            Err(ureq::Error::Transport(transport)) => {
-                circuit.record_failure();
-                // Surface the transport-level cause (DNS, TLS handshake,
-                // connect timeout, ...) — previously discarded, which made
-                // send failures invisible on devices with no other signal.
-                log::warn!(
-                    target: "xybrid_telemetry",
-                    "Transport error sending telemetry batch (attempt {}/{}): {}",
-                    attempt + 1,
-                    retry_policy.max_attempts,
-                    transport
-                );
-                // Continue to retry
-            }
-        }
-    }
-
-    // All retries exhausted
-    Err(events.to_vec())
-}
-
-/// Check if an HTTP status code is retryable.
-fn is_retryable_status(status: u16) -> bool {
-    matches!(status, 429 | 502 | 503 | 504)
-}
-
-/// Queue failed events for later retry.
-fn queue_failed_events(
-    events: Vec<PlatformEvent>,
-    failed_queue: &Arc<Mutex<VecDeque<PlatformEvent>>>,
-    dropped_count: &Arc<AtomicU32>,
-) {
-    let mut queue = failed_queue.lock().unwrap_or_else(|p| p.into_inner());
-
-    for event in events {
-        if queue.len() >= MAX_FAILED_QUEUE_SIZE {
-            // Queue is full, drop oldest event
-            queue.pop_front();
-            dropped_count.fetch_add(1, Ordering::Relaxed);
-        }
-        queue.push_back(event);
-    }
-}
-
-/// Retry sending failed events from the queue.
-fn retry_failed_events(
-    failed_queue: &Arc<Mutex<VecDeque<PlatformEvent>>>,
-    config: &TelemetryConfig,
-    agent: &ureq::Agent,
-    circuit: &Arc<CircuitBreaker>,
-    retry_policy: &RetryPolicy,
-) {
-    // Don't retry if circuit is open
-    if !circuit.can_execute() {
-        return;
-    }
-
-    // Take a batch of events from the queue
-    let events: Vec<PlatformEvent> = {
-        let mut queue = failed_queue.lock().unwrap_or_else(|p| p.into_inner());
-        let batch_size = config.batch_size.min(queue.len());
-        queue.drain(..batch_size).collect()
-    };
-
-    if events.is_empty() {
-        return;
-    }
-
-    // Try to send the batch
-    if let Err(failed_events) = send_batch_inner(&events, config, agent, circuit, retry_policy) {
-        // Put them back at the front of the queue
-        let mut queue = failed_queue.lock().unwrap_or_else(|p| p.into_inner());
-        for event in failed_events.into_iter().rev() {
-            queue.push_front(event);
-        }
-    }
-}
-
-/// Convert SDK TelemetryEvent to Platform format
-fn convert_to_platform_event(
-    event: &TelemetryEvent,
-    config: &TelemetryConfig,
-    device_profile: Option<&DeviceProfile>,
-    pipeline_id: Option<Uuid>,
-    trace_id: Option<Uuid>,
-) -> PlatformEvent {
-    // Build payload from event fields
-    let mut payload = serde_json::json!({});
-    let mut event_pipeline_id = pipeline_id;
-    let mut event_trace_id = trace_id;
-    let mut correlation_id = None;
-    let mut outcome_category = None;
-    let mut abort_reason = None;
-
-    if let Some(stage) = &event.stage_name {
-        payload["stage_name"] = serde_json::json!(stage);
-    }
-    if let Some(target) = &event.target {
-        payload["target"] = serde_json::json!(target);
-    }
-    if let Some(latency) = event.latency_ms {
-        payload["latency_ms"] = serde_json::json!(latency);
-    }
-    if let Some(error) = &event.error {
-        payload["error"] = serde_json::json!(error);
-        payload["status"] = serde_json::json!("error");
-    } else {
-        payload["status"] = serde_json::json!("success");
-    }
-    if let Some(data) = &event.data {
-        // Try to parse as JSON, otherwise store as string
-        if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(data) {
-            if let Some(obj) = parsed.as_object_mut() {
-                if let Some(v) = obj.remove(CONTEXT_PIPELINE_ID_KEY) {
-                    event_pipeline_id = v.as_str().and_then(|s| Uuid::parse_str(s).ok());
-                }
-                if let Some(v) = obj.remove(CONTEXT_TRACE_ID_KEY) {
-                    event_trace_id = v.as_str().and_then(|s| Uuid::parse_str(s).ok());
-                }
-            }
-            // Hoist select top-level fields from `data` into `payload` so
-            // downstream analytics (the platform's /traces list reads
-            // these at the top level of the JSONB payload) can find them
-            // without diving into the nested `data` object. Spans further
-            // down already populate `tokens_in` / `tokens_out` for
-            // local-inference events; this covers the non-span path where
-            // a caller publishes usage info manually — e.g. a direct
-            // cloud-provider response whose `usage` block wouldn't
-            // otherwise reach the dashboard's cost column.
-            for key in [
-                "tokens_in",
-                "tokens_out",
-                "model_id",
-                // Cache-tier tokens for providers that report them.
-                // Canonical names (Anthropic-flavored) so the list page
-                // and detail-page receipt work uniformly across
-                // DeepSeek / Anthropic / OpenAI / Gemini.
-                "cache_read_input_tokens",
-                "cache_creation_input_tokens",
-                // Per-inference resource summary. Nested JSON stays under
-                // `data.resource_summary`; hoisting the object to the payload
-                // top level lets the analytics backend column-extract via
-                // flat JSON-path selectors without teaching each consumer
-                // the nested shape.
-                "resource_summary",
-                "correlation_id",
-                "outcome_category",
-                "abort_reason",
-                // VLM-specific executor timing: image decode / resize /
-                // normalize before local vision-language inference.
-                "image_preprocess_ms",
-                // Per-routing-decision reliability hint (object with
-                // `recent_abort_rate` + `sample_size`). Lives in the SDK
-                // hoist list so the analytics backend can extract it via
-                // `json:$.local_reliability_hint.*` without descending
-                // into the nested data object.
-                "local_reliability_hint",
-                // Streaming flag — `XybridModel::run_streaming` and the
-                // streaming-fast-path `ModelComplete` (Pipeline) both
-                // stamp `data.streaming = true`. Hoisting to the top
-                // level lets the Tinybird datasource pick it up as a
-                // typed column for a `streaming` badge / filter on the
-                // Traces dashboard, distinguishing chat-flow / REPL
-                // turns from batch-style inferences at a glance.
-                "streaming",
-                // Live-capture session tag — the options-aware streaming
-                // path stamps `data.live_mode = true` +
-                // `data.frame_session_id = <uuid>` when a run is tagged via
-                // `RunOptions::with_frame_session`. Hoisting them to the
-                // payload top level lets the Traces dashboard column-extract
-                // a `live_mode` badge and group rows by session. Non-live
-                // events never carry these keys, so the hoist is a no-op for
-                // them (byte-identical to the pre-live-mode payload).
-                "live_mode",
-                "frame_session_id",
-                // Choice-scorer decisions: `XybridModel::run` stamps
-                // `data.task = "decision"`, `data.backend` and
-                // `data.choice_count` (how many candidates were scored, never
-                // their ids, texts or scores) on its `ModelComplete`, so a
-                // decision is attributed even without a span tree. No other
-                // event puts these keys in `data`, so the hoist is a no-op
-                // for them.
-                "task",
-                "backend",
-                "choice_count",
-            ]
-            .iter()
-            {
-                if payload.get(*key).is_none() {
-                    if let Some(v) = parsed.get(*key) {
-                        payload[*key] = v.clone();
-                    }
-                }
-            }
-            correlation_id = parsed
-                .get("correlation_id")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            outcome_category = parsed.get("outcome_category").cloned();
-            abort_reason = parsed
-                .get("abort_reason")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            payload["data"] = parsed;
-        } else {
-            payload["data"] = serde_json::json!(data);
-        }
-    }
-
-    // Convert timestamp
-    let timestamp = chrono::DateTime::from_timestamp_millis(event.timestamp_ms as i64)
-        .map(|dt| dt.to_rfc3339());
-
-    // Capture spans for PipelineComplete and ModelComplete events.
-    //
-    // Two source paths, in priority order:
-    //
-    //   1. **Embedded spans in `event.data["spans"]`** — used when the
-    //      caller pre-captured the span tree synchronously before
-    //      publishing. This sidesteps a race in the default (global
-    //      collector) path: `convert_to_platform_event` runs on the
-    //      exporter's background thread, but the global tracing
-    //      collector is mutated live by whatever the caller's next
-    //      unit of work is opening. For bursty emitters (e.g. chunked
-    //      document summarization firing many ModelComplete events
-    //      back-to-back), this produced empty/misattributed stages.
-    //      Callers that need deterministic per-event capture write
-    //      `get_stages_json()["spans"]` into `event.data["spans"]`
-    //      and reset tracing themselves before publishing.
-    //
-    //   2. **Global `TemplateExecutor`-populated collector** — the
-    //      historical path, preserved for in-process local inference
-    //      where only one model call is active at a time and the race
-    //      doesn't manifest.
-    // Span-bearing event types: completion-family events publish a final
-    // ModelComplete/PipelineComplete that drains the collector, AND the
-    // cloud-fallback flow publishes LocalAborted/CloudRetry as terminal
-    // markers for each leg without ever firing a *Complete, AND
-    // ModelWarmup is its own completion category (XybridModel::warmup
-    // opens executor spans then publishes a single ModelWarmup —
-    // distinct from ModelComplete so the dashboard can filter warmups
-    // out of cost-attribution rollups). All four kinds need their
-    // flamegraph attached at the wire layer or the dashboard sees an
-    // empty trace detail. This list MUST match `snapshot_spans_into_event`
-    // above; otherwise the SDK attaches spans to event.data["spans"]
-    // but `convert_to_platform_event` strips them again before the wire.
-    let stages = if matches!(
-        event.event_type.as_str(),
-        "PipelineComplete" | "ModelComplete" | "ModelWarmup" | "LocalAborted" | "CloudRetry"
-    ) && core_tracing::is_tracing_enabled()
-    {
-        let embedded_spans: Option<serde_json::Value> = payload
-            .get("data")
-            .and_then(|d| d.get("spans"))
-            .filter(|v| !v.is_null())
-            .cloned();
-
-        let spans = if let Some(inner) = embedded_spans {
-            // Do NOT reset the global collector here. The caller already
-            // did its own synchronous capture+reset on the publishing
-            // thread (see `publish_telemetry_event::snapshot_spans_into_event`
-            // and Mirage's `summarize.rs::synthesize_chunk_cloud`). Any
-            // state currently in the collector at this moment belongs to
-            // OTHER in-flight work on other threads — resetting it here
-            // would steal their open spans and drop them on the floor,
-            // producing empty flamegraphs for those subsequent events.
-            // That's the race the earlier reset caused: a classifier's
-            // async-processed embedded-spans event clobbered a concurrent
-            // cloud synthesize's still-open span stack.
-            serde_json::json!({ "spans": inner })
-        } else {
-            let s = core_tracing::get_stages_json();
-            core_tracing::reset_tracing();
-            s
-        };
-
-        // Hoist LLM token counts from the span metadata into the outer
-        // payload so analytics backends that read `tokens_in` /
-        // `tokens_out` at the top of the event see them without having
-        // to descend into the span tree. No-op when no `llm_inference*`
-        // span is present.
-        if let Some((tokens_in, tokens_out)) = extract_llm_token_counts(&spans) {
-            if let Some(n) = tokens_in {
-                if payload.get("tokens_in").is_none() {
-                    payload["tokens_in"] = serde_json::json!(n);
-                }
-            }
-            if let Some(n) = tokens_out {
-                if payload.get("tokens_out").is_none() {
-                    payload["tokens_out"] = serde_json::json!(n);
-                }
-            }
-        }
-        // Hoist cost-accounting string attrs onto the payload top level
-        // for the billing column.
-        //
-        // `backend` may live on any span — LLM events set it on the
-        // inner `llm_inference` span (via `LlmStrategy` / cloud adapter),
-        // non-LLM events (ASR/TTS) set it on the outer `execute:<model>`
-        // span via `backend_label_from_template`. Read from any span so
-        // both surfaces produce the same wire shape.
-        //
-        // `provider` is cloud-LLM-only and must stay gated to LLM spans:
-        // a non-LLM span carrying a stray `provider` key would emit a
-        // phantom value on an ASR/TTS payload.
-        if payload.get("backend").is_none() {
-            if let Some(v) = extract_string_attr_from_any_span(&spans, "backend") {
-                payload["backend"] = serde_json::json!(v);
-            }
-        }
-        if payload.get("provider").is_none() {
-            if let Some(v) = extract_llm_inference_string_attr(&spans, "provider") {
-                payload["provider"] = serde_json::json!(v);
-            }
-        }
-        // Semantic task label (chat / vlm / asr / tts / embedding / …)
-        // sourced from `model_metadata.json`. Lives on the outer
-        // `execute:<model>` span so it's always reachable via the
-        // any-span hoist regardless of modality. Promotes the field
-        // to the wire payload so the console can filter without
-        // joining model_id against the registry at render time.
-        if payload.get("task").is_none() {
-            if let Some(v) = extract_string_attr_from_any_span(&spans, "task") {
-                payload["task"] = serde_json::json!(v);
-            }
-        }
-        // Quantization label (q4_0 / q4_k_m / fp16 / …) sourced from
-        // `model_metadata.json` first, GGUF filename second. Two runs
-        // of "the same model" at different quantizations are now
-        // distinguishable in the analytics rollup. Open string —
-        // values outside the documented set still flow through.
-        if payload.get("quantization").is_none() {
-            if let Some(v) = extract_string_attr_from_any_span(&spans, "quantization") {
-                payload["quantization"] = serde_json::json!(v);
-            }
-        }
-        // Resolved execution provider — which on-device engine path
-        // actually ran (coreml / cpu / metal / cuda / mlx-metal / …).
-        // ORT path: harvested from per-session profiling JSON after the
-        // first inference (bypasses the API gap where ORT exposes no
-        // session-level resolved-EP getter). LLM path: build-flag-derived
-        // label keyed on the backend name. Cloud paths omit — `provider`
-        // already carries the attribution. Lives on whichever inner span
-        // emitted it, hoisted via the any-span lookup so all modalities
-        // produce the same wire shape.
-        if payload.get("execution_provider").is_none() {
-            if let Some(v) = extract_string_attr_from_any_span(&spans, "execution_provider") {
-                payload["execution_provider"] = serde_json::json!(v);
-            }
-        }
-        // Local KV cache hits (llama.cpp's multi-turn prefix reuse). The
-        // backend only emits this metadata key when the most recent call
-        // actually reused a prefix (n > 0), so a present value here is
-        // always meaningful — no need to filter out zeros at the SDK
-        // layer. Mirror of cloud's `cache_read_input_tokens` so the
-        // analytics column can stack local + cloud cache hits.
-        if payload.get("prompt_cached_tokens").is_none() {
-            if let Some(n) = extract_llm_prompt_cached_tokens(&spans) {
-                payload["prompt_cached_tokens"] = serde_json::json!(n);
-            }
-        }
-        if payload.get("image_preprocess_ms").is_none() {
-            if let Some(n) = extract_u64_attr_from_any_span(&spans, "image_preprocess_ms") {
-                payload["image_preprocess_ms"] = serde_json::json!(n);
-            }
-        }
-        Some(spans)
-    } else {
-        None
-    };
-
-    PlatformEvent {
-        session_id: config.session_id,
-        event_type: event.event_type.clone(),
-        payload,
-        sdk_version: crate::SDK_VERSION.to_string(),
-        binding: crate::get_binding().to_string(),
-        device_id: config.device_id.clone(),
-        device_label: config.device_label.clone(),
-        platform: config.platform.clone(),
-        app_version: config.app_version.clone(),
-        device: device_profile.cloned(),
-        timestamp,
-        pipeline_id: event_pipeline_id,
-        trace_id: event_trace_id,
-        correlation_id,
-        outcome_category,
-        abort_reason,
-        stages,
-    }
-}
-
-/// Resolve the effective device profile for a config: auto-detect (if on),
-/// then apply the per-field patch, then apply the full override. Hostname is
-/// only filled when `config.capture_hostname` is true.
-fn resolve_device_profile(config: &TelemetryConfig) -> Option<DeviceProfile> {
-    let mut profile = if config.auto_hardware_detection {
-        DeviceProfile::detect()
-    } else {
-        DeviceProfile::default()
-    };
-    profile = profile.merged_with(config.device_profile_patch.clone());
-    if let Some(override_) = config.device_profile_override.clone() {
-        profile = profile.merged_with(override_);
-    }
-    if config.capture_hostname && profile.hostname.is_none() {
-        profile.hostname = detect_hostname();
-    }
-    if profile.is_empty() {
-        None
-    } else {
-        Some(profile)
-    }
-}
-
-fn detect_hostname() -> Option<String> {
-    std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-        .ok()
-        .map(|hostname| hostname.trim().to_string())
-        .filter(|hostname| !hostname.is_empty())
-}
-
-/// Walk a `stages` JSON (shape: `{"spans":[{"name","metadata":{...}}]}`) and
-/// return `(tokens_in, tokens_out)` read from the first span that either
-/// carries LLM-style metadata (`ttft_ms`, `tokens_generated`, `tokens_out`,
-/// `completion_tokens`) or is named with a known LLM prefix
-/// (`llm_inference*` or `inference:*`).
-///
-/// Looks at both canonical keys (`tokens_in` / `tokens_out`) and OpenAI-ish
-/// keys (`prompt_tokens` / `completion_tokens` + `tokens_generated`) so the
-/// hoist works regardless of which LLM adapter emitted the span or how the
-/// enclosing orchestrator named it.
-fn extract_llm_token_counts(stages: &serde_json::Value) -> Option<(Option<u64>, Option<u64>)> {
-    let spans = stages.get("spans")?.as_array()?;
-    let read = |meta: Option<&serde_json::Value>, keys: &[&str]| -> Option<u64> {
-        for k in keys {
-            let Some(v) = meta.and_then(|m| m.get(*k)) else {
-                continue;
-            };
-            if let Some(n) = v.as_u64() {
-                return Some(n);
-            }
-            if let Some(s) = v.as_str() {
-                if let Ok(n) = s.parse::<u64>() {
-                    return Some(n);
-                }
-            }
-        }
-        None
-    };
-    // Token accounting invariant: the authoritative counts live on the LAST
-    // LLM span in the trace. A streaming run emits a timing-only span first
-    // (ttft_ms, no counts yet) and a final accounting span with the totals;
-    // a retried run emits one span per attempt and we want the final attempt.
-    // Earlier-span values only win as a fallback when no later span carries
-    // the corresponding key at all.
-    let mut saw_llm_span = false;
-    let mut tokens_in: Option<u64> = None;
-    let mut tokens_out: Option<u64> = None;
-    for span in spans {
-        let name = span.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        let meta = span.get("metadata");
-        let is_llm_span = name.starts_with("llm_inference")
-            || name.starts_with("inference:")
-            || meta
-                .map(|m| {
-                    m.get("ttft_ms").is_some()
-                        || m.get("tokens_generated").is_some()
-                        || m.get("tokens_out").is_some()
-                        || m.get("completion_tokens").is_some()
-                })
-                .unwrap_or(false);
-        if !is_llm_span {
-            continue;
-        }
-        saw_llm_span = true;
-        if let Some(v) = read(meta, &["tokens_in", "prompt_tokens"]) {
-            tokens_in = Some(v);
-        }
-        if let Some(v) = read(
-            meta,
-            &["tokens_out", "completion_tokens", "tokens_generated"],
-        ) {
-            tokens_out = Some(v);
-        }
-    }
-    if saw_llm_span {
-        Some((tokens_in, tokens_out))
-    } else {
-        None
-    }
-}
-
-/// Lift the local-LLM `prompt_cached_tokens` value (count of prompt
-/// tokens served from the backend's KV cache on the most recent call)
-/// off the LAST LLM span. The local mirror of cloud's
-/// `cache_read_input_tokens` — emitted only when a backend that tracks
-/// prefix reuse (today: llama.cpp) actually reused tokens, so reading
-/// `Some(n)` from this helper means the value is meaningful and worth
-/// hoisting verbatim. Same last-span-wins / LLM-span detection rule as
-/// [`extract_llm_token_counts`] so retried runs and timing-only spans
-/// don't fight the count-bearing span.
-fn extract_llm_prompt_cached_tokens(stages: &serde_json::Value) -> Option<u64> {
-    let spans = stages.get("spans")?.as_array()?;
-    let mut latest: Option<u64> = None;
-    for span in spans {
-        let name = span.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        let meta = span.get("metadata");
-        let is_llm_span = name.starts_with("llm_inference")
-            || name.starts_with("inference:")
-            || meta
-                .map(|m| {
-                    m.get("ttft_ms").is_some()
-                        || m.get("tokens_generated").is_some()
-                        || m.get("tokens_out").is_some()
-                        || m.get("completion_tokens").is_some()
-                })
-                .unwrap_or(false);
-        if !is_llm_span {
-            continue;
-        }
-        let Some(v) = meta.and_then(|m| m.get("prompt_cached_tokens")) else {
-            continue;
-        };
-        if let Some(n) = v.as_u64() {
-            latest = Some(n);
-        } else if let Some(s) = v.as_str() {
-            if let Ok(n) = s.parse::<u64>() {
-                latest = Some(n);
-            }
-        }
-    }
-    latest
-}
-
-/// Walk a `stages` JSON (same shape as [`extract_llm_token_counts`]) and
-/// return the value of `key` from the LAST LLM-flavoured span that
-/// carries it as a string. Used to lift cost-accounting string attrs
-/// (`backend`, `provider`) onto the wire payload's top level alongside
-/// the token counts.
-///
-/// LLM-span detection is identical to [`extract_llm_token_counts`]
-/// (name prefix `llm_inference*` / `inference:*` or LLM-style metadata
-/// keys) so the two hoists agree on which span is "the" LLM span when
-/// a trace contains other inference spans (e.g. ASR/TTS).
-fn extract_llm_inference_string_attr(stages: &serde_json::Value, key: &str) -> Option<String> {
-    let spans = stages.get("spans")?.as_array()?;
-    let mut found: Option<String> = None;
-    for span in spans {
-        let name = span.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        let meta = span.get("metadata");
-        let is_llm_span = name.starts_with("llm_inference")
-            || name.starts_with("inference:")
-            || meta
-                .map(|m| {
-                    m.get("ttft_ms").is_some()
-                        || m.get("tokens_generated").is_some()
-                        || m.get("tokens_out").is_some()
-                        || m.get("completion_tokens").is_some()
-                })
-                .unwrap_or(false);
-        if !is_llm_span {
-            continue;
-        }
-        if let Some(v) = meta.and_then(|m| m.get(key)).and_then(|v| v.as_str()) {
-            // Same last-span-wins rule as the token-count hoist: a retried
-            // run emits one span per attempt and we want the final value.
-            found = Some(v.to_string());
-        }
-    }
-    found
-}
-
-/// Walk a `stages` JSON and return the value of `key` from the LAST span
-/// (any flavour) that carries it as a string. Used for cost-accounting
-/// scalars that must surface on every inference event regardless of
-/// modality — chiefly `backend`, which is set on the outer
-/// `execute:<model>` span for non-LLM events (ASR/TTS via
-/// `backend_label_from_template`) and on the inner `llm_inference` span
-/// for LLM events.
-///
-/// Intentionally NOT used for `provider`: that field is cloud-LLM-only
-/// and a stray match on a non-LLM span would emit a nonsense provider
-/// value on an ASR/TTS payload. Use [`extract_llm_inference_string_attr`]
-/// for provider.
-fn extract_string_attr_from_any_span(stages: &serde_json::Value, key: &str) -> Option<String> {
-    let spans = stages.get("spans")?.as_array()?;
-    let mut found: Option<String> = None;
-    for span in spans {
-        let meta = span.get("metadata");
-        if let Some(v) = meta.and_then(|m| m.get(key)).and_then(|v| v.as_str()) {
-            // Same last-span-wins rule as the LLM-gated hoist.
-            found = Some(v.to_string());
-        }
-    }
-    found
-}
-
-fn extract_u64_attr_from_any_span(stages: &serde_json::Value, key: &str) -> Option<u64> {
-    let spans = stages.get("spans")?.as_array()?;
-    let mut found: Option<u64> = None;
-    for span in spans {
-        let Some(v) = span.get("metadata").and_then(|meta| meta.get(key)) else {
-            continue;
-        };
-        if let Some(n) = v.as_u64() {
-            found = Some(n);
-        } else if let Some(s) = v.as_str() {
-            if let Ok(n) = s.parse::<u64>() {
-                found = Some(n);
-            }
-        }
-    }
-    found
-}
-
-// ============================================================================
-// Global Platform Exporter
-// ============================================================================
-
-static PLATFORM_EXPORTER: RwLock<Option<HttpTelemetryExporter>> = RwLock::new(None);
-
-/// Initialize the global platform telemetry exporter
-///
-/// This also enables span tracing in xybrid-core for detailed execution profiling.
-/// Spans are automatically captured and included in `PipelineComplete` events.
-///
-/// # Example
-///
-/// ```no_run
-/// use xybrid_sdk::telemetry::{init_platform_telemetry, TelemetryConfig};
-///
-/// let config = TelemetryConfig::new("https://ingest.xybrid.dev", "your-api-key")
-///     .with_device("device-123", "ios")
-///     .with_app_version("1.0.0");
-///
-/// init_platform_telemetry(config);
-/// ```
-pub fn init_platform_telemetry(mut config: TelemetryConfig) {
-    // Enable span tracing in xybrid-core for execution profiling
-    core_tracing::init_tracing(true);
-
-    // Resource-telemetry mode. Env override wins over the config value
-    // so operators can flip `XYBRID_RESOURCE_TELEMETRY=off` during demos
-    // without rebuilding; the env-only init path below uses the same
-    // helper so behavior is identical.
-    config.resource_telemetry = resolve_resource_telemetry_mode(config.resource_telemetry);
-    activate_resource_telemetry(config.resource_telemetry);
-
-    // Register automatic execution listener so TemplateExecutor emits
-    // ExecutionStarted / ExecutionCompleted / ExecutionFailed events
-    register_execution_listener();
-
-    let exporter = HttpTelemetryExporter::new(config);
-    exporter.start();
-
-    // Register as a telemetry sender
-    let sender = exporter.create_sender();
-    register_telemetry_sender(sender);
-
-    if let Ok(mut global) = PLATFORM_EXPORTER.write() {
-        *global = Some(exporter);
-    }
-
-    // Install a panic hook that flushes telemetry before the process
-    // dies. Without this, a panic during inference loses the entire
-    // buffered batch (Started / Failed pair included).
-    install_telemetry_panic_hook();
-}
-
 // -- Process-wide resource-telemetry mode ----------------------------------
 //
-// `XybridModel::run*` / `Pipeline::run*` consult this to decide whether (and
-// how) to instrument a run. Stored independently of `TelemetryConfig` so the
-// SDK doesn't have to carry a config reference into every run path. Writes
-// happen at `init_platform_telemetry`; reads are cheap.
+// SDK operations that select no observability session (or a borrowed
+// observer) sample device resources with this mode; an operation pinned to a
+// configured session uses that session's mode instead. Written by
+// `XybridInit::resource_telemetry` and by installing a default session (its
+// configured mode); reads are cheap.
 static RESOURCE_TELEMETRY_MODE: RwLock<ResourceTelemetryMode> =
     RwLock::new(ResourceTelemetryMode::Off);
 
-fn set_resource_telemetry_mode(mode: ResourceTelemetryMode) {
+pub(crate) fn set_resource_telemetry_mode(mode: ResourceTelemetryMode) {
     if let Ok(mut guard) = RESOURCE_TELEMETRY_MODE.write() {
         *guard = mode;
     }
@@ -1586,8 +101,7 @@ fn set_resource_telemetry_mode(mode: ResourceTelemetryMode) {
 /// Apply the `XYBRID_RESOURCE_TELEMETRY` env override on top of a configured
 /// mode. The env var wins unconditionally when set (and parses to a known
 /// variant) so operators can disable resource telemetry at runtime without a
-/// rebuild. Both `init_platform_telemetry` and `init_platform_telemetry_from_env`
-/// funnel through here so the two init paths can't drift.
+/// rebuild.
 fn resolve_resource_telemetry_mode(configured: ResourceTelemetryMode) -> ResourceTelemetryMode {
     match resource_mode_from_env() {
         Some(env_mode) => env_mode,
@@ -1595,19 +109,29 @@ fn resolve_resource_telemetry_mode(configured: ResourceTelemetryMode) -> Resourc
     }
 }
 
-/// Pre-warm the global `ResourceMonitor` + publish the active mode to the
-/// process-wide state read by `begin_resource_run`. `Off` still stores the
-/// mode so a later rehydration can read a consistent value; the monitor
-/// just sits idle until something flips it on.
-fn activate_resource_telemetry(mode: ResourceTelemetryMode) {
+/// Resolve a configured mode against the env override and pre-warm the global
+/// `ResourceMonitor` when it samples, so the first run doesn't pay the cold
+/// read.
+pub(crate) fn prepare_resource_telemetry(mode: ResourceTelemetryMode) -> ResourceTelemetryMode {
+    let mode = resolve_resource_telemetry_mode(mode);
     if !mode.is_off() {
         ResourceMonitor::global().prewarm();
     }
-    set_resource_telemetry_mode(mode);
+    mode
 }
 
-/// Current resource-telemetry mode for this process. `Off` until
-/// `init_platform_telemetry` runs with a mode other than `Off`.
+/// Publish `mode` (after the env override) as the process-wide mode. `Off`
+/// still stores the mode so a later rehydration can read a consistent value;
+/// the monitor just sits idle until something flips it on.
+pub(crate) fn activate_resource_telemetry(mode: ResourceTelemetryMode) {
+    set_resource_telemetry_mode(prepare_resource_telemetry(mode));
+}
+
+/// Process-wide resource-telemetry mode: the one SDK operations that select
+/// no observability session sample with. `Off` until set by
+/// `XybridInit::resource_telemetry` or by installing a default session
+/// configured with another mode. An operation pinned to a session
+/// (`ObservationOptions::with_session`) uses that session's mode instead.
 pub fn resource_telemetry_mode() -> ResourceTelemetryMode {
     match RESOURCE_TELEMETRY_MODE.read() {
         Ok(g) => *g,
@@ -1615,12 +139,16 @@ pub fn resource_telemetry_mode() -> ResourceTelemetryMode {
     }
 }
 
-/// Begin a resource-telemetry scope for one `Model::run*` / `Pipeline::run*`
-/// call. Returns a guard that produces the summary on `finish()`. Callers
-/// who want the summary attached to their outgoing `TelemetryEvent` can use
-/// [`attach_resource_summary`] at emit time.
+/// Begin a resource-telemetry scope. Returns a guard that produces the
+/// summary on `finish()`. Callers who want the summary attached to their
+/// outgoing `TelemetryEvent` can use [`attach_resource_summary`] at emit time.
+///
+/// On a thread running an SDK operation (for example in a streaming callback,
+/// or under a [`CapturedScope`](crate::observability::CapturedScope)) it
+/// samples with that operation's mode, which follows the session it is pinned
+/// to. Elsewhere it uses the process-wide [`resource_telemetry_mode`].
 pub fn begin_resource_run() -> xybrid_core::device::RunGuard {
-    ResourceMonitor::global().begin_run(resource_telemetry_mode())
+    ResourceMonitor::global().begin_run(crate::observability::current_resource_telemetry())
 }
 
 /// Mutate a `TelemetryEvent.data` JSON string to add `resource_summary`.
@@ -1647,7 +175,8 @@ pub fn attach_resource_summary(event: &mut TelemetryEvent, summary: Option<Resou
     }
 }
 
-/// Attach the resource summary from `guard` and publish the event. Run-site
+/// Attach the resource summary from `guard`, publish the event, and return
+/// the summary (so the run can also record it on its span). Run-site
 /// shorthand for callers that always want the two steps bundled:
 ///
 /// ```text
@@ -1661,19 +190,11 @@ pub fn attach_resource_summary(event: &mut TelemetryEvent, summary: Option<Resou
 pub fn publish_with_resource_summary(
     mut event: TelemetryEvent,
     guard: xybrid_core::device::RunGuard,
-) {
-    attach_resource_summary(&mut event, guard.finish());
+) -> Option<ResourceUsageSummary> {
+    let summary = guard.finish();
+    attach_resource_summary(&mut event, summary.clone());
     publish_telemetry_event(event);
-}
-
-pub(crate) fn publish_with_resource_summary_in_context(
-    mut event: TelemetryEvent,
-    guard: xybrid_core::device::RunGuard,
-    pipeline_id: Option<Uuid>,
-    trace_id: Option<Uuid>,
-) {
-    attach_resource_summary(&mut event, guard.finish());
-    publish_telemetry_event_in_context(event, pipeline_id, trace_id);
+    summary
 }
 
 /// Build a `LocalAborted` telemetry event for a resource-driven cloud-fallback
@@ -1683,8 +204,8 @@ pub(crate) fn publish_with_resource_summary_in_context(
 /// token count, and a `correlation_id` shared with the paired `CloudRetry`
 /// event so analytics joins on the two halves of one logical inference.
 /// `correlation_id`, `outcome_category`, and `abort_reason` ride in
-/// `event.data`; the platform-event hoist (see `convert_to_platform_event`)
-/// promotes them to top-level columns.
+/// `event.data` for in-process subscribers. Observability exports are
+/// recorded separately on OpenTelemetry spans.
 pub fn local_aborted_event(
     correlation_id: &str,
     model_id: &str,
@@ -2001,91 +522,39 @@ pub fn publish_cloud_retry(
     ));
 }
 
-/// Initialize platform telemetry from environment variables
-///
-/// Returns `true` if initialization succeeded, `false` if XYBRID_API_KEY is not set.
-/// Also enables span tracing in xybrid-core for detailed execution profiling.
-pub fn init_platform_telemetry_from_env() -> bool {
-    if let Some(exporter) = HttpTelemetryExporter::from_env() {
-        // Enable span tracing in xybrid-core for execution profiling
-        core_tracing::init_tracing(true);
-
-        // Resource-telemetry: the env path has no TelemetryConfig, so the
-        // env var is the only way in. Apply the same resolver + activation
-        // pair `init_platform_telemetry` uses so consumers that rely on
-        // `XYBRID_RESOURCE_TELEMETRY=summary` get identical behavior
-        // regardless of which init entry point they chose.
-        let resource_mode = resolve_resource_telemetry_mode(ResourceTelemetryMode::Off);
-        activate_resource_telemetry(resource_mode);
-
-        // Register automatic execution listener
-        register_execution_listener();
-
-        exporter.start();
-        let sender = exporter.create_sender();
-        register_telemetry_sender(sender);
-
-        if let Ok(mut global) = PLATFORM_EXPORTER.write() {
-            *global = Some(exporter);
-        }
-
-        // Mirror `init_platform_telemetry`: install a panic hook so a
-        // crash during inference still ships its buffered Started/Failed
-        // events instead of dying silently.
-        install_telemetry_panic_hook();
-        true
-    } else {
-        false
-    }
-}
-
 // ============================================================================
 // First-inference dev nudge
 // ============================================================================
 
-/// URL printed in the dev-nudge log. Hard-coded rather than wired through
-/// config because the nudge fires when no config has been provided.
-const DASHBOARD_URL: &str = "https://dashboard.xybrid.dev";
+/// Documentation for enabling observability export. Hard-coded rather than
+/// wired through config because the nudge fires when no config was provided.
+const OBSERVABILITY_DOCS_URL: &str = "https://docs.xybrid.dev/sdk/observability";
 
 /// Once-guard for [`maybe_emit_dev_nudge`].
 static DEV_NUDGE: std::sync::Once = std::sync::Once::new();
 
-/// Emit a one-shot info-level hint when the host app runs inference
-/// without configuring an API key. Subsequent calls are no-ops via
-/// [`std::sync::Once`].
+/// Emit a one-shot info-level hint when the host app runs inference without
+/// configuring observability export. Subsequent calls are no-ops.
 ///
-/// Hooked into [`crate::model::XybridModel::run`] and
-/// [`crate::model::XybridModel::run_async`] so the nudge surfaces on first
-/// use rather than at init time — a host app that initializes the SDK far
-/// from where it runs inference still sees the hint.
-///
-/// Suppressed when `XYBRID_QUIET=1`.
+/// Hooked into the run entry points so the nudge surfaces on first use rather
+/// than at init time. Suppressed when `XYBRID_QUIET=1`.
 pub(crate) fn maybe_emit_dev_nudge() {
     DEV_NUDGE.call_once(|| {
-        // Resolve via the SDK accessor so a programmatically-set key (held in
-        // memory, not the env) also suppresses the "no key" nudge.
-        let api_key = crate::get_api_key();
         let quiet = std::env::var("XYBRID_QUIET").ok();
-        if !should_emit_dev_nudge(api_key.as_deref(), quiet.as_deref()) {
+        if !should_emit_dev_nudge(crate::observability::is_enabled(), quiet.as_deref()) {
             return;
         }
         log::info!(
             target: "xybrid_sdk",
-            "telemetry disabled (no XYBRID_API_KEY set). Get a free key at {} to see your inference traces.",
-            DASHBOARD_URL,
+            "observability export is not configured; traces stay local. See {} to send traces to Xybrid or any OpenTelemetry backend.",
+            OBSERVABILITY_DOCS_URL,
         );
     });
 }
 
-/// Pure predicate that decides whether the dev-nudge should print. Split
-/// out so unit tests can exercise the rule without poking process
-/// environment variables.
-fn should_emit_dev_nudge(api_key: Option<&str>, quiet: Option<&str>) -> bool {
-    if quiet == Some("1") {
-        return false;
-    }
-    let has_key = api_key.map(|k| !k.is_empty()).unwrap_or(false);
-    !has_key
+/// Pure predicate that decides whether the dev-nudge should print.
+fn should_emit_dev_nudge(observability_enabled: bool, quiet: Option<&str>) -> bool {
+    quiet != Some("1") && !observability_enabled
 }
 
 #[cfg(test)]
@@ -2093,115 +562,48 @@ mod dev_nudge_tests {
     use super::should_emit_dev_nudge;
 
     #[test]
-    fn emits_when_no_api_key_and_not_quiet() {
-        assert!(should_emit_dev_nudge(None, None));
+    fn emits_when_observability_is_not_configured() {
+        assert!(should_emit_dev_nudge(false, None));
     }
 
     #[test]
     fn suppressed_when_quiet_flag_set() {
-        assert!(!should_emit_dev_nudge(None, Some("1")));
+        assert!(!should_emit_dev_nudge(false, Some("1")));
     }
 
     #[test]
-    fn suppressed_when_api_key_present() {
-        assert!(!should_emit_dev_nudge(Some("xy_live_abc"), None));
-    }
-
-    #[test]
-    fn empty_api_key_treated_as_unset() {
-        assert!(should_emit_dev_nudge(Some(""), None));
-    }
-
-    #[test]
-    fn quiet_takes_priority_over_missing_key() {
-        assert!(!should_emit_dev_nudge(None, Some("1")));
+    fn suppressed_when_observability_is_configured() {
+        assert!(!should_emit_dev_nudge(true, None));
     }
 
     #[test]
     fn quiet_other_value_not_suppressive() {
-        // Only "1" suppresses. "true" / "yes" don't — keeps the env-flag
-        // contract narrow.
-        assert!(should_emit_dev_nudge(None, Some("true")));
-        assert!(should_emit_dev_nudge(None, Some("0")));
+        assert!(should_emit_dev_nudge(false, Some("true")));
+        assert!(should_emit_dev_nudge(false, Some("0")));
     }
 }
 
-/// Set pipeline context for event enrichment
-pub fn set_telemetry_pipeline_context(pipeline_id: Option<Uuid>, trace_id: Option<Uuid>) {
-    let mut event_context = xybrid_core::event_bus::EventContext::current();
-    event_context.pipeline_id = pipeline_id;
-    event_context.trace_id = trace_id;
-    if event_context.is_empty() {
-        xybrid_core::event_bus::clear_current_event_context();
-    } else {
-        xybrid_core::event_bus::set_current_event_context(event_context);
-    }
-
-    if let Ok(exporter) = PLATFORM_EXPORTER.read() {
-        if let Some(exp) = exporter.as_ref() {
-            exp.set_pipeline_context(pipeline_id, trace_id);
-        }
-    }
-}
-
-/// RAII guard that installs a pipeline context on construction and
-/// restores the previous context on drop.
+/// Register a telemetry event sender
 ///
-/// Callers (e.g. `Pipeline::run`, `XybridModel::run_with_context`) need
-/// to scope a per-invocation `trace_id` so every telemetry event
-/// emitted during the call shares it. Pairing the install with a manual
-/// `set_telemetry_pipeline_context(None, None)` on every exit path is
-/// error-prone — any `?` between install and clear leaks the
-/// `trace_id` onto subsequent unrelated telemetry on the same thread,
-/// and a panic skips the cleanup entirely. This guard removes the
-/// duplication and closes the panic-leak hole.
-///
-/// On `Drop` the guard restores whatever context was in place before
-/// `install` ran (rather than blanket-clearing), so nested installs
-/// compose correctly. The exporter's pipeline context is held behind
-/// a process-global `Arc<RwLock<...>>`; for fully race-free per-call
-/// scoping under concurrent threads, callers should also rely on the
-/// thread-local `EventContext` (see `xybrid-core::event_bus`) which
-/// `set_telemetry_pipeline_context` keeps in sync.
-pub(crate) struct TelemetryPipelineContextGuard {
-    previous_pipeline_id: Option<Uuid>,
-    previous_trace_id: Option<Uuid>,
-}
-
-impl TelemetryPipelineContextGuard {
-    /// Install a pipeline context for the lifetime of the guard.
-    pub(crate) fn install(pipeline_id: Option<Uuid>, trace_id: Option<Uuid>) -> Self {
-        let (previous_pipeline_id, previous_trace_id) = current_telemetry_pipeline_context();
-        set_telemetry_pipeline_context(pipeline_id, trace_id);
-        Self {
-            previous_pipeline_id,
-            previous_trace_id,
-        }
+/// The first registration also subscribes to executor lifecycle events
+/// (`ExecutionStarted` / `ExecutionCompleted` / `ExecutionFailed`), so they
+/// are only produced when someone listens.
+pub fn register_telemetry_sender(sender: TelemetrySender) {
+    EXECUTION_LISTENER.call_once(register_execution_listener);
+    if let Ok(mut senders) = TELEMETRY_SENDERS.lock() {
+        senders.push(sender);
     }
 }
 
-impl Drop for TelemetryPipelineContextGuard {
-    fn drop(&mut self) {
-        set_telemetry_pipeline_context(self.previous_pipeline_id, self.previous_trace_id);
-    }
-}
+static EXECUTION_LISTENER: std::sync::Once = std::sync::Once::new();
 
-/// Register the execution listener that converts `ExecutionEvent`s from
-/// xybrid-core's `TemplateExecutor` into `TelemetryEvent`s and publishes them.
+/// Forward `TemplateExecutor` lifecycle events to subscribers.
 fn register_execution_listener() {
     execution_listener::set_execution_listener(|event| {
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-
-        // `Started` events are eagerly flushed after publish so a crash
-        // mid-inference (e.g. Metal SIGABRT, OOM kill) still leaves a
-        // breadcrumb on the backend. Without this, the event sits in the
-        // 10-event / 5-second batch buffer and dies with the process,
-        // which is exactly the bug this code is patching.
-        let is_started = matches!(event, ExecutionEvent::Started { .. });
-
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
         let telemetry_event = match event {
             ExecutionEvent::Started { model_id, method } => TelemetryEvent {
                 event_type: "ExecutionStarted".to_string(),
@@ -2232,11 +634,6 @@ fn register_execution_listener() {
                 error,
             } => TelemetryEvent {
                 event_type: "ExecutionFailed".to_string(),
-                // Surface the model_id in the operation column so error
-                // rows on the Traces dashboard read like the success rows
-                // (`pipeline / <model-id>`) instead of the executor-
-                // internal method name. The method is still preserved
-                // in `data` for forensics.
                 stage_name: Some(model_id.clone()),
                 target: Some("device".to_string()),
                 latency_ms: Some(latency_ms as u32),
@@ -2251,137 +648,8 @@ fn register_execution_listener() {
                 timestamp_ms,
             },
         };
-
-        // Started-event fast path: ensure the event reaches the wire even
-        // if the process dies before the matching Completed/Failed.
-        //
-        // `publish_telemetry_event` enqueues onto an mpsc channel; a
-        // background thread moves the event into the exporter's batch
-        // buffer. That handoff takes microseconds, but the eager flush runs
-        // on *this* thread and would race the bg thread if called
-        // immediately. Snapshot the exporter's monotonic ingest counter
-        // *before* publishing so we can wait for THIS event's handoff —
-        // waiting on a merely non-empty buffer would let a stale, already-
-        // buffered event trip the flush before our Started event lands,
-        // leaving the breadcrumb stuck in the channel until the periodic
-        // flush (defeating the crash-before-completion guarantee).
-        let started_ingest_baseline = if is_started {
-            PLATFORM_EXPORTER
-                .read()
-                .ok()
-                .and_then(|g| g.as_ref().map(|exp| exp.ingested_count()))
-        } else {
-            None
-        };
-
         publish_telemetry_event(telemetry_event);
-
-        if let Some(baseline) = started_ingest_baseline {
-            if let Ok(exporter) = PLATFORM_EXPORTER.read() {
-                if let Some(exp) = exporter.as_ref() {
-                    // Spin briefly (≤10ms total, 100µs per attempt) until the
-                    // bg thread has moved our event into the buffer. If the
-                    // handoff never registers (bg thread stalled, sender
-                    // gone), fall through and flush anyway — a no-op when the
-                    // buffer is empty.
-                    for _ in 0..100 {
-                        if exp.ingested_count() > baseline {
-                            break;
-                        }
-                        std::thread::sleep(Duration::from_micros(100));
-                    }
-                    // Bounded, no-retry flush: a slow or unreachable endpoint
-                    // must not stall inference startup the way the
-                    // retry+backoff `flush()` would (it can block for many
-                    // seconds on this hot path).
-                    exp.flush_blocking(Duration::from_millis(STARTED_EVENT_FLUSH_TIMEOUT_MS));
-                }
-            }
-        }
     });
-}
-
-/// Flush all pending telemetry events
-pub fn flush_platform_telemetry() {
-    if let Ok(exporter) = PLATFORM_EXPORTER.read() {
-        if let Some(exp) = exporter.as_ref() {
-            exp.flush();
-        }
-    }
-}
-
-/// Synchronous, deadline-bounded flush for shutdown / panic paths.
-///
-/// Drains the buffer and sends one HTTP batch with the supplied timeout
-/// applied to both connect and request. Skips retry/backoff/circuit-breaker
-/// logic so the call returns within roughly `timeout`. Best-effort: failed
-/// events are dropped, not requeued. See
-/// [`HttpTelemetryExporter::flush_blocking`] for the safety contract this
-/// upholds for panic-handler use.
-pub fn flush_platform_telemetry_blocking(timeout: Duration) {
-    if let Ok(exporter) = PLATFORM_EXPORTER.read() {
-        if let Some(exp) = exporter.as_ref() {
-            exp.flush_blocking(timeout);
-        }
-    }
-}
-
-// Guards against double-installing the panic hook. The hook chains to the
-// previous one so we play nicely with frameworks that install their own
-// (test harnesses, color-eyre, etc.).
-static PANIC_HOOK_INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-
-/// Install a panic hook that synchronously flushes telemetry before
-/// re-raising. Idempotent — subsequent calls are no-ops.
-///
-/// Bounded at 500ms so a wedged HTTP endpoint cannot hang the unwinding
-/// thread indefinitely. The hook chains to whatever hook was previously
-/// installed so external frameworks (e.g. test harnesses) keep their
-/// behavior.
-///
-/// Does NOT cover async aborts (SIGABRT, SIGKILL, OS-level termination):
-/// those bypass Rust panic infrastructure entirely. For those paths,
-/// rely on `ExecutionStarted` being eagerly flushed so the backend at
-/// minimum sees that the run began before the process died.
-pub fn install_telemetry_panic_hook() {
-    if PANIC_HOOK_INSTALLED.set(()).is_err() {
-        return;
-    }
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        // Bound at 500ms — long enough for a healthy local network round
-        // trip, short enough that a wedged endpoint doesn't hang the
-        // dying process. `flush_platform_telemetry_blocking` reads the
-        // global exporter via a `try`-style lock recovery so a poisoned
-        // RwLock here will not double-panic.
-        flush_platform_telemetry_blocking(Duration::from_millis(500));
-        previous(info);
-    }));
-}
-
-/// Shutdown platform telemetry exporter
-///
-/// This also disables span tracing in xybrid-core.
-pub fn shutdown_platform_telemetry() {
-    // Disable span tracing
-    core_tracing::init_tracing(false);
-
-    // Remove automatic execution listener
-    execution_listener::clear_execution_listener();
-
-    if let Ok(mut exporter) = PLATFORM_EXPORTER.write() {
-        if let Some(exp) = exporter.take() {
-            exp.stop();
-        }
-    }
-}
-
-/// Register a telemetry event sender
-pub fn register_telemetry_sender(sender: TelemetrySender) {
-    // Use if-let to gracefully handle poisoned mutex
-    if let Ok(mut senders) = TELEMETRY_SENDERS.lock() {
-        senders.push(sender);
-    }
 }
 
 /// Convert OrchestratorEvent to TelemetryEvent
@@ -2461,12 +729,9 @@ pub fn convert_orchestrator_event(event: &OrchestratorEvent) -> TelemetryEvent {
             latency_ms: None,
             error: None,
             // Embed the local reliability hint at the top level of event.data
-            // so the `convert_to_platform_event` hoist list can surface it on
-            // the payload at the top level (where the platform datasource's
-            // JSONPath extractors live, alongside correlation_id / outcome_*).
-            // Non-finite f32 values would serialize to JSON `null`, breaking
-            // the typed platform column; the authority emits only finite
-            // values, but we sanitize at the bridge for defense in depth.
+            // so subscribers can inspect it alongside routing context.
+            // Non-finite f32 values would serialize to JSON `null`; sanitize
+            // them here so consumers always receive a numeric rate.
             data: Some(
                 serde_json::json!({
                     "reason": reason,
@@ -2621,120 +886,6 @@ fn attach_event_context(event: TelemetryEvent, context: &EventContext) -> Teleme
     }
 }
 
-/// Synchronous span snapshot for publish. Only acts on completion-family
-/// events (PipelineComplete / ModelComplete) where the dashboard wants a
-/// flamegraph; skips if the caller already embedded their own spans.
-/// When it does act, it drains the global collector so the next unit of
-/// work on this thread starts with a clean slate.
-fn snapshot_spans_into_event(event: TelemetryEvent) -> TelemetryEvent {
-    // Span-bearing event types — see the matching list in
-    // `convert_to_platform_event` for why LocalAborted/CloudRetry are here.
-    // The cloud-fallback flow never fires a ModelComplete/PipelineComplete,
-    // so without these the cloud-leg `SpanGuard`s in
-    // `runtime_adapter/cloud/mod.rs` get stranded in the global collector
-    // and the dashboard's flamegraph stays empty.
-    //
-    // `ModelWarmup` follows the same shape: `XybridModel::warmup` opens
-    // `execute:<model>` + `llm_inference` spans via the executor before
-    // publishing. Without this entry those spans would (a) never reach
-    // the warmup event's payload — the dashboard falls back to a
-    // synthesized placeholder flamegraph — and (b) leak into the next
-    // event's snapshot (typically the first real inference of the
-    // session), giving that inference's trace two stray spans it
-    // didn't generate.
-    let is_span_bearing = matches!(
-        event.event_type.as_str(),
-        "PipelineComplete" | "ModelComplete" | "ModelWarmup" | "LocalAborted" | "CloudRetry"
-    );
-    if !is_span_bearing || !core_tracing::is_tracing_enabled() {
-        return event;
-    }
-
-    // If the caller already has spans in their data blob, leave it
-    // alone — they opted into managing their own lifecycle (Mirage
-    // does this for cross-chunk isolation).
-    let data_already_has_spans = event
-        .data
-        .as_ref()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-        .and_then(|v| v.get("spans").cloned())
-        .filter(|v| !v.is_null())
-        .is_some();
-    if data_already_has_spans {
-        return event;
-    }
-
-    let captured = core_tracing::get_stages_json();
-    core_tracing::reset_tracing();
-
-    // Merge captured spans into event.data["spans"].
-    let mut merged: serde_json::Value = event
-        .data
-        .as_ref()
-        .and_then(|s| serde_json::from_str(s).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
-    if !merged.is_object() {
-        merged = serde_json::json!({});
-    }
-    if let Some(spans) = captured.get("spans") {
-        merged["spans"] = spans.clone();
-    }
-
-    TelemetryEvent {
-        data: Some(merged.to_string()),
-        ..event
-    }
-}
-
-fn current_telemetry_pipeline_context() -> (Option<Uuid>, Option<Uuid>) {
-    if let Ok(exporter) = PLATFORM_EXPORTER.read() {
-        if let Some(exp) = exporter.as_ref() {
-            let pipeline_id = exp.pipeline_id.read().ok().and_then(|g| *g);
-            let trace_id = exp.trace_id.read().ok().and_then(|g| *g);
-            return (pipeline_id, trace_id);
-        }
-    }
-    (None, None)
-}
-
-fn snapshot_context_into_event(event: TelemetryEvent) -> TelemetryEvent {
-    let (pipeline_id, trace_id) = current_telemetry_pipeline_context();
-    snapshot_context_into_event_with(event, pipeline_id, trace_id)
-}
-
-fn snapshot_context_into_event_with(
-    event: TelemetryEvent,
-    pipeline_id: Option<Uuid>,
-    trace_id: Option<Uuid>,
-) -> TelemetryEvent {
-    if pipeline_id.is_none() && trace_id.is_none() {
-        return event;
-    }
-
-    let mut data = match event.data.as_ref() {
-        Some(raw) => match serde_json::from_str::<serde_json::Value>(raw) {
-            Ok(value) if value.is_object() => value,
-            Ok(value) => serde_json::json!({ "value": value }),
-            Err(_) => serde_json::json!({ "value": raw }),
-        },
-        None => serde_json::json!({}),
-    };
-
-    if let Some(obj) = data.as_object_mut() {
-        if let Some(id) = pipeline_id {
-            obj.insert(CONTEXT_PIPELINE_ID_KEY.to_string(), serde_json::json!(id));
-        }
-        if let Some(id) = trace_id {
-            obj.insert(CONTEXT_TRACE_ID_KEY.to_string(), serde_json::json!(id));
-        }
-    }
-
-    TelemetryEvent {
-        data: Some(data.to_string()),
-        ..event
-    }
-}
-
 /// Build a `ModelDownload` event for a successful registry fetch.
 ///
 /// Carries the cost-attribution fields agreed with the platform schema:
@@ -2746,9 +897,8 @@ fn snapshot_context_into_event_with(
 /// inside the network download, excluding hash verification and cache
 /// extraction so the field reflects bytes-on-the-wire latency).
 ///
-/// The wire `event_type` is the literal string `"ModelDownload"`. The
-/// fields land under `payload.data` after `convert_to_platform_event`
-/// runs; ingest reads them from there.
+/// The `event_type` is the literal string `"ModelDownload"`, with download
+/// metadata encoded in `TelemetryEvent.data` for in-process subscribers.
 ///
 /// Pure builder — does not publish, allows unit tests to inspect the
 /// event shape without standing up the global exporter.
@@ -2806,129 +956,9 @@ pub fn publish_model_download(
     publish_telemetry_event(event);
 }
 
-/// Publish a telemetry event to all registered subscribers
+/// Publish a telemetry event to all registered subscribers.
 pub fn publish_telemetry_event(event: TelemetryEvent) {
-    // Span snapshot: capture spans synchronously at publish time.
-    //
-    // The exporter thread (`convert_to_platform_event`) used to do this
-    // asynchronously, which caused a race when a caller published
-    // ModelComplete/PipelineComplete events back-to-back: any span opened
-    // by the next unit of work (e.g. Mirage's chunked summarize opening
-    // `cloud_synthesize` immediately after a local classifier's event
-    // published) could be stolen or reset by the exporter while still
-    // open, producing empty spans / 0ms durations in the flamegraph.
-    //
-    // Capturing here instead, on the PUBLISHING thread, anchors each
-    // event's span tree to the exact state of the global collector at
-    // the moment the caller finished emitting it. Subsequent span work
-    // on the same thread is cleanly separated. Callers that already
-    // embedded `spans` in `event.data` (e.g. Mirage's `summarize.rs`
-    // `synthesize_chunk_cloud`, which captures+resets earlier for
-    // composability) are left untouched so they keep full control.
-    let event = snapshot_spans_into_event(event);
-    let event = snapshot_context_into_event(event);
     dispatch_telemetry_event(event);
-}
-
-pub(crate) fn publish_telemetry_event_in_context(
-    event: TelemetryEvent,
-    pipeline_id: Option<Uuid>,
-    trace_id: Option<Uuid>,
-) {
-    let event = snapshot_spans_into_event(event);
-    let event = snapshot_context_into_event_with(event, pipeline_id, trace_id);
-    dispatch_telemetry_event(event);
-}
-
-/// Minimum gap between emitted wire rows for a single live-capture session.
-///
-/// A live-vision loop fires one inference per frame (potentially many per
-/// second); without throttling each would emit its own `ModelComplete` wire
-/// row. The dispatch funnel rate-limits live-mode events to roughly one row per
-/// second per `frame_session_id`, dropping the intervening per-frame rows. This
-/// is the v1 contract (Open Decision #5) — a true summary/rollup row would need
-/// a session-end signal the SDK never receives, so a per-session rate-limit is
-/// what ships.
-const LIVE_EVENT_MIN_INTERVAL: Duration = Duration::from_secs(1);
-
-/// Idle TTL after which a `frame_session_id`'s rate-limit entry is forgotten.
-///
-/// `LIVE_SAMPLER_STATE` keeps one entry per distinct session id; without
-/// eviction the map would grow for the process lifetime, which matters because
-/// this is SDK code that can be embedded in long-running hosts. On each
-/// live-event dispatch we opportunistically drop entries idle longer than this
-/// TTL (no background task needed). The TTL is generous — far longer than the
-/// 1s rate window — so an active session is never evicted mid-stream. A session
-/// idle this long is safe to forget: a later event for a forgotten id simply
-/// emits as "first-seen", which is the correct rate-limit decision anyway.
-const LIVE_SAMPLER_TTL: Duration = Duration::from_secs(300);
-
-/// Per-`frame_session_id` last-emit timestamps for the live-mode rate limiter.
-///
-/// Process-global so the throttle survives across the many short-lived
-/// inference calls that make up one live session. Keyed by the caller-supplied
-/// session UUID; entries are only created for live-mode events, so non-live
-/// telemetry never touches this map.
-static LIVE_SAMPLER_STATE: std::sync::LazyLock<Mutex<std::collections::HashMap<String, Instant>>> =
-    std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
-
-/// Extract the live-capture tag (`live_mode == true` + a non-empty
-/// `frame_session_id`) from a telemetry event's `data` JSON, if present.
-///
-/// Returns `Some(frame_session_id)` only when the event was tagged via the
-/// live-mode streaming path. Every non-live event (no such keys, `live_mode`
-/// absent/false, or no session id) returns `None` and therefore bypasses the
-/// sampler entirely — its dispatch path is byte-for-byte unchanged.
-fn live_session_id(event: &TelemetryEvent) -> Option<String> {
-    let raw = event.data.as_ref()?;
-    let parsed: serde_json::Value = serde_json::from_str(raw).ok()?;
-    if parsed.get("live_mode").and_then(serde_json::Value::as_bool) != Some(true) {
-        return None;
-    }
-    parsed
-        .get("frame_session_id")
-        .and_then(serde_json::Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-}
-
-/// Pure rate-limit decision for a single live-capture session, with
-/// opportunistic TTL eviction to bound the map.
-///
-/// Returns `true` (and records `now` as the new last-emit time) when at least
-/// `min_interval` has elapsed since the session's previous emit, or when the
-/// session has never emitted before. Returns `false` (leaving the recorded
-/// time untouched) when the previous emit was too recent — that event is
-/// dropped. Sessions are independent: throttling one `id` never affects
-/// another.
-///
-/// Before deciding, drops every entry idle longer than `ttl` (`now - last >
-/// ttl`). This bounds the map without a background task: a session quiet far
-/// beyond the rate window is forgotten, and a later event for a forgotten id
-/// correctly emits as "first-seen". `ttl` must be `>= min_interval` (a TTL
-/// shorter than the rate window would evict still-throttled entries); callers
-/// pass [`LIVE_SAMPLER_TTL`], which is far larger. Extracted as a free function
-/// over an explicit `&mut HashMap` so the decision + eviction are unit-testable
-/// without the process-global state.
-fn should_emit_live_event(
-    last_emits: &mut std::collections::HashMap<String, Instant>,
-    id: &str,
-    now: Instant,
-    min_interval: Duration,
-    ttl: Duration,
-) -> bool {
-    // Opportunistic eviction: forget sessions idle longer than the TTL. Keep
-    // the id under decision regardless so its own freshness check below is not
-    // perturbed by eviction ordering.
-    last_emits.retain(|entry_id, &mut last| entry_id == id || now.duration_since(last) <= ttl);
-
-    match last_emits.get(id) {
-        Some(&last) if now.duration_since(last) < min_interval => false,
-        _ => {
-            last_emits.insert(id.to_string(), now);
-            true
-        }
-    }
 }
 
 fn dispatch_telemetry_event(event: TelemetryEvent) {
@@ -2940,29 +970,8 @@ fn dispatch_telemetry_event_with_optout(event: TelemetryEvent, opted_out: bool) 
         return;
     }
 
-    // Live-mode rate limit: a live-capture loop emits one inference per frame.
-    // Throttle to ~1 wire row/sec per session so a long live session doesn't
-    // flood the backend with per-frame rows. NON-LIVE events return `None` from
-    // `live_session_id` and skip this block entirely — their path below is
-    // unchanged. A poisoned sampler mutex degrades to emitting (recover rather
-    // than silently drop real telemetry).
-    if let Some(session_id) = live_session_id(&event) {
-        let mut state = LIVE_SAMPLER_STATE.lock().unwrap_or_else(|e| e.into_inner());
-        if !should_emit_live_event(
-            &mut state,
-            &session_id,
-            Instant::now(),
-            LIVE_EVENT_MIN_INTERVAL,
-            LIVE_SAMPLER_TTL,
-        ) {
-            return;
-        }
-    }
-
-    // Use unwrap_or_else to recover from poisoned mutex - this prevents
-    // a panic in one component from permanently breaking telemetry
     let Ok(senders) = TELEMETRY_SENDERS.lock() else {
-        // Mutex is poisoned, silently skip telemetry rather than crash
+        // Mutex is poisoned: skip rather than crash.
         return;
     };
     let mut dead_senders = Vec::new();
@@ -2973,7 +982,6 @@ fn dispatch_telemetry_event_with_optout(event: TelemetryEvent, opted_out: bool) 
         }
     }
 
-    // Remove dead senders
     drop(senders);
     if !dead_senders.is_empty() {
         if let Ok(mut senders) = TELEMETRY_SENDERS.lock() {
@@ -3066,14 +1074,6 @@ pub fn subscribe_orchestrator_events(
     bridge_orchestrator_events(orchestrator)
 }
 
-pub(crate) fn subscribe_orchestrator_events_in_context(
-    orchestrator: &xybrid_core::orchestrator::Orchestrator,
-    _pipeline_id: Option<Uuid>,
-    _trace_id: Option<Uuid>,
-) -> BridgeHandle {
-    bridge_orchestrator_events(orchestrator)
-}
-
 fn bridge_loop(
     subscription: xybrid_core::event_bus::Subscription,
     command_rx: mpsc::Receiver<BridgeCommand>,
@@ -3160,591 +1160,72 @@ fn publish_orchestrator_event(event: OrchestratorEvent) {
 mod tests {
     use super::*;
     use std::sync::MutexGuard;
+    use uuid::Uuid;
 
     static TELEMETRY_SENDER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-    fn live_model_complete_event(frame_session_id: &str) -> TelemetryEvent {
-        TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("qwen2.5-vl".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(120),
-            error: None,
-            data: Some(
-                serde_json::json!({
-                    "model_id": "qwen2.5-vl",
-                    "streaming": true,
-                    "live_mode": true,
-                    "frame_session_id": frame_session_id,
-                })
-                .to_string(),
-            ),
-            timestamp_ms: 1_700_000_000_000,
-        }
+    // Serialize tests that replace the process-wide subscriber registry and
+    // restore it even if a test panics. Bridge threads are joined before this
+    // guard drops so queued events cannot escape into the next test.
+    struct TelemetrySenderTestGuard {
+        _lock: MutexGuard<'static, ()>,
+        previous: Vec<TelemetrySender>,
     }
 
-    #[test]
-    fn live_sampler_drops_second_event_within_min_interval() {
-        let mut state = std::collections::HashMap::new();
-        let t0 = Instant::now();
-        let interval = Duration::from_secs(1);
-        let ttl = Duration::from_secs(300);
-        // First event for a session always emits.
-        assert!(should_emit_live_event(
-            &mut state, "sess-a", t0, interval, ttl
-        ));
-        // A second event 500ms later is within the window → dropped.
-        let t1 = t0 + Duration::from_millis(500);
-        assert!(!should_emit_live_event(
-            &mut state, "sess-a", t1, interval, ttl
-        ));
-    }
-
-    #[test]
-    fn live_sampler_emits_after_min_interval_elapses() {
-        let mut state = std::collections::HashMap::new();
-        let t0 = Instant::now();
-        let interval = Duration::from_secs(1);
-        let ttl = Duration::from_secs(300);
-        assert!(should_emit_live_event(
-            &mut state, "sess-a", t0, interval, ttl
-        ));
-        // Exactly at the interval boundary → emit (>= comparison).
-        let t1 = t0 + Duration::from_secs(1);
-        assert!(should_emit_live_event(
-            &mut state, "sess-a", t1, interval, ttl
-        ));
-        // The recorded time advanced, so the next one right after is dropped.
-        let t2 = t1 + Duration::from_millis(10);
-        assert!(!should_emit_live_event(
-            &mut state, "sess-a", t2, interval, ttl
-        ));
-    }
-
-    #[test]
-    fn live_sampler_treats_sessions_independently() {
-        let mut state = std::collections::HashMap::new();
-        let t0 = Instant::now();
-        let interval = Duration::from_secs(1);
-        let ttl = Duration::from_secs(300);
-        assert!(should_emit_live_event(
-            &mut state, "sess-a", t0, interval, ttl
-        ));
-        // A different session at the same instant emits — throttling one
-        // session never affects another.
-        assert!(should_emit_live_event(
-            &mut state, "sess-b", t0, interval, ttl
-        ));
-        // Each session keeps its own window.
-        let t1 = t0 + Duration::from_millis(200);
-        assert!(!should_emit_live_event(
-            &mut state, "sess-a", t1, interval, ttl
-        ));
-        assert!(!should_emit_live_event(
-            &mut state, "sess-b", t1, interval, ttl
-        ));
-    }
-
-    #[test]
-    fn live_sampler_evicts_idle_entries_past_ttl() {
-        let mut state = std::collections::HashMap::new();
-        let t0 = Instant::now();
-        let interval = Duration::from_secs(1);
-        let ttl = Duration::from_secs(300);
-
-        // Two sessions emit at t0.
-        assert!(should_emit_live_event(
-            &mut state, "sess-old", t0, interval, ttl
-        ));
-        assert!(should_emit_live_event(
-            &mut state,
-            "sess-keep",
-            t0,
-            interval,
-            ttl
-        ));
-        assert_eq!(state.len(), 2);
-
-        // `sess-keep` stays active (re-emits within TTL); a *third* session
-        // fires well past the TTL. The eviction sweep drops `sess-old` (idle
-        // > TTL) but retains `sess-keep` (idle <= TTL), bounding the map.
-        let t_keep = t0 + Duration::from_secs(10);
-        assert!(should_emit_live_event(
-            &mut state,
-            "sess-keep",
-            t_keep,
-            interval,
-            ttl
-        ));
-        let t_new = t0 + ttl + Duration::from_secs(1);
-        assert!(should_emit_live_event(
-            &mut state, "sess-new", t_new, interval, ttl
-        ));
-
-        // `sess-old` evicted; `sess-keep` + `sess-new` retained.
-        assert!(!state.contains_key("sess-old"));
-        assert!(state.contains_key("sess-keep"));
-        assert!(state.contains_key("sess-new"));
-        assert_eq!(state.len(), 2);
-
-        // A subsequent event for the forgotten `sess-old` id correctly emits as
-        // first-seen (not dropped), even immediately — there is no retained
-        // last-emit time to throttle against.
-        let t_revisit = t_new + Duration::from_millis(1);
-        assert!(should_emit_live_event(
-            &mut state, "sess-old", t_revisit, interval, ttl
-        ));
-
-        // Eviction never perturbs the in-window rate limit: a fresh entry
-        // re-firing within `min_interval` is still dropped.
-        let t_throttle = t_revisit + Duration::from_millis(100);
-        assert!(!should_emit_live_event(
-            &mut state, "sess-old", t_throttle, interval, ttl
-        ));
-    }
-
-    #[test]
-    fn live_session_id_extracts_only_tagged_events() {
-        // A live-tagged event yields its session id.
-        let live = live_model_complete_event("frame-sess-123");
-        assert_eq!(live_session_id(&live).as_deref(), Some("frame-sess-123"));
-
-        // A plain streaming (non-live) event has no live tag → None, so it
-        // bypasses the sampler entirely.
-        let non_live = TelemetryEvent {
-            data: Some(
-                serde_json::json!({ "model_id": "qwen2.5-vl", "streaming": true }).to_string(),
-            ),
-            ..live_model_complete_event("ignored")
-        };
-        assert_eq!(live_session_id(&non_live), None);
-
-        // live_mode false (even with an id) is treated as non-live.
-        let disabled = TelemetryEvent {
-            data: Some(
-                serde_json::json!({ "live_mode": false, "frame_session_id": "x" }).to_string(),
-            ),
-            ..live_model_complete_event("ignored")
-        };
-        assert_eq!(live_session_id(&disabled), None);
-
-        // No data at all → None.
-        let no_data = TelemetryEvent {
-            data: None,
-            ..live_model_complete_event("ignored")
-        };
-        assert_eq!(live_session_id(&no_data), None);
-    }
-
-    #[test]
-    fn live_tag_hoists_to_platform_event_top_level() {
-        // A live-tagged ModelComplete must surface `live_mode` +
-        // `frame_session_id` on the wire payload top level (alongside the
-        // existing hoist list) so the Traces dashboard can column-extract them.
-        let event = live_model_complete_event("frame-sess-xyz");
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-
-        assert_eq!(platform.payload["live_mode"], serde_json::json!(true));
-        assert_eq!(
-            platform.payload["frame_session_id"],
-            serde_json::json!("frame-sess-xyz")
-        );
-    }
-
-    #[test]
-    fn choice_decision_fields_hoist_to_platform_event_top_level() {
-        // A choice scorer's ModelComplete carries its decision fields in
-        // `data`; they surface on the wire payload top level even when no
-        // span tree is attached.
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("cua-s1-forms".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(3),
-            error: None,
-            data: Some(
-                serde_json::json!({
-                    "model_id": "cua-s1-forms",
-                    "output_type": "ChoiceScores",
-                    "task": "decision",
-                    "backend": "ort",
-                    "choice_count": 5,
-                })
-                .to_string(),
-            ),
-            timestamp_ms: 1_700_000_000_000,
-        };
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-
-        assert_eq!(platform.payload["task"], serde_json::json!("decision"));
-        assert_eq!(platform.payload["backend"], serde_json::json!("ort"));
-        assert_eq!(platform.payload["choice_count"], serde_json::json!(5));
-    }
-
-    #[test]
-    fn non_live_event_payload_is_byte_identical_without_live_keys() {
-        // Regression guard: a non-live (no live tag) ModelComplete event must
-        // convert to a wire payload that carries NEITHER `live_mode` nor
-        // `frame_session_id`. The hoist of those keys is a no-op for non-live
-        // events, so the existing per-run telemetry path is unchanged.
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("qwen2.5-0.5b".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(420),
-            error: None,
-            data: Some(
-                serde_json::json!({
-                    "model_id": "qwen2.5-0.5b",
-                    "streaming": true,
-                })
-                .to_string(),
-            ),
-            timestamp_ms: 1_700_000_000_000,
-        };
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-        let payload_json = serde_json::to_string(&platform.payload).unwrap();
-
-        assert!(
-            !payload_json.contains("live_mode"),
-            "non-live payload must not carry live_mode, got: {payload_json}"
-        );
-        assert!(
-            !payload_json.contains("frame_session_id"),
-            "non-live payload must not carry frame_session_id, got: {payload_json}"
-        );
-        // And the nested data object likewise stays free of the live keys.
-        assert!(platform.payload["data"].get("live_mode").is_none());
-        assert!(platform.payload["data"].get("frame_session_id").is_none());
-        // Nor does a run that is not a decision gain the decision fields.
-        for key in ["task", "backend", "choice_count"] {
-            assert!(platform.payload.get(key).is_none(), "{key}: {payload_json}");
-        }
-    }
-
-    #[test]
-    fn platform_event_payload_has_no_legacy_cache_keys() {
-        // End-to-end through convert_to_platform_event so we exercise
-        // the real hoist list + serde path. A ModelComplete event
-        // carrying a data blob with canonical cache keys must
-        // serialize to a payload that contains the canonical names and
-        // none of the DeepSeek-specific legacy names. This backs up
-        // the source-containment test (`tests/legacy_cache_names.rs`)
-        // with a runtime-format assertion: if a field rename is
-        // incomplete — e.g., a `#[serde(rename = "cache_hit_tokens")]`
-        // is forgotten or a manual json literal writes the old key —
-        // this catches it even when the source file reads canonical.
-        let data = serde_json::json!({
-            "model_id": "deepseek-chat",
-            "tokens_in": 1000,
-            "tokens_out": 120,
-            "cost_usd": 0.00123,
-            "cache_read_input_tokens": 800,
-            "cache_read_cost_usd": 0.000056,
-            "uncached_input_cost_usd": 0.000054,
-        });
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("cloud_synthesize".to_string()),
-            target: Some("cloud".to_string()),
-            latency_ms: Some(420),
-            error: None,
-            data: Some(data.to_string()),
-            timestamp_ms: 1_700_000_000_000,
-        };
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform_event = convert_to_platform_event(&event, &config, None, None, None);
-        let payload_json = serde_json::to_string(&platform_event.payload).unwrap();
-
-        // Forbidden keys built at runtime so the source of this file
-        // doesn't contain the literals (5a would flag them otherwise).
-        let forbidden = [
-            format!("cache{}hit{}tokens", "_", "_"),
-            format!("cache{}miss{}tokens", "_", "_"),
-            format!("cache{}hit{}cost{}usd", "_", "_", "_"),
-            format!("cache{}miss{}cost{}usd", "_", "_", "_"),
-        ];
-        for key in &forbidden {
-            assert!(
-                !payload_json.contains(key),
-                "platform event payload leaked legacy key {key}: {payload_json}"
+    impl TelemetrySenderTestGuard {
+        fn acquire() -> Self {
+            let lock = TELEMETRY_SENDER_TEST_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let previous = std::mem::take(
+                &mut *TELEMETRY_SENDERS
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
             );
+            Self {
+                _lock: lock,
+                previous,
+            }
         }
-        // Positive assertion — the canonical name IS present. Without
-        // this, an empty payload would trivially satisfy the negation
-        // above.
-        assert!(payload_json.contains("cache_read_input_tokens"));
     }
 
-    #[test]
-    fn platform_event_stamps_sdk_version_and_binding() {
-        // Invariant: every PlatformEvent that leaves the SDK carries
-        // `sdk_version` (= crate::SDK_VERSION) and `binding`
-        // (= crate::get_binding()). The assertion compares against the
-        // SDK's own view of itself rather than hardcoded strings so the
-        // test is hermetic regardless of `set_binding(...)` calls made by
-        // other tests sharing this process (BINDING is a OnceLock).
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("test_stage".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(10),
-            error: None,
-            data: None,
-            timestamp_ms: 1_700_000_000_000,
-        };
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-
-        assert_eq!(platform.sdk_version, crate::SDK_VERSION);
-        assert_eq!(platform.binding, crate::get_binding());
-        assert!(
-            !platform.sdk_version.is_empty(),
-            "sdk_version must not be empty"
-        );
-        assert!(!platform.binding.is_empty(), "binding must not be empty");
-
-        // Wire format: serialize and confirm the exact JSON keys land
-        // on the payload. Guards against an accidental `#[serde(rename)]`
-        // drift that would silently break the backend ingest contract.
-        let json = serde_json::to_value(&platform).unwrap();
-        assert_eq!(
-            json["sdk_version"].as_str(),
-            Some(crate::SDK_VERSION),
-            "wire key `sdk_version` missing or mismatched: {json}"
-        );
-        assert_eq!(
-            json["binding"].as_str(),
-            Some(crate::get_binding()),
-            "wire key `binding` missing or mismatched: {json}"
-        );
+    impl Drop for TelemetrySenderTestGuard {
+        fn drop(&mut self) {
+            *TELEMETRY_SENDERS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                std::mem::take(&mut self.previous);
+        }
     }
 
-    #[test]
-    fn resource_summary_attaches_and_hoists_through_convert() {
-        // End-to-end happy path: attach_resource_summary()
-        // edits event.data, then convert_to_platform_event hoists
-        // resource_summary to the platform-event payload top level
-        // (same hoist mechanism as cache tokens).
-        let summary = ResourceUsageSummary {
-            cpu_avg_pct: Some(34.1),
-            cpu_peak_pct: Some(62.5),
-            process_rss_peak_mb: Some(712),
-            available_mem_min_mb: Some(4180),
-            memory_pressure_peak: xybrid_core::device::MemoryPressure::Normal,
-            thermal_state_peak: xybrid_core::device::ThermalState::Normal,
-            battery_pct_end: Some(72),
-            sample_count: 4,
-            sampling_mode: "summary".to_string(),
-            sampling_interval_ms: Some(1000),
-        };
-        let mut event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("qwen2.5-0.5b".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(420),
-            error: None,
-            data: Some(serde_json::json!({ "model_id": "qwen2.5-0.5b" }).to_string()),
-            timestamp_ms: 1_700_000_000_000,
-        };
-        attach_resource_summary(&mut event, Some(summary));
-
-        // Sanity: attach mutated event.data.
-        let data_json = event.data.clone().expect("data present");
-        let data: serde_json::Value = serde_json::from_str(&data_json).unwrap();
-        assert!(data.get("resource_summary").is_some());
+    fn publish_and_receive(event: TelemetryEvent) -> TelemetryEvent {
+        let _guard = TelemetrySenderTestGuard::acquire();
+        let (tx, rx) = mpsc::channel();
+        register_telemetry_sender(tx);
+        publish_telemetry_event(event.clone());
+        let received = receive_event(&rx, &event.event_type);
         assert_eq!(
-            data["resource_summary"]["cpu_peak_pct"].as_f64(),
-            Some(62.5)
+            serde_json::to_value(&received).unwrap(),
+            serde_json::to_value(&event).unwrap(),
+            "subscribers must receive every event field unchanged",
         );
-
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-        let payload_json = serde_json::to_string(&platform.payload).unwrap();
-
-        // Hoisted to payload top level (sibling of tokens_in / cache_*).
-        assert!(
-            payload_json.contains("\"resource_summary\""),
-            "resource_summary must be hoisted to payload top level, got: {}",
-            payload_json
-        );
-        // And reachable via the object root, not just as a nested string.
-        let parsed: serde_json::Value = serde_json::from_str(&payload_json).unwrap();
-        assert_eq!(
-            parsed["resource_summary"]["cpu_peak_pct"].as_f64(),
-            Some(62.5),
-            "hoisted value should be the same object we attached"
-        );
+        received
     }
 
-    #[test]
-    fn pipeline_complete_publishes_resource_summary_in_payload() {
-        // Parallel coverage to `resource_summary_attaches_and_hoists_through_convert`
-        // but for the PipelineComplete path — the hoist logic has no branch
-        // on event_type, but we assert the shape end-to-end so a future
-        // regression that special-cases Model vs Pipeline won't slip.
-        let summary = ResourceUsageSummary {
-            cpu_avg_pct: Some(12.0),
-            cpu_peak_pct: Some(45.0),
-            process_rss_peak_mb: Some(380),
-            available_mem_min_mb: Some(6000),
-            memory_pressure_peak: xybrid_core::device::MemoryPressure::Normal,
-            thermal_state_peak: xybrid_core::device::ThermalState::Normal,
-            battery_pct_end: None,
-            sample_count: 3,
-            sampling_mode: "summary".to_string(),
-            sampling_interval_ms: Some(1000),
-        };
-        let mut event = TelemetryEvent {
-            event_type: "PipelineComplete".to_string(),
-            stage_name: Some("mirage-document-insights".to_string()),
-            target: None,
-            latency_ms: Some(1_200),
-            error: None,
-            data: Some("{\"stages\":[],\"output_type\":\"Text\"}".to_string()),
-            timestamp_ms: 1_700_000_000_000,
-        };
-        attach_resource_summary(&mut event, Some(summary));
-
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-        let payload_json = serde_json::to_string(&platform.payload).unwrap();
-
-        assert!(
-            payload_json.contains("\"resource_summary\""),
-            "PipelineComplete should carry resource_summary on payload top level, got: {payload_json}"
-        );
-        let parsed: serde_json::Value = serde_json::from_str(&payload_json).unwrap();
-        assert_eq!(parsed["resource_summary"]["sample_count"].as_i64(), Some(3));
-        assert_eq!(
-            parsed["resource_summary"]["memory_pressure_peak"].as_str(),
-            Some("normal")
-        );
-    }
-
-    #[test]
-    fn routing_outcome_fields_hoist_to_platform_event_top_level() {
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("qwen2.5-0.5b".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(420),
-            error: None,
-            data: Some(
-                serde_json::json!({
-                    "model_id": "qwen2.5-0.5b",
-                    "correlation_id": "run-string-123",
-                    "outcome_category": {
-                        "kind": "aborted_for_cloud_fallback",
-                        "reason": "stress_memory"
-                    },
-                    "abort_reason": "stress_memory"
-                })
-                .to_string(),
-            ),
-            timestamp_ms: 1_700_000_000_000,
-        };
-
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-
-        assert_eq!(platform.correlation_id.as_deref(), Some("run-string-123"));
-        assert_eq!(
-            platform
-                .outcome_category
-                .as_ref()
-                .and_then(|v| v.get("kind")),
-            Some(&serde_json::json!("aborted_for_cloud_fallback"))
-        );
-        assert_eq!(platform.abort_reason.as_deref(), Some("stress_memory"));
-        assert_eq!(platform.payload["correlation_id"], "run-string-123");
-        assert_eq!(
-            platform.payload["outcome_category"]["kind"],
-            "aborted_for_cloud_fallback"
-        );
-        assert_eq!(platform.payload["abort_reason"], "stress_memory");
-    }
-
-    #[test]
-    fn local_reliability_hint_hoists_to_platform_event_top_level() {
-        // RoutingDecision events serialize the hint into event.data via
-        // `Telemetry::log_routing_decision`. The hoist list in
-        // convert_to_platform_event must copy that nested object to the
-        // payload top level so the analytics backend can column-extract
-        // `json:$.local_reliability_hint.recent_abort_rate` and
-        // `.sample_size` without descending into `data`.
-        let event = TelemetryEvent {
-            event_type: "RoutingDecision".to_string(),
-            stage_name: Some("stage-1".to_string()),
-            target: Some("cloud".to_string()),
-            latency_ms: None,
-            error: None,
-            data: Some(
-                serde_json::json!({
-                    "stage": "stage-1",
-                    "target": "cloud",
-                    "reason": "history_bias",
-                    "local_reliability_hint": {
-                        "recent_abort_rate": 0.75,
-                        "sample_size": 4_u32,
-                    }
-                })
-                .to_string(),
-            ),
-            timestamp_ms: 1_700_000_000_000,
-        };
-
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-
-        assert_eq!(
-            platform.payload["local_reliability_hint"]["recent_abort_rate"]
-                .as_f64()
-                .unwrap_or(-1.0),
-            0.75
-        );
-        assert_eq!(
-            platform.payload["local_reliability_hint"]["sample_size"].as_i64(),
-            Some(4)
-        );
-    }
-
-    #[test]
-    fn empty_local_reliability_hint_still_hoists_with_sample_size_zero() {
-        // Empty-window case: window has no entries yet. The SDK still
-        // emits (0.0, 0) so the platform can distinguish "no data" from
-        // "field missing because the SDK is older than the schema".
-        let event = TelemetryEvent {
-            event_type: "RoutingDecision".to_string(),
-            stage_name: Some("stage-1".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: None,
-            error: None,
-            data: Some(
-                serde_json::json!({
-                    "stage": "stage-1",
-                    "target": "local",
-                    "reason": "default_local",
-                    "local_reliability_hint": {
-                        "recent_abort_rate": 0.0,
-                        "sample_size": 0_u32,
-                    }
-                })
-                .to_string(),
-            ),
-            timestamp_ms: 1_700_000_000_000,
-        };
-
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-
-        assert_eq!(
-            platform.payload["local_reliability_hint"]["sample_size"].as_i64(),
-            Some(0)
-        );
+    fn receive_event(rx: &mpsc::Receiver<TelemetryEvent>, event_type: &str) -> TelemetryEvent {
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            let received = rx
+                .recv_timeout(remaining)
+                .expect("the expected telemetry event must arrive before the deadline");
+            // Other SDK unit tests can publish into the process-wide registry
+            // without replacing it. Select this test's event before asserting
+            // its payload so unrelated model activity cannot cause a failure.
+            if received.event_type == event_type {
+                return received;
+            }
+        }
     }
 
     #[test]
@@ -3784,32 +1265,14 @@ mod tests {
         assert_eq!(cloud_data["outcome_category"], "cloud_success");
         assert_eq!(cloud_data["tokens_emitted"], 38);
 
-        // The platform-event hoist promotes `correlation_id` and `abort_reason`
-        // out of `event.data` so analytics can join on top-level columns.
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform_local = convert_to_platform_event(&local, &config, None, None, None);
-        let platform_cloud = convert_to_platform_event(&cloud, &config, None, None, None);
-
-        assert_eq!(
-            platform_local.correlation_id.as_deref(),
-            Some("run-abc-123")
-        );
-        assert_eq!(
-            platform_cloud.correlation_id.as_deref(),
-            Some("run-abc-123")
-        );
-        assert_eq!(
-            platform_cloud.outcome_category.as_ref(),
-            Some(&serde_json::json!("cloud_success"))
-        );
-        assert_eq!(
-            platform_cloud.payload["outcome_category"],
-            serde_json::json!("cloud_success")
-        );
-        assert_eq!(
-            platform_local.abort_reason.as_deref(),
-            Some("stress_memory")
-        );
+        let received_local = publish_and_receive(local);
+        let received_cloud = publish_and_receive(cloud);
+        let received_local_data: serde_json::Value =
+            serde_json::from_str(received_local.data.as_deref().unwrap()).unwrap();
+        let received_cloud_data: serde_json::Value =
+            serde_json::from_str(received_cloud.data.as_deref().unwrap()).unwrap();
+        assert_eq!(received_local_data, local_data);
+        assert_eq!(received_cloud_data, cloud_data);
     }
 
     #[test]
@@ -3821,6 +1284,7 @@ mod tests {
             available_mem_min_mb: Some(512),
             memory_pressure_peak: xybrid_core::device::MemoryPressure::Critical,
             thermal_state_peak: xybrid_core::device::ThermalState::Hot,
+            thermal_measured: true,
             battery_pct_end: Some(51),
             sample_count: 3,
             sampling_mode: "debug_local".to_string(),
@@ -3858,16 +1322,11 @@ mod tests {
             Some(2)
         );
 
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&local, &config, None, None, None);
-        assert_eq!(
-            platform.payload["resource_summary"]["sample_count"].as_i64(),
-            Some(3)
-        );
-        assert_eq!(
-            platform.payload["local_reliability_hint"]["sample_size"].as_i64(),
-            Some(2)
-        );
+        let received = publish_and_receive(local);
+        let received_data: serde_json::Value =
+            serde_json::from_str(received.data.as_deref().unwrap()).unwrap();
+        assert_eq!(received_data, data);
+        assert_eq!(received_data["resource_summary"]["sample_count"], 3);
     }
 
     #[test]
@@ -3908,14 +1367,16 @@ mod tests {
         );
         assert_eq!(cloud_data["tokens_emitted"], 0);
 
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&cloud, &config, None, None, None);
+        let received = publish_and_receive(cloud);
+        let received_data: serde_json::Value =
+            serde_json::from_str(received.data.as_deref().unwrap()).unwrap();
+        assert_eq!(received_data, cloud_data);
         assert_eq!(
-            platform.outcome_category.as_ref(),
-            Some(&serde_json::json!({
+            received_data["outcome_category"],
+            serde_json::json!({
                 "kind": "hard_fail",
                 "reason": "Gateway returned 502: Provider error"
-            }))
+            }),
         );
     }
 
@@ -3981,7 +1442,8 @@ mod tests {
 
     #[test]
     fn env_resource_mode_parses_all_variants() {
-        // Helper drives the parsed variants without touching the real env.
+        // Exercise the same parser as the env override without mutating the
+        // environment while other SDK tests initialize observability.
         let cases: &[(&str, ResourceTelemetryMode)] = &[
             ("off", ResourceTelemetryMode::Off),
             ("boundary", ResourceTelemetryMode::Boundary),
@@ -4001,12 +1463,11 @@ mod tests {
             ),
         ];
         for (raw, expected) in cases {
-            std::env::set_var("XYBRID_RESOURCE_TELEMETRY", raw);
-            let parsed = resource_mode_from_env().expect(raw);
+            let parsed = parse_resource_telemetry_mode(raw).expect(raw);
             assert_eq!(&parsed, expected, "parsing `{}`", raw);
         }
-        std::env::remove_var("XYBRID_RESOURCE_TELEMETRY");
-        assert!(resource_mode_from_env().is_none());
+        assert!(parse_resource_telemetry_mode("unknown").is_none());
+        assert!(parse_resource_telemetry_mode("").is_none());
     }
 
     #[test]
@@ -4107,10 +1568,8 @@ mod tests {
 
     #[test]
     fn routing_decided_event_carries_local_reliability_hint_end_to_end() {
-        // Production-shape regression test: walk the full
-        // OrchestratorEvent -> TelemetryEvent -> PlatformEvent pipeline
-        // so the hint flows through every seam the previous PR draft
-        // missed.
+        // Follow routing metadata through the orchestrator bridge and the
+        // supported in-process subscriber stream.
         let event = OrchestratorEvent::RoutingDecided {
             stage_name: "stage-1".to_string(),
             target: "cloud".to_string(),
@@ -4121,7 +1580,7 @@ mod tests {
         };
         let telemetry_event = convert_orchestrator_event(&event);
 
-        // Bridge embeds the hint in event.data so the hoist list picks it up.
+        // The bridge embeds the hint in event.data for subscribers.
         let data_str = telemetry_event.data.as_ref().expect("data must be present");
         let parsed_data: serde_json::Value = serde_json::from_str(data_str).unwrap();
         assert_eq!(
@@ -4135,19 +1594,10 @@ mod tests {
             Some(4)
         );
 
-        // And the platform-event payload surfaces the hint at the top level.
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&telemetry_event, &config, None, None, None);
-        assert_eq!(
-            platform.payload["local_reliability_hint"]["recent_abort_rate"]
-                .as_f64()
-                .unwrap_or(-1.0),
-            0.75
-        );
-        assert_eq!(
-            platform.payload["local_reliability_hint"]["sample_size"].as_i64(),
-            Some(4)
-        );
+        let received = publish_and_receive(telemetry_event);
+        let received_data: serde_json::Value =
+            serde_json::from_str(received.data.as_deref().unwrap()).unwrap();
+        assert_eq!(received_data, parsed_data);
     }
 
     #[test]
@@ -4204,6 +1654,10 @@ mod tests {
                 context: Default::default(),
             });
         bridge.drain();
+        drop(orchestrator);
+        bridge
+            .join()
+            .expect("bridge should stop before test cleanup");
 
         let mut received = None;
         for _ in 0..20 {
@@ -4328,33 +1782,6 @@ mod tests {
             recent_abort_rate: 0.0,
             sample_size: 0,
             context: xybrid_core::event_bus::EventContext::default(),
-        }
-    }
-
-    fn clear_registered_telemetry_senders() {
-        TELEMETRY_SENDERS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clear();
-    }
-
-    struct TelemetrySenderTestGuard {
-        _guard: MutexGuard<'static, ()>,
-    }
-
-    impl TelemetrySenderTestGuard {
-        fn acquire() -> Self {
-            let guard = TELEMETRY_SENDER_TEST_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            clear_registered_telemetry_senders();
-            Self { _guard: guard }
-        }
-    }
-
-    impl Drop for TelemetrySenderTestGuard {
-        fn drop(&mut self) {
-            clear_registered_telemetry_senders();
         }
     }
 
@@ -4529,10 +1956,7 @@ mod tests {
 
         publish_telemetry_event(event.clone());
 
-        // Should receive the event
-        let received = rx.recv_timeout(std::time::Duration::from_millis(100));
-        assert!(received.is_ok());
-        let received_event = received.unwrap();
+        let received_event = receive_event(&rx, "TestEvent");
         assert_eq!(received_event.event_type, "TestEvent");
     }
 
@@ -4558,545 +1982,13 @@ mod tests {
             timestamp_ms: 0,
         };
 
-        dispatch_telemetry_event_with_optout(event, true);
+        dispatch_telemetry_event_with_optout(event.clone(), true);
 
         assert!(
-            rx.try_recv().is_err(),
+            !rx.try_iter().any(|received| {
+                received.event_type == event.event_type && received.stage_name == event.stage_name
+            }),
             "XYBRID_TELEMETRY_OPTOUT must suppress VLM inference events entirely"
-        );
-    }
-
-    #[test]
-    fn test_telemetry_config_defaults() {
-        let config = TelemetryConfig::default();
-        assert_eq!(config.batch_size, 10);
-        assert_eq!(config.flush_interval_secs, 5);
-        assert_eq!(config.max_retries, 3);
-        assert!(config.enable_retry_queue);
-        assert!(config.auto_hardware_detection);
-        assert!(!config.capture_hostname);
-    }
-
-    #[test]
-    fn test_http_exporter_circuit_breaker_initial_state() {
-        let config = TelemetryConfig::new("https://example.com", "test-key")
-            .with_device("test-device", "test-platform");
-        let exporter = HttpTelemetryExporter::new(config);
-        assert!(!exporter.is_circuit_open());
-    }
-
-    #[test]
-    fn test_http_exporter_circuit_breaker_reset() {
-        let config = TelemetryConfig::new("https://example.com", "test-key")
-            .with_device("test-device", "test-platform");
-        let exporter = HttpTelemetryExporter::new(config);
-
-        // Manually trigger failures to open the circuit
-        for _ in 0..3 {
-            exporter.circuit.record_failure();
-        }
-        assert!(exporter.is_circuit_open());
-
-        // Reset should close it
-        exporter.reset_circuit();
-        assert!(!exporter.is_circuit_open());
-    }
-
-    #[test]
-    fn test_http_exporter_failed_queue_initial_empty() {
-        let config = TelemetryConfig::new("https://example.com", "test-key")
-            .with_device("test-device", "test-platform");
-        let exporter = HttpTelemetryExporter::new(config);
-        assert_eq!(exporter.failed_queue_size(), 0);
-        assert_eq!(exporter.dropped_count(), 0);
-    }
-
-    #[test]
-    fn ingest_counter_advances_on_channel_handoff() {
-        // The ExecutionStarted fast path waits for `ingested_count()` to grow
-        // past a pre-publish baseline so it observes THIS event's
-        // channel→buffer handoff rather than a merely non-empty buffer (which
-        // a stale, already-buffered event would satisfy immediately). Verify
-        // the counter advances exactly when an event crosses the sender
-        // channel into the buffer.
-        //
-        // batch_size is large so the handoff never auto-flushes (which would
-        // drain the buffer and attempt a network send to the invalid host).
-        let config = TelemetryConfig::new("http://example.invalid", "k").with_batch_size(1000);
-        let exporter = HttpTelemetryExporter::new(config);
-        let tx = exporter.create_sender();
-
-        assert_eq!(exporter.ingested_count(), 0, "counter starts at zero");
-
-        let baseline = exporter.ingested_count();
-        tx.send(TelemetryEvent {
-            event_type: "ExecutionStarted".to_string(),
-            stage_name: Some("chat".to_string()),
-            target: Some("device".to_string()),
-            latency_ms: None,
-            error: None,
-            data: None,
-            timestamp_ms: 1,
-        })
-        .expect("send to live handoff thread");
-
-        // Bounded wait for the background handoff thread to move it across.
-        let mut waited = Duration::ZERO;
-        while exporter.ingested_count() <= baseline && waited < Duration::from_secs(2) {
-            std::thread::sleep(Duration::from_millis(5));
-            waited += Duration::from_millis(5);
-        }
-
-        assert!(
-            exporter.ingested_count() > baseline,
-            "ingest counter must advance once the event crosses into the buffer"
-        );
-        assert_eq!(
-            exporter.buffer.lock().unwrap().len(),
-            1,
-            "event must be buffered (large batch_size, no flush)"
-        );
-    }
-
-    #[test]
-    fn test_queue_failed_events() {
-        let queue = Arc::new(Mutex::new(VecDeque::new()));
-        let dropped = Arc::new(AtomicU32::new(0));
-
-        let events = vec![PlatformEvent {
-            session_id: Uuid::new_v4(),
-            event_type: "Test".to_string(),
-            payload: serde_json::json!({}),
-            sdk_version: crate::SDK_VERSION.to_string(),
-            binding: crate::get_binding().to_string(),
-            device_id: None,
-            device_label: None,
-            platform: None,
-            app_version: None,
-            device: None,
-            timestamp: None,
-            pipeline_id: None,
-            trace_id: None,
-            correlation_id: None,
-            outcome_category: None,
-            abort_reason: None,
-            stages: None,
-        }];
-
-        queue_failed_events(events, &queue, &dropped);
-        assert_eq!(queue.lock().unwrap().len(), 1);
-        assert_eq!(dropped.load(Ordering::Relaxed), 0);
-    }
-
-    #[test]
-    fn test_is_retryable_status() {
-        assert!(is_retryable_status(429));
-        assert!(is_retryable_status(502));
-        assert!(is_retryable_status(503));
-        assert!(is_retryable_status(504));
-        assert!(!is_retryable_status(200));
-        assert!(!is_retryable_status(400));
-        assert!(!is_retryable_status(401));
-        assert!(!is_retryable_status(404));
-    }
-
-    // ------------------------------------------------------------------
-    // Device telemetry — opt-out contract + random-UUID device_id
-    //
-    // These tests cover the adversarial-review findings: auto-detection
-    // opt-out must omit both the `device` object and the auto-generated
-    // `device_id`; the default device_id must not be a hardware fingerprint.
-    // ------------------------------------------------------------------
-
-    fn sample_event() -> TelemetryEvent {
-        TelemetryEvent {
-            event_type: "TestEvent".to_string(),
-            stage_name: None,
-            target: None,
-            latency_ms: None,
-            error: None,
-            data: None,
-            timestamp_ms: 0,
-        }
-    }
-
-    #[test]
-    fn opt_out_emits_no_device_and_no_auto_id() {
-        // Start with a default config (which auto-wires `device_id` from
-        // `Device::current()`), then opt out of hardware detection without
-        // providing a label or overrides. This mirrors the `HttpTelemetryExporter::new`
-        // merge path where the strict opt-out contract clears the
-        // default-injected id.
-        let mut config =
-            TelemetryConfig::new("http://example.invalid", "k").with_auto_hardware_detection(false);
-        let profile = resolve_device_profile(&config);
-        assert!(profile.is_none(), "strict opt-out must yield None profile");
-
-        // Replicate the exporter's strict-opt-out clearing so the test covers
-        // the full emission path, not just `convert_to_platform_event`.
-        if !config.auto_hardware_detection && !config.device_id_explicit {
-            config.device_id = None;
-        }
-
-        let event =
-            convert_to_platform_event(&sample_event(), &config, profile.as_ref(), None, None);
-        let json = serde_json::to_value(&event).unwrap();
-        assert!(
-            json.get("device").is_none(),
-            "no `device` key on strict opt-out, got: {json}"
-        );
-        assert!(
-            json.get("device_id").is_none(),
-            "strict opt-out must omit `device_id` entirely, not emit null. got: {json}"
-        );
-    }
-
-    #[test]
-    fn embedded_context_overrides_flush_context() {
-        let config = TelemetryConfig::new("http://example.invalid", "k");
-        let event_pipeline_id = Uuid::new_v4();
-        let event_trace_id = Uuid::new_v4();
-        let flush_pipeline_id = Uuid::new_v4();
-        let flush_trace_id = Uuid::new_v4();
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: None,
-            target: Some("cloud".to_string()),
-            latency_ms: Some(42),
-            error: None,
-            data: Some(
-                serde_json::json!({
-                    CONTEXT_PIPELINE_ID_KEY: event_pipeline_id,
-                    CONTEXT_TRACE_ID_KEY: event_trace_id,
-                    "model_id": "deepseek-chat",
-                    "tokens_in": 100,
-                    "tokens_out": 10,
-                })
-                .to_string(),
-            ),
-            timestamp_ms: 0,
-        };
-
-        let converted = convert_to_platform_event(
-            &event,
-            &config,
-            None,
-            Some(flush_pipeline_id),
-            Some(flush_trace_id),
-        );
-
-        assert_eq!(converted.pipeline_id, Some(event_pipeline_id));
-        assert_eq!(converted.trace_id, Some(event_trace_id));
-        assert_eq!(converted.payload["model_id"], "deepseek-chat");
-        assert!(converted.payload["data"]
-            .get(CONTEXT_PIPELINE_ID_KEY)
-            .is_none());
-        assert!(converted.payload["data"]
-            .get(CONTEXT_TRACE_ID_KEY)
-            .is_none());
-    }
-
-    #[test]
-    fn extract_llm_token_counts_reads_canonical_keys() {
-        let stages = serde_json::json!({
-            "spans": [
-                { "name": "execute:preprocessing", "metadata": {} },
-                {
-                    "name": "llm_inference_with_messages",
-                    "metadata": {
-                        "tokens_in": "128",
-                        "tokens_out": "42",
-                        "tokens_generated": "42"
-                    }
-                }
-            ]
-        });
-        let (tin, tout) = extract_llm_token_counts(&stages).expect("should find llm span");
-        assert_eq!(tin, Some(128));
-        assert_eq!(tout, Some(42));
-    }
-
-    #[test]
-    fn extract_llm_token_counts_falls_back_to_openai_style_keys() {
-        let stages = serde_json::json!({
-            "spans": [{
-                "name": "llm_inference_streaming",
-                "metadata": {
-                    "prompt_tokens": "16",
-                    "completion_tokens": "64"
-                }
-            }]
-        });
-        let (tin, tout) = extract_llm_token_counts(&stages).expect("should find llm span");
-        assert_eq!(tin, Some(16));
-        assert_eq!(tout, Some(64));
-    }
-
-    #[test]
-    fn extract_llm_token_counts_returns_none_without_llm_span() {
-        let stages = serde_json::json!({
-            "spans": [
-                { "name": "execute:asr.whisper-tiny", "metadata": {} }
-            ]
-        });
-        assert!(extract_llm_token_counts(&stages).is_none());
-    }
-
-    #[test]
-    fn extract_llm_prompt_cached_tokens_picks_last_llm_span_with_value() {
-        // Mirrors the token-count extractor's last-span-wins rule: a
-        // streaming run emits a timing-only span first, then a final
-        // span with the accounting numbers. The cached-tokens hoist
-        // must read from the final span — earlier values should be
-        // shadowed when a later span has its own.
-        let stages = serde_json::json!({
-            "spans": [
-                {
-                    "name": "llm_inference_streaming",
-                    "metadata": { "ttft_ms": 120, "prompt_cached_tokens": "0" }
-                },
-                {
-                    "name": "llm_inference_with_messages",
-                    "metadata": { "tokens_in": 200, "prompt_cached_tokens": "150" }
-                }
-            ]
-        });
-        assert_eq!(extract_llm_prompt_cached_tokens(&stages), Some(150));
-    }
-
-    #[test]
-    fn extract_llm_prompt_cached_tokens_handles_numeric_value() {
-        // The runtime emits via add_metadata which always stringifies,
-        // but a future emit path or external producer might supply a
-        // raw number. Both shapes must extract correctly.
-        let stages = serde_json::json!({
-            "spans": [{
-                "name": "llm_inference_with_messages",
-                "metadata": { "prompt_cached_tokens": 96 }
-            }]
-        });
-        assert_eq!(extract_llm_prompt_cached_tokens(&stages), Some(96));
-    }
-
-    #[test]
-    fn extract_llm_prompt_cached_tokens_returns_none_when_absent() {
-        // Backends that don't track prefix reuse never emit the key —
-        // the SDK hoist must produce None so the wire payload omits the
-        // field entirely (rather than emitting a misleading 0).
-        let stages = serde_json::json!({
-            "spans": [{
-                "name": "llm_inference_with_messages",
-                "metadata": { "tokens_in": 32, "tokens_out": 96 }
-            }]
-        });
-        assert_eq!(extract_llm_prompt_cached_tokens(&stages), None);
-    }
-
-    #[test]
-    fn extract_llm_prompt_cached_tokens_ignores_non_llm_spans() {
-        // An ASR/TTS span carrying a stray `prompt_cached_tokens` would
-        // be a real bug to flag, but the extractor must not let that
-        // value leak onto the LLM hoist axis. Same LLM-span detection
-        // as the token-count extractor.
-        let stages = serde_json::json!({
-            "spans": [
-                {
-                    "name": "execute:asr.whisper-tiny",
-                    "metadata": { "prompt_cached_tokens": "999" }
-                }
-            ]
-        });
-        assert_eq!(extract_llm_prompt_cached_tokens(&stages), None);
-    }
-
-    #[test]
-    fn extract_llm_token_counts_scans_across_llm_spans() {
-        let stages = serde_json::json!({
-            "spans": [
-                {
-                    "name": "llm_inference_streaming",
-                    "metadata": { "ttft_ms": 120 }
-                },
-                {
-                    "name": "inference:qwen2.5-0.5b",
-                    "metadata": { "tokens_in": 32, "tokens_out": 96 }
-                }
-            ]
-        });
-        let (tin, tout) = extract_llm_token_counts(&stages).expect("should find llm spans");
-        assert_eq!(tin, Some(32));
-        assert_eq!(tout, Some(96));
-    }
-
-    #[test]
-    fn extract_llm_token_counts_prefers_last_authoritative_span() {
-        // Retry-like trace: three spans, each with progressively larger
-        // token counts. The authoritative totals live on the final attempt.
-        // We must NOT keep the first-seen values from span #1.
-        let stages = serde_json::json!({
-            "spans": [
-                {
-                    "name": "llm_inference_streaming",
-                    "metadata": { "tokens_in": 10, "tokens_out": 5 }
-                },
-                {
-                    "name": "llm_inference_streaming",
-                    "metadata": { "ttft_ms": 50 }
-                },
-                {
-                    "name": "llm_inference_streaming",
-                    "metadata": { "tokens_in": 128, "tokens_out": 42 }
-                }
-            ]
-        });
-        let (tin, tout) = extract_llm_token_counts(&stages).expect("should find llm spans");
-        assert_eq!(tin, Some(128), "must take last-span tokens_in, not first");
-        assert_eq!(tout, Some(42), "must take last-span tokens_out, not first");
-    }
-
-    #[test]
-    fn extract_llm_token_counts_falls_back_across_partial_spans() {
-        // Streaming-with-partial: the final span has no tokens_in but an
-        // earlier span did. The fallback must carry the earlier value
-        // through rather than drop it, since nothing later overrides it.
-        let stages = serde_json::json!({
-            "spans": [
-                {
-                    "name": "llm_inference_streaming",
-                    "metadata": { "tokens_in": 64 }
-                },
-                {
-                    "name": "llm_inference_streaming",
-                    "metadata": { "tokens_out": 256 }
-                }
-            ]
-        });
-        let (tin, tout) = extract_llm_token_counts(&stages).expect("should find llm spans");
-        assert_eq!(tin, Some(64));
-        assert_eq!(tout, Some(256));
-    }
-
-    #[test]
-    fn extract_llm_inference_string_attr_reads_backend_and_provider() {
-        // The cloud adapter writes both keys onto the inner
-        // `llm_inference` span (see `runtime_adapter::cloud::mod`).
-        // The hoist must read them through the same span-detection
-        // rule used by the token-count hoist so the two stay in sync.
-        let stages = serde_json::json!({
-            "spans": [
-                { "name": "execute:gpt-4o-mini", "metadata": {} },
-                {
-                    "name": "llm_inference",
-                    "metadata": {
-                        "backend": "cloud",
-                        "provider": "openai",
-                        "tokens_in": "120",
-                        "tokens_out": "32"
-                    }
-                }
-            ]
-        });
-        assert_eq!(
-            extract_llm_inference_string_attr(&stages, "backend").as_deref(),
-            Some("cloud")
-        );
-        assert_eq!(
-            extract_llm_inference_string_attr(&stages, "provider").as_deref(),
-            Some("openai")
-        );
-    }
-
-    #[test]
-    fn extract_llm_inference_string_attr_skips_non_llm_spans() {
-        // A non-LLM span (e.g., the outer execute span or an ASR
-        // span) carrying a `backend` key MUST NOT win — the hoist's
-        // contract is "read from the LLM span, the same one the
-        // token-count hoist reads". Otherwise a TTS/ASR backend
-        // string could spuriously land on an LLM event's payload.
-        let stages = serde_json::json!({
-            "spans": [
-                {
-                    "name": "execute:asr-whisper-tiny",
-                    "metadata": { "backend": "ort" }
-                },
-                {
-                    "name": "execute:gpt-4o-mini",
-                    "metadata": { "provider": "should-not-win" }
-                }
-            ]
-        });
-        assert!(extract_llm_inference_string_attr(&stages, "backend").is_none());
-        assert!(extract_llm_inference_string_attr(&stages, "provider").is_none());
-    }
-
-    #[test]
-    fn extract_llm_inference_string_attr_prefers_last_llm_span() {
-        // Mirror of `extract_llm_token_counts_prefers_last_authoritative_span`:
-        // a retried run emits one LLM span per attempt and the final
-        // attempt is the source of truth. Fields from earlier attempts
-        // must not leak through.
-        let stages = serde_json::json!({
-            "spans": [
-                {
-                    "name": "llm_inference",
-                    "metadata": { "backend": "cloud", "provider": "anthropic" }
-                },
-                {
-                    "name": "llm_inference",
-                    "metadata": { "backend": "cloud", "provider": "openai" }
-                }
-            ]
-        });
-        assert_eq!(
-            extract_llm_inference_string_attr(&stages, "provider").as_deref(),
-            Some("openai"),
-            "must take last-span provider, not first"
-        );
-    }
-
-    #[test]
-    fn extract_string_attr_from_any_span_reads_outer_execute_span() {
-        // Non-LLM events (ASR/TTS) carry `backend` on the outer
-        // `execute:<model>` span via `backend_label_from_template` —
-        // the LLM-gated hoist would skip it, dropping backend
-        // attribution from the wire payload. The any-span hoist must
-        // pick it up so ASR/TTS rows aren't blank in the billing column.
-        let stages = serde_json::json!({
-            "spans": [
-                {
-                    "name": "execute:wav2vec2-base-960h",
-                    "metadata": { "backend": "ort" }
-                }
-            ]
-        });
-        assert_eq!(
-            extract_string_attr_from_any_span(&stages, "backend").as_deref(),
-            Some("ort")
-        );
-    }
-
-    #[test]
-    fn extract_string_attr_from_any_span_prefers_last() {
-        // Same last-wins rule as the LLM-gated hoist, applied across
-        // any span. If both inner and outer spans carry `backend` (an
-        // LLM run that also annotates the outer `execute:` span), the
-        // last one in the array wins — matching the existing
-        // token-count hoist behaviour for retried runs.
-        let stages = serde_json::json!({
-            "spans": [
-                {
-                    "name": "execute:gpt-4o-mini",
-                    "metadata": { "backend": "first" }
-                },
-                {
-                    "name": "llm_inference",
-                    "metadata": { "backend": "second" }
-                }
-            ]
-        });
-        assert_eq!(
-            extract_string_attr_from_any_span(&stages, "backend").as_deref(),
-            Some("second")
         );
     }
 
@@ -5138,340 +2030,5 @@ mod tests {
         let event = build_model_download_event("test-model", 42, "r2", 1);
         let data: serde_json::Value = serde_json::from_str(event.data.as_deref().unwrap()).unwrap();
         assert_eq!(data["source"].as_str(), Some("r2"));
-    }
-
-    #[test]
-    fn task_field_hoists_to_payload_top_level() {
-        // INF-93: `task` is a semantic label sourced from the model
-        // bundle's `metadata.task`, written by `TemplateExecutor` onto
-        // the outer `execute:<model>` span. This test exercises the
-        // full convert path so an accidental future regression (e.g.,
-        // dropping the hoist branch) is caught without depending on
-        // the executor.
-        //
-        // `convert_to_platform_event` only runs the hoist block when
-        // global tracing is on (it would otherwise have nothing to
-        // capture from the global collector); flip it on here so the
-        // embedded-spans branch fires.
-        xybrid_core::tracing::init_tracing(true);
-        let data = serde_json::json!({
-            "spans": [
-                {
-                    "name": "execute:wav2vec2-base-960h",
-                    "metadata": { "task": "asr", "backend": "ort" }
-                }
-            ]
-        });
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("transcribe".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(420),
-            error: None,
-            data: Some(data.to_string()),
-            timestamp_ms: 1_700_000_000_000,
-        };
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-        let payload_json = serde_json::to_string(&platform.payload).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&payload_json).unwrap();
-        assert_eq!(
-            parsed["task"].as_str(),
-            Some("asr"),
-            "task must be hoisted to payload top level: {}",
-            payload_json
-        );
-    }
-
-    #[test]
-    fn quantization_field_hoists_to_payload_top_level() {
-        // INF-91: `quantization` is sourced by `TemplateExecutor` from
-        // `metadata.quantization` (or GGUF filename inference) and
-        // written onto the outer `execute:<model>` span. The hoist
-        // must surface it on the wire payload alongside `task` and
-        // `backend` so analytics rolls up
-        // `model_id × quantization` as distinct rows.
-        xybrid_core::tracing::init_tracing(true);
-        let data = serde_json::json!({
-            "spans": [
-                {
-                    "name": "execute:qwen2.5-0.5b-instruct",
-                    "metadata": { "quantization": "q4_k_m", "backend": "llamacpp" }
-                }
-            ]
-        });
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("chat".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(1_200),
-            error: None,
-            data: Some(data.to_string()),
-            timestamp_ms: 1_700_000_000_000,
-        };
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-        let parsed: serde_json::Value =
-            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
-        assert_eq!(
-            parsed["quantization"].as_str(),
-            Some("q4_k_m"),
-            "quantization must be hoisted: {}",
-            serde_json::to_string(&parsed).unwrap()
-        );
-    }
-
-    #[test]
-    fn image_preprocess_ms_hoists_to_payload_top_level() {
-        // INF-236: VLM image preprocessing is timed on the executor
-        // span tree, then hoisted so analytics and Studio can show a
-        // dedicated "Image preprocess" row without decoding the full
-        // trace detail client-side.
-        xybrid_core::tracing::init_tracing(true);
-        let data = serde_json::json!({
-            "spans": [
-                {
-                    "name": "vlm_inference_with_messages",
-                    "metadata": { "task": "vlm", "image_count": "1" }
-                },
-                {
-                    "name": "vision_encoder",
-                    "metadata": { "image_preprocess_ms": "17", "image_count": "1" }
-                }
-            ]
-        });
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("lfm2-vl-450m".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(900),
-            error: None,
-            data: Some(data.to_string()),
-            timestamp_ms: 1_700_000_000_000,
-        };
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-        let parsed: serde_json::Value =
-            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
-        assert_eq!(
-            parsed["image_preprocess_ms"].as_u64(),
-            Some(17),
-            "image_preprocess_ms must be hoisted: {}",
-            serde_json::to_string(&parsed).unwrap()
-        );
-    }
-
-    #[test]
-    fn streaming_field_hoists_to_payload_top_level() {
-        // `XybridModel::run_streaming` and the streaming-fast-path
-        // `ModelComplete` (Pipeline) both stamp `data.streaming = true`.
-        // The hoist must surface it on the wire payload's top level so
-        // the platform's Tinybird datasource can read it as a typed
-        // column for a `streaming` badge / filter on the Traces
-        // dashboard.
-        //
-        // Unlike `task` / `quantization` (which are sourced from spans),
-        // `streaming` is published directly on the event's `data` blob
-        // — no span involvement. Test exercises the convert path with a
-        // minimal `data` payload mirroring the production publish shape.
-        let data = serde_json::json!({
-            "model_id": "qwen2.5-0.5b-instruct",
-            "version": "1.0",
-            "output_type": "Text",
-            "streaming": true,
-        });
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("qwen2.5-0.5b-instruct".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(1_200),
-            error: None,
-            data: Some(data.to_string()),
-            timestamp_ms: 1_700_000_000_000,
-        };
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-        let parsed: serde_json::Value =
-            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
-        assert_eq!(
-            parsed["streaming"].as_bool(),
-            Some(true),
-            "streaming must be hoisted to payload top level: {}",
-            serde_json::to_string(&parsed).unwrap()
-        );
-    }
-
-    #[test]
-    fn image_preprocess_ms_omitted_when_span_does_not_carry_it() {
-        xybrid_core::tracing::init_tracing(true);
-        let data = serde_json::json!({
-            "spans": [
-                {
-                    "name": "llm_inference_with_messages",
-                    "metadata": { "task": "chat", "tokens_out": "12" }
-                }
-            ]
-        });
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("qwen2.5-0.5b".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(200),
-            error: None,
-            data: Some(data.to_string()),
-            timestamp_ms: 1_700_000_000_000,
-        };
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-        let parsed: serde_json::Value =
-            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
-        assert!(
-            parsed.get("image_preprocess_ms").is_none(),
-            "text-only inference must omit image_preprocess_ms: {}",
-            serde_json::to_string(&parsed).unwrap()
-        );
-    }
-
-    #[test]
-    fn streaming_field_omitted_when_data_does_not_carry_it() {
-        // Non-streaming inference events (`XybridModel::run`,
-        // non-streaming pipeline runs) don't stamp `data.streaming`.
-        // The hoist must leave the top-level key absent in that case so
-        // the platform-side column reads `NULL` (not `false`) for batch
-        // calls — preserves the three-valued logic the Tinybird
-        // datasource encodes via `Nullable(UInt8)`.
-        let data = serde_json::json!({
-            "model_id": "qwen2.5-0.5b-instruct",
-            "version": "1.0",
-            "output_type": "Text",
-        });
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("qwen2.5-0.5b-instruct".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(1_200),
-            error: None,
-            data: Some(data.to_string()),
-            timestamp_ms: 1_700_000_000_000,
-        };
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-        let parsed: serde_json::Value =
-            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
-        assert!(
-            parsed.get("streaming").is_none(),
-            "streaming must be omitted from top-level payload when absent in data: {}",
-            serde_json::to_string(&parsed).unwrap()
-        );
-    }
-
-    #[test]
-    fn task_field_omitted_when_span_does_not_carry_it() {
-        // Contract: `task` is optional / additive. A bundle without a
-        // `task` declaration must produce a payload that omits the key
-        // entirely (not an empty string). Guards against a future
-        // refactor that emits `Some("")` or `Some("unknown")`.
-        //
-        // Tracing must be enabled for the hoist branch to fire;
-        // otherwise this test would pass trivially even if the hoist
-        // were emitting a stale empty-string default.
-        xybrid_core::tracing::init_tracing(true);
-        let data = serde_json::json!({
-            "spans": [
-                {
-                    "name": "execute:custom-model",
-                    "metadata": { "backend": "ort" }
-                }
-            ]
-        });
-        let event = TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some("custom".to_string()),
-            target: Some("local".to_string()),
-            latency_ms: Some(10),
-            error: None,
-            data: Some(data.to_string()),
-            timestamp_ms: 1_700_000_000_000,
-        };
-        let config = TelemetryConfig::new("https://ingest.example.test", "sk_test_abc");
-        let platform = convert_to_platform_event(&event, &config, None, None, None);
-        let parsed: serde_json::Value =
-            serde_json::from_value(serde_json::to_value(&platform.payload).unwrap()).unwrap();
-        assert!(
-            parsed.get("task").is_none(),
-            "task must be absent (not empty string) when bundle didn't declare it: {}",
-            serde_json::to_string(&parsed).unwrap()
-        );
-    }
-
-    #[test]
-    fn opt_out_with_explicit_attribute_suppresses_device_id() {
-        // Privacy contract: opting out of hardware detection must suppress
-        // the auto-wired `device_id` even when explicit non-hardware context
-        // (labels, attributes, hostname) puts the profile back in "has
-        // context" mode. Callers who want a stable id must opt back in via
-        // `with_device(...)`.
-        let config = TelemetryConfig::new("http://example.invalid", "k")
-            .with_auto_hardware_detection(false)
-            .with_device_attribute("tailnet", "production");
-        let exporter = HttpTelemetryExporter::new(config);
-        assert!(
-            exporter.config.device_id.is_none(),
-            "opt-out + explicit attribute must suppress auto-wired device_id, got: {:?}",
-            exporter.config.device_id
-        );
-    }
-
-    #[test]
-    fn opt_out_with_explicit_with_device_preserves_id() {
-        // Inverse of the suppression test: when the caller explicitly opts
-        // back in via `with_device(...)`, the identifier must survive the
-        // opt-out clear.
-        let config = TelemetryConfig::new("http://example.invalid", "k")
-            .with_auto_hardware_detection(false)
-            .with_device("caller-supplied-id", "linux");
-        let exporter = HttpTelemetryExporter::new(config);
-        assert_eq!(
-            exporter.config.device_id.as_deref(),
-            Some("caller-supplied-id"),
-            "explicit with_device must survive opt-out clear"
-        );
-    }
-
-    #[test]
-    fn with_hardware_disables_auto_detection() {
-        let profile = DeviceProfile {
-            chip_family: Some("supplied-chip".into()),
-            ram_gb: Some(16),
-            ..Default::default()
-        };
-        let config = TelemetryConfig::new("http://example.invalid", "k").with_hardware(profile);
-        assert!(
-            !config.auto_hardware_detection,
-            "with_hardware must disable auto-detection"
-        );
-        let resolved = resolve_device_profile(&config).expect("profile present");
-        assert_eq!(resolved.chip_family.as_deref(), Some("supplied-chip"));
-        assert_eq!(resolved.ram_gb, Some(16));
-        assert!(resolved.os.is_none(), "os must stay None (opt-out honored)");
-        assert!(
-            resolved.arch.is_none(),
-            "arch must stay None (opt-out honored)"
-        );
-    }
-
-    #[test]
-    fn opt_out_with_explicit_attribute_still_emits_device() {
-        let config = TelemetryConfig::new("http://example.invalid", "k")
-            .with_auto_hardware_detection(false)
-            .with_device_attribute("tailnet", "production");
-        let profile = resolve_device_profile(&config);
-        let profile = profile.expect("explicit attribute must surface a profile");
-        assert!(profile.chip_family.is_none());
-        assert!(profile.ram_gb.is_none());
-        assert_eq!(
-            profile.custom.get("tailnet").map(String::as_str),
-            Some("production")
-        );
     }
 }

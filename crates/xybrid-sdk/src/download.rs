@@ -424,10 +424,21 @@ impl ModelDownload {
 
         let worker = Arc::clone(&download);
         let worker_id = id.clone();
+        // The caller's context and session, so the download is a span of the
+        // operation that started it rather than an orphan root.
+        let context = crate::observability::CapturedContext::capture();
         let spawned = std::thread::Builder::new()
             .name(format!("xybrid-download-{id}"))
             .spawn(move || {
+                let _context = context.enter();
                 let id = worker_id;
+                let span = crate::observability::SpanScope::start(
+                    &format!("download {id}"),
+                    vec![crate::observability::KeyValue::new(
+                        "gen_ai.request.model",
+                        id.clone(),
+                    )],
+                );
                 let publisher = Arc::clone(&worker);
                 let outcome = RegistryClient::from_env().and_then(|client| {
                     // Resolve the format exactly as `load()` does, so the
@@ -441,6 +452,7 @@ impl ModelDownload {
                         move |status| publisher.publish(status),
                     )
                 });
+                span.end(&outcome);
                 match outcome {
                     Ok(_) => worker.publish_terminal(DownloadState::Ready, None),
                     Err(SdkError::Cancelled { message }) => {

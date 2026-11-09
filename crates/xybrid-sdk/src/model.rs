@@ -10,6 +10,10 @@ use crate::cache::layout::CacheLayout;
 use crate::cache::CacheManager;
 use crate::download::{ModelDownload, MAX_IN_FLIGHT_PROGRESS_BP};
 use crate::model_registry::AutoReleasePolicy;
+use crate::observability::{
+    AttemptReason, AttemptSpec, KeyValue, Location, ObservationContext, ObservationRef,
+    RunObservation, RunStart, RunSubject, SpanScope,
+};
 use crate::registry_client::{
     registry_format_for_auto_local_backend,
     registry_format_preference_for_backend_choice_with_registry_context,
@@ -122,6 +126,17 @@ pub type SdkErrorSource = Box<dyn std::error::Error + Send + Sync>;
 pub enum SdkError {
     #[error("Model not found: {0}")]
     ModelNotFound(String),
+    /// The registry found the model, but this runtime is below its OS floor.
+    /// This is a permanent compatibility refusal, not a missing model or a
+    /// transient download failure. Tokens use the registry's `min_os` format.
+    #[error("OS_VERSION_UNSUPPORTED: model '{model_id}' on '{platform}' requires {required}, but this runtime reports {os}; {message}", required = .min_os.join(", "))]
+    OsVersionUnsupported {
+        model_id: String,
+        platform: String,
+        os: String,
+        min_os: Vec<String>,
+        message: String,
+    },
     #[error("Directory not found: {0}")]
     DirectoryNotFound(String),
     #[error("model_metadata.json not found in directory: {0}")]
@@ -215,6 +230,10 @@ pub enum SdkError {
     /// the caller just asked for.
     #[error("Cancelled: {message}")]
     Cancelled { message: String },
+    /// Telemetry was lost or its delivery could not be confirmed. Retrying
+    /// the inference would duplicate work and cannot recover these records.
+    #[error("Telemetry delivery failed: {0}")]
+    TelemetryDelivery(String),
 }
 
 /// Generates the `message`-only and `_src` (cause-chaining) constructors for
@@ -298,6 +317,7 @@ impl SdkError {
 
             // Non-retryable errors (permanent failures)
             SdkError::ModelNotFound(_) => false,
+            SdkError::OsVersionUnsupported { .. } => false,
             SdkError::DirectoryNotFound(_) => false,
             SdkError::MetadataNotFound(_) => false,
             SdkError::MetadataInvalid(_) => false,
@@ -319,6 +339,7 @@ impl SdkError {
             // Retrying a cancelled download would resume exactly what the
             // caller just stopped.
             SdkError::Cancelled { .. } => false,
+            SdkError::TelemetryDelivery(_) => false,
         }
     }
 
@@ -466,10 +487,9 @@ fn finish_tts_stream(
 /// Stamp the live-capture tag onto a telemetry-event `data` object.
 ///
 /// When `live_tag` is `Some`, inserts the flat `live_mode = true` +
-/// `frame_session_id = <uuid>` fields that `convert_to_platform_event` hoists
-/// to the wire payload top level and the dispatch funnel uses to rate-limit per
-/// session. When `None` (every non-live run), `data` is left **byte-for-byte
-/// unchanged** so the existing telemetry path is unaffected.
+/// `frame_session_id = <uuid>` fields for in-process subscribers. Exported
+/// observations carry their own frame context and trace throttling. When `None`
+/// (every non-live run), `data` is left unchanged.
 fn stamp_live_mode_tag(data: &mut serde_json::Value, live_tag: Option<&LiveModeTag>) {
     let Some(tag) = live_tag else {
         return;
@@ -619,8 +639,57 @@ fn local_reliability_hint_after_abort(
 ///
 /// Lives as a free function so unit tests can drive it directly without
 /// constructing a real [`XybridModel`].
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn dispatch_after_local<F, S>(
+    local_result: SdkResult<InferenceResult>,
+    envelope: &Envelope,
+    cloud_adapter: &dyn xybrid_core::runtime_adapter::CloudStreaming,
+    correlation_id: String,
+    model_id: &str,
+    local_tokens: u32,
+    local_latency_ms: u32,
+    local_resource_summary: Option<xybrid_core::device::ResourceUsageSummary>,
+    authority: &dyn OrchestrationAuthority,
+    policy_metrics: xybrid_core::context::DeviceMetrics,
+    signal_context: Option<SignalContext>,
+    cancellation_token: Option<CancellationToken>,
+    generation_config: Option<&GenerationConfig>,
+    on_token: &mut F,
+    on_seam: &mut S,
+) -> SdkResult<InferenceResult>
+where
+    F: FnMut(
+            xybrid_core::runtime_adapter::types::PartialToken,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+        + Send,
+    S: FnMut(SeamInfo) + Send,
+{
+    dispatch_after_local_observed(
+        None,
+        local_result,
+        envelope,
+        cloud_adapter,
+        correlation_id,
+        model_id,
+        local_tokens,
+        local_latency_ms,
+        local_resource_summary,
+        authority,
+        policy_metrics,
+        signal_context,
+        cancellation_token,
+        generation_config,
+        on_token,
+        on_seam,
+    )
+}
+
+/// [`dispatch_after_local`] recording the cloud retry as a fallback attempt
+/// of `obs`.
+#[allow(clippy::too_many_arguments)]
+fn dispatch_after_local_observed<F, S>(
+    obs: Option<&RunObservation>,
     local_result: SdkResult<InferenceResult>,
     envelope: &Envelope,
     cloud_adapter: &dyn xybrid_core::runtime_adapter::CloudStreaming,
@@ -876,7 +945,18 @@ where
             // misconfiguration, gateway 5xx, network partition, etc.) —
             // the trace would just stop after `LocalAborted` and the
             // dashboard would show no cloud activity at all.
+            let attempt = obs.map(|obs| {
+                obs.attempt(AttemptSpec {
+                    reason: AttemptReason::Fallback,
+                    location: Location::Remote,
+                    provider: None,
+                    model: Some(cloud_model_id),
+                })
+            });
             let cloud_result = cloud_adapter.execute_streaming(&cloud_envelope, cloud_callback);
+            if let Some(attempt) = attempt {
+                attempt.end_adapter(&cloud_result);
+            }
             let cloud_latency_ms = duration_millis_u32(cloud_start.elapsed());
             let cloud_token_count = cloud_tokens.load(std::sync::atomic::Ordering::SeqCst);
 
@@ -952,6 +1032,8 @@ pub struct StreamConfig {
     pub audio_ctx: Option<u32>,
     /// Path to VAD model (uses default if None)
     pub vad_model_dir: Option<String>,
+    /// Observation controls for the ASR session workflow and its decoders.
+    pub observation: Option<crate::observability::ObservationOptions>,
 }
 
 impl Default for StreamConfig {
@@ -962,6 +1044,7 @@ impl Default for StreamConfig {
             language: Some("en".to_string()),
             audio_ctx: None,
             vad_model_dir: None,
+            observation: None,
         }
     }
 }
@@ -1051,6 +1134,9 @@ impl ModelHandle {
                     "Reloading auto-released model {}",
                     self.metadata.model_id
                 );
+                // The materialization the triggering run performs next is a
+                // reload, observed as its own `load_model` operation.
+                crate::observability::mark_reload();
                 self.state = LoadState::Loaded;
                 Ok(())
             }
@@ -1609,6 +1695,7 @@ pub struct ModelLoader {
     /// Per-load auto-release override. `None` inherits the process-global
     /// default set via [`crate::set_auto_release`].
     auto_release: Option<AutoReleasePolicy>,
+    observation: Option<crate::observability::ObservationOptions>,
 }
 
 /// Copy a caller's [`GenerationConfig`] onto a cloud-bound envelope's metadata.
@@ -1712,6 +1799,21 @@ fn speculative_cloud_policy_gate(cloud_envelope: &Envelope) -> SdkResult<()> {
     }
 }
 
+/// The conversation a context run sends: the system prompt and history,
+/// without `input` when the caller already pushed it onto the context.
+fn observed_history(context: &ConversationContext, input: &Envelope) -> Vec<Envelope> {
+    let mut history: Vec<Envelope> = context.system_envelope().into_iter().cloned().collect();
+    let turns = context.history();
+    let turns = match turns.last() {
+        Some(last) if last.kind == input.kind && last.role() == input.role() => {
+            &turns[..turns.len() - 1]
+        }
+        _ => turns,
+    };
+    history.extend(turns.iter().cloned());
+    history
+}
+
 /// Emit a `ModelComplete` telemetry event for a speculative cloud serve.
 fn publish_speculative_cloud_event(model_id: &str, latency_ms: u32, streaming: bool) {
     let event = crate::telemetry::TelemetryEvent {
@@ -1729,10 +1831,7 @@ fn publish_speculative_cloud_event(model_id: &str, latency_ms: u32, streaming: b
             })
             .to_string(),
         ),
-        timestamp_ms: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0),
+        timestamp_ms: current_timestamp_millis(),
     };
     crate::telemetry::publish_telemetry_event(event);
 }
@@ -1895,7 +1994,7 @@ fn cloud_serve_batch(
     let output = CloudRuntimeAdapter::new()
         .execute(&cloud_envelope)
         .map_err(|e| sdk_execution_error("Speculative cloud execution failed", e))?;
-    let latency_ms = start.elapsed().as_millis() as u32;
+    let latency_ms = duration_millis_u32(start.elapsed());
     publish_speculative_cloud_event(model_id, latency_ms, false);
     Ok(InferenceResult::new_cloud(output, model_id, latency_ms))
 }
@@ -1928,7 +2027,7 @@ where
     let output = CloudRuntimeAdapter::new()
         .execute_streaming(&cloud_envelope, callback)
         .map_err(streaming_execution_error)?;
-    let latency_ms = start.elapsed().as_millis() as u32;
+    let latency_ms = duration_millis_u32(start.elapsed());
     publish_speculative_cloud_event(model_id, latency_ms, true);
     Ok(InferenceResult::new_cloud(output, model_id, latency_ms))
 }
@@ -1944,6 +2043,12 @@ fn cloud_api_key_present() -> bool {
 }
 
 impl ModelLoader {
+    /// Sets observation controls for this load, including its parent and session.
+    pub fn observation(mut self, options: crate::observability::ObservationOptions) -> Self {
+        self.observation = Some(options);
+        self
+    }
+
     /// Create loader from registry (recommended).
     ///
     /// Uses the registry API to resolve the model ID to the best variant
@@ -1967,6 +2072,7 @@ impl ModelLoader {
             speculative_cloud: None,
             backend_override: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -1989,6 +2095,7 @@ impl ModelLoader {
             speculative_cloud: None,
             backend_override: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -2006,6 +2113,7 @@ impl ModelLoader {
             speculative_cloud: None,
             backend_override: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -2031,6 +2139,7 @@ impl ModelLoader {
             speculative_cloud: None,
             backend_override: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -2050,6 +2159,7 @@ impl ModelLoader {
             speculative_cloud: None,
             backend_override: None,
             auto_release: None,
+            observation: None,
         })
     }
 
@@ -2086,6 +2196,7 @@ impl ModelLoader {
             speculative_cloud: None,
             backend_override: None,
             auto_release: None,
+            observation: None,
         })
     }
 
@@ -2119,6 +2230,7 @@ impl ModelLoader {
             speculative_cloud: None,
             backend_override: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -2142,6 +2254,7 @@ impl ModelLoader {
             speculative_cloud: None,
             backend_override: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -2169,6 +2282,7 @@ impl ModelLoader {
             speculative_cloud: None,
             backend_override: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -2402,8 +2516,64 @@ impl ModelLoader {
     /// # Ok(())
     /// # }
     /// ```
-    #[allow(deprecated)]
     pub fn load_with_progress<F>(&self, progress_callback: F) -> SdkResult<XybridModel>
+    where
+        F: Fn(DownloadStatus),
+    {
+        let load = crate::observability::LoadScope::start(
+            &self.observed_model_name(),
+            None,
+            self.observation.as_ref(),
+        );
+        if let ModelSource::Bundle { path } = &self.source {
+            if let Ok(metadata) = std::fs::metadata(path) {
+                load.size_bytes(metadata.len());
+            }
+        }
+        if let ModelSource::Directory { path } = &self.source {
+            load.describe_directory(&self.observed_model_name(), path);
+        }
+        let result = self.load_body(|status| {
+            if let Some(bytes) = status.total_bytes {
+                load.size_bytes(bytes);
+            }
+            progress_callback(status);
+        });
+        if let Ok(model) = &result {
+            let handle = model.handle.read().unwrap_or_else(|e| e.into_inner());
+            load.describe_directory(&model.model_id, &handle.model_dir);
+        }
+        let reference = load.end(&result);
+        result.map(|mut model| {
+            model.load_observation = reference;
+            model
+        })
+    }
+
+    /// The model a load observation names before resolution: the requested
+    /// id, a directory's declared `model_id`, or a bundle's file name.
+    fn observed_model_name(&self) -> String {
+        if let Some(id) = &self.model_id {
+            return id.clone();
+        }
+        match &self.source {
+            ModelSource::Directory { path } => {
+                std::fs::read_to_string(path.join("model_metadata.json"))
+                    .ok()
+                    .and_then(|json| serde_json::from_str::<ModelMetadata>(&json).ok())
+                    .map(|metadata| metadata.model_id)
+            }
+            ModelSource::Bundle { path } => path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_owned),
+            _ => None,
+        }
+        .unwrap_or_else(|| "model".to_owned())
+    }
+
+    #[allow(deprecated)]
+    fn load_body<F>(&self, progress_callback: F) -> SdkResult<XybridModel>
     where
         F: Fn(DownloadStatus),
     {
@@ -2473,9 +2643,13 @@ impl ModelLoader {
     pub async fn load_async(&self) -> SdkResult<XybridModel> {
         // For now, wrap the sync version. Real async would use tokio::fs and async HTTP.
         let loader = self.clone();
-        tokio::task::spawn_blocking(move || loader.load())
-            .await
-            .map_err(|e| SdkError::load_src("Task join error", e))?
+        let context = crate::observability::CapturedContext::capture();
+        tokio::task::spawn_blocking(move || {
+            let _context = context.enter();
+            loader.load()
+        })
+        .await
+        .map_err(|e| SdkError::load_src("Task join error", e))?
     }
 
     /// Load model from registry using RegistryClient.
@@ -2532,6 +2706,10 @@ impl ModelLoader {
                 Some(format) => client.resolve_with_format(id, platform, format)?,
                 None => client.resolve(id, platform)?,
             };
+            let declared_bytes = crate::registry_client::total_declared_bytes(&resolved);
+            if declared_bytes > 0 {
+                crate::observability::record_load_size(declared_bytes);
+            }
             if crate::registry_client::resolved_is_chat(&resolved) {
                 return Ok(self.load_speculative(client, id, format, resolved));
             }
@@ -2620,9 +2798,19 @@ impl ModelLoader {
         let id_owned = id.to_string();
         let thread_name = format!("speculative-download-{id_owned}");
         let backend_override = self.backend_override;
+        // The background install is its own `load_model` operation under the
+        // load that started it (it may outlive that span, which is valid).
+        let context = crate::observability::CapturedContext::capture();
         if let Err(err) = std::thread::Builder::new()
             .name(thread_name)
             .spawn(move || {
+                let _context = context.enter();
+                let load = crate::observability::LoadScope::start_with_trigger(
+                    &id_owned,
+                    None,
+                    None,
+                    "speculative_background",
+                );
                 let built = client
                     .fetch_extracted_resolved(
                         &id_owned,
@@ -2636,6 +2824,10 @@ impl ModelLoader {
                         &|status| bg_download.set_progress(status),
                     )
                     .and_then(|dir| Self::create_model_handle(&dir, backend_override));
+                if let Ok(real) = &built {
+                    load.describe_directory(&id_owned, &real.model_dir);
+                }
+                load.end(&built);
                 match built {
                     Ok(real) => {
                         *bg_handle.write().unwrap_or_else(|e| e.into_inner()) = real;
@@ -2654,10 +2846,7 @@ impl ModelLoader {
                                 latency_ms: None,
                                 error: Some(e.to_string()),
                                 data: None,
-                                timestamp_ms: std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map(|d| d.as_millis() as u64)
-                                    .unwrap_or(0),
+                                timestamp_ms: current_timestamp_millis(),
                             },
                         );
                     }
@@ -2690,6 +2879,7 @@ impl ModelLoader {
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(download),
             last_accessed,
+            load_observation: None,
         }
     }
 
@@ -2782,6 +2972,7 @@ impl ModelLoader {
         log::debug!(target: "xybrid_sdk", "Shared Hugging Face cache snapshot for '{}' at commit {}", repo, snapshot.commit);
         let shared_files =
             crate::cache::hf_shared::select_snapshot_files(&snapshot, repo, variant)?;
+        crate::observability::record_load_cache_hit(true);
         let result = (|| {
             let cache_dir = huggingface_materialized_cache_dir(
                 cache_layout,
@@ -2876,6 +3067,7 @@ impl ModelLoader {
                 let dangling = crate::cache::hf_shared::remove_dangling_files(&cache_dir);
                 if dangling == 0 {
                     log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
+                    crate::observability::record_load_cache_hit(true);
                     return self.load_from_directory(&cache_dir);
                 }
                 log::warn!(
@@ -2968,6 +3160,7 @@ impl ModelLoader {
                                 .unwrap_or(cache_dir);
                             if crate::cache::hf_shared::remove_dangling_files(&cache_dir) == 0 {
                                 log::info!(target: "xybrid_sdk", "Loading offline HuggingFace revision from cache: {}", cache_dir.display());
+                                crate::observability::record_load_cache_hit(true);
                                 return self.load_from_directory(&cache_dir);
                             }
                             log::warn!(
@@ -3027,6 +3220,7 @@ impl ModelLoader {
                         variant,
                     )?;
                     log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", materialized_dir.display());
+                    crate::observability::record_load_cache_hit(true);
                     return self.load_from_directory(&materialized_dir);
                 }
                 log::info!(
@@ -3154,6 +3348,7 @@ impl ModelLoader {
             &_progress_callback as &dyn Fn(DownloadStatus),
         );
         let mut reused_files = 0usize;
+        let mut all_files_reused = true;
         // Lazily fetched `filename -> blob hash` map for content-addressed
         // reuse; outer None = not fetched yet, inner None = fetch failed.
         let mut remote_blob_ids: Option<Option<std::collections::HashMap<String, String>>> = None;
@@ -3229,6 +3424,9 @@ impl ModelLoader {
 
             // Download file (hf-hub caches internally), then materialize it
             // (symlink on unix, copy elsewhere — avoids duplication)
+            // hf-hub does not report whether `get` downloads or reuses its
+            // own cache, so that branch cannot establish a cache miss.
+            all_files_reused = false;
             let cached_path = repo_api.get(filename).map_err(|e| {
                 SdkError::network_src(
                     format!("Failed to download '{}' from '{}'", filename, repo),
@@ -3257,6 +3455,9 @@ impl ModelLoader {
                 "Reused {}/{} files for '{}' from the shared Hugging Face cache",
                 reused_files, total_files, repo
             );
+        }
+        if all_files_reused && total_files > 0 {
+            crate::observability::record_load_cache_hit(true);
         }
 
         // Report completion
@@ -3391,6 +3592,7 @@ impl ModelLoader {
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
             last_accessed,
+            load_observation: None,
         }
     }
 
@@ -3616,6 +3818,7 @@ pub struct XybridModel {
     /// Ordering is `Relaxed`: an LRU order that is a few microseconds stale
     /// picks a slightly different victim, which is not a correctness question.
     last_accessed: Arc<AtomicU64>,
+    load_observation: Option<ObservationRef>,
 }
 
 /// Model size in MB if the bundle declares one, for LRU tie-breaking only.
@@ -3665,15 +3868,17 @@ fn publish_model_warmup_event(
             })
             .to_string(),
         ),
-        timestamp_ms: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0),
+        timestamp_ms: current_timestamp_millis(),
     };
     crate::telemetry::publish_with_resource_summary(event, resource_guard);
 }
 
 impl XybridModel {
+    /// Immutable reference to this handle's original load operation.
+    pub fn load_observation_ref(&self) -> Option<&ObservationRef> {
+        self.load_observation.as_ref()
+    }
+
     /// Get the model ID.
     pub fn model_id(&self) -> &str {
         &self.model_id
@@ -3880,11 +4085,80 @@ impl XybridModel {
         &self,
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
+        obs: &RunObservation,
     ) -> Option<SdkResult<InferenceResult>> {
-        match cloud_serve_batch(&self.model_id, envelope, config) {
+        let attempt = obs.attempt(self.speculative_attempt());
+        let result = cloud_serve_batch(&self.model_id, envelope, config);
+        attempt.end(&result);
+        match result {
             Ok(result) => Some(Ok(result)),
             Err(err) => self.after_failed_cloud_leg(err, 0),
         }
+    }
+
+    /// The speculative gateway attempt that serves a run while the local
+    /// weights download.
+    fn speculative_attempt(&self) -> AttemptSpec<'_> {
+        AttemptSpec {
+            reason: AttemptReason::Initial,
+            location: Location::Remote,
+            provider: None,
+            model: Some(&self.model_id),
+        }
+    }
+
+    /// Starts observing a run of this model on the current thread: the
+    /// logical inference span, with execution stages recorded beneath it.
+    fn observe(
+        &self,
+        input: &Envelope,
+        history: &[Envelope],
+        options: Option<&RunOptions>,
+        config: Option<&GenerationConfig>,
+        streaming: bool,
+        parent: Option<ObservationContext>,
+    ) -> RunObservation {
+        let subject = {
+            let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
+            RunSubject::from_metadata(&self.model_id, &handle.metadata)
+        };
+        RunObservation::start(RunStart {
+            subject,
+            input: Some(input),
+            history,
+            options,
+            generation: config.or_else(|| options.and_then(|o| o.generation_config.as_ref())),
+            streaming,
+            location: if self.cloud_serve() {
+                Location::Remote
+            } else {
+                Location::Local
+            },
+            parent,
+            provider: None,
+            server: None,
+        })
+    }
+
+    /// Runs the local leg. After an earlier (cloud) attempt it is recorded as
+    /// a fallback attempt of the same logical request.
+    fn local_leg(
+        &self,
+        obs: &RunObservation,
+        leg: impl FnOnce() -> SdkResult<InferenceResult>,
+    ) -> SdkResult<InferenceResult> {
+        if obs.attempt_count() == 0 {
+            return leg();
+        }
+        let attempt = obs.attempt(AttemptSpec {
+            reason: AttemptReason::Fallback,
+            location: Location::Local,
+            provider: None,
+            model: Some(&self.model_id),
+        });
+        let result = leg();
+        attempt.end(&result);
+        result
     }
 
     /// Streaming counterpart of [`Self::cloud_leg_batch`].
@@ -3893,6 +4167,7 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
         on_token: &mut F,
+        obs: &RunObservation,
     ) -> Option<SdkResult<InferenceResult>>
     where
         F: FnMut(
@@ -3901,7 +4176,10 @@ impl XybridModel {
             + Send,
     {
         let emitted = std::sync::atomic::AtomicU32::new(0);
-        match cloud_serve_streaming(&self.model_id, envelope, config, on_token, &emitted) {
+        let attempt = obs.attempt(self.speculative_attempt());
+        let result = cloud_serve_streaming(&self.model_id, envelope, config, on_token, &emitted);
+        attempt.end(&result);
+        match result {
             Ok(result) => Some(Ok(result)),
             Err(err) => {
                 self.after_failed_cloud_leg(err, emitted.load(std::sync::atomic::Ordering::SeqCst))
@@ -4177,12 +4455,24 @@ impl XybridModel {
         // its own event_type so the platform can render with a `warmup`
         // badge and default-filter it out of cost-attribution rollups.
         let start = Instant::now();
-        let resource_guard = crate::telemetry::begin_resource_run();
-        let trace_id = uuid::Uuid::new_v4();
-        let _telemetry_ctx =
-            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+        let load = {
+            let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
+            let format = RunSubject::from_metadata(&self.model_id, &handle.metadata).format;
+            crate::observability::LoadSubject::new(
+                &self.model_id,
+                format,
+                "warmup",
+                crate::observability::declared_model_size(&handle.metadata),
+            )
+        };
+        let span = SpanScope::start_loading(
+            &format!("warmup {}", self.model_id),
+            vec![KeyValue::new("gen_ai.request.model", self.model_id.clone())],
+            Some(load),
+        );
+        let resource_guard = span.begin_resources();
 
-        let event_fields = {
+        let event_fields = (|| {
             let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
             handle.ensure_runnable()?;
             let metadata = handle.metadata.clone();
@@ -4193,14 +4483,16 @@ impl XybridModel {
                 .execute(&metadata, &warmup_input, None)
                 .map_err(|e| SdkError::inference_src("Warmup execution failed", e))?;
 
-            WarmupEventFields {
+            Ok(WarmupEventFields {
                 model_id: self.model_id.clone(),
                 version: metadata.version,
                 output_type: self.output_type,
-            }
-        };
+            })
+        })();
+        span.end(&event_fields);
+        let event_fields = event_fields?;
 
-        let latency_ms = start.elapsed().as_millis() as u32;
+        let latency_ms = duration_millis_u32(start.elapsed());
         publish_model_warmup_event(event_fields, latency_ms, resource_guard);
 
         log::info!(
@@ -4238,82 +4530,11 @@ impl XybridModel {
     /// # }
     /// ```
     pub async fn warmup_async(&self) -> SdkResult<()> {
-        self.touch();
-        let handle = self.handle.clone();
-        let model_id = self.model_id.clone();
-        let output_type = self.output_type;
-        let supports_streaming = self.supports_streaming;
-        let is_llm = self.is_llm();
-        let fixed_choices = self.fixed_choices();
-
+        let model = self.clone();
+        let context = crate::observability::CapturedContext::capture();
         tokio::task::spawn_blocking(move || {
-            log::info!(target: "xybrid_sdk", "Warming up model (async): {}", model_id);
-
-            // Create a minimal input based on expected input type
-            let warmup_input = match output_type {
-                OutputType::ChoiceScores => choice_warmup_request(&fixed_choices),
-                OutputType::Audio => Envelope {
-                    kind: EnvelopeKind::Text("Hi".to_string()),
-                    metadata: std::collections::HashMap::new(),
-                },
-                OutputType::Text if supports_streaming && !is_llm => {
-                    let silence_samples = vec![0i16; 16000];
-                    let audio_bytes = Self::create_wav_bytes(&silence_samples, 16000);
-                    Envelope {
-                        kind: EnvelopeKind::Audio(audio_bytes),
-                        metadata: std::collections::HashMap::new(),
-                    }
-                }
-                OutputType::Text | OutputType::Embedding | OutputType::Unknown => Envelope {
-                    kind: EnvelopeKind::Text("Hi".to_string()),
-                    metadata: std::collections::HashMap::new(),
-                },
-            };
-
-            // See sync `warmup()` for rationale — cap LLM decoding at
-            // 1 token so warmup doesn't run a full generation.
-            let warmup_input = cap_warmup_generation(warmup_input);
-
-            let start = Instant::now();
-            let resource_guard = crate::telemetry::begin_resource_run();
-            let trace_id = uuid::Uuid::new_v4();
-            let _telemetry_ctx =
-                crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
-
-            // Run inference inline and publish a `ModelWarmup` event —
-            // same shape as the sync `warmup()` above. Previously this
-            // path published nothing at all, so async warmups were
-            // silent on the wire (visible only via logs).
-            let event_fields = {
-                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
-                guard.ensure_runnable()?;
-
-                let metadata = guard.metadata.clone();
-                guard
-                    .executor
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .execute(&metadata, &warmup_input, None)
-                    .map_err(|e| SdkError::inference_src("Warmup failed", e))?;
-
-                WarmupEventFields {
-                    model_id: model_id.clone(),
-                    version: metadata.version,
-                    output_type,
-                }
-            };
-
-            let latency_ms = start.elapsed().as_millis() as u32;
-            publish_model_warmup_event(event_fields, latency_ms, resource_guard);
-
-            log::info!(
-                target: "xybrid_sdk",
-                "Model {} warmed up (async) in {}ms",
-                model_id,
-                latency_ms
-            );
-
-            Ok(())
+            let _context = context.enter();
+            model.warmup()
         })
         .await
         .map_err(|e| SdkError::inference_src("Task join error", e))?
@@ -4365,73 +4586,83 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
+        self.run_observed(envelope, config, None, None)
+    }
+
+    /// [`Self::run`] with per-run options and a parent context captured
+    /// before a hop to a blocking worker.
+    fn run_observed(
+        &self,
+        envelope: &Envelope,
+        config: Option<&GenerationConfig>,
+        options: Option<&RunOptions>,
+        parent: Option<ObservationContext>,
+    ) -> SdkResult<InferenceResult> {
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
         self.guard_input(envelope, EntryPoint::Batch)?;
+        let obs = self.observe(envelope, &[], options, config, false, parent);
+        let result = self.run_body(envelope, config, &obs);
+        obs.finish(result)
+    }
 
+    fn run_body(
+        &self,
+        envelope: &Envelope,
+        config: Option<&GenerationConfig>,
+        obs: &RunObservation,
+    ) -> SdkResult<InferenceResult> {
         // Speculative cloud: serve from the gateway until the local handle is
         // ready (see `cloud_serve`).
         if self.cloud_serve() {
-            if let Some(result) = self.cloud_leg_batch(envelope, config) {
+            if let Some(result) = self.cloud_leg_batch(envelope, config, obs) {
                 return result;
             }
             // Cloud failed but the download landed — run locally below.
         }
-        let start = Instant::now();
-        // Begin a resource-telemetry scope for this run. When
-        // `resource_telemetry_mode()` is `Off` the guard is a no-op; otherwise
-        // it captures start snapshots (and launches a sampler for Summary /
-        // DebugLocal). Summary is produced by
-        // `publish_with_resource_summary` at the end of this function.
-        let resource_guard = crate::telemetry::begin_resource_run();
+        self.local_leg(obs, || {
+            let start = Instant::now();
+            // Resource-telemetry scope for this run, sampled with the mode of
+            // its session; a no-op guard when that mode is `Off`.
+            let resource_guard = obs.begin_resources();
 
-        // Install a per-call trace_id for the lifetime of this run. Any
-        // telemetry events emitted between install and `Drop` (including
-        // any deferred adapter events) share the same `trace_id`, so the
-        // dashboard collapses them to a single Traces row. Same
-        // discipline `run_with_context` uses; see `docs/sdk/trace-model.md`.
-        let trace_id = uuid::Uuid::new_v4();
-        let _telemetry_ctx =
-            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+            // Recover from poisoned RwLock to prevent permanent lock errors
+            let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
-        // Recover from poisoned RwLock to prevent permanent lock errors
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+            handle.ensure_runnable()?;
 
-        handle.ensure_runnable()?;
+            // Clone metadata to avoid borrow conflict with executor
+            let metadata = handle.metadata.clone();
+            let output = handle
+                .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .execute(&metadata, envelope, config)
+                .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
-        // Clone metadata to avoid borrow conflict with executor
-        let metadata = handle.metadata.clone();
-        let output = handle
-            .executor
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .execute(&metadata, envelope, config)
-            .map_err(|e| sdk_execution_error("Execution failed", e))?;
+            let latency_ms = duration_millis_u32(start.elapsed());
 
-        let latency_ms = duration_millis_u32(start.elapsed());
+            // Emit ModelComplete telemetry event
+            let mut data = serde_json::json!({
+                "model_id": self.model_id,
+                "version": self.version,
+                "output_type": format!("{:?}", self.output_type),
+            });
+            add_choice_telemetry(&mut data, &metadata, &output);
+            let event = crate::telemetry::TelemetryEvent {
+                event_type: "ModelComplete".to_string(),
+                stage_name: Some(self.model_id.clone()),
+                target: Some("local".to_string()),
+                latency_ms: Some(latency_ms),
+                error: None,
+                data: Some(data.to_string()),
+                timestamp_ms: current_timestamp_millis(),
+            };
+            let summary = crate::telemetry::publish_with_resource_summary(event, resource_guard);
+            obs.resource(summary.as_ref());
 
-        // Emit ModelComplete telemetry event
-        let mut data = serde_json::json!({
-            "model_id": self.model_id,
-            "version": self.version,
-            "output_type": format!("{:?}", self.output_type),
-        });
-        add_choice_telemetry(&mut data, &metadata, &output);
-        let event = crate::telemetry::TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some(self.model_id.clone()),
-            target: Some("local".to_string()),
-            latency_ms: Some(latency_ms),
-            error: None,
-            data: Some(data.to_string()),
-            timestamp_ms: current_timestamp_millis(),
-        };
-        crate::telemetry::publish_with_resource_summary(event, resource_guard);
-
-        // `_telemetry_ctx` drops here, clearing the pipeline context after
-        // the publish — same ordering as `run_with_context`.
-
-        Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+            Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+        })
     }
 
     /// Deliver owned PCM16 audio packets during synthesis.
@@ -4458,8 +4689,27 @@ impl XybridModel {
         &self,
         envelope: &Envelope,
         options: &RunOptions,
+        on_chunk: F,
+    ) -> SdkResult<crate::result::TtsStreamResult>
+    where
+        F: FnMut(xybrid_core::execution::TtsAudioChunk) -> bool,
+    {
+        self.run_tts_streaming_observed(envelope, options, on_chunk)
+            .map(|(summary, observation)| crate::result::TtsStreamResult {
+                summary,
+                observation,
+            })
+    }
+
+    fn run_tts_streaming_observed<F>(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
         mut on_chunk: F,
-    ) -> SdkResult<xybrid_core::execution::TtsStreamResult>
+    ) -> SdkResult<(
+        xybrid_core::execution::TtsStreamResult,
+        Option<ObservationRef>,
+    )>
     where
         F: FnMut(xybrid_core::execution::TtsAudioChunk) -> bool,
     {
@@ -4476,7 +4726,7 @@ impl XybridModel {
             .as_ref()
             .is_some_and(CancellationToken::is_cancelled)
         {
-            return Ok(cancelled_result());
+            return Ok((cancelled_result(), None));
         }
         let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
         let mut abort_state = AbortState::new(options);
@@ -4486,109 +4736,130 @@ impl XybridModel {
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
         self.guard_input(envelope, EntryPoint::Streaming)?;
-        let start = Instant::now();
-        let resource_guard = crate::telemetry::begin_resource_run();
-        let trace_id = uuid::Uuid::new_v4();
-        let _telemetry_ctx =
-            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+        let obs = self.observe(envelope, &[], Some(options), None, true, None);
+        let chunks = obs.chunk_sink();
+        let result = (|| {
+            let start = Instant::now();
+            let resource_guard = obs.begin_resources();
 
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
-        if options
-            .cancellation_token
-            .as_ref()
-            .is_some_and(CancellationToken::is_cancelled)
-        {
-            return Ok(cancelled_result());
-        }
-        abort_state
-            .check_before_run()
-            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
-        handle.ensure_runnable()?;
-        let metadata = handle.metadata.clone();
+            let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+            if options
+                .cancellation_token
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Ok(cancelled_result());
+            }
+            abort_state
+                .check_before_run()
+                .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
+            handle.ensure_runnable()?;
+            let metadata = handle.metadata.clone();
 
-        // The watcher and packet callback share policy state, independently of
-        // the model lock. Retain the reason that actually stopped synthesis so
-        // a resource abort cannot be mistaken for user cancellation or success.
-        let abort_state = Mutex::new((abort_state, None));
-        let cancel = options.cancellation_token.clone();
-        let should_stop = |before_packet: bool| {
-            if cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
-                return true;
-            }
-            let mut guard = abort_state.lock().unwrap_or_else(|e| e.into_inner());
-            let (state, stopped_reason) = &mut *guard;
-            if stopped_reason.is_some() {
-                return true;
-            }
-            let check = if before_packet {
-                state.check_before_token()
-            } else {
-                state.check_during_compute()
+            // The watcher and packet callback share policy state, independently of
+            // the model lock. Retain the reason that actually stopped synthesis so
+            // a resource abort cannot be mistaken for user cancellation or success.
+            let abort_state = Mutex::new((abort_state, None));
+            let cancel = options.cancellation_token.clone();
+            let should_stop = |before_packet: bool| {
+                if cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
+                    return true;
+                }
+                let mut guard = abort_state.lock().unwrap_or_else(|e| e.into_inner());
+                let (state, stopped_reason) = &mut *guard;
+                if stopped_reason.is_some() {
+                    return true;
+                }
+                let check = if before_packet {
+                    state.check_before_token()
+                } else {
+                    state.check_during_compute()
+                };
+                if let Err(reason) = check {
+                    *stopped_reason = Some(reason);
+                    return true;
+                }
+                false
             };
-            if let Err(reason) = check {
-                *stopped_reason = Some(reason);
-                return true;
+            let mut delivery_cancelled = false;
+            let mut adapter = |packet: xybrid_core::execution::TtsAudioChunk| -> bool {
+                if should_stop(true) {
+                    return false;
+                }
+                chunks.chunk();
+                // Release the abort-state lock before calling consumer code.
+                let keep_going = on_chunk(packet);
+                delivery_cancelled |= !keep_going;
+                // A user cancel issued from the final callback must still stop
+                // delivery even when the backend performs no further policy poll.
+                keep_going && !cancel.as_ref().is_some_and(CancellationToken::is_cancelled)
+            };
+
+            let summary = handle
+                .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .execute_tts_streaming_with_config(
+                    &metadata,
+                    envelope,
+                    options.generation_config.as_ref(),
+                    &|| should_stop(false),
+                    &mut adapter,
+                );
+            let (_, stopped_reason) = abort_state.into_inner().unwrap_or_else(|e| e.into_inner());
+            let summary = finish_tts_stream(
+                summary,
+                stopped_reason,
+                fallback_to_cloud,
+                delivery_cancelled || cancel.as_ref().is_some_and(CancellationToken::is_cancelled),
+            )?;
+
+            let latency_ms = duration_millis_u32(start.elapsed());
+            let event = crate::telemetry::TelemetryEvent {
+                event_type: "ModelComplete".to_string(),
+                stage_name: Some(self.model_id.clone()),
+                target: Some("local".to_string()),
+                latency_ms: Some(latency_ms),
+                error: None,
+                data: Some(
+                    serde_json::json!({
+                        "model_id": self.model_id,
+                        "version": self.version,
+                        "output_type": format!("{:?}", self.output_type),
+                        "streaming": true,
+                        "tts_status": format!("{:?}", summary.status).to_lowercase(),
+                        "limited_chunks": summary.limited_chunks,
+                    })
+                    .to_string(),
+                ),
+                timestamp_ms: current_timestamp_millis(),
+            };
+            let resources = crate::telemetry::publish_with_resource_summary(event, resource_guard);
+            obs.resource(resources.as_ref());
+
+            Ok(summary)
+        })();
+        match result {
+            Ok(summary) => {
+                obs.operation().set_attribute(KeyValue::new(
+                    "xybrid.tts.status",
+                    format!("{:?}", summary.status).to_lowercase(),
+                ));
+                obs.operation().set_attribute(KeyValue::new(
+                    "xybrid.tts.chunks",
+                    i64::from(summary.chunks),
+                ));
+                if summary.status == xybrid_core::execution::TtsStatus::Cancelled {
+                    Ok((summary, obs.cancel()))
+                } else {
+                    Ok((summary, obs.succeed_without_output()))
+                }
             }
-            false
-        };
-        let mut delivery_cancelled = false;
-        let mut adapter = |packet: xybrid_core::execution::TtsAudioChunk| -> bool {
-            if should_stop(true) {
-                return false;
+            Err(e) => {
+                obs.fail(&e);
+                Err(e)
             }
-            // Release the abort-state lock before calling consumer code.
-            let keep_going = on_chunk(packet);
-            delivery_cancelled |= !keep_going;
-            // A user cancel issued from the final callback must still stop
-            // delivery even when the backend performs no further policy poll.
-            keep_going && !cancel.as_ref().is_some_and(CancellationToken::is_cancelled)
-        };
-
-        let summary = handle
-            .executor
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .execute_tts_streaming_with_config(
-                &metadata,
-                envelope,
-                options.generation_config.as_ref(),
-                &|| should_stop(false),
-                &mut adapter,
-            );
-        let (_, stopped_reason) = abort_state.into_inner().unwrap_or_else(|e| e.into_inner());
-        let summary = finish_tts_stream(
-            summary,
-            stopped_reason,
-            fallback_to_cloud,
-            delivery_cancelled || cancel.as_ref().is_some_and(CancellationToken::is_cancelled),
-        )?;
-
-        let latency_ms = start.elapsed().as_millis() as u32;
-        let event = crate::telemetry::TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some(self.model_id.clone()),
-            target: Some("local".to_string()),
-            latency_ms: Some(latency_ms),
-            error: None,
-            data: Some(
-                serde_json::json!({
-                    "model_id": self.model_id,
-                    "version": self.version,
-                    "output_type": format!("{:?}", self.output_type),
-                    "streaming": true,
-                    "tts_status": format!("{:?}", summary.status).to_lowercase(),
-                    "limited_chunks": summary.limited_chunks,
-                })
-                .to_string(),
-            ),
-            timestamp_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0),
-        };
-        crate::telemetry::publish_with_resource_summary(event, resource_guard);
-
-        Ok(summary)
+        }
     }
 
     /// Synthesize on a blocking worker, delivering owned audio packets.
@@ -4597,16 +4868,20 @@ impl XybridModel {
         envelope: &Envelope,
         options: &RunOptions,
         on_chunk: F,
-    ) -> SdkResult<xybrid_core::execution::TtsStreamResult>
+    ) -> SdkResult<crate::result::TtsStreamResult>
     where
         F: FnMut(xybrid_core::execution::TtsAudioChunk) -> bool + Send + 'static,
     {
         let model = self.clone();
         let envelope = envelope.clone();
         let options = options.clone();
-        tokio::task::spawn_blocking(move || model.run_tts_streaming(&envelope, &options, on_chunk))
-            .await
-            .map_err(|e| SdkError::inference_src("TTS worker failed", e))?
+        let context = crate::observability::CapturedContext::capture();
+        tokio::task::spawn_blocking(move || {
+            let _context = context.enter();
+            model.run_tts_streaming(&envelope, &options, on_chunk)
+        })
+        .await
+        .map_err(|e| SdkError::inference_src("TTS worker failed", e))?
     }
 
     /// Run batch inference with per-run controls.
@@ -4632,20 +4907,27 @@ impl XybridModel {
             if is_zzz {
                 let start = Instant::now();
                 let mut pcm = Vec::new();
-                let summary = self.run_tts_streaming(envelope, options, |packet| {
-                    pcm.extend(packet.pcm);
-                    true
-                })?;
+                let (summary, observation) =
+                    self.run_tts_streaming_observed(envelope, options, |packet| {
+                        pcm.extend(packet.pcm);
+                        true
+                    })?;
                 let mut output = summary.into_envelope();
                 output.kind = xybrid_core::ir::EnvelopeKind::Audio(pcm);
                 return Ok(InferenceResult::new(
                     output,
                     &self.model_id,
                     start.elapsed().as_millis() as u32,
-                ));
+                )
+                .with_observation(observation));
             }
         }
-        self.run(envelope, options.generation_config.as_ref())
+        self.run_observed(
+            envelope,
+            options.generation_config.as_ref(),
+            Some(options),
+            None,
+        )
     }
 
     /// Run inference with conversation context.
@@ -4697,72 +4979,77 @@ impl XybridModel {
         context: &ConversationContext,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
+        self.run_with_context_observed(envelope, context, config, None)
+    }
+
+    fn run_with_context_observed(
+        &self,
+        envelope: &Envelope,
+        context: &ConversationContext,
+        config: Option<&GenerationConfig>,
+        options: Option<&RunOptions>,
+    ) -> SdkResult<InferenceResult> {
         self.touch();
         self.guard_context_input(envelope, context, EntryPoint::Conversation)?;
-
-        // Speculative cloud: serve from the gateway until the local handle is
-        // ready. The gateway leg is stateless — `context` is not replayed (the
-        // reactive fallback behaves the same) — full history resumes once the
-        // local model takes over.
-        if self.cloud_serve() {
-            if let Some(result) = self.cloud_leg_batch(envelope, config) {
-                return result;
+        let history = observed_history(context, envelope);
+        let obs = self.observe(envelope, &history, options, config, false, None);
+        let result = (|| {
+            // Speculative cloud: serve from the gateway until the local handle
+            // is ready. The gateway leg is stateless — `context` is not
+            // replayed (the reactive fallback behaves the same) — full history
+            // resumes once the local model takes over.
+            if self.cloud_serve() {
+                if let Some(result) = self.cloud_leg_batch(envelope, config, &obs) {
+                    return result;
+                }
+                // Cloud failed but the download landed — run locally below.
             }
-            // Cloud failed but the download landed — run locally below.
-        }
-        let start = Instant::now();
-        let resource_guard = crate::telemetry::begin_resource_run();
+            self.local_leg(&obs, || {
+                let start = Instant::now();
+                let resource_guard = obs.begin_resources();
 
-        // Install a turn-scoped trace_id for the lifetime of this call.
-        // The guard's `Drop` clears the pipeline context on every exit —
-        // including the `?` error paths and panics below — so every
-        // telemetry event emitted between install and drop shares the
-        // same `trace_id` and the dashboard collapses the turn to one
-        // Traces row. Same discipline `Pipeline::run` uses for stages.
-        let trace_id = uuid::Uuid::new_v4();
-        let _telemetry_ctx =
-            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+                // Recover from poisoned RwLock to prevent permanent lock errors
+                let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
-        // Recover from poisoned RwLock to prevent permanent lock errors
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+                handle.ensure_runnable()?;
 
-        handle.ensure_runnable()?;
+                // Clone metadata to avoid borrow conflict with executor
+                let metadata = handle.metadata.clone();
+                let output = handle
+                    .executor
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .execute_with_context(&metadata, envelope, context, config)
+                    .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
-        // Clone metadata to avoid borrow conflict with executor
-        let metadata = handle.metadata.clone();
-        let output = handle
-            .executor
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .execute_with_context(&metadata, envelope, context, config)
-            .map_err(|e| sdk_execution_error("Execution failed", e))?;
+                let latency_ms = duration_millis_u32(start.elapsed());
 
-        let latency_ms = duration_millis_u32(start.elapsed());
+                // Emit ModelComplete telemetry event
+                let event = crate::telemetry::TelemetryEvent {
+                    event_type: "ModelComplete".to_string(),
+                    stage_name: Some(self.model_id.clone()),
+                    target: Some("local".to_string()),
+                    latency_ms: Some(latency_ms),
+                    error: None,
+                    data: Some(
+                        serde_json::json!({
+                            "model_id": self.model_id,
+                            "version": self.version,
+                            "output_type": format!("{:?}", self.output_type),
+                            "context_messages": context.history().len(),
+                        })
+                        .to_string(),
+                    ),
+                    timestamp_ms: current_timestamp_millis(),
+                };
+                let summary =
+                    crate::telemetry::publish_with_resource_summary(event, resource_guard);
+                obs.resource(summary.as_ref());
 
-        // Emit ModelComplete telemetry event
-        let event = crate::telemetry::TelemetryEvent {
-            event_type: "ModelComplete".to_string(),
-            stage_name: Some(self.model_id.clone()),
-            target: Some("local".to_string()),
-            latency_ms: Some(latency_ms),
-            error: None,
-            data: Some(
-                serde_json::json!({
-                    "model_id": self.model_id,
-                    "version": self.version,
-                    "output_type": format!("{:?}", self.output_type),
-                    "context_messages": context.history().len(),
-                })
-                .to_string(),
-            ),
-            timestamp_ms: current_timestamp_millis(),
-        };
-        crate::telemetry::publish_with_resource_summary(event, resource_guard);
-
-        // `_telemetry_ctx` drops here (and on every early return / unwind
-        // above), clearing the pipeline context after the publish.
-
-        Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+                Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+            })
+        })();
+        obs.finish(result)
     }
 
     /// Run inference with conversation context and per-run controls.
@@ -4776,7 +5063,12 @@ impl XybridModel {
         abort_state
             .check_before_run()
             .map_err(|reason| SdkError::inference(format!("Execution aborted: {reason}")))?;
-        self.run_with_context(envelope, context, options.generation_config.as_ref())
+        self.run_with_context_observed(
+            envelope,
+            context,
+            options.generation_config.as_ref(),
+            Some(options),
+        )
     }
 
     /// Run streaming inference with conversation context.
@@ -4832,15 +5124,64 @@ impl XybridModel {
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
-        // No live-capture tag on the bare context streaming path.
         self.run_streaming_with_context_tagged(envelope, context, config, None, on_token)
     }
 
-    /// Internal context-streaming entry point that optionally stamps a
-    /// live-capture telemetry tag onto the emitted `ModelComplete` event. See
-    /// [`Self::run_streaming_tagged`] for the rationale; this is the
-    /// conversation-context variant.
+    /// Internal context-streaming entry point. `options` (from the
+    /// options-aware entry points) carries observation controls and the
+    /// live-capture tag stamped onto the emitted `ModelComplete` event.
     fn run_streaming_with_context_tagged<F>(
+        &self,
+        envelope: &Envelope,
+        context: &ConversationContext,
+        config: Option<&GenerationConfig>,
+        options: Option<&RunOptions>,
+        mut on_token: F,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        self.touch();
+        self.guard_context_input(envelope, context, EntryPoint::Streaming)?;
+        let history = observed_history(context, envelope);
+        let obs = self.observe(envelope, &history, options, config, true, None);
+        let chunks = obs.chunk_sink();
+        let mut on_token = move |token| {
+            chunks.chunk();
+            on_token(token)
+        };
+        let result = (|| {
+            // Speculative cloud: stream from the gateway until the local
+            // handle is ready. The gateway leg is stateless (`context` not
+            // replayed, matching the reactive fallback); full history resumes
+            // once local takes over.
+            if self.cloud_serve() {
+                if let Some(result) =
+                    self.cloud_leg_streaming(envelope, config, &mut on_token, &obs)
+                {
+                    return result;
+                }
+                // Cloud failed before emitting a token but the download
+                // landed — stream locally below.
+            }
+            let live_tag = options.and_then(RunOptions::live_mode_tag);
+            self.local_leg(&obs, || {
+                self.stream_with_context_local(
+                    envelope,
+                    context,
+                    config,
+                    live_tag.as_ref(),
+                    &mut on_token,
+                )
+            })
+        })();
+        obs.finish(result)
+    }
+
+    fn stream_with_context_local<F>(
         &self,
         envelope: &Envelope,
         context: &ConversationContext,
@@ -4856,28 +5197,7 @@ impl XybridModel {
     {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
-        self.touch();
-        self.guard_context_input(envelope, context, EntryPoint::Streaming)?;
-
-        // Speculative cloud: stream from the gateway until the local handle is
-        // ready. The gateway leg is stateless (`context` not replayed, matching
-        // the reactive fallback); full history resumes once local takes over.
-        if self.cloud_serve() {
-            if let Some(result) = self.cloud_leg_streaming(envelope, config, &mut on_token) {
-                return result;
-            }
-            // Cloud failed before emitting a token but the download landed —
-            // stream locally below.
-        }
-
         let start = Instant::now();
-
-        // RAII pipeline context — see `run_with_context` for rationale.
-        // Cleared on drop at end of scope (after publish) or on any
-        // early return / unwind below.
-        let trace_id = uuid::Uuid::new_v4();
-        let _telemetry_ctx =
-            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -4981,12 +5301,11 @@ impl XybridModel {
         abort_state
             .check_before_run()
             .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
-        let live_tag = options.live_mode_tag();
         self.run_streaming_with_context_tagged(
             envelope,
             context,
             options.generation_config.as_ref(),
-            live_tag.as_ref(),
+            Some(options),
             move |token| {
                 if let Err(reason) = abort_state.check_before_token() {
                     return Err(reason.into_streaming_error(fallback_to_cloud));
@@ -5046,20 +5365,69 @@ impl XybridModel {
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
-        // No live-capture tag on the bare `run_streaming` path — telemetry is
-        // byte-for-byte the pre-live-mode shape.
         self.run_streaming_tagged(envelope, config, None, on_token)
     }
 
-    /// Internal streaming entry point that optionally stamps a live-capture
-    /// telemetry tag onto the emitted `ModelComplete` event.
-    ///
-    /// `run_streaming` delegates here with `live_tag = None` (unchanged wire
-    /// payload). The options-aware streaming entry points pass
-    /// `RunOptions::live_mode_tag()` so live-capture sessions carry
-    /// `live_mode` + `frame_session_id` on the wire, which the telemetry
-    /// dispatch funnel then rate-limits per session.
+    /// Internal streaming entry point. `options` (from the options-aware
+    /// entry points) carries observation controls and the live-capture tag
+    /// stamped onto the emitted `ModelComplete` event.
     fn run_streaming_tagged<F>(
+        &self,
+        envelope: &Envelope,
+        config: Option<&GenerationConfig>,
+        options: Option<&RunOptions>,
+        mut on_token: F,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        self.touch();
+        self.guard_input(envelope, EntryPoint::Streaming)?;
+        let obs = self.observe(envelope, &[], options, config, true, None);
+        let chunks = obs.chunk_sink();
+        let mut on_token = move |token| {
+            chunks.chunk();
+            on_token(token)
+        };
+        let result = self.stream_body(envelope, config, options, &obs, &mut on_token);
+        obs.finish(result)
+    }
+
+    /// Streaming run body under an existing observation: the speculative
+    /// cloud leg when the weights are still downloading, else local.
+    fn stream_body<F>(
+        &self,
+        envelope: &Envelope,
+        config: Option<&GenerationConfig>,
+        options: Option<&RunOptions>,
+        obs: &RunObservation,
+        on_token: &mut F,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        // Speculative cloud: stream from the gateway until the local handle is
+        // ready (see `cloud_serve`).
+        if self.cloud_serve() {
+            if let Some(result) = self.cloud_leg_streaming(envelope, config, on_token, obs) {
+                return result;
+            }
+            // Cloud failed before emitting a token but the download landed —
+            // stream locally below.
+        }
+        let live_tag = options.and_then(RunOptions::live_mode_tag);
+        self.local_leg(obs, || {
+            self.stream_local(envelope, config, live_tag.as_ref(), on_token)
+        })
+    }
+
+    fn stream_local<F>(
         &self,
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
@@ -5074,26 +5442,7 @@ impl XybridModel {
     {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
-        self.touch();
-        self.guard_input(envelope, EntryPoint::Streaming)?;
-
-        // Speculative cloud: stream from the gateway until the local handle is
-        // ready (see `cloud_serve`).
-        if self.cloud_serve() {
-            if let Some(result) = self.cloud_leg_streaming(envelope, config, &mut on_token) {
-                return result;
-            }
-            // Cloud failed before emitting a token but the download landed —
-            // stream locally below.
-        }
-
         let start = Instant::now();
-
-        // Per-call trace_id scope — see `run` for rationale. Cleared on
-        // drop at end of scope (after publish) or on any early return.
-        let trace_id = uuid::Uuid::new_v4();
-        let _telemetry_ctx =
-            crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -5193,16 +5542,57 @@ impl XybridModel {
         abort_state
             .check_before_run()
             .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
-        let live_tag = options.live_mode_tag();
         self.run_streaming_tagged(
             envelope,
             options.generation_config.as_ref(),
-            live_tag.as_ref(),
+            Some(options),
             move |token| {
                 check_abort_for_streaming(supports_streaming, &mut abort_state, fallback_to_cloud)?;
                 on_token(token)
             },
         )
+    }
+
+    /// The local leg of [`Self::run_streaming_with_fallback`]: the same abort
+    /// checks as [`Self::run_streaming_with_options`], recorded as the first
+    /// attempt of `obs` instead of a run of its own.
+    fn fallback_local_leg<F>(
+        &self,
+        envelope: &Envelope,
+        options: &RunOptions,
+        obs: &RunObservation,
+        mut on_token: F,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        let supports_streaming = self.supports_streaming;
+        let mut abort_state = AbortState::new(options);
+        let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
+        abort_state
+            .check_before_run()
+            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
+        let mut on_token = move |token| {
+            check_abort_for_streaming(supports_streaming, &mut abort_state, fallback_to_cloud)?;
+            on_token(token)
+        };
+        let config = options.generation_config.as_ref();
+        if self.cloud_serve() {
+            return self.stream_body(envelope, config, Some(options), obs, &mut on_token);
+        }
+        let attempt = obs.attempt(AttemptSpec {
+            reason: AttemptReason::Initial,
+            location: Location::Local,
+            provider: None,
+            model: Some(&self.model_id),
+        });
+        let live_tag = options.live_mode_tag();
+        let result = self.stream_local(envelope, config, live_tag.as_ref(), &mut on_token);
+        attempt.end(&result);
+        result
     }
 
     /// Swap `token` into the preemptive cancel-and-replace slot and cancel the
@@ -5416,13 +5806,20 @@ impl XybridModel {
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
+        let obs = self.observe(envelope, &[], Some(options), None, true, None);
+        let chunks = obs.chunk_sink();
+        let mut on_token = move |token| {
+            chunks.chunk();
+            on_token(token)
+        };
+
         let local_tokens = Arc::new(AtomicU32::new(0));
         let local_start = Instant::now();
-        let local_resource_guard = crate::telemetry::begin_resource_run();
+        let local_resource_guard = obs.begin_resources();
 
         let local_result = {
             let local_tokens = local_tokens.clone();
-            self.run_streaming_with_options(envelope, options, |token| {
+            self.fallback_local_leg(envelope, options, &obs, |token| {
                 local_tokens.fetch_add(1, Ordering::SeqCst);
                 on_token(token)
             })
@@ -5433,7 +5830,9 @@ impl XybridModel {
         let policy_metrics = fallback_policy_metrics(options);
         let signal_context = Some(SignalContext::from_metrics(&policy_metrics));
 
-        dispatch_after_local(
+        obs.resource(local_resource_summary.as_ref());
+        let result = dispatch_after_local_observed(
+            Some(&obs),
             local_result,
             envelope,
             cloud_adapter,
@@ -5447,9 +5846,10 @@ impl XybridModel {
             signal_context,
             options.cancellation_token.clone(),
             options.generation_config.as_ref(),
-            on_token,
+            &mut on_token,
             on_seam,
-        )
+        );
+        obs.finish(result)
     }
 
     /// Run inference returning a stream of events.
@@ -5497,12 +5897,9 @@ impl XybridModel {
             return Box::pin(tokio_stream::iter([StreamEvent::Error(error.to_string())]));
         }
         let (tx, rx) = mpsc::channel::<StreamEvent>(100);
-        let handle = self.handle.clone();
-        let model_id = self.model_id.clone();
-        let version = self.version.clone();
-        let output_type = self.output_type;
-        // Speculative cloud routing decision, captured before the worker spawns.
-        let speculative = self.cloud_serve().then(|| self.clone());
+        let model = self.clone();
+        // Captured on the caller's thread: the run happens on a blocking worker.
+        let context = crate::observability::CapturedContext::capture();
 
         // Clone tx for the completion event (before moving into spawn_blocking)
         let tx_completion = tx.clone();
@@ -5510,129 +5907,26 @@ impl XybridModel {
         // Spawn blocking task to run inference
         tokio::task::spawn(async move {
             let result = tokio::task::spawn_blocking(move || -> SdkResult<InferenceResult> {
-                let start = Instant::now();
-
-                // Per-call trace_id scope — see `run` for rationale. Lives
-                // inside the spawn_blocking closure so the install + drop
-                // happen on the same thread the publish runs on.
-                let trace_id = uuid::Uuid::new_v4();
-                let _telemetry_ctx =
-                    crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
-
-                // Speculative cloud: stream from the gateway until the local
-                // handle is ready, forwarding each token as a StreamEvent.
-                if let Some(model) = speculative {
-                    let tx_token = tx.clone();
-                    let cloud = model.cloud_leg_streaming(
-                        &envelope,
-                        config.as_ref(),
-                        &mut |token: PartialToken| {
-                            let _ = tx_token.blocking_send(StreamEvent::Token(StreamToken {
-                                token: token.token.clone(),
-                                token_id: token.token_id,
-                                index: token.index,
-                                cumulative_text: token.cumulative_text.clone(),
-                                finish_reason: token.finish_reason.clone(),
-                                tool_calls: token.tool_calls.clone(),
-                                raw_text: token.raw_text.clone(),
-                            }));
-                            Ok(())
-                        },
-                    );
-                    if let Some(result) = cloud {
-                        return result;
-                    }
-                    // Cloud failed before emitting a token but the download
-                    // landed — stream locally below.
-                }
-
-                // Get write lock on handle
-                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
-
-                guard.ensure_runnable()?;
-
-                let metadata = guard.metadata.clone();
-                let is_llm = metadata_supports_token_streaming(&metadata);
-
-                // Clone tx for the streaming callback (so we can use tx in the else branch)
-                let tx_for_callback = tx.clone();
-
-                let output = if is_llm {
-                    // True streaming for LLM models
-                    guard
-                        .executor
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .execute_streaming(
-                            &metadata,
-                            &envelope,
-                            Box::new(move |token: PartialToken| {
-                                let stream_token = StreamToken {
-                                    token: token.token.clone(),
-                                    token_id: token.token_id.map(|id| id),
-                                    index: token.index,
-                                    cumulative_text: token.cumulative_text.clone(),
-                                    finish_reason: token.finish_reason.clone(),
-                                    tool_calls: token.tool_calls.clone(),
-                                    raw_text: token.raw_text.clone(),
-                                };
-                                // Ignore send errors (receiver dropped)
-                                let _ =
-                                    tx_for_callback.blocking_send(StreamEvent::Token(stream_token));
-                                Ok(())
-                            }),
-                            config.as_ref(),
-                        )
-                        .map_err(streaming_execution_error)?
-                } else {
-                    // Non-LLM: batch execution, emit single token
-                    let result = guard
-                        .executor
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .execute(&metadata, &envelope, config.as_ref())
-                        .map_err(|e| sdk_execution_error("Execution failed", e))?;
-
-                    // Emit single token with full result
-                    if let xybrid_core::ir::EnvelopeKind::Text(text) = &result.kind {
-                        let stream_token = StreamToken {
-                            token: text.clone(),
-                            token_id: None,
-                            index: 0,
-                            cumulative_text: text.clone(),
-                            finish_reason: Some("stop".to_string()),
-                            // Non-LLM template: tool calling is an LLM feature.
-                            tool_calls: Vec::new(),
-                            raw_text: None,
-                        };
-                        let _ = tx.blocking_send(StreamEvent::Token(stream_token));
-                    }
-                    result
+                let _context = context.enter();
+                let obs = model.observe(&envelope, &[], None, config.as_ref(), true, None);
+                let chunks = obs.chunk_sink();
+                let mut on_token = move |token: PartialToken| {
+                    chunks.chunk();
+                    // Ignore send errors (receiver dropped)
+                    let _ = tx.blocking_send(StreamEvent::Token(StreamToken {
+                        token: token.token,
+                        token_id: token.token_id,
+                        index: token.index,
+                        cumulative_text: token.cumulative_text,
+                        finish_reason: token.finish_reason,
+                        tool_calls: token.tool_calls,
+                        raw_text: token.raw_text,
+                    }));
+                    Ok(())
                 };
-
-                let latency_ms = duration_millis_u32(start.elapsed());
-
-                // Emit telemetry
-                let event = crate::telemetry::TelemetryEvent {
-                    event_type: "ModelComplete".to_string(),
-                    stage_name: Some(model_id.clone()),
-                    target: Some("local".to_string()),
-                    latency_ms: Some(latency_ms),
-                    error: None,
-                    data: Some(
-                        serde_json::json!({
-                            "model_id": model_id,
-                            "version": version,
-                            "output_type": format!("{:?}", output_type),
-                            "streaming": true,
-                        })
-                        .to_string(),
-                    ),
-                    timestamp_ms: current_timestamp_millis(),
-                };
-                crate::telemetry::publish_telemetry_event(event);
-
-                Ok(InferenceResult::new(output, &model_id, latency_ms))
+                let result =
+                    model.stream_body(&envelope, config.as_ref(), None, &obs, &mut on_token);
+                obs.finish(result)
             })
             .await;
 
@@ -5678,80 +5972,14 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
-        crate::telemetry::maybe_emit_dev_nudge();
-        self.touch();
-        self.guard_input(envelope, EntryPoint::Batch)?;
-
-        // Speculative cloud: serve from the gateway (off the runtime via
-        // spawn_blocking, like the local path) until the local handle is ready.
-        if self.cloud_serve() {
-            let model = self.clone();
-            let cloud_envelope = envelope.clone();
-            let cloud_config = config.cloned();
-            // `None` = the cloud leg failed and the download landed; fall
-            // through to the local path below (also off the runtime).
-            let cloud_result = tokio::task::spawn_blocking(move || {
-                model.cloud_leg_batch(&cloud_envelope, cloud_config.as_ref())
-            })
-            .await
-            .map_err(|e| SdkError::inference_src("Task join error", e))?;
-            if let Some(result) = cloud_result {
-                return result;
-            }
-        }
-        let handle = self.handle.clone();
-        let model_id = self.model_id.clone();
-        let version = self.version.clone();
-        let output_type = self.output_type;
+        let model = self.clone();
         let envelope = envelope.clone();
         let config = config.cloned();
-
+        // Captured on the caller's thread: the run happens on a blocking worker.
+        let context = crate::observability::CapturedContext::capture();
         tokio::task::spawn_blocking(move || {
-            let start = Instant::now();
-            let resource_guard = crate::telemetry::begin_resource_run();
-
-            // Per-call trace_id scope — see `run` for rationale. Cleared
-            // on drop at end of the spawn_blocking closure (after publish)
-            // or on any early return.
-            let trace_id = uuid::Uuid::new_v4();
-            let _telemetry_ctx =
-                crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
-
-            // Recover from poisoned RwLock to prevent permanent lock errors
-            let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
-
-            guard.ensure_runnable()?;
-
-            // Clone metadata to avoid borrow conflict with executor
-            let metadata = guard.metadata.clone();
-            let output = guard
-                .executor
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .execute(&metadata, &envelope, config.as_ref())
-                .map_err(|e| sdk_execution_error("Execution failed", e))?;
-
-            let latency_ms = duration_millis_u32(start.elapsed());
-
-            // Emit ModelComplete telemetry event
-            let mut data = serde_json::json!({
-                "model_id": model_id,
-                "version": version,
-                "output_type": format!("{:?}", output_type),
-            });
-            add_choice_telemetry(&mut data, &metadata, &output);
-            let event = crate::telemetry::TelemetryEvent {
-                event_type: "ModelComplete".to_string(),
-                stage_name: Some(model_id.clone()),
-                target: Some("local".to_string()),
-                latency_ms: Some(latency_ms),
-                error: None,
-                data: Some(data.to_string()),
-                timestamp_ms: current_timestamp_millis(),
-            };
-            crate::telemetry::publish_with_resource_summary(event, resource_guard);
-
-            Ok(InferenceResult::new(output, &model_id, latency_ms))
+            let _context = context.enter();
+            model.run_observed(&envelope, config.as_ref(), None, None)
         })
         .await
         .map_err(|e| SdkError::inference_src("Task join error", e))?
@@ -5847,6 +6075,8 @@ impl XybridModel {
             core_config,
             &self.model_id,
             Arc::clone(&handle.executor),
+            config.observation.as_ref(),
+            Some(&handle.metadata),
         )
     }
 
@@ -5885,6 +6115,7 @@ impl Clone for XybridModel {
             // Shared too: a run on any clone must count as use of the model
             // the registry knows about, not of this clone.
             last_accessed: self.last_accessed.clone(),
+            load_observation: self.load_observation.clone(),
         }
     }
 }
@@ -5982,6 +6213,7 @@ mod tests {
                         size_bytes: 1,
                         hf_repo: "xybrid-ai/test".to_string(),
                         file: format!("{name}.xyb"),
+                        min_os: Vec::new(),
                     },
                 )
             })
@@ -6436,6 +6668,8 @@ mod tests {
 
     #[test]
     fn release_memory_sees_registered_models() {
+        // `release_memory()` in a concurrent test would evict this model.
+        let _residency = crate::model_registry::residency_test_lock();
         let model = test_loaded_model(false);
         crate::model_registry::register(&model.model_id, &model.handle, &model.last_accessed, None);
 
@@ -6906,6 +7140,7 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::new(SpeculativeDownload::default())),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         };
         assert!(speculating.cloud_serve(), "not loaded -> cloud");
 
@@ -6950,6 +7185,7 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::new(SpeculativeDownload::default())),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         };
 
         // Pre-swap: the optimistic cached values stand (the cloud leg streams
@@ -7004,6 +7240,7 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::clone(&download)),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         };
 
         // Download already landed, so a token-less failure can retry locally.
@@ -7213,6 +7450,20 @@ mod tests {
             (SdkError::CircuitOpen("x".into()), false),
             (SdkError::NotLoaded, false),
             (SdkError::ConfigError("x".into()), false),
+            (
+                SdkError::TelemetryDelivery("lost acknowledgement".into()),
+                false,
+            ),
+            (
+                SdkError::OsVersionUnsupported {
+                    model_id: "phonon-31m-en".into(),
+                    platform: "ios-arm64".into(),
+                    os: "ios-15.7".into(),
+                    min_os: vec!["ios-16.0".into()],
+                    message: "requires iOS 16".into(),
+                },
+                false,
+            ),
         ];
         for (err, expected) in &cases {
             assert_eq!(err.is_retryable(), *expected, "inherent for {err:?}");
@@ -8330,6 +8581,7 @@ mod tests {
             speculative: None,
             default_generation_config: GenerationConfig::default(),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         }
     }
 
@@ -8378,6 +8630,7 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         }
     }
 
@@ -8400,6 +8653,217 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
+        }
+    }
+
+    #[test]
+    fn streamed_tts_result_carries_an_exported_reference() {
+        use crate::observability::test_support::*;
+        let (session, memory, _provider) = memory_session();
+        let mut metadata = ModelMetadata::onnx("tts-model", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("task".into(), serde_json::json!("text-to-speech"));
+        let model = test_model_with_metadata(metadata);
+        let options = RunOptions::new().with_observation(
+            crate::observability::ObservationOptions::default().with_session(&session),
+        );
+        // Blank text completes before any asset is touched.
+        let result = model
+            .run_tts_streaming(&text_envelope("   "), &options, |_| panic!("no audio"))
+            .unwrap();
+        assert_eq!(result.status, xybrid_core::execution::TtsStatus::Completed);
+        let reference = result.observation.clone().expect("streamed TTS reference");
+        let span = memory.by_ref(&reference);
+        assert_eq!(span.name, "generate_content tts-model");
+        assert_eq!(
+            attr(&span, "xybrid.tts.status").as_deref(),
+            Some("completed")
+        );
+        assert_eq!(
+            attr(&span, "gen_ai.request.stream").as_deref(),
+            Some("true")
+        );
+    }
+
+    /// A loadable ONNX model directory whose weights are missing: loading the
+    /// handle succeeds, materializing the weights on first execute fails.
+    fn weightless_onnx_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let metadata = ModelMetadata::onnx("weightless", "1.0", "model.onnx");
+        std::fs::write(
+            dir.path().join("model_metadata.json"),
+            serde_json::to_vec(&metadata).unwrap(),
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn explicit_lazy_and_reload_loads_are_separate_load_operations() {
+        // `release_memory()` in a concurrent test would evict this model.
+        let _residency = crate::model_registry::residency_test_lock();
+        use crate::observability::test_support::*;
+        use crate::observability::{semconv, ObservationContext, ObservationOptions};
+        let (session, memory, _provider) = memory_session();
+        let parent = ObservationContext::from_traceparent(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            None,
+        )
+        .unwrap();
+        let dir = weightless_onnx_dir();
+        let model = ModelLoader::from_directory(dir.path())
+            .unwrap()
+            .observation(
+                ObservationOptions::default()
+                    .with_session(&session)
+                    .with_parent(parent.clone()),
+            )
+            .load()
+            .unwrap();
+        let reference = model
+            .load_observation_ref()
+            .cloned()
+            .expect("load reference");
+        assert_eq!(model.clone().load_observation_ref(), Some(&reference));
+        let load = memory.by_ref(&reference);
+        assert_eq!(load.name, "load_model weightless");
+        assert_eq!(parent_id(&load), parent.span_id());
+        assert_eq!(attr(&load, "xybrid.load.trigger").as_deref(), Some("load"));
+        assert_eq!(
+            attr(&load, semconv::attr::RUNTIME_NAME).as_deref(),
+            Some("onnxruntime")
+        );
+        assert_eq!(
+            attr(&load, semconv::attr::MODEL_FORMAT).as_deref(),
+            Some("onnx")
+        );
+
+        let options = RunOptions::new()
+            .with_observation(ObservationOptions::default().with_session(&session));
+        let input = text_envelope("hello");
+        // First execute after the load materializes the weights (and fails here).
+        assert!(model.run_with_options(&input, &options).is_err());
+        // An automatically released model reloads on its next run.
+        model.handle.write().unwrap().evict();
+        assert!(model.run_with_options(&input, &options).is_err());
+
+        let loads: Vec<_> = memory
+            .spans()
+            .into_iter()
+            .filter(|s| s.name == "load_model weightless" && span_id(s) != reference.span_id)
+            .collect();
+        let triggers: Vec<String> = loads
+            .iter()
+            .map(|s| attr(s, "xybrid.load.trigger").unwrap())
+            .collect();
+        assert_eq!(triggers, ["lazy", "reload"]);
+        for load in &loads {
+            assert_eq!(
+                attr(load, semconv::attr::ERROR_TYPE).as_deref(),
+                Some("load_error")
+            );
+            assert_eq!(
+                attr(load, semconv::attr::RUNTIME_NAME).as_deref(),
+                Some("onnxruntime")
+            );
+            // Each load hangs beneath the run that triggered it.
+            let mut current = load.clone();
+            let run = loop {
+                let parent = memory
+                    .spans()
+                    .into_iter()
+                    .find(|s| span_id(s) == parent_id(&current))
+                    .expect("a load has an exported ancestor");
+                if attr(&parent, semconv::attr::OPERATION_NAME).as_deref() == Some("predict") {
+                    break parent;
+                }
+                current = parent;
+            };
+            assert_eq!(run.name, "predict weightless");
+        }
+    }
+
+    #[test]
+    fn local_trace_collection_does_not_suppress_worker_backed_loads() {
+        use crate::observability::test_support::*;
+        use crate::observability::ObservationOptions;
+        let _residency = crate::model_registry::residency_test_lock();
+        let (session, memory, _provider) = memory_session();
+        let dir = weightless_onnx_dir();
+        let loader = ModelLoader::from_directory(dir.path())
+            .unwrap()
+            .observation(ObservationOptions::default().with_session(&session));
+        // A local collecting recorder has no trace context, but it is not an
+        // explicit suppression: the async load must stay observed, like the
+        // synchronous one.
+        let local = xybrid_core::tracing::capture();
+        let model = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(loader.load_async())
+            .unwrap();
+        drop(local);
+        let reference = model
+            .load_observation_ref()
+            .expect("the async load is observed under a local capture");
+        assert_eq!(memory.by_ref(reference).name, "load_model weightless");
+    }
+
+    #[test]
+    fn explicitly_selected_session_samples_resources_while_the_default_is_off() {
+        // `release_memory()` in a concurrent test would evict this model.
+        let _residency = crate::model_registry::residency_test_lock();
+        use crate::observability::test_support::*;
+        use crate::observability::{
+            install_default_session, ObservabilitySession, ObservationOptions, Observer,
+        };
+        use xybrid_core::device::ResourceTelemetryMode;
+        let _default = default_session_lock();
+        // The default (and so the process-wide mode) samples nothing.
+        let previous =
+            install_default_session(ObservabilitySession::borrowed(Observer::disabled()));
+        let (session, memory, _provider) = resource_session(ResourceTelemetryMode::Boundary);
+        let selected = ObservationOptions::default().with_session(&session);
+        let options = RunOptions::new().with_observation(selected.clone());
+
+        let dir = weightless_onnx_dir();
+        let model = ModelLoader::from_directory(dir.path())
+            .unwrap()
+            .observation(selected)
+            .load()
+            .unwrap();
+        // The first execute materializes the weights lazily (and fails here).
+        assert!(model
+            .run_with_options(&text_envelope("hello"), &options)
+            .is_err());
+        let mut metadata = ModelMetadata::onnx("tts-model", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("task".into(), serde_json::json!("text-to-speech"));
+        // Blank text completes before any asset is touched.
+        let tts = test_model_with_metadata(metadata)
+            .run_tts_streaming(&text_envelope("   "), &options, |_| panic!("no audio"))
+            .unwrap();
+
+        // Uninstalls the application-installed default without shutting it down.
+        crate::observability::shutdown_observability(std::time::Duration::ZERO).unwrap();
+        if let Some(previous) = previous {
+            install_default_session(previous);
+        }
+        let explicit = memory.by_ref(model.load_observation_ref().expect("load reference"));
+        let lazy = memory
+            .spans()
+            .into_iter()
+            .find(|s| attr(s, "xybrid.load.trigger").as_deref() == Some("lazy"))
+            .expect("lazy load");
+        let run = memory.by_ref(tts.observation.as_ref().expect("TTS reference"));
+        for span in [explicit, lazy, run] {
+            assert!(
+                has_resources(&span),
+                "{} ignored its selected session's resource mode",
+                span.name
+            );
         }
     }
 
@@ -8452,6 +8916,7 @@ mod tests {
                 AbortSignal::ThermalCritical,
                 ResourceSnapshot {
                     thermal_state: ThermalState::Critical,
+                    thermal_measured: true,
                     ..Default::default()
                 },
                 xybrid_core::abort::AbortReason::StressThermal,
@@ -9594,6 +10059,7 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         }
     }
 
@@ -10526,6 +10992,7 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::clone(&download)),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         };
         // Point any cloud leg at the mock, with a key, so a leaked request
         // would be counted rather than fail before sending.

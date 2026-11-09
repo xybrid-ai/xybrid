@@ -537,6 +537,7 @@ mod tests {
             size_bytes: 1,
             hf_repo: "xybrid/qwen".to_string(),
             file: "model".to_string(),
+            min_os: Vec::new(),
         }
     }
 

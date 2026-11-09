@@ -5,6 +5,7 @@ library;
 
 import 'result.dart';
 import 'tools.dart';
+import 'observability.dart';
 
 /// Typed reason for a local stream abort that is eligible for cloud fallback.
 enum CloudFallbackReason {
@@ -39,11 +40,14 @@ class StreamToken {
   /// "tool_calls", "error").
   final String? finishReason;
 
-  /// Final inference metrics. Present only on the completion token.
+  /// Final inference metrics supplied by native completion.
   final XybridInferenceMetrics? metrics;
 
   /// Reason for a local abort that crossed the stream as a cloud-fallback marker.
   final CloudFallbackReason? cloudFallbackReason;
+
+  /// Trace reference supplied by native completion.
+  final ObservationRef? observation;
 
   /// Tool calls the model asked for this turn — final token only.
   ///
@@ -73,6 +77,7 @@ class StreamToken {
     this.finishReason,
     this.metrics,
     this.cloudFallbackReason,
+    this.observation,
     this.toolCalls = const [],
     this.rawText,
   });

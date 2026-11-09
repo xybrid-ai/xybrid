@@ -40,8 +40,10 @@ Cross-platform example app for iOS, Android, and macOS using the Flutter SDK bin
 |------|------------------|--------------|
 | Flutter | 3.19.0+ | [flutter.dev/docs/get-started/install](https://flutter.dev/docs/get-started/install) |
 | Dart | 3.3.0+ | Included with Flutter |
-| Xcode | 14.0+ | Mac App Store (for iOS/macOS) |
+| Xcode | 15.0+ | Mac App Store (for iOS/macOS) |
 | Android Studio | Hedgehog+ | [developer.android.com/studio](https://developer.android.com/studio) (for Android) |
+| Deployment Target | iOS 16.0+, macOS 14.0+ (Apple Silicon) | - |
+| Android SDK | API 28+ (Android 9) | Via SDK Manager |
 
 ### Getting Started
 

@@ -25,11 +25,9 @@ description: >
 # Seed Bazel's distdir with bounded curl retries before analysis so cold caches
 # recover from transient failures without retrying compilation.
 #
-# rules_rs 0.0.95 fetches Ubuntu's zlib1g .deb for its Linux rustc (bundled
-# libLLVM needs libz.so.1) from one pinned snapshot.ubuntu.com URL. On
-# 2026-10-27 that host returned 503 and every Bazel lane failed analysis. The
-# same package (same SHA-256) is published on Launchpad, so it is seeded into a
-# distdir from the pinned URL or, failing that, from Launchpad.
+# rules_rs fetches Ubuntu's zlib1g .deb for its Linux rustc (bundled libLLVM
+# needs libz.so.1). Seed its pinned package into a distdir from the Ubuntu
+# snapshot or Launchpad, with bounded retries for transient download failures.
 #
 # Bazel verifies the checksums from the upstream pins, so a restored (or
 # mirrored) file cannot substitute different content — a cache hit is exactly the
@@ -62,19 +60,19 @@ inputs:
       rs/private/rustc_repository.bzl). Update with both SHA-256s on a rules_rs
       bump that moves the pin; a stale value only costs the fallback.
     required: false
-    default: "1.3.dfsg-3.1ubuntu2.1"
+    default: "1.3.dfsg-3.1ubuntu2.2"
   zlib-deb-snapshot:
     description: snapshot.ubuntu.com timestamp in rules_rs's pinned zlib URL.
     required: false
-    default: 20260801T000000Z
+    default: 20260901T000000Z
   zlib-deb-amd64-sha256:
     description: SHA-256 of that version's amd64 .deb, as pinned by rules_rs.
     required: false
-    default: 7074b6a2f6367a10d280c00a1cb02e74277709180bab4f2491a2f355ab2d6c20
+    default: 84b9cf5752b29c9f92c27cd4c4ba9bbcc70b5ccf9b1b515421a28ae23212e273
   zlib-deb-arm64-sha256:
     description: SHA-256 of that version's arm64 .deb, as pinned by rules_rs.
     required: false
-    default: cbe3d39ec32d3cc27c021ae4af11e7c67bdf9d700d573207e0941d4038056278
+    default: e55ab3b4fb7b6edc4a628e28ec13f8780b08abe427d33ae148f030d8586d0e9a
   macos-sdk-mirror:
     description: >
       Optional replacement download location for that package, as host+path with no

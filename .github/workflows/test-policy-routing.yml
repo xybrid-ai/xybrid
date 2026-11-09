@@ -54,7 +54,7 @@ env:
 jobs:
   test-policy-routing:
     name: Test policy routing (real local model, fake DeepSeek)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -66,6 +66,9 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: policy-routing-integration
+          # Per-image cache: ort-sys's build-script output records this image's
+          # Xcode clang-runtime path, which other images may lack.
+          env-vars: ImageOS
 
       - name: Ensure download tooling (jq, zstd)
         run: |

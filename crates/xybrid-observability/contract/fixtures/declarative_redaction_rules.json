@@ -1,0 +1,258 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "max_traversal_bytes": 1024,
+    "redact_substrings": [
+      "secret"
+    ],
+    "redaction_rules": [
+      {
+        "find": "[REDACTED]",
+        "replace": "<r>",
+        "type": "replace_literal"
+      },
+      {
+        "find": "sk-live-123",
+        "replace": "[KEY]",
+        "type": "replace_literal"
+      },
+      {
+        "find": "[KEY]",
+        "replace": "<key>",
+        "type": "replace_literal"
+      },
+      {
+        "key": "gen_ai.system_instructions",
+        "type": "omit_attribute"
+      },
+      {
+        "key": "gen_ai.prompt.variable.user_id",
+        "type": "omit_attribute"
+      },
+      {
+        "find": "<<expand>>",
+        "replace": "################################################################################################################################################################################################################################################################################################################################################################################################################",
+        "type": "replace_literal"
+      }
+    ]
+  },
+  "description": "Declarative rules run after the callback redactor and before truncation: ordered literal replacements apply to every JSON string value (each rule sees the previous rule's output; object keys, numbers and booleans are untouched), and omit_attribute drops exactly the named governed key without marking it truncated. A rule expansion beyond the traversal budget fails closed. Error messages follow the same rules.",
+  "expect": {
+    "logs": [
+      {
+        "attributes": {
+          "exception.message": "bad key <key> for <r>",
+          "exception.type": "auth_failed"
+        },
+        "event_name": "gen_ai.client.operation.exception",
+        "severity_number": 13,
+        "span": "err"
+      }
+    ],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "error.type": "auth_failed",
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.005
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.01
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.input.messages": [
+            {
+              "parts": [
+                {
+                  "content": "key <key> and <r>",
+                  "type": "text"
+                },
+                {
+                  "arguments": {
+                    "flag": true,
+                    "n": 123,
+                    "nested": [
+                      "<r>",
+                      456
+                    ],
+                    "sk-live-123": "<key>"
+                  },
+                  "id": "c1",
+                  "name": "lookup",
+                  "type": "tool_call"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "gen_ai.operation.name": "chat",
+          "gen_ai.prompt.name": "tmpl",
+          "gen_ai.prompt.variable.topic": "my <r> <key>",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "xybrid.genai.content.truncated_attributes": [
+            "gen_ai.output.messages"
+          ],
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 10,
+        "id": "chat",
+        "kind": "INTERNAL",
+        "name": "chat tiny",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "error.type": "auth_failed",
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 25,
+        "id": "err",
+        "kind": "INTERNAL",
+        "name": "chat tiny",
+        "parent": null,
+        "start_ms": 20,
+        "status": {
+          "code": "ERROR",
+          "description": "bad key <key> for <r>"
+        },
+        "trace": 1
+      }
+    ]
+  },
+  "name": "declarative_redaction_rules",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "prompt_name": "tmpl",
+        "prompt_variables": {
+          "topic": "my secret sk-live-123",
+          "user_id": "u-1"
+        },
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 1,
+      "id": "chat",
+      "op": "system_instructions",
+      "value": [
+        {
+          "content": "secret",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "at_ms": 1,
+      "id": "chat",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "key sk-live-123 and secret",
+              "type": "text"
+            },
+            {
+              "arguments": {
+                "flag": true,
+                "n": 123,
+                "nested": [
+                  "secret",
+                  456
+                ],
+                "sk-live-123": "sk-live-123"
+              },
+              "id": "c1",
+              "name": "lookup",
+              "type": "tool_call"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 5,
+      "id": "chat",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "stop",
+          "parts": [
+            {
+              "content": "<<expand>><<expand>><<expand>>",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 10,
+      "id": "chat",
+      "op": "end"
+    },
+    {
+      "at_ms": 20,
+      "id": "err",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 25,
+      "error_type": "auth_failed",
+      "id": "err",
+      "message": "bad key sk-live-123 for secret",
+      "op": "end_with_error"
+    }
+  ]
+}

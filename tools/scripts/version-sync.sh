@@ -42,6 +42,8 @@ PYTHON_PYPROJECT="$REPO_ROOT/bindings/python/pyproject.toml"
 # the lightweight version check as well as regenerating it below, so release
 # validation catches drift without requiring the boltffi CLI in every CI job.
 PYTHON_BOLT_INIT="$REPO_ROOT/bindings/python/xybrid/_bolt/__init__.py"
+OBSERVABILITY_PACKAGE="$REPO_ROOT/bindings/observability-js/package.json"
+OBSERVABILITY_VERSION_TS="$REPO_ROOT/bindings/observability-js/src/version.ts"
 WEB_PACKAGE="$REPO_ROOT/bindings/web/package.json"
 # The browser SDK's source carries its version too, for the X-Xybrid-Client
 # header it sends the registry.
@@ -49,12 +51,12 @@ WEB_VERSION_TS="$REPO_ROOT/bindings/web/src/version.ts"
 # The Flutter example's lockfile records the plugin's own version. `flutter pub
 # get` rewrites it, so a bump that skips it leaves every contributor a diff.
 FLUTTER_EXAMPLE_LOCK="$REPO_ROOT/bindings/flutter/example/pubspec.lock"
-# The Unity README pins the release twice in its install snippets: the OpenUPM
-# manifest dependency and the git-URL tag. OpenUPM shows this README on the
-# package page, and the SDK downloads the natives of the version it installs,
-# so a stale pin installs an old SDK (they sat at 0.6.0 until 0.13.1, when
-# version-sync took them over).
-UNITY_README="$REPO_ROOT/bindings/unity/README.md"
+# The install snippets in the READMEs and docs pages (pubspec, Gradle, SwiftPM,
+# npm, Cargo, Unity) name the release a user installs, and the registries show
+# some of those READMEs on the package page. install_pins.py owns them: its PINS
+# table lists each snippet and the files that carry it. Before it did, they
+# drifted for releases (the pub.dev page said ^0.6.0 during 0.16.0).
+INSTALL_PINS="$REPO_ROOT/tools/scripts/install_pins.py"
 
 # Extract current workspace version from Cargo.toml
 get_cargo_version() {
@@ -121,6 +123,18 @@ get_web_version() {
     python3 -c "import json; print(json.load(open('$WEB_PACKAGE'))['version'])"
 }
 
+get_observability_version() {
+    python3 -c "import json; print(json.load(open('$OBSERVABILITY_PACKAGE'))['version'])"
+}
+
+get_observability_source_version() {
+    sed -n 's/^export const VERSION = "\(.*\)";$/\1/p' "$OBSERVABILITY_VERSION_TS"
+}
+
+get_web_observability_version() {
+    python3 -c "import json; print(json.load(open('$WEB_PACKAGE'))['dependencies']['@xybrid/observability'])"
+}
+
 get_web_source_version() {
     sed -n 's/^export const SDK_VERSION = "\(.*\)";$/\1/p' "$WEB_VERSION_TS"
 }
@@ -134,30 +148,6 @@ import re, sys
 match = re.search(sys.argv[2], open(sys.argv[1]).read(), re.M)
 print(match.group(2) if match else 'NOT FOUND')
 " "$FLUTTER_EXAMPLE_LOCK" "$FLUTTER_EXAMPLE_LOCK_ENTRY"
-}
-
-# The two Unity README pins: group 1 is the fixed prefix, group 2 the version.
-# A version starts with a digit, so the local-development
-# `"ai.xybrid.sdk": "file:..."` snippet and the untagged git URL never match.
-UNITY_README_UPM_PIN='("ai\.xybrid\.sdk": ")([0-9][0-9A-Za-z.+-]*)(?=")'
-UNITY_README_GIT_PIN='(\?path=/bindings/unity#v)([0-9][0-9A-Za-z.+-]*)'
-
-# Every distinct version one pin names, space-separated: a stale duplicate
-# fails --check instead of hiding behind the first match.
-get_unity_readme_pins() {
-    python3 -c "
-import re, sys
-text = open(sys.argv[1], encoding='utf-8').read()
-print(' '.join(sorted({m.group(2) for m in re.finditer(sys.argv[2], text)})) or 'NOT FOUND')
-" "$UNITY_README" "$1"
-}
-
-get_unity_readme_upm_version() {
-    get_unity_readme_pins "$UNITY_README_UPM_PIN"
-}
-
-get_unity_readme_git_version() {
-    get_unity_readme_pins "$UNITY_README_GIT_PIN"
 }
 
 # Set version in Cargo workspace (all Rust crates inherit via version.workspace = true)
@@ -273,6 +263,22 @@ regenerate_python_bolt() {
     python3 "$REPO_ROOT/tools/scripts/gen_python_bolt.py"
 }
 
+set_observability_version() {
+    local version="$1"
+    python3 -c "
+import json
+path = '$OBSERVABILITY_PACKAGE'
+with open(path) as f:
+    data = json.load(f)
+data['version'] = '$version'
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\\n')
+"
+    sed -i.bak "s/^export const VERSION = \".*\";$/export const VERSION = \"$version\";/" "$OBSERVABILITY_VERSION_TS"
+    rm -f "$OBSERVABILITY_VERSION_TS.bak"
+}
+
 set_web_version() {
     local version="$1"
     python3 -c "
@@ -280,6 +286,7 @@ import json
 with open('$WEB_PACKAGE', 'r') as f:
     data = json.load(f)
 data['version'] = '$version'
+data['dependencies']['@xybrid/observability'] = '$version'
 with open('$WEB_PACKAGE', 'w') as f:
     json.dump(data, f, indent=2)
     f.write('\\n')
@@ -301,27 +308,12 @@ open(path, 'w').write(text)
 " "$FLUTTER_EXAMPLE_LOCK" "$FLUTTER_EXAMPLE_LOCK_ENTRY" "$version"
 }
 
-# Rewrite both Unity README pins. Python, like the lockfile edit above: no
-# BSD/GNU sed differences, and line endings and non-ASCII text survive. Both set
-# modes run it first, so a missing snippet or a malformed version (say
-# `v0.14.0`, which the pin patterns could never match again) fails the bump
-# before any file is written.
-set_unity_readme_version() {
-    local version="$1"
-    python3 -c "
-import re, sys
-path, version, patterns = sys.argv[1], sys.argv[2], sys.argv[3:]
-if not re.fullmatch(r'[0-9][0-9A-Za-z.+-]*', version):
-    sys.exit('Unity install pin: ' + repr(version) + ' is not a version (no leading v)')
-with open(path, encoding='utf-8', newline='') as f:
-    text = f.read()
-for pattern in patterns:
-    text, count = re.subn(pattern, lambda m: m.group(1) + version, text)
-    if count == 0:
-        sys.exit('Unity install pin ' + pattern + ' not found in ' + path)
-with open(path, 'w', encoding='utf-8', newline='') as f:
-    f.write(text)
-" "$UNITY_README" "$version" "$UNITY_README_UPM_PIN" "$UNITY_README_GIT_PIN"
+# Rewrite every docs install pin. Both set modes run it first: it writes nothing
+# unless every pin is found and the version is well formed (`v0.14.0`, which no
+# pin pattern could match again, is refused), so a bump fails before any file
+# is written.
+set_install_pins() {
+    python3 "$INSTALL_PINS" set "$1"
 }
 
 # Check mode: verify all versions match
@@ -333,7 +325,7 @@ check_versions() {
     echo "Cargo workspace version: $cargo_version"
     echo ""
 
-    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Unity README OpenUPM pin:get_unity_readme_upm_version" "Unity README git tag pin:get_unity_readme_git_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "Swift FFI plist:get_swift_ffi_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version" "Python generated binding:get_python_bolt_version" "Browser/Web:get_web_version" "Browser/Web source:get_web_source_version" "Flutter example lock:get_flutter_example_lock_version"; do
+    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "Swift FFI plist:get_swift_ffi_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version" "Python generated binding:get_python_bolt_version" "Observability JS:get_observability_version" "Observability JS source:get_observability_source_version" "Browser/Web observability dependency:get_web_observability_version" "Browser/Web:get_web_version" "Browser/Web source:get_web_source_version" "Flutter example lock:get_flutter_example_lock_version"; do
         local name="${name_func%%:*}"
         local func="${name_func##*:}"
         local version
@@ -354,6 +346,9 @@ check_versions() {
         fi
     done
 
+    # One line per docs install pin, in the same format.
+    python3 "$INSTALL_PINS" check "$cargo_version" || exit_code=1
+
     echo ""
     if [ "$exit_code" -eq 0 ]; then
         echo "All versions in sync."
@@ -372,7 +367,7 @@ case "${1:-}" in
         # Sync non-Rust files to match Cargo workspace version
         VERSION="$(get_cargo_version)"
         echo "Syncing all packages to version: $VERSION"
-        set_unity_readme_version "$VERSION"
+        set_install_pins "$VERSION"
         set_flutter_version "$VERSION"
         set_flutter_example_lock_version "$VERSION"
         set_flutter_rust_version "$VERSION"
@@ -384,6 +379,7 @@ case "${1:-}" in
         set_rn_aar_version "$VERSION"
         set_python_version "$VERSION"
         regenerate_python_bolt
+        set_observability_version "$VERSION"
         set_web_version "$VERSION"
         echo "Done. Run '$0 --check' to verify."
         ;;
@@ -398,7 +394,7 @@ case "${1:-}" in
         # Set version everywhere
         VERSION="$1"
         echo "Setting all packages to version: $VERSION"
-        set_unity_readme_version "$VERSION"
+        set_install_pins "$VERSION"
         set_cargo_version "$VERSION"
         set_flutter_version "$VERSION"
         set_flutter_example_lock_version "$VERSION"
@@ -411,6 +407,7 @@ case "${1:-}" in
         set_rn_aar_version "$VERSION"
         set_python_version "$VERSION"
         regenerate_python_bolt
+        set_observability_version "$VERSION"
         set_web_version "$VERSION"
         echo ""
         echo "Rust crates inherit via version.workspace = true."

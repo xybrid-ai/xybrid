@@ -82,10 +82,18 @@ A test model for metadata generation.
             ..
         } => {
             assert_eq!(model_file, "model-Q4_K_M.gguf");
-            assert_eq!(*context_length, 8192);
+            // Capped at 4,096 tokens; the GGUF's own 8,192 is kept below.
+            assert_eq!(*context_length, 4096);
         }
         other => panic!("Expected Gguf template, got {:?}", other),
     }
+    assert_eq!(
+        metadata
+            .metadata
+            .get("max_context_length")
+            .and_then(|v| v.as_u64()),
+        Some(8192)
+    );
 
     // GGUF models should have no preprocessing/postprocessing
     assert!(metadata.preprocessing.is_empty());

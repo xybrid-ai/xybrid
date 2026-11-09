@@ -4,6 +4,8 @@
 //!
 //! | Module | Commands |
 //! |--------|----------|
+//! | [`connect`] | `connect` - Provision a claimable Xybrid workspace for this project |
+//! | [`auth`] | `auth status`, `auth claim`, `auth logout` - This project's Xybrid credentials |
 //! | [`run`] | `run` - Execute pipelines, bundles, and models |
 //! | [`repl`] | `repl` - Interactive REPL mode |
 //! | [`models`] | `models list`, `models info`, `models voices` |
@@ -17,8 +19,10 @@
 //! | [`types`] | Shared CLI enum types (ModelsCommand, CacheCommand) |
 //! | [`utils`] | Shared utility functions |
 
+pub mod auth;
 pub mod bundle;
 pub mod cache;
+pub mod connect;
 pub mod fetch;
 pub mod init;
 pub mod models;

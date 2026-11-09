@@ -35,6 +35,46 @@ separately. The same verifier is included in the published crate as
 `python3 <crate-directory>/zzz_pull.py --target <target>`. It works without this
 workspace and does not include the engine binary or private credentials.
 
+### Python and prebuilt directory selection
+
+The verifier requires **Python 3.11+**, including for offline verification. It
+checks the interpreter version before reading inputs or downloading anything.
+Cargo uses `python3` by default; set `XYBRID_ZZZ_PYTHON=python3.11` (or an
+absolute executable path) to select another interpreter. This variable names
+one executable, with no shell arguments; paths containing spaces work. Invoke
+manual staging commands with that same Python executable. Bazel's repository
+helper also accepts `--repo_env=XYBRID_ZZZ_PYTHON=<executable>`.
+
+`XYBRID_ZZZ_PREBUILT_DIR` accepts either of these private layouts:
+
+- **One slice:** the exact directory printed by `zzz_pull.py`, containing
+  `RECEIPT.json`, `.pinned-archive.tar.gz`, `lib/`, `include/`, and the other
+  verified payload files. Existing single-slice overrides keep working.
+- **Multiple targets:** a private root containing complete verified slices
+  directly under their Rust target triples, such as
+  `<root>/aarch64-apple-darwin/` and `<root>/aarch64-linux-android/`. Move or copy
+  each entire staged directory into the matching child, preserving private
+  permissions (directories `0700`, files `0600`); symlinked slices are rejected.
+  The `--dest` option still stages using release/target/profile/checksum keys;
+  it does not create this flat layout automatically.
+
+Cargo and the verifier select `<root>/<requested Rust target>` when that child
+exists; otherwise they treat the override as one slice. A present but invalid
+child fails verification and never falls back. The root must also have private
+permissions when selecting a child. Every selected slice is fully reverified
+against the committed pin, including its retained archive. A missing, wrong,
+or tampered override fails without downloading a replacement. For example:
+
+```bash
+XYBRID_ZZZ_PREBUILT_DIR=/private/engine-slices \
+  python3.11 crates/zzz-sys/zzz_pull.py --target aarch64-linux-android --verify-only
+```
+
+The command prints the selected slice directory only on success. A wrong-target
+receipt reports the requested and provided Rust targets when both are recognized;
+unrecognized receipt values and private paths are never echoed in that diagnostic.
+An enabled unsupported target still fails the build, even when an override is set.
+
 ## Rust bindings
 
 `xybrid-zzz-sys` carries the ABI-1 FFI for `libzzz_embed.a` plus a thin safe
@@ -82,7 +122,7 @@ receipts must preserve that CPU, minimum, system-library list and device or
 simulator ABI. Bazel uses the existing iOS 16 configurations and pinned Apple
 toolchains: its two ARM64 selects distinguish apple_support's
 [`device` and `simulator` constraints](https://github.com/bazelbuild/apple_support/blob/2.2.0/constraints/BUILD),
-as emitted by [rules_rs 0.0.95's pinned rules_rust mapping](https://github.com/hermeticbuild/rules_rust/blob/f19661ba71f77c993ce1eb082053692610fe4313/rust/platform/triple_mappings.bzl).
+as emitted by [rules_rs 0.2.0's pinned rules_rust mapping](https://github.com/hermeticbuild/rules_rust/blob/2ab43f0bbaa406ffb1a0dd64ae2ecb8f7734f733/rust/platform/triple_mappings.bzl).
 Linux ARM64 additionally requires the GNU libc constraint.
 
 Bazel loads packages from unselected `select` arms. For only these three new

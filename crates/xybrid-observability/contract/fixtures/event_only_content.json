@@ -1,0 +1,227 @@
+{
+  "config": {
+    "content_capture": "event_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "event_only mode: content moves to a structured gen_ai.client.inference.operation.details event and leaves the span.",
+  "expect": {
+    "logs": [
+      {
+        "attributes": {
+          "gen_ai.input.messages": [
+            {
+              "parts": [
+                {
+                  "content": "Once upon",
+                  "type": "text"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "gen_ai.operation.name": "text_completion",
+          "gen_ai.output.messages": [
+            {
+              "finish_reason": "length",
+              "parts": [
+                {
+                  "content": " a time there",
+                  "type": "text"
+                }
+              ],
+              "role": "assistant"
+            }
+          ],
+          "gen_ai.provider.name": "onnxruntime",
+          "gen_ai.request.model": "gpt2",
+          "gen_ai.response.finish_reasons": [
+            "length"
+          ],
+          "gen_ai.usage.input_tokens": 2,
+          "gen_ai.usage.output_tokens": 4
+        },
+        "event_name": "gen_ai.client.inference.operation.details",
+        "severity_number": 5,
+        "span": "chat"
+      }
+    ],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "text_completion",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "gpt2",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.04
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "text_completion",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "gpt2",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 2
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "text_completion",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "gpt2",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 4
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "text_completion",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "gpt2",
+              "gen_ai.token.modality": "unknown",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 2
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "text_completion",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "gpt2",
+              "gen_ai.token.modality": "unknown",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 4
+          }
+        ],
+        "unit": "{token}"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "text_completion",
+          "gen_ai.provider.name": "onnxruntime",
+          "gen_ai.request.model": "gpt2",
+          "gen_ai.response.finish_reasons": [
+            "length"
+          ],
+          "gen_ai.usage.input_tokens": 2,
+          "gen_ai.usage.output_tokens": 4,
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "onnxruntime"
+        },
+        "end_ms": 40,
+        "id": "chat",
+        "kind": "INTERNAL",
+        "name": "text_completion gpt2",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "event_only_content",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "gpt2",
+        "operation": "text_completion",
+        "provider": "onnxruntime",
+        "runtime": "onnxruntime"
+      }
+    },
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "Once upon",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 30,
+      "id": "chat",
+      "input_tokens": 2,
+      "op": "usage",
+      "output_tokens": 4
+    },
+    {
+      "at_ms": 30,
+      "id": "chat",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "length",
+          "parts": [
+            {
+              "content": " a time there",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 30,
+      "id": "chat",
+      "op": "finish_reasons",
+      "value": [
+        "length"
+      ]
+    },
+    {
+      "at_ms": 40,
+      "id": "chat",
+      "op": "end"
+    }
+  ]
+}

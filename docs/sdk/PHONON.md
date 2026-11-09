@@ -8,9 +8,13 @@ and its armeabi-v7a and x86_64 libraries do not (see the
 [Kotlin README](../../bindings/kotlin/README.md#speech-phonon--kitten-tts-2)).
 Elsewhere, build a custom native SDK with the verified engine archive
 described in [zzz-sys](../../crates/zzz-sys/README.md).
-The engine has platform minimums of macOS 13, glibc 2.28 and Android API 29;
+Pinned iOS ARM64 device and ARM64 simulator engine slices also exist, but
+native Swift/Flutter speech linkage and installed iOS speech execution remain
+unqualified. Registry availability does not establish native SDK support.
+The engine has platform minimums of macOS 13, glibc 2.28, Android API 29 and
+iOS 16 for the corresponding slices;
 the final linked SDK can require a newer OS. Linux consumers need an
-x86-64-v3 CPU. This backend does not support Windows, iOS or Metal.
+x86-64-v3 CPU for the x86_64 slice. This backend does not support Windows or Metal.
 
 ## Checkpoints
 
@@ -43,9 +47,13 @@ tokenizer and voices.
 ### Getting phonon-31m-en
 
 - **From the xybrid registry**, as model id `phonon-31m-en`. The registry
-  serves it on the three platforms above, and only to builds that advertise
-  `zzz-phonon-31m`; any other build gets a not-found error. The Android SDK
-  advertises it from its arm64-v8a library only.
+  serves the same existing GGUF for `android-arm64`, `macos-arm64`,
+  `linux-x86_64` and, following the deployed
+  [registry compatibility update](https://github.com/xybrid-ai/xybrid-platform/pull/308),
+  `ios-arm64`. Every entry requires `zzz-phonon-31m`; clients missing that
+  backend receive a structured HTTP 404. The Android SDK advertises it from
+  its arm64-v8a library only. The iOS registry entry does not enable speech
+  in standard Swift or Flutter binaries.
 
   ```rust,ignore
   let model = ModelLoader::from_registry("phonon-31m-en").load()?;
@@ -77,6 +85,38 @@ pinned engine slice. Flutter reports the diagnostic through `XybridException`.
   "metadata": { "task": "text-to-speech" }
 }
 ```
+
+### Registry compatibility
+
+Each registry variant declares an OS floor in its optional `min_os` array:
+
+| Registry platform | `min_os` |
+|---|---|
+| `android-arm64` | `["android-api-29"]` |
+| `ios-arm64` | `["ios-16.0"]` |
+| `macos-arm64` | `["macos-13.0"]` |
+| `linux-x86_64` | `["glibc-2.28"]` |
+
+The SDK sends the detected runtime version as an optional `os` resolve query
+parameter: `android-api-N`, `ios-X.Y`, `macos-X.Y` or `glibc-X.Y`. Linux uses
+the GNU libc version, not the kernel version. The parameter is omitted when
+the runtime version is unknown or the request explicitly targets a different
+platform. It controls compatibility even when registry telemetry is opted
+out. Missing or malformed tokens preserve the registry's legacy behavior and
+do not enforce an OS floor; a successful resolve alone does not qualify the
+native SDK.
+
+When no compatible fallback exists, the registry returns HTTP 404 with
+`BACKEND_REQUIRED` for missing backend capabilities, or
+`OS_VERSION_UNSUPPORTED` for a runtime below the variant's floor. The SDK
+reports backend refusals as `UnsupportedBackendCapability`, retaining the
+registry code and message in its hint. Rust reports OS refusals as
+`SdkError::OsVersionUnsupported`; foreign bindings use their existing
+`ConfigError` with the full `OS_VERSION_UNSUPPORTED` diagnostic. Both refusals
+are permanent and nonretryable. OS floors also appear in model-detail and
+resolve responses; the Linux x86-64-v3 CPU requirement remains a separate SDK
+check. See [registry compatibility](../telemetry/registry.md#resolve-compatibility) for
+the request and response contract.
 
 ### Voices
 

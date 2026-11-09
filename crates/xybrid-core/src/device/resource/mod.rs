@@ -121,6 +121,9 @@ pub struct ResourceSnapshot {
     pub total_mem_mb: Option<u32>,
     pub memory_pressure: MemoryPressure,
     pub thermal_state: ThermalState,
+    /// Whether a platform reading actually supplied the thermal state.
+    #[serde(default)]
+    pub thermal_measured: bool,
     pub battery_pct: Option<u8>,
     pub captured_at_ms: u64,
 }
@@ -137,6 +140,7 @@ impl ResourceSnapshot {
             total_mem_mb: None,
             memory_pressure: MemoryPressure::Unknown,
             thermal_state: ThermalState::Normal,
+            thermal_measured: false,
             battery_pct: None,
             captured_at_ms: now_ms(),
         }
@@ -182,6 +186,9 @@ pub struct ResourceUsageSummary {
     pub available_mem_min_mb: Option<u32>,
     pub memory_pressure_peak: MemoryPressure,
     pub thermal_state_peak: ThermalState,
+    /// False when every sample lacked a platform thermal reading.
+    #[serde(default)]
+    pub thermal_measured: bool,
     pub battery_pct_end: Option<u8>,
     pub sample_count: u32,
     /// Label matching `ResourceTelemetryMode::label()`: `"off"`, `"boundary"`,
@@ -211,6 +218,7 @@ struct Aggregator {
     mem_avail_min: Option<u32>,
     pressure_peak: MemoryPressure,
     thermal_peak: ThermalState,
+    thermal_measured: bool,
     latest_battery: Option<u8>,
     sample_count: u32,
 }
@@ -225,6 +233,7 @@ impl Aggregator {
             mem_avail_min: None,
             pressure_peak: MemoryPressure::Unknown,
             thermal_peak: ThermalState::Normal,
+            thermal_measured: false,
             latest_battery: None,
             sample_count: 0,
         }
@@ -254,7 +263,10 @@ impl Aggregator {
             });
         }
         self.pressure_peak = self.pressure_peak.worse_of(s.memory_pressure);
-        self.thermal_peak = thermal_worse_of(self.thermal_peak, s.thermal_state);
+        if s.thermal_measured {
+            self.thermal_peak = thermal_worse_of(self.thermal_peak, s.thermal_state);
+            self.thermal_measured = true;
+        }
         if s.battery_pct.is_some() {
             self.latest_battery = s.battery_pct;
         }
@@ -273,6 +285,7 @@ impl Aggregator {
             available_mem_min_mb: self.mem_avail_min,
             memory_pressure_peak: self.pressure_peak,
             thermal_state_peak: self.thermal_peak,
+            thermal_measured: self.thermal_measured,
             battery_pct_end: self.latest_battery,
             sample_count: self.sample_count,
             sampling_mode: mode.label().to_string(),
@@ -461,6 +474,7 @@ impl ResourceMonitor {
             total_mem_mb: inner.total_mem_mb.or(total_mb),
             memory_pressure: MemoryPressure::derive(available_mb, inner.total_mem_mb.or(total_mb)),
             thermal_state: platform.thermal_state.unwrap_or(ThermalState::Normal),
+            thermal_measured: platform.thermal_state.is_some(),
             battery_pct: platform.battery_pct,
             captured_at_ms: now_ms(),
         };
@@ -683,6 +697,7 @@ mod tests {
             total_mem_mb: Some(16000),
             memory_pressure: MemoryPressure::Normal,
             thermal_state: ThermalState::Normal,
+            thermal_measured: false,
             battery_pct: Some(80),
             captured_at_ms: 0,
         });
@@ -693,6 +708,7 @@ mod tests {
             total_mem_mb: Some(16000),
             memory_pressure: MemoryPressure::Warn,
             thermal_state: ThermalState::Hot,
+            thermal_measured: true,
             battery_pct: Some(78),
             captured_at_ms: 1_000,
         });

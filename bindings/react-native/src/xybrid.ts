@@ -8,14 +8,12 @@ import type { CacheEntry, CacheStatus, ThermalState } from './types';
 export interface XybridInitOptions {
   /**
    * Xybrid API key. Enables the platform features on top of local inference:
-   * telemetry to the dashboard, cloud fallback, speculative cloud serving.
-   * Get one at https://dashboard.xybrid.dev.
+   * cloud fallback and speculative cloud serving. It does not enable trace
+   * export; see `ObservabilityConfig`. Get one at https://dashboard.xybrid.dev.
    */
   apiKey?: string;
   /** Override the LLM gateway URL (full URL including `/v1`). */
   gatewayUrl?: string;
-  /** Override the telemetry ingest URL (self-hosted dashboards). */
-  ingestUrl?: string;
   /**
    * Where downloaded models live. Defaults to `<Caches>/xybrid/models` on
    * iOS and `<filesDir>/xybrid/models` on Android. Only honoured when

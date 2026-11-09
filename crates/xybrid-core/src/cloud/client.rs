@@ -1,7 +1,7 @@
 //! Cloud client implementation.
 
 use super::completion::{CompletionRequest, CompletionResponse, Role};
-use super::config::{same_origin, CloudBackend, CloudConfig};
+use super::config::{platform_gateway_url, same_origin, CloudBackend, CloudConfig};
 use super::error::CloudError;
 use crate::http::{with_retry, CircuitBreaker, CircuitConfig, RetryPolicy, RetryResult};
 use serde_json::json;
@@ -128,9 +128,20 @@ impl Cloud {
         // Clone request data needed for retry closure
         let request_clone = request.clone();
 
+        // Each retry is an execution attempt of its own: report it (with the
+        // failed try's error class and when it failed) before re-sending, so
+        // the recorder can give the re-sent request a new parent context.
+        let mut failed_try: Option<(&'static str, Instant)> = None;
         let result: RetryResult<CompletionResponse, CloudError> =
             with_retry(&self.retry_policy, Some(&self.gateway_circuit), || {
-                self.call_gateway(request_clone.clone())
+                if let Some((error_type, failed_at)) = failed_try.take() {
+                    crate::tracing::record_request_retry(error_type, failed_at);
+                }
+                let outcome = self.call_gateway(request_clone.clone());
+                if let Err(error) = &outcome {
+                    failed_try = Some((error.error_type(), Instant::now()));
+                }
+                outcome
             });
 
         result.into_result()
@@ -177,10 +188,12 @@ impl Cloud {
             );
         }
 
-        let mut req = self
-            .agent
-            .post(&url)
-            .set("Content-Type", "application/json");
+        let mut req = inject_transport_trace_headers(
+            &self.config.gateway_url,
+            self.agent
+                .post(&url)
+                .set("Content-Type", "application/json"),
+        );
 
         if let Some(ref key) = api_key {
             req = req.set("Authorization", &format!("Bearer {}", key));
@@ -400,6 +413,26 @@ fn resolve_direct_api_key(
         destination,
         provider.api_key_env_var()
     )))
+}
+
+/// Adds W3C trace context to a request on the OpenAI-compatible transport
+/// bound for `destination`.
+///
+/// Context leaves the process automatically only for the configured Xybrid
+/// platform gateway — the same single origin that may receive the platform
+/// API key automatically (see [`CloudConfig::resolve_api_key`]). Any other
+/// origin, such as a `backend: direct` provider's base URL or a stage's custom
+/// `gateway_url`, is a third party: it receives context only when the
+/// session's provider allowlist names that exact origin.
+pub(crate) fn inject_transport_trace_headers(
+    destination: &str,
+    request: ureq::Request,
+) -> ureq::Request {
+    if same_origin(destination, &platform_gateway_url()) {
+        crate::tracing::inject_trace_headers(request)
+    } else {
+        crate::tracing::inject_provider_trace_headers(request)
+    }
 }
 
 /// Extract `choices[0].message.content` from an OpenAI-shaped 200 response.

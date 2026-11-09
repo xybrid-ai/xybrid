@@ -11,10 +11,114 @@ import 'context.dart';
 import 'envelope.dart';
 import 'generation_config.dart';
 import 'llm.dart';
+import 'observability.dart';
 import 'result.dart';
 import 'rust/api/model.dart';
 import 'run_options.dart';
 import 'tools.dart';
+
+// Native completion supplies metrics and correlation after the terminal token.
+// Hold that terminal token so successful turns still finalize exactly once.
+//
+// A local abort crosses as a cloud-fallback marker. With
+// [cloudFallbackAbortIsFinal] it ends the run (unless a terminal token already
+// did); otherwise it is a non-final marker announcing the cloud continuation.
+Stream<StreamToken> _tokensWithCompletion(
+  Stream<FfiStreamEvent> stream, {
+  bool cloudFallbackAbortIsFinal = true,
+}) async* {
+  StreamToken? pendingFinal;
+  var emittedToolCalls = false;
+  try {
+    await for (final event in stream) {
+      switch (event) {
+        case FfiStreamEvent_Token(:final field0):
+          final token = StreamToken(
+            token: field0.token,
+            index: field0.index,
+            cumulativeText: field0.cumulativeText,
+            isFinal: field0.finishReason != null,
+            finishReason: field0.finishReason,
+            toolCalls:
+                field0.toolCalls.map(ToolCall.fromFfi).toList(growable: false),
+            rawText: field0.rawText,
+          );
+          if (token.isFinal) {
+            pendingFinal = token;
+          } else {
+            if (token.toolCalls.isNotEmpty) emittedToolCalls = true;
+            yield token;
+          }
+        case FfiStreamEvent_Complete(:final field0):
+          final terminal = pendingFinal;
+          pendingFinal = null;
+          final calls = emittedToolCalls
+              ? const <ToolCall>[]
+              : terminal != null && terminal.toolCalls.isNotEmpty
+                  ? terminal.toolCalls
+                  : field0.toolCalls
+                      .map(ToolCall.fromFfi)
+                      .toList(growable: false);
+          if (calls.isNotEmpty) emittedToolCalls = true;
+          yield StreamToken(
+            token: terminal?.token ?? '',
+            index: terminal?.index ?? 0,
+            cumulativeText: terminal?.cumulativeText ?? field0.text ?? '',
+            isFinal: true,
+            finishReason: terminal?.finishReason ??
+                (calls.isEmpty ? 'stop' : 'tool_calls'),
+            metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
+            observation: field0.observation,
+            toolCalls: calls,
+            rawText: terminal?.rawText ?? (calls.isEmpty ? null : field0.text),
+          );
+        case FfiStreamEvent_Error(:final field0):
+          // Keep the existing terminal-then-error behavior when native result
+          // conversion fails after generation, so the error is never hidden.
+          if (pendingFinal != null) {
+            yield pendingFinal;
+            pendingFinal = null;
+          }
+          yield StreamToken(
+            token: '',
+            index: 0,
+            cumulativeText: '',
+            isFinal: true,
+            finishReason: 'error: $field0',
+          );
+        case FfiStreamEvent_CloudFallbackAbort(:final field0):
+          if (!cloudFallbackAbortIsFinal) {
+            // After a terminal token the marker changes nothing; that token
+            // still waits for its completion.
+            if (pendingFinal == null) {
+              yield _cloudFallbackAbortToken(field0, isFinal: false);
+            }
+          } else if (pendingFinal != null) {
+            // The run already produced its terminal token; the abort replaces
+            // only the completion, so finalize with that token.
+            yield pendingFinal;
+            pendingFinal = null;
+            return;
+          } else {
+            yield _cloudFallbackAbortToken(field0, isFinal: true);
+            return;
+          }
+      }
+    }
+  } catch (error) {
+    if (pendingFinal != null) yield pendingFinal;
+    pendingFinal = null;
+    yield StreamToken(
+      token: '',
+      index: 0,
+      cumulativeText: '',
+      isFinal: true,
+      finishReason: 'error: $error',
+    );
+  }
+  // Some native streams can close without a Complete event.
+  if (pendingFinal != null) yield pendingFinal;
+}
 
 /// Exception thrown when Xybrid operations fail.
 class XybridException implements Exception {
@@ -200,6 +304,10 @@ class XybridModelLoader {
 
   XybridModelLoader._(this._inner);
 
+  /// Return a loader with explicit parent, suppression and correlation controls.
+  XybridModelLoader withObservation(ObservationOptions options) =>
+      XybridModelLoader._(_inner.withObservation(options: options.toFfi()));
+
   /// Create a loader for a model from the Xybrid registry.
   ///
   /// The [modelId] should match a model ID in the registry (e.g., "kokoro-82m").
@@ -344,6 +452,8 @@ class XybridModel {
   /// runtime-ready MLX SafeTensors models, and `false` for batch-only model
   /// types or non-linking MLX skeleton builds.
   bool supportsTokenStreaming() => inner.supportsTokenStreaming();
+  /// Immutable reference for the load that created this model.
+  ObservationRef? get loadObservationRef => inner.loadObservationRef();
 
   /// Whether runs are currently answered by the cloud because the local
   /// weights are not ready yet. `false` for ordinary local models.
@@ -411,11 +521,13 @@ class XybridModel {
   Future<XybridResult> run(
     XybridEnvelope envelope, {
     GenerationConfig? config,
+    RunOptions? options,
   }) async {
     try {
       final ffiResult = await inner.run(
         envelope: envelope.inner,
         config: config?.toFfi(),
+        options: options?.toFfi(),
       );
       return XybridResult.fromFfi(ffiResult);
     } on XybridException {
@@ -451,12 +563,14 @@ class XybridModel {
     XybridEnvelope envelope,
     ConversationContext context, {
     GenerationConfig? config,
+    RunOptions? options,
   }) async {
     try {
       final ffiResult = await inner.runWithContext(
         envelope: envelope.inner,
         context: context.inner,
         config: config?.toFfi(),
+        options: options?.toFfi(),
       );
       return XybridResult.fromFfi(ffiResult);
     } on XybridException {
@@ -516,6 +630,7 @@ class XybridModel {
     CancellationToken? cancellationToken,
     bool preempt = false,
     String? frameSessionId,
+    RunOptions? options,
   }) async* {
     try {
       // Use native streaming from FFI
@@ -525,60 +640,10 @@ class XybridModel {
         cancellationToken: cancellationToken?.inner,
         preempt: preempt,
         frameSessionId: frameSessionId,
+        options: options?.toFfi(),
       );
 
-      var emittedFinal = false;
-
-      await for (final event in stream) {
-        switch (event) {
-          case FfiStreamEvent_Token(:final field0):
-            final isFinal = field0.finishReason != null;
-            if (isFinal) emittedFinal = true;
-            yield StreamToken(
-              token: field0.token,
-              index: field0.index,
-              cumulativeText: field0.cumulativeText,
-              isFinal: isFinal,
-              finishReason: field0.finishReason,
-              toolCalls: field0.toolCalls
-                  .map(ToolCall.fromFfi)
-                  .toList(growable: false),
-              rawText: field0.rawText,
-            );
-          case FfiStreamEvent_Complete(:final field0):
-            // Only emit if we haven't already emitted a final token
-            if (!emittedFinal) {
-              final calls = field0.toolCalls
-                  .map(ToolCall.fromFfi)
-                  .toList(growable: false);
-              yield StreamToken(
-                token: '',
-                index: 0,
-                cumulativeText: field0.text ?? '',
-                isFinal: true,
-                finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
-                metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
-                toolCalls: calls,
-                rawText: calls.isEmpty ? null : field0.text,
-              );
-            }
-          case FfiStreamEvent_Error(:final field0):
-            // Even after a final token: the run can still fail once
-            // generation stops, e.g. on an output XybridResult cannot carry.
-            yield StreamToken(
-              token: '',
-              index: 0,
-              cumulativeText: '',
-              isFinal: true,
-              finishReason: 'error: $field0',
-            );
-          case FfiStreamEvent_CloudFallbackAbort(:final field0):
-            if (!emittedFinal) {
-              emittedFinal = true;
-              yield _cloudFallbackAbortToken(field0, isFinal: true);
-            }
-        }
-      }
+      yield* _tokensWithCompletion(stream);
     } catch (e) {
       // Emit error token
       yield StreamToken(
@@ -599,17 +664,24 @@ class XybridModel {
   Stream<TtsAudioChunk> runTtsStreaming(
     XybridEnvelope envelope, {
     CancellationToken? cancellationToken,
+    RunOptions? options,
+    void Function(FfiTtsStreamResult result)? onComplete,
   }) async* {
     final stream = inner.runTtsStream(
       envelope: envelope.inner,
       config: null,
       cancellationToken: cancellationToken?.inner,
+      options: options?.toFfi(),
     );
     await for (final event in stream) {
       switch (event) {
         case FfiTtsStreamEvent_AudioChunk(:final pcm, :final sampleRate):
           yield TtsAudioChunk(pcm: pcm, sampleRate: sampleRate);
-        case FfiTtsStreamEvent_Complete():
+        case FfiTtsStreamEvent_Complete(:final field0):
+          onComplete?.call(field0);
+          if (field0.status == FfiTtsStatus.limited) {
+            throw StateError('TTS output limited; partial audio delivered');
+          }
           return;
         case FfiTtsStreamEvent_Error(:final field0):
           throw StateError('TTS streaming failed: $field0');
@@ -641,56 +713,7 @@ class XybridModel {
         cancellationToken: cancellationToken?.inner,
       );
 
-      var emittedFinal = false;
-
-      await for (final event in stream) {
-        switch (event) {
-          case FfiStreamEvent_Token(:final field0):
-            final isFinal = field0.finishReason != null;
-            if (isFinal) emittedFinal = true;
-            yield StreamToken(
-              token: field0.token,
-              index: field0.index,
-              cumulativeText: field0.cumulativeText,
-              isFinal: isFinal,
-              finishReason: field0.finishReason,
-              toolCalls: field0.toolCalls
-                  .map(ToolCall.fromFfi)
-                  .toList(growable: false),
-              rawText: field0.rawText,
-            );
-          case FfiStreamEvent_Complete(:final field0):
-            if (!emittedFinal) {
-              final calls = field0.toolCalls
-                  .map(ToolCall.fromFfi)
-                  .toList(growable: false);
-              yield StreamToken(
-                token: '',
-                index: 0,
-                cumulativeText: field0.text ?? '',
-                isFinal: true,
-                finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
-                metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
-                toolCalls: calls,
-                rawText: calls.isEmpty ? null : field0.text,
-              );
-            }
-          case FfiStreamEvent_Error(:final field0):
-            // Even after a final token: the run can still fail once
-            // generation stops, e.g. on an output XybridResult cannot carry.
-            yield StreamToken(
-              token: '',
-              index: 0,
-              cumulativeText: '',
-              isFinal: true,
-              finishReason: 'error: $field0',
-            );
-          case FfiStreamEvent_CloudFallbackAbort(:final field0):
-            if (!emittedFinal) {
-              yield _cloudFallbackAbortToken(field0, isFinal: false);
-            }
-        }
-      }
+      yield* _tokensWithCompletion(stream, cloudFallbackAbortIsFinal: false);
     } catch (e) {
       yield StreamToken(
         token: '',
@@ -748,6 +771,7 @@ class XybridModel {
     CancellationToken? cancellationToken,
     bool preempt = false,
     String? frameSessionId,
+    RunOptions? options,
   }) async* {
     try {
       final stream = inner.runStreamWithContext(
@@ -757,6 +781,7 @@ class XybridModel {
         cancellationToken: cancellationToken?.inner,
         preempt: preempt,
         frameSessionId: frameSessionId,
+        options: options?.toFfi(),
       );
 
       // This method emits the native terminal token AND a completion token
@@ -793,6 +818,7 @@ class XybridModel {
               isFinal: true,
               finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
               metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
+              observation: field0.observation,
               toolCalls: calls,
               rawText: calls.isEmpty ? null : field0.text,
             );

@@ -56,13 +56,44 @@ void Awake()
 
 在 Android 上，模型缓存在 `Application.persistentDataPath/xybrid` 下（SDK 使用其中的 `models` 子目录，并在旁边的 `extracted` 目录中存放可直接运行的文件）。如需使用其他目录，请在加载或列出任何模型之前调用 `XybridBolt.XybridBolt.InitSdkCacheDir(path)`；以最先设置的目录为准。
 
-无论是否鉴权，推理都完全在本地运行。传入 `apiKey` 即可点亮[控制台](https://dashboard.xybrid.dev)——这一次调用会启动遥测导出器，你的 `model.Run(...)` 调用便会自动上报执行轨迹：
+无论是否鉴权，推理都完全在本地运行。`apiKey` 用于云端网关鉴权；`gatewayUrl` 可覆盖网关地址：
 
 ```csharp
 XybridClient.Initialize(apiKey: "xy_live_...");
 ```
 
-未提供密钥时，遥测处于禁用状态，首次推理会打印一条一次性提示指向控制台（可通过环境变量 `XYBRID_QUIET=1` 关闭）。在 [dashboard.xybrid.dev](https://dashboard.xybrid.dev) 免费获取密钥。若使用自托管控制台，请额外传入 `ingestUrl`。如需高级遥测设置（批大小、刷新间隔、设备属性），请构建 `TelemetryConfig` 并改用 `XybridClient.InitializeTelemetry`。
+## 可观测性
+
+在你完成配置之前，轨迹导出处于关闭状态——仅提供 API 密钥不会启用导出。用两种预设之一启动一次即可：
+
+```csharp
+// 将轨迹发送到 Xybrid 控制台
+XybridClient.InitializeObservability(
+    ObservabilityConfig.Xybrid("xy_live_...")
+        .WithService(Application.productName, Application.version));
+
+// 将轨迹、指标和日志发送到 OTLP/HTTP 端点（例如 OpenTelemetry Collector）
+XybridClient.InitializeObservability(ObservabilityConfig.Otlp("http://collector:4318"));
+```
+
+默认会采集提示词与输出；链式调用 `.WithMetadataOnly()` 则只导出元数据。`.WithTracesEndpoint(url)` 可将控制台预设指向自托管端点。在配置导出之前，首次推理会打印一条一次性提示（可通过 `XYBRID_QUIET=1` 关闭）。在 [dashboard.xybrid.dev](https://dashboard.xybrid.dev) 免费获取密钥。
+
+`ObservationOptions` 可携带单次运行的轨迹上下文，每个结果的 `Observation` 标识其所属轨迹：
+
+```csharp
+var result = model.Run(envelope, observation: new ObservationOptions
+{
+    Traceparent = parentTraceparent,
+    ConversationId = chatId,
+});
+if (result.Observation is XybridBolt.XybridObservationRef run)
+{
+    XybridClient.RecordFeedback(run, score: 1.0, label: "thumbs_up");
+}
+XybridClient.FlushObservability(TimeSpan.FromSeconds(2));
+```
+
+反馈与评估（`XybridClient.RecordEvaluation(target, name, ...)`）需要日志信号，因此在仅发送轨迹的控制台预设下会返回 `false`。请在 `OnApplicationPause(true)` 中调用 `FlushObservability`，在 `OnApplicationQuit` 中调用 `ShutdownObservability`：移动操作系统可能在不触发退出回调的情况下终止后台应用。
 
 ## 快速开始
 
@@ -208,25 +239,39 @@ string transcription = model.RunAudio(wavBytes, sampleRate: 16000);
 音频必须是 PCM **float32、单声道、16 kHz**——从平台麦克风格式转换由调用方负责。
 
 ```csharp
-using var session = model.Stream(StreamingConfigs.VoiceActivity(vadModelDir, language: "en"));
+using System.Threading;
+using Xybrid;
+using XybridBolt; // the Partials() extension
 
-// Drive the UI from the partial stream.
-await foreach (var partial in session.Partials(cancellationToken))
-{
-    label.text = partial.Text;
-}
+using var session = model.Stream(StreamingConfigs.VoiceActivity(vadModelDir, language: "en"));
+ShowPartials(session, cancellationToken); // not awaited: runs alongside the feed loop
 
 // From the Microphone clip, converted to float mono 16 kHz:
 session.Feed(pcm);
 
-string transcript = session.Flush();
+XybridTranscriptionResult result = session.Flush();
+string transcript = result.Text;
+
+// Started from the main thread, each await resumes there, so the UI can be updated.
+async void ShowPartials(XybridStreamingSession live, CancellationToken token)
+{
+    await foreach (var partial in live.Partials(token))
+    {
+        label.text = partial.Text;
+    }
+}
 ```
 
 部分转写文本是**累积的，而不是增量**：请用新的结果替换上一条显示，而不是追加。
 在订阅之前产生的部分结果会立即送达，因此一句话开头的词不会丢失。
 
-`flush()` 结束会话并返回完整转写文本；若其间有任何音频块转写失败，它会返回错误——
-那段音频已经丢失，否则返回的转写结果看起来完整却缺了一段。`cancel()` 结束会话并丢弃排队中的音频。
+`Flush()` 结束会话并返回 `XybridTranscriptionResult`：完整转写文本在 `Text` 中，另含
+`DurationMs`、`ChunksProcessed` 以及会话的 `Observation` 引用。若其间有任何音频块转写失败，它会抛出异常——
+那段音频已经丢失，否则返回的转写结果看起来完整却缺了一段。`Cancel()` 结束会话并丢弃排队中的音频。
+
+<Callout type="warn">
+早期版本以 `string` 返回转写文本。现在请改为读取结果的 `.Text`。
+</Callout>
 
 语音活动检测按语音边界切分，而不是按固定时钟，可避免窗口落在词中间造成的断续。
 它需要一个包含 `model.onnx` 的 Silero VAD 模型目录；SDK 不附带该模型，
@@ -266,6 +311,7 @@ using (var result = model.Run(envelope))
 | `Error` | `string` | 失败时的错误信息 |
 | `Text` | `string` | 文本输出（ASR、LLM） |
 | `LatencyMs` | `uint` | 推理延迟（毫秒） |
+| `Observation` | `XybridObservationRef?` | 该次运行的轨迹/跨度 ID（已追踪时） |
 
 ---
 
