@@ -22,8 +22,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`xybrid.genai.resource.memory.pressure`: `normal`, `warn` or `critical`).
   The Rust SDK maps them from its resource summary; unmeasured values stay
   absent. Rust and JS `ResourceSample` gained the matching optional fields.
+- **Rust:** per-destination OTLP response hooks in `xybrid-observability`
+  (`otlp::ResponseHook`, `SignalEndpoint::with_response_hook`). A hook sees
+  every HTTP response of its destination once, including retries and the
+  shutdown drain, and may disable that destination alone; what it no longer
+  sends is counted as `dropped`, never as exported.
+  `SignalEndpoint::is_xybrid_preset` marks the endpoint the Xybrid preset built.
+- **Rust:** Xybrid workspace feedback. With the Xybrid preset, trace ingest
+  reports a `xybrid connect` key's provisional deadline or its expiry
+  (`WorkspaceNotice`), read through `ObservabilitySession::workspace_feedback`
+  or `observability::workspace_feedback`. The CLI prints it after a run's
+  final export, with one claim line a day pointing at `xybrid auth claim`.
 
 ### Changed
+
+- When Xybrid's trace ingest reports that a key's unclaimed workspace expired
+  (HTTP 401 with `X-Xybrid-Workspace: expired` and a `workspace_expired`
+  status), every binding using the Xybrid preset stops sending traces to it
+  for the rest of the session. Later spans are counted as `dropped` in the
+  existing exporter stats; local inference, local spans and other destinations
+  continue. Claim the workspace and start observability again to resume.
+- The first-inference nudge points at `xybrid connect` and the console, and
+  says that a key alone exports nothing.
 
 - Portable observability contract v2 preserves numeric/null wire types and
   unsampled references, bounds retained content and delivery queues, and cancels
@@ -94,6 +114,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Delivery failures from flush/shutdown use `TelemetryDelivery` in native
   bindings. Inspect delivery stats or retry export; do not rerun inference to
   recover a missing acknowledgement.
+- **Rust:** `xybrid_observability::otlp::SignalEndpoint` gained a private
+  field, so it can no longer be built with a struct literal. Use
+  `SignalEndpoint::new` and its `with_*` methods.
 
 ## [0.17.0] - 2026-11-05
 

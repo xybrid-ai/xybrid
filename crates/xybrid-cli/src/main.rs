@@ -53,7 +53,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 use xybrid_core::ir::Choice;
-use xybrid_sdk::observability::{ObservabilityConfig, OtlpConfig, XYBRID_TRACES_ENDPOINT};
+use xybrid_sdk::observability::{
+    ObservabilityConfig, OtlpConfig, WorkspaceNotice, XYBRID_TRACES_ENDPOINT,
+};
 use xybrid_sdk::SdkError;
 
 /// Xybrid CLI - Hybrid Cloud-Edge AI Inference Pipeline Runner
@@ -549,21 +551,35 @@ fn main() -> Result<()> {
         // stderr: stdout belongs to the command's own output.
         ui::status("Observability enabled");
     }
+    // Xybrid ingest's word on the key's workspace. Taken now: shutdown below
+    // uninstalls the SDK's default session, and the export's final drain may
+    // bring the first response. Read after that drain.
+    let workspace = match &local_capture {
+        Some(capture) => capture.workspace_feedback(),
+        None if exporting => xybrid_sdk::observability::workspace_feedback(),
+        None => None,
+    };
     // The reminder follows the project's saved credential whenever it is the
     // key in use, including when it arrives through XYBRID_API_KEY (an
-    // exported .env) or --api-key.
-    platform::notices::maybe_claim_reminder(
-        || {
-            key.as_ref().and_then(|key| {
-                resolve::stored_matching(key, host.as_ref(), project_root.as_deref())
-            })
-        },
-        cli.quiet,
-        json,
-    );
+    // exported .env) or --api-key. A run exporting through the Xybrid preset
+    // holds it until ingest answered, so the run prints one claim line, with
+    // the platform's deadline when ingest reported one.
+    let saved_credential = || {
+        key.as_ref()
+            .and_then(|key| resolve::stored_matching(key, host.as_ref(), project_root.as_deref()))
+    };
+    if workspace.is_none() {
+        platform::notices::maybe_claim_reminder(saved_credential, cli.quiet, json);
+    }
     if key.is_some() && !exporting && cli.command.runs_inference() {
         platform::notices::maybe_export_tip(cli.quiet, json);
     }
+    // Where the key went, for refreshing its saved deadline from the notice.
+    let export_endpoint = match (&workspace, key.as_ref()) {
+        (Some(_), Some(key)) if cli.observability => trace_endpoint(&cli, key, host.as_ref()).ok(),
+        _ => None,
+    };
+    let quiet = cli.quiet;
 
     let root = local_capture.as_ref().map(tracing_viz::LocalCapture::begin);
     let scope = root.as_ref().map(|root| root.enter());
@@ -591,6 +607,31 @@ fn main() -> Result<()> {
                 ui::warning_stderr(&format!("Observability shutdown failed: {error}"));
             }
         }
+    }
+    if let Some(feedback) = &workspace {
+        let notice = feedback.notice();
+        if let (
+            Some(WorkspaceNotice::Provisional { key_expires_at }),
+            Some(key),
+            Some(host),
+            Some(project),
+            Some(endpoint),
+        ) = (
+            notice,
+            key.as_ref(),
+            host.as_ref(),
+            project_root.as_deref(),
+            export_endpoint.as_deref(),
+        ) {
+            platform::notices::refresh_key_deadline(
+                key,
+                host,
+                project,
+                endpoint,
+                key_expires_at.into(),
+            );
+        }
+        platform::notices::report_workspace_notice(notice, saved_credential, quiet, json);
     }
 
     if let Err(ref err) = result {

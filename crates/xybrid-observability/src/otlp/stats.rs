@@ -10,7 +10,8 @@ pub struct SignalStats {
     pub exported: u64,
     /// Items discarded by local policy without a deciding delivery attempt:
     /// admission refused (item or byte budget), offered after shutdown began,
-    /// oversized single item, still queued when shutdown cancelled.
+    /// oversized single item, still queued when shutdown cancelled, pending
+    /// or offered after the destination's response hook disabled it.
     pub dropped: u64,
     /// Items whose export ended without acknowledgement: rejection, retries
     /// exhausted, deadline or cancellation in flight, transport error, lost

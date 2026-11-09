@@ -12,8 +12,8 @@
 //! use std::time::Duration;
 //! use xybrid_sdk::observability::{self, ObservabilityConfig, OtlpConfig};
 //!
-//! // Traces to the Xybrid dashboard:
-//! observability::init_observability(ObservabilityConfig::xybrid("xy_live_..."))?;
+//! // Traces to the Xybrid console (a key from `xybrid connect` or the console):
+//! observability::init_observability(ObservabilityConfig::xybrid("sk_live_..."))?;
 //! // ...or everything to an OpenTelemetry Collector:
 //! observability::init_observability(ObservabilityConfig::otlp(OtlpConfig::collector(
 //!     "http://localhost:4318",
@@ -32,6 +32,11 @@
 //! (for example a `traceparent` from another process or language), a
 //! conversation id, prompt metadata, and trace suppression. Results return
 //! their [`ObservationRef`] for feedback and evaluations.
+//!
+//! With the Xybrid preset, trace ingest also reports the lifecycle of a key
+//! from `xybrid connect` (a provisional workspace and its deadline, or its
+//! expiry); see [`WorkspaceFeedback`] and [`workspace_feedback`]. An expired
+//! key stops that destination only, never local inference.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -46,8 +51,9 @@ use xybrid_core::ir::{Envelope, EnvelopeKind, ImageSource};
 use xybrid_core::tracing::{RecorderScope, TraceHeaders, TraceRecorder};
 
 pub use xybrid_observability::otlp::{
-    BatchLimits, OtlpConfig, PipelineStats, Protocol, ResourceConfig, RetryLimits, SignalEndpoint,
-    SignalStats, XYBRID_TRACES_ENDPOINT,
+    BatchLimits, ExportResponse, OtlpConfig, PipelineStats, Protocol, ResourceConfig,
+    ResponseAction, ResponseHook, RetryLimits, RpcStatus, SignalEndpoint, SignalStats,
+    XYBRID_TRACES_ENDPOINT,
 };
 pub use xybrid_observability::{
     semconv, AttemptInfo, AttemptOperation, AttemptReason, ContentCapture, ContentPolicy,
@@ -71,6 +77,8 @@ use session::resolve_session;
 pub use session::{
     default_session, install_default_session, CapturedContext, CapturedScope, ObservabilitySession,
 };
+mod workspace;
+pub use workspace::{WorkspaceFeedback, WorkspaceNotice};
 
 /// How observability is exported.
 #[derive(Clone)]
@@ -106,9 +114,10 @@ impl ObservabilityConfig {
         }
     }
 
-    /// Xybrid dashboard preset: traces only, bearer-authenticated. Metrics and
+    /// Xybrid console preset: traces only, bearer-authenticated. Metrics and
     /// logs are not sent; use [`ObservabilityConfig::otlp`] with a Collector
-    /// to route them to your own stores.
+    /// to route them to your own stores. Sessions built from it report the
+    /// key's workspace lifecycle ([`ObservabilitySession::workspace_feedback`]).
     pub fn xybrid(api_key: &str) -> Self {
         Self::otlp(OtlpConfig::xybrid_traces(api_key))
     }
@@ -246,6 +255,16 @@ pub fn is_enabled() -> bool {
 /// Per-signal delivery counters, unavailable for borrowed providers.
 pub fn stats() -> Option<PipelineStats> {
     default_session().and_then(|s| s.stats())
+}
+
+/// The workspace feedback of the default session's Xybrid trace destination
+/// (see [`ObservabilitySession::workspace_feedback`]).
+///
+/// [`shutdown_observability`] uninstalls the default session, and its final
+/// drain may bring the first response: take this handle before shutting down
+/// and read [`WorkspaceFeedback::notice`] afterwards.
+pub fn workspace_feedback() -> Option<WorkspaceFeedback> {
+    default_session().and_then(|s| s.workspace_feedback())
 }
 
 /// Flushes the default session's owned pipeline.

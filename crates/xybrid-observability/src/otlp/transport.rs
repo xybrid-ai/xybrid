@@ -1,7 +1,11 @@
 //! The final transport boundary (D24, D26, D28): one HTTP request flow per
 //! body, sharing the export's absolute deadline across attempts, backoff,
 //! `Retry-After` waits and the response read. Redirects are never followed.
+//! A destination's response hook sees every response here, once, and may
+//! disable the destination (see [`super::hook`]).
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, RETRY_AFTER};
@@ -12,8 +16,15 @@ use tokio_util::sync::CancellationToken;
 use super::config::{Protocol, ResolvedSignal, RetryLimits};
 use super::defaults;
 use super::encode::{self, Signal};
+use super::hook::{ExportResponse, ResponseAction, ResponseHook};
 use super::runtime::tokio_after;
 use crate::error::{Error, Result};
+
+/// How long a failure body is read for a response hook (never past the
+/// attempt's own timeout). A `google.rpc.Status` is a few bytes that arrive
+/// with the headers; a body still stalled after this is treated as
+/// unreadable, so a retryable status keeps its retry budget.
+const FAILURE_BODY_READ_LIMIT: Duration = Duration::from_secs(1);
 
 /// Builds the shared HTTP client: rustls, HTTP/1.1, no redirects, no proxy
 /// discovery, no client-level timeout (each attempt carries its own).
@@ -38,10 +49,14 @@ pub(crate) enum Delivery {
     Acknowledged { rejected: u64 },
     /// No acknowledgement (status, transport error, deadline, cancellation).
     Failed,
+    /// Not attempted: the destination was disabled by its response hook.
+    Disabled,
 }
 
-/// One signal's destination: the URL, the resolved headers, and the retry
-/// policy. The only code that builds requests.
+/// One signal's destination: the URL, the resolved headers, the retry
+/// policy, its response hook and whether that hook disabled it. The only
+/// code that builds requests. One is built per pipeline (or exporter set),
+/// so a new build starts enabled.
 #[derive(Clone, Debug)]
 pub(crate) struct Sender {
     client: Client,
@@ -51,6 +66,8 @@ pub(crate) struct Sender {
     timeout: Duration,
     retry: RetryLimits,
     signal: Signal,
+    hook: Option<ResponseHook>,
+    disabled: Arc<AtomicBool>,
 }
 
 impl Sender {
@@ -63,6 +80,23 @@ impl Sender {
             timeout: resolved.timeout,
             retry,
             signal: resolved.signal,
+            hook: resolved.hook.clone(),
+            disabled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Whether the response hook disabled this destination.
+    pub(crate) fn is_disabled(&self) -> bool {
+        self.disabled.load(Ordering::Acquire)
+    }
+
+    fn disable(&self) {
+        if !self.disabled.swap(true, Ordering::AcqRel) {
+            log::warn!(
+                "xybrid-observability: the {} destination was disabled by its response hook; \
+                 pending and later items are dropped",
+                self.signal.as_str()
+            );
         }
     }
 
@@ -85,7 +119,17 @@ impl Sender {
         let signal = self.signal.as_str();
         let content_type = HeaderValue::from_static(self.protocol.content_type());
         let mut retry = 0usize;
+        let mut attempted = false;
         loop {
+            if self.is_disabled() {
+                // Items whose delivery was already attempted fail; untried
+                // ones are the caller's to drop.
+                return if attempted {
+                    Delivery::Failed
+                } else {
+                    Delivery::Disabled
+                };
+            }
             let now = Instant::now();
             if cancel.is_cancelled() || now >= deadline {
                 return Delivery::Failed;
@@ -110,6 +154,7 @@ impl Sender {
                     return Delivery::Failed;
                 }
             };
+            attempted = true;
             let sent = cancel
                 .run_until_cancelled(timeout_at(attempt_deadline, self.client.execute(request)))
                 .await;
@@ -126,16 +171,48 @@ impl Sender {
                 }
                 Some(Ok(Ok(response))) => {
                     let status = response.status();
+                    let wait = retry_after(response.headers());
+                    // A hook sees the headers and the bounded body of every
+                    // response; without one, only a 2xx body is read. A
+                    // failure body is read only for the hook, and briefly:
+                    // a stalled one must not use up the retry budget.
+                    let headers = self.hook.as_ref().map(|_| response.headers().clone());
+                    let read_until = if status.is_success() {
+                        Some(deadline)
+                    } else if headers.is_some() {
+                        Some(
+                            tokio_after(Instant::now(), FAILURE_BODY_READ_LIMIT)
+                                .min(attempt_deadline),
+                        )
+                    } else {
+                        None
+                    };
+                    let body = match read_until {
+                        Some(until) => match cancel
+                            .run_until_cancelled(timeout_at(until, read_capped(response)))
+                            .await
+                        {
+                            Some(Ok(body)) => body,
+                            _ => None,
+                        },
+                        None => None,
+                    };
+                    if let (Some(hook), Some(headers)) = (&self.hook, &headers) {
+                        let seen = ExportResponse::new(
+                            self.signal,
+                            self.protocol,
+                            status.as_u16(),
+                            headers,
+                            body.as_deref(),
+                        );
+                        if hook.call(&seen) == ResponseAction::Disable {
+                            self.disable();
+                        }
+                    }
                     if status.is_success() {
-                        let body = cancel
-                            .run_until_cancelled(timeout_at(deadline, read_capped(response)))
-                            .await;
-                        let rejected = match body {
-                            Some(Ok(Some(bytes))) => {
-                                encode::rejected(self.signal, self.protocol, &bytes)
-                            }
-                            _ => 0,
-                        };
+                        let rejected = body.map_or(0, |bytes| {
+                            encode::rejected(self.signal, self.protocol, &bytes)
+                        });
                         return Delivery::Acknowledged { rejected };
                     }
                     log::warn!(
@@ -145,10 +222,12 @@ impl Sender {
                     if !is_retryable(status) {
                         return Delivery::Failed;
                     }
-                    (true, retry_after(response.headers()))
+                    (true, wait)
                 }
             };
-            if !retryable || retry >= self.retry.max_retries {
+            // A disabled destination never retries, so it never waits for a
+            // backoff or `Retry-After` either: the items fail now.
+            if !retryable || retry >= self.retry.max_retries || self.is_disabled() {
                 return Delivery::Failed;
             }
             let wait = retry_after.unwrap_or_else(|| backoff(&self.retry, retry));
