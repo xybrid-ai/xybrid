@@ -167,6 +167,36 @@ class ChangeSelectionTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(classify("pull_request", pr_files(path))["unity_bolt"], "false")
 
+    def test_observability_scenario_inputs_run_their_gates(self):
+        # test_observability_capture.py requires every lane's scenario source to
+        # configure the omit rule and record the content it drops, so editing a
+        # lane must run the tooling tests. The Python suite runs the scenario
+        # end to end over the harness, the SDK and the observability crate.
+        tests_dir = Path(__file__).resolve().parent
+        spec = importlib.util.spec_from_file_location(
+            "observability_capture_under_ci_gate", tests_dir / "test_observability_capture.py"
+        )
+        capture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(capture)
+        for path, _, _ in capture.LANE_SOURCES.values():
+            with self.subTest(path=path):
+                self.assertTrue((capture.REPO / path).is_file(), path)
+                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "true")
+        for path in (
+            "tools/scripts/observability_capture/check_capture.py",
+            "crates/xybrid-observability/src/exporter.rs",
+            "crates/xybrid-sdk/src/observability.rs",
+            "bindings/python/tests/observability_scenario.py",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["python_sdk"], "true")
+        for path in (
+            "bindings/flutter/test/observability_test.dart",
+            "bindings/apple/Tests/XybridTests/ObservationTests.swift",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
+
     def test_unity_drift_inputs_select_both_unity_jobs(self):
         for path in (
             "bindings/unity/Runtime/Bolt/XybridError.cs",
