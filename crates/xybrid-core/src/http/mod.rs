@@ -28,6 +28,12 @@
 //! # }
 //! ```
 //!
+//! A server-directed wait (`Retry-After`) is honored only up to
+//! [`MAX_RETRY_AFTER`] per call, in total; past that the retry gives up with
+//! the server's error instead of sleeping. Loops that sleep on
+//! [`RetryableError::retry_after`] themselves track it with a
+//! [`RetryAfterBudget`].
+//!
 //! ## Circuit Breaker
 //!
 //! Use [`CircuitBreaker`] to prevent hammering failing endpoints:
@@ -50,4 +56,6 @@ mod circuit_breaker;
 mod retry;
 
 pub use circuit_breaker::{CircuitBreaker, CircuitConfig, CircuitState};
-pub use retry::{with_retry, RetryPolicy, RetryResult, RetryableError};
+pub use retry::{
+    with_retry, RetryAfterBudget, RetryPolicy, RetryResult, RetryableError, MAX_RETRY_AFTER,
+};

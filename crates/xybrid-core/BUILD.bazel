@@ -263,6 +263,7 @@ rust_test(
         "@crates//:criterion",
         "@crates//:dirs",
         "@crates//:hound",
+        "@crates//:httpmock",
         "@crates//:libloading",
         "@crates//:tempfile",
     ] + _CORE_TEST_UREQ,

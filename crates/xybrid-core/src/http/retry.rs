@@ -1,6 +1,8 @@
 //! Retry logic with exponential backoff and jitter.
 //!
 //! Provides automatic retry for transient failures with configurable backoff.
+//! Server-directed waits (`Retry-After`) are honored only within
+//! [`MAX_RETRY_AFTER`]; see [`RetryAfterBudget`].
 
 use std::time::Duration;
 
@@ -11,6 +13,74 @@ const DEFAULT_MAX_ATTEMPTS: u32 = 5;
 const DEFAULT_INITIAL_DELAY_MS: u32 = 1000;
 const DEFAULT_MAX_DELAY_MS: u32 = 30000;
 const DEFAULT_JITTER_FACTOR: f32 = 0.5;
+
+/// Longest a retried call waits on server-directed delays (`Retry-After`), in
+/// total.
+///
+/// The wait blocks the calling thread, and a server can ask for anything: an
+/// over-quota gateway once sent `Retry-After` of a day. A minute covers
+/// ordinary rate limits (a few seconds each) across a whole retry policy. A
+/// `Retry-After` that does not fit in what is left of it ends the loop at once
+/// with the server's error: retrying before the server's time would only be
+/// refused again, and sleeping past the budget is what this bound prevents.
+/// Policy backoff (no `Retry-After`) is not charged against it.
+pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
+
+/// What remains of [`MAX_RETRY_AFTER`] during one retried call.
+///
+/// Create one per call (not per attempt) and [`spend`](Self::spend) every
+/// server-directed wait through it before sleeping.
+///
+/// # Examples
+///
+/// ```
+/// use std::time::Duration;
+/// use xybrid_core::http::RetryAfterBudget;
+///
+/// let mut budget = RetryAfterBudget::new();
+/// assert!(budget.spend(Duration::from_secs(1)));
+/// // A day does not fit: give up instead of sleeping.
+/// assert!(!budget.spend(Duration::from_secs(86_400)));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryAfterBudget {
+    remaining: Duration,
+}
+
+impl RetryAfterBudget {
+    /// A full budget of [`MAX_RETRY_AFTER`].
+    pub const fn new() -> Self {
+        Self {
+            remaining: MAX_RETRY_AFTER,
+        }
+    }
+
+    /// Charge `wait` to the budget if it fits, returning whether the caller
+    /// may sleep it.
+    ///
+    /// `false` leaves the budget unchanged and means "give up now": the
+    /// server asked for longer than this call will wait.
+    pub fn spend(&mut self, wait: Duration) -> bool {
+        match self.remaining.checked_sub(wait) {
+            Some(left) => {
+                self.remaining = left;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Server-directed waiting this call may still do.
+    pub fn remaining(&self) -> Duration {
+        self.remaining
+    }
+}
+
+impl Default for RetryAfterBudget {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Configuration for retry behavior.
 #[derive(Debug, Clone)]
@@ -106,7 +176,8 @@ pub enum RetryResult<T, E> {
     Success(T),
     /// Operation failed with a non-retryable error.
     Failure(E),
-    /// All retry attempts exhausted.
+    /// All retry attempts exhausted, or the server asked to wait longer than
+    /// the [`RetryAfterBudget`] allows.
     Exhausted {
         /// The last error encountered.
         last_error: E,
@@ -136,7 +207,8 @@ pub trait RetryableError {
     /// Returns true if the error is transient and the operation should be retried.
     ///
     /// Retryable errors include:
-    /// - 429 (Rate Limited)
+    /// - 429 (Rate Limited), but not a spent quota such as OpenAI's
+    ///   `insufficient_quota`, which waiting does not restore
     /// - 502 (Bad Gateway)
     /// - 503 (Service Unavailable)
     /// - Connection timeouts
@@ -153,7 +225,9 @@ pub trait RetryableError {
 
     /// Returns the recommended delay before retrying, if the server specified one.
     ///
-    /// This is typically parsed from the `Retry-After` HTTP header.
+    /// This is typically parsed from the `Retry-After` HTTP header. Report the
+    /// server's value as is: [`with_retry`] gives up rather than wait past
+    /// [`MAX_RETRY_AFTER`], which it can only do when it sees the real delay.
     fn retry_after(&self) -> Option<Duration>;
 
     /// Construct the error to report when a circuit breaker stayed open for the
@@ -177,6 +251,12 @@ pub trait RetryableError {
 /// # Returns
 ///
 /// A `RetryResult` indicating success, non-retryable failure, or exhausted retries.
+///
+/// A server-directed wait ([`RetryableError::retry_after`]) replaces the
+/// policy backoff for that retry, and is honored only while it fits in the
+/// call's [`RetryAfterBudget`] ([`MAX_RETRY_AFTER`] in total). One that does
+/// not fit returns [`RetryResult::Exhausted`] with that error at once, without
+/// sleeping.
 ///
 /// # Example
 ///
@@ -215,6 +295,8 @@ where
     E: RetryableError,
 {
     let mut last_error: Option<E> = None;
+    let mut retry_after_budget = RetryAfterBudget::new();
+    let mut attempts_made: u32 = 0;
 
     for attempt in 0..policy.max_attempts {
         // Check circuit breaker if provided
@@ -227,13 +309,24 @@ where
             }
         }
 
-        // Calculate delay for this attempt (0 for first attempt)
-        let delay = if let Some(ref err) = last_error {
-            // Use server-specified retry-after if available
-            err.retry_after()
-                .unwrap_or_else(|| policy.delay_for_attempt(attempt))
-        } else {
-            policy.delay_for_attempt(attempt)
+        // Calculate delay for this attempt (0 for first attempt). The previous
+        // error is consumed here: the attempt below either returns or
+        // replaces it.
+        let delay = match last_error.take() {
+            None => policy.delay_for_attempt(attempt),
+            Some(err) => match err.retry_after() {
+                // Use server-specified retry-after while the budget lasts
+                Some(wait) if retry_after_budget.spend(wait) => wait,
+                // The server wants longer than this call may wait: report its
+                // error now instead of sleeping or retrying early.
+                Some(_) => {
+                    return RetryResult::Exhausted {
+                        last_error: err,
+                        attempts: attempts_made,
+                    }
+                }
+                None => policy.delay_for_attempt(attempt),
+            },
         };
 
         if !delay.is_zero() {
@@ -241,6 +334,7 @@ where
         }
 
         // Execute the operation
+        attempts_made += 1;
         match operation() {
             Ok(result) => {
                 // Record success with circuit breaker
@@ -482,6 +576,103 @@ mod tests {
 
         assert!(matches!(result, RetryResult::Exhausted { attempts: 3, .. }));
         assert_eq!(call_count, 3);
+    }
+
+    /// A `Retry-After` beyond the budget ends the loop after the one attempt
+    /// that produced it, without sleeping, and reports that error.
+    #[test]
+    fn retry_after_beyond_budget_gives_up_without_sleeping() {
+        let policy = RetryPolicy {
+            max_attempts: 5,
+            initial_delay_ms: 1,
+            max_delay_ms: 10,
+            jitter_factor: 0.0,
+        };
+        let mut call_count = 0;
+        let started = std::time::Instant::now();
+
+        let result: RetryResult<&str, TestError> = with_retry(&policy, None, || {
+            call_count += 1;
+            Err(TestError {
+                retryable: true,
+                retry_after: Some(Duration::from_secs(86_400)),
+            })
+        });
+
+        assert_eq!(call_count, 1, "no retry once the wait exceeds the budget");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "gave up after {:?}",
+            started.elapsed()
+        );
+        match result {
+            RetryResult::Exhausted {
+                last_error,
+                attempts,
+            } => {
+                assert_eq!(attempts, 1);
+                assert_eq!(last_error.retry_after, Some(Duration::from_secs(86_400)));
+            }
+            other => panic!("expected Exhausted, got {other:?}"),
+        }
+    }
+
+    /// A short `Retry-After` is honored (it replaces the policy backoff) and
+    /// the operation is retried.
+    #[test]
+    fn short_retry_after_is_honored_and_retried() {
+        let policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_ms: 1,
+            max_delay_ms: 10,
+            jitter_factor: 0.0,
+        };
+        let wait = Duration::from_millis(50);
+        let mut call_count = 0;
+        let started = std::time::Instant::now();
+
+        let result: RetryResult<&str, TestError> = with_retry(&policy, None, || {
+            call_count += 1;
+            if call_count < 3 {
+                Err(TestError {
+                    retryable: true,
+                    retry_after: Some(wait),
+                })
+            } else {
+                Ok("success")
+            }
+        });
+
+        assert!(result.is_success());
+        assert_eq!(call_count, 3);
+        assert!(
+            started.elapsed() >= wait * 2,
+            "server wait skipped: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn retry_after_budget_is_cumulative_per_call() {
+        let mut budget = RetryAfterBudget::new();
+        assert_eq!(budget.remaining(), MAX_RETRY_AFTER);
+
+        // Waits that fit are charged; zero always fits.
+        assert!(budget.spend(Duration::ZERO));
+        assert!(budget.spend(MAX_RETRY_AFTER / 2));
+        assert!(budget.spend(MAX_RETRY_AFTER / 2));
+        assert_eq!(budget.remaining(), Duration::ZERO);
+
+        // Nothing more fits, and a refusal leaves the budget unchanged.
+        assert!(!budget.spend(Duration::from_millis(1)));
+        assert_eq!(budget.remaining(), Duration::ZERO);
+
+        // A single wait above the cap never fits a fresh budget.
+        let mut fresh = RetryAfterBudget::default();
+        assert!(!fresh.spend(MAX_RETRY_AFTER + Duration::from_millis(1)));
+        assert!(!fresh.spend(Duration::from_secs(u64::MAX)));
+        assert_eq!(fresh.remaining(), MAX_RETRY_AFTER);
+        assert!(fresh.spend(MAX_RETRY_AFTER));
     }
 
     #[test]

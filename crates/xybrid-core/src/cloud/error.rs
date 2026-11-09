@@ -25,6 +25,10 @@ pub enum CloudError {
     NetworkError(String),
 
     /// API returned an error response.
+    ///
+    /// `message` is the server's own. A 429 here is a spent quota
+    /// (`insufficient_quota`), which is not retryable; a plain rate limit is
+    /// [`CloudError::RateLimited`].
     #[error("API error ({status}): {message}")]
     ApiError { status: u16, message: String },
 
@@ -32,7 +36,11 @@ pub enum CloudError {
     #[error("Failed to parse response: {0}")]
     ParseError(String),
 
-    /// Rate limit exceeded.
+    /// Rate limit exceeded (HTTP 429 other than a spent quota).
+    ///
+    /// `retry_after_secs` is the server's `Retry-After` as sent; the retry
+    /// loop gives up rather than wait past
+    /// [`MAX_RETRY_AFTER`](crate::http::MAX_RETRY_AFTER).
     #[error("Rate limit exceeded. Retry after {retry_after_secs} seconds.")]
     RateLimited { retry_after_secs: u64 },
 
@@ -81,6 +89,22 @@ impl CloudError {
             CloudError::CircuitOpen(_) => "circuit_open",
         }
     }
+}
+
+/// OpenAI-style error `code` / `type` for a quota that is spent, not
+/// throttled.
+///
+/// OpenAI sends it with HTTP 429, and so does the Xybrid gateway for an
+/// unclaimed agent workspace over its quota, whose message says how to claim
+/// it. Waiting does not restore the quota, so such a 429 is reported as
+/// [`CloudError::ApiError`] (not retryable) rather than
+/// [`CloudError::RateLimited`], whatever `Retry-After` came with it.
+pub(crate) const INSUFFICIENT_QUOTA: &str = "insufficient_quota";
+
+/// Whether an OpenAI-style error body's `error.code` or `error.type` is
+/// [`INSUFFICIENT_QUOTA`].
+pub(crate) fn is_insufficient_quota(code: Option<&str>, error_type: Option<&str>) -> bool {
+    code == Some(INSUFFICIENT_QUOTA) || error_type == Some(INSUFFICIENT_QUOTA)
 }
 
 impl From<std::io::Error> for CloudError {
@@ -133,10 +157,14 @@ impl RetryableError for CloudError {
             CloudError::Timeout { .. } => true,
             CloudError::NetworkError(_) => true,
             CloudError::GatewayError(_) => true,
-            CloudError::ApiError { status, .. } => {
-                // Retry on server errors and specific client errors
-                matches!(status, 429 | 502 | 503 | 504)
-            }
+            CloudError::ApiError { status, .. } => match status {
+                // A 429 that waiting can lift arrives as `RateLimited`. One
+                // left as `ApiError` is a spent quota (`insufficient_quota`,
+                // see `is_insufficient_quota`): fail fast with its message.
+                429 => false,
+                502..=504 => true,
+                _ => false,
+            },
 
             // Non-retryable errors (permanent failures)
             CloudError::BackendUnavailable(_) => false,

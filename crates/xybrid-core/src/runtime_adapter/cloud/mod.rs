@@ -1740,4 +1740,46 @@ mod tests {
         );
         assert!(!message.contains("FAKE_DEEPSEEK_REPLY"));
     }
+
+    /// Both adapter paths (batch through `Cloud::complete`, and SSE) answer an
+    /// over-quota 429 with one request and the gateway's claim guidance, never
+    /// waiting on its `Retry-After`.
+    #[test]
+    fn insufficient_quota_fails_fast_on_batch_and_streaming_paths() {
+        use httpmock::prelude::*;
+
+        const CLAIM: &str = "Workspace quota used up. Claim it at https://xybrid.dev/claim.";
+        let server = MockServer::start();
+        let gateway = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(429)
+                .header("Retry-After", "86400")
+                .header("content-type", "application/json")
+                .body(
+                    json!({ "error": {
+                        "message": CLAIM,
+                        "type": "insufficient_quota",
+                        "code": "insufficient_quota",
+                    } })
+                    .to_string(),
+                );
+        });
+        let adapter = CloudRuntimeAdapter::with_gateway(&server.base_url());
+        let envelope = text_with(&[("provider", "openai"), ("model", "m")]);
+
+        let started = Instant::now();
+        let batch = adapter.execute(&envelope).expect_err("over quota");
+        assert!(started.elapsed() < Duration::from_secs(1), "batch waited");
+        assert!(batch.to_string().contains(CLAIM), "{batch}");
+        gateway.assert_hits(1);
+
+        let ignore: StreamingCallback<'_> = Box::new(|_: PartialToken| Ok(()));
+        let started = Instant::now();
+        let streamed = adapter
+            .execute_streaming(&envelope, ignore)
+            .expect_err("over quota");
+        assert!(started.elapsed() < Duration::from_secs(1), "stream waited");
+        assert!(streamed.to_string().contains(CLAIM), "{streamed}");
+        gateway.assert_hits(2);
+    }
 }
