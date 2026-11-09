@@ -132,7 +132,10 @@ def command_output(argv: Sequence[str], cwd: Path = REPO, timeout: float = 60.0)
 
 
 def producer_provenance(tools: workloads.Toolchain) -> Dict[str, Any]:
-    status = command_output(["git", "status", "--porcelain"]) or ""
+    # Tracked changes make the producers differ from the commit; untracked
+    # files (build leftovers, scratch directories) are listed, not counted.
+    status = command_output(["git", "status", "--porcelain", "--untracked-files=no"]) or ""
+    untracked = command_output(["git", "ls-files", "--others", "--exclude-standard", "--directory"]) or ""
     cargo_toml = (REPO / "Cargo.toml").read_text(encoding="utf-8")
     workspace_version = re.search(r'\[workspace\.package\][^\[]*?\nversion\s*=\s*"([^"]+)"', cargo_toml, re.S)
     js_package = json.loads((workloads.JS_DIR / "package.json").read_text(encoding="utf-8"))
@@ -141,6 +144,7 @@ def producer_provenance(tools: workloads.Toolchain) -> Dict[str, Any]:
         "git_branch": command_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]),
         "git_dirty": bool(status),
         "git_modified": [line[3:] for line in status.splitlines()][:50],
+        "git_untracked": untracked.splitlines()[:50],
         "xybrid_observability_crate": workspace_version.group(1) if workspace_version else None,
         "observability_js_package": js_package.get("version"),
         "runtimes": {

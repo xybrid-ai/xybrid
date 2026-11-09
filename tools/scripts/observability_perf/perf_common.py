@@ -93,7 +93,8 @@ def environment(repo: Path = REPO) -> Dict[str, Any]:
 
 
 def source_identity(repo: Path = REPO) -> Dict[str, Any]:
-    status = _run(["git", "status", "--porcelain"], cwd=repo)
+    # Tracked changes only: untracked build leftovers do not change what was built.
+    status = _run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=repo)
     return {
         "commit": _run(["git", "rev-parse", "HEAD"], cwd=repo),
         "branch": _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo),
