@@ -49,26 +49,20 @@ def _result(envelope: xybrid.XybridEnvelope, output_type: xybrid.XybridOutputTyp
 
 def test_init_is_idempotent(monkeypatch) -> None:
     configure = Mock()
-    binding = Mock()
     monkeypatch.setattr(xybrid, "_INITIALIZED", False)
     monkeypatch.setattr(bolt, "configure_runtime", configure)
-    monkeypatch.setattr(bolt, "set_binding", binding)
 
-    xybrid.init(api_key="first-key", gateway_url="https://gateway.example", ingest_url="https://ingest.example")
+    xybrid.init(api_key="first-key", gateway_url="https://gateway.example")
     xybrid.init(api_key="ignored-after-first-init")
 
     assert xybrid.is_initialized()
-    binding.assert_called_once_with("python")
-    configure.assert_called_once_with(
-        api_key="first-key", gateway_url="https://gateway.example", ingest_url="https://ingest.example"
-    )
+    configure.assert_called_once_with(api_key="first-key", gateway_url="https://gateway.example")
 
 
 def test_failed_init_can_be_retried(monkeypatch) -> None:
     configure = Mock(side_effect=[xybrid.ConfigError("invalid configuration"), None])
     monkeypatch.setattr(xybrid, "_INITIALIZED", False)
     monkeypatch.setattr(bolt, "configure_runtime", configure)
-    monkeypatch.setattr(bolt, "set_binding", Mock())
 
     with pytest.raises(xybrid.ConfigError, match="invalid configuration"):
         xybrid.init()
@@ -486,3 +480,78 @@ def test_every_generated_error_variant_maps_to_a_typed_exception() -> None:
     ]
 
     assert unmapped == [], f"add typed exceptions for {unmapped} in xybrid/_errors.py"
+
+
+@pytest.mark.parametrize("exceptional", [False, True])
+def test_manual_observation_context_manager_releases_once(exceptional):
+    observation = bolt.XybridWorkflowObservation("python-test", None)
+    if exceptional:
+        with pytest.raises(RuntimeError):
+            with observation:
+                raise RuntimeError("private application error")
+    else:
+        with observation:
+            observation.complete()
+            observation.cancel()  # first terminal call wins
+    assert observation._handle is None
+    observation.close()  # explicit close and later GC are idempotent
+
+
+def _manual_observation(kind, options=None):
+    if kind == "workflow":
+        return bolt.XybridWorkflowObservation("python-test", options)
+    if kind == "tool":
+        call = bolt.XybridToolCallInfo("test-tool", None, None, None, None)
+        return bolt.XybridToolObservation(call, options)
+    if kind == "inference":
+        request = bolt.XybridInferenceRequest(
+            "chat", "test", "test-model", bolt.XybridExecutionLocation.LOCAL,
+            None, None, False, None, None, None, None, None,
+        )
+        return bolt.XybridInferenceObservation(request, options)
+    info = bolt.XybridModelLoadInfo("test-model", None, None, None, None)
+    return bolt.XybridModelLoadObservation(info, options)
+
+
+@pytest.mark.parametrize("kind", ["workflow", "tool", "inference", "load"])
+def test_manual_observation_rejects_invalid_parent(kind):
+    options = bolt.XybridObservationOptions(
+        traceparent="invalid", tracestate=None, conversation_id=None, suppress_trace=False
+    )
+    with pytest.raises(xybrid.ConfigError, match="invalid traceparent") as raised:
+        _manual_observation(kind, options)
+    assert isinstance(raised.value, xybrid.XybridError)
+    assert isinstance(raised.value.error, bolt.XybridErrorConfigError)
+
+
+@pytest.mark.parametrize("kind", ["workflow", "tool", "inference", "load"])
+def test_manual_observation_native_lifecycle(kind):
+    observation = _manual_observation(kind)
+    assert not observation.is_finished()
+    observation.complete()
+    observation.cancel()
+    assert observation.is_finished()
+    observation.close()
+    observation.close()
+    assert observation._handle is None
+
+
+@pytest.mark.parametrize("kind,method", [
+    ("tool", "record_result"),
+    ("inference", "record_system_instructions"),
+    ("inference", "record_input_messages"),
+    ("inference", "record_output_messages"),
+    ("inference", "record_tool_definitions"),
+])
+def test_manual_observation_rejects_invalid_content(kind, method):
+    with _manual_observation(kind) as observation:
+        with pytest.raises(xybrid.ConfigError):
+            getattr(observation, method)("invalid json")
+
+
+def test_manual_constructor_error_adaptation_preserves_python_errors():
+    constructor = bolt.XybridWorkflowObservation.__init__
+    xybrid._errors._install()
+    assert bolt.XybridWorkflowObservation.__init__ is constructor
+    with pytest.raises(TypeError):
+        bolt.XybridWorkflowObservation()

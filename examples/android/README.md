@@ -17,7 +17,7 @@ This is a native Android example app demonstrating how to integrate the Xybrid S
 |------|------------------|-------|
 | Android Studio | Hedgehog (2023.1.1) or later | [Download](https://developer.android.com/studio) |
 | JDK | 11+ | Included with Android Studio |
-| Android SDK | API 28+ (Android 9.0) | Via SDK Manager |
+| Android SDK | API 29+ (Android 10) | Via SDK Manager |
 | Rust toolchain | With Android targets | For building native libraries |
 | Android NDK | r26+ | For cross-compilation |
 
@@ -55,16 +55,16 @@ Or build from the command line:
 
 ### 3. Set your API key (optional)
 
-The app reads `XYBRID_API_KEY` (and optionally `XYBRID_PLATFORM_URL`, the
-telemetry ingest endpoint) through `BuildConfig`, wired in
+The app reads `XYBRID_API_KEY` (and optionally `XYBRID_TRACES_ENDPOINT`, a
+full OTLP trace URL) through `BuildConfig`, wired in
 `app/build.gradle.kts` from one of three sources (first one wins) — so neither
 lands in the repo:
 
 | Source | Best for | How |
 |--------|----------|-----|
-| `local.properties` | Android Studio (just press Run) | `xybrid.apiKey=sk_test_...` / `xybrid.platformUrl=https://...` |
-| Gradle property | one-liner / CI | `-PXYBRID_API_KEY=sk_test_...` / `-PXYBRID_PLATFORM_URL=https://...` |
-| Env variable | shells / CI | `export XYBRID_API_KEY=sk_test_...` / `export XYBRID_PLATFORM_URL=https://...` |
+| `local.properties` | Android Studio (just press Run) | `xybrid.apiKey=sk_test_...` / `xybrid.tracesEndpoint=https://...` |
+| Gradle property | one-liner / CI | `-PXYBRID_API_KEY=sk_test_...` / `-PXYBRID_TRACES_ENDPOINT=https://...` |
+| Env variable | shells / CI | `export XYBRID_API_KEY=sk_test_...` / `export XYBRID_TRACES_ENDPOINT=https://...` |
 
 The Gradle-property form is the Android analog of Flutter's
 `flutter run --dart-define=...`:
@@ -72,16 +72,18 @@ The Gradle-property form is the Android analog of Flutter's
 ```bash
 ./gradlew installDebug \
   -PXYBRID_API_KEY=sk_test_... \
-  -PXYBRID_PLATFORM_URL=https://your-platform.example.com
+  -PXYBRID_TRACES_ENDPOINT=https://your-platform.example.com/v1/traces
 ```
 
 For Android Studio, copy
 [`local.properties.example`](local.properties.example) to `local.properties`
 (already gitignored) and fill in your values. Both are optional: without a key
-the app runs anonymously (on-device inference, telemetry disabled); without a
-platform URL it uses the default Xybrid endpoint (`XYBRID_PLATFORM_URL` is
-handy for pointing a debug build at a self-hosted or tunneled platform). Get a
-free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+the app runs anonymously (on-device inference, no trace export). With a key,
+`MainActivity` passes it to `Xybrid.init` and also starts trace export with
+`Xybrid.Observability.xybrid(apiKey).start()` — the SDK never exports on the
+key alone. `XYBRID_TRACES_ENDPOINT` points those traces at a self-hosted or
+tunneled endpoint instead of the Xybrid dashboard. Get a free key at
+[dashboard.xybrid.dev](https://dashboard.xybrid.dev).
 
 ### 4. Obtain Model Files
 
@@ -124,7 +126,7 @@ The app defaults to `<app-files-dir>/models/kokoro-82m` — you can edit the pat
 
 ### 5. Run the App
 
-1. Select a device or emulator (API 28+)
+1. Select a device or emulator (API 29+)
 2. Click **Run** (Shift+F10)
 3. Tap **Initialize SDK**
 4. Enter the model bundle path (or use the default)
@@ -266,7 +268,7 @@ adb shell ls -la /data/local/tmp/models/kokoro-82m/
 
 | Requirement | Value |
 |-------------|-------|
-| Minimum SDK | API 28 (Android 9.0) |
+| Minimum SDK | API 29 (Android 10) |
 | Target SDK | API 34 (Android 14) |
 | Kotlin | 1.8.22 |
 | Compose BOM | 2023.06.01 |

@@ -102,7 +102,10 @@ impl InferenceSession for OnnxInferenceSession {
 /// and want explicit control over the EP-capture flag (the desktop
 /// adapter opts in to capture so its `real_inference` can read the
 /// resolved EP back; the mobile adapter stays on the cheap path).
-/// Every other ONNX session in this crate goes through the factory.
+/// Choice scorers construct theirs via the crate-internal
+/// `ONNXSession::build_unlogged`, which also sets the session's ONNX
+/// Runtime log level to fatal. Every other ONNX session in this crate goes
+/// through the factory.
 #[derive(Default)]
 pub struct OnnxSessionFactory;
 

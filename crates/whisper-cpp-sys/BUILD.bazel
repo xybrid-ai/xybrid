@@ -22,7 +22,12 @@ rust_library(
     crate_features = [
         "bindings",
         "committed-bindings",
-    ],
+    ] + select({
+        # The Core ML bridge's hooks (src/lib.rs `coreml`); the bridge itself
+        # is //:whisper_coreml, linked through //:whisper on the same condition.
+        "@platforms//os:ios": ["coreml"],
+        "//conditions:default": [],
+    }),
     edition = "2021",
     # //:whisper carries llama's ggml transitively, so this single edge supplies
     # the whisper archive, the ggml archives and their platform link deps.
@@ -44,3 +49,10 @@ alias(
     actual = ":xybrid_whisper_sys",
     visibility = ["//visibility:public"],
 )
+
+# xybrid's Core ML encoder bridge, compiled by //:whisper_coreml (root package,
+# next to the upstream header it implements).
+exports_files([
+    "native/xybrid-whisper-coreml.h",
+    "native/xybrid-whisper-coreml.mm",
+])

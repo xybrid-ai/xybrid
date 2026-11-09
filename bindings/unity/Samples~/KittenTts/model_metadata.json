@@ -1,0 +1,24 @@
+{
+  "model_id": "kitten-tts-2-bruno",
+  "version": "rc.4",
+  "execution_template": {
+    "type": "ZzzEmbed",
+    "model_file": "kitten-tts-2-q2_0.gguf",
+    "decoder_file": "kitten-s3-meanflow-f32.gguf",
+    "language_voice_file": "bruno.lm.json",
+    "decoder_voice_file": "bruno.s3.json",
+    "language": "en",
+    "threads": 6,
+    "max_tokens": 0,
+    "seed": 0,
+    "sentence_chunks": true,
+    "accelerate": false
+  },
+  "files": [
+    "kitten-tts-2-q2_0.gguf",
+    "kitten-s3-meanflow-f32.gguf",
+    "bruno.lm.json",
+    "bruno.s3.json"
+  ],
+  "metadata": { "task": "text-to-speech" }
+}

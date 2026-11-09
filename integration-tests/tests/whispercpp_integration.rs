@@ -322,6 +322,23 @@ fn transcribes_full_clip_within_wer_budget() {
 }
 
 #[test]
+fn transcribes_with_prompt_metadata_within_wer_budget() {
+    let _serial = serial_model_test();
+    let Some(mut runtime) = whisper_runtime() else {
+        skip_notice();
+        return;
+    };
+
+    let pcm = read_pcm(JFK_CLIP);
+    let text = transcribed(
+        &mut runtime,
+        &pcm,
+        &[("prompt", "President John F. Kennedy.")],
+    );
+    assert_wer_within_budget("11 s clip with prompt", JFK_TRANSCRIPT, &text);
+}
+
+#[test]
 fn transcribes_exactly_240159_samples() {
     let _serial = serial_model_test();
     let Some(mut runtime) = whisper_runtime() else {
@@ -529,12 +546,26 @@ fn translate_without_language_returns_english_for_french_audio() {
 }
 
 #[test]
-fn rejects_prompt_metadata_without_exposing_it() {
-    let private_prompt = "PRIVATE_PROMPT_SENTINEL_7c1f";
+fn accepts_valid_prompt_metadata_before_loading_a_model() {
     let pcm = vec![0.0; SAMPLE_RATE as usize];
     let mut runtime = WhisperCppRuntime::new();
-    let error = transcribe(&mut runtime, &pcm, &[("prompt", private_prompt)])
-        .expect_err("prompt is unsupported and must be rejected");
+    let error = transcribe(&mut runtime, &pcm, &[("prompt", "Jarv, Quarry, Bluff.")])
+        .expect_err("valid prompt metadata proceeds to the model-loading check");
+
+    assert!(
+        matches!(error, AdapterError::ModelNotLoaded(_)),
+        "expected ModelNotLoaded, got {error:?}"
+    );
+}
+
+#[test]
+fn rejects_invalid_prompt_metadata_without_exposing_it() {
+    let private_prompt = "PRIVATE_PROMPT_SENTINEL_7c1f";
+    let invalid_prompt = format!("{private_prompt}\0");
+    let pcm = vec![0.0; SAMPLE_RATE as usize];
+    let mut runtime = WhisperCppRuntime::new();
+    let error = transcribe(&mut runtime, &pcm, &[("prompt", &invalid_prompt)])
+        .expect_err("a prompt containing a null byte must be rejected");
 
     assert!(
         matches!(error, AdapterError::InvalidInput(_)),

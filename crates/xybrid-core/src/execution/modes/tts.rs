@@ -5,6 +5,9 @@
 //!
 //! Input mapping is based on ONNX metadata (dtype + shape), not input names,
 //! so any TTS model with the standard input signature works without code changes.
+//! The waveform output is chosen by name: see [`tts_waveform_output`]. A model
+//! may also report how many frames each input token lasts; that output is found
+//! by name too (see [`tts_duration_output`]) and read alongside the waveform.
 
 use crate::runtime_adapter::onnx::ONNXSession;
 use crate::runtime_adapter::AdapterError;
@@ -15,7 +18,84 @@ use std::collections::HashMap;
 
 use super::super::types::ExecutorResult;
 
-/// Execute TTS inference with phoneme IDs, voice embedding, and speed.
+/// Names a TTS model may give its waveform output, in order of preference.
+///
+/// KittenTTS 0.8 returns `waveform` next to per-phoneme `duration`; Kokoro's
+/// only output is `audio`.
+const WAVEFORM_OUTPUT_NAMES: [&str; 2] = ["waveform", "audio"];
+
+/// Picks the TTS model output that carries the waveform.
+///
+/// A model with a single output needs no choice. With several outputs, the
+/// waveform is the first of [`WAVEFORM_OUTPUT_NAMES`] the model declares; the
+/// others, such as KittenTTS's per-phoneme durations, are not audio.
+///
+/// # Errors
+///
+/// Returns [`AdapterError::InvalidInput`] if the model has no outputs, or has
+/// several and none of them carries a waveform name. Guessing could encode a
+/// non-audio tensor as sound.
+pub fn tts_waveform_output(output_names: &[String]) -> ExecutorResult<&str> {
+    if let [only] = output_names {
+        return Ok(only);
+    }
+    WAVEFORM_OUTPUT_NAMES
+        .iter()
+        .find_map(|wanted| output_names.iter().find(|name| name.as_str() == *wanted))
+        .map(String::as_str)
+        .ok_or_else(|| {
+            AdapterError::InvalidInput(format!(
+                "TTS model outputs {output_names:?} do not identify the waveform: expected a \
+                 single output, or one named {}",
+                WAVEFORM_OUTPUT_NAMES.join(" or ")
+            ))
+        })
+}
+
+/// Names a TTS model may give its per-token duration output, in order of
+/// preference.
+///
+/// KittenTTS 0.8 names it `duration`; a Kokoro export with its predicted
+/// durations exposed may use any of these. Each value is the number of
+/// waveform frames the matching input token lasts.
+const DURATION_OUTPUT_NAMES: [&str; 3] = ["duration", "durations", "pred_dur"];
+
+/// Picks the TTS model output that carries per-token durations, if it has one.
+///
+/// Returns the first of [`DURATION_OUTPUT_NAMES`] the model declares. A model
+/// with a single output has none (that output is the waveform), and the
+/// `waveform_output` is never returned, whatever its name.
+pub fn tts_duration_output<'a>(
+    output_names: &'a [String],
+    waveform_output: &str,
+) -> Option<&'a str> {
+    if output_names.len() < 2 {
+        return None;
+    }
+    DURATION_OUTPUT_NAMES
+        .iter()
+        .find_map(|wanted| {
+            output_names
+                .iter()
+                .find(|name| name.as_str() == *wanted && name.as_str() != waveform_output)
+        })
+        .map(String::as_str)
+}
+
+/// What one TTS inference returns.
+#[derive(Debug, Clone)]
+pub struct TtsInference {
+    /// The waveform tensor, as the model returned it.
+    pub waveform: ArrayD<f32>,
+    /// Frames per input token, one per phoneme id in input order, when a
+    /// duration output was asked for and could be read. `None` otherwise.
+    pub durations: Option<Vec<i64>>,
+}
+
+/// Execute TTS inference with phoneme IDs, voice embedding, and speed, and
+/// return the `waveform_output` tensor (see [`tts_waveform_output`]) along
+/// with the `duration_output` values when one is given (see
+/// [`tts_duration_output`]).
 ///
 /// Inputs are mapped by dtype and shape pattern, not by name:
 /// - int64 input with shape [1, N] (dynamic) → token/phoneme IDs
@@ -24,12 +104,24 @@ use super::super::types::ExecutorResult;
 ///
 /// This makes the function model-agnostic: KittenTTS (input_ids, style, speed)
 /// and Kokoro (tokens, style, speed) both work without name-specific code.
+///
+/// The waveform read is strict; the duration read is not. Durations that are
+/// missing or of an unexpected type leave [`TtsInference::durations`] `None`
+/// rather than failing the synthesis, since the audio is still good.
+///
+/// # Errors
+///
+/// Returns [`AdapterError::InvalidInput`] if the model's inputs do not match
+/// the patterns above, and an error if inference fails or the waveform output
+/// is missing or not float32.
 pub fn execute_tts_inference(
     session: &ONNXSession,
     phoneme_ids: &[i64],
     voice_embedding: Vec<f32>,
     speed: f32,
-) -> ExecutorResult<HashMap<String, ArrayD<f32>>> {
+    waveform_output: &str,
+    duration_output: Option<&str>,
+) -> ExecutorResult<TtsInference> {
     let input_names = session.input_names();
     let input_shapes = session.input_shapes();
     let input_dtypes = session.input_dtypes();
@@ -127,7 +219,12 @@ pub fn execute_tts_inference(
         )));
     }
 
-    session.run_with_values(value_inputs)
+    let (waveform, durations) =
+        session.run_f32_with_optional_i64(value_inputs, waveform_output, duration_output)?;
+    Ok(TtsInference {
+        waveform,
+        durations,
+    })
 }
 
 /// Classification of a TTS model input based on dtype and shape.
@@ -169,4 +266,117 @@ fn classify_tts_input(dtype: Option<TensorElementType>, shape: &[i64]) -> TtsInp
         _ => {}
     }
     TtsInputKind::Unknown
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn outputs(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn a_single_output_is_the_waveform_whatever_its_name() {
+        assert_eq!(
+            tts_waveform_output(&outputs(&["output_0"])).unwrap(),
+            "output_0"
+        );
+    }
+
+    #[test]
+    fn kitten_waveform_wins_over_duration_in_either_order() {
+        for names in [["waveform", "duration"], ["duration", "waveform"]] {
+            assert_eq!(
+                tts_waveform_output(&outputs(&names)).unwrap(),
+                "waveform",
+                "{names:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_output_named_audio_is_a_waveform() {
+        assert_eq!(
+            tts_waveform_output(&outputs(&["duration", "audio"])).unwrap(),
+            "audio"
+        );
+    }
+
+    #[test]
+    fn waveform_is_preferred_when_a_model_names_both() {
+        assert_eq!(
+            tts_waveform_output(&outputs(&["audio", "waveform"])).unwrap(),
+            "waveform"
+        );
+    }
+
+    #[test]
+    fn several_outputs_without_a_waveform_name_are_rejected() {
+        let err = tts_waveform_output(&outputs(&["duration", "pitch"])).unwrap_err();
+        let AdapterError::InvalidInput(message) = err else {
+            panic!("expected InvalidInput, got {err:?}");
+        };
+        assert!(
+            message.contains("duration") && message.contains("pitch"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_model_without_outputs_is_rejected() {
+        assert!(matches!(
+            tts_waveform_output(&[]),
+            Err(AdapterError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn duration_output_is_found_in_either_order() {
+        for names in [["waveform", "duration"], ["duration", "waveform"]] {
+            let names = outputs(&names);
+            let waveform = tts_waveform_output(&names).unwrap();
+            assert_eq!(
+                tts_duration_output(&names, waveform),
+                Some("duration"),
+                "{names:?}"
+            );
+        }
+        for wanted in ["durations", "pred_dur"] {
+            let names = outputs(&["audio", wanted]);
+            assert_eq!(tts_duration_output(&names, "audio"), Some(wanted));
+        }
+    }
+
+    #[test]
+    fn duration_is_preferred_over_the_other_duration_names() {
+        let names = outputs(&["pred_dur", "audio", "durations", "duration"]);
+        assert_eq!(tts_duration_output(&names, "audio"), Some("duration"));
+    }
+
+    #[test]
+    fn a_single_output_model_has_no_duration_output() {
+        // Stock Kokoro: one output, so it is the waveform, never durations,
+        // even if it were called `duration`.
+        for only in ["audio", "duration"] {
+            let names = outputs(&[only]);
+            let waveform = tts_waveform_output(&names).unwrap();
+            assert_eq!(tts_duration_output(&names, waveform), None, "{only}");
+        }
+        assert_eq!(tts_duration_output(&[], "audio"), None);
+    }
+
+    #[test]
+    fn a_model_without_a_duration_name_has_no_duration_output() {
+        let names = outputs(&["waveform", "pitch"]);
+        assert_eq!(tts_duration_output(&names, "waveform"), None);
+    }
+
+    #[test]
+    fn the_waveform_output_is_never_the_duration_output() {
+        // Should a model call its waveform `durations`, the waveform is not
+        // read back as durations.
+        let names = outputs(&["durations", "pitch"]);
+        assert_eq!(tts_duration_output(&names, "durations"), None);
+    }
 }

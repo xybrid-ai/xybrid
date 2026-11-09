@@ -146,11 +146,13 @@ pub struct RunOptions {
     /// emitting one row per frame. `None` for one-shot runs.
     pub frame_session_id: Option<String>,
     /// When `true`, marks the run as part of a continuous live-capture session.
-    /// Live-mode inferences carry `frame_session_id` + `live_mode` on the wire
-    /// and are rate-limited at the telemetry dispatch funnel rather than emitted
-    /// per frame. Defaults to `false` (per-run telemetry, byte-for-byte
-    /// unchanged from the non-live path).
+    /// Every frame is counted in metrics; detailed traces are sampled per
+    /// session (see `ObservabilityConfig::live_trace_interval`). Defaults to
+    /// `false`.
     pub live_mode: bool,
+    /// Observation controls for this run: explicit parent context,
+    /// conversation id, prompt metadata, trace suppression.
+    pub observation: Option<crate::observability::ObservationOptions>,
 }
 
 impl RunOptions {
@@ -200,14 +202,21 @@ impl RunOptions {
     /// Tag this run as part of a live-capture session.
     ///
     /// Sets `frame_session_id` to the caller-supplied UUID and flips
-    /// `live_mode = true`. Every inference sharing the same `frame_session_id`
-    /// is tagged on the wire; the telemetry dispatch funnel rate-limits these
-    /// to roughly one row per second per session (dropping the intervening
-    /// per-frame rows). Non-live runs leave both fields at their defaults and
-    /// their telemetry path is unchanged.
+    /// `live_mode = true`. Every frame of the session is counted in metrics;
+    /// detailed traces are kept for roughly one frame per interval per
+    /// session.
     pub fn with_frame_session(mut self, frame_session_id: impl Into<String>) -> Self {
         self.frame_session_id = Some(frame_session_id.into());
         self.live_mode = true;
+        self
+    }
+
+    /// Sets the observation controls for this run.
+    pub fn with_observation(
+        mut self,
+        observation: crate::observability::ObservationOptions,
+    ) -> Self {
+        self.observation = Some(observation);
         self
     }
 }
@@ -367,6 +376,21 @@ impl AbortState {
         if let Some(reason) = self.detect_abort_reason() {
             self.active_reason = Some(reason.clone());
             return Err(reason);
+        }
+        Ok(())
+    }
+
+    /// Poll while a waveform is being computed without spending packet grace.
+    ///
+    /// With zero grace, stop computation immediately on an observed signal.
+    /// Otherwise latch it for `check_before_token` at the next audio packet:
+    /// watcher polls must not consume the caller's delivery grace budget.
+    pub(crate) fn check_during_compute(&mut self) -> Result<(), AbortReason> {
+        if self.policy.max_grace_tokens == 0 {
+            return self.check_before_token();
+        }
+        if self.active_reason.is_none() {
+            self.active_reason = self.detect_abort_reason();
         }
         Ok(())
     }
@@ -614,6 +638,60 @@ mod tests {
         assert_eq!(
             state.check_before_run().expect_err("run should abort"),
             AbortReason::UserCancelled
+        );
+    }
+
+    #[test]
+    fn tts_compute_poll_stops_on_resource_pressure_without_grace() {
+        let options = RunOptions::new()
+            .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::ThermalCritical));
+        let reader = Arc::new(CountingResourceReader::new(ResourceSnapshot {
+            thermal_state: ThermalState::Critical,
+            thermal_measured: true,
+            ..Default::default()
+        }));
+        let mut state = AbortState::with_resource_reader(&options, reader);
+
+        assert_eq!(
+            state.check_during_compute(),
+            Err(AbortReason::Thermal(ThermalState::Critical))
+        );
+        // Once stopping has been requested, further polls stay stopped even
+        // inside the resource sampling interval.
+        assert_eq!(
+            state.check_during_compute(),
+            Err(AbortReason::Thermal(ThermalState::Critical))
+        );
+    }
+
+    #[test]
+    fn tts_compute_polls_latch_pressure_without_spending_audio_packet_grace() {
+        let options = RunOptions::new().with_abort_policy(
+            AbortPolicy::default()
+                .stop_on(AbortSignal::MemoryPressureCritical)
+                .with_max_grace_tokens(2),
+        );
+        let reader = Arc::new(CountingResourceReader::new(ResourceSnapshot {
+            memory_pressure: MemoryPressure::Critical,
+            ..Default::default()
+        }));
+        let mut state = AbortState::with_resource_reader(&options, reader.clone());
+
+        for _ in 0..100 {
+            state.check_during_compute().unwrap();
+        }
+        assert_eq!(reader.reads(), 1);
+        state.check_before_token().expect("first grace packet");
+        for _ in 0..100 {
+            state.check_during_compute().unwrap();
+        }
+        state.check_before_token().expect("second grace packet");
+        // A final grace packet can complete normally. The next delivery,
+        // rather than a watcher poll after the final packet, exhausts grace.
+        state.check_during_compute().unwrap();
+        assert_eq!(
+            state.check_before_token(),
+            Err(AbortReason::MemoryPressure(MemoryPressure::Critical))
         );
     }
 
@@ -1007,6 +1085,7 @@ mod tests {
     fn streaming_thermal_abort_check_stays_within_low_end_android_budget() {
         let snapshot = ResourceSnapshot {
             thermal_state: ThermalState::Critical,
+            thermal_measured: true,
             ..Default::default()
         };
         let reader = Arc::new(CountingResourceReader::new(snapshot));

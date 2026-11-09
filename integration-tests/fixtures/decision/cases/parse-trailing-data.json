@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "parse-trailing-data",
+  "profile": "lfm3-d1/text/v1",
+  "title": "JSON followed by more text",
+  "covers": ["transport", "refusal-parse"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}} {}",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "common_json_error",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "[json.exception.parse_error.101] parse error at line 1, column 167: syntax error while parsing value - unexpected '{'; expected end of input"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "invalid_json"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

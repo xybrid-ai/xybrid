@@ -14,7 +14,11 @@ from pathlib import Path
 
 DEFAULT_PLUGINS_ROOT = Path("bindings/unity/Runtime/Plugins")
 DEFAULT_ANDROID_DEPENDENCIES = Path("vendor/ort-android")
-ANDROID_DEPENDENCY_NAMES = ("libonnxruntime.so", "libc++_shared.so")
+ANDROID_DEPENDENCY_NAMES = ("libonnxruntime.so",)
+# The Unity Android library links libc++ statically, so the package ships no
+# C++ runtime. A copy left in a local plugins tree (gitignored, never cleaned)
+# collides in Gradle with the one Unity's GameActivity packages for libgame.so.
+STALE_ANDROID_LIBRARY_NAMES = ("libc++_shared.so",)
 
 
 @dataclass(frozen=True)
@@ -99,7 +103,7 @@ def plugin_meta(guid: str, spec: TargetSpec) -> str:
         AddToEmbeddedBinaries: false
         CPU: ARM64
         CompileFlags:
-        FrameworkDependencies:"""
+        FrameworkDependencies: Accelerate"""
     elif spec.platform == "Android":
         target_data = f"""\
         Exclude Editor: 1
@@ -216,6 +220,14 @@ def stage_file(
     print(f"  Staged: {destination}")
 
 
+def remove_stale_file(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    print(f"  Removed stale: {path}")
+
+
 def stage_native(
     native: Path,
     target: str,
@@ -267,6 +279,11 @@ def stage_native(
     )
 
     if spec.android_abi is not None:
+        for stale_name in STALE_ANDROID_LIBRARY_NAMES:
+            stale = destination_dir / stale_name
+            remove_stale_file(stale)
+            remove_stale_file(stale.with_name(f"{stale.name}.meta"))
+
         dependencies_dir = android_dependencies / spec.android_abi
         if not dependencies_dir.is_dir():
             print(

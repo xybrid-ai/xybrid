@@ -1,0 +1,16 @@
+{
+  "model_id": "browser-smollm2",
+  "version": "1",
+  "execution_template": {
+    "type": "Gguf",
+    "model_file": "model.gguf",
+    "chat_template": null,
+    "context_length": 512,
+    "generation_params": null
+  },
+  "files": ["model.gguf"],
+  "preprocessing": [],
+  "postprocessing": [],
+  "description": null,
+  "metadata": {}
+}

@@ -11,6 +11,7 @@ Execute a hybrid pipeline on the current device.
 xybrid run --config <path>
 xybrid run --pipeline <name>
 xybrid run --pipeline <name> --dry-run
+xybrid run --directory <dir> --input-text <context> --choice <id>=<text>
 ```
 
 ## Options
@@ -22,6 +23,8 @@ xybrid run --pipeline <name> --dry-run
 | `--bundle` | `-b` | Run a `.xyb` bundle file directly |
 | `--input-text` | | Text input for text-based models (LLM, TTS) |
 | `--input-audio` | | Path to an audio file for audio-based models (ASR) — WAV, MP3, OGG, or FLAC |
+| `--choice` | | A candidate for a choice-scoring model, as `ID=TEXT`; repeatable. See [Choice scoring](#choice-scoring) |
+| `--output` | `-o` | Save the result: audio as `.wav`, text as `.txt`, choice scores as JSON |
 | `--target` | | Force model format (`onnx`, `coreml`, `tflite`); auto-detected if omitted |
 | `--dry-run` | | Simulate routing without execution |
 | `--policy` | | Load a policy bundle (YAML/JSON) that constrains routing — see [Hybrid Execution › Policies](/docs/concepts/hybrid-execution#policies) |
@@ -115,6 +118,84 @@ credentials.
 
     Dune follows Paul Atreides ...
 ```
+
+## Choice scoring
+
+A choice-scoring model (a `ChoiceScorer` in its `model_metadata.json`) reads one
+context and a closed list of candidates and returns one score per candidate,
+without generating text. Pass the context with `--input-text` and each
+candidate with `--choice ID=TEXT`. The id names the candidate in the result and
+the model reads the text; the text is everything after the first `=` and may
+be empty. The model scores its own fixed choices after yours, so a scorer with
+at least two of them, like CUA-S1-FORMS, also runs without `--choice`.
+
+CUA-S1-FORMS scores form actions against a page. From a checkout, stage it with
+`./integration-tests/download.sh cua-s1-forms` (it regenerates the ONNX export
+from the pinned checkpoint), then:
+
+```bash
+xybrid run --directory integration-tests/fixtures/models/cua-s1-forms \
+  --input-text 'TASK fill the form from the document, then submit
+FORM Intake
+ELEMENT Edit "Phone" value=""' \
+  --choice tel="fill Tel: (503) 555-0142" --choice name="fill Name: Jane Doe" \
+  --output scores.json
+```
+
+```
+  ID     Score   Logit
+  ────────────────────────────────
+  tel    0.9997   29.9987  best
+  name   0.0000    3.8055
+  check  0.0000   -1.2357  fixed
+  click  0.0000  -13.4527  fixed
+  skip   0.0003   21.8863  fixed
+
+  Margin           0.9994
+  › Scores rank these candidates against each other; they are not calibrated probabilities
+```
+
+The rows come in the order offered: your choices, then the model's fixed
+choices (`check`, `click` and `skip` for FORMS). `Score` is the softmax of the
+logits over these candidates, `Logit` the model's raw output, and `Margin` the
+best score's lead over the runner-up. The highest score is marked `best`: equal
+scores go to the higher logit, and an exact tie to the first candidate. A score
+says how the model ranks the offered candidates, not how likely one is to be
+right, and acting on it is up to the caller. `--output` saves the scores at
+full precision, without the rounding:
+
+```json
+{
+  "entries": [
+    { "id": "tel", "logit": 29.99869, "score": 0.9997003, "fixed": false },
+    { "id": "name", "logit": 3.80547, "score": 4.2101643e-12, "fixed": false },
+    { "id": "check", "logit": -1.2357253, "score": 2.7222987e-14, "fixed": true },
+    { "id": "click", "logit": -13.452731, "score": 1.3463486e-19, "fixed": true },
+    { "id": "skip", "logit": 21.886269, "score": 0.00029970234, "fixed": true }
+  ],
+  "label_mass": null
+}
+```
+
+FORMS reads the first 224 bytes of the context and the first 96 bytes of each
+candidate, and cuts longer input without saying so.
+
+A request is checked before the model runs, and by `--dry-run` too. It is
+refused when the context is empty, when an id is empty, repeated or one of the
+model's fixed ids, and when there are fewer than two candidates or more than the
+model accepts (64 for FORMS), fixed ones included. These refusals count
+positions from 0: a candidate in the order offered, a caller choice among your
+`--choice` flags and a fixed choice among the model's fixed choices. They never
+quote your ids or texts. A `--choice` with no `=`, or nothing before it, is a
+usage error, which repeats the argument like any other. A model that is not a
+choice scorer refuses `--choice`.
+
+`--choice` needs `--input-text`, and cannot be combined with `--config`,
+`--pipeline`, `--input-audio`, `--input-image`, `--voice`, `--max-tokens` or
+`--speculative-cloud`. A choice scorer refuses `--input-audio`,
+`--input-image`, `--voice` and `--max-tokens` without `--choice` too.
+`xybrid repl` refuses a choice scorer, also as a pipeline stage, and so does
+`--speculative-cloud`, also with `--dry-run`.
 
 ## Pipeline Format
 

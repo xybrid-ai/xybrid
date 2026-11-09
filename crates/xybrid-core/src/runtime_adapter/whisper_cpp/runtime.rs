@@ -1,4 +1,8 @@
 //! The [`ModelRuntime`] implementation backed by whisper.cpp.
+//!
+//! Set envelope metadata `prompt` to vocabulary or preceding transcript text
+//! that should guide recognition, such as `"Jarv, Quarry, Bluff."`. The runtime
+//! applies it per request; omitted or blank prompts leave the default unchanged.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -171,14 +175,13 @@ impl WhisperCppRuntime {
             }
         }
 
-        // whisper.cpp supports an initial prompt, but xybrid has not exposed
-        // or validated that capability yet. Reject it rather than silently
-        // claiming to honour caller input; do not echo the prompt because it
-        // may contain private user text.
-        if metadata_value(metadata, "prompt").is_some() {
-            return Err(AdapterError::InvalidInput(
-                "'prompt' is not supported by the whisper.cpp runtime".to_string(),
-            ));
+        if let Some(prompt) = metadata_value(metadata, "prompt") {
+            if prompt.contains('\0') {
+                return Err(AdapterError::InvalidInput(
+                    "'prompt' contains a null byte".to_string(),
+                ));
+            }
+            params.prompt = Some(prompt.to_string());
         }
 
         // Rejected rather than ignored: greedy decoding with temperature
@@ -309,13 +312,14 @@ fn native_error(err: NativeError) -> AdapterError {
     match err {
         NativeError::InvalidInput(_)
         | NativeError::UnsupportedLanguage { .. }
-        | NativeError::AudioTooShort { .. } => AdapterError::InvalidInput(err.to_string()),
+        | NativeError::AudioTooShort { .. }
+        | NativeError::CoreMlAudioCtx { .. } => AdapterError::InvalidInput(err.to_string()),
         NativeError::LoadFailed(_) | NativeError::NotCompiledIn => {
             AdapterError::ModelNotLoaded(err.to_string())
         }
-        NativeError::InferenceFailed { .. } | NativeError::InvalidUtf8 { .. } => {
-            AdapterError::RuntimeError(err.to_string())
-        }
+        NativeError::InferenceFailed { .. }
+        | NativeError::InvalidUtf8 { .. }
+        | NativeError::CoreMlEncoderFailed { .. } => AdapterError::RuntimeError(err.to_string()),
         // `WhisperError` is `#[non_exhaustive]`: a future variant must map to
         // something rather than break the build, and a runtime failure is the
         // safe assumption.
@@ -400,12 +404,28 @@ mod tests {
     }
 
     #[test]
-    fn prompt_is_rejected_without_echoing_its_contents() {
+    fn prompt_is_passed_per_request_and_does_not_leak_into_the_next() {
+        let runtime = WhisperCppRuntime::new();
+        let params = runtime
+            .params_for(&meta(&[("prompt", "Jarv, Quarry, Bluff.")]))
+            .expect("valid vocabulary");
+        assert_eq!(params.prompt.as_deref(), Some("Jarv, Quarry, Bluff."));
+        assert!(runtime.params_for(&meta(&[])).unwrap().prompt.is_none());
+        assert!(runtime
+            .params_for(&meta(&[("prompt", "  ")]))
+            .unwrap()
+            .prompt
+            .is_none());
+    }
+
+    #[test]
+    fn invalid_prompt_is_rejected_without_echoing_its_contents() {
         let runtime = WhisperCppRuntime::new();
         let private_prompt = "PRIVATE_PROMPT_SENTINEL_7c1f";
+        let invalid_prompt = format!("{private_prompt}\0");
         let err = runtime
-            .params_for(&meta(&[("prompt", private_prompt)]))
-            .expect_err("prompt handling is not implemented");
+            .params_for(&meta(&[("prompt", &invalid_prompt)]))
+            .expect_err("C strings cannot contain null bytes");
 
         assert!(matches!(err, AdapterError::InvalidInput(_)), "{err:?}");
         let message = err.to_string();

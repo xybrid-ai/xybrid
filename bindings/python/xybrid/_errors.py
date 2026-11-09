@@ -13,13 +13,14 @@ everything, and ``exc.error`` still holds the generated payload.
 
 Wiring: the generated ``_boltffi_error_exception`` resolves the exception class
 for a payload by looking up ``f"{type(payload).__name__}Exception"`` in the
-``_bolt`` module globals. Injecting those names (``_install``, called at import
-from ``xybrid/__init__.py``) is enough to make every native call raise the
-typed class — no generated code is modified.
+``_bolt`` module globals. ``_install`` registers those names and adapts the
+manual observation constructors, which currently bypass that dispatcher in
+generated code. No generated code is modified.
 """
 
 from __future__ import annotations
 
+from functools import wraps
 from typing import Any, ClassVar
 
 from . import _bolt
@@ -46,6 +47,7 @@ __all__ = [
     "RateLimited",
     "StreamingNotSupported",
     "Timeout",
+    "TelemetryDelivery",
     "UnsupportedBackendCapability",
     "UnsupportedModelCapability",
     "XybridError",
@@ -234,6 +236,13 @@ class RateLimited(XybridError):
         return f"rate limited; retry after {self.retry_after_secs}s"
 
 
+class TelemetryDelivery(XybridError):
+    """Telemetry delivery failed; retrying an inference cannot repair it."""
+
+    __slots__ = ()
+    _payload = _bolt.XybridErrorTelemetryDelivery
+
+
 class Timeout(XybridError):
     """The operation timed out."""
 
@@ -304,3 +313,29 @@ def _install() -> None:
         # class, so it still raises a xybrid error with the payload attached.
         exception_type = typed.get(payload_type, XybridError)
         setattr(_bolt, f"{payload_type.__name__}Exception", exception_type)
+
+    if getattr(_bolt, "_xybrid_constructor_errors_installed", False):
+        return
+
+    def typed_constructor(constructor: Any) -> Any:
+        @wraps(constructor)
+        def construct(*args: Any, **kwargs: Any) -> None:
+            _bolt._boltffi_call(
+                _bolt.XybridError._boltffi_from_wire,
+                lambda: constructor(*args, **kwargs),
+            )
+
+        return construct
+
+    # These fallible constructors call the C bridge directly. Keep the same
+    # payload decoder as generated fallible methods, preserving other Python
+    # exceptions (including argument TypeErrors).
+    for name in (
+        "XybridWorkflowObservation",
+        "XybridToolObservation",
+        "XybridInferenceObservation",
+        "XybridModelLoadObservation",
+    ):
+        handle = getattr(_bolt, name)
+        handle.__init__ = typed_constructor(handle.__init__)
+    _bolt._xybrid_constructor_errors_installed = True

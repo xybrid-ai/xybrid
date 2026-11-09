@@ -55,6 +55,9 @@ pub(crate) const CHAT_STOP_PATTERNS: &[&str] = &[
 /// Only safe to use in **final-text cleanup** — during streaming
 /// these would false-positive on legitimate text that happens to
 /// start with `|`. [`StreamingTextFilter`] does NOT include them.
+/// Only a complete match counts: [`trim_partial_stop_suffix`] skips
+/// them, because without the `<` their prefixes are ordinary text
+/// (`end_of_turn>` starts with `e`).
 ///
 /// NOTE: deliberately omits a `turn|>` entry. The marker body starts
 /// with the very common letter `t`, and `trim_partial_stop_suffix`
@@ -190,6 +193,19 @@ pub(crate) fn strip_and_capture_thinking_tags(text: &str) -> (String, Option<Str
     (clean, reasoning)
 }
 
+/// Whether output generated after `prompt` starts inside a reasoning block:
+/// the prompt ends in the `<think>` opener, primed by the llama.cpp adapter
+/// (`THINK_PRIME`) or written by the chat template itself (LFM3 with thinking
+/// on, including its tool continuations). The model's reasoning then carries
+/// no opener of its own.
+///
+/// The chat paths' double-prime guard applies the same test before appending
+/// `THINK_PRIME`. LFM3's thinking-off state (`<think></think>`) is closed, and
+/// raw codec-TTS prompts never end in `<think>`.
+pub(crate) fn is_reasoning_primed(prompt: &str) -> bool {
+    prompt.trim_end().ends_with(PRIMED_OPEN)
+}
+
 /// Like [`strip_and_capture_thinking_tags`], for output generated from a
 /// reasoning-primed prompt (the llama.cpp adapter's `THINK_PRIME`). The opener
 /// lives in the prompt, so output whose budget ran out before `</think>` is
@@ -223,10 +239,13 @@ fn push_reasoning(buf: &mut String, block: &str) {
 
 /// Truncate `text` at the earliest complete occurrence of any pattern
 /// in `patterns`. Returns `true` if a stop was found and truncated.
+///
+/// An empty pattern is skipped, as the native llama.cpp loop skips one:
+/// it would match at offset 0 and erase the whole text.
 pub(crate) fn truncate_at_first_stop<S: AsRef<str>>(text: &mut String, patterns: &[S]) -> bool {
     let mut earliest: Option<usize> = None;
-    for p in patterns {
-        if let Some(pos) = text.find(p.as_ref()) {
+    for p in patterns.iter().map(AsRef::as_ref).filter(|p| !p.is_empty()) {
+        if let Some(pos) = text.find(p) {
             earliest = Some(match earliest {
                 None => pos,
                 Some(cur) => cur.min(pos),
@@ -246,11 +265,18 @@ pub(crate) fn truncate_at_first_stop<S: AsRef<str>>(text: &mut String, patterns:
 /// prefixes (length `1..pattern.len()`) are trimmed; complete
 /// matches are the job of [`truncate_at_first_stop`].
 ///
+/// [`CHAT_STOP_PATTERNS_BROKEN`] entries are skipped: their prefixes are
+/// ordinary text, and `end_of_turn>` trimmed the `e` off every answer
+/// ending in one (`"true"` came back as `"tru"`).
+///
 /// Returns `true` on first trim and stops (matches the prior
 /// llama_cpp behavior).
 pub(crate) fn trim_partial_stop_suffix<S: AsRef<str>>(text: &mut String, patterns: &[S]) -> bool {
     for pattern in patterns {
         let p = pattern.as_ref();
+        if CHAT_STOP_PATTERNS_BROKEN.contains(&p) {
+            continue;
+        }
         for prefix_len in 1..p.len() {
             let prefix = &p[..prefix_len];
             if text.ends_with(prefix) {
@@ -290,7 +316,11 @@ pub(crate) struct StreamingTextFilter {
 }
 
 impl StreamingTextFilter {
-    pub fn new(stop_patterns: Vec<String>) -> Self {
+    pub fn new(mut stop_patterns: Vec<String>) -> Self {
+        // An empty pattern is not a stop (the native llama.cpp loop drops one
+        // too); every text contains it, so it would end the stream before the
+        // first chunk.
+        stop_patterns.retain(|pattern| !pattern.is_empty());
         Self {
             stop_patterns,
             cumulative_text: String::new(),
@@ -405,22 +435,20 @@ impl StreamingTextFilter {
             self.suppress_complete_tool_blocks();
         }
 
-        // Complete stop pattern observed?
-        for pattern in &self.stop_patterns {
-            if self.cumulative_text.contains(pattern.as_str()) {
-                self.hit_stop_pattern = true;
-                if let Some(pos) = self.cumulative_text.find(pattern.as_str()) {
-                    self.cumulative_text.truncate(pos);
-                    // The stop can complete at a position below text that was
-                    // already emitted (a partial prefix under-held in an
-                    // earlier chunk). Re-establish the boundary invariant
-                    // (`last_emitted_len <= cumulative_text.len()`) exactly
-                    // like the think-strip branch above, or
-                    // `cumulative_emitted()` slices out of bounds and panics.
-                    self.last_emitted_len = self.last_emitted_len.min(self.cumulative_text.len());
-                }
-                return None;
-            }
+        // Complete stop pattern observed? Cut at the earliest one, as the
+        // final-text cleanup does, and fall through: the chunk that completes
+        // a stop can carry text ahead of it ("The" completes the stop "he"),
+        // and that text is emitted below like any other. Later pushes return
+        // nothing.
+        if truncate_at_first_stop(&mut self.cumulative_text, &self.stop_patterns) {
+            self.hit_stop_pattern = true;
+            // The stop can complete at a position below text that was
+            // already emitted (a partial prefix under-held in an earlier
+            // chunk). Re-establish the boundary invariant
+            // (`last_emitted_len <= cumulative_text.len()`) exactly like the
+            // think-strip branch above, or `cumulative_emitted()` slices out
+            // of bounds and panics.
+            self.last_emitted_len = self.last_emitted_len.min(self.cumulative_text.len());
         }
 
         // Find the safe emission boundary (exclude potential partial
@@ -606,6 +634,35 @@ mod tests {
         let (clean, reasoning) = strip_and_capture_thinking_tags_primed("   \n ", true, true);
         assert_eq!(clean, "");
         assert_eq!(reasoning, None);
+    }
+
+    #[test]
+    fn prompt_ending_in_an_open_think_is_reasoning_primed() {
+        // xybrid's own prime, and the channel an LFM3 continuation with
+        // thinking on reopens.
+        assert!(is_reasoning_primed(
+            "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n<think>\n"
+        ));
+        assert!(is_reasoning_primed(
+            "</tool_response><|im_end|>\n<|im_start|>assistant\n<think>"
+        ));
+    }
+
+    #[test]
+    fn prompt_without_an_open_think_is_not_reasoning_primed() {
+        for prompt in [
+            // LFM3 with thinking off pre-fills a closed channel.
+            "<|im_start|>assistant\n<think></think>",
+            // A ChatML continuation opens a fresh turn.
+            "<|im_start|>tool\n<|tool_response_start|>{}<|tool_response_end|><|im_end|>\n<|im_start|>assistant\n",
+            // A replayed thought earlier in the prompt does not count.
+            "<|im_start|>assistant\n<think>plan</think>answer<|im_end|>\n<|im_start|>user\n",
+            // A codec-TTS raw prompt.
+            "user: Convert the text to speech:<|TEXT_PROMPT_START|>hi<|TEXT_PROMPT_END|>\nassistant:<|SPEECH_GENERATION_START|>",
+            "",
+        ] {
+            assert!(!is_reasoning_primed(prompt), "{prompt:?}");
+        }
     }
 
     #[test]
@@ -824,6 +881,55 @@ mod tests {
         assert!(f.saw_tool_call_block());
     }
 
+    /// LFM3's call block, streamed in the token pieces the model produces:
+    /// nothing of it reaches the callback, prose on either side does.
+    #[test]
+    fn streaming_filter_suppresses_lfm3_tool_block_split_across_tokens() {
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("Checking."), Some("Checking.".to_string()));
+        for piece in [
+            "<tool_call>",
+            "\n",
+            "<function=",
+            "get",
+            "_weather",
+            ">\n",
+            "<parameter=",
+            "city",
+            ">\nParis\n",
+            "</parameter>",
+            "\n",
+            "</function>",
+            "\n",
+            "</tool_call>",
+        ] {
+            assert_eq!(f.push(piece), None, "{piece:?} must not reach the callback");
+        }
+        assert_eq!(f.push(" Done."), Some(" Done.".to_string()));
+
+        assert_eq!(f.cumulative_emitted(), "Checking. Done.");
+        assert!(f.saw_tool_call_block());
+    }
+
+    /// A reasoning-primed LFM3 stream closes its thinking before the call:
+    /// neither the reasoning nor the call block is emitted.
+    #[test]
+    fn streaming_filter_hides_lfm3_reasoning_and_tool_block() {
+        let mut f = StreamingTextFilter::new_reasoning_primed(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("The user wants the weather."), None);
+        assert_eq!(f.push("</think>"), None);
+        assert_eq!(
+            f.push("<tool_call>\n<function=get_weather>\n<parameter=city>\nParis\n</parameter>\n</function>\n</tool_call>"),
+            None
+        );
+
+        assert_eq!(f.cumulative_emitted(), "");
+        assert_eq!(f.reasoning(), Some("The user wants the weather."));
+        assert!(f.saw_tool_call_block());
+    }
+
     #[test]
     fn streaming_filter_holds_back_split_tool_start_marker() {
         let (start, end, _) = TOOL_BLOCK_MARKERS[0];
@@ -944,6 +1050,19 @@ mod tests {
         assert_eq!(text, "no stops here");
     }
 
+    /// `""` occurs at offset 0 of every text. Counting it erased the whole
+    /// answer and reported a stop.
+    #[test]
+    fn truncate_at_first_stop_ignores_an_empty_pattern() {
+        let mut text = String::from("The rest");
+        assert!(!truncate_at_first_stop(&mut text, &[""]));
+        assert_eq!(text, "The rest");
+
+        // A real stop in the same list still applies.
+        assert!(truncate_at_first_stop(&mut text, &["", " rest"]));
+        assert_eq!(text, "The");
+    }
+
     #[test]
     fn trim_partial_stop_suffix_removes_partial_prefix() {
         let mut text = String::from("response tail <|im_");
@@ -988,6 +1107,23 @@ mod tests {
         assert!(f.is_stopped());
         // Further pushes are no-ops.
         assert_eq!(f.push(" ignored"), None);
+    }
+
+    /// Every text contains `""`, so counting it stopped the stream before
+    /// its first chunk and nothing was ever emitted.
+    #[test]
+    fn streaming_filter_ignores_an_empty_stop_pattern() {
+        let mut f = StreamingTextFilter::new(vec![String::new(), "<|im_end|>".to_string()]);
+        assert_eq!(f.push("The"), Some("The".to_string()));
+        assert_eq!(f.push(" rest"), Some(" rest".to_string()));
+        assert!(!f.is_stopped());
+
+        f.push("<|im_end|>");
+        assert!(f.is_stopped(), "the real stop in the list still applies");
+
+        let mut primed = StreamingTextFilter::new_reasoning_primed(vec![String::new()]);
+        primed.push("thought</think>");
+        assert_eq!(primed.push("answer"), Some("answer".to_string()));
     }
 
     #[test]
@@ -1182,6 +1318,28 @@ mod tests {
         }
     }
 
+    /// The chat paths clean their final text with every pattern, the broken
+    /// variants included. `end_of_turn>` is one, so a partial match on its
+    /// `e` cut the last letter off any answer ending in `e`, even one the
+    /// model ended itself. The real markers' prefixes are still trimmed.
+    #[test]
+    fn trim_partial_stop_suffix_keeps_words_ending_in_broken_marker_prefixes() {
+        let mut patterns: Vec<&str> = CHAT_STOP_PATTERNS.to_vec();
+        patterns.extend_from_slice(CHAT_STOP_PATTERNS_BROKEN);
+        for answer in ["true", "The", "the end", "Ready to send", "| a | b |"] {
+            let mut text = answer.to_string();
+            assert!(
+                !trim_partial_stop_suffix(&mut text, &patterns),
+                "{answer:?} was trimmed to {text:?}"
+            );
+            assert_eq!(text, answer);
+        }
+
+        let mut text = String::from("done <|im_");
+        assert!(trim_partial_stop_suffix(&mut text, &patterns));
+        assert_eq!(text, "done ");
+    }
+
     /// Regression guard: `CHAT_STOP_PATTERNS_BROKEN` must NOT contain
     /// `turn|>`. The body starts with the common letter `t`, and
     /// `trim_partial_stop_suffix` would then trim any final answer
@@ -1259,5 +1417,46 @@ mod tests {
         assert_eq!(f.push("x"), None); // completes the stop
         assert!(f.is_stopped());
         assert_eq!(f.cumulative_emitted(), "hello ");
+    }
+
+    /// A chunk can carry text ahead of the stop it completes: the token "The"
+    /// completes the stop "he". That text is part of the answer, which the
+    /// final text keeps, so the stream emits it before it stops.
+    #[test]
+    fn streaming_filter_emits_the_text_before_a_stop_inside_a_chunk() {
+        let mut f = StreamingTextFilter::new(vec!["he".to_string()]);
+        assert_eq!(f.push("The"), Some("T".to_string()));
+        assert!(f.is_stopped());
+        assert_eq!(f.cumulative_emitted(), "T");
+
+        let mut f = StreamingTextFilter::new(vec!["<|im_end|>".to_string()]);
+        assert_eq!(f.push("Hello wor"), Some("Hello wor".to_string()));
+        assert_eq!(f.push("ld.<|im_end|>tail"), Some("ld.".to_string()));
+        assert_eq!(f.push(" more"), None);
+        assert_eq!(f.cumulative_emitted(), "Hello world.");
+    }
+
+    /// Two stops in one chunk: the stream cuts at the earlier one, wherever
+    /// it sits in the pattern list, as `truncate_at_first_stop` cuts the
+    /// final text.
+    #[test]
+    fn streaming_filter_cuts_at_the_earliest_stop_in_a_chunk() {
+        let mut f = StreamingTextFilter::new(vec!["B".to_string(), "A".to_string()]);
+        assert_eq!(f.push("xAyBz"), Some("x".to_string()));
+        assert_eq!(f.cumulative_emitted(), "x");
+    }
+
+    /// Text before the stop that could be the start of a stop stays held
+    /// back, as the final-text cleanup trims it.
+    #[test]
+    fn streaming_filter_holds_a_partial_stop_left_before_the_stop() {
+        let mut f = StreamingTextFilter::new(vec!["ab".to_string()]);
+        assert_eq!(f.push("xaab"), Some("x".to_string()));
+        assert_eq!(f.cumulative_emitted(), "x");
+
+        let mut text = String::from("xaab");
+        assert!(truncate_at_first_stop(&mut text, &["ab"]));
+        assert!(trim_partial_stop_suffix(&mut text, &["ab"]));
+        assert_eq!(text, "x");
     }
 }

@@ -15,7 +15,7 @@ Add the Xybrid package via Swift Package Manager:
 
 ```swift title="Package.swift"
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.10.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.17.0")
 ]
 ```
 
@@ -51,7 +51,7 @@ On iOS, `Xybrid.initialize()` enables `UIDevice` battery monitoring and subscrib
 
 ## Initialization
 
-Inference runs entirely on-device whether or not you authenticate. Pass an `apiKey` to light up the [dashboard](https://dashboard.xybrid.dev) — that single call starts the telemetry exporter, and your `model.run(...)` calls automatically emit execution traces:
+Inference runs entirely on-device whether or not you authenticate. The `apiKey` authenticates the cloud gateway; `gatewayUrl` overrides it:
 
 ```swift
 Xybrid.initialize(
@@ -59,7 +59,37 @@ Xybrid.initialize(
 )
 ```
 
-Without a key, telemetry is disabled and the first inference logs a one-shot hint pointing at the dashboard (suppress with the `XYBRID_QUIET=1` environment variable). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev). For a self-hosted dashboard, also pass `ingestUrl`.
+## Observability
+
+Trace export is off until you configure it — an API key alone does not enable it. Start it once, after `initialize()`, with one of two presets:
+
+```swift
+// Traces to the Xybrid dashboard
+try Xybrid.Observability.xybrid(apiKey: key)
+    .service("MyApp", version: "1.4.0")
+    .start()
+
+// Traces, metrics, and logs to an OTLP/HTTP endpoint (e.g. an OpenTelemetry Collector)
+try Xybrid.Observability.otlp(endpoint: "http://collector:4318")
+    .start()
+```
+
+Prompts and outputs are captured by default; add `.metadataOnly()` to export metadata only. `.tracesEndpoint(_:)` points the dashboard preset at a self-hosted endpoint. Until export is configured, the first inference logs a one-shot hint (suppress with `XYBRID_QUIET=1`). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+
+Run options carry per-run trace context, and each result's `observation` identifies its trace:
+
+```swift
+let result = try await model.runAsync(
+    envelope: envelope,
+    options: .make(traceparent: parentTraceparent, conversationId: chatId)
+)
+if let observation = result.observation {
+    try Xybrid.Observability.recordFeedback(for: observation, score: 1, label: "thumbs_up")
+}
+try await Xybrid.Observability.flushAsync()
+```
+
+Feedback and evaluations (`recordEvaluation(for:name:...)`) need a logs signal, so they return `false` with the dashboard preset, which sends traces only.
 
 ---
 
@@ -172,17 +202,24 @@ Task {
 try session.feed(samples: pcm)
 
 // When the user stops talking:
-let transcript = try session.flush()
+let result = try session.flush()
+let transcript = result.text
 ```
 
 Partial text is **cumulative, not a delta**: render each one in place of the
 previous rather than appending. A partial produced before you subscribe is
 delivered immediately, so the opening words of an utterance are never lost.
 
-`flush()` ends the session and returns the full transcript — and reports an
-error if any chunk failed to transcribe, because that audio is gone and the
-transcript would otherwise look complete. `cancel()` ends the session and
-discards queued audio.
+`flush()` ends the session and returns an `XybridTranscriptionResult`: the full
+transcript in `text`, plus `durationMs`, `chunksProcessed` and the session's
+`observation` reference. It throws if any chunk failed to transcribe, because
+that audio is gone and the transcript would otherwise look complete.
+`cancel()` ends the session and discards queued audio.
+
+<Callout type="warn">
+Earlier releases returned the transcript as a `String`. Read `.text` from the
+result instead.
+</Callout>
 
 Voice-activity detection cuts chunks on speech boundaries instead of a fixed
 clock, which avoids the stutter you get when a window lands mid-word. It needs

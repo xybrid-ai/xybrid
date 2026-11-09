@@ -1,45 +1,21 @@
-//! Telemetry integration test — end-to-end with a real model and ingestion API.
+//! SDK local telemetry and OpenTelemetry integration tests.
 //!
-//! This test runs a lightweight MNIST inference, emits telemetry events, and
-//! verifies they are accepted by the configured ingestion endpoint.
-//!
-//! ## Prerequisites
-//!
-//! 1. Download the MNIST model fixture:
-//!    ```bash
-//!    cd repos/xybrid && ./integration-tests/download.sh mnist
-//!    ```
-//!
-//! 2. Set environment variables:
-//!    ```bash
-//!    export XYBRID_TEST_INGEST_URL=http://localhost:8000   # ingestion API base URL
-//!    export XYBRID_TEST_API_KEY=sk_test_your_key_here      # API key for the endpoint
-//!    ```
-//!
-//! ## Usage
-//!
-//! ```bash
-//! # Run the integration test (ignored by default — needs env vars + model)
-//! XYBRID_TEST_INGEST_URL=http://localhost:8000 \
-//! XYBRID_TEST_API_KEY=sk_test_abc123 \
-//!   cargo test -p xybrid-sdk --test telemetry_integration -- --ignored
-//! ```
+//! OTLP exports go to an in-process HTTP collector; no credentials or external
+//! service are needed. Real inference tests skip when their fixture is absent.
 
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::net::TcpListener;
 use std::sync::mpsc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_core::testing::model_fixtures;
-use xybrid_sdk::{
-    flush_platform_telemetry, init_platform_telemetry, publish_telemetry_event,
-    register_telemetry_sender, shutdown_platform_telemetry, HttpTelemetryExporter, TelemetryConfig,
-    TelemetryEvent,
-};
+use xybrid_sdk::observability::{self, ObservabilityConfig};
+use xybrid_sdk::{publish_telemetry_event, register_telemetry_sender, TelemetryEvent};
+
+#[path = "support/otlp.rs"]
+mod otlp;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,9 +33,22 @@ fn now_ms() -> u64 {
 /// one test's listener install would otherwise capture another test's
 /// emitted events, masking real regressions as vacuous passes. Mirrors
 /// the same discipline `xybrid-core::execution::listener::tests` uses.
-fn listener_test_lock() -> std::sync::MutexGuard<'static, ()> {
+fn listener_test_lock() -> GlobalStateGuard {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    observability::shutdown_observability(Duration::from_secs(5)).unwrap();
+    GlobalStateGuard { _lock: lock }
+}
+
+struct GlobalStateGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl Drop for GlobalStateGuard {
+    fn drop(&mut self) {
+        xybrid_sdk::clear_execution_listener();
+        let _ = observability::shutdown_observability(Duration::from_secs(5));
+    }
 }
 
 fn event(event_type: &str) -> TelemetryEvent {
@@ -72,74 +61,6 @@ fn event(event_type: &str) -> TelemetryEvent {
         data: None,
         timestamp_ms: now_ms(),
     }
-}
-
-fn start_mock_ingest() -> (String, mpsc::Receiver<String>, std::thread::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("mock ingest should bind");
-    let addr = listener.local_addr().expect("mock ingest should have addr");
-    let (tx, rx) = mpsc::channel();
-
-    let handle = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("mock ingest should accept");
-        let mut buffer = Vec::new();
-        let mut chunk = [0_u8; 1024];
-        let mut header_end = None;
-        let mut content_length = 0_usize;
-
-        loop {
-            let read = stream.read(&mut chunk).expect("mock ingest should read");
-            if read == 0 {
-                break;
-            }
-            buffer.extend_from_slice(&chunk[..read]);
-
-            if header_end.is_none() {
-                header_end = find_header_end(&buffer);
-                if let Some(end) = header_end {
-                    content_length = parse_content_length(&buffer[..end]);
-                }
-            }
-
-            if let Some(end) = header_end {
-                let body_start = end + 4;
-                if buffer.len() >= body_start + content_length {
-                    break;
-                }
-            }
-        }
-
-        let body = header_end
-            .map(|end| {
-                let body_start = end + 4;
-                let body_end = (body_start + content_length).min(buffer.len());
-                String::from_utf8_lossy(&buffer[body_start..body_end]).to_string()
-            })
-            .unwrap_or_default();
-        tx.send(body).expect("mock ingest should send body");
-
-        let response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK";
-        stream
-            .write_all(response)
-            .expect("mock ingest should respond");
-    });
-
-    (format!("http://{addr}"), rx, handle)
-}
-
-fn find_header_end(buffer: &[u8]) -> Option<usize> {
-    buffer.windows(4).position(|window| window == b"\r\n\r\n")
-}
-
-fn parse_content_length(headers: &[u8]) -> usize {
-    String::from_utf8_lossy(headers)
-        .lines()
-        .find_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            name.eq_ignore_ascii_case("content-length")
-                .then(|| value.trim().parse::<usize>().ok())
-                .flatten()
-        })
-        .unwrap_or(0)
 }
 
 /// Create a dummy 28×28 grayscale image as a flat f32 vec (784 pixels).
@@ -162,147 +83,55 @@ fn mnist_input_envelope() -> Envelope {
 // Tests
 // ---------------------------------------------------------------------------
 
-/// Full end-to-end: init telemetry → run MNIST → emit events → flush to API.
-///
-/// Ignored by default because it requires:
-/// - `XYBRID_TEST_INGEST_URL` and `XYBRID_TEST_API_KEY` env vars
-/// - The MNIST model fixture on disk
+/// Exercise the actual SDK run path and flush the resulting OTLP trace.
 #[test]
-#[ignore]
-fn telemetry_e2e_with_mnist_inference() {
-    // -- 1. Read config from env ------------------------------------------
-    let ingest_url = std::env::var("XYBRID_TEST_INGEST_URL")
-        .expect("Set XYBRID_TEST_INGEST_URL to the ingestion API base URL");
-    let api_key =
-        std::env::var("XYBRID_TEST_API_KEY").expect("Set XYBRID_TEST_API_KEY to a valid API key");
-
-    println!("Ingestion endpoint : {}", ingest_url);
-    println!(
-        "API key            : {}…",
-        &api_key[..api_key.len().min(12)]
-    );
-
-    // -- 2. Locate model --------------------------------------------------
-    let model_dir = model_fixtures::require_model("mnist");
-    let metadata_path = model_dir.join("model_metadata.json");
-    let metadata: ModelMetadata =
-        serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap()).unwrap();
-
-    // -- 3. Register a local channel so we can observe emitted events -----
-    let (tx, rx) = mpsc::channel::<TelemetryEvent>();
+fn observability_e2e_with_mnist_inference() {
+    let _serial = listener_test_lock();
+    let Some(model_dir) = model_fixtures::model_or_skip("mnist") else {
+        return;
+    };
+    let (endpoint, rx, handle) = otlp::start_mock_ingest();
+    observability::init_observability(
+        ObservabilityConfig::otlp(otlp::trace_config(&endpoint))
+            .content(observability::ContentPolicy::metadata_only()),
+    )
+    .unwrap();
+    let (tx, events) = mpsc::channel();
     register_telemetry_sender(tx);
-
-    // -- 4. Init platform telemetry (HTTP exporter) -----------------------
-    let config = TelemetryConfig::new(&ingest_url, &api_key)
-        .with_device("integration-test", "ci")
-        .with_app_version(env!("CARGO_PKG_VERSION"))
-        .with_batch_size(1) // flush every event immediately
-        .with_flush_interval(1);
-    init_platform_telemetry(config);
-
-    // -- 5. Emit PipelineStart --------------------------------------------
-    let mut start_ev = event("PipelineStart");
-    start_ev.data = Some(r#"{"stages":["mnist"]}"#.to_string());
-    publish_telemetry_event(start_ev);
-
-    // -- 6. Run MNIST inference -------------------------------------------
-    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
-    let input = mnist_input_envelope();
-
-    let start = Instant::now();
-    let output = executor
-        .execute(&metadata, &input, None)
-        .expect("MNIST inference should succeed");
-    let latency_ms = start.elapsed().as_millis() as u32;
-
-    // Validate output is an Embedding with 10 class probabilities
-    match &output.kind {
+    let model = xybrid_sdk::ModelLoader::from_directory(&model_dir)
+        .unwrap()
+        .load()
+        .unwrap();
+    let result = model.run(&mnist_input_envelope(), None).unwrap();
+    match &result.envelope().kind {
         EnvelopeKind::Embedding(probs) => {
-            assert_eq!(
-                probs.len(),
-                10,
-                "MNIST should output 10 class probabilities"
-            );
-            let sum: f32 = probs.iter().sum();
-            assert!(
-                (sum - 1.0).abs() < 0.01,
-                "Softmax output should sum to ~1.0, got {}",
-                sum
-            );
-            let predicted = probs
-                .iter()
-                .enumerate()
-                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-                .map(|(i, _)| i)
-                .unwrap();
-            println!(
-                "MNIST predicted digit: {} (latency: {}ms)",
-                predicted, latency_ms
-            );
+            assert_eq!(probs.len(), 10);
+            assert!((probs.iter().sum::<f32>() - 1.0).abs() < 0.01);
         }
         other => panic!("Expected Embedding output, got {:?}", other.as_str()),
     }
-
-    // -- 7. Emit PipelineComplete -----------------------------------------
-    let mut complete_ev = event("PipelineComplete");
-    complete_ev.stage_name = Some("mnist".to_string());
-    complete_ev.target = Some("device".to_string());
-    complete_ev.latency_ms = Some(latency_ms);
-    publish_telemetry_event(complete_ev);
-
-    // -- 8. Flush and shutdown --------------------------------------------
-    flush_platform_telemetry();
-    // Give the HTTP exporter a moment to deliver
-    std::thread::sleep(Duration::from_secs(2));
-    shutdown_platform_telemetry();
-
-    // -- 9. Verify events were observed locally ---------------------------
-    let mut collected: Vec<TelemetryEvent> = Vec::new();
-    while let Ok(ev) = rx.try_recv() {
-        collected.push(ev);
-    }
-
-    // With automatic instrumentation we expect at least 4 events:
-    // PipelineStart, ExecutionStarted, ExecutionCompleted, PipelineComplete
-    assert!(
-        collected.len() >= 4,
-        "Expected at least 4 events (PipelineStart + ExecutionStarted + ExecutionCompleted + PipelineComplete), got {}",
-        collected.len()
-    );
-
-    let types: Vec<&str> = collected.iter().map(|e| e.event_type.as_str()).collect();
-    assert!(
-        types.contains(&"PipelineStart"),
-        "Missing PipelineStart event. Got: {:?}",
-        types
-    );
-    assert!(
-        types.contains(&"ExecutionStarted"),
-        "Missing automatic ExecutionStarted event. Got: {:?}",
-        types
-    );
-    assert!(
-        types.contains(&"ExecutionCompleted"),
-        "Missing automatic ExecutionCompleted event. Got: {:?}",
-        types
-    );
-    assert!(
-        types.contains(&"PipelineComplete"),
-        "Missing PipelineComplete event. Got: {:?}",
-        types
-    );
-
-    println!(
-        "OK — {} telemetry events captured and flushed to {}",
-        collected.len(),
-        ingest_url
-    );
+    let reference = result
+        .observation_ref()
+        .expect("the SDK returns its trace reference");
+    observability::flush_observability(Duration::from_secs(5)).unwrap();
+    let body: serde_json::Value =
+        serde_json::from_str(&rx.recv_timeout(Duration::from_secs(5)).unwrap()).unwrap();
+    handle.join().unwrap();
+    assert!(otlp::spans(&body)
+        .iter()
+        .any(|span| span["traceId"] == reference.trace_id));
+    let completions: Vec<_> = events
+        .try_iter()
+        .filter(|event| event.event_type == "ModelComplete")
+        .collect();
+    assert_eq!(completions.len(), 1, "one local completion per inference");
 }
 
 /// Verify that telemetry events are published through the sender channel
 /// even without a remote endpoint. This does NOT require env vars.
 #[test]
 fn telemetry_local_event_publishing() {
+    let _serial = listener_test_lock();
     let (tx, rx) = mpsc::channel::<TelemetryEvent>();
     register_telemetry_sender(tx);
 
@@ -351,34 +180,72 @@ fn telemetry_event_fields() {
     assert_eq!(deser.latency_ms, ev.latency_ms);
 }
 
-/// Verify HTTP-exported events include the resolved device profile.
+/// SDK identity and hardware attributes use the OTLP resource, independent
+/// of local event payloads. Publishing a local event must not create a span.
 #[test]
-fn telemetry_http_event_includes_device_profile() {
-    let (endpoint, rx, handle) = start_mock_ingest();
-    let config = TelemetryConfig::new(endpoint, "test-key")
-        .with_device("integration-test", "ci")
-        .with_hardware_chip("integration-chip")
-        .with_hardware_ram_gb(64)
-        .with_batch_size(1)
-        .with_flush_interval(60);
-    let exporter = HttpTelemetryExporter::new(config);
-
-    exporter.push(event("DeviceProfileEvent"));
-
-    let body = rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("mock ingest should receive a request body");
-    handle.join().expect("mock ingest thread should finish");
-
-    let json: serde_json::Value = serde_json::from_str(&body).expect("request body should be JSON");
-    let device = &json["events"][0]["device"];
-
-    assert_eq!(device["chip_family"].as_str(), Some("integration-chip"));
-    assert_eq!(device["ram_gb"].as_u64(), Some(64));
-    assert!(
-        device["chip_family"].is_string() || device["arch"].is_string(),
-        "device should include chip_family or arch: {device:?}"
+fn observability_http_trace_includes_resource_identity() {
+    let _serial = listener_test_lock();
+    let (endpoint, rx, handle) = otlp::start_mock_ingest();
+    let config = otlp::trace_config(&endpoint)
+        .with_resource_attribute(observability::KeyValue::new(
+            "xybrid.device.chip",
+            "integration-chip",
+        ))
+        .with_resource_attribute(observability::KeyValue::new("xybrid.device.ram_gb", 64_i64));
+    observability::init_observability(
+        ObservabilityConfig::otlp(config)
+            .device_attributes(false)
+            .service("integration-test", Some("1.2.3".to_owned())),
+    )
+    .unwrap();
+    let (tx, local_events) = mpsc::channel();
+    register_telemetry_sender(tx);
+    publish_telemetry_event(event("DeviceProfileEvent"));
+    let op = observability::observer().start_inference(
+        observability::InferenceRequest::new("chat", "llama.cpp").with_model("tiny"),
+        observability::StartOptions::default(),
     );
+    op.end();
+    observability::flush_observability(Duration::from_secs(5)).unwrap();
+    let body: serde_json::Value =
+        serde_json::from_str(&rx.recv_timeout(Duration::from_secs(5)).unwrap()).unwrap();
+    handle.join().unwrap();
+    let attributes = &body["resourceSpans"][0]["resource"]["attributes"];
+    for (key, expected) in [
+        ("service.name", "integration-test"),
+        ("service.version", "1.2.3"),
+        ("xybrid.device.chip", "integration-chip"),
+        ("telemetry.sdk.name", "xybrid"),
+        ("xybrid.sdk.version", xybrid_sdk::SDK_VERSION),
+    ] {
+        assert_eq!(
+            otlp::attribute(attributes, key).unwrap()["stringValue"],
+            expected
+        );
+    }
+    assert_eq!(
+        otlp::attribute(attributes, "xybrid.device.ram_gb").unwrap()["intValue"],
+        "64"
+    );
+    assert!(
+        otlp::attribute(attributes, "host.name").is_none(),
+        "hostnames are never exported"
+    );
+    assert_eq!(
+        otlp::spans(&body).len(),
+        1,
+        "local events must not be converted to OTLP spans"
+    );
+    assert_eq!(observability::stats().unwrap().traces.exported, 1);
+    assert_eq!(
+        local_events.try_recv().unwrap().event_type,
+        "DeviceProfileEvent"
+    );
+    observability::shutdown_observability(Duration::from_secs(5)).unwrap();
+    assert!(!observability::is_enabled());
+    assert!(observability::stats().is_none());
+    observability::flush_observability(Duration::from_secs(5)).unwrap();
+    observability::shutdown_observability(Duration::from_secs(5)).unwrap();
 }
 
 /// Verify that `TemplateExecutor::execute` does **not** emit
@@ -714,10 +581,8 @@ fn execute_streaming_emits_no_outer_telemetry_events() {
 
 /// Regression guard: a chat-context LLM call must carry the `backend` and
 /// `quantization` cost-attribution labels somewhere in its captured span
-/// tree. The SDK's downstream `convert_to_platform_event` hoist reads
-/// from any span via `extract_string_attr_from_any_span`, so as long as
-/// at least one span in the trace carries each key the Traces dashboard
-/// renders the columns.
+/// tree. Scoped recorders retain these adapter attributes for local tooling
+/// and SDK observation recorders export them on stage spans.
 ///
 /// The subtle thing this is protecting against: the chat-context family
 /// in `execute_with_context_impl` / `execute_streaming_with_context_impl`
@@ -759,11 +624,8 @@ fn chat_context_llm_call_carries_backend_and_quantization_on_spans() {
         .metadata
         .insert("backend".to_string(), serde_json::json!("llamacpp"));
 
-    // Enable + clear the global tracing collector so we read only the
-    // spans this test produced. Other tests that touch tracing share the
-    // collector — the listener_test_lock above serialises them.
-    core_tracing::init_tracing(true);
-    core_tracing::reset_tracing();
+    // Capture only this call's stages on its thread.
+    let capture = core_tracing::capture();
 
     let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
     let input = Envelope::new(EnvelopeKind::Text("hi".to_string())).with_role(MessageRole::User);
@@ -780,7 +642,7 @@ fn chat_context_llm_call_carries_backend_and_quantization_on_spans() {
         .execute_with_context(&metadata, &input, &ctx, Some(&gen_config))
         .expect("chat-context LLM call should succeed");
 
-    let stages = core_tracing::get_stages_json();
+    let stages = capture.stages_json();
     let spans = stages
         .get("spans")
         .and_then(|v| v.as_array())
@@ -808,8 +670,6 @@ fn chat_context_llm_call_carries_backend_and_quantization_on_spans() {
          rationale as `backend`. Spans captured: {:#}",
         stages
     );
-
-    core_tracing::reset_tracing();
 }
 
 /// Regression guard: `XybridModel::run_streaming` must emit exactly one
@@ -1419,74 +1279,47 @@ fn xybrid_model_warmup_emits_one_model_warmup_event() {
     );
 }
 
-/// Regression guard: `XybridModel::warmup` must drain the global span
-/// collector when it publishes — otherwise the executor spans opened
-/// during warmup (`execute:<model>`, `llm_inference`) stay in the
-/// collector and leak into the snapshot of the next event the SDK
-/// publishes. On a real CLI REPL session that means the first chat
-/// turn's `ModelComplete` snapshot captures three spans (two leaked
-/// warmup spans + one real chat span) and the warmup's own
-/// `ModelWarmup` event reaches the dashboard with no real spans —
-/// the dashboard falls back to its synthesized placeholder
-/// flamegraph.
-///
-/// The fix is that `ModelWarmup` is in the span-bearing event-type
-/// list inside `publish_telemetry_event::snapshot_spans_into_event`
-/// (and the matching gate in `convert_to_platform_event`). This test
-/// asserts the observable consequence: the global collector is empty
-/// after `model.warmup()` returns.
+/// Warmup records its own scoped trace, restores the caller's recorder, and
+/// leaves no warmup stages to pollute the next operation's capture.
 #[cfg(feature = "llm-llamacpp")]
 #[test]
-fn xybrid_model_warmup_drains_span_collector_to_avoid_leak_into_next_event() {
+fn xybrid_model_warmup_restores_caller_trace_scope() {
     use xybrid_core::tracing as core_tracing;
-
     let _serial = listener_test_lock();
-
     let Some(model_dir) = model_fixtures::model_or_skip("qwen2.5-0.5b-instruct") else {
         return;
     };
-
-    // Need tracing enabled for the executor's SpanGuards to actually
-    // open spans, and for `snapshot_spans_into_event` to consider this
-    // event span-bearing. Reset first so leftover spans from earlier
-    // tests don't pollute the assertion.
-    core_tracing::init_tracing(true);
-    core_tracing::reset_tracing();
-
-    let (tx, _rx) = mpsc::channel::<TelemetryEvent>();
-    register_telemetry_sender(tx);
-
     let model = xybrid_sdk::ModelLoader::from_directory(&model_dir)
-        .expect("loader should build from directory")
+        .unwrap()
         .load()
-        .expect("qwen2.5-0.5b-instruct should load");
-
+        .unwrap();
+    let capture = core_tracing::capture();
+    {
+        let _stage = core_tracing::SpanGuard::new("before-warmup");
+    }
     model.warmup().expect("warmup should succeed");
-
-    // After publish, the collector must be empty. Any leftover span
-    // here would attach to whatever event publishes next, polluting
-    // its trace detail on the dashboard.
-    let after = core_tracing::get_stages_json();
-    let leftover_spans = after
-        .get("spans")
-        .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
+    {
+        let _stage = core_tracing::SpanGuard::new("after-warmup");
+    }
+    let stages = capture.stages_json();
+    let names: Vec<_> = stages["spans"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|span| span["name"].as_str().unwrap())
+        .collect();
     assert_eq!(
-        leftover_spans, 0,
-        "global span collector must be drained after `XybridModel::warmup` publishes \
-         its `ModelWarmup` event — leftover spans leak into the next event's \
-         snapshot. Got {} stranded spans: {}",
-        leftover_spans, after
+        names,
+        ["before-warmup", "after-warmup"],
+        "warmup must isolate its stages and restore the caller's recorder"
     );
-
-    core_tracing::reset_tracing();
 }
 
 /// Smoke test: MNIST inference works without telemetry (no env vars needed).
 /// Ensures the model fixture is valid and the execution pipeline doesn't panic.
 #[test]
 fn mnist_inference_smoke_test() {
+    let _serial = listener_test_lock();
     let Some(model_dir) = model_fixtures::model_or_skip("mnist") else {
         return; // model not downloaded — skip gracefully
     };

@@ -23,8 +23,11 @@ version and the Kotlin SDK pin (`tools/scripts/version-sync.sh`).
    `bindings/react-native/package.json` (`scripts/pin-ios-checksum.sh`) and
    pushes that to the release branch.
 2. **`release-publish.yml`**, after the release PR merges:
+   - `publish-release` checks the draft's zip against both pins at the merge
+     commit and, on a mismatch, stops before the release or its tag goes
+     public;
    - `verify-spm-checksum` downloads the now-public zip and checks both pins
-     (`pin-ios-checksum.sh --check`);
+     again (`pin-ios-checksum.sh --check`);
    - `publish-npm` runs the test suite and the tarball check at the tag,
      waits (up to 30 minutes) until Maven Central serves
      `ai.xybrid:xybrid-kotlin:<version>` — without it the package's Android
@@ -32,6 +35,7 @@ version and the Kotlin SDK pin (`tools/scripts/version-sync.sh`).
      approves the staged version on npmjs.com with 2FA. Versions with a
      prerelease suffix (`0.10.0-rc1`) go to the `next` dist-tag, others to
      `latest` after approval. Re-runs skip a version already live on npm.
+   - After the first stable release following a prerelease, remove `next` (`npm dist-tag rm @xybrid/react-native next`) or move it to that stable version so it cannot keep installing the old prerelease.
 
 If the wait times out, the Kotlin deployment is usually sitting unreleased in
 the Central Portal (central.sonatype.com → Deployments). Release it, wait for

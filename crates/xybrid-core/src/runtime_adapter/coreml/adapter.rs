@@ -134,13 +134,13 @@ impl CoreMLRuntimeAdapter {
     /// 1. Convert Envelope to CoreML input format (MLMultiArray, etc.)
     /// 2. Run inference via CoreML framework (with Metal acceleration if available)
     /// 3. Convert CoreML output back to Envelope
-    fn simulate_inference(&self, input: &Envelope) -> Envelope {
+    fn simulate_inference(&self, input: &Envelope) -> AdapterResult<Envelope> {
         // Mock inference: transform input kind to output kind
         // CoreML is commonly used for:
         // - Vision models (image -> classification)
         // - NLP models (text -> embeddings/predictions)
         // - Audio models (audio -> features)
-        match &input.kind {
+        Ok(match &input.kind {
             EnvelopeKind::Audio(_) => {
                 // ASR or audio classification
                 Envelope::new(EnvelopeKind::Text("coreml-transcribed text".to_string()))
@@ -159,7 +159,10 @@ impl CoreMLRuntimeAdapter {
             EnvelopeKind::MultiPart(_) => Envelope::new(EnvelopeKind::Text(
                 "coreml-multimodal-unsupported".to_string(),
             )),
-        }
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                return Err(crate::execution::choice::choice_kind_not_runtime_input());
+            }
+        })
     }
 }
 
@@ -233,9 +236,7 @@ impl RuntimeAdapter for CoreMLRuntimeAdapter {
         // 5. Handle errors from CoreML framework
         // 6. Use Metal acceleration if available (via MLModelConfiguration)
 
-        let output = self.simulate_inference(input);
-
-        Ok(output)
+        self.simulate_inference(input)
     }
 }
 
@@ -260,9 +261,7 @@ impl RuntimeAdapterExt for CoreMLRuntimeAdapter {
         }
 
         // Simulate inference execution
-        let output = self.simulate_inference(input);
-
-        Ok(output)
+        self.simulate_inference(input)
     }
 
     fn unload_model(&mut self, model_id: &str) -> AdapterResult<()> {

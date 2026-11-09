@@ -1,11 +1,13 @@
-//! Choice-scoring data: the candidates a caller offers and the scores a
-//! decision model returns for them.
+//! Choice-scoring data: the request a caller sends to a decision model and the
+//! scores the model returns.
 //!
 //! A choice scorer takes one context plus a closed list of candidate actions
 //! and returns one score per candidate from a single forward pass, without
-//! generating text. These types carry that request and result. They are plain
-//! data: validation lives in [`crate::execution::choice`], and the runtimes
-//! that produce [`ChoiceScores`] live next to their backends.
+//! generating text. [`ChoiceRequest`] carries the request (it travels as
+//! [`EnvelopeKind::ChoiceRequest`](super::EnvelopeKind::ChoiceRequest)) and
+//! [`ChoiceScores`] the result. They are plain data: validation lives in
+//! [`crate::execution::choice`], and the runtimes that produce
+//! [`ChoiceScores`] live next to their backends.
 //!
 //! Choice ids and texts are caller content. The [`Debug`] impls here print
 //! lengths, counts and numbers only, so logging a request or result never
@@ -14,9 +16,14 @@
 //! # Example
 //!
 //! ```
-//! use xybrid_core::ir::{Choice, ChoiceScore, ChoiceScores};
+//! use xybrid_core::ir::{Choice, ChoiceRequest, ChoiceScore, ChoiceScores, Envelope, EnvelopeKind};
 //!
-//! let offered = [Choice::new("tel", "fill Tel: (503) 555-0142"), Choice::new("skip", "skip")];
+//! let context = Envelope::new(EnvelopeKind::Text("FORM Intake".into()));
+//! let offered = vec![Choice::new("tel", "fill Tel: (503) 555-0142"), Choice::new("skip", "skip")];
+//! let request = ChoiceRequest::new(context, offered.clone());
+//! assert_eq!(request.choices().len(), 2);
+//! assert!(!format!("{request:?}").contains("Intake"));
+//!
 //! let scores = ChoiceScores {
 //!     entries: vec![
 //!         ChoiceScore { id: offered[0].id.clone(), logit: 3.0, score: 0.95, fixed: false },
@@ -29,6 +36,7 @@
 //! assert!(!format!("{scores:?}").contains("tel"));
 //! ```
 
+use super::Envelope;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -62,6 +70,62 @@ impl fmt::Debug for Choice {
         f.debug_struct("Choice")
             .field("id_bytes", &self.id.len())
             .field("text_bytes", &self.text.len())
+            .finish()
+    }
+}
+
+/// One choice-scoring request: a context and the candidates to score
+/// against it.
+///
+/// The model reads the context and each choice's `text`. Ids only name the
+/// candidates in the result, so renaming them never changes a score.
+///
+/// The fields are private and set by [`ChoiceRequest::new`], so fields a later
+/// model needs (instructions, typed questions) can be added without a breaking
+/// change to [`EnvelopeKind`](super::EnvelopeKind). The request is checked
+/// against the model it is sent to when it runs, not here: see
+/// [`validate_choice_request`](crate::execution::choice::validate_choice_request).
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChoiceRequest {
+    context: Box<Envelope>,
+    choices: Vec<Choice>,
+}
+
+impl ChoiceRequest {
+    /// Creates a request scoring `choices` against `context`.
+    ///
+    /// Choice scorers read a text context today; other kinds are refused when
+    /// the request runs.
+    pub fn new(context: Envelope, choices: Vec<Choice>) -> Self {
+        Self {
+            context: Box::new(context),
+            choices,
+        }
+    }
+
+    /// The context the candidates are scored against.
+    pub fn context(&self) -> &Envelope {
+        &self.context
+    }
+
+    /// The caller's candidates, in the order they were offered.
+    pub fn choices(&self) -> &[Choice] {
+        &self.choices
+    }
+
+    /// Splits the request into its context and choices.
+    pub fn into_parts(self) -> (Envelope, Vec<Choice>) {
+        (*self.context, self.choices)
+    }
+}
+
+impl fmt::Debug for ChoiceRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ChoiceRequest")
+            .field("context_kind", &self.context.kind_str())
+            .field("context_bytes", &self.context.payload_size())
+            .field("choices", &self.choices.len())
             .finish()
     }
 }
@@ -206,6 +270,48 @@ mod tests {
         let rendered = format!("{choice:?} {:?}", scores(&[0.7, 0.3]));
         assert!(!rendered.contains(CANARY), "{rendered}");
         assert!(rendered.contains("count: 2"), "{rendered}");
+    }
+
+    #[test]
+    fn request_debug_never_prints_the_context_ids_or_text() {
+        use crate::ir::{Envelope, EnvelopeKind};
+
+        let mut context = Envelope::new(EnvelopeKind::Text(format!("context {CANARY}")));
+        context.set_metadata("note".into(), CANARY.into());
+        let request = ChoiceRequest::new(
+            context,
+            vec![
+                Choice::new(CANARY, format!("text {CANARY}")),
+                Choice::new("b", "b"),
+            ],
+        );
+        let rendered = format!("{request:?}");
+        assert!(!rendered.contains(CANARY), "{rendered}");
+        assert!(rendered.contains("choices: 2"), "{rendered}");
+        assert!(rendered.contains("context_kind: \"Text\""), "{rendered}");
+    }
+
+    #[test]
+    fn request_accessors_return_what_was_set() {
+        use crate::ir::{Envelope, EnvelopeKind};
+
+        let context = Envelope::new(EnvelopeKind::Text("ctx".into()));
+        let offered = vec![Choice::new("a", "first"), Choice::new("b", "second")];
+        let request = ChoiceRequest::new(context.clone(), offered.clone());
+        assert_eq!(request.context(), &context);
+        assert_eq!(request.choices(), offered.as_slice());
+        assert_eq!(request.into_parts(), (context, offered));
+    }
+
+    #[test]
+    fn request_json_rejects_unknown_fields() {
+        let json = r#"{"context":{"kind":{"Text":"ctx"},"metadata":{}},"choices":[{"id":"a","text":"b"}]}"#;
+        let request: ChoiceRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.choices().len(), 1);
+
+        let extra =
+            r#"{"context":{"kind":{"Text":"ctx"},"metadata":{}},"choices":[],"question":"q"}"#;
+        assert!(serde_json::from_str::<ChoiceRequest>(extra).is_err());
     }
 
     #[test]

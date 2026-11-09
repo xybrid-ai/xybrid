@@ -6,20 +6,26 @@
 # (it reads section headers; the loader reads program headers), only an
 # on-device dlopen can.
 #
-# Expects a directory (default ./dlopen-gate) staged by build-android.yml
-# containing: libxybrid_bolt.so, libxybrid_bolt.stripped.so, libc++_shared.so,
-# libonnxruntime.so, android-dlopen-probe. Run after the emulator is booted
-# (the emulator-runner action waits for boot before invoking this).
+# Expects a directory (default ./dlopen-gate) staged by build-android.yml or
+# build-unity.yml containing: libxybrid_bolt.so, libxybrid_bolt.stripped.so,
+# android-dlopen-probe, and each library named in GATE_SIBLINGS. GATE_SIBLINGS
+# is the space-separated list of libraries shipped beside the bolt .so,
+# "libc++_shared.so libonnxruntime.so" when unset (the Kotlin AAR). The Unity
+# package ships no libc++_shared.so, so its gate passes only libonnxruntime.so:
+# a C++ runtime import left in its .so then fails the dlopen. Run after the
+# emulator is booted (the emulator-runner action waits for boot before
+# invoking this).
 set -euo pipefail
 
 GATE_DIR="${1:-dlopen-gate}"
 DEVICE_DIR=/data/local/tmp/xybrid-gate
 ADB="${ADB:-adb}"
+read -r -a SIBLINGS <<< "${GATE_SIBLINGS-libc++_shared.so libonnxruntime.so}"
 
-echo "==> Pushing gate artifacts to $DEVICE_DIR"
+echo "==> Pushing gate artifacts to $DEVICE_DIR (siblings: ${SIBLINGS[*]:-none})"
 "$ADB" shell "rm -rf $DEVICE_DIR && mkdir -p $DEVICE_DIR"
-for f in libxybrid_bolt.so libxybrid_bolt.stripped.so libc++_shared.so \
-         libonnxruntime.so android-dlopen-probe; do
+for f in libxybrid_bolt.so libxybrid_bolt.stripped.so ${SIBLINGS[@]+"${SIBLINGS[@]}"} \
+         android-dlopen-probe; do
     "$ADB" push "$GATE_DIR/$f" "$DEVICE_DIR/$f" > /dev/null
 done
 "$ADB" shell "chmod 755 $DEVICE_DIR/android-dlopen-probe"

@@ -16,8 +16,10 @@ use super::encode::encode_request;
 use super::math::{choice_scores, softmax_scores};
 use super::onnx::{ChoiceAxis, OnnxChoiceScorer};
 use super::*;
-use crate::execution::template::{ByteOverflow, ChoiceScorerSpec, OnnxByteOptionScorerSpec};
-use crate::ir::Choice;
+use crate::execution::template::{
+    ByteOverflow, ChoiceScorerSpec, ExecutionTemplate, ModelMetadata, OnnxByteOptionScorerSpec,
+};
+use crate::ir::{Choice, ChoiceRequest, ChoiceScore, ChoiceScores, Envelope, EnvelopeKind};
 use crate::runtime_adapter::onnx::{ExecutionProviderKind, ONNXSession, SessionOptions};
 use crate::testing::model_fixtures::{models_required, staged_artifact, ENV_REQUIRE_MODELS};
 use serde::Deserialize;
@@ -546,6 +548,15 @@ fn choice_errors_map_onto_adapter_errors() {
         AdapterError::from(runtime),
         AdapterError::ModelNotLoaded(_)
     ));
+    for request in [
+        ChoiceError::UnsupportedContext { kind: "Audio" },
+        ChoiceError::NestedChoiceKind,
+    ] {
+        assert!(matches!(
+            AdapterError::from(request),
+            AdapterError::InvalidInput(_)
+        ));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -906,4 +917,379 @@ fn g1_forms_logits_and_scores_match_the_reference() {
         bounds.near_tie_margin
     );
     assert_eq!(exempt, ["tie-duplicate-text", "near-tie-telephone"]);
+}
+
+// ---------------------------------------------------------------------------
+// Entry guards: where a choice request may go
+// ---------------------------------------------------------------------------
+
+fn scorer_metadata(spec: OnnxByteOptionScorerSpec) -> ModelMetadata {
+    let mut metadata = ModelMetadata::onnx("forms-scorer", "1.0", "cua-s1-forms.onnx");
+    metadata.execution_template = ExecutionTemplate::ChoiceScorer {
+        scorer: ChoiceScorerSpec::OnnxByteOptionScorer(spec),
+    };
+    metadata
+}
+
+fn text(content: &str) -> Envelope {
+    Envelope::new(EnvelopeKind::Text(content.to_string()))
+}
+
+fn request_envelope(context: Envelope, offered: &[(&str, &str)]) -> Envelope {
+    Envelope::choice_request(context, choices(offered))
+}
+
+fn scores_envelope() -> Envelope {
+    Envelope::new(EnvelopeKind::ChoiceScores(ChoiceScores {
+        entries: vec![ChoiceScore {
+            id: "a".into(),
+            logit: 0.0,
+            score: 1.0,
+            fixed: false,
+        }],
+        label_mass: None,
+    }))
+}
+
+const ALL_ENTRIES: [EntryPoint; 4] = [
+    EntryPoint::Batch,
+    EntryPoint::Streaming,
+    EntryPoint::Conversation,
+    EntryPoint::Pipeline,
+];
+
+/// The capability a refusal names, or a panic naming what came back instead.
+fn refused_capability(result: Result<(), AdapterError>) -> String {
+    match result {
+        Err(AdapterError::UnsupportedModelCapability {
+            model_id,
+            capability,
+            ..
+        }) => {
+            assert!(!model_id.is_empty());
+            capability
+        }
+        other => panic!("expected UnsupportedModelCapability, got {other:?}"),
+    }
+}
+
+fn invalid_input(result: Result<(), AdapterError>) -> String {
+    match result {
+        Err(AdapterError::InvalidInput(message)) => message,
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_valid_batch_request_passes_validation() {
+    let metadata = scorer_metadata(forms_spec());
+    let input = request_envelope(
+        text(FAKE_CONTEXT),
+        &[("tel", "fill Tel"), ("name", "fill Name")],
+    );
+    validate_choice_request(&metadata, &input, EntryPoint::Batch).unwrap();
+
+    // FORMS has three fixed choices, so a request may offer none of its own.
+    let fixed_only = request_envelope(text(FAKE_CONTEXT), &[]);
+    validate_choice_request(&metadata, &fixed_only, EntryPoint::Batch).unwrap();
+}
+
+#[test]
+fn scorers_refuse_every_entry_but_batch() {
+    let metadata = scorer_metadata(forms_spec());
+    let input = request_envelope(text(FAKE_CONTEXT), &[("tel", "fill Tel")]);
+    for (entry, capability) in [
+        (EntryPoint::Streaming, "streaming"),
+        (EntryPoint::Conversation, "conversation context"),
+        (EntryPoint::Pipeline, "pipeline stages"),
+    ] {
+        assert_eq!(
+            refused_capability(validate_choice_request(&metadata, &input, entry)),
+            capability
+        );
+    }
+}
+
+#[test]
+fn scorers_refuse_every_input_but_a_request() {
+    let metadata = scorer_metadata(forms_spec());
+    let inputs = [
+        (text("hello"), "Text input"),
+        (
+            Envelope::new(EnvelopeKind::Audio(vec![0; 8])),
+            "Audio input",
+        ),
+        (
+            Envelope::new(EnvelopeKind::Embedding(vec![0.5])),
+            "Embedding input",
+        ),
+        (
+            Envelope::new(EnvelopeKind::MultiPart(vec![text("hello")])),
+            "MultiPart input",
+        ),
+        (scores_envelope(), "ChoiceScores input"),
+    ];
+    for (input, capability) in inputs {
+        assert_eq!(
+            refused_capability(validate_choice_request(
+                &metadata,
+                &input,
+                EntryPoint::Batch
+            )),
+            capability
+        );
+    }
+}
+
+#[test]
+fn other_models_refuse_choice_kinds_anywhere() {
+    let request = request_envelope(text(FAKE_CONTEXT), &[("a", "x"), ("b", "y")]);
+    let buried = Envelope::new(EnvelopeKind::MultiPart(vec![
+        text("hello"),
+        Envelope::new(EnvelopeKind::MultiPart(vec![request.clone()])),
+    ]));
+    let mut gguf = ModelMetadata::onnx("chat", "1.0", "model.gguf");
+    gguf.execution_template = ExecutionTemplate::Gguf {
+        model_file: "model.gguf".into(),
+        chat_template: None,
+        context_length: 2048,
+        generation_params: None,
+    };
+    for metadata in [ModelMetadata::onnx("text", "1.0", "model.onnx"), gguf] {
+        for input in [&request, &scores_envelope(), &buried] {
+            for entry in ALL_ENTRIES {
+                assert_eq!(
+                    refused_capability(validate_choice_request(&metadata, input, entry)),
+                    "choice requests"
+                );
+            }
+        }
+        for entry in ALL_ENTRIES {
+            validate_choice_request(&metadata, &text("hello"), entry).unwrap();
+        }
+    }
+}
+
+#[test]
+fn request_contexts_must_be_non_empty_text() {
+    let metadata = scorer_metadata(forms_spec());
+    let offered = [("a", "x")];
+    let validate = |context: Envelope| -> Result<(), AdapterError> {
+        validate_choice_request(
+            &metadata,
+            &request_envelope(context, &offered),
+            EntryPoint::Batch,
+        )
+    };
+
+    assert!(invalid_input(validate(text(""))).contains("context is empty"));
+    for (context, kind) in [
+        (Envelope::new(EnvelopeKind::Audio(vec![1])), "Audio"),
+        (
+            Envelope::new(EnvelopeKind::Embedding(vec![1.0])),
+            "Embedding",
+        ),
+        (
+            Envelope::new(EnvelopeKind::MultiPart(vec![text("x")])),
+            "MultiPart",
+        ),
+    ] {
+        let message = invalid_input(validate(context));
+        assert!(
+            message.contains(&format!("the context envelope is {kind}")),
+            "{message}"
+        );
+    }
+    let nested = request_envelope(text("inner"), &offered);
+    for context in [
+        nested.clone(),
+        scores_envelope(),
+        Envelope::new(EnvelopeKind::MultiPart(vec![nested])),
+    ] {
+        let message = invalid_input(validate(context));
+        assert!(message.contains("contains a choice request"), "{message}");
+    }
+}
+
+#[test]
+fn request_candidates_follow_the_candidate_rules() {
+    let mut spec = forms_spec();
+    spec.max_choices = 5;
+    let metadata = scorer_metadata(spec);
+    let validate = |offered: &[(&str, &str)]| {
+        validate_choice_request(
+            &metadata,
+            &request_envelope(text(FAKE_CONTEXT), offered),
+            EntryPoint::Batch,
+        )
+    };
+
+    // 3 caller + 3 fixed > 5.
+    assert!(invalid_input(validate(&[("a", "x"), ("b", "y"), ("c", "z")])).contains("at most 5"));
+    assert!(invalid_input(validate(&[("", "x")])).contains("empty id"));
+    assert!(invalid_input(validate(&[("a", "x"), ("a", "y")])).contains("repeats the id"));
+    assert!(invalid_input(validate(&[("skip", "x")])).contains("reuses the id of fixed choice"));
+
+    let mut no_fixed = forms_spec();
+    no_fixed.fixed_choices.clear();
+    let metadata = scorer_metadata(no_fixed);
+    let one = request_envelope(text(FAKE_CONTEXT), &[("a", "x")]);
+    let message = invalid_input(validate_choice_request(&metadata, &one, EntryPoint::Batch));
+    assert!(message.contains("needs at least 2"), "{message}");
+}
+
+#[test]
+fn reject_fields_are_checked_before_any_model_runs() {
+    let mut spec = forms_spec();
+    spec.context.overflow = ByteOverflow::Reject;
+    spec.context.max_len = 4;
+    spec.choice.overflow = ByteOverflow::Reject;
+    spec.choice.max_len = 3;
+    spec.fixed_choices = choices(&[("skip", "no")]);
+    let metadata = scorer_metadata(spec);
+
+    let long_context = request_envelope(text("12345"), &[("a", "ok")]);
+    let message = invalid_input(validate_choice_request(
+        &metadata,
+        &long_context,
+        EntryPoint::Batch,
+    ));
+    assert!(message.contains("the context is 5 bytes"), "{message}");
+
+    let long_choice = request_envelope(text("1234"), &[("a", "four")]);
+    let message = invalid_input(validate_choice_request(
+        &metadata,
+        &long_choice,
+        EntryPoint::Batch,
+    ));
+    assert!(message.contains("candidate 0 is 4 bytes"), "{message}");
+}
+
+#[test]
+fn invalid_specs_are_refused_before_the_request_is_read() {
+    let mut spec = forms_spec();
+    spec.context.offset = 0;
+    let metadata = scorer_metadata(spec);
+    let input = request_envelope(text(FAKE_CONTEXT), &[("a", "x")]);
+    let message = invalid_input(validate_choice_request(
+        &metadata,
+        &input,
+        EntryPoint::Batch,
+    ));
+    assert!(message.contains("invalid choice scorer spec"), "{message}");
+}
+
+#[test]
+fn history_with_choice_kinds_is_refused() {
+    let request = request_envelope(text(FAKE_CONTEXT), &[("a", "x")]);
+    let history = [
+        text("earlier"),
+        Envelope::new(EnvelopeKind::MultiPart(vec![request])),
+    ];
+    assert_eq!(
+        refused_capability(ensure_no_choice_kinds("chat", &history)),
+        "choice requests"
+    );
+    ensure_no_choice_kinds("chat", &[text("earlier"), text("later")]).unwrap();
+}
+
+#[test]
+fn refusals_never_quote_the_caller() {
+    let scorer = scorer_metadata(forms_spec());
+    let mut context = text(&format!("context {CANARY}"));
+    context.set_metadata("note".into(), CANARY.into());
+    let request = Envelope::choice_request(
+        context.clone(),
+        vec![Choice::new(CANARY, format!("text {CANARY}"))],
+    );
+    let duplicate = Envelope::choice_request(
+        context.clone(),
+        vec![Choice::new(CANARY, CANARY), Choice::new(CANARY, CANARY)],
+    );
+    let nested = Envelope::choice_request(request.clone(), vec![Choice::new(CANARY, CANARY)]);
+    let results = [
+        validate_choice_request(&scorer, &duplicate, EntryPoint::Batch),
+        validate_choice_request(&scorer, &nested, EntryPoint::Batch),
+        validate_choice_request(&scorer, &request, EntryPoint::Streaming),
+        validate_choice_request(&scorer, &context, EntryPoint::Batch),
+        validate_choice_request(
+            &ModelMetadata::onnx("text", "1.0", "model.onnx"),
+            &request,
+            EntryPoint::Batch,
+        ),
+        ensure_no_choice_kinds("chat", [&request]),
+    ];
+    for result in results {
+        let error = result.unwrap_err();
+        let rendered = format!("{error} {error:?}");
+        assert!(!rendered.contains(CANARY), "{rendered}");
+    }
+}
+
+#[test]
+fn renaming_ids_leaves_the_scores_unchanged() {
+    // Ids name candidates in the result only: the model reads the context and
+    // each choice's text. So two requests that differ only in their ids
+    // encode identically and score identically.
+    let original = ChoiceRequest::new(text(FAKE_CONTEXT), fake_choices());
+    let renamed = ChoiceRequest::new(
+        text(FAKE_CONTEXT),
+        fake_choices()
+            .into_iter()
+            .enumerate()
+            .map(|(index, choice)| Choice::new(format!("renamed-{index}"), choice.text))
+            .collect(),
+    );
+    let spec = forms_spec();
+    let context = |request: &ChoiceRequest| match &request.context().kind {
+        EnvelopeKind::Text(text) => text.clone(),
+        other => panic!("text context expected, got {other:?}"),
+    };
+    let encode = |request: &ChoiceRequest| {
+        let e =
+            effective_candidates(request.choices(), &spec.fixed_choices, spec.max_choices).unwrap();
+        encode_request(&spec, &context(request), &e, None).unwrap()
+    };
+    let (a, b) = (encode(&original), encode(&renamed));
+    assert_eq!(
+        (
+            &a.context_ids,
+            &a.choice_ids,
+            &a.choice_token_mask,
+            &a.choice_mask
+        ),
+        (
+            &b.context_ids,
+            &b.choice_ids,
+            &b.choice_token_mask,
+            &b.choice_mask
+        )
+    );
+
+    let Some(session) = fake("dynamic.onnx") else {
+        return;
+    };
+    let scorer = OnnxChoiceScorer::bind(&session, &spec).unwrap();
+    let score = |request: &ChoiceRequest| {
+        scorer
+            .score(&session, &context(request), request.choices())
+            .unwrap()
+    };
+    let (first, second) = (score(&original), score(&renamed));
+    assert_eq!(first.entries.len(), second.entries.len());
+    for (x, y) in first.entries.iter().zip(&second.entries) {
+        assert_eq!((x.logit, x.score, x.fixed), (y.logit, y.score, y.fixed));
+    }
+    let renamed_ids: Vec<&str> = second.entries.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(
+        renamed_ids,
+        [
+            "renamed-0",
+            "renamed-1",
+            "renamed-2",
+            "check",
+            "click",
+            "skip"
+        ]
+    );
 }

@@ -69,9 +69,17 @@ pub fn apply_preprocessing_step(
             vocab_file,
             tokenizer_type,
             max_length,
+            add_special_tokens,
         } => {
             let vocab_path = resolve_file_path(base_path, vocab_file);
-            text::tokenize_step(data, &vocab_path, tokenizer_type, *max_length, tokenizers)
+            text::tokenize_step(
+                data,
+                &vocab_path,
+                tokenizer_type,
+                *max_length,
+                *add_special_tokens,
+                tokenizers,
+            )
         }
 
         PreprocessingStep::PhonemeRaw { .. } => {

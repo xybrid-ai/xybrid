@@ -7,11 +7,12 @@
 //! - `temperature_sample_step`: Sample a class from filtered logits
 //! - `threshold_step`: Apply threshold to probabilities
 //! - `meanpool_step`: Mean pooling over sequence dimension
+//! - `l2_normalize_step`: Scale vectors to unit length
 //! - `denormalize_step`: Denormalize tensor values (inverse of Normalize preprocessing)
 
 use super::super::types::{ExecutorResult, RawOutputs};
 use crate::runtime_adapter::AdapterError;
-use ndarray::{ArrayD, IxDyn};
+use ndarray::{ArrayD, Axis, IxDyn};
 use rand::Rng;
 use std::collections::HashMap;
 
@@ -291,6 +292,42 @@ pub fn meanpool_step(data: RawOutputs, dim: usize) -> ExecutorResult<RawOutputs>
     result_map.insert("sentence_embedding".to_string(), pooled);
 
     Ok(RawOutputs::TensorMap(result_map))
+}
+
+/// Scale every vector along the last axis to unit L2 norm.
+///
+/// Embeddings are compared by cosine similarity; unit vectors turn that into
+/// a dot product, as sentence-transformers' `normalize_embeddings=True` does.
+/// An all-zero vector has no direction and is left as is.
+///
+/// # Arguments
+/// - `data`: Input data (TensorMap; e.g. `[batch, hidden_size]` after `MeanPool`)
+///
+/// # Errors
+/// Returns an error if the input is not a TensorMap.
+pub fn l2_normalize_step(data: RawOutputs) -> ExecutorResult<RawOutputs> {
+    let mut tensor_map = match data {
+        RawOutputs::TensorMap(map) => map,
+        _ => {
+            return Err(AdapterError::InvalidInput(
+                "L2Normalize requires tensor map".to_string(),
+            ))
+        }
+    };
+
+    for tensor in tensor_map.values_mut() {
+        let Some(last_axis) = tensor.ndim().checked_sub(1) else {
+            continue; // A scalar has no vector to normalize.
+        };
+        for mut vector in tensor.lanes_mut(Axis(last_axis)) {
+            let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+            if norm > 0.0 {
+                vector.mapv_inplace(|value| value / norm);
+            }
+        }
+    }
+
+    Ok(RawOutputs::TensorMap(tensor_map))
 }
 
 /// Denormalize tensor values (inverse of Normalize preprocessing).
@@ -1025,5 +1062,62 @@ mod tests {
 
         let result = denormalize_step(RawOutputs::TensorMap(map), &mean, &std_vals);
         assert!(result.is_err(), "expected error on shape mismatch");
+    }
+
+    // ============================================================
+    // L2Normalize
+    // ============================================================
+
+    fn embedding_data(shape: &[usize], values: Vec<f32>) -> RawOutputs {
+        let tensor = ArrayD::from_shape_vec(IxDyn(shape), values).expect("valid shape");
+        RawOutputs::TensorMap(HashMap::from([("sentence_embedding".to_string(), tensor)]))
+    }
+
+    fn only_tensor(result: RawOutputs) -> ArrayD<f32> {
+        match result {
+            RawOutputs::TensorMap(map) => map.into_values().next().expect("one tensor"),
+            other => panic!("expected TensorMap, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn l2_normalize_scales_each_vector_to_unit_length() {
+        let data = embedding_data(&[2, 2], vec![3.0, 4.0, 0.0, 2.0]);
+
+        let tensor = only_tensor(l2_normalize_step(data).unwrap());
+
+        assert_eq!(tensor.shape(), &[2, 2]);
+        let values: Vec<f32> = tensor.iter().copied().collect();
+        for (actual, expected) in values.iter().zip([0.6, 0.8, 0.0, 1.0]) {
+            assert!((actual - expected).abs() < 1e-6, "{values:?}");
+        }
+    }
+
+    #[test]
+    fn l2_normalize_leaves_a_zero_vector_alone() {
+        let data = embedding_data(&[1, 3], vec![0.0; 3]);
+
+        let tensor = only_tensor(l2_normalize_step(data).unwrap());
+
+        assert!(tensor.iter().all(|&value| value == 0.0));
+    }
+
+    #[test]
+    fn l2_normalize_after_meanpool_gives_a_unit_embedding() {
+        // [batch=1, seq_len=2, hidden=2]: the mean of (1, 2) and (3, 6) is (2, 4).
+        let pooled =
+            meanpool_step(embedding_data(&[1, 2, 2], vec![1.0, 2.0, 3.0, 6.0]), 1).unwrap();
+
+        let tensor = only_tensor(l2_normalize_step(pooled).unwrap());
+
+        let norm = tensor.iter().map(|value| value * value).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-6, "norm {norm}");
+        let ratio = tensor[IxDyn(&[0, 1])] / tensor[IxDyn(&[0, 0])];
+        assert!((ratio - 2.0).abs() < 1e-6, "direction changed: {tensor:?}");
+    }
+
+    #[test]
+    fn l2_normalize_requires_a_tensor_map() {
+        assert_invalid(l2_normalize_step(RawOutputs::ClassId(1)));
     }
 }

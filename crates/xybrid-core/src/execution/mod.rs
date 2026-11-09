@@ -98,8 +98,14 @@ pub(crate) mod path;
 // Loaded tokenizer.json cache, one per executor (internal)
 pub(crate) mod tokenizer_cache;
 
+// Last executor-built ONNX session, one per executor (internal)
+pub(crate) mod session_cache;
+
 // TTS text chunking (internal)
 pub(crate) mod text_chunking;
+
+// TTS per-phoneme timing arithmetic (internal)
+pub(crate) mod tts_timing;
 
 // LLM telemetry span stampers (internal, LLM features only)
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -134,3 +140,6 @@ pub mod listener;
 pub(crate) mod strategies;
 #[allow(unused_imports)]
 pub(crate) use strategies::{ExecutionContext, ExecutionStrategy};
+
+pub mod tts_stream;
+pub use tts_stream::{TtsAudioChunk, TtsStatus, TtsStreamResult};

@@ -12,12 +12,14 @@ Get Xybrid running in your app with a few lines of code. Choose your SDK below.
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.10.1
+  xybrid_flutter: ^0.17.0
 ```
 
 ```bash
 flutter pub get
 ```
+
+The plugin needs iOS 16.0, macOS 14.0 and Android 9 (API 28) or later; the [Flutter guide](/docs/sdks/flutter#requirements) shows how to raise your app's minimums.
 
 **Run inference**
 
@@ -54,7 +56,7 @@ Or add to `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.10.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.17.0")
 ]
 ```
 
@@ -85,9 +87,13 @@ let result = try await model.runAsync(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.10.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.17.0")
 }
 ```
+
+Releases 0.16.0 and later require Android 10 (API 29): set `minSdk = 29` or higher in your app's `defaultConfig`, or the build fails at the manifest merge.
+
+Downloading models from the registry needs network access, and the SDK declares no permissions: add `<uses-permission android:name="android.permission.INTERNET" />` to your app's `AndroidManifest.xml`.
 
 **Run inference**
 
@@ -114,10 +120,12 @@ val result = model.runAsync(envelope)
 **Install** in a React Native 0.76+ app with the New Architecture, or an Expo SDK 52+ development build:
 
 ```bash
-npm install @xybrid/react-native@0.10.1
+npm install @xybrid/react-native@0.17.0
 ```
 
 For bare React Native, run `cd ios && pod install`. For Expo, run `npx expo prebuild`; Expo Go cannot load the native module.
+
+On Android, releases 0.16.0 and later require `minSdkVersion` 29 (Android 10). The React Native and Expo templates default to 24; the [React Native guide](/docs/sdks/react-native#installation) shows how to raise it.
 
 **Run inference**
 
@@ -145,7 +153,7 @@ In Unity, go to **Window > Package Manager > + > Add package from git URL** and 
 https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.xybrid.sdk`. Native libraries download automatically on first import (SHA-256 verified); pin a version by appending `#v0.10.1` to the git URL.
+Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.xybrid.sdk`. Native libraries download automatically on first import (SHA-256 verified); pin a version by appending `#v0.17.0` to the git URL.
 
 **Run inference**
 
@@ -174,9 +182,10 @@ Debug.Log($"Latency: {result.LatencyMs}ms");
 `@xybrid/web` is a private preview and not yet on npm. It lives in [`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web):
 
 ```bash
-git clone https://github.com/xybrid-ai/xybrid
+git clone --recurse-submodules https://github.com/xybrid-ai/xybrid
 cd xybrid/bindings/web
-pnpm install
+pnpm install --frozen-lockfile
+pnpm build        # Bazel builds the Rust/WASM runtime
 pnpm dev:example   # downloads pinned demo models, then serves the demo
 ```
 
@@ -187,7 +196,7 @@ import { XybridLlm } from "@xybrid/web";
 
 // Stream a reply from a language model running in the browser
 const llm = await XybridLlm.load("/llm/model_metadata.json", {
-  wasmPath: "/llm-runtime",
+  wasmPath: "/xybrid/runtime",
   accelerator: "auto", // WebGPU when available, wasm otherwise
 });
 
@@ -202,14 +211,15 @@ verifies the download with SHA-256 when Hugging Face provides a Git-LFS OID
 compatible metadata in memory when the repo doesn't ship one:
 
 ```ts
-const llm = await XybridLlm.fromHuggingFace("litert-community/SmolLM2-135M-Instruct", {
-  wasmPath: "/llm-runtime", // defaults to /xybrid/llm-runtime when omitted
+const llm = await XybridLlm.fromHuggingFace("QuantFactory/SmolLM2-135M-Instruct-GGUF", {
+  file: "SmolLM2-135M-Instruct.Q4_0.gguf",
+  wasmPath: "/xybrid/runtime", // defaults to /xybrid/runtime when omitted
 });
 ```
 
 **Expected output:** Text streamed into the page token by token, generated entirely in the browser.
 
-See the [Web SDK guide](/docs/sdks/web) for the tensor surface, registry loading, and the full API.
+See the [Web SDK guide](/docs/sdks/web) for GGUF loading, cancellation, measurements, and the current API.
   </Tab>
   <Tab value="Rust">
 **Install**
@@ -217,7 +227,7 @@ See the [Web SDK guide](/docs/sdks/web) for the tensor surface, registry loading
 ```toml
 # Cargo.toml
 [dependencies]
-xybrid = "0.10.1"
+xybrid = "0.17.0"
 ```
 
 **Run inference**

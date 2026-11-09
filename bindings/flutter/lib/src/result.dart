@@ -8,6 +8,7 @@ import 'dart:typed_data';
 
 import 'rust/api/result.dart';
 import 'tools.dart';
+import 'observability.dart';
 import 'utils/audio.dart';
 
 /// Per-stage latency entry for pipeline runs.
@@ -16,11 +17,15 @@ import 'utils/audio.dart';
 /// the pipeline definition.
 class XybridStageLatency {
   XybridStageLatency.fromFfi(FfiStageLatency inner)
-    : stageId = inner.stageId,
-      latencyMs = inner.latencyMs;
+      : stageId = inner.stageId,
+        latencyMs = inner.latencyMs,
+        observation = inner.observation;
 
   final String stageId;
   final int latencyMs;
+
+  /// Inference reference of this pipeline stage, when tracing is available.
+  final ObservationRef? observation;
 }
 
 /// Typed inference metrics surfaced on every [XybridResult].
@@ -35,16 +40,16 @@ class XybridStageLatency {
 /// `pipeline.run()`.
 class XybridInferenceMetrics {
   XybridInferenceMetrics.fromFfi(FfiInferenceMetrics inner)
-    : totalMs = inner.totalMs,
-      ttftMs = inner.ttftMs,
-      tokensPerSecond = inner.tokensPerSecond,
-      prefillTps = inner.prefillTps,
-      decodeTps = inner.decodeTps,
-      tokensOut = inner.tokensOut,
-      imagePreprocessMs = inner.imagePreprocessMs,
-      stageLatenciesMs = inner.stageLatenciesMs
-          .map(XybridStageLatency.fromFfi)
-          .toList(growable: false);
+      : totalMs = inner.totalMs,
+        ttftMs = inner.ttftMs,
+        tokensPerSecond = inner.tokensPerSecond,
+        prefillTps = inner.prefillTps,
+        decodeTps = inner.decodeTps,
+        tokensOut = inner.tokensOut,
+        imagePreprocessMs = inner.imagePreprocessMs,
+        stageLatenciesMs = inner.stageLatenciesMs
+            .map(XybridStageLatency.fromFfi)
+            .toList(growable: false);
 
   /// Wall-clock latency in ms (mirrors [XybridResult.latencyMs]).
   final int totalMs;
@@ -87,6 +92,9 @@ class XybridResult {
 
   /// Whether the inference completed successfully.
   bool get success => _inner.success;
+
+  /// Trace reference for feedback/evaluations; null when untraced or suppressed.
+  ObservationRef? get observation => _inner.observation;
 
   /// Whether this answer came from the device or the cloud gateway.
   ///
@@ -149,9 +157,8 @@ class XybridResult {
   ///
   /// The raw tool-call block stays in [text] untouched, and malformed model
   /// output yields an empty list rather than an error.
-  late final List<ToolCall> toolCalls = _inner.toolCalls
-      .map(ToolCall.fromFfi)
-      .toList(growable: false);
+  late final List<ToolCall> toolCalls =
+      _inner.toolCalls.map(ToolCall.fromFfi).toList(growable: false);
 
   /// Whether the model asked to call at least one tool.
   bool get hasToolCalls => toolCalls.isNotEmpty;

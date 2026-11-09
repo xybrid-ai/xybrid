@@ -8,6 +8,7 @@ use super::super::tokenizer_cache::TokenizerCache;
 use super::super::types::{ExecutorResult, PreprocessedData};
 use crate::execution::template::{PhonemizerBackend, TokenizerType};
 use crate::runtime_adapter::AdapterError;
+use std::collections::HashMap;
 
 /// Tokenize text input for NLP models.
 ///
@@ -16,12 +17,21 @@ use crate::runtime_adapter::AdapterError;
 /// - `tokenizer_path`: Path to tokenizer.json file
 /// - `tokenizer_type`: Type of tokenizer (WordPiece, BPE, SentencePiece)
 /// - `max_length`: Optional maximum sequence length
+/// - `add_special_tokens`: Add the post-processor's special tokens (e.g.
+///   `<bos>`/`<eos>`); truncation then keeps the closing ones
 /// - `tokenizers`: The executor's cache; the file is parsed only on a miss
+///
+/// # Errors
+///
+/// Returns `InvalidInput` for non-text input, a SentencePiece tokenizer (not
+/// supported yet), a tokenizer that fails to load or encode, or a `max_length`
+/// that leaves no room for text before the closing special tokens (or is `0`).
 pub fn tokenize_step(
     data: PreprocessedData,
     tokenizer_path: &str,
     tokenizer_type: &TokenizerType,
     max_length: Option<usize>,
+    add_special_tokens: bool,
     tokenizers: &mut TokenizerCache,
 ) -> ExecutorResult<PreprocessedData> {
     let text = match data {
@@ -50,7 +60,7 @@ pub fn tokenize_step(
     };
 
     let encoding = tokenizer
-        .encode(text.clone(), false)
+        .encode(text.clone(), add_special_tokens)
         .map_err(|e| AdapterError::InvalidInput(format!("Tokenization failed: {}", e)))?;
 
     let mut ids: Vec<usize> = encoding.get_ids().iter().map(|&id| id as usize).collect();
@@ -67,9 +77,34 @@ pub fn tokenize_step(
 
     if let Some(max_len) = max_length {
         if ids.len() > max_len {
-            ids.truncate(max_len);
-            attention_mask.truncate(max_len);
-            token_type_ids.truncate(max_len);
+            // Cut the text, not the closing special tokens (`<eos>`, `[SEP]`):
+            // a sequence that lost them is not one the model was trained on.
+            // Padding from the tokenizer's own config comes after them, masked
+            // out but also marked special, so they end where the mask ends.
+            let end = attention_mask
+                .iter()
+                .rposition(|&mask| mask == 1)
+                .map_or(0, |last| last + 1);
+            let closing = if add_special_tokens && end > max_len {
+                trailing_special_tokens(&encoding.get_special_tokens_mask()[..end])
+            } else {
+                0
+            };
+            if closing >= max_len {
+                return Err(AdapterError::InvalidInput(if max_len == 0 {
+                    "Tokenize max_length must be at least 1".to_string()
+                } else {
+                    format!(
+                        "Tokenize max_length {max_len} leaves no room for text before \
+                         the {closing} special token(s) that close the sequence"
+                    )
+                }));
+            }
+            for values in [&mut ids, &mut attention_mask, &mut token_type_ids] {
+                let tail = values[end - closing..end].to_vec();
+                values.truncate(max_len - closing);
+                values.extend(tail);
+            }
         }
     }
 
@@ -80,6 +115,16 @@ pub fn tokenize_step(
         vocab_file: tokenizer_path.to_string(),
         original_text: text,
     })
+}
+
+/// Number of special tokens closing an encoding: the run of `1`s at the end of
+/// its special-tokens mask.
+fn trailing_special_tokens(special_tokens_mask: &[u32]) -> usize {
+    special_tokens_mask
+        .iter()
+        .rev()
+        .take_while(|&&special| special == 1)
+        .count()
 }
 
 /// Silence token ID in the Kokoro vocabulary.
@@ -146,42 +191,57 @@ pub fn phonemize_step(
     let phonemes = backend_impl.phonemize(&processed_text, &tokens_map)?;
 
     // Convert phonemes to token IDs
-    let mut ids: Vec<i64> = Vec::new();
-
-    if add_padding {
-        ids.push(0); // Start padding token
-    }
-
-    // Prepend silence tokens for plosive onset smoothing
-    if silence_tokens > 0 {
-        ids.extend(std::iter::repeat_n(
-            KOKORO_SILENCE_TOKEN_ID,
-            silence_tokens as usize,
-        ));
-    }
-
-    for c in phonemes.chars() {
-        if let Some(&id) = tokens_map.get(&c) {
-            ids.push(id);
-        } else if c == ' ' {
-            // Space character - check if it has a mapping
-            if let Some(&id) = tokens_map.get(&' ') {
-                ids.push(id);
-            }
-        }
-        // Skip unknown characters silently
-    }
-
-    if add_padding {
-        ids.push(0); // End padding token
-    }
+    let (ids, symbols) = phonemes_to_ids(&phonemes, &tokens_map, add_padding, silence_tokens);
 
     // Return as PhonemeIds for use by TTS models
     Ok(PreprocessedData::PhonemeIds {
         ids,
+        symbols,
         phonemes,
         original_text: text,
     })
+}
+
+/// Maps a phoneme string to token ids, recording the phoneme behind each id.
+///
+/// Emits, in order: a start pad (`0`) when `add_padding`, `silence_tokens`
+/// silence tokens (plosive onset smoothing), one id per phoneme character the
+/// tokens map knows (unknown characters are skipped), and an end pad. The two
+/// vectors are the same length: each phoneme id gets its character, and pads
+/// and silence tokens get `None`, since no phoneme produced them.
+fn phonemes_to_ids(
+    phonemes: &str,
+    tokens_map: &HashMap<char, i64>,
+    add_padding: bool,
+    silence_tokens: u8,
+) -> (Vec<i64>, Vec<Option<char>>) {
+    let mut ids: Vec<i64> = Vec::new();
+    let mut symbols: Vec<Option<char>> = Vec::new();
+
+    if add_padding {
+        ids.push(0); // Start padding token
+        symbols.push(None);
+    }
+
+    // Prepend silence tokens for plosive onset smoothing
+    let silence = usize::from(silence_tokens);
+    ids.extend(std::iter::repeat_n(KOKORO_SILENCE_TOKEN_ID, silence));
+    symbols.extend(std::iter::repeat_n(None, silence));
+
+    for c in phonemes.chars() {
+        // Skip unknown characters silently (a mapped space is a token too)
+        if let Some(&id) = tokens_map.get(&c) {
+            ids.push(id);
+            symbols.push(Some(c));
+        }
+    }
+
+    if add_padding {
+        ids.push(0); // End padding token
+        symbols.push(None);
+    }
+
+    (ids, symbols)
 }
 
 /// Normalize text for TTS processing.
@@ -544,7 +604,6 @@ fn number_to_words(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     use crate::execution::preprocessing::backends::MisakiBackend;
     use crate::execution::preprocessing::backends::PhonemizerBackend as PhonemizerBackendTrait;
@@ -656,7 +715,7 @@ mod tests {
             return crate_path.to_string();
         }
         // Try absolute path as last resort
-        env!("CARGO_MANIFEST_DIR").to_string()
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests")
             + "/../../integration-tests/fixtures/models/kokoro-82m"
     }
 
@@ -1160,7 +1219,7 @@ mod tests {
         if std::path::Path::new(crate_path).join("misaki").exists() {
             return crate_path.to_string();
         }
-        env!("CARGO_MANIFEST_DIR").to_string()
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests")
             + "/../../integration-tests/fixtures/models/kitten-tts-nano-0.2"
     }
 
@@ -1247,6 +1306,245 @@ mod tests {
                 "Token mapping validation failed — phoneme characters not in tokens.txt:\n{}",
                 details.join("\n")
             );
+        }
+    }
+
+    // ============================================================================
+    // Tokenize Tests
+    // ============================================================================
+
+    const BOS: usize = 1;
+    const EOS: usize = 2;
+    const PAD: usize = 7;
+
+    /// Writes a word-level `tokenizer.json` whose post-processor wraps a
+    /// sequence as `<bos> … <eos>`, the way Gemma's does, and that pads every
+    /// encoding to `pad_to` tokens when set.
+    fn write_bos_eos_tokenizer(dir: &std::path::Path, pad_to: Option<usize>) -> String {
+        use tokenizers::models::wordlevel::WordLevel;
+        use tokenizers::pre_tokenizers::whitespace::Whitespace;
+        use tokenizers::processors::template::TemplateProcessing;
+        use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer};
+
+        let words = [
+            "<unk>", "<bos>", "<eos>", "one", "two", "three", "four", "<pad>",
+        ];
+        let vocab = words
+            .iter()
+            .enumerate()
+            .map(|(id, word)| (word.to_string(), id as u32))
+            .collect();
+        let model = WordLevel::builder()
+            .vocab(vocab)
+            .unk_token("<unk>".to_string())
+            .build()
+            .expect("word-level model builds");
+        let post_processor = TemplateProcessing::builder()
+            .try_single("<bos> $A <eos>")
+            .expect("template parses")
+            .special_tokens(vec![("<bos>", BOS as u32), ("<eos>", EOS as u32)])
+            .build()
+            .expect("template processing builds");
+
+        let mut tokenizer = Tokenizer::new(model);
+        tokenizer.with_pre_tokenizer(Some(Whitespace {}));
+        tokenizer.with_post_processor(Some(post_processor));
+        if let Some(length) = pad_to {
+            tokenizer.with_padding(Some(PaddingParams {
+                strategy: PaddingStrategy::Fixed(length),
+                pad_id: PAD as u32,
+                pad_token: "<pad>".to_string(),
+                ..PaddingParams::default()
+            }));
+        }
+        let path = dir.join("tokenizer.json");
+        tokenizer
+            .save(&path, false)
+            .expect("tokenizer.json is written");
+        path.to_string_lossy().into_owned()
+    }
+
+    /// Tokenizes `text` and returns `(ids, attention_mask, token_type_ids)`.
+    fn try_tokenize(
+        text: &str,
+        max_length: Option<usize>,
+        add_special_tokens: bool,
+        pad_to: Option<usize>,
+    ) -> ExecutorResult<(Vec<usize>, Vec<usize>, Vec<usize>)> {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = write_bos_eos_tokenizer(dir.path(), pad_to);
+        let output = tokenize_step(
+            PreprocessedData::Text(text.to_string()),
+            &path,
+            &TokenizerType::BPE,
+            max_length,
+            add_special_tokens,
+            &mut TokenizerCache::default(),
+        )?;
+        match output {
+            PreprocessedData::TokenIds {
+                ids,
+                attention_mask,
+                token_type_ids,
+                ..
+            } => Ok((ids, attention_mask, token_type_ids)),
+            other => panic!("expected token ids, got {other:?}"),
+        }
+    }
+
+    /// [`try_tokenize`] with a tokenizer that does not pad.
+    fn tokenize(
+        text: &str,
+        max_length: Option<usize>,
+        add_special_tokens: bool,
+    ) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
+        try_tokenize(text, max_length, add_special_tokens, None).expect("tokenizes")
+    }
+
+    #[test]
+    fn tokenize_leaves_out_special_tokens_by_default() {
+        let (ids, _, _) = tokenize("one two three", None, false);
+
+        assert_eq!(ids, vec![3, 4, 5]);
+    }
+
+    #[test]
+    fn tokenize_adds_the_post_processor_special_tokens_when_asked() {
+        let (ids, attention_mask, token_type_ids) = tokenize("one two three", None, true);
+
+        assert_eq!(ids, vec![BOS, 3, 4, 5, EOS]);
+        assert_eq!(attention_mask, vec![1; 5]);
+        assert_eq!(token_type_ids, vec![0; 5]);
+    }
+
+    #[test]
+    fn truncation_keeps_the_closing_special_token() {
+        let (ids, attention_mask, token_type_ids) = tokenize("one two three four", Some(4), true);
+
+        assert_eq!(ids, vec![BOS, 3, 4, EOS]);
+        assert_eq!(attention_mask.len(), 4);
+        assert_eq!(token_type_ids.len(), 4);
+    }
+
+    #[test]
+    fn truncation_without_special_tokens_cuts_the_end() {
+        let (ids, attention_mask, token_type_ids) = tokenize("one two three four", Some(2), false);
+
+        assert_eq!(ids, vec![3, 4]);
+        assert_eq!(attention_mask.len(), 2);
+        assert_eq!(token_type_ids.len(), 2);
+    }
+
+    #[test]
+    fn truncation_keeps_the_text_when_the_tokenizer_pads() {
+        // Padded to 8, the encoding ends `<eos> <pad> <pad>`, and the padding
+        // is marked special too: only `<eos>` closes the text.
+        let (ids, attention_mask, token_type_ids) =
+            try_tokenize("one two three four", Some(4), true, Some(8)).expect("tokenizes");
+
+        assert_eq!(ids, vec![BOS, 3, 4, EOS]);
+        assert_eq!(attention_mask, vec![1; 4]);
+        assert_eq!(token_type_ids, vec![0; 4]);
+    }
+
+    #[test]
+    fn truncation_cuts_only_padding_when_the_text_fits() {
+        let (ids, attention_mask, _) =
+            try_tokenize("one two", Some(6), true, Some(8)).expect("tokenizes");
+
+        assert_eq!(ids, vec![BOS, 3, 4, EOS, PAD, PAD]);
+        assert_eq!(attention_mask, vec![1, 1, 1, 1, 0, 0]);
+    }
+
+    #[test]
+    fn max_length_without_room_for_text_is_rejected() {
+        // Cut to one token, `<bos> one two <eos>` would be `<eos>` alone.
+        assert!(try_tokenize("one two", Some(1), true, None).is_err());
+        assert!(try_tokenize("one two", Some(0), false, None).is_err());
+    }
+
+    #[test]
+    fn trailing_special_tokens_counts_only_the_closing_run() {
+        assert_eq!(trailing_special_tokens(&[1, 0, 0, 1]), 1);
+        assert_eq!(trailing_special_tokens(&[1, 0, 1, 1]), 2);
+        assert_eq!(trailing_special_tokens(&[0, 0]), 0);
+        assert_eq!(trailing_special_tokens(&[]), 0);
+    }
+
+    // ============================================================================
+    // Phoneme symbols (one per token id)
+    // ============================================================================
+
+    /// A tiny Kokoro-like vocabulary: `h`, `ə`, space, and the quote mark
+    /// Kokoro maps to id 11.
+    fn tiny_vocab() -> HashMap<char, i64> {
+        HashMap::from([('h', 50), ('ə', 83), (' ', 16), ('"', 11)])
+    }
+
+    #[test]
+    fn symbols_align_one_to_one_with_ids_including_pads_and_silence() {
+        let (ids, symbols) = phonemes_to_ids("hə \"h", &tiny_vocab(), true, 2);
+
+        assert_eq!(ids, vec![0, 30, 30, 50, 83, 16, 11, 50, 0]);
+        assert_eq!(
+            symbols,
+            vec![
+                None,
+                None,
+                None,
+                Some('h'),
+                Some('ə'),
+                Some(' '),
+                Some('"'),
+                Some('h'),
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn unknown_phoneme_chars_are_skipped_in_lockstep() {
+        // `x` and `ˈ` are not in the vocabulary: neither an id nor a symbol.
+        let (ids, symbols) = phonemes_to_ids("xhˈəx", &tiny_vocab(), false, 0);
+
+        assert_eq!(ids, vec![50, 83]);
+        assert_eq!(symbols, vec![Some('h'), Some('ə')]);
+    }
+
+    #[test]
+    fn phonemize_step_symbols_name_the_phoneme_behind_each_id() {
+        if !has_kokoro_fixtures() {
+            eprintln!("Skipping: Kokoro fixtures not found");
+            return;
+        }
+        let base = kokoro_fixture_path();
+        let tokens_path = std::path::Path::new(&base)
+            .join("tokens.txt")
+            .to_string_lossy()
+            .to_string();
+        let vocab = kokoro_vocab();
+
+        let result = phonemize_step(
+            PreprocessedData::Text("Hello there, world.".to_string()),
+            &tokens_path,
+            &PhonemizerBackend::MisakiDictionary,
+            None,
+            None,
+            true, // add_padding
+            true, // normalize_text
+            2,    // silence_tokens
+        )
+        .unwrap();
+
+        let ids = result.as_phoneme_ids().expect("phoneme ids").clone();
+        let symbols = result.as_phoneme_symbols().expect("phoneme symbols");
+        assert_eq!(symbols.len(), ids.len());
+        assert_eq!(&symbols[..3], &[None, None, None]);
+        assert_eq!(symbols.last(), Some(&None));
+        for (id, symbol) in ids.iter().zip(symbols) {
+            if let Some(c) = symbol {
+                assert_eq!(vocab.get(c), Some(id), "symbol {c:?}");
+            }
         }
     }
 }

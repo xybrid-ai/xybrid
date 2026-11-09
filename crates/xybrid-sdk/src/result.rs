@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use xybrid_core::gateway::ToolCall;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_core::ir::{ChoiceScores, Envelope, EnvelopeKind, PhonemeTiming};
 
 /// Per-stage latency entry for pipeline runs.
 ///
@@ -95,6 +95,9 @@ pub enum OutputType {
     Embedding,
     /// Unknown or custom output type
     Unknown,
+    /// Scores from a choice scorer, one per candidate (see
+    /// [`InferenceResult::choice_scores`]).
+    ChoiceScores,
 }
 
 impl std::fmt::Display for OutputType {
@@ -104,6 +107,7 @@ impl std::fmt::Display for OutputType {
             OutputType::Audio => write!(f, "audio"),
             OutputType::Embedding => write!(f, "embedding"),
             OutputType::Unknown => write!(f, "unknown"),
+            OutputType::ChoiceScores => write!(f, "choice_scores"),
         }
     }
 }
@@ -127,6 +131,7 @@ impl std::fmt::Display for OutputType {
 ///     OutputType::Text => println!("Text: {}", result.unwrap_text()),
 ///     OutputType::Audio => println!("Audio: {} bytes", result.unwrap_audio().len()),
 ///     OutputType::Embedding => println!("Embedding: {} dims", result.unwrap_embedding().len()),
+///     OutputType::ChoiceScores => println!("{} candidates", result.choice_scores().unwrap().entries.len()),
 ///     OutputType::Unknown => println!("Unknown output"),
 /// }
 ///
@@ -151,6 +156,8 @@ pub struct InferenceResult {
     provenance: ExecutionProvenance,
     /// Typed metrics parsed from `envelope.metadata`
     metrics: InferenceMetrics,
+    /// Trace/span ids of the run's logical inference span, when traced
+    observation: Option<xybrid_observability::ObservationRef>,
 }
 
 /// Where a result was actually produced.
@@ -223,12 +230,29 @@ impl InferenceResult {
             model_id: model_id.into(),
             provenance,
             metrics,
+            observation: None,
         }
     }
 
     /// Where this result was actually produced — local or cloud.
     pub fn provenance(&self) -> ExecutionProvenance {
         self.provenance
+    }
+
+    /// Trace and span ids of this run's logical inference span, for linking
+    /// feedback and evaluation results. `None` when the run was not traced.
+    pub fn observation_ref(&self) -> Option<&xybrid_observability::ObservationRef> {
+        self.observation.as_ref()
+    }
+
+    pub(crate) fn with_observation(
+        mut self,
+        observation: Option<xybrid_observability::ObservationRef>,
+    ) -> Self {
+        if observation.is_some() {
+            self.observation = observation;
+        }
+        self
     }
 
     /// Create from envelope with pre-computed output type.
@@ -251,6 +275,7 @@ impl InferenceResult {
             model_id: model_id.into(),
             provenance: ExecutionProvenance::Local,
             metrics,
+            observation: None,
         }
     }
 
@@ -320,15 +345,32 @@ impl InferenceResult {
     ///
     /// Present when the request offered tools (`GenerationConfig::with_tools`)
     /// and the model emitted at least one well-formed tool-call block
-    /// (LFM2-style `<|tool_call_start|>...`, gemma-4-style
-    /// `<|tool_call>call:...`, or FunctionGemma-style
-    /// `<start_function_call>call:...`). The raw blocks stay in
+    /// (LFM2-style `<|tool_call_start|>...`, LFM3-style
+    /// `<tool_call><function=...>`, gemma-4-style `<|tool_call>call:...`, or
+    /// FunctionGemma-style `<start_function_call>call:...`). The raw blocks stay in
     /// [`text`](Self::text) untouched. Returns an empty vec when the metadata
     /// is absent or unparseable — malformed model output is never an error.
     pub fn tool_calls(&self) -> Vec<ToolCall> {
         self.envelope
             .metadata
             .get(Envelope::TOOL_CALLS_METADATA_KEY)
+            .and_then(|raw| serde_json::from_str(raw).ok())
+            .unwrap_or_default()
+    }
+
+    /// When each phoneme is spoken in the returned audio, for lip sync or
+    /// word highlighting.
+    ///
+    /// Present on a TTS result when the model reports how long each input
+    /// token lasts (an ONNX TTS model with a `duration` output). Times are
+    /// seconds from the first sample of [`audio_bytes`](Self::audio_bytes),
+    /// in order and never overlapping; padding and silence tokens are left
+    /// out. Returns an empty vec when the metadata is absent or unparseable,
+    /// as for models without durations, streamed audio and cloud results.
+    pub fn phoneme_timings(&self) -> Vec<PhonemeTiming> {
+        self.envelope
+            .metadata
+            .get(Envelope::PHONEME_TIMINGS_METADATA_KEY)
             .and_then(|raw| serde_json::from_str(raw).ok())
             .unwrap_or_default()
     }
@@ -351,6 +393,16 @@ impl InferenceResult {
             EnvelopeKind::Embedding(vec) => Some(vec),
             _ => None,
         }
+    }
+
+    /// Get a choice scorer's scores if available, one entry per candidate in
+    /// the order offered (the caller's choices, then the model's fixed ones).
+    ///
+    /// Scores are relative preferences among the offered candidates, not
+    /// calibrated probabilities of being correct. Returns `None` if the output
+    /// is not choice scores.
+    pub fn choice_scores(&self) -> Option<&ChoiceScores> {
+        self.envelope.as_choice_scores()
     }
 
     // ========================================================================
@@ -421,7 +473,10 @@ pub(crate) fn output_type_for_envelope(envelope: &Envelope) -> OutputType {
         EnvelopeKind::Text(_) => OutputType::Text,
         EnvelopeKind::Audio(_) => OutputType::Audio,
         EnvelopeKind::Embedding(_) => OutputType::Embedding,
-        EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => OutputType::Unknown,
+        EnvelopeKind::ChoiceScores(_) => OutputType::ChoiceScores,
+        EnvelopeKind::Image { .. }
+        | EnvelopeKind::MultiPart(_)
+        | EnvelopeKind::ChoiceRequest(_) => OutputType::Unknown,
     }
 }
 
@@ -533,6 +588,72 @@ mod tests {
         let result = InferenceResult::new(envelope, "llm-model", 10);
 
         assert!(result.tool_calls().is_empty());
+    }
+
+    #[test]
+    fn test_phoneme_timings_parses_valid_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            Envelope::PHONEME_TIMINGS_METADATA_KEY.to_string(),
+            r#"[{"phoneme":"h","start":0.0125,"end":0.05},{"phoneme":"\"","start":0.05,"end":0.1}]"#
+                .to_string(),
+        );
+        let envelope = Envelope {
+            kind: EnvelopeKind::Audio(vec![0; 4800]),
+            metadata,
+        };
+        let result = InferenceResult::new(envelope, "kokoro-82m-timed", 50);
+
+        assert_eq!(
+            result.phoneme_timings(),
+            vec![
+                PhonemeTiming {
+                    phoneme: "h".to_string(),
+                    start: 0.0125,
+                    end: 0.05,
+                },
+                PhonemeTiming {
+                    phoneme: "\"".to_string(),
+                    start: 0.05,
+                    end: 0.1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_phoneme_timings_absent_or_malformed_returns_empty_vec() {
+        let absent = InferenceResult::new(
+            Envelope {
+                kind: EnvelopeKind::Audio(vec![1, 2, 3, 4]),
+                metadata: HashMap::new(),
+            },
+            "kokoro-82m",
+            50,
+        );
+        assert!(absent.phoneme_timings().is_empty());
+
+        for raw in [
+            "not-json",
+            r#"{"phoneme":"h","start":0.0,"end":0.1}"#,
+            r#"[{"phoneme":"h","start":"soon","end":0.1}]"#,
+            r#"[{"phoneme":"h","start":0.0}]"#,
+        ] {
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                Envelope::PHONEME_TIMINGS_METADATA_KEY.to_string(),
+                raw.to_string(),
+            );
+            let malformed = InferenceResult::new(
+                Envelope {
+                    kind: EnvelopeKind::Audio(vec![1, 2, 3, 4]),
+                    metadata,
+                },
+                "kokoro-82m-timed",
+                50,
+            );
+            assert!(malformed.phoneme_timings().is_empty(), "{raw}");
+        }
     }
 
     #[test]
@@ -660,5 +781,21 @@ mod tests {
             EnvelopeKind::Text(text) => assert_eq!(text, "test"),
             _ => panic!("Expected Text"),
         }
+    }
+}
+
+/// Terminal streamed-speech result. Audio packets are delivered through the sink.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TtsStreamResult {
+    /// Existing runtime delivery summary.
+    pub summary: xybrid_core::execution::TtsStreamResult,
+    /// Inference reference; absent for disabled or explicitly suppressed tracing.
+    pub observation: Option<crate::observability::ObservationRef>,
+}
+
+impl std::ops::Deref for TtsStreamResult {
+    type Target = xybrid_core::execution::TtsStreamResult;
+    fn deref(&self) -> &Self::Target {
+        &self.summary
     }
 }

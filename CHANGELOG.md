@@ -9,12 +9,567 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Application-owned observability sessions and typed workflow, tool, inference
+  and model-load handles, with explicit parents, first-terminal-wins completion
+  and cancellation on last-owner disposal.
+- Observation controls and returned references across model loads, pipelines,
+  streamed TTS and live ASR, including native bindings and React Native cleanup.
+- Caller-owned device IDs, declarative redaction and opt-in third-party context
+  propagation. Export remains explicitly configured and offline use stays available.
+- Resource samples export peak CPU utilization
+  (`xybrid.genai.resource.cpu.peak_utilization`, 0–1), minimum available memory
+  (`xybrid.genai.resource.memory.min_available_bytes`) and memory pressure
+  (`xybrid.genai.resource.memory.pressure`: `normal`, `warn` or `critical`).
+  The Rust SDK maps them from its resource summary; unmeasured values stay
+  absent. Rust and JS `ResourceSample` gained the matching optional fields.
+
+### Changed
+
+- Portable observability contract v2 preserves numeric/null wire types and
+  unsampled references, bounds retained content and delivery queues, and cancels
+  HTTP work on lifecycle deadlines. Per-signal counters report delivery outcomes.
+- JavaScript exporter support covers aligned OpenTelemetry 3.0/0.300 and
+  3.1/0.301 families. The core entry point stays independent of SDK packages.
+- CLI traces are scoped to each operation; `--trace-export PATH` explicitly
+  writes an artifact. See `docs/sdk/observability-coverage.md` for migration and
+  execution coverage.
+
+### Migration
+
+- Analyze saved traces with `xybrid trace FILE`; the session/latest selectors
+  were removed. `--trace-export PATH` now writes OTLP/JSON instead of Chrome
+  trace JSON.
+- Observability stats now contain per-signal accepted, exported, dropped,
+  failed and pending counters. Update consumers of the previous flat fields.
+- Rust streamed TTS returns `TtsStreamResult` (core summary plus observation),
+  and ASR flush returns a transcription result carrying its session reference.
+  Public streaming, stage and pipeline result records gained observation fields;
+  update exhaustive struct literals and serialized-result consumers.
+- Live ASR `flush()` returns a transcription record instead of a string in every
+  binding: Swift, Kotlin and Python `XybridTranscriptionResult`, Unity
+  `XybridBolt.XybridTranscriptionResult`, React Native `TranscriptionResult`
+  and Flutter `FfiTranscriptionResult`. Read `text` (Unity `Text`) for the
+  transcript; the record also carries the duration, the chunk count and the
+  session's observation reference.
+- Flutter `FfiTtsStreamEvent.complete` carries an `FfiTtsStreamResult`.
+  `runTtsStreaming` reports it through `onComplete` and fails the stream with
+  a `StateError` when the output was limited.
+- Invalid explicit W3C parents are rejected. Validate caller-supplied
+  `traceparent` values before passing observation options.
+- React Native observation references use `{trace_id, span_id}`. Replace reads
+  of `traceId` and `spanId` with the corresponding snake-case fields.
+- Unity `Pipeline.Run` and `Model.Stream` accept optional observation controls.
+  Recompile assemblies using the wrappers to pick up the changed signatures.
+- Python observation context managers classify interruption and cancellation
+  separately from application errors. Release still cancels unfinished work
+  without flushing.
+- Delivery failures from flush/shutdown use `TelemetryDelivery` in native
+  bindings. Inspect delivery stats or retry export; do not rerun inference to
+  recover a missing acknowledgement.
+
+## [0.17.0] - 2026-11-05
+
+### Added
+
+- **Rust:** decision-model data types in `xybrid_core::ir::decision`,
+  re-exported from `xybrid_core::ir` and `xybrid_sdk`. `DecisionRequest` is a
+  state plus choice, yes/no and score questions; `Decisions` holds one answer
+  per question with the distribution it was read from, checked against it on
+  construction and decoding. `OrderedJson` carries JSON content with its key
+  order and number identity. Decoding refuses oversized payloads before
+  allocating them. Data only: nothing runs them yet.
+- **LFM3 tool calling (llama.cpp backend):** tool-bearing requests to LFM3
+  models parse their `<tool_call><function=…><parameter=…>` calls into
+  `tool_calls`. LFM3 writes every argument as text, and each one is typed
+  against the tool's JSON Schema the way llama.cpp types it: a `string`
+  parameter keeps `75001` as text, an `integer` one gets `75001`.
+  `Envelope::tool_results` continuations replay the call and each result as
+  LFM3's own `tool` turn, and streaming suppresses LFM3 call blocks like the
+  other families'. With thinking on, a continuation's reasoning goes to
+  `reasoning_content`, never to the stream or to `text`, even when the token
+  budget runs out mid-thought. Qwen 3.5 writes the same notation, so its calls
+  parse too, but its continuations are rejected: xybrid implements LFM3's
+  tool-result framing, not Qwen 3.5's. Rust callers can type the arguments
+  with `tool_call::parse_tool_calls_with_tools`.
+- **Vision (llama.cpp):** `vision_encoder.max_image_tokens` in
+  `model_metadata.json` caps how many tokens one image becomes; the vision
+  encoder scales larger images down to fit. Native-resolution encoders need it:
+  LFM3-VL 2B turns a 12-megapixel photo into about 4,000 tokens, which alone
+  fills a 4,096-token context and takes minutes to encode on a CPU. Without the
+  field each encoder keeps its own limit, so existing bundles are unchanged.
+  Loading `LiquidAI/LFM3-VL-2B-GGUF` from Hugging Face now loads its vision
+  projector too (it ran text-only), with a 1,024-token image cap and LiquidAI's
+  recommended sampling.
+- **LFM3 (llama.cpp backend):** LiquidAI's LFM3 1.7B and LFM3-VL 2B GGUFs
+  load and run, with thinking switched by the metadata `reasoning` flag, tool
+  calling and image input (see the [reasoning](docs/content/docs/guides/reasoning.mdx),
+  [tool calling](docs/content/docs/guides/tool-calling.mdx) and
+  [vision](docs/content/docs/guides/vision-models.mdx) guides). The integration
+  fixtures `lfm3-1.7b` and `lfm3-vl-2b` pin LiquidAI's quantization-aware Q4_0
+  builds. LFM3-Audio 2B and LFM3-Omni 2B are not supported: they need
+  llama.cpp's audio input and speech generation, which xybrid does not wrap.
+- **`llamacpp-lfm3` and `llamacpp-lfm3vl` registry backends.** Every
+  `llm-llamacpp` build reports `llamacpp-lfm3`, and every
+  `llm-llamacpp-vision` build also reports `llamacpp-lfm3vl`. `resolve` sends
+  both in its `&backends=` query even when telemetry is opted out, so the
+  registry can serve the LFM3 models only to builds that run them. Older
+  builds report `llm-llamacpp` too but can't run LFM3: 0.15.0 and earlier
+  lack the `lfm3` architecture, and 0.16.0 loads it without LFM3's prompt
+  format, tool calls or image-token cap.
+
+- **Phoneme timings from ONNX TTS models, for lip sync.** When an ONNX TTS
+  model declares a per-token duration output (named `duration`, `durations`
+  or `pred_dur`), the result now says when each phoneme is spoken: the
+  phoneme and its start and end, in seconds from the first sample of the
+  returned audio. Silence trimming and the crossfades between long-text
+  chunks are already accounted for, and pads and silence tokens are left out.
+  Rust reads them with `InferenceResult::phoneme_timings()` and Unity with
+  `InferenceResult.PhonemeTimings` and `HasPhonemeTimings`. Kotlin, Swift and
+  Python have no typed field yet: they parse the `phoneme_timings` JSON entry
+  of the result envelope's metadata. Dart results carry no metadata, so Dart
+  gets no timings. KittenTTS 0.8 already declares `duration`. Stock Kokoro-82M
+  does not; `tools/conformance/expose_tts_duration.py` adds the output to its
+  ONNX graph without changing the audio (see
+  [`TTSAudioEncode`](docs/sdk/MODEL_METADATA.md#ttsaudioencode)). A model
+  without such an output returns the same audio as before and no new metadata
+  key. Streaming TTS, the zzz speech engines (Phonon, Kitten TTS 2), codec TTS
+  (NeuTTS) and runs answered by the cloud report no timings.
+
+### Changed
+
+- **Rust:** `xybrid-core` turns on serde_json's `float_roundtrip` feature, so
+  every crate that links it parses JSON floats correctly rounded (serde_json's
+  default is best-effort and can be one ulp off). Float-dense JSON parses about
+  19–32% slower.
+- **Breaking (Flutter):** `xybrid_flutter` now declares the platform minimums
+  its precompiled libraries are built for: iOS 16.0 (was 13.0), macOS 14.0
+  (was 10.15) and Android 9, API 28 (`minSdkVersion` was 21). An app that
+  targets an older version used to build and could then fail to load the
+  native library on an older device; now `pod install` rejects the plugin or
+  the Android manifest merge fails. Raise the app's minimums: `minSdk = 28` in
+  the app's Gradle `defaultConfig` (Flutter's default, `flutter.minSdkVersion`,
+  is lower); `platform :ios, '16.0'` in `ios/Podfile` and an iOS Deployment
+  Target of 16.0 for the Runner target; `platform :osx, '14.0'` in
+  `macos/Podfile` and a macOS Deployment Target of 14.0. The libraries are
+  unchanged. The Flutter README's macOS 13.3 was too low: the libraries'
+  llama.cpp and whisper.cpp code is built for macOS 14.0.
+- **Build tooling:** upgrade rules_rs to 0.2.0 and remove its local patch.
+  llama.cpp remains pinned to v0.8.0.
+
+### Fixed
+
+- Text GGUFs whose `model_metadata.json` xybrid generates (a Hugging Face repo
+  without one, `--model-file`, `fromModelFile`, `xybrid init`) now run with
+  the model's native context capped at 4,096 tokens, as generated vision GGUF
+  metadata already did. The generated file used the native context, and
+  llama.cpp reserves the KV cache for all of it at load: LFM3 1.7B (262,144
+  tokens) reserved about 5.9 GB of f16 KV cache and now reserves about 92 MB;
+  Qwen 3.5 0.8B went from about 3.2 GB to 50 MB. The native value is kept as
+  `metadata.max_context_length`, and `metadata.context_length` records the
+  context in use. A conversation that outgrows 4,096 tokens fails with
+  "Input too long". To allow more, raise `execution_template.context_length`
+  in the generated file (the `metadata` keys only describe it) and run the
+  directory with `xybrid run --directory`: `xybrid run --model-file`
+  regenerates the metadata on every run (see
+  [`Gguf`](docs/sdk/MODEL_METADATA.md#gguf)). Files generated by earlier
+  versions keep their native context until deleted, except under
+  `xybrid run --model-file`, which regenerates them.
+- llama.cpp raw-prompt generation (`generate_raw`, which tool-result
+  continuations use) reported `finish_reason: "length"` for every answer, even
+  one that ended on an end-of-generation token or a stop sequence. Every
+  llama.cpp path now reports `stop` for those, and `length` only for an answer
+  cut off unfinished, by the token budget or a failed decode. Codec TTS reads
+  only the generated text and is unaffected. In chat and streaming generation,
+  an empty stop sequence no longer erases the answer or suppresses the whole
+  stream, and a partial stop trimmed off an answer the budget cut short no
+  longer counts as `stop`.
+- llama.cpp streaming always ends with the terminal token that carries
+  `finish_reason` once any token was generated. When the text filter suppressed
+  every delta, as for a reasoning model whose budget ran out mid-thought, the
+  callback never received it.
+- llama.cpp chat answers keep a final `e`. The cleanup that trims a partial
+  chat-template marker off the end matched the start of `end_of_turn>`, so a
+  grammar-constrained `true` came back as `tru` after the stream had shown
+  `true`.
+- llama.cpp output keeps characters the vocabulary splits across tokens. Each
+  token's bytes were decoded on their own, so a character spread over several
+  tokens vanished from the stream and from the final text: qwen3-0.6b returned
+  `ok` for a grammar-constrained `🙂 ok`, and `本` for `日本語`. Text is now
+  decoded across token boundaries. Bytes that cannot be UTF-8 become U+FFFD, and
+  a character the budget cuts off midway is dropped from both.
+- llama.cpp streaming emits the text ahead of a stop sequence that completes
+  inside a token. With the stop `he` and the token `The`, the stream sent
+  nothing while the final text was `T`. When two stops complete in one chunk,
+  the stream now cuts at the earlier one, as the final text does.
+- **llama.cpp backend:** LFM3 chat prompts render through the model's own chat
+  template. llama.cpp's built-in matcher reads LFM3's template as plain ChatML
+  and drops the thinking state every assistant turn opens with (`<think>` to
+  reason, `<think></think>` to answer directly), so the model reasoned without
+  an opening tag and sometimes answered a question nobody asked. The `reasoning`
+  flag in the model metadata picks the state.
+- **llama.cpp backend:** prompts rendered through a model's chat template now
+  start with BOS when its vocabulary leaves BOS to the template (LFM3's
+  GGUFs set `tokenizer.ggml.add_bos_token` to false), as llama.cpp's own chat
+  path does. Vocabularies that add BOS themselves are unchanged.
+- **llama.cpp backend:** reasoning models no longer get a doubled think block
+  in tool-bearing prompts. The template render asked for thinking off, so
+  templates such as Qwen 3.5's closed an empty think block that priming then
+  reopened (`<think>\n\n</think>\n\n<think>\n`); it now asks for thinking on
+  when the model's `reasoning` flag is set. gemma-4 still renders with
+  thinking off.
+- **Rust builds:** refresh the generated llama.cpp native manifest for the
+  current wrapper, restoring matching prebuilt archives for external Cargo
+  builds on supported targets.
+- **Release preparation:** reject stale Flutter precompiled libraries after
+  native inputs change, verify Apple libraries against their declared OS
+  minimums, and check the draft XCFramework against the SwiftPM and React
+  Native checksums before publishing. Documentation install pins now update
+  with every version bump and are checked in CI.
+
+## [0.16.0] - 2026-10-30
+
+### Added
+
+- **Android, React Native:** on-device speech with Phonon and Kitten TTS 2 in
+  `ai.xybrid:xybrid-kotlin` and `@xybrid/react-native` on Android. The AAR's
+  arm64-v8a library now links the zzz speech engine statically, so on Android
+  arm64-v8a devices `phonon-31m-en` loads from the xybrid registry and a
+  Kitten TTS 2 bundle loads from a local directory, through the existing model
+  and run APIs (see [Phonon speech](docs/sdk/PHONON.md)). The armeabi-v7a and
+  x86_64 libraries are built without the engine: there the registry does not
+  serve `phonon-31m-en` and a Kitten bundle fails to load. On iOS the standard
+  Swift package, Flutter plugin and React Native module are unchanged and have
+  no speech engine, so the registry does not serve them `phonon-31m-en`; its
+  `ios-arm64` entry serves only custom `tts-zzz` builds, whose speech linkage
+  remains unqualified. The AAR also carries the
+  engine's fourteen notice files (its runtime terms and the upstream licenses)
+  under `assets/xybrid/zzz/`. Android merges library assets into the APK, so
+  every app that ships the SDK carries them.
+
+### Changed
+
+- **llama.cpp:** update to [v0.8.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.8.0) (commit `8642541b255bfb5dc39cd351a178be09013a55d6`).
+
+- **Breaking (Android, React Native):** `ai.xybrid:xybrid-kotlin` and
+  `@xybrid/react-native` now require Android 10 (API 29); their `minSdk` was 24.
+  The AAR's arm64-v8a natives are now built against API 29. An app with a lower
+  `minSdk` fails the manifest merge at build time. Raise it to 29: `minSdk = 29`
+  in the app's Gradle `defaultConfig`; with Expo, `android.minSdkVersion: 29`
+  through `expo-build-properties` (or set the `android.minSdkVersion=29` gradle
+  property from your own config plugin, since `expo prebuild` regenerates
+  `android/`); in bare React Native, `minSdkVersion = 29` in the root
+  `android/build.gradle` `ext` block. Flutter and Unity Android requirements are
+  unchanged.
+
+### Removed
+
+- **Breaking (Rust):** the inert Android speech companion is removed: the
+  `android-companion` Cargo feature on `xybrid-zzz-sys`, the
+  `tts-zzz-android-companion` features on `xybrid-core`, `xybrid-sdk` and
+  `xybrid-bolt`, the Bazel flag `--//:tts_zzz_android_companion` and the
+  `//bindings/kotlin:xybrid_kotlin_zzz_aar` target. Crates that enable either
+  feature must drop it. `xybrid_zzz_sys::UnavailableReason` drops its
+  companion-only variants and keeps `UnsupportedCpu`, so code naming a removed
+  variant must be updated. The removal does not affect custom static `tts-zzz`
+  builds.
+
+### Fixed
+
+- Registry resolution sends the runtime Android API, Apple OS or GNU libc
+  version and retains backend/OS compatibility refusal reasons. Rust registry
+  responses expose the artifact's `min_os` floors; older registry responses
+  remain readable.
+- Flutter Android builds support Gradle 9 / AGP 9 and copy `libc++_shared.so`
+  from the host app's selected NDK. Apple build logs no longer dump the environment.
+- Custom speech builds accept a configurable Python 3.11+ interpreter through
+  `XYBRID_ZZZ_PYTHON` and a per-target root in `XYBRID_ZZZ_PREBUILT_DIR`.
+- Speech models fail during load when the runtime lacks a usable zzz backend,
+  including when the model is cached. Flutter load failures throw
+  `XybridException`, and native diagnostics retain their causes without an extra
+  inference prefix.
+- Rust builds with `asr-whispercpp` on hosts with libclang 22 or newer generate
+  a usable `whisper_full_params` binding. The llama.cpp and whisper.cpp build
+  scripts now use bindgen 0.72.1, which resolves forward-declared structs that
+  older bindgen emitted as opaque placeholders.
+- Unity iOS players import native symbols from the statically linked application
+  (`__Internal`). The generated bindings previously tried to load `xybrid_bolt`
+  as a dynamic library. The Unity Editor continues using its host's dynamic library,
+  including when iOS is the selected build target.
+- Unity iOS builds link Accelerate for the native archive's vDSP calls.
+  The build hook also repairs framework metadata in already downloaded native
+  bundles, preserving custom dependencies and the plugin GUID.
+
+## [0.15.0] - 2026-10-26
+
+### Changed
+
+- **llama.cpp:** update to [v0.7.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.7.0) (commit `620d2225cc436ab0b001e3200e590e3b286ef9ab`).
+
+### Fixed
+
+- Windows Cargo builds from a Git checkout now use the prebuilt llama.cpp
+  archives. The hashed source files retain LF line endings, so their hashes
+  match the generated native manifest.
+
+## [0.14.0] - 2026-10-25
+
+### Changed
+
+- Custom `tts-zzz` builds now pin engine `v0.1.0-rc.9`. Its
+  `phonon-kitten-tts2` archives carry the engine's runtime terms and fourteen
+  third-party notices, which the verifier checks byte for byte. The pins add
+  static slices for iOS devices, the iOS arm64 simulator and Linux arm64.
+  Standard prebuilt SDK packaging is unchanged and still omits zzz.
+- **llama.cpp:** update to [v0.6.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.6.0) (commit `d81235049384534c167caea52b85a694f6103d14`).
+
+### Fixed
+
+- **Unity Android builds no longer fail on a duplicate `libc++_shared.so`.**
+  When Unity's GameActivity packages its own copy, Gradle stopped at
+  `mergeDebugNativeLibs` with "2 files found with path
+  'lib/arm64-v8a/libc++_shared.so'" (seen with Unity 6000.6.4f1). The Unity
+  Android library now links libc++ statically, and the Unity Android natives
+  no longer include `libc++_shared.so`. That also removes two packaging
+  faults: the x86_64 bundle shipped an arm64 `libc++_shared.so`, and the
+  armeabi-v7a bundle shipped none although its library needs one. After an
+  update, the copy earlier releases installed under
+  `Assets/Xybrid/Plugins/Android/` is removed the next time the Android
+  natives are downloaded.
+- **The Unity README gives the real Android cache location.** Models live
+  under `Application.persistentDataPath/xybrid`: the SDK is given its `models`
+  subfolder and keeps runtime-ready files beside it in `extracted`.
+- **The Unity docs no longer claim Intel Mac support.** The macOS native
+  library is Apple Silicon (arm64) only; the README said Intel Macs ran it
+  through Rosetta 2, which runs x86_64 code on Apple Silicon and not the
+  reverse. The docs site's Unity page also listed Windows and Linux as planned
+  and left out iOS and Android. Both now carry the same platform table, with
+  the iOS 16 minimum and Unity's removal of Android x86_64 in Unity 6.5.
+
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.13.1] - 2026-10-22
+
+Custom `tts-zzz` builds use the Phonon + Kitten TTS 2-only engine profile;
+the published Rust sys crate can verify that engine without a source checkout.
+No API changes. Standard prebuilt SDK packaging is unchanged.
+
+### Changed
+
+- Custom `tts-zzz` builds now pin engine `v0.1.0-rc.8`'s
+  `phonon-kitten-tts2` profile: only Phonon and Kitten TTS 2, with the
+  existing `zzz_embed` ABI. Other engine models and APIs are excluded.
+  Standard prebuilt SDK packaging is unchanged.
+
+### Fixed
+
+- The published `xybrid-zzz-sys` crate includes its verifier and uses its
+  packaged manifest, so an enabled build can verify a privately staged
+  engine without the xybrid source workspace.
+
+---
+
+## [0.13.0] - 2026-10-21
+
+Gradium's public Phonon checkpoint, `phonon-31m-en` (Apache-2.0), runs through
+the opt-in `tts-zzz` backend on zzz engine `v0.1.0-rc.7`. Standard prebuilt SDK
+packaging is unchanged.
+
+### Added
+
+- **Phonon `phonon-31m-en` through the opt-in `tts-zzz` backend.** Gradium's
+  public English checkpoint (Apache-2.0) loads as one converted GGUF with the
+  existing `ZzzPhonon` template and audio APIs. It carries 38 voices:
+  `default`, used when no voice is set, plus the 37 English voices of the
+  `gradium/phonon-voices` catalog. Its default temperature is 0.3 and it
+  speaks English at 24 kHz mono. The two earlier private Phonon previews
+  still load. See [Phonon speech](docs/sdk/PHONON.md).
+- **`zzz-phonon-31m` registry backend.** Every `tts-zzz` build reports it,
+  and `resolve` sends it in its `&backends=` query even when telemetry is
+  opted out, so the registry can serve `phonon-31m-en` only to builds whose
+  engine loads it. 0.12.0 builds report `tts-zzz` but cannot load that model.
+
+### Changed
+
+- **zzz engine pin bumped to `v0.1.0-rc.7`**, the first engine release that
+  loads `phonon-31m-en`; `v0.1.0-rc.6` rejects it. The engine's C ABI is
+  unchanged, so the SDK exposes no new Phonon options.
+
+---
+
+## [0.12.0] - 2026-10-20
+
+Phonon joins Kitten behind the opt-in `tts-zzz` feature for custom native
+builds. Both use the existing audio APIs; standard prebuilt SDK packaging
+is unchanged. This release also adds Rust choice scoring and EmbeddingGemma 2
+text embeddings, and keeps embedding sessions resident between calls.
+
+Rust consumers must update exhaustive matches for the new template, envelope
+and output variants, and `Tokenize` struct literals. Existing bundle metadata
+and foreign binding APIs remain compatible; choice scorers remain Rust-only.
+
+### Added
+
+- **Phonon speech through the opt-in `tts-zzz` backend.** Load a single GGUF
+  with the `ZzzPhonon` execution template, then use the existing batch and
+  audio-streaming APIs, including async calls, cancellation and resource-abort
+  controls. Voice, language, temperature and seed overrides travel through
+  existing request options. Omitted voices and temperature `0` select the
+  bundle defaults. Sessions remain resident and reusable after cancellation
+  or returned errors. The combined engine archive also preserves Kitten TTS 2;
+  standard prebuilt SDK artifacts continue to require a custom `tts-zzz` build
+  for either model.
+
+- **Choice scoring in the Rust SDK.** A `ChoiceScorer` model scores a closed
+  list of candidates against one context: build the input with
+  `Envelope::choice_request` and call `run`, `run_with_options` or
+  `run_async`. `InferenceResult::choice_scores()` returns one raw logit and
+  one softmax score per candidate, the caller's choices first, then the
+  scorer's fixed ones. The first kind of scorer is `OnnxByteOptionScorer`, an
+  ONNX model over UTF-8 byte ids; CUA-S1-FORMS matches its PyTorch reference
+  through the SDK within 2e-5 in logits. The executor checks the model against
+  its spec once and keeps that session for later runs, and `warmup()` scores a
+  synthetic request. Telemetry reports the decision task, the backend and the
+  number of candidates, never ids, texts or scores. When ONNX Runtime fails a
+  scorer run, its message is withheld from the error, and so is the shape of a
+  wrong-shaped output, which a model can derive from the request. Scorer
+  sessions and runs set ONNX Runtime's own log level to fatal, so ONNX Runtime
+  logs nothing below fatal for them, such as that message or a warning that
+  quotes what the request produced. Its process-wide logger is not covered; by
+  default it follows `ORT_LOG`. The language bindings still refuse to load a
+  scorer.
+- **`xybrid run --choice` scores candidates from the CLI.** Pass the context as
+  `--input-text` and each candidate as `--choice ID=TEXT` (repeatable) to a
+  choice scorer from `--directory`, `--model`, `--bundle` or `--huggingface`.
+  The CLI prints every candidate's score and raw logit in the order offered,
+  the scorer's fixed choices last, marks the best one and prints the margin;
+  `--output` saves the scores as JSON. A scorer given no `--choice` scores its
+  fixed choices. Requests are checked before the model runs, also by
+  `--dry-run`, and the refusals number candidates from 0 without quoting ids
+  or texts. Other models refuse `--choice`; a scorer refuses `--input-audio`,
+  `--input-image`, `--voice` and `--max-tokens`; and `xybrid repl` and
+  `--speculative-cloud` refuse a scorer.
+- **EmbeddingGemma 2 runs as a local text-embedding model.** Google's open
+  (Apache 2.0) embedding model returns 768-dimensional unit vectors for text
+  in over 100 languages and for code. Its ONNX export also declares image,
+  video and audio inputs, which the token-ID path now gives zero rows, so the
+  text model runs alone. On the q4 export the vectors match the model's own
+  `sentence_embedding` output to a cosine of at least 0.9999. The
+  `embeddinggemma-2` test fixture shows the metadata; callers prefix queries
+  with `task: search result | query: ` and documents with
+  `title: none | text: `. Image, video and audio input are not supported yet.
+- **`Tokenize` can add the tokenizer's special tokens.** With
+  `add_special_tokens: true`, the text is wrapped in the special tokens the
+  tokenizer's post-processor defines (`<bos>`/`<eos>`, `[CLS]`/`[SEP]`), and
+  truncation to `max_length` keeps the closing ones. Without them,
+  EmbeddingGemma 2's vectors dropped as low as a cosine of 0.61 against the
+  correct ones. The default stays `false`, so existing models are unchanged.
+- **An `L2Normalize` postprocessing step** scales embeddings to unit length.
+  Put it after `MeanPool` for models whose sentence-transformers pipeline
+  ends in `Normalize`.
+
+### Changed
+
+- **Rust:** `ExecutionTemplate` gains `ZzzPhonon`; exhaustive matches need
+  an additional arm. Existing Kitten bundle metadata remains compatible.
+
+- **Embedding models keep their ONNX session between calls.** The token-ID
+  (BERT-style) path built a new session on every call and dropped it: 44 of
+  about 52 ms for a MiniLM embedding on an M4 Max, against 2 ms of
+  inference. It now keeps one session per loaded model, as TTS already did,
+  and `warmup()` builds it ahead of the first real call.
+- **Breaking (Rust):** `PreprocessingStep::Tokenize` gains an
+  `add_special_tokens` field and `PostprocessingStep` gains an `L2Normalize`
+  variant, so struct literals and exhaustive matches need updating. Existing
+  `model_metadata.json` files are unaffected.
+- **Breaking (Rust):** choice requests have a typed place in the API.
+  `EnvelopeKind` gains `ChoiceRequest` (a sealed `ChoiceRequest`: one context
+  and the caller's choices) and `ChoiceScores`, `ExecutionTemplate` gains
+  `ChoiceScorer`, and the SDK's `OutputType` gains `ChoiceScores`, so
+  exhaustive matches over these enums need new arms. Existing envelopes keep
+  their binary encoding. A `ChoiceScorer` model accepts only a choice request,
+  and only through `run`, `run_with_options` or `run_async`. Every other entry
+  point and every other model refuse choice requests and choice scores,
+  including inside a multi-part message, conversation history or a pipeline,
+  before any backend or cloud call. The bindings refuse to load a choice
+  scorer, and an invalid scorer spec fails the load with `MetadataInvalid`.
+
+---
+
+## [0.11.0] - 2026-10-06
+
+The browser SDK now runs Xybrid's own Rust llama.cpp path compiled to
+WebAssembly, replacing the LiteRT preview, and ships with each GitHub Release.
+Speculative loads ask the registry before serving from the cloud, early stops
+in llama.cpp runs report as stops, and every SDK reports its own name to the
+registry and telemetry. Unity on Android can load models.
+
+This release breaks the `@xybrid/web` preview API (`XybridModel` and LiteRT
+models are gone) and renames two `xybrid-ffi-facade` conversions in Rust. The
+foreign binding APIs are unchanged.
+
+### Added
+
+- **The browser SDK runs GGUF models through Xybrid's Rust runtime.**
+  `@xybrid/web` compiles the existing `xybrid-llama` wrappers and the pinned
+  llama.cpp to WebAssembly, with a CPU/WASM SIMD build and an experimental
+  WebGPU build that needs `shader-f16`. `XybridLlm` loads a GGUF from a URL,
+  the registry or Hugging Face with integrity checks, streams tokens in a
+  worker, cancels generation, enforces the context limit and reports memory
+  and speed. The gzipped runtime is about 1.1 MiB (CPU) or 1.5 MiB (WebGPU),
+  plus the model. CI builds both runtimes and runs real GGUF generation in
+  Chromium; WebGPU generation has not been verified on GPU hardware yet.
+- **ONNX choice-scoring primitives in `xybrid-core`.** `OnnxChoiceScorer`
+  scores a closed list of candidates against one context without generating
+  text, from a `ChoiceScorerSpec`. It matches the PyTorch reference for the
+  CUA-S1-FORMS fixtures within 2e-5 in logits on macOS and Linux. No SDK entry
+  point runs a scorer yet.
+- **Per-sequence state snapshots in `xybrid-llama`.**
+  `LlamaContext::state_seq_save` and `state_seq_restore` copy a sequence's
+  KV cache and recurrent state out and back in, through three new
+  `llama_state_seq_*_c` shim functions. This makes prefix reuse possible on
+  recurrent and hybrid models such as LFM2, where `kv_cache_seq_rm` cannot
+  truncate: prefill a shared system prompt once, then restore it before each
+  request. Snapshots are opaque (`LlamaSeqSnapshot`) and only restore into
+  the context that saved them, because llama.cpp does not validate the bytes
+  and can abort on bad ones. A `seq_id` the context does not hold, or a
+  failed restore, returns an error, and a failed restore leaves the sequence
+  empty. `xybrid-core` does not use it yet.
+- **Kitten TTS 2 via the pinned zzz engine (`tts-zzz`).** `xybrid-zzz-sys`
+  carries hand-written ABI-1 FFI for the prebuilt `libzzz_embed.a` and
+  statically links the privately staged pinned slice through
+  `tools/scripts/zzz_pull.py` verification — the crate never compiles zzz;
+  an enabled build fails on unsupported targets or unverified slices. The
+  safe surface (`KittenSession`, streaming audio callback, typed errors)
+  plugs into `xybrid-core` as the `ZzzEmbed` execution template (four asset
+  paths: language and decoder GGUFs plus both voice JSONs), executed by a
+  new `zzz` runtime that synthesizes text to WAV envelopes with the
+  engine's 24 kHz mono output. Feature-gated off every platform preset
+  until native CI fetches the pinned slices. Model weights and voices stay
+  separate files. Raw archives, receipts and staging remain private.
+- **Web SDK release packaging.** Releases include `@xybrid/web` as an npm
+  archive with its ESM client, declarations, worker, CPU/WASM SIMD and
+  experimental WebGPU runtimes. Preparation checks the actual archive in an
+  isolated consumer and Chromium; npm publication stages that same artifact
+  for approval, using `next` for prereleases.
+- **Daily llama.cpp stable-release intake (POC).** Official upstream releases
+  produce reviewed dependency-update PRs, with real grammar and vision tests.
+  Once validation and the refreshed native manifest are ready, automation
+  prepares a release branch for the existing reviewed release pipeline.
 - **`XybridModel::is_speculative`** reports whether a load served the model
   from the cloud while it downloaded. It stays `true` once the download lands;
   `is_cloud_serving` reports whether the cloud still answers.
 
 ### Changed
 
+- **Breaking (`@xybrid/web`):** the LiteRT runtime and the tensor
+  `XybridModel` API are removed. Use `XybridLlm` with GGUF models and `Gguf`
+  metadata instead of `.litertlm` / `LiteRtLm`. `wasmPath` now defaults to
+  `/xybrid/runtime`. Registry and Hugging Face loading, streaming, generation
+  options, load cancellation and typed errors keep their shape.
 - **A speculative load asks the registry before serving from the cloud.**
   When speculation is on and the model is not cached, the load now resolves
   the model first and serves it from the gateway only if the registry
@@ -47,6 +602,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **KittenTTS no longer returns its phoneme durations instead of speech.**
+  KittenTTS 0.8 models (nano, micro and mini) return per-phoneme durations
+  next to the waveform, and synthesis used whichever output came first. In
+  about four runs out of ten, "Hello world" came back as 15 samples, under a
+  millisecond of sound, and the run still succeeded. Short, long and streamed
+  text were all affected. Synthesis now uses the output named `waveform` (or
+  `audio`); a TTS model with several outputs and neither name fails with an
+  error instead of guessing. Kokoro has a single output and was not affected.
+- **Stopping a llama.cpp run on one of its first tokens no longer reports a
+  native failure.** When memory or thermal pressure, a cancel, or an
+  `on_token` error stopped generation on one of the first four tokens (five
+  for vision models), the run failed with an unrelated error such as
+  `Generation failed with error code -2 (sampler chain creation failed)`.
+  Cloud fallback therefore never reached the cloud, and a cancel did not read
+  as a cancel. Those stops now behave as they do later in the run.
 - **Dart streams no longer drop an error that follows the final token.**
   `runStreaming` and `runStreamingWithFallback` ignored any error that arrived
   after the final token, so a run that failed once generation stopped looked
@@ -89,10 +659,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`SdkConfig::with_binding()` and `SdkConfig::binding()`.** No API reads a
   config's binding, so they never changed what requests report. Use
   `xybrid_sdk::set_binding` or `xybrid_sdk::init().binding()`.
-
-### Planned
-
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
 
 ---
 
@@ -2073,7 +2639,7 @@ First production release of xybrid - a hybrid cloud-edge ML inference orchestrat
 | Android arm64 | ✅ | ✅ | CPU (NNAPI planned) |
 | iOS arm64 | ✅ | Planned | CoreML ANE, Metal GPU |
 
-## [Unreleased]
+## Roadmap
 
 ### Planned
 

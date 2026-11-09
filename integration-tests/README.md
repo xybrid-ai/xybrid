@@ -77,6 +77,7 @@ cargo test -p integration-tests --test tts_integration test_phonemize_text
 | `integration_check.rs` | Verifies downloaded models exist | wav2vec2, kitten-tts |
 | `asr_integration.rs` | ASR pipeline: audio decode, inference, CTC decode | wav2vec2, whisper-tiny |
 | `tts_integration.rs` | TTS pipeline: phonemizer, tokens, voice embeddings | kitten-tts, kokoro-82m |
+| `embedding_parity.rs` | Text embeddings match the model's own reference vectors | embeddinggemma-2 |
 | `local_llm.rs` | Local LLM inference (GGUF) | qwen2.5-0.5b-instruct |
 
 ### ASR Integration Tests
@@ -113,6 +114,27 @@ Tests included:
 - `test_load_voice_embeddings_bin` - voices.bin parsing
 - `test_model_metadata_loading` - model_metadata.json validation
 - `test_voice_embedding_loader_npz` - NPZ voice file support (kokoro)
+
+### Embedding Parity Tests
+
+```bash
+# Download the model (q4 ONNX export, 207 MB)
+./integration-tests/download.sh embeddinggemma-2
+
+# Run the embedding tests
+cargo test -p integration-tests --test embedding_parity
+```
+
+Tests included:
+- `embeddinggemma2_reproduces_the_reference_embeddings` - Four texts give
+  unit-length vectors within a cosine of 0.9999 of the model graph's own
+  `sentence_embedding` output, and the same vector again on the cached session
+- `embeddinggemma2_ranks_the_matching_document_first` - English and French
+  queries are closer to the matching document than to an unrelated one
+
+The reference vectors live in `fixtures/embedding/embeddinggemma-2.json`.
+Regenerate them with `python3 tools/scripts/gen_embedding_goldens.py`
+(needs `onnxruntime==1.23.2`, `tokenizers` and `numpy`).
 
 ## Model Sources
 

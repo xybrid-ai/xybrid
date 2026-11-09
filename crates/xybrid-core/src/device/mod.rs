@@ -41,6 +41,9 @@ pub mod windows;
 // Main detection logic
 pub mod capabilities;
 
+// Runtime OS version in the registry's compatibility-token format.
+mod os_version;
+
 // Telemetry-facing device profile (chip, RAM, OS, for wire events)
 pub mod profile;
 
@@ -57,6 +60,7 @@ mod tests;
 
 // Re-exports for convenience
 pub use capabilities::detect_capabilities;
+pub use os_version::runtime_os_version;
 pub use platform_state::{
     clear_battery_level, clear_thermal_state, current_platform_state,
     refresh_native_platform_state, set_battery_level, set_platform_state, set_thermal_state,

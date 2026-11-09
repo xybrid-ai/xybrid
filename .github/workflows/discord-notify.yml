@@ -1,4 +1,5 @@
-name: Discord notify (contributor activity)
+# Purpose: Post newly opened good-first-issue and help-wanted issues, and first-time contributors' pull requests, to Discord.
+name: "Community: Contributor activity"
 
 on:
   # Issues fire on `opened` only. GitHub emits a separate `labeled` event for
@@ -14,7 +15,7 @@ on:
     types: [opened]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}
+  group: discord-notify-${{ github.event.issue.number || github.event.pull_request.number }}
   cancel-in-progress: false
 
 permissions:

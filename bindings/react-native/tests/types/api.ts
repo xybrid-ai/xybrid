@@ -5,11 +5,15 @@
 import {
   Envelope,
   GenerationConfigs,
+  Observability,
+  ObservabilityConfig,
   type InferenceMetrics,
   type InferenceResult,
   type Model,
+  type ObservationRef,
   type RunOptions,
   type StreamToken,
+  Xybrid,
   isXybridError,
 } from '../../src';
 
@@ -42,6 +46,18 @@ async function usage(): Promise<void> {
 
   // @ts-expect-error envelopes are discriminated on `kind`.
   await model.run({ kind: 'text', bytesBase64: '' });
+
+  await ObservabilityConfig.xybrid('key').setService('app', '1.0').setMetadataOnly(true).init();
+  const traced = await model.run(Envelope.text('hi'), { traceparent: '00-…-01', suppressTrace: false });
+  const observation: ObservationRef | undefined = traced.observation;
+  if (observation) await Observability.recordFeedback(observation, { score: 1 });
+  await Observability.flush(2000);
+
+  // @ts-expect-error ingestUrl was removed; export is configured with ObservabilityConfig.
+  await Xybrid.initialize({ apiKey: 'key', ingestUrl: 'https://ingest.example' });
+
+  // @ts-expect-error an evaluation needs a name.
+  await Observability.recordEvaluation({ trace_id: 't', span_id: 's' }, { scoreValue: 1 });
 
   try {
     await model.warmup();

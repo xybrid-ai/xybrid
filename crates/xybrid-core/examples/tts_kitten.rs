@@ -108,6 +108,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("❌ Unexpected vision output");
             return Err("Expected audio output, got vision output".into());
         }
+        EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+            println!("❌ Unexpected choice output");
+            return Err("Expected audio output, got choice output".into());
+        }
     }
 
     println!();

@@ -359,7 +359,7 @@ using var result = loader.Load().Run(Envelope.Text("Hello!"));
 
 ### `fromHuggingFace()`
 
-Downloads a model from a HuggingFace Hub repository and caches it locally. Model metadata (`model_metadata.json`) is auto-generated from the model card and file inspection if not present in the repository.
+Downloads a model from a HuggingFace Hub repository and caches it locally. Model metadata (`model_metadata.json`) is auto-generated from the model card and file inspection if not present in the repository. For a GGUF, the generated context is capped at 4,096 tokens; see [`Gguf`](MODEL_METADATA.md#gguf) to raise it.
 
 > **Note:** Requires the `huggingface` feature flag to be enabled at compile time.
 
@@ -674,6 +674,29 @@ class XybridModel {
     required RunOptions options,
   });
 
+  // Unity uses RunTtsStreaming(envelope, onAudio, cancellationToken) and
+  // RunTtsStreamingAsync with the same arguments. Audio is owned PCM16 LE,
+  // carrying sampleRate, channels and firstSample (per-channel offset).
+  // Both return TtsStreamResult: completed, cancelled, limited, or failed.
+  // Calls run off the main/audio thread; callbacks run on the draining worker.
+  // The existing native RunStream/StreamNext/StreamResult/StreamClose protocol
+  // delivers Audio events for TTS models and Token events for text models.
+  // Kitten cancellation reaches the active native session without the model
+  // lock; pre-cancelled/queued requests never synthesize. Cancellation discards
+  // queued audio; callers invalidate already scheduled playback themselves.
+  // Dispose only after the asynchronous run has returned.
+  // Batch Kitten output uses the existing raw PCM16 LE audio contract.
+  // Unity InferenceResult.SpeechStatus / LimitedChunks expose partial limits;
+  // Success is false for limited/cancelled batch output, with AudioBytes retained.
+  // RunTts (byte-only convenience) therefore throws on a limit.
+  // Kitten Run with a cancellation token collects the controlled stream, so
+  // live interruption also retains a cancelled batch outcome/partial PCM.
+  // ZzzEmbed metadata adds sentence_chunks=false and accelerate=false. The
+  // latter is macOS-only. max_tokens=0 uses available LM-window room, with the
+  // engine's split-chunk runaway guard; explicit caps remain explicit. Kitten
+  // owns text splitting and preserves expression markup. Limited output is
+  // partial audio, never an unqualified completed request.
+
   // Benchmarking
   Future<BenchmarkResult> benchmark({
     required Envelope envelope,
@@ -750,6 +773,61 @@ The generated Swift and C# model types expose the same generation-default call
 as `defaultGenerationConfig()` / `DefaultGenerationConfig()`. These reads use
 load-time metadata snapshots, so they do not wait behind an in-flight
 inference's model write lock.
+
+### Choice scoring (Rust)
+
+A `ChoiceScorer` model (see [`MODEL_METADATA.md`](MODEL_METADATA.md#choicescorer))
+scores a closed list of candidates against one context instead of generating
+output. Build the input with `Envelope::choice_request` and run it through
+`run`, `run_with_options` or `run_async`; the scores come back in
+`InferenceResult::choice_scores()`.
+
+```rust
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::{Choice, ModelLoader};
+
+let model = ModelLoader::from_directory("models/cua-s1-forms")?.load()?;
+model.warmup()?; // loads the scorer and checks the model against its spec
+
+let request = Envelope::choice_request(
+    Envelope::new(EnvelopeKind::Text("FORM Intake\nELEMENT Edit \"Phone\" value=\"\"".into())),
+    vec![
+        Choice::new("tel", "fill Tel: (503) 555-0142"),
+        Choice::new("name", "fill Name: Jane Doe"),
+    ],
+);
+let result = model.run(&request, None)?;
+let scores = result.choice_scores().expect("a scorer returns choice scores");
+let best = &scores.entries[scores.best().expect("at least two candidates")];
+println!("{} {:.3}", best.id, best.score);
+```
+
+- `is_choice_scorer()` tells a scorer apart, and `fixed_choices()` lists the
+  candidates it appends after the caller's; their ids are reserved.
+- `ChoiceScores.entries` holds one `ChoiceScore { id, logit, score, fixed }`
+  per candidate, the caller's choices first, then the fixed ones. `best()` is
+  the index of the highest score and `margin()` its lead over the runner-up.
+  Scores rank the offered candidates against each other; they are not
+  calibrated probabilities.
+- Every other entry point (streaming, `*_with_context`, pipelines) refuses a
+  scorer, every other model refuses a choice request, and a scorer refuses any
+  other input, all before any backend or cloud call; the `run*` methods report
+  `SdkError::UnsupportedModelCapability`. Choice requests never go to the
+  cloud.
+- An invalid request (an empty context, fewer than two or more than
+  `max_choices` candidates, or an empty, repeated or reserved id) fails with
+  `SdkError::InferenceError`. Errors name positions and counts, never ids,
+  texts or the context. When ONNX Runtime fails, its own message, which can
+  quote input bytes, is withheld, and so is the shape of a wrong-shaped output,
+  which a model can derive from the request. Scorer sessions and runs set ONNX
+  Runtime's own log level to fatal, so ONNX Runtime logs nothing below fatal
+  for them, such as that message or a warning that quotes what the request
+  produced. Its process-wide logger is not covered; by default it follows
+  `ORT_LOG`.
+- The language bindings refuse to load a choice scorer.
+- From the command line, `xybrid run --input-text <context> --choice ID=TEXT`
+  sends the same request and prints the scores; see the
+  [CLI reference](../content/docs/cli/reference/run.mdx#choice-scoring).
 
 ### Implementation Status
 
@@ -1311,6 +1389,8 @@ public sealed class InferenceResult : IDisposable
   public string ReasoningContent { get; }
   public bool HasAudio { get; }
   public bool HasEmbedding { get; }
+  public IReadOnlyList<PhonemeTiming> PhonemeTimings { get; }  // Never null
+  public bool HasPhonemeTimings { get; }
 }
 
 public enum OutputType { Text, Audio, Embedding, Unknown }
@@ -1399,6 +1479,71 @@ public sealed class StageLatency
 }
 ```
 
+### Phoneme timings (TTS)
+
+A TTS result says when each phoneme is spoken in its audio if the model
+declares a per-token duration output (`duration`, `durations` or `pred_dur`;
+see [`TTSAudioEncode`](MODEL_METADATA.md#ttsaudioencode)). Use it to drive lip
+sync or word highlighting from the playback clock. KittenTTS 0.8 declares
+`duration`; stock Kokoro-82M needs the output added first, which
+`tools/conformance/expose_tts_duration.py` does without changing the audio.
+For every other model the list is empty.
+
+Each entry is one token the model was fed, named by its symbol in the tokens
+file: a phoneme character, a stress mark (`ˈ`, `ˌ`), a space or a punctuation
+mark. `start` and `end` are seconds from the first sample of `audioBytes`, the
+audio exactly as returned, after silence trimming and the crossfades between
+long-text chunks. Entries are in order, never overlap and stay within the
+audio. Pads and silence tokens are not listed, so there can be gaps between
+entries, and audio after the last one when the model's end pad is audible (up
+to about 0.1 s on KittenTTS 0.8; none on Kokoro-82M).
+
+```rust
+// xybrid_core::ir::PhonemeTiming, also reachable as xybrid_sdk::ir::PhonemeTiming
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PhonemeTiming {
+    pub phoneme: String,
+    pub start: f32,  // seconds
+    pub end: f32,    // seconds
+}
+
+impl InferenceResult {
+    /// Empty when the key is absent or malformed.
+    pub fn phoneme_timings(&self) -> Vec<PhonemeTiming>;
+}
+```
+
+```csharp
+public sealed class PhonemeTiming
+{
+  public string Phoneme { get; }
+  public float Start { get; }   // Seconds from the first sample of AudioBytes
+  public float End { get; }
+}
+```
+
+```csharp
+using var result = model.Run(Envelope.Text(line, voiceId, speed));
+result.ThrowIfFailed();
+byte[] pcm = result.AudioBytes;
+foreach (var t in result.PhonemeTimings)
+    Debug.Log($"{t.Phoneme}: {t.Start:F3}-{t.End:F3} s");
+```
+
+The timings travel in the result envelope's metadata under `phoneme_timings`
+(`Envelope::PHONEME_TIMINGS_METADATA_KEY` in Rust) as a JSON array. The key is
+absent, not empty, when there are none:
+
+```json
+[{"phoneme":"h","start":0.0125,"end":0.05},{"phoneme":"ə","start":0.05,"end":0.1}]
+```
+
+Kotlin, Swift and Python have no typed field yet; read that entry from
+`result.envelope.metadata` and parse the JSON. Dart results carry no envelope
+metadata, so Dart has no timings yet. No binding gets timings from streaming
+TTS, the zzz speech engines (Phonon, Kitten TTS 2), codec TTS (NeuTTS) or runs
+answered by the cloud.
+
 ### Implementation Status
 
 | Property | Dart | Kotlin | Swift | C# |
@@ -1418,6 +1563,8 @@ public sealed class StageLatency
 | `metrics.ttftMs` | ✅ | ✅ | ✅ | ✅ |
 | `metrics.tokensPerSecond` | ✅ | ✅ | ✅ | ✅ |
 | `metrics.stageLatenciesMs` | ✅ | ✅ | ✅ | ✅ |
+| `phonemeTimings` | — | — | — | ✅ |
+| `hasPhonemeTimings` | — | — | — | ✅ |
 
 ---
 
@@ -1607,7 +1754,8 @@ final stream = model.runStreaming(
 Per-run controls for cooperative cancellation and resource-driven local abort.
 Rust SDK methods with options are available as model-level `run_with_options`,
 `run_with_context_options`, `run_streaming_with_options`, and
-`run_streaming_with_context_options`, plus pipeline-level `run_with_options`,
+`run_streaming_with_context_options`, `run_tts_streaming` and its async partner,
+plus pipeline-level `run_with_options`,
 `run_async_with_options`, `Xybrid::run_pipeline_with_options`, and
 `Xybrid::run_pipeline_streaming_with_options`.
 
@@ -1634,6 +1782,20 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 `fallback_to_cloud` is carried in policy and telemetry contracts so binding
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
+
+TTS checks the same resource policy before synthesis and before audio packet
+delivery. Kitten also polls it while native inference runs, independently of
+the model lock; ONNX can stop only at chunk boundaries. Resource aborts return
+`AbortedForCloudFallback` when the policy permits fallback, or an inference
+error otherwise. `max_grace_tokens` counts additional audio packets on this
+path; polling does not spend that budget. User cancellation returns a cancelled
+TTS summary immediately after the backend drains, without packet grace or cloud
+fallback. These checks preserve the fallback decision; they do not themselves
+start a cloud request.
+Completed and limited backend results remain authoritative if a resource
+signal arrives during finalization. A resource fallback requires the backend
+to confirm that local synthesis was interrupted; late signals do not restart
+speech that has already finished.
 
 **User cancellation (all bindings).** A caller
 can abort an in-flight local streaming run via a `CancellationToken` cancel

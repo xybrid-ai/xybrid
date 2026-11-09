@@ -55,6 +55,9 @@ What it does:
         via d.) -> `partial`, so a static constructor for each in
         bindings/unity/Runtime/BoltSupplement registers the `unity` binding
         before that type's first call reaches native code.
+     i. Selects `__Internal` for iOS players, where Unity links the native
+        archive statically. Editors (including with iOS selected) and other
+        players keep the platform's dynamic `xybrid_bolt` library.
   3. Writes deterministic Unity .meta files (GUID = sha256(asset path)[:32],
      the same scheme as stage_unity_desktop_ort.py).
   4. Syncs the result into bindings/unity/Runtime/Bolt, pruning stale files.
@@ -85,6 +88,13 @@ DEST_DIR = REPO_ROOT / "bindings" / "unity" / "Runtime" / "Bolt"
 DEST_REL = "bindings/unity/Runtime/Bolt"
 PINNED_BOLTFFI = "0.30.1"
 
+NATIVE_LIBRARY_TARGET = '        internal const string LibName = "xybrid_bolt";'
+NATIVE_LIBRARY_REPLACEMENT = '''#if UNITY_IOS && !UNITY_EDITOR
+        internal const string LibName = "__Internal";
+#else
+        internal const string LibName = "xybrid_bolt";
+#endif'''
+
 
 # --- Transform (a): readonly record struct (C# 10) -> plain readonly struct ---
 # Matches a positional `public readonly record struct Name( params ) {`. The
@@ -100,10 +110,16 @@ RECORD_STRUCT_RE = re.compile(
 # XybridToolResult), plus 2 for the live ASR session (XybridStreamingConfig /
 # XybridPartialResult), plus 2 for the pipeline result (XybridPipelineResult /
 # XybridStageResult), plus 2 for model cache management (XybridCacheEntry /
-# XybridCacheStatus).
+# XybridCacheStatus), plus 2 for observability (XybridObservationRef /
+# XybridObservabilityStats).
+# Observability v2 adds eight: per-signal stats (XybridSignalStats), observation
+# controls (XybridObservationOptions), the terminal ASR result
+# (XybridTranscriptionResult) and the manual-observation records
+# (XybridObservationContext / XybridToolCallInfo / XybridInferenceRequest /
+# XybridUsage / XybridModelLoadInfo).
 # Bump this deliberately: the count is a tripwire for unreviewed boltffi output
 # drift, not a value to auto-sync.
-EXPECTED_RECORD_STRUCTS = 20
+EXPECTED_RECORD_STRUCTS = 31
 
 
 # --- Transform (g): Unsafe.SizeOf<T>() -> Marshal.SizeOf<T>(). boltffi's wire
@@ -149,8 +165,10 @@ CONTEXT_PARTIAL_REPLACEMENT = (
 )
 
 RESULT_FILE = "XybridResult.cs"
-RESULT_REASONING_TARGET = "string? ReasoningContent) {"
-RESULT_REASONING_REPLACEMENT = "string? ReasoningContent = null) {"
+RESULT_REASONING_TARGET = "string? ReasoningContent, XybridObservationRef? Observation = null) {"
+RESULT_REASONING_REPLACEMENT = (
+    "string? ReasoningContent = null, XybridObservationRef? Observation = null) {"
+)
 
 READER_REMAINING_TARGET = (
     "        internal WireReader(nint pointer, nuint length)\n"
@@ -179,7 +197,8 @@ RESULT_DECODER_TARGET = """        internal static XybridResult Decode(WireReade
                 (XybridExecutionTarget)reader.ReadI32(),
                 XybridInferenceMetrics.Decode(reader),
                 reader.ReadArray(reader => XybridToolCall.Decode(reader)),
-                reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadU8() == 0 ? default(XybridObservationRef?) : XybridObservationRef.Decode(reader)
             );
 """
 RESULT_DECODER_REPLACEMENT = """        internal static XybridResult Decode(WireReader reader)
@@ -194,6 +213,9 @@ RESULT_DECODER_REPLACEMENT = """        internal static XybridResult Decode(Wire
             string? reasoningContent = reader.HasRemaining
                 ? reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
                 : ReasoningFromMetadata(envelope);
+            XybridObservationRef? observation = reader.HasRemaining
+                ? reader.ReadU8() == 0 ? default(XybridObservationRef?) : XybridObservationRef.Decode(reader)
+                : null;
             return new XybridResult(
                 envelope,
                 outputType,
@@ -202,7 +224,8 @@ RESULT_DECODER_REPLACEMENT = """        internal static XybridResult Decode(Wire
                 executionTarget,
                 metrics,
                 toolCalls,
-                reasoningContent
+                reasoningContent,
+                observation
             );
         }
 
@@ -295,8 +318,8 @@ BOLT_CLASS_REPLACEMENT = "public static partial class XybridBolt"
 ENTRY_PARTIAL_TARGETS = {
     "XybridDownload.cs": "public sealed class XybridDownload : global::System.IDisposable",
     "XybridPipeline.cs": "public sealed class XybridPipeline : global::System.IDisposable",
-    "XybridTelemetryConfig.cs": (
-        "public sealed class XybridTelemetryConfig : global::System.IDisposable"
+    "XybridObservabilityConfig.cs": (
+        "public sealed class XybridObservabilityConfig : global::System.IDisposable"
     ),
 }
 
@@ -329,7 +352,13 @@ def _downlevel_record_structs(content: str) -> tuple[str, int]:
             for p in match.group("params").split(",")
             if p.strip()
         ]
-        ctor_params = ", ".join(f"{ty} {pn}" for ty, pn in fields)
+        ctor_params = ", ".join(
+            f"{ty} {pn}" + (
+                " = null" if pn in ("Observation", "DecoderObservation")
+                and ty in ("XybridObservationRef?", "XybridObservationOptions?") else ""
+            )
+            for ty, pn in fields
+        )
         assigns = " ".join(f"this.{pn} = {pn};" for _, pn in fields)
         props = "\n".join(f"        public {ty} {pn} {{ get; }}" for ty, pn in fields)
         return (
@@ -431,6 +460,7 @@ def generate() -> dict[str, str]:
     reader_remaining_added = False
     result_compatibility_added = False
     stream_next_kept_alive = False
+    native_library_selected = False
     for src in sources:
         content = src.read_text(encoding="utf-8")
         content, n = _downlevel_record_structs(content)
@@ -446,6 +476,14 @@ def generate() -> dict[str, str]:
                 content = content.replace(target, replacement, 1)
             text_variant_fixed = True
         if src.name == BOLT_CLASS_FILE:
+            _drift(
+                content.count(NATIVE_LIBRARY_TARGET) == 1,
+                f"expected native library declaration in {src.name}",
+            )
+            content = content.replace(
+                NATIVE_LIBRARY_TARGET, NATIVE_LIBRARY_REPLACEMENT, 1
+            )
+            native_library_selected = True
             for target, replacement in GUID_REWRITES:
                 _drift(target in content, f"expected a Guid codec body in {src.name}")
                 content = content.replace(target, replacement, 1)
@@ -536,6 +574,7 @@ def generate() -> dict[str, str]:
         f"{EXPECTED_UNSAFE_SIZEOF}",
     )
     _drift(bolt_class_renamed, f"{BOLT_CLASS_FILE} not found in boltffi output")
+    _drift(native_library_selected, f"native library not selected in {BOLT_CLASS_FILE}")
     _drift(reader_remaining_added, f"WireReader not found in {BOLT_CLASS_FILE}")
     _drift(guid_fenced, "Guid codec bodies not found in boltffi output")
     _drift(

@@ -62,6 +62,10 @@ def run_prompt(model: xybrid.XybridModel) -> None:
         fallback_to_cloud=False,
         max_grace_tokens=0,
         correlation_id=None,
+        traceparent=None,
+        tracestate=None,
+        conversation_id=None,
+        suppress_trace=False,
     )
 
     prompt = "What is the capital of France? Answer in one short sentence."
@@ -89,7 +93,11 @@ def run_prompt(model: xybrid.XybridModel) -> None:
 
 def main() -> int:
     spec = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL
+
+    # Local inference needs no API key. Cloud authentication and observability
+    # export are configured separately (see xybrid.init docstring).
     xybrid.init()
+
     print(f"loading {spec} (registry/HF models download on first run) ...")
     t0 = time.perf_counter()
     try:

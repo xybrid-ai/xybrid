@@ -200,7 +200,19 @@ fn compile_whisper_cpp() {
         build.flag_if_supported("-Wno-deprecated-declarations");
     }
 
+    let coreml = coreml_enabled();
+    if coreml {
+        // What upstream's src/CMakeLists.txt adds to the whisper target for
+        // WHISPER_COREML and WHISPER_COREML_ALLOW_FALLBACK.
+        build
+            .define("WHISPER_USE_COREML", None)
+            .define("WHISPER_COREML_ALLOW_FALLBACK", None);
+    }
+
     build.compile("whisper");
+    if coreml {
+        compile_coreml_encoder(&manifest_dir, &whisper_dir);
+    }
 
     // `cc::Build::compile` already emitted `-lwhisper` plus its search path.
     // Re-emit the ggml archives AFTER it: GNU ld resolves static archives left
@@ -229,6 +241,42 @@ fn compile_whisper_cpp() {
     println!("cargo:rustc-link-lib=static:-bundle=ggml-base");
     println!("cargo:rustc-link-lib=static:-bundle=ggml-cpu");
     emit_platform_deps();
+}
+
+/// Whether to build whisper.cpp's Core ML encoder: the `coreml` feature, on
+/// iOS. Elsewhere the feature is a no-op — on macOS Metal is the faster
+/// encoder, and Bazel builds the bridge for iOS only, so cargo matches it.
+fn coreml_enabled() -> bool {
+    env::var_os("CARGO_FEATURE_COREML").is_some()
+        && env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("ios")
+}
+
+/// Compile xybrid's Core ML encoder bridge, `native/xybrid-whisper-coreml.mm`.
+///
+/// It implements the C ABI whisper.cpp declares in `coreml/whisper-encoder.h`
+/// in place of upstream's `src/coreml/*` sources, none of which are compiled:
+/// upstream's bridge ignores prediction errors and copies unchecked output, and
+/// its compat category replaces Core ML's async prediction methods process-wide.
+/// See the file's header for what the replacement checks. Called after the
+/// whisper archive is emitted, so the bridge it references links after it.
+fn compile_coreml_encoder(manifest_dir: &Path, whisper_dir: &Path) {
+    let native = manifest_dir.join("native");
+    println!("cargo:rerun-if-changed={}", native.display());
+
+    cc::Build::new()
+        .cpp(true)
+        .std("c++17")
+        .flag("-fobjc-arc")
+        // Consumers may target older iOS than the bridge needs (the Flutter
+        // pod declares 13.0); every newer API must sit behind @available.
+        .flag("-Werror=unguarded-availability-new")
+        .include(&native)
+        .include(whisper_dir.join("src"))
+        .file(native.join("xybrid-whisper-coreml.mm"))
+        .compile("xybrid-whisper-coreml");
+
+    println!("cargo:rustc-link-lib=framework=CoreML");
+    println!("cargo:rustc-link-lib=framework=Foundation");
 }
 
 /// Re-emit the platform libraries and frameworks that ggml's own object files

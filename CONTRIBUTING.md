@@ -210,6 +210,9 @@ builds are reproducible.
 
 - [Dependabot](.github/dependabot.yml) opens weekly update PRs for Cargo and
   GitHub Actions dependencies.
+- [llama.cpp stable updates](docs/development/llamacpp-updates.md) are checked
+  daily; the POC prepares update PRs, validates real inference, and feeds the
+  existing release-branch pipeline after review and native-manifest refresh.
 - Security advisories across ecosystems are surfaced by Dependabot security
   alerts and the OpenSSF Scorecard / OSV database; known-vulnerable
   dependencies are upgraded promptly.

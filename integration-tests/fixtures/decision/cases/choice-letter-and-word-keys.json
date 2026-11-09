@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "id": "choice-letter-and-word-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "One key that is not a letter: every option gets an assigned code",
+  "covers": ["choice-letter-keys"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"A\": \"First\", \"B\": \"Second\", \"other\": \"Something else\"}}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "choice",
+          "keys": ["A", "B", "other"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA First\nB Second\nC Something else\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 41, 5206, 207, 42, 7795, 207, 43, 39280, 3080, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 49,
+          "select": [41, 334, 42, 378, 43, 340]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "A",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "B",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "other",
+              "code": "C",
+              "range": [4, 6]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x4113793c", "0x40bd9324", "0x411c1ef0", "0x40d1925a", "0x410c16d7", "0x40b6e54e"]
+      ],
+      "scores": [
+        ["0x4113793c", "0x411c1ef0", "0x410c16d7"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "choice",
+          "choice": "B",
+          "probabilities": {
+            "A": 0.31190305126284779,
+            "B": 0.46722064159188503,
+            "other": 0.22087630714526721
+          },
+          "confidence": 0.46722064159188503
+        }
+      },
+      "usage": {
+        "input_tokens": 50,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

@@ -1,4 +1,5 @@
-name: Build Natives (prebuilt llama.cpp)
+# Purpose: Publish prebuilt llama.cpp slices to ghcr.io and open the natives-manifest PR that lets plain cargo builds download them.
+name: "Artifacts: Publish llama.cpp prebuilts"
 
 # Publisher for the prebuilt-natives cache: compiles the llama.cpp static
 # slice ONCE per (target, feature-set) and pushes it to ghcr, tagged by the
@@ -44,7 +45,7 @@ on:
 # Do NOT cancel in-progress publishes: a half-finished push leaves the cache
 # cold (correct, just slow), and write-once means a re-run is idempotent.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-natives-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -109,14 +110,19 @@ jobs:
           #     boltffi's xcframework sets include_macos=false, so aarch64-apple-
           #     darwin / x86_64 are not consumed and are not published here). ---
           - target: aarch64-apple-ios
-            runner: macos-14
+            runner: macos-15
             needs-ndk: false
           - target: aarch64-apple-ios-sim
-            runner: macos-14
+            runner: macos-15
             needs-ndk: false
           # --- Linux (host build; consumed by the Flutter linux leg) ---
+          # Pinned to an LTS image like the arm64 row below: min_glibc is this
+          # runner's glibc, and on ubuntu-latest (26.04, glibc 2.43) every
+          # Ubuntu 24.04 / Debian consumer declined the slice. The Flutter leg
+          # stays on ubuntu-latest, so its fingerprint pull misses and build.rs
+          # downloads this slice through the manifest instead.
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             needs-ndk: false
           # --- Desktop rows: not consumed by any xybrid CI job. These exist
           #     purely so an EXTERNAL `cargo build --features llm-llamacpp`
@@ -128,10 +134,10 @@ jobs:
             runner: ubuntu-24.04-arm
             needs-ndk: false
           - target: aarch64-apple-darwin
-            runner: macos-14
+            runner: macos-15
             needs-ndk: false
           - target: x86_64-apple-darwin
-            runner: macos-14
+            runner: macos-15
             needs-ndk: false
           - target: x86_64-pc-windows-msvc
             runner: windows-latest

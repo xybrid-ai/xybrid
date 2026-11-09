@@ -1,18 +1,53 @@
 //! Safe RAII wrapper for a loaded llama.cpp model.
 //!
-//! Owns `llama_model*` via [`Drop`] glue. Inherent methods over the model
-//! pointer cover tokenization, detokenization, special-token lookup, chat
-//! template extraction, and the recurrent / hybrid architecture
-//! predicates the KV-cache prefix-reuse path gates on.
+//! Owns `llama_model*` through a shared [`ModelHandle`]: the native model is
+//! freed when the last of the [`LlamaModel`] and the contexts created from it
+//! is dropped. Inherent methods over the model pointer cover tokenization,
+//! detokenization, special-token lookup, chat template extraction, and the
+//! recurrent / hybrid architecture predicates the KV-cache prefix-reuse path
+//! gates on.
 
 use std::ffi::{c_void, CStr};
+use std::sync::Arc;
 
 use crate::error::{LlamaError, LlamaResult};
 use crate::ffi;
+use crate::utf8::Utf8Decoder;
 
 /// Opaque handle to a loaded llama.cpp model.
+///
+/// A [`LlamaContext`](crate::LlamaContext) or `MtmdContext` created from the
+/// model shares its native handle, so dropping the `LlamaModel` first is safe:
+/// the native model stays loaded until the last of them is dropped.
 pub struct LlamaModel {
+    handle: Arc<ModelHandle>,
+}
+
+/// The native `llama_model*`, freed when its last owner drops.
+///
+/// [`LlamaModel`] and every context created from it hold one, because native
+/// contexts keep reading the model they were created from.
+pub(crate) struct ModelHandle {
     ptr: *mut c_void,
+}
+
+impl ModelHandle {
+    #[inline]
+    pub(crate) fn as_ptr(&self) -> *mut c_void {
+        self.ptr
+    }
+}
+
+impl Drop for ModelHandle {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            // SAFETY: ptr came from `ffi::load_model_from_file`, checked
+            // non-null on construction. Drop runs once, after every
+            // `LlamaModel` and context sharing this handle is gone.
+            unsafe { ffi::free_model(self.ptr) };
+            self.ptr = std::ptr::null_mut();
+        }
+    }
 }
 
 impl LlamaModel {
@@ -29,7 +64,9 @@ impl LlamaModel {
         if ptr.is_null() {
             return Err(LlamaError::LoadFailed(path.to_string()));
         }
-        Ok(Self { ptr })
+        Ok(Self {
+            handle: Arc::new(ModelHandle { ptr }),
+        })
     }
 
     /// Returns the raw pointer for the `xybrid-llama` internals.
@@ -38,7 +75,24 @@ impl LlamaModel {
     /// callable. Consumers stay on the safe surface.
     #[inline]
     pub(crate) fn as_ptr(&self) -> *const c_void {
-        self.ptr
+        self.handle.as_ptr()
+    }
+
+    /// The shared native handle, for contexts that must keep the model loaded.
+    #[inline]
+    pub(crate) fn handle(&self) -> &Arc<ModelHandle> {
+        &self.handle
+    }
+
+    /// A handle with no native model, for tests. Only native wrappers that
+    /// reject a null model may receive it.
+    #[cfg(test)]
+    pub(crate) fn test_stub() -> Self {
+        Self {
+            handle: Arc::new(ModelHandle {
+                ptr: std::ptr::null_mut(),
+            }),
+        }
     }
 
     /// Tokenize `text` without special-token parsing.
@@ -71,7 +125,13 @@ impl LlamaModel {
         // SAFETY: `c_text` outlives both calls. Probe + real call follow
         // llama.cpp's documented two-pass tokenization protocol.
         let probe = unsafe {
-            ffi::tokenize_probe(self.ptr, &c_text, text.len(), add_special, parse_special)
+            ffi::tokenize_probe(
+                self.as_ptr(),
+                &c_text,
+                text.len(),
+                add_special,
+                parse_special,
+            )
         };
         let required = if probe < 0 { -probe } else { probe };
         if required <= 0 {
@@ -82,7 +142,7 @@ impl LlamaModel {
         // SAFETY: `tokens` is writable for `capacity` i32 elements.
         let result = unsafe {
             ffi::tokenize_into(
-                self.ptr,
+                self.as_ptr(),
                 &c_text,
                 text.len(),
                 tokens.as_mut_ptr(),
@@ -100,17 +160,49 @@ impl LlamaModel {
 
     /// Detokenize `tokens` to a UTF-8 string, rendering special tokens
     /// (e.g. `<|im_end|>`) verbatim in their text form.
+    ///
+    /// The pieces are joined as bytes and decoded once, so a character that a
+    /// byte-level vocabulary splits across tokens survives. Bytes that cannot
+    /// be UTF-8 become U+FFFD. A character the tokens leave unfinished at the
+    /// end (the budget ran out between its bytes) has no text and is dropped,
+    /// as the streaming callback never receives one either. In `generate_raw`,
+    /// which keeps the final EOG token, a character left unfinished directly
+    /// before it decodes as `�` followed by the EOG text instead, because the
+    /// EOG's bytes follow it in the same call.
     pub fn detokenize(&self, tokens: &[i32]) -> LlamaResult<String> {
-        let mut result = String::new();
+        let mut bytes = Vec::new();
         let mut buf = vec![0u8; 256];
         for &token in tokens {
-            // SAFETY: `buf` writable for `buf.len()` bytes. The C wrapper
-            // returns the number of bytes written (or required); we
-            // re-allocate and retry on overflow exactly once, matching
-            // the pre-refactor behavior.
-            let len = unsafe {
+            bytes.extend_from_slice(self.piece_bytes(token, &mut buf));
+        }
+        let mut decoder = Utf8Decoder::default();
+        let text = decoder.push(&bytes).into_owned();
+        decoder.discard_unfinished();
+        Ok(text)
+    }
+
+    /// Write `token`'s piece, special tokens rendered, into `buf`, growing it
+    /// when the piece does not fit, and return the bytes written.
+    fn piece_bytes<'b>(&self, token: i32, buf: &'b mut Vec<u8>) -> &'b [u8] {
+        // SAFETY: `buf` is writable for `buf.len()` bytes.
+        let mut len = unsafe {
+            ffi::token_to_piece(
+                self.as_ptr(),
+                token,
+                buf.as_mut_ptr() as *mut std::os::raw::c_char,
+                buf.len(),
+                0,
+                true,
+            )
+        };
+        if len < 0 {
+            // llama.cpp returns the size a piece needs, negated, when `buf` is
+            // too small for it.
+            buf.resize(len.unsigned_abs() as usize, 0);
+            // SAFETY: as above, after the resize.
+            len = unsafe {
                 ffi::token_to_piece(
-                    self.ptr,
+                    self.as_ptr(),
                     token,
                     buf.as_mut_ptr() as *mut std::os::raw::c_char,
                     buf.len(),
@@ -118,45 +210,22 @@ impl LlamaModel {
                     true,
                 )
             };
-            if len > 0 {
-                let len_usize = len as usize;
-                if len_usize >= buf.len() {
-                    buf.resize(len_usize + 1, 0);
-                    // SAFETY: buf resized above.
-                    let retry_len = unsafe {
-                        ffi::token_to_piece(
-                            self.ptr,
-                            token,
-                            buf.as_mut_ptr() as *mut std::os::raw::c_char,
-                            buf.len(),
-                            0,
-                            true,
-                        )
-                    };
-                    if retry_len > 0 {
-                        if let Ok(piece) = std::str::from_utf8(&buf[..retry_len as usize]) {
-                            result.push_str(piece);
-                        }
-                    }
-                } else if let Ok(piece) = std::str::from_utf8(&buf[..len_usize]) {
-                    result.push_str(piece);
-                }
-            }
         }
-        Ok(result)
+        let len = usize::try_from(len).unwrap_or(0).min(buf.len());
+        &buf[..len]
     }
 
     /// BOS (beginning-of-sequence) token.
     pub fn token_bos(&self) -> i32 {
-        // SAFETY: self.ptr is a live model pointer.
-        unsafe { ffi::token_bos(self.ptr) }
+        // SAFETY: the handle keeps the model pointer live.
+        unsafe { ffi::token_bos(self.as_ptr()) }
     }
 
     /// Primary EOS token. For end-of-generation checks across modern
     /// multi-EOG vocabularies, prefer [`Self::vocab_is_eog`].
     pub fn token_eos(&self) -> i32 {
-        // SAFETY: self.ptr is a live model pointer.
-        unsafe { ffi::token_eos(self.ptr) }
+        // SAFETY: the handle keeps the model pointer live.
+        unsafe { ffi::token_eos(self.as_ptr()) }
     }
 
     /// True when `token` is registered as an end-of-generation token in
@@ -164,14 +233,25 @@ impl LlamaModel {
     /// `<|eot_id|>` + `<|end_of_text|>`; Gemma: `<end_of_turn>`;
     /// Qwen: `<|im_end|>` + `<|endoftext|>`).
     pub fn vocab_is_eog(&self, token: i32) -> bool {
-        // SAFETY: self.ptr is a live model pointer.
-        unsafe { ffi::vocab_is_eog(self.ptr, token) }
+        // SAFETY: the handle keeps the model pointer live.
+        unsafe { ffi::vocab_is_eog(self.as_ptr(), token) }
+    }
+
+    /// True when tokenizing with `add_special` prepends the BOS token.
+    ///
+    /// Reads the GGUF `tokenizer.ggml.add_bos_token` flag. When it is
+    /// unset (LFM3), the BOS token only reaches the model if the prompt
+    /// text carries it, which is how the model's chat template renders
+    /// `bos_token`.
+    pub fn adds_bos(&self) -> bool {
+        // SAFETY: the handle keeps the model pointer live.
+        unsafe { ffi::vocab_get_add_bos(self.as_ptr()) }
     }
 
     /// Vocabulary size.
     pub fn n_vocab(&self) -> usize {
-        // SAFETY: self.ptr is a live model pointer.
-        unsafe { ffi::n_vocab(self.ptr) as usize }
+        // SAFETY: the handle keeps the model pointer live.
+        unsafe { ffi::n_vocab(self.as_ptr()) as usize }
     }
 
     /// Returns `true` for fully recurrent architectures (Mamba, RWKV).
@@ -179,8 +259,8 @@ impl LlamaModel {
     /// additionally covers hybrid models (LFM2, Qwen35, Granite-hybrid,
     /// …) that share the same KV-cache truncation hazard.
     pub fn is_recurrent(&self) -> bool {
-        // SAFETY: self.ptr is a live model pointer.
-        unsafe { ffi::model_is_recurrent(self.ptr) }
+        // SAFETY: the handle keeps the model pointer live.
+        unsafe { ffi::model_is_recurrent(self.as_ptr()) }
     }
 
     /// Returns `true` for any model with recurrent state — fully
@@ -194,18 +274,18 @@ impl LlamaModel {
     /// prefix length and `llama_decode` fails on the diverging tail
     /// (wrapper error code -3 — see [`LlamaError::DecodeFailed`]).
     pub fn has_recurrent_state(&self) -> bool {
-        // SAFETY: self.ptr is a live model pointer.
-        unsafe { ffi::model_has_recurrent_state(self.ptr) }
+        // SAFETY: the handle keeps the model pointer live.
+        unsafe { ffi::model_has_recurrent_state(self.as_ptr()) }
     }
 
     /// The model's built-in chat template, if any, from GGUF metadata.
     /// Returns `None` when the model doesn't embed a template — callers
     /// fall back to their preferred default (commonly ChatML).
     pub fn chat_template(&self) -> Option<String> {
-        // SAFETY: self.ptr is a live model pointer. The returned C
+        // SAFETY: the handle keeps the model pointer live. The returned C
         // string is owned by llama.cpp; we copy it into an owned String
         // before any further C-side mutation could invalidate it.
-        let ptr = unsafe { ffi::model_chat_template(self.ptr) };
+        let ptr = unsafe { ffi::model_chat_template(self.as_ptr()) };
         if ptr.is_null() {
             return None;
         }
@@ -215,18 +295,6 @@ impl LlamaModel {
             .to_str()
             .ok()
             .map(|s| s.to_string())
-    }
-}
-
-impl Drop for LlamaModel {
-    fn drop(&mut self) {
-        if !self.ptr.is_null() {
-            // SAFETY: ptr came from `ffi::load_model_from_file` (or
-            // equivalent), checked non-null on construction. Drop runs
-            // at most once per handle.
-            unsafe { ffi::free_model(self.ptr) };
-            self.ptr = std::ptr::null_mut();
-        }
     }
 }
 
@@ -245,6 +313,7 @@ impl Drop for LlamaModel {
 //   - llama_token_bos_c             : read-only
 //   - llama_token_eos_c             : read-only
 //   - llama_vocab_is_eog_c          : read-only
+//   - llama_vocab_get_add_bos_c     : read-only
 //   - llama_model_chat_template_c   : read-only (returns interior C string)
 //   - llama_n_vocab_c               : read-only
 //   - llama_model_is_recurrent_c    : read-only
@@ -260,5 +329,8 @@ impl Drop for LlamaModel {
 // reachable through this safe surface (no symbol for them is in
 // `llama-cpp-sys::bindings`). If a future binding adds one, this audit
 // must be re-run before the symbol joins the allowlist.
-unsafe impl Send for LlamaModel {}
-unsafe impl Sync for LlamaModel {}
+//
+// The audit applies to `ModelHandle`, which owns the pointer. `LlamaModel`
+// is `Send + Sync` through its `Arc`, which contexts on other threads share.
+unsafe impl Send for ModelHandle {}
+unsafe impl Sync for ModelHandle {}

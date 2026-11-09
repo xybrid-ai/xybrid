@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "math-temperature-negative",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A negative temperature: upstream refuses to load the model",
+  "covers": ["refusal-load"],
+  "artifact": "d1-2b-q4km",
+  "metadata": {
+    "set": {
+      "lfm3.decision.temperature.noul": "f32:-1.0"
+    }
+  },
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"x\"}}}",
+  "upstream": {
+    "load": {
+      "refusal": {
+        "exception": "runtime_error",
+        "status": 500,
+        "type": "server_error",
+        "message": "invalid decision temperature: lfm3.decision.temperature.noul = -1.000000"
+      }
+    }
+  },
+  "xybrid": {
+    "load": {
+      "refuse": "invalid_metadata"
+    },
+    "parse": "not_reached",
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

@@ -12,9 +12,13 @@
 # the four test files drives ~16 native call sites, so the .so is genuinely
 # exercised rather than merely present. It then AOT-compiles the same package
 # into a Linux IL2CPP player and runs the player headlessly against that native.
+# Last, a second EditMode run executes the shared observability runtime scenario
+# (tools/scripts/observability_capture/scenario.md) in the Editor against a local
+# OTLP receiver and checks what the native exported.
 #
 # The Windows plugin loader remains outside hosted CI.
-name: Unity Editor CI
+# Purpose: Run a real Unity Editor: EditMode tests against a Bazel-built native, an IL2CPP player smoke, then the observability runtime scenario.
+name: "SDK: Unity Editor"
 
 on:
   pull_request:
@@ -23,11 +27,18 @@ on:
       - "bindings/unity/**"
       - "crates/xybrid-bolt/**"
       - "crates/xybrid-ffi-facade/**"
+      # The SDK and the observability crate it links: the observability
+      # runtime scenario below exercises their export, content rules and
+      # lifecycle through the C# API. xybrid-core is left to the Apple,
+      # Android and Flutter lanes, which run the same scenario on its changes.
+      - "crates/xybrid-sdk/**"
+      - "crates/xybrid-observability/**"
       - "tools/unity-runtime-smoke/**"
       - "tools/scripts/stage_unity_native.py"
       - "tools/scripts/stage_unity_desktop_ort.py"
       - "tools/scripts/bazel-output.sh"
       - "tools/scripts/write-buildbuddy-rc.sh"
+      - "tools/scripts/observability_capture/**"
       - ".github/workflows/unity-editor.yml"
       # Markdown inside any path above cannot affect this build.
       - "!**.md"
@@ -37,11 +48,14 @@ on:
       - "bindings/unity/**"
       - "crates/xybrid-bolt/**"
       - "crates/xybrid-ffi-facade/**"
+      - "crates/xybrid-sdk/**"
+      - "crates/xybrid-observability/**"
       - "tools/unity-runtime-smoke/**"
       - "tools/scripts/stage_unity_native.py"
       - "tools/scripts/stage_unity_desktop_ort.py"
       - "tools/scripts/bazel-output.sh"
       - "tools/scripts/write-buildbuddy-rc.sh"
+      - "tools/scripts/observability_capture/**"
       - ".github/workflows/unity-editor.yml"
       # Markdown inside any path above cannot affect this build.
       - "!**.md"
@@ -54,7 +68,7 @@ permissions:
   checks: write
 
 concurrency:
-  group: unity-editor-${{ github.workflow }}-${{ github.ref }}
+  group: unity-editor-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -225,6 +239,92 @@ jobs:
           fi
           grep -Fq "[XybridSmoke] OK" "$LOG"
 
+      # The shared observability runtime scenario
+      # (tools/scripts/observability_capture/scenario.md), on the Editor's Mono
+      # runtime against the native staged above.
+      # bindings/unity/Tests/Editor/ObservabilityRuntimeScenarioTests.cs drives
+      # the public C# API against capture_server.py and writes expectations.json;
+      # check_capture.py then compares it with what the receiver recorded
+      # (parent-in, reference-out, manual operations, content controls,
+      # lifecycle).
+      #
+      # game-ci runs the Editor in a container that forwards only its own list
+      # of environment variables and mounts only the workspace, as
+      # /github/workspace. So the test takes its settings as Editor arguments,
+      # writes under the workspace, and reaches the receiver on the runner
+      # through the host network. Without those arguments the test is ignored,
+      # as in the EditMode run above; the check step then fails on the missing
+      # expectations.json, so a skipped scenario cannot pass.
+      - name: Start the observability capture receiver
+        id: capture
+        if: env.UNITY_LICENSE != ''
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/unity-observability"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          # Outlives this step; the check step stops it.
+          nohup python3 tools/scripts/observability_capture/capture_server.py \
+            --port 0 --out "$OUT/capture.jsonl" --ready-file "$OUT/ready.json" \
+            < /dev/null > "$OUT/server.log" 2>&1 &
+          echo "$!" > "$OUT/server.pid"
+          for _ in $(seq 1 100); do
+            [ -s "$OUT/ready.json" ] && break
+            kill -0 "$(cat "$OUT/server.pid")" 2>/dev/null || break
+            sleep 0.1
+          done
+          if [ ! -s "$OUT/ready.json" ]; then
+            cat "$OUT/server.log"
+            echo "::error::capture_server.py did not start."
+            exit 1
+          fi
+          PORT=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["port"])' "$OUT/ready.json")
+          echo "port=$PORT" >> "$GITHUB_OUTPUT"
+          echo "OTLP receiver listening on port $PORT"
+
+      # No githubToken: a failed test then fails this step through Unity's exit
+      # code, without publishing a second check run.
+      - name: Run the observability runtime scenario (EditMode)
+        if: steps.capture.outcome == 'success'
+        uses: game-ci/unity-test-runner@0ff419b913a3630032cbe0de48a0099b5a9f0ed9 # v4.3.1
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: tools/unity-runtime-smoke
+          unityVersion: 6000.3.6f1
+          testMode: EditMode
+          artifactsPath: unity-observability-results
+          useHostNetwork: true
+          customParameters: >-
+            -testCategory ObservabilityRuntimeScenario
+            -xybridScenarioEndpoint http://127.0.0.1:${{ steps.capture.outputs.port }}
+            -xybridScenarioExpectations /github/workspace/unity-observability/expectations.json
+            -xybridScenarioWorkdir /github/workspace/unity-observability/work
+
+      - name: Check the observability capture
+        if: always() && steps.capture.outcome == 'success'
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/unity-observability"
+          # SIGTERM: the receiver writes its last line and exits 0.
+          PID=$(cat "$OUT/server.pid")
+          kill -TERM "$PID" 2>/dev/null || true
+          for _ in $(seq 1 100); do
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 0.1
+          done
+          cat "$OUT/server.log"
+          if [ ! -f "$OUT/expectations.json" ]; then
+            echo "::error::The scenario wrote no expectations.json: the test was ignored (were the -xybridScenario* arguments passed?) or the Editor stopped before it. See unity-observability-results/editmode.log."
+            exit 1
+          fi
+          python3 tools/scripts/observability_capture/check_capture.py \
+            --capture "$OUT/capture.jsonl" \
+            --expectations "$OUT/expectations.json" \
+            --report "$OUT/report.json"
+
       - name: Upload test results
         if: always() && env.UNITY_LICENSE != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -240,5 +340,16 @@ jobs:
         with:
           name: unity-linux-il2cpp-smoke-log
           path: ${{ runner.temp }}/linux-il2cpp-player.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload observability scenario evidence
+        if: always() && steps.capture.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unity-observability-scenario
+          path: |
+            unity-observability
+            unity-observability-results
           if-no-files-found: warn
           retention-days: 7

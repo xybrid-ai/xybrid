@@ -1,10 +1,39 @@
+import type { Observer, ParentInput, TraceMode } from "@xybrid/observability";
+
 export type AcceleratorPreference = "auto" | "wasm" | "webgpu";
 export type SelectedAccelerator = "wasm" | "webgpu";
+
+/** Where an operation joins a trace, and whether it is traced at all. */
+export type TraceOptions = {
+  /** Explicit parent (`op.context()` or a `traceparent`); wins over the ambient context. */
+  readonly parent?: ParentInput;
+  /** `tracestate` accompanying a `traceparent` string parent. */
+  readonly tracestate?: string;
+  /** `suppress` records metrics without a span. */
+  readonly trace?: TraceMode;
+};
+
+/** Per-generation observation details. */
+export type GenerateObservation = TraceOptions & {
+  readonly conversationId?: string;
+  readonly prompt?: {
+    readonly name: string;
+    readonly version?: string;
+    readonly variables?: Readonly<Record<string, string>>;
+  };
+};
 
 export type LoadOptions = {
   readonly wasmPath?: string | URL;
   readonly accelerator?: AcceleratorPreference;
   readonly signal?: AbortSignal;
+  /**
+   * Records the model load and every later generation of this model with an application-owned
+   * `@xybrid/observability` observer. Without it nothing is recorded.
+   */
+  readonly observer?: Observer;
+  /** Trace placement of the `load_model` operation. */
+  readonly observation?: TraceOptions;
 };
 
 export type DownloadProgress = {
@@ -30,36 +59,13 @@ export type HuggingFaceLoadOptions = LoadOptions & {
 
 export type GenerateOptions = {
   readonly maxOutputTokens?: number;
+  /** Trace placement and GenAI request details; used only when the model has an observer. */
+  readonly observation?: GenerateObservation;
 };
 
-export type TensorDataType = "float32" | "int32" | "uint8";
-export type TensorValue =
-  | Float32Array<ArrayBufferLike>
-  | Int32Array<ArrayBufferLike>
-  | Uint8Array<ArrayBufferLike>;
-
-export type TensorDetail = {
-  readonly name: string;
-  readonly shape: readonly number[];
-  readonly dataType: TensorDataType;
-};
-
-export type TensorInput =
-  | TensorValue
-  | {
-      readonly data: TensorValue;
-      readonly shape: readonly number[];
-    };
-
-export type TensorInputs = readonly TensorInput[] | Readonly<Record<string, TensorInput>>;
-
-export type TensorOutput = {
-  readonly name: string;
-  readonly shape: readonly number[];
-  readonly data: TensorValue;
-};
-
-export type RunResult = {
-  readonly outputs: readonly TensorOutput[];
-  readonly byName: Readonly<Record<string, TensorOutput>>;
+/** Load a GGUF URL directly, optionally verifying its declared size and SHA-256. */
+export type GgufLoadOptions = LlmLoadOptions & {
+  readonly contextLength?: number;
+  readonly sizeBytes?: number;
+  readonly sha256?: string;
 };

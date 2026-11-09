@@ -1,0 +1,328 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Streaming remote chat: CLIENT span, server identity, first chunk vs first token, chunk gaps and measured token timing.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 0.5
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 12
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 9
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.time_per_output_chunk",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 2,
+            "sum": 0.2
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.time_to_first_chunk",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 0.25
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "gen_ai.token.modality": "unknown",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "value": 12
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "gen_ai.token.modality": "unknown",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "value": 9
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "xybrid.genai.client.inference.time_to_first_token",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "openai",
+              "gen_ai.request.model": "gpt-4o-mini",
+              "server.address": "api.openai.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 0.18
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.input.messages": [
+            {
+              "parts": [
+                {
+                  "content": "What is the capital of France?",
+                  "type": "text"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "gen_ai.operation.name": "chat",
+          "gen_ai.output.messages": [
+            {
+              "finish_reason": "stop",
+              "parts": [
+                {
+                  "content": "The capital of France is Paris.",
+                  "type": "text"
+                }
+              ],
+              "role": "assistant"
+            }
+          ],
+          "gen_ai.provider.name": "openai",
+          "gen_ai.request.model": "gpt-4o-mini",
+          "gen_ai.request.stream": true,
+          "gen_ai.response.finish_reasons": [
+            "stop"
+          ],
+          "gen_ai.response.time_to_first_chunk": 0.25,
+          "gen_ai.usage.input_tokens": 12,
+          "gen_ai.usage.output_tokens": 9,
+          "server.address": "api.openai.com",
+          "server.port": 443,
+          "xybrid.genai.execution.location": "remote",
+          "xybrid.genai.input.modalities": [
+            "text"
+          ],
+          "xybrid.genai.output.modalities": [
+            "text"
+          ],
+          "xybrid.genai.response.chunk_count": 3,
+          "xybrid.genai.response.time_per_output_token": 0.04,
+          "xybrid.genai.response.time_to_first_token": 0.18,
+          "xybrid.genai.runtime.name": "http"
+        },
+        "end_ms": 500,
+        "id": "chat",
+        "kind": "CLIENT",
+        "name": "chat gpt-4o-mini",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "inference_streaming_remote",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "request": {
+        "input_modalities": [
+          "text"
+        ],
+        "location": "remote",
+        "model": "gpt-4o-mini",
+        "operation": "chat",
+        "output_modalities": [
+          "text"
+        ],
+        "provider": "openai",
+        "runtime": "http",
+        "server_address": "api.openai.com",
+        "server_port": 443,
+        "stream": true
+      }
+    },
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "What is the capital of France?",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 180,
+      "id": "chat",
+      "op": "first_token"
+    },
+    {
+      "at_ms": 250,
+      "id": "chat",
+      "op": "chunk"
+    },
+    {
+      "at_ms": 300,
+      "id": "chat",
+      "op": "first_token"
+    },
+    {
+      "at_ms": 330,
+      "id": "chat",
+      "op": "chunk"
+    },
+    {
+      "at_ms": 450,
+      "id": "chat",
+      "op": "chunk"
+    },
+    {
+      "at_ms": 450,
+      "id": "chat",
+      "op": "token_timing",
+      "time_per_output_token_s": 0.04
+    },
+    {
+      "at_ms": 460,
+      "id": "chat",
+      "input_tokens": 12,
+      "op": "usage",
+      "output_tokens": 9
+    },
+    {
+      "at_ms": 460,
+      "id": "chat",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "stop",
+          "parts": [
+            {
+              "content": "The capital of France is Paris.",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 460,
+      "id": "chat",
+      "op": "finish_reasons",
+      "value": [
+        "stop"
+      ]
+    },
+    {
+      "at_ms": 500,
+      "id": "chat",
+      "op": "end"
+    }
+  ]
+}

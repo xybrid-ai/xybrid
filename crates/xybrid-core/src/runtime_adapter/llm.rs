@@ -122,7 +122,7 @@ fn parsed_tool_calls(text: &str, config: &GenerationConfig) -> Vec<crate::gatewa
     if config.tools.is_empty() {
         return Vec::new();
     }
-    crate::runtime_adapter::tool_call::parse_tool_calls(text)
+    crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(text, &config.tools)
 }
 
 // =============================================================================
@@ -788,6 +788,9 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
             EnvelopeKind::MultiPart(_) => Err(AdapterError::InvalidInput(
                 "LLM adapter expects Text input, not MultiPart".to_string(),
             )),
+            EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                Err(crate::execution::choice::choice_kind_not_runtime_input())
+            }
         }
     }
 }

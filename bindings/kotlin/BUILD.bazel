@@ -15,6 +15,11 @@
 #                         NDK that linked the .so; no vendored drift)
 #   libonnxruntime.so   — vendored, arm64-v8a + x86_64 only (armv7 ships no ORT,
 #                         matching today's AAR)
+#
+# With --//:tts_zzz=true the arm64-v8a libxybrid_bolt.so also links the zzz
+# speech engine (Phonon, Kitten TTS 2) statically; armeabi-v7a and x86_64 build
+# without it (//bazel/zzz:android_without_slice), and the engine's notices ride
+# along under assets/xybrid/zzz/ (:aar_zzz_notices).
 load("@aspect_bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_import")
 load("@rules_kotlin//kotlin:core.bzl", "define_kt_toolchain")
@@ -22,6 +27,7 @@ load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
 load("@rules_pkg//pkg:zip.bzl", "pkg_zip")
 load("//bazel/ggml:android.bzl", "ANDROID_ARM64_CPU_VARIANTS", "ANDROID_ARM64_GGML_LIBS")
+load("//bazel/zzz:notices.bzl", "zzz_notice_files")
 
 # Consumer-compatibility toolchain (registered in MODULE.bazel): rules_kotlin
 # 2.4's bundled kotlinc emits Kotlin 2.1 METADATA by default, which the shipped
@@ -195,6 +201,21 @@ pkg_files(
     renames = {"bazel/R.txt": "R.txt"},
 )
 
+# The speech engine's fourteen notices (runtime terms and upstream licenses),
+# packaged only by a --//:tts_zzz=true build, whose arm64-v8a slice links the
+# engine: the exact files the verified arm64 Android slice exports, at
+# assets/xybrid/zzz/<path>. Android merges library assets into the APK, so an
+# app that ships the SDK carries them. Analysis fails unless all fourteen
+# canonical paths, and nothing else, are present (//bazel/zzz:notices.bzl).
+# Manual: wildcard analysis must not reach @zzz_android, which fails without a
+# staged slice; only the AAR's flag-on select below names this target.
+zzz_notice_files(
+    name = "aar_zzz_notices",
+    notices = "@zzz_android//:notices",
+    prefix = "assets/xybrid/zzz",
+    tags = ["manual"],
+)
+
 pkg_zip(
     name = "xybrid_kotlin_aar",
     srcs = [
@@ -204,7 +225,12 @@ pkg_zip(
     ] + [":jni_bolt_" + abi for abi, _, _, _ in ANDROID_ABIS] +
         [":jni_cxx_" + abi for abi, _, _, _ in ANDROID_ABIS] +
         [":jni_ort_" + abi for abi, _, _, ort_target in ANDROID_ABIS if ort_target] +
-        [":jni_ggml_arm64-v8a"],
+        [":jni_ggml_arm64-v8a"] +
+        select({
+            # Top-level configuration: this zip is not transitioned per ABI.
+            "//:tts_zzz_enabled": [":aar_zzz_notices"],
+            "//conditions:default": [],
+        }),
     out = "xybrid-kotlin.aar",
     visibility = ["//visibility:public"],
 )

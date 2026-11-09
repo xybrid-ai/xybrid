@@ -1,32 +1,33 @@
-//! Tracing module - Span collection for observability.
+//! Execution stage tracing.
 //!
-//! This module provides span-based tracing for TemplateExecutor and other components.
-//! Spans represent units of work with timing and can be nested to form a tree structure.
+//! Execution code marks stages with [`SpanGuard`] and annotates them with
+//! [`add_metadata`]. Those calls go to the [`TraceRecorder`] installed on the
+//! current thread for the duration of one run — never to a process-wide
+//! collector — so concurrent runs cannot see or reset each other's spans.
+//! With no recorder installed every call is a cheap no-op.
 //!
-//! # Usage
+//! The SDK installs a recorder that turns stages into OpenTelemetry child
+//! spans of the run's logical request. Tests and local tooling use
+//! [`CollectingRecorder`] / [`capture`] to inspect the stage tree.
 //!
-//! ```no_run
-//! # fn _example() {
-//! use xybrid_core::tracing::{SpanCollector, SpanGuard};
-//!
-//! let mut collector = SpanCollector::new();
-//! let span_id = collector.start_span("preprocessing");
-//! collector.add_metadata("step", "AudioDecode");
-//! // ... do work ...
-//! collector.end_span();
-//!
-//! // Or use RAII guard against the global collector:
-//! {
-//!     let _guard = SpanGuard::new("inference");
-//!     // span automatically ends when guard drops
-//! }
-//! # let _ = span_id;
-//! # }
 //! ```
+//! use xybrid_core::tracing::{add_metadata, capture, SpanGuard};
+//!
+//! let trace = capture();
+//! {
+//!     let _stage = SpanGuard::new("inference");
+//!     add_metadata("model", "whisper");
+//! }
+//! assert_eq!(trace.stages_json()["spans"][0]["name"], "inference");
+//! ```
+//!
+//! Work that hops threads inside a run carries the recorder explicitly with
+//! [`current_recorder`] and [`RecorderScope::install`].
 
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -68,11 +69,11 @@ impl Span {
     }
 }
 
-/// Collector for tracing spans during execution
+/// An in-memory stage tree for one trace.
 #[derive(Debug, Default)]
 pub struct SpanCollector {
     spans: Vec<Span>,
-    stack: Vec<usize>, // Stack of active span IDs
+    stack: Vec<usize>,
     enabled: bool,
 }
 
@@ -105,17 +106,14 @@ impl SpanCollector {
         self.enabled = enabled;
     }
 
-    /// Start a new span, returns span ID
+    /// Start a new span under the innermost open span, returns span ID
     pub fn start_span(&mut self, name: impl Into<String>) -> usize {
-        if !self.enabled {
-            return 0;
-        }
-
         let parent_id = self.stack.last().copied();
         self.start_span_with_parent(name, parent_id)
     }
 
-    fn start_span_with_parent(
+    /// Start a new span under an explicit parent, returns span ID
+    pub fn start_span_with_parent(
         &mut self,
         name: impl Into<String>,
         parent_id: Option<usize>,
@@ -123,9 +121,7 @@ impl SpanCollector {
         if !self.enabled {
             return 0;
         }
-
         let span_id = self.spans.len();
-
         self.spans.push(Span::new(name.into(), parent_id, span_id));
         self.stack.push(span_id);
         span_id
@@ -136,7 +132,6 @@ impl SpanCollector {
         if !self.enabled {
             return;
         }
-
         if let Some(span_id) = self.stack.pop() {
             if let Some(span) = self.spans.get_mut(span_id) {
                 span.end();
@@ -149,26 +144,21 @@ impl SpanCollector {
         if !self.enabled {
             return;
         }
-
         if let Some(span) = self.spans.get_mut(span_id) {
             span.end();
         }
-        // Remove from stack if present
         self.stack.retain(|&id| id != span_id);
     }
 
     /// Add metadata to the current span
     pub fn add_metadata(&mut self, key: impl Into<String>, value: impl Into<String>) {
-        if !self.enabled {
-            return;
-        }
-
         if let Some(&span_id) = self.stack.last() {
             self.add_metadata_to_span(span_id, key, value);
         }
     }
 
-    fn add_metadata_to_span(
+    /// Add metadata to a specific span
+    pub fn add_metadata_to_span(
         &mut self,
         span_id: usize,
         key: impl Into<String>,
@@ -177,7 +167,6 @@ impl SpanCollector {
         if !self.enabled {
             return;
         }
-
         if let Some(span) = self.spans.get_mut(span_id) {
             span.metadata.insert(key.into(), value.into());
         }
@@ -188,7 +177,7 @@ impl SpanCollector {
         &self.spans
     }
 
-    /// Get spans as a serializable structure for API transmission
+    /// Get spans as a serializable structure
     pub fn to_stages_json(&self) -> serde_json::Value {
         let spans: Vec<serde_json::Value> = self
             .spans
@@ -215,7 +204,7 @@ impl SpanCollector {
             .sum()
     }
 
-    /// Reset the collector for a new trace
+    /// Clear the collector
     pub fn reset(&mut self) {
         self.spans.clear();
         self.stack.clear();
@@ -227,123 +216,458 @@ impl SpanCollector {
     }
 }
 
-// Thread-safe global span collector for use across the crate
-lazy_static::lazy_static! {
-    static ref GLOBAL_COLLECTOR: Arc<Mutex<SpanCollector>> = Arc::new(Mutex::new(SpanCollector::with_enabled(false)));
+/// Receives the stages of one run.
+///
+/// Span ids are recorder-defined; `parent` is the id of the innermost stage
+/// open on the calling thread when the span started (`None` for the run's
+/// first stage). Implementations must be cheap: they run on the inference
+/// thread.
+pub trait TraceRecorder: Send + Sync {
+    /// Optional concrete recorder access for the layer that installed it.
+    /// Core never interprets the extension or depends on its owner's types.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
+    /// Starts a stage and returns its id.
+    fn start_span(&self, name: &str, parent: Option<u64>) -> u64;
+    /// Ends a stage.
+    fn end_span(&self, id: u64);
+    /// Annotates a stage.
+    fn add_metadata(&self, id: u64, key: &str, value: &str);
+    /// W3C trace headers (`traceparent`, optional `tracestate`) for outbound
+    /// requests made inside stage `id` (or the run itself when `None`).
+    /// Recorders without a trace return `None`.
+    fn trace_headers(&self, _id: Option<u64>) -> Option<TraceHeaders> {
+        None
+    }
+    /// Whether trace context may leave the Xybrid runtime for this provider origin.
+    fn allows_provider_context(&self, _origin: &str) -> bool {
+        false
+    }
+    /// Core is about to re-send an outbound request made from stage `id` (or
+    /// the run itself when `None`) because the previous try failed at
+    /// `failed_at` with `error_type`, a closed-vocabulary label (never a
+    /// message).
+    ///
+    /// Recorders that model execution attempts end the current attempt as
+    /// failed at `failed_at` (so the backoff wait belongs to neither try) and
+    /// start a retry attempt now, so the re-sent request (and any stage
+    /// started afterwards) carries the retry's own context. Called on the
+    /// thread that makes the request, after the backoff and before the
+    /// request's trace headers are read.
+    fn retry_request(&self, _id: Option<u64>, _error_type: &str, _failed_at: std::time::Instant) {}
 }
 
-#[cfg(test)]
-static GLOBAL_TRACE_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-#[cfg(test)]
-pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-    GLOBAL_TRACE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+/// W3C Trace Context headers for an outbound request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceHeaders {
+    /// `traceparent` header value.
+    pub traceparent: String,
+    /// `tracestate` header value, if any.
+    pub tracestate: Option<String>,
 }
+
+struct ThreadTrace {
+    recorder: Arc<dyn TraceRecorder>,
+    stack: Vec<u64>,
+    /// Identifies this installation, so a [`SpanGuard`] dropped after its
+    /// scope is gone (a later poll of an instrumented future, another thread)
+    /// still ends its stage on the recorder that started it.
+    scope: u64,
+}
+
+/// Source of [`ThreadTrace::scope`] tokens; only uniqueness matters.
+static NEXT_SCOPE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 thread_local! {
-    static THREAD_SPAN_STACK: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+    static CURRENT: RefCell<Vec<ThreadTrace>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Initialize the global tracing collector
-pub fn init_tracing(enabled: bool) {
-    if let Ok(mut collector) = GLOBAL_COLLECTOR.lock() {
-        collector.set_enabled(enabled);
-        collector.reset();
-    }
-    THREAD_SPAN_STACK.with(|stack| stack.borrow_mut().clear());
+/// Installs a recorder on the current thread until dropped; restores the
+/// previous one (scopes nest).
+#[must_use = "the recorder is uninstalled when the scope drops"]
+pub struct RecorderScope {
+    _not_send: std::marker::PhantomData<*const ()>,
 }
 
-/// Start a span in the global collector
-pub fn start_span(name: impl Into<String>) -> usize {
-    let parent_id = THREAD_SPAN_STACK.with(|stack| stack.borrow().last().copied());
-    let span_id = GLOBAL_COLLECTOR
-        .lock()
-        .map(|mut c| c.start_span_with_parent(name, parent_id))
-        .unwrap_or(0);
-    THREAD_SPAN_STACK.with(|stack| stack.borrow_mut().push(span_id));
-    span_id
-}
-
-/// End the current span in the global collector
-pub fn end_span() {
-    let span_id = THREAD_SPAN_STACK.with(|stack| stack.borrow_mut().pop());
-    if let Ok(mut collector) = GLOBAL_COLLECTOR.lock() {
-        if let Some(span_id) = span_id {
-            collector.end_span_by_id(span_id);
+impl RecorderScope {
+    /// Installs `recorder` on this thread.
+    pub fn install(recorder: Arc<dyn TraceRecorder>) -> Self {
+        CURRENT.with(|c| {
+            c.borrow_mut().push(ThreadTrace {
+                recorder,
+                stack: Vec::new(),
+                scope: NEXT_SCOPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            })
+        });
+        Self {
+            _not_send: std::marker::PhantomData,
         }
     }
 }
 
-/// End a specific span by ID
-pub fn end_span_by_id(id: usize) {
-    if let Ok(mut collector) = GLOBAL_COLLECTOR.lock() {
-        collector.end_span_by_id(id);
+impl Drop for RecorderScope {
+    fn drop(&mut self) {
+        CURRENT.with(|c| {
+            c.borrow_mut().pop();
+        });
     }
 }
 
-/// Add metadata to the current span
-pub fn add_metadata(key: impl Into<String>, value: impl Into<String>) {
-    let span_id = THREAD_SPAN_STACK.with(|stack| stack.borrow().last().copied());
-    if let Ok(mut collector) = GLOBAL_COLLECTOR.lock() {
-        if let Some(span_id) = span_id {
-            collector.add_metadata_to_span(span_id, key, value);
-        }
+impl fmt::Debug for RecorderScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("RecorderScope")
     }
 }
 
-/// Get the stages JSON from the global collector
-pub fn get_stages_json() -> serde_json::Value {
-    GLOBAL_COLLECTOR
-        .lock()
-        .map(|c| c.to_stages_json())
-        .unwrap_or(serde_json::json!({ "spans": [] }))
+/// The recorder installed on this thread, to carry into another thread.
+pub fn current_recorder() -> Option<Arc<dyn TraceRecorder>> {
+    CURRENT.with(|c| c.borrow().last().map(|t| t.recorder.clone()))
 }
 
-/// Reset the global collector
-pub fn reset_tracing() {
-    if let Ok(mut collector) = GLOBAL_COLLECTOR.lock() {
-        collector.reset();
-    }
-    THREAD_SPAN_STACK.with(|stack| stack.borrow_mut().clear());
-}
-
-/// Check if global tracing is enabled
+/// Whether a recorder is installed on this thread.
 pub fn is_tracing_enabled() -> bool {
-    GLOBAL_COLLECTOR
-        .lock()
-        .map(|c| c.is_enabled())
-        .unwrap_or(false)
+    CURRENT.with(|c| !c.borrow().is_empty())
 }
 
-/// RAII guard for automatic span ending
+/// Start a stage on this thread's recorder. Returns its id (0 when no
+/// recorder is installed).
+pub fn start_span(name: impl Into<String>) -> u64 {
+    CURRENT.with(|c| {
+        let mut c = c.borrow_mut();
+        let Some(trace) = c.last_mut() else {
+            return 0;
+        };
+        let name = name.into();
+        let id = trace
+            .recorder
+            .start_span(&name, trace.stack.last().copied());
+        trace.stack.push(id);
+        id
+    })
+}
+
+/// End the innermost stage on this thread.
+pub fn end_span() {
+    CURRENT.with(|c| {
+        let mut c = c.borrow_mut();
+        if let Some(trace) = c.last_mut() {
+            if let Some(id) = trace.stack.pop() {
+                trace.recorder.end_span(id);
+            }
+        }
+    });
+}
+
+/// End a specific stage on this thread.
+pub fn end_span_by_id(id: u64) {
+    CURRENT.with(|c| {
+        let mut c = c.borrow_mut();
+        if let Some(trace) = c.last_mut() {
+            if trace.stack.contains(&id) {
+                trace.stack.retain(|s| *s != id);
+                trace.recorder.end_span(id);
+            }
+        }
+    });
+}
+
+/// Annotate the innermost open stage on this thread.
+pub fn add_metadata(key: impl Into<String>, value: impl Into<String>) {
+    CURRENT.with(|c| {
+        let c = c.borrow();
+        if let Some(trace) = c.last() {
+            if let Some(&id) = trace.stack.last() {
+                trace.recorder.add_metadata(id, &key.into(), &value.into());
+            }
+        }
+    });
+}
+
+/// Id of the innermost open stage of this thread's current recorder, if any.
+///
+/// Lets the layer that installed the recorder parent work started inside an
+/// open stage to that stage rather than to the recorder's root.
+pub fn current_span_id() -> Option<u64> {
+    CURRENT.with(|c| c.borrow().last().and_then(|t| t.stack.last().copied()))
+}
+
+/// Prefix of the stage core opens around loading weights into a runtime.
+///
+/// The full stage name is `model_load:<runtime>`, where `<runtime>` is the
+/// runtime's wire label (`llamacpp`, `ort`, `whispercpp`, `zzz`, ...). Core
+/// opens it only when a load actually happens (a cache miss), so a warm
+/// runtime reports no load.
+pub const MODEL_LOAD_STAGE_PREFIX: &str = "model_load:";
+
+/// Metadata key with which core marks the innermost stage as failed
+/// (value `"error"`); see [`mark_stage_failed`].
+pub const STAGE_OUTCOME_KEY: &str = "outcome";
+
+/// Marks the innermost open stage as failed without exporting why: the
+/// recorder only learns that the stage's work (for example a model load)
+/// did not succeed.
+pub fn mark_stage_failed() {
+    add_metadata(STAGE_OUTCOME_KEY, "error");
+}
+
+/// Opens a [`MODEL_LOAD_STAGE_PREFIX`] stage for `runtime`, or a no-op guard
+/// when no recorder is installed.
+pub fn model_load_stage(runtime: &str) -> SpanGuard {
+    if !is_tracing_enabled() {
+        return SpanGuard {
+            id: 0,
+            origin: None,
+        };
+    }
+    SpanGuard::new(format!("{MODEL_LOAD_STAGE_PREFIX}{runtime}"))
+}
+
+/// W3C trace headers for an outbound request made from the innermost open
+/// stage on this thread, so remote spans join the run's trace.
+pub fn current_trace_headers() -> Option<TraceHeaders> {
+    CURRENT.with(|c| {
+        let c = c.borrow();
+        let trace = c.last()?;
+        trace.recorder.trace_headers(trace.stack.last().copied())
+    })
+}
+
+/// The `traceparent` part of [`current_trace_headers`].
+pub fn current_traceparent() -> Option<String> {
+    current_trace_headers().map(|h| h.traceparent)
+}
+
+/// Adds `traceparent`/`tracestate` to an outbound request when the current
+/// run is traced.
+pub fn inject_trace_headers(request: ureq::Request) -> ureq::Request {
+    match current_trace_headers() {
+        Some(headers) => {
+            let request = request.set("traceparent", &headers.traceparent);
+            match headers.tracestate {
+                Some(state) => request.set("tracestate", &state),
+                None => request,
+            }
+        }
+        None => request,
+    }
+}
+
+/// Canonical HTTP(S) origin for an explicit provider propagation allowlist.
+/// Credentials, query strings, fragments and non-root paths are rejected.
+pub fn provider_origin(origin: &str) -> Option<String> {
+    let url = url::Url::parse(origin).ok()?;
+    (matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && matches!(url.path(), "" | "/"))
+    .then(|| url.origin().ascii_serialization())
+}
+
+/// Injects context only when the current session explicitly permits this provider.
+/// Xybrid-owned hops use [`inject_trace_headers`] directly.
+pub fn inject_provider_trace_headers(request: ureq::Request) -> ureq::Request {
+    let permitted = url::Url::parse(request.url()).ok().is_some_and(|url| {
+        CURRENT.with(|c| {
+            c.borrow().last().is_some_and(|trace| {
+                trace
+                    .recorder
+                    .allows_provider_context(&url.origin().ascii_serialization())
+            })
+        })
+    });
+    if permitted {
+        inject_trace_headers(request)
+    } else {
+        request
+    }
+}
+
+/// Reports that core is about to re-send the current outbound request after a
+/// try that failed at `failed_at` with `error_type` (see
+/// [`TraceRecorder::retry_request`]). Call it before the retry injects its
+/// trace headers, so the retry carries its own parent context.
+pub fn record_request_retry(error_type: &str, failed_at: std::time::Instant) {
+    // Release the thread-local borrow before calling out: the recorder may
+    // read this thread's tracing state.
+    let target = CURRENT.with(|c| {
+        c.borrow()
+            .last()
+            .map(|t| (t.recorder.clone(), t.stack.last().copied()))
+    });
+    if let Some((recorder, id)) = target {
+        recorder.retry_request(id, error_type, failed_at);
+    }
+}
+
+/// RAII guard for a stage.
+///
+/// The stage always ends on the recorder that started it, even when the guard
+/// is dropped after that recorder's scope is gone: a guard held across an
+/// `.await` of a future whose every poll installs a fresh scope, or a guard
+/// moved to another thread.
 pub struct SpanGuard {
-    id: usize,
-    use_global: bool,
+    id: u64,
+    /// The recorder and scope the stage started under; `None` when inactive.
+    origin: Option<(Arc<dyn TraceRecorder>, u64)>,
 }
 
 impl SpanGuard {
-    /// Create a new guard that uses the global collector
+    /// Starts a stage on this thread's recorder.
     pub fn new(name: impl Into<String>) -> Self {
-        let id = start_span(name);
-        Self {
-            id,
-            use_global: true,
+        if !is_tracing_enabled() {
+            return Self {
+                id: 0,
+                origin: None,
+            };
+        }
+        let name = name.into();
+        let started = CURRENT.with(|c| {
+            let mut c = c.borrow_mut();
+            let trace = c.last_mut()?;
+            let id = trace
+                .recorder
+                .start_span(&name, trace.stack.last().copied());
+            trace.stack.push(id);
+            Some((id, (trace.recorder.clone(), trace.scope)))
+        });
+        match started {
+            Some((id, origin)) => Self {
+                id,
+                origin: Some(origin),
+            },
+            None => Self {
+                id: 0,
+                origin: None,
+            },
         }
     }
 
-    /// Get the span ID
-    pub fn id(&self) -> usize {
+    /// The stage id.
+    pub fn id(&self) -> u64 {
         self.id
     }
 }
 
 impl Drop for SpanGuard {
     fn drop(&mut self) {
-        if self.use_global {
-            end_span();
+        let Some((recorder, scope)) = self.origin.take() else {
+            return;
+        };
+        let id = self.id;
+        let end = CURRENT.with(|c| {
+            let mut c = c.borrow_mut();
+            match c.iter_mut().rev().find(|t| t.scope == scope) {
+                // Its scope is still installed here: end the stage unless it
+                // was already ended explicitly.
+                Some(trace) => {
+                    let open = trace.stack.contains(&id);
+                    trace.stack.retain(|s| *s != id);
+                    open
+                }
+                // Its scope is gone: only the recorder can still end it.
+                None => true,
+            }
+        });
+        if end {
+            recorder.end_span(id);
         }
+    }
+}
+
+impl fmt::Debug for SpanGuard {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SpanGuard").field("id", &self.id).finish()
+    }
+}
+
+/// A recorder that keeps the stage tree in memory (tests, local tooling).
+#[derive(Debug, Default)]
+pub struct CollectingRecorder {
+    collector: Mutex<SpanCollector>,
+}
+
+impl CollectingRecorder {
+    /// A new, empty recorder.
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            collector: Mutex::new(SpanCollector::new()),
+        })
+    }
+
+    /// The stages recorded so far, as `{"spans": [...]}`.
+    pub fn stages_json(&self) -> serde_json::Value {
+        self.collector
+            .lock()
+            .map(|c| c.to_stages_json())
+            .unwrap_or_else(|_| serde_json::json!({ "spans": [] }))
+    }
+
+    /// A copy of the recorded spans.
+    pub fn spans(&self) -> Vec<Span> {
+        self.collector
+            .lock()
+            .map(|c| c.spans().to_vec())
+            .unwrap_or_default()
+    }
+}
+
+impl TraceRecorder for CollectingRecorder {
+    fn start_span(&self, name: &str, parent: Option<u64>) -> u64 {
+        self.collector
+            .lock()
+            .map(|mut c| c.start_span_with_parent(name, parent.map(|p| p as usize)) as u64)
+            .unwrap_or(0)
+    }
+
+    fn end_span(&self, id: u64) {
+        if let Ok(mut c) = self.collector.lock() {
+            c.end_span_by_id(id as usize);
+        }
+    }
+
+    fn add_metadata(&self, id: u64, key: &str, value: &str) {
+        if let Ok(mut c) = self.collector.lock() {
+            c.add_metadata_to_span(id as usize, key, value);
+        }
+    }
+}
+
+/// Collects the stages run on this thread until dropped.
+#[must_use = "stages are only collected while the capture is alive"]
+pub struct TraceCapture {
+    recorder: Arc<CollectingRecorder>,
+    _scope: RecorderScope,
+}
+
+impl TraceCapture {
+    /// The stages recorded so far, as `{"spans": [...]}`.
+    pub fn stages_json(&self) -> serde_json::Value {
+        self.recorder.stages_json()
+    }
+
+    /// The recorder, to install on helper threads.
+    pub fn recorder(&self) -> Arc<CollectingRecorder> {
+        self.recorder.clone()
+    }
+}
+
+impl fmt::Debug for TraceCapture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TraceCapture").finish_non_exhaustive()
+    }
+}
+
+/// Starts collecting the stages run on this thread.
+pub fn capture() -> TraceCapture {
+    let recorder = CollectingRecorder::new();
+    let scope = RecorderScope::install(recorder.clone());
+    TraceCapture {
+        recorder,
+        _scope: scope,
     }
 }
 
@@ -383,6 +707,31 @@ mod tests {
     }
 
     #[test]
+    fn current_span_id_and_model_load_stage_follow_the_innermost_stage() {
+        assert_eq!(current_span_id(), None);
+        let inactive = model_load_stage("ort");
+        assert_eq!(inactive.id(), 0);
+        drop(inactive);
+        let trace = capture();
+        assert_eq!(current_span_id(), None);
+        let outer = SpanGuard::new("outer");
+        assert_eq!(current_span_id(), Some(outer.id()));
+        {
+            let load = model_load_stage("llamacpp");
+            assert_eq!(current_span_id(), Some(load.id()));
+        }
+        assert_eq!(current_span_id(), Some(outer.id()));
+        drop(outer);
+        let names: Vec<String> = trace
+            .recorder()
+            .spans()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(names, ["outer", "model_load:llamacpp"]);
+    }
+
+    #[test]
     fn test_disabled_collector() {
         let mut collector = SpanCollector::with_enabled(false);
 
@@ -407,5 +756,214 @@ mod tests {
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0]["name"], "test");
         assert!(spans[0]["duration_ms"].as_u64().unwrap() >= 10);
+    }
+
+    #[test]
+    fn no_recorder_means_no_op() {
+        let _g = SpanGuard::new("ignored");
+        add_metadata("k", "v");
+        assert!(!is_tracing_enabled());
+        assert!(current_traceparent().is_none());
+    }
+
+    #[test]
+    fn captures_nested_stages_on_this_thread_only() {
+        let trace = capture();
+        {
+            let _outer = SpanGuard::new("outer");
+            add_metadata("a", "1");
+            {
+                let _inner = SpanGuard::new("inner");
+                add_metadata("b", "2");
+            }
+            std::thread::spawn(|| {
+                // Another thread has no recorder: nothing leaks in.
+                let _g = SpanGuard::new("other-thread");
+            })
+            .join()
+            .unwrap();
+        }
+        let spans = trace.recorder().spans();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[1].parent_id, Some(0));
+        assert_eq!(spans[0].metadata["a"], "1");
+        assert_eq!(spans[1].metadata["b"], "2");
+    }
+
+    #[test]
+    fn concurrent_captures_are_isolated() {
+        let handles: Vec<_> = (0..4)
+            .map(|n| {
+                std::thread::spawn(move || {
+                    let trace = capture();
+                    for _ in 0..=n {
+                        let _g = SpanGuard::new(format!("t{n}"));
+                    }
+                    trace.recorder().spans().len()
+                })
+            })
+            .collect();
+        let counts: Vec<usize> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(counts, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn recorder_can_follow_work_across_threads() {
+        let trace = capture();
+        let _outer = SpanGuard::new("outer");
+        let recorder = current_recorder().unwrap();
+        std::thread::spawn(move || {
+            let _scope = RecorderScope::install(recorder);
+            let _g = SpanGuard::new("helper");
+        })
+        .join()
+        .unwrap();
+        drop(_outer);
+        let names: Vec<String> = trace
+            .recorder()
+            .spans()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(names, vec!["outer", "helper"]);
+    }
+
+    #[test]
+    fn scopes_nest_and_restore() {
+        let outer = capture();
+        {
+            let inner = capture();
+            let _g = SpanGuard::new("inner-only");
+            drop(_g);
+            assert_eq!(inner.recorder().spans().len(), 1);
+        }
+        let _g = SpanGuard::new("outer-only");
+        drop(_g);
+        assert_eq!(outer.recorder().spans().len(), 1);
+    }
+    #[test]
+    fn provider_headers_require_an_exact_allowed_origin() {
+        struct Recorder;
+        impl TraceRecorder for Recorder {
+            fn start_span(&self, _: &str, _: Option<u64>) -> u64 {
+                1
+            }
+            fn end_span(&self, _: u64) {}
+            fn add_metadata(&self, _: u64, _: &str, _: &str) {}
+            fn allows_provider_context(&self, origin: &str) -> bool {
+                origin == "https://allowed.example"
+            }
+            fn trace_headers(&self, _: Option<u64>) -> Option<TraceHeaders> {
+                Some(TraceHeaders {
+                    traceparent: "00-11111111111111111111111111111111-2222222222222222-01".into(),
+                    tracestate: Some("xy=a".into()),
+                })
+            }
+        }
+        let _scope = RecorderScope::install(Arc::new(Recorder));
+        for url in [
+            "https://other.example/v1",
+            "https://allowed.example.evil/v1",
+            "http://allowed.example/v1",
+            "https://allowed.example:444/v1",
+        ] {
+            assert!(inject_provider_trace_headers(ureq::get(url))
+                .header("traceparent")
+                .is_none());
+        }
+        let request =
+            inject_provider_trace_headers(ureq::get("https://allowed.example:443/v1/chat"));
+        assert!(request.header("traceparent").is_some());
+        assert_eq!(request.header("tracestate"), Some("xy=a"));
+        assert!(
+            inject_trace_headers(ureq::get("https://self-hosted.xybrid/v1"))
+                .header("traceparent")
+                .is_some()
+        );
+    }
+
+    /// A guard held across a poll boundary (the scope that started it is
+    /// replaced by a fresh one for the same recorder) still ends its stage.
+    #[test]
+    fn guards_end_their_stage_after_their_scope_is_gone() {
+        let recorder = CollectingRecorder::new();
+        let first = RecorderScope::install(recorder.clone());
+        let held = SpanGuard::new("held");
+        drop(first);
+        let second = RecorderScope::install(recorder.clone());
+        let next = SpanGuard::new("next-poll");
+        drop(held);
+        drop(next);
+        drop(second);
+        // And a guard moved to a thread without any recorder.
+        let scope = RecorderScope::install(recorder.clone());
+        let moved = SpanGuard::new("moved");
+        std::thread::spawn(move || drop(moved)).join().unwrap();
+        drop(scope);
+        let spans = recorder.spans();
+        let names: Vec<&str> = spans.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["held", "next-poll", "moved"]);
+        for span in &spans {
+            assert!(span.duration_ms.is_some(), "{} never ended", span.name);
+        }
+    }
+
+    #[test]
+    fn request_retries_reach_the_current_recorder_with_its_innermost_stage() {
+        #[derive(Default)]
+        struct Retries(Mutex<Vec<(Option<u64>, String, std::time::Instant)>>);
+        impl TraceRecorder for Retries {
+            fn start_span(&self, _: &str, _: Option<u64>) -> u64 {
+                7
+            }
+            fn end_span(&self, _: u64) {}
+            fn add_metadata(&self, _: u64, _: &str, _: &str) {}
+            fn retry_request(
+                &self,
+                id: Option<u64>,
+                error_type: &str,
+                failed_at: std::time::Instant,
+            ) {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((id, error_type.to_owned(), failed_at));
+            }
+        }
+        let first = std::time::Instant::now();
+        let second = first + std::time::Duration::from_millis(5);
+        // No recorder: a no-op.
+        record_request_retry("timeout", first);
+        let recorder = Arc::new(Retries::default());
+        let _scope = RecorderScope::install(recorder.clone());
+        record_request_retry("rate_limited", first);
+        let stage = SpanGuard::new("request");
+        record_request_retry("gateway_error", second);
+        drop(stage);
+        assert_eq!(
+            *recorder.0.lock().unwrap(),
+            [
+                (None, "rate_limited".to_owned(), first),
+                (Some(7), "gateway_error".to_owned(), second)
+            ]
+        );
+    }
+
+    #[test]
+    fn provider_origin_rejects_ambiguous_allowlist_entries() {
+        assert_eq!(
+            provider_origin("https://ALLOWED.example:443/"),
+            Some("https://allowed.example".into())
+        );
+        for origin in [
+            "ftp://example.com",
+            "https://u:p@example.com",
+            "https://example.com/path",
+            "https://example.com?x=1",
+            "https://example.com#fragment",
+            "example.com",
+        ] {
+            assert!(provider_origin(origin).is_none(), "{origin}");
+        }
     }
 }

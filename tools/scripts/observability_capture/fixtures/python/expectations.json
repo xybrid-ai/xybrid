@@ -1,0 +1,155 @@
+{
+  "automatic": {
+    "load": {
+      "error": null,
+      "outcome": "ok"
+    },
+    "run": {
+      "error": "InferenceError: Execution failed: Inference error: Backend error: Load failed: Model not found: Model file not found: <workdir>/scenario-weightless/model.onnx",
+      "outcome": "error"
+    }
+  },
+  "binding": "python",
+  "lifecycle": {
+    "after_shutdown": {
+      "flush": "ok",
+      "workflow_context": null,
+      "workflow_ref": null
+    },
+    "flush": "ok",
+    "shutdown": [
+      "ok",
+      "ok"
+    ]
+  },
+  "parent_span_id": "707974686f6e0000",
+  "references": {
+    "inference": {
+      "span_id": "08974c98c5bbd606",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "inference_failed": {
+      "span_id": "ca014d8230390af2",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "inference_released": {
+      "span_id": "7c82f91d521a143c",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "load": {
+      "span_id": "ed9b4f5cbe2a2734",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "run": null,
+    "tool": {
+      "span_id": "c66567ad8146e309",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "workflow": {
+      "span_id": "719f88b2d14fdb32",
+      "trace_id": "78793a707974686f6e00000000000000"
+    }
+  },
+  "scenario_error": null,
+  "schema": "xybrid-observability-scenario/1",
+  "sdk_version": "0.17.0",
+  "stats": {
+    "after_flush": {
+      "enabled": true,
+      "logs": {
+        "accepted": 2,
+        "dropped": 0,
+        "exported": 2,
+        "failed": 0,
+        "pending": 0
+      },
+      "metrics": {
+        "accepted": 8,
+        "dropped": 0,
+        "exported": 8,
+        "failed": 0,
+        "pending": 0
+      },
+      "traces": {
+        "accepted": 9,
+        "dropped": 0,
+        "exported": 9,
+        "failed": 0,
+        "pending": 0
+      }
+    },
+    "after_release": {
+      "enabled": true,
+      "logs": {
+        "accepted": 1,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 1
+      },
+      "metrics": {
+        "accepted": 0,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 0
+      },
+      "traces": {
+        "accepted": 4,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 4
+      }
+    },
+    "after_shutdown": {
+      "enabled": false,
+      "logs": {
+        "accepted": 0,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 0
+      },
+      "metrics": {
+        "accepted": 0,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 0
+      },
+      "traces": {
+        "accepted": 0,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    },
+    "before_release": {
+      "enabled": true,
+      "logs": {
+        "accepted": 1,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 1
+      },
+      "metrics": {
+        "accepted": 0,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 0
+      },
+      "traces": {
+        "accepted": 3,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 3
+      }
+    }
+  },
+  "trace_id": "78793a707974686f6e00000000000000"
+}

@@ -1,9 +1,16 @@
 //! Runtime feature-flag introspection.
 //!
-//! Reports which Cargo features were enabled at compile time so callers
+//! Reports which compiled features are available on this host so callers
 //! (e.g. the registry telemetry header) can advertise the active backend set.
 
 use std::sync::OnceLock;
+
+/// The registry serves the `ios-arm64` whisper bundles (Core ML encoder
+/// included) only to clients that list this backend.
+#[cfg(feature = "asr-whispercpp")]
+const WHISPER_COREML: bool = xybrid_whisper::COREML_ENCODER;
+#[cfg(not(feature = "asr-whispercpp"))]
+const WHISPER_COREML: bool = false;
 
 // Forward-compatible feature names: some entries (`ort-cuda`, `espeak`) are
 // not yet declared in Cargo.toml. The `cfg!()` checks resolve to `false`
@@ -13,9 +20,17 @@ use std::sync::OnceLock;
 #[allow(unexpected_cfgs)]
 const ALL_FEATURES: &[(&str, bool)] = &[
     ("asr-whispercpp", cfg!(feature = "asr-whispercpp")),
+    ("asr-whispercpp-coreml", WHISPER_COREML),
     ("candle-cuda", cfg!(feature = "candle-cuda")),
     ("candle-metal", cfg!(feature = "candle-metal")),
     ("espeak", cfg!(feature = "espeak")),
+    // The registry serves `lfm3-1.7b` only to clients that list
+    // `llamacpp-lfm3`, and `lfm3-vl-2b` only to those that list
+    // `llamacpp-lfm3vl`. Older builds report `llm-llamacpp` too but can't run
+    // LFM3: 0.15.0 and earlier lack the `lfm3` architecture, and 0.16.0 loads
+    // it without LFM3's prompt format, tool calls or image-token cap.
+    ("llamacpp-lfm3", cfg!(feature = "llm-llamacpp")),
+    ("llamacpp-lfm3vl", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-llamacpp", cfg!(feature = "llm-llamacpp")),
     ("llm-llamacpp-vision", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-mistral", cfg!(feature = "llm-mistral")),
@@ -23,9 +38,14 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     ("ort-cuda", cfg!(feature = "ort-cuda")),
     ("ort-download", cfg!(feature = "ort-download")),
     ("ort-dynamic", cfg!(feature = "ort-dynamic")),
+    ("tts-zzz", cfg!(feature = "tts-zzz")),
     // Vision (image envelopes + preprocessing pipeline) is always compiled in;
     // the heavy native VLM backend is reported via `llm-llamacpp-vision`.
     ("vision", true),
+    // The registry serves `phonon-31m-en` only to clients that list this
+    // backend. Every `tts-zzz` build pins a zzz engine that loads it; the
+    // rc.6 engine pinned by 0.12.0 rejects it, so `tts-zzz` alone cannot gate it.
+    ("zzz-phonon-31m", cfg!(feature = "tts-zzz")),
 ];
 
 /// Return the sorted list of enabled runtime feature names.
@@ -35,14 +55,31 @@ const ALL_FEATURES: &[(&str, bool)] = &[
 pub fn enabled() -> &'static [&'static str] {
     static ENABLED: OnceLock<Vec<&'static str>> = OnceLock::new();
     ENABLED
-        .get_or_init(|| filter_enabled(ALL_FEATURES))
+        .get_or_init(|| filter_enabled(ALL_FEATURES, zzz_available()))
         .as_slice()
 }
 
-fn filter_enabled(items: &[(&'static str, bool)]) -> Vec<&'static str> {
+fn zzz_available() -> bool {
+    #[cfg(feature = "tts-zzz")]
+    {
+        xybrid_zzz_sys::availability().is_ok()
+            && xybrid_zzz_sys::abi_version() == xybrid_zzz_sys::ZZZ_EMBED_ABI_VERSION
+            && xybrid_zzz_sys::supports_model("phonon")
+            && xybrid_zzz_sys::supports_model("kitten-tts2")
+    }
+    #[cfg(not(feature = "tts-zzz"))]
+    {
+        false
+    }
+}
+
+fn filter_enabled(items: &[(&'static str, bool)], zzz_available: bool) -> Vec<&'static str> {
     let mut names: Vec<&'static str> = items
         .iter()
-        .filter_map(|(name, on)| if *on { Some(*name) } else { None })
+        .filter_map(|(name, on)| {
+            let available = zzz_available || !matches!(*name, "tts-zzz" | "zzz-phonon-31m");
+            (*on && available).then_some(*name)
+        })
         .collect();
     names.sort();
     names
@@ -54,7 +91,7 @@ mod tests {
 
     #[test]
     fn empty_input_yields_empty_slice() {
-        let result = filter_enabled(&[]);
+        let result = filter_enabled(&[], true);
         assert!(result.is_empty());
     }
 
@@ -65,7 +102,7 @@ mod tests {
             ("ort-coreml", false),
             ("llm-llamacpp", false),
         ];
-        assert!(filter_enabled(items).is_empty());
+        assert!(filter_enabled(items, true).is_empty());
     }
 
     #[test]
@@ -76,7 +113,7 @@ mod tests {
             ("llm-llamacpp", true),
         ];
         assert_eq!(
-            filter_enabled(items),
+            filter_enabled(items, true),
             vec!["candle-metal", "llm-llamacpp", "ort-download"]
         );
     }
@@ -125,5 +162,49 @@ mod tests {
     #[test]
     fn llamacpp_reports_enabled() {
         assert!(enabled().contains(&"llm-llamacpp"));
+    }
+
+    #[test]
+    fn lfm3_backends_follow_the_llama_cpp_features() {
+        assert_eq!(
+            enabled().contains(&"llamacpp-lfm3"),
+            cfg!(feature = "llm-llamacpp")
+        );
+        assert_eq!(
+            enabled().contains(&"llamacpp-lfm3vl"),
+            cfg!(feature = "llm-llamacpp-vision")
+        );
+    }
+
+    #[cfg(feature = "asr-whispercpp")]
+    #[test]
+    fn whisper_coreml_follows_the_encoder_bridge() {
+        assert_eq!(
+            enabled().contains(&"asr-whispercpp-coreml"),
+            xybrid_whisper::COREML_ENCODER
+        );
+    }
+
+    #[test]
+    fn zzz_phonon_31m_follows_tts_zzz() {
+        assert_eq!(
+            enabled().contains(&"zzz-phonon-31m"),
+            cfg!(feature = "tts-zzz") && zzz_available()
+        );
+    }
+
+    #[test]
+    fn unavailable_zzz_is_not_advertised_but_other_backends_are_preserved() {
+        let items = &[
+            ("tts-zzz", true),
+            ("zzz-phonon-31m", true),
+            ("vision", true),
+        ];
+        assert_eq!(filter_enabled(items, false), vec!["vision"]);
+        assert_eq!(
+            filter_enabled(items, true),
+            vec!["tts-zzz", "vision", "zzz-phonon-31m"]
+        );
+        assert!(filter_enabled(&[("tts-zzz", false), ("zzz-phonon-31m", false)], true).is_empty());
     }
 }

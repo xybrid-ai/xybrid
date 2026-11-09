@@ -1,4 +1,5 @@
-name: Build Android
+# Purpose: Build the Android .so files for every ABI, test the Kotlin wrapper, and gate dlopen and the observability scenario on an x86_64 emulator.
+name: "SDK: Android"
 
 on:
   pull_request:
@@ -9,15 +10,28 @@ on:
       - 'crates/xybrid-ffi-facade/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
+      - 'crates/xybrid-observability/**'
       - 'tools/scripts/android-dlopen-gate.sh'
       - 'tools/scripts/android-dlopen-probe.c'
       - 'tools/scripts/verify_android_jni.py'
+      - 'tools/scripts/verify_android_api_level.py'
+      # The shared observability scenario's receiver and checker (the
+      # observability-scenario job below).
+      - 'tools/scripts/observability_capture/**'
       - 'xtask/**'
       # llama.cpp's Android build config and sources (see //:llama_android_dl).
       - 'BUILD.bazel'
       - 'bazel/ggml/**'
+      # The Android NDK toolchains: @androidndk (API 28) and the AAR arm64
+      # slice's @androidndk_api29 (see //bazel/toolchains/android), the patch
+      # that generates both, and the .bazelrc NDK download pins.
+      - 'MODULE.bazel'
+      - 'bazel/toolchains/android/**'
+      - 'rules_android_ndk.patch'
+      - '.bazelrc'
       - 'crates/llama-cpp-sys/**'
       - 'vendor/llama-cpp'
+      - 'vendor/ort-android/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
       - '.github/workflows/build-android.yml'
@@ -39,15 +53,23 @@ on:
       - 'crates/xybrid-ffi-facade/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
+      - 'crates/xybrid-observability/**'
       - 'tools/scripts/android-dlopen-gate.sh'
       - 'tools/scripts/android-dlopen-probe.c'
       - 'tools/scripts/verify_android_jni.py'
+      - 'tools/scripts/verify_android_api_level.py'
+      - 'tools/scripts/observability_capture/**'
       - 'xtask/**'
       # llama.cpp's Android build config and sources (see //:llama_android_dl).
       - 'BUILD.bazel'
       - 'bazel/ggml/**'
+      - 'MODULE.bazel'
+      - 'bazel/toolchains/android/**'
+      - 'rules_android_ndk.patch'
+      - '.bazelrc'
       - 'crates/llama-cpp-sys/**'
       - 'vendor/llama-cpp'
+      - 'vendor/ort-android/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
       - '.github/workflows/build-android.yml'
@@ -55,7 +77,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-android-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all
@@ -176,6 +198,16 @@ jobs:
               exit 1
             fi
             echo "  DT_NEEDED libc++_shared.so: present"
+            # The Android API level the slice was linked for, from its
+            # .note.android.ident: arm64-v8a builds with @androidndk_api29
+            # (Android 10, the SDK's minSdk); the other slices stay on
+            # @androidndk at API 28. Either fallback changes which devices load it.
+            case "$abi" in
+              arm64-v8a) api=29 ;;
+              *) api=28 ;;
+            esac
+            python3 tools/scripts/verify_android_api_level.py --readelf "$READELF" \
+              --api "$api" "$SO"
             # The 64-bit ABIs must be 16 KB-aligned or they won't load on
             # Android 15+ (16 KB-page) devices. A LOAD segment aligned below
             # 0x4000 means the shim's -Wl,-z,max-page-size=16384 didn't land.
@@ -229,6 +261,9 @@ jobs:
             done < <("$READELF" -l "$SO" | awk '$1=="LOAD"{if(NF>4){print $NF}else{getline;print $NF}}')
             echo "OK: $lib ($(du -h "$SO" | cut -f1), 16 KB aligned)"
           done
+          # Same configuration as libxybrid_bolt.so, so the same API-29 link.
+          python3 tools/scripts/verify_android_api_level.py --readelf "$READELF" --api 29 \
+            $(printf "$SO_BASE/%s\n" libllama.so libggml.so libggml-base.so libmtmd.so $shipped)
 
       - name: Verify ORT runtime bundled (arm64-v8a, x86_64)
         run: |
@@ -411,3 +446,103 @@ jobs:
           script: |
             bash tools/scripts/android-dlopen-gate.sh dlopen-gate
             bindings/kotlin/gradlew -p bindings/kotlin/consumer-smoke :app:connectedDebugAndroidTest --no-daemon --console=plain
+
+  # The observability runtime lane: the shared scenario
+  # (tools/scripts/observability_capture/scenario.md) through the public Kotlin
+  # wrapper, inside the dlopen gate's consumer APK and shipped x86_64 AAR on the
+  # same emulator image. ObservabilityScenarioTest exports OTLP/JSON to
+  # capture_server.py on the runner (10.0.2.2 from the emulator) and writes
+  # expectations.json, which observability-scenario.sh copies off the device;
+  # check_capture.py then compares the two. Its checks cover parent-in,
+  # references out, manual operations, redaction and omission, release-cancels,
+  # the weightless load and failed run, flush and double shutdown, on the AAR as
+  # shipped. Its own job, so a failure names the scenario, not the load gate.
+  observability-scenario:
+    name: Observability scenario (x86_64 emulator)
+    needs: build-android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # KVM is required for a usable (hardware-accelerated) x86_64 emulator on
+      # the Linux runner; without it boot times out.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Download dlopen-gate artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-dlopen-gate
+          path: dlopen-gate
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Built before the emulator boots, so a compile error fails here and the
+      # emulator step only installs and runs.
+      - name: Build the consumer and its instrumentation APK
+        run: |
+          mkdir -p bindings/kotlin/consumer-smoke/app/libs
+          cp dlopen-gate/xybrid-kotlin.aar bindings/kotlin/consumer-smoke/app/libs/
+          bindings/kotlin/gradlew -p bindings/kotlin/consumer-smoke \
+            :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --console=plain
+
+      # Same retrying pre-install as the dlopen gate: the emulator-runner
+      # action's single `sdkmanager --install emulator` intermittently lands a
+      # corrupt download.
+      - name: Pre-install Android Emulator (retry corrupt downloads)
+        run: |
+          set -u
+          sdk="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          sdkmanager="$(command -v sdkmanager || true)"
+          if [ -z "$sdkmanager" ]; then
+            sdkmanager="$(ls "$sdk"/cmdline-tools/latest/bin/sdkmanager \
+              "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
+          fi
+          if [ -z "$sdkmanager" ]; then
+            echo "::error::sdkmanager not found under $sdk"; exit 1
+          fi
+          echo "using sdkmanager: $sdkmanager"
+          for i in $(seq 1 3); do
+            if yes | "$sdkmanager" --install emulator --channel=0; then
+              echo "emulator installed (attempt $i)"
+              exit 0
+            fi
+            echo "::warning::emulator install attempt $i failed; clearing partial download and retrying"
+            rm -rf "$sdk/emulator" "$sdk/.temp" "$sdk/.downloadIntermediates" || true
+            sleep 10
+          done
+          echo "::error::emulator install failed after 3 attempts"
+          exit 1
+
+      # run_scenario.py starts the receiver on a free port, fills {endpoint}
+      # (http://10.0.2.2:<port>) and {expectations}, runs the test through
+      # observability-scenario.sh, and fails unless every check passes.
+      - name: Run the observability scenario on the emulator
+        uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            python3 tools/scripts/observability_capture/run_scenario.py --binding kotlin --endpoint-host 10.0.2.2 --out-dir observability-scenario -- bash bindings/kotlin/consumer-smoke/observability-scenario.sh {endpoint} {expectations}
+
+      # capture.jsonl, expectations.json, report.json, the instrumentation
+      # output and a logcat dump, for diagnosing a failed check.
+      - name: Upload the scenario capture and report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-observability-scenario
+          path: observability-scenario/
+          if-no-files-found: warn
+          retention-days: 7

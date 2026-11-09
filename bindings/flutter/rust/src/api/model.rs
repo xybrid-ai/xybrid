@@ -18,6 +18,12 @@ use super::device;
 use super::result::FfiResult;
 use super::spawn_reporting_panics;
 
+// Use the canonical SDK-to-FFI conversion to retain the source chain when
+// crossing Flutter's string-only error boundary.
+fn sdk_error_message(error: xybrid_sdk::SdkError) -> String {
+    facade::Error::from(error).to_string()
+}
+
 /// Generation parameters for LLM inference.
 ///
 /// All fields are optional. When `None`, the model's default value is used.
@@ -161,13 +167,6 @@ impl FfiGenerationConfig {
                 .collect(),
         }
     }
-
-    /// # Errors
-    /// Returns the facade's message when a tool carries a `parametersJson`
-    /// that isn't valid JSON.
-    pub(crate) fn to_sdk_over(&self, base: GenerationConfig) -> Result<GenerationConfig, String> {
-        self.to_facade().apply_over(base).map_err(|e| e.to_string())
-    }
 }
 
 /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
@@ -234,7 +233,14 @@ impl Clone for FfiCancellationToken {
 ///
 /// This mirrors the customer-facing Dart `RunOptions` wrapper and maps into
 /// `xybrid_sdk::RunOptions` at the FFI boundary.
+#[frb(non_opaque)]
+#[derive(Default)]
 pub struct FfiRunOptions {
+    pub traceparent: Option<String>,
+    pub tracestate: Option<String>,
+    pub conversation_id: Option<String>,
+    #[frb(default = false)]
+    pub suppress_trace: bool,
     pub cloud_provider: Option<String>,
     pub cloud_model: Option<String>,
     pub cloud_gateway_url: Option<String>,
@@ -265,6 +271,10 @@ impl FfiRunOptions {
         }
         facade::RunOptions {
             generation_config,
+            traceparent: self.traceparent.clone(),
+            tracestate: self.tracestate.clone(),
+            conversation_id: self.conversation_id.clone(),
+            suppress_trace: self.suppress_trace,
             abort_on,
             fallback_to_cloud: self.fallback_to_cloud,
             max_grace_tokens: self.max_grace_tokens.unwrap_or(0),
@@ -326,6 +336,33 @@ impl FfiRunOptions {
 /// that races in after the last token must NOT trigger a false cancel.
 fn should_cancel_on_sink_close(reached_terminal: bool) -> bool {
     !reached_terminal
+}
+
+/// Preserve the default streaming policy unless the caller supplied options.
+/// Generation parameters have already been resolved against the loaded model.
+fn resolved_streaming_run_options(
+    config: Option<GenerationConfig>,
+    cancellation_token: Option<&FfiCancellationToken>,
+    frame_session_id: Option<&str>,
+    options: Option<&FfiRunOptions>,
+) -> Result<RunOptions, String> {
+    let Some(options) = options else {
+        return Ok(streaming_run_options(
+            config,
+            cancellation_token,
+            frame_session_id,
+        ));
+    };
+    let mut mapped = options.to_sdk_with_cancellation_over(
+        None,
+        GenerationConfig::default(),
+        cancellation_token,
+    )?;
+    mapped.generation_config = config;
+    if let Some(id) = non_empty(frame_session_id) {
+        mapped = mapped.with_frame_session(id.to_string());
+    }
+    Ok(mapped)
 }
 
 /// Build minimal SDK [`RunOptions`] for the plain (non-cloud-fallback)
@@ -541,9 +578,50 @@ pub enum FfiTtsStreamEvent {
     /// One synthesized chunk: raw 16-bit LE PCM and its sample rate (Hz).
     AudioChunk { pcm: Vec<u8>, sample_rate: u32 },
     /// Synthesis completed.
-    Complete,
+    Complete(FfiTtsStreamResult),
     /// An error occurred during synthesis.
     Error(String),
+}
+
+/// Terminal synthesis status and counters, including partial cancellation.
+#[derive(Clone)]
+pub struct FfiTtsStreamResult {
+    pub status: FfiTtsStatus,
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub samples: u64,
+    pub chunks: u32,
+    pub limited_chunks: u32,
+    pub observation: Option<super::observability::FfiObservationRef>,
+}
+
+#[derive(Clone)]
+pub enum FfiTtsStatus {
+    Completed,
+    Cancelled,
+    Limited,
+}
+
+impl From<xybrid_sdk::result::TtsStreamResult> for FfiTtsStreamResult {
+    fn from(result: xybrid_sdk::result::TtsStreamResult) -> Self {
+        use xybrid_core::execution::TtsStatus;
+        Self {
+            status: match result.status {
+                TtsStatus::Completed => FfiTtsStatus::Completed,
+                TtsStatus::Cancelled => FfiTtsStatus::Cancelled,
+                TtsStatus::Limited => FfiTtsStatus::Limited,
+            },
+            sample_rate: result.sample_rate,
+            channels: result.channels,
+            samples: result.samples,
+            chunks: result.chunks,
+            limited_chunks: result.limited_chunks,
+            observation: result
+                .observation
+                .as_ref()
+                .map(super::observability::FfiObservationRef::from_sdk),
+        }
+    }
 }
 
 /// Token received during streaming inference.
@@ -699,6 +777,18 @@ impl From<xybrid_sdk::StreamEvent> for FfiStreamEvent {
 }
 
 impl FfiModelLoader {
+    /// Clone this loader with validated observation controls.
+    #[frb(sync)]
+    pub fn with_observation(
+        &self,
+        options: super::observability::FfiObservationOptions,
+    ) -> Result<Self, String> {
+        let mut loader = self.0.clone();
+        if let Some(options) = options.to_sdk()? {
+            loader = loader.observation(options);
+        }
+        Ok(Self(loader))
+    }
     #[frb(sync)]
     pub fn from_registry(model_id: String) -> FfiModelLoader {
         FfiModelLoader(ModelLoader::from_registry(&model_id))
@@ -732,14 +822,14 @@ impl FfiModelLoader {
     pub fn from_bundle(path: String) -> Result<FfiModelLoader, String> {
         ModelLoader::from_bundle(&path)
             .map(FfiModelLoader)
-            .map_err(|e| e.to_string())
+            .map_err(sdk_error_message)
     }
 
     #[frb(sync)]
     pub fn from_directory(path: String) -> Result<FfiModelLoader, String> {
         ModelLoader::from_directory(&path)
             .map(FfiModelLoader)
-            .map_err(|e| e.to_string())
+            .map_err(sdk_error_message)
     }
 
     /// Create a loader for a model from a HuggingFace Hub repository.
@@ -753,11 +843,11 @@ impl FfiModelLoader {
 
     /// Load the model without progress updates.
     pub async fn load(&self) -> Result<FfiModel, String> {
-        self.0
-            .load_async()
-            .await
-            .map(|m| FfiModel(Arc::new(m)))
-            .map_err(|e| e.to_string())
+        let model = self.0.load_async().await.map_err(sdk_error_message)?;
+        // Flutter loads through the SDK, not the facade's loader, so it
+        // applies the facade's FFI refusal itself.
+        facade::ensure_ffi_supported(&model).map_err(|e| e.to_string())?;
+        Ok(FfiModel(Arc::new(model)))
     }
 
     /// Load the model with download progress updates.
@@ -779,13 +869,16 @@ impl FfiModelLoader {
                 let _ = sink.add(FfiLoadEvent::Progress(FfiDownloadStatus::from_sdk(status)));
             });
 
-            match result {
-                Ok(_) => {
+            match result
+                .map_err(sdk_error_message)
+                .and_then(|model| facade::ensure_ffi_supported(&model).map_err(|e| e.to_string()))
+            {
+                Ok(()) => {
                     // Model is now cached, send complete event
                     let _ = sink.add(FfiLoadEvent::Complete);
                 }
-                Err(e) => {
-                    let _ = sink.add(FfiLoadEvent::Error(e.to_string()));
+                Err(message) => {
+                    let _ = sink.add(FfiLoadEvent::Error(message));
                 }
             }
         };
@@ -796,6 +889,14 @@ impl FfiModelLoader {
 }
 
 impl FfiModel {
+    /// Immutable reference for the load that created this model.
+    #[frb(sync)]
+    pub fn load_observation_ref(&self) -> Option<super::observability::FfiObservationRef> {
+        self.0
+            .load_observation_ref()
+            .map(super::observability::FfiObservationRef::from_sdk)
+    }
+
     /// Whether runs are currently answered by the cloud because the local
     /// weights are not ready yet. `false` for ordinary local models.
     ///
@@ -892,15 +993,17 @@ impl FfiModel {
         &self,
         envelope: super::envelope::FfiEnvelope,
         config: Option<FfiGenerationConfig>,
+        options: Option<FfiRunOptions>,
     ) -> Result<FfiResult, String> {
-        let sdk_config = config
-            .as_ref()
-            .map(|c| c.to_sdk_over(self.0.default_generation_config()))
-            .transpose()?;
+        let options = options.unwrap_or_default().to_sdk_with_cancellation_over(
+            config.map(|c| c.to_facade()),
+            self.0.default_generation_config(),
+            None,
+        )?;
         let result = self
             .0
-            .run(&envelope.into_envelope(), sdk_config.as_ref())
-            .map_err(|e| e.to_string())?;
+            .run_with_options(&envelope.into_envelope(), &options)
+            .map_err(sdk_error_message)?;
         FfiResult::try_from_inference_result(&result)
     }
 
@@ -943,6 +1046,7 @@ impl FfiModel {
         cancellation_token: Option<FfiCancellationToken>,
         preempt: bool,
         frame_session_id: Option<String>,
+        options: Option<FfiRunOptions>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
         let model = self.0.clone();
@@ -971,11 +1075,18 @@ impl FfiModel {
                     return;
                 }
             };
-            let run_options = streaming_run_options(
+            let run_options = match resolved_streaming_run_options(
                 sdk_config,
                 cancel_handle.as_ref(),
                 frame_session_id.as_deref(),
-            );
+                options.as_ref(),
+            ) {
+                Ok(options) => options,
+                Err(error) => {
+                    let _ = sink.add(FfiStreamEvent::Error(error));
+                    return;
+                }
+            };
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let mut token_index = 0u32;
             let result = {
@@ -1013,7 +1124,7 @@ impl FfiModel {
                     let _ = sink.add(FfiStreamEvent::completion(&inference_result));
                 }
                 Err(e) => {
-                    let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
+                    let _ = sink.add(FfiStreamEvent::Error(sdk_error_message(e)));
                 }
             }
         };
@@ -1036,6 +1147,7 @@ impl FfiModel {
         envelope: super::envelope::FfiEnvelope,
         config: Option<FfiGenerationConfig>,
         cancellation_token: Option<FfiCancellationToken>,
+        options: Option<FfiRunOptions>,
         sink: StreamSink<FfiTtsStreamEvent>,
     ) {
         let model = self.0.clone();
@@ -1058,7 +1170,18 @@ impl FfiModel {
                     return;
                 }
             };
-            let run_options = streaming_run_options(sdk_config, cancel_handle.as_ref(), None);
+            let run_options = match resolved_streaming_run_options(
+                sdk_config,
+                cancel_handle.as_ref(),
+                None,
+                options.as_ref(),
+            ) {
+                Ok(options) => options,
+                Err(error) => {
+                    let _ = sink.add(FfiTtsStreamEvent::Error(error));
+                    return;
+                }
+            };
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let result = {
                 let reached_terminal = reached_terminal.clone();
@@ -1066,9 +1189,12 @@ impl FfiModel {
                 // Clone the sink for the per-chunk callback; the original stays
                 // for the terminal Complete/Error emit below.
                 let chunk_sink = sink.clone();
-                let on_chunk = move |pcm: Vec<u8>, sample_rate: u32| -> bool {
+                let on_chunk = move |packet: xybrid_core::execution::TtsAudioChunk| -> bool {
                     if chunk_sink
-                        .add(FfiTtsStreamEvent::AudioChunk { pcm, sample_rate })
+                        .add(FfiTtsStreamEvent::AudioChunk {
+                            pcm: packet.pcm,
+                            sample_rate: packet.sample_rate,
+                        })
                         .is_err()
                         && should_cancel_on_sink_close(
                             reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
@@ -1087,22 +1213,14 @@ impl FfiModel {
             };
 
             match result {
-                Ok(()) => {
+                Ok(summary) => {
                     reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    // A cancelled run (barge-in via sink-close, or the caller
-                    // cancelling the token) stopped early — don't surface it as a
-                    // successful Complete. On sink-close the add would no-op
-                    // anyway, but a token-only cancel keeps the sink open.
-                    let cancelled = cancel_handle
-                        .as_ref()
-                        .map(|h| h.0.is_cancelled())
-                        .unwrap_or(false);
-                    if !cancelled {
-                        let _ = sink.add(FfiTtsStreamEvent::Complete);
-                    }
+                    // Terminal status distinguishes completed, limited and
+                    // cancelled synthesis while retaining counters/reference.
+                    let _ = sink.add(FfiTtsStreamEvent::Complete(summary.into()));
                 }
                 Err(e) => {
-                    let _ = sink.add(FfiTtsStreamEvent::Error(e.to_string()));
+                    let _ = sink.add(FfiTtsStreamEvent::Error(sdk_error_message(e)));
                 }
             }
         };
@@ -1135,11 +1253,13 @@ impl FfiModel {
         envelope: super::envelope::FfiEnvelope,
         context: &FfiConversationContext,
         config: Option<FfiGenerationConfig>,
+        options: Option<FfiRunOptions>,
     ) -> Result<FfiResult, String> {
-        let sdk_config = config
-            .as_ref()
-            .map(|c| c.to_sdk_over(self.0.default_generation_config()))
-            .transpose()?;
+        let options = options.unwrap_or_default().to_sdk_with_cancellation_over(
+            config.map(|c| c.to_facade()),
+            self.0.default_generation_config(),
+            None,
+        )?;
         let ctx_guard = context
             .0
             .read()
@@ -1147,8 +1267,8 @@ impl FfiModel {
 
         let result = self
             .0
-            .run_with_context(&envelope.into_envelope(), &ctx_guard, sdk_config.as_ref())
-            .map_err(|e| e.to_string())?;
+            .run_with_context_options(&envelope.into_envelope(), &ctx_guard, &options)
+            .map_err(sdk_error_message)?;
 
         FfiResult::try_from_inference_result(&result)
     }
@@ -1183,8 +1303,7 @@ impl FfiModel {
     // FRB-exported boundary fn: each param maps to a named Dart argument, so
     // they cannot be bundled into a struct without reshaping the generated Dart
     // API. The arg count (envelope, context, config, token, preempt,
-    // frame_session_id, sink) is inherent to the binding surface.
-    #[allow(clippy::too_many_arguments)]
+    // frame_session_id, options, sink) is inherent to the binding surface.
     pub fn run_stream_with_context(
         &self,
         envelope: super::envelope::FfiEnvelope,
@@ -1193,6 +1312,7 @@ impl FfiModel {
         cancellation_token: Option<FfiCancellationToken>,
         preempt: bool,
         frame_session_id: Option<String>,
+        options: Option<FfiRunOptions>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
         let model = self.0.clone();
@@ -1217,11 +1337,18 @@ impl FfiModel {
                     return;
                 }
             };
-            let run_options = streaming_run_options(
+            let run_options = match resolved_streaming_run_options(
                 sdk_config,
                 cancel_handle.as_ref(),
                 frame_session_id.as_deref(),
-            );
+                options.as_ref(),
+            ) {
+                Ok(options) => options,
+                Err(error) => {
+                    let _ = sink.add(FfiStreamEvent::Error(error));
+                    return;
+                }
+            };
             // Get read lock on context
             let ctx_guard = match ctx.read() {
                 Ok(guard) => guard,
@@ -1275,7 +1402,7 @@ impl FfiModel {
                     let _ = sink.add(FfiStreamEvent::completion(&inference_result));
                 }
                 Err(e) => {
-                    let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
+                    let _ = sink.add(FfiStreamEvent::Error(sdk_error_message(e)));
                 }
             }
         };
@@ -1371,7 +1498,7 @@ impl FfiModel {
                     let _ = sink.add(FfiStreamEvent::completion(&inference_result));
                 }
                 Err(e) => {
-                    let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
+                    let _ = sink.add(FfiStreamEvent::Error(sdk_error_message(e)));
                 }
             }
         };
@@ -1397,7 +1524,7 @@ impl FfiModel {
         config: super::streaming::FfiStreamingConfig,
     ) -> Result<super::streaming::FfiStreamSession, String> {
         let sdk_config = config.to_sdk()?;
-        let stream = self.0.stream(sdk_config).map_err(|e| e.to_string())?;
+        let stream = self.0.stream(sdk_config).map_err(sdk_error_message)?;
         Ok(super::streaming::FfiStreamSession::spawn(stream))
     }
 
@@ -1407,7 +1534,7 @@ impl FfiModel {
     /// Runs on FRB's worker pool, so the returned `Future` does not block the
     /// Dart isolate. Returns an error string if the warmup inference fails.
     pub fn warmup(&self) -> Result<(), String> {
-        self.0.warmup().map_err(|e| e.to_string())
+        self.0.warmup().map_err(sdk_error_message)
     }
 
     /// Unload the model, dropping the executor and freeing the underlying
@@ -1419,13 +1546,35 @@ impl FfiModel {
     /// valid but unloaded; a subsequent call reloads on demand. Returns an
     /// error string if unloading fails.
     pub fn unload(&self) -> Result<(), String> {
-        self.0.unload().map_err(|e| e.to_string())
+        self.0.unload().map_err(sdk_error_message)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sdk_diagnostics_retain_load_and_inference_causes() {
+        let load = xybrid_sdk::SdkError::LoadError {
+            message: "Failed to parse metadata".into(),
+            source: Some(Box::new(std::io::Error::other("invalid model metadata"))),
+        };
+        assert_eq!(
+            sdk_error_message(load),
+            "Failed to load model: Failed to parse metadata: invalid model metadata"
+        );
+        let inference = xybrid_sdk::SdkError::InferenceError {
+            message: "Execution failed".into(),
+            source: Some(Box::new(xybrid_core::runtime_adapter::AdapterError::RuntimeError(
+                "zzz execution requires the 'tts-zzz' feature and its privately staged pinned engine slice".into(),
+            ))),
+        };
+        let message = sdk_error_message(inference);
+        assert!(message.contains("tts-zzz"));
+        assert!(message.contains("pinned engine slice"));
+        assert_eq!(message.matches("Inference failed:").count(), 1);
+    }
 
     fn sample_options() -> FfiRunOptions {
         FfiRunOptions {
@@ -1438,7 +1587,75 @@ mod tests {
             fallback_to_cloud: false,
             max_grace_tokens: None,
             frame_session_id: None,
+            ..FfiRunOptions::default()
         }
+    }
+
+    #[test]
+    fn observation_options_reach_sdk_without_altering_generation_or_cancel() {
+        let mut options = sample_options();
+        options.traceparent =
+            Some("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01".into());
+        options.tracestate = Some("vendor=value".into());
+        options.conversation_id = Some("conversation-1".into());
+        options.suppress_trace = true;
+        let sdk = options
+            .to_sdk_with_cancellation_over(
+                Some(facade::GenerationConfig {
+                    max_tokens: Some(17),
+                    ..Default::default()
+                }),
+                GenerationConfig::default(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(sdk.generation_config.as_ref().unwrap().max_tokens, 17);
+        let observation = sdk.observation.unwrap();
+        assert_eq!(
+            observation.parent.unwrap().trace_id(),
+            "0af7651916cd43dd8448eb211c80319c"
+        );
+        assert_eq!(
+            observation.conversation_id.as_deref(),
+            Some("conversation-1")
+        );
+        assert_eq!(
+            observation.trace,
+            xybrid_sdk::observability::TraceMode::Suppress
+        );
+        assert!(!sdk.abort_policy.observes(AbortSignal::UserCancelled));
+        options.traceparent = Some("invalid".into());
+        options.tracestate = None;
+        options.conversation_id = None;
+        options.suppress_trace = false;
+        assert!(options
+            .to_sdk_with_cancellation_over(None, GenerationConfig::default(), None)
+            .is_err());
+    }
+
+    #[test]
+    fn streaming_options_keep_model_config_cancellation_and_frame_session() {
+        let token = FfiCancellationToken::new();
+        let mut options = sample_options();
+        options.conversation_id = Some("stream-1".into());
+        let config = GenerationConfig {
+            max_tokens: 23,
+            ..Default::default()
+        };
+        let sdk = resolved_streaming_run_options(
+            Some(config),
+            Some(&token),
+            Some("frame-1"),
+            Some(&options),
+        )
+        .unwrap();
+        assert_eq!(sdk.generation_config.as_ref().unwrap().max_tokens, 23);
+        assert_eq!(sdk.frame_session_id.as_deref(), Some("frame-1"));
+        assert!(sdk.abort_policy.observes(AbortSignal::UserCancelled));
+        assert_eq!(
+            sdk.observation.as_ref().unwrap().conversation_id.as_deref(),
+            Some("stream-1")
+        );
     }
 
     #[test]
@@ -1559,6 +1776,7 @@ mod tests {
             fallback_to_cloud: false,
             max_grace_tokens: Some(2),
             frame_session_id: None,
+            ..FfiRunOptions::default()
         };
 
         let sdk = ffi

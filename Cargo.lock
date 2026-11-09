@@ -514,9 +514,9 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.70.1"
+version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f49d8fed880d473ea71efb9bf597651e77201bdd4893efe54c9e5d65ae04ce6f"
+checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
 dependencies = [
  "bitflags 2.13.2",
  "cexpr",
@@ -527,7 +527,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "rustc-hash 1.1.0",
+ "rustc-hash",
  "shlex 1.3.0",
  "syn 2.0.119",
 ]
@@ -1088,6 +1088,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "const-hex"
+version = "1.19.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e59eef12462b0f9b0a3620219be5d639afd79fe39dff0a42c3997061f9298b4"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "proptest",
+ "serde_core",
+]
+
+[[package]]
 name = "cookie"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1142,6 +1154,12 @@ dependencies = [
  "core-foundation",
  "libc",
 ]
+
+[[package]]
+name = "core_detect"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
 
 [[package]]
 name = "cpufeatures"
@@ -2320,17 +2338,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec9d92d097f4749b64e8cc33d924d9f40a2d4eb91402b458014b781f5733d60f"
 
 [[package]]
-name = "hostname"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "617aaa3557aef3810a6369d0a99fac8a080891b68bd9f9812a1eeda0c0730cbd"
-dependencies = [
- "cfg-if",
- "libc",
- "windows-link 0.2.1",
-]
-
-[[package]]
 name = "hound"
 version = "3.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2749,7 +2756,7 @@ dependencies = [
 
 [[package]]
 name = "integration-tests"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3653,6 +3660,50 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
+name = "opentelemetry"
+version = "0.33.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c1f1a6ac9c875a4941e4c7c085b61e8f4daa326de03b4701768c3491a6ad9ee"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "js-sys",
+ "pin-project-lite",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "opentelemetry-proto"
+version = "0.33.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d576f5dddc3299341bcd85a04be17b2564844c0c9563214f02d85f2524d1afae"
+dependencies = [
+ "base64 0.22.1",
+ "const-hex",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "prost",
+ "serde",
+]
+
+[[package]]
+name = "opentelemetry_sdk"
+version = "0.33.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "372a912db2974d1990207006fd0e3aa0ef3fd4ad3be43c65cfaadf2206866061"
+dependencies = [
+ "futures-channel",
+ "futures-executor",
+ "futures-util",
+ "opentelemetry",
+ "percent-encoding",
+ "portable-atomic",
+ "rand 0.9.5",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4013,6 +4064,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "proptest"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8530004ccb15eae51c7e40009fbe317f341f804db54dc033eec1c50be28cfa0"
+dependencies = [
+ "bitflags 2.13.2",
+ "chacha20",
+ "core_detect",
+ "num-traits",
+ "rand 0.10.2",
+ "rand_xorshift",
+ "regex-syntax",
+ "unarray",
+]
+
+[[package]]
+name = "prost"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
+dependencies = [
+ "bytes",
+ "prost-derive",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
+dependencies = [
+ "anyhow",
+ "itertools 0.14.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "pulp"
 version = "0.18.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4106,7 +4196,7 @@ dependencies = [
  "pin-project-lite",
  "quinn-proto",
  "quinn-udp",
- "rustc-hash 2.1.3",
+ "rustc-hash",
  "rustls",
  "socket2 0.6.5",
  "thiserror 2.0.20",
@@ -4127,7 +4217,7 @@ dependencies = [
  "rand 0.10.2",
  "rand_pcg",
  "ring",
- "rustc-hash 2.1.3",
+ "rustc-hash",
  "rustls",
  "rustls-pki-types",
  "slab",
@@ -4233,6 +4323,15 @@ name = "rand_pcg"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caa0f4137e1c0a72f4c651489402276c8e8e1cf081f3b0ba156d2cbeef09e86a"
+dependencies = [
+ "rand_core 0.10.1",
+]
+
+[[package]]
+name = "rand_xorshift"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60aa6af80be32871323012e02e6e65f8a7cc7890931ae421d217ad8fe0df2ccf"
 dependencies = [
  "rand_core 0.10.1",
 ]
@@ -4493,12 +4592,6 @@ name = "rustc-demangle"
 version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b74b56ffa8bb2830709a538c2cbcae9aa062db0d2a42563bfb09bdaae44020eb"
-
-[[package]]
-name = "rustc-hash"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustc-hash"
@@ -5582,6 +5675,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unarray"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6271,7 +6370,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -6285,14 +6384,14 @@ dependencies = [
 
 [[package]]
 name = "xybrid"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "xybrid-sdk",
 ]
 
 [[package]]
 name = "xybrid-cli"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6301,10 +6400,12 @@ dependencies = [
  "console 0.16.6",
  "dialoguer",
  "dirs",
- "hostname",
+ "httpmock",
  "image 0.25.10",
  "indicatif 0.17.11",
- "lazy_static",
+ "libc",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -6314,14 +6415,16 @@ dependencies = [
  "tracing-flame",
  "tracing-subscriber",
  "ureq 2.12.1",
+ "url",
  "uuid",
  "xybrid-core",
+ "xybrid-observability",
  "xybrid-sdk",
 ]
 
 [[package]]
 name = "xybrid-core"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6385,13 +6488,14 @@ dependencies = [
  "xybrid-llama",
  "xybrid-llama-sys",
  "xybrid-whisper",
+ "xybrid-zzz-sys",
  "yuvutils-rs",
  "zstd",
 ]
 
 [[package]]
 name = "xybrid-ffi-facade"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "log",
  "serde_json",
@@ -6403,7 +6507,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-llama"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -6412,7 +6516,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-llama-sys"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -6425,7 +6529,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-macros"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6433,8 +6537,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "xybrid-observability"
+version = "0.17.0"
+dependencies = [
+ "httpdate",
+ "httpmock",
+ "log",
+ "opentelemetry",
+ "opentelemetry-proto",
+ "opentelemetry_sdk",
+ "prost",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "xybrid-sdk"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6442,6 +6565,8 @@ dependencies = [
  "hf-hub",
  "httpmock",
  "log",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "ort",
  "rustls",
  "serde",
@@ -6454,14 +6579,23 @@ dependencies = [
  "tokio-stream",
  "ureq 2.12.1",
  "ureq 3.4.2",
+ "url",
  "uuid",
  "xybrid-core",
  "xybrid-macros",
+ "xybrid-observability",
+]
+
+[[package]]
+name = "xybrid-web-runtime"
+version = "0.17.0"
+dependencies = [
+ "xybrid-llama",
 ]
 
 [[package]]
 name = "xybrid-whisper"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -6470,7 +6604,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-whisper-sys"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -6478,8 +6612,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xybrid-zzz-sys"
+version = "0.17.0"
+dependencies = [
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "xybrid_bolt"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "android_logger",
  "boltffi",
@@ -6491,7 +6633,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid_flutter"
-version = "0.10.1"
+version = "0.17.0"
 dependencies = [
  "android_logger",
  "flutter_rust_bridge",

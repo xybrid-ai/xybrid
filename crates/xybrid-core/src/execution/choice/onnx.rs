@@ -255,14 +255,21 @@ impl PreparedChoices {
     /// `session` must hold the model the scorer was bound to: only the output
     /// shape is re-checked here.
     ///
+    /// The run's ONNX Runtime log level is fatal, so ONNX Runtime doesn't log
+    /// a failed run's message, which can quote bytes of the request. Messages
+    /// it logs through the session, such as a warning quoting the shape an
+    /// input produced, follow the session's own level; the executor builds
+    /// scorer sessions at fatal too.
+    ///
     /// # Errors
     ///
     /// [`ChoiceError::InferenceFailed`] when ONNX Runtime fails (its message is
     /// withheld: it can quote input values, which are bytes of the request);
     /// [`ChoiceError::Runtime`] when the logits output is missing or not
     /// float32; [`ChoiceError::OutputShape`] unless the logits are `[1, rows]`
-    /// for the encoded rows; [`ChoiceError::NonFiniteLogit`] for a NaN or
-    /// infinite logit on an offered candidate.
+    /// for the encoded rows (its message withholds the model's shape, which a
+    /// model can derive from the request); [`ChoiceError::NonFiniteLogit`] for
+    /// a NaN or infinite logit on an offered candidate.
     pub fn run(self, session: &ONNXSession) -> ChoiceResult<ChoiceScores> {
         let spec = &self.spec;
         let rows = self.encoded.choice_mask.len();
@@ -283,7 +290,7 @@ impl PreparedChoices {
         ]);
 
         let logits = session
-            .run_single_output_f32(inputs, &spec.logits_output)
+            .run_single_output_f32_unlogged(inputs, &spec.logits_output)
             .map_err(|error| match error {
                 AdapterError::InferenceFailed(_) => ChoiceError::InferenceFailed,
                 other => ChoiceError::Runtime(other),

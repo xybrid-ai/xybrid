@@ -32,7 +32,4 @@ export class RuntimeInitializer {
   }
 }
 
-export const sharedInitializer = new RuntimeInitializer();
-
-// LiteRT-LM has its own per-page wasm module, separate from LiteRT's.
 export const sharedLlmInitializer = new RuntimeInitializer();

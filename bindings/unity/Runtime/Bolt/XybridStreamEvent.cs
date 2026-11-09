@@ -19,14 +19,16 @@ namespace XybridBolt
     /// </summary>
     public readonly struct XybridStreamEvent
     {
-        public XybridStreamEvent(XybridStreamEventKind Kind, XybridStreamToken? Token) { this.Kind = Kind; this.Token = Token; }
+        public XybridStreamEvent(XybridStreamEventKind Kind, XybridStreamToken? Token, XybridTtsAudioChunk? Audio) { this.Kind = Kind; this.Token = Token; this.Audio = Audio; }
         public XybridStreamEventKind Kind { get; }
         public XybridStreamToken? Token { get; }
+        public XybridTtsAudioChunk? Audio { get; }
 
         internal static XybridStreamEvent Decode(WireReader reader) =>
             new XybridStreamEvent(
                 (XybridStreamEventKind)reader.ReadI32(),
-                reader.ReadU8() == 0 ? default(XybridStreamToken?) : XybridStreamToken.Decode(reader)
+                reader.ReadU8() == 0 ? default(XybridStreamToken?) : XybridStreamToken.Decode(reader),
+                reader.ReadU8() == 0 ? default(XybridTtsAudioChunk?) : XybridTtsAudioChunk.Decode(reader)
             );
 
         internal void Encode(WireWriter writer)
@@ -36,6 +38,17 @@ namespace XybridBolt
             }
             {
                 if (this.Token is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    boltffiValue0.Encode(writer);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.Audio is { } boltffiValue0)
                 {
                     writer.WriteU8(1);
                     boltffiValue0.Encode(writer);

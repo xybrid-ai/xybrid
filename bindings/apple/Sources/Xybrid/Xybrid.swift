@@ -37,16 +37,21 @@ private let boltSetProviderApiKey = setProviderApiKey
 /// It registers the binding identifier so registry calls are attributed to the
 /// Swift SDK, and is safe to call multiple times — subsequent calls are no-ops.
 ///
-/// Inference runs on-device whether or not you authenticate. Pass an `apiKey`
-/// to start the telemetry exporter and see your runs on the dashboard — get a
-/// free key at https://dashboard.xybrid.dev.
+/// Inference runs on-device whether or not you authenticate. The `apiKey`
+/// authenticates the cloud gateway; it does not export anything. Trace export
+/// is off until you start it with ``Xybrid/Observability`` — get a free key at
+/// https://dashboard.xybrid.dev.
 ///
 /// ```swift
-/// // Anonymous — local inference, telemetry disabled
+/// // Anonymous — local inference only
 /// Xybrid.initialize()
 ///
-/// // Authenticated — telemetry flows to the dashboard
-/// Xybrid.initialize(apiKey: ProcessInfo.processInfo.environment["XYBRID_API_KEY"])
+/// // Authenticated, with traces sent to the Xybrid dashboard
+/// let apiKey = ProcessInfo.processInfo.environment["XYBRID_API_KEY"]
+/// Xybrid.initialize(apiKey: apiKey)
+/// if let apiKey {
+///     try Xybrid.Observability.xybrid(apiKey: apiKey).start()
+/// }
 /// ```
 public enum Xybrid {
     private static let initLock = NSLock()
@@ -66,12 +71,10 @@ public enum Xybrid {
     /// `binding=swift`. Idempotent and thread-safe.
     ///
     /// All parameters are optional. Without an `apiKey`, the SDK runs fully
-    /// on-device and telemetry is disabled — the first inference logs a
-    /// one-shot hint pointing at the dashboard (suppress with the
-    /// `XYBRID_QUIET=1` environment variable). Pass `apiKey` to start the
-    /// platform telemetry exporter; `ingestUrl` overrides the destination
-    /// for a self-hosted dashboard, and `gatewayUrl` overrides the LLM
-    /// gateway. Get a free key at https://dashboard.xybrid.dev.
+    /// on-device. `apiKey` authenticates the cloud gateway and `gatewayUrl`
+    /// overrides it. Neither starts trace export: build a config with
+    /// ``Xybrid/Observability`` and call `start()` for that. Get a free key at
+    /// https://dashboard.xybrid.dev.
     ///
     /// Configuration is applied on the first call; because `initialize()` is
     /// idempotent, a later call with different arguments is a no-op.
@@ -86,19 +89,17 @@ public enum Xybrid {
     /// nothing extra is registered here.
     ///
     /// - Parameters:
-    ///   - apiKey: Xybrid API key. When set, starts the telemetry exporter.
+    ///   - apiKey: Xybrid API key for the cloud gateway.
     ///   - gatewayUrl: Optional override for the LLM gateway URL.
-    ///   - ingestUrl: Optional override for the telemetry ingest URL.
     public static func initialize(
         apiKey: String? = nil,
-        gatewayUrl: String? = nil,
-        ingestUrl: String? = nil
+        gatewayUrl: String? = nil
     ) {
         initLock.lock()
         defer { initLock.unlock() }
         if initialized { return }
         setBinding(binding: "swift")
-        configureRuntime(apiKey: apiKey, gatewayUrl: gatewayUrl, ingestUrl: ingestUrl)
+        configureRuntime(apiKey: apiKey, gatewayUrl: gatewayUrl)
         // `registerPlatformObservers()` touches UIKit (`UIDevice.current`,
         // `isBatteryMonitoringEnabled`) on iOS, which is main-thread-only.
         // `initialize()` is documented as callable from any thread (apps
@@ -177,8 +178,9 @@ public enum Xybrid {
     /// Whether a Xybrid gateway API key is resolvable, from either
     /// `initialize(apiKey:)` or the environment.
     ///
-    /// Inference runs on-device without one; this reports whether the optional
-    /// platform features (cloud routing, telemetry) can engage.
+    /// Inference runs on-device without one; this reports whether cloud
+    /// routing can engage. It says nothing about trace export, which only
+    /// ``Xybrid/Observability`` starts.
     public static var hasApiKey: Bool {
         boltHasApiKey()
     }
@@ -472,6 +474,225 @@ public extension Xybrid {
     }
 }
 
+// MARK: - Observability
+
+public extension Xybrid {
+    /// OpenTelemetry export of runs as traces (and, for OTLP, metrics and logs).
+    ///
+    /// Export is off until a config is started; an API key alone never
+    /// enables it. Once started, prompts, outputs, and tool payloads are
+    /// captured unless the config sets ``XybridObservabilityConfig/metadataOnly(_:)``.
+    ///
+    /// ```swift
+    /// // Traces to the Xybrid dashboard
+    /// try Xybrid.Observability.xybrid(apiKey: key)
+    ///     .service("MyApp", version: "1.4.0")
+    ///     .start()
+    ///
+    /// // Traces, metrics, and logs to an OpenTelemetry Collector
+    /// try Xybrid.Observability.otlp(endpoint: "http://collector:4318")
+    ///     .metadataOnly()
+    ///     .start()
+    /// ```
+    ///
+    /// Each run's ``XybridResult/observation`` identifies its trace, for
+    /// ``recordFeedback(for:score:label:comment:)`` and
+    /// ``recordEvaluation(for:name:score:label:explanation:)``.
+    enum Observability {
+        /// Manual operations retain their original SDK session. Pass `context()` to children.
+        public static func startWorkflow(_ name: String, options: XybridObservationOptions? = nil) throws -> XybridWorkflowObservation {
+            try XybridWorkflowObservation(name: name, options: options)
+        }
+        public static func startTool(_ call: XybridToolCallInfo, options: XybridObservationOptions? = nil) throws -> XybridToolObservation {
+            try XybridToolObservation(call: call, options: options)
+        }
+        public static func startInference(_ request: XybridInferenceRequest, options: XybridObservationOptions? = nil) throws -> XybridInferenceObservation {
+            try XybridInferenceObservation(request: request, options: options)
+        }
+        public static func startModelLoad(_ info: XybridModelLoadInfo, options: XybridObservationOptions? = nil) throws -> XybridModelLoadObservation {
+            try XybridModelLoadObservation(info: info, options: options)
+        }
+        /// Completes on return, cancels on task cancellation, and records a safe error label on throw.
+        public static func withWorkflow<T>(_ name: String, options: XybridObservationOptions? = nil,
+                                           body: (XybridWorkflowObservation) async throws -> T) async throws -> T {
+            let operation = try startWorkflow(name, options: options)
+            do {
+                try Task.checkCancellation()
+                let result = try await body(operation)
+                try Task.checkCancellation()
+                operation.complete()
+                return result
+            } catch is CancellationError {
+                operation.cancel()
+                throw CancellationError()
+            } catch {
+                operation.fail(errorType: "application_error", message: nil)
+                throw error
+            }
+        }
+
+        /// The Xybrid dashboard's OTLP trace endpoint, used by ``xybrid(apiKey:)``.
+        public static var defaultTracesEndpoint: String {
+            observabilityDefaultTracesEndpoint()
+        }
+
+        /// A config that sends traces to the Xybrid dashboard, authenticated
+        /// with `apiKey`. Nothing is exported until you call `start()`.
+        public static func xybrid(apiKey: String) -> XybridObservabilityConfig {
+            XybridObservabilityConfig(xybrid: apiKey)
+        }
+
+        /// A config that sends traces, metrics, and logs to an OTLP/HTTP
+        /// endpoint such as an OpenTelemetry Collector (`http://host:4318`).
+        /// Nothing is exported until you call `start()`.
+        public static func otlp(endpoint: String) -> XybridObservabilityConfig {
+            XybridObservabilityConfig(otlp: endpoint)
+        }
+
+        /// Current delivery counters; all zero while export is off.
+        public static var stats: XybridObservabilityStats {
+            observabilityStats()
+        }
+
+        /// Export everything queued, waiting at most `timeoutMs`.
+        ///
+        /// Blocks the caller; prefer ``flushAsync(timeoutMs:)`` on the main actor.
+        /// - Throws: ``XybridError`` when the bound is exceeded.
+        public static func flush(timeoutMs: UInt32 = 5_000) throws {
+            try observabilityFlush(timeoutMs: timeoutMs)
+        }
+
+        /// Flush and stop exporting, waiting at most `timeoutMs`. Idempotent.
+        ///
+        /// Blocks the caller; prefer ``shutdownAsync(timeoutMs:)`` on the main actor.
+        /// - Throws: ``XybridError`` when the bound is exceeded.
+        public static func shutdown(timeoutMs: UInt32 = 5_000) throws {
+            try observabilityShutdown(timeoutMs: timeoutMs)
+        }
+
+        /// ``flush(timeoutMs:)`` without blocking the calling thread or actor.
+        public static func flushAsync(timeoutMs: UInt32 = 5_000) async throws {
+            try await Task.detached { try observabilityFlush(timeoutMs: timeoutMs) }.value
+        }
+
+        /// ``shutdown(timeoutMs:)`` without blocking the calling thread or actor.
+        public static func shutdownAsync(timeoutMs: UInt32 = 5_000) async throws {
+            try await Task.detached { try observabilityShutdown(timeoutMs: timeoutMs) }.value
+        }
+
+        /// Record end-user feedback on a run, such as a thumbs up or down.
+        ///
+        /// - Parameter target: the run's ``XybridResult/observation``.
+        /// - Returns: `false` when no logs signal is configured — the
+        ///   ``xybrid(apiKey:)`` preset sends traces only.
+        /// - Throws: ``XybridError`` when `target` is not a valid trace/span id pair.
+        @discardableResult
+        public static func recordFeedback(
+            for target: XybridObservationRef,
+            score: Double? = nil,
+            label: String? = nil,
+            comment: String? = nil
+        ) throws -> Bool {
+            try observabilityRecordFeedback(
+                target: target,
+                score: score,
+                label: label,
+                comment: comment
+            )
+        }
+
+        /// Record an evaluation result, such as an LLM-as-judge score, on a run.
+        ///
+        /// - Parameter target: the run's ``XybridResult/observation``.
+        /// - Returns: `false` when no logs signal is configured.
+        /// - Throws: ``XybridError`` when `target` is not a valid trace/span id pair.
+        @discardableResult
+        public static func recordEvaluation(
+            for target: XybridObservationRef,
+            name: String,
+            score: Double? = nil,
+            label: String? = nil,
+            explanation: String? = nil
+        ) throws -> Bool {
+            try observabilityRecordEvaluation(
+                target: target,
+                name: name,
+                scoreValue: score,
+                scoreLabel: label,
+                explanation: explanation
+            )
+        }
+    }
+}
+
+// Chainable setters over the generated `setX` methods, ending in `start()`.
+// The config is single-use: after `start()` the setters no-op and a second
+// `start()` throws.
+public extension XybridObservabilityConfig {
+    /// Override the full trace endpoint URL (staging, self-hosted).
+    @discardableResult
+    func tracesEndpoint(_ endpoint: String) -> XybridObservabilityConfig {
+        setTracesEndpoint(endpoint: endpoint)
+        return self
+    }
+
+    /// Add an HTTP header sent with every export request.
+    @discardableResult
+    func header(_ name: String, _ value: String) -> XybridObservabilityConfig {
+        setHeader(name: name, value: value)
+        return self
+    }
+
+    /// Send OTLP JSON instead of protobuf.
+    @discardableResult
+    func jsonProtocol(_ json: Bool = true) -> XybridObservabilityConfig {
+        setJsonProtocol(json: json)
+        return self
+    }
+
+    /// Set the reported service (app) name and version.
+    @discardableResult
+    func service(_ name: String, version: String? = nil) -> XybridObservabilityConfig {
+        setService(name: name, version: version)
+        return self
+    }
+
+    /// Attach a resource attribute, for example `deployment.environment`.
+    @discardableResult
+    func resourceAttribute(_ key: String, _ value: String) -> XybridObservabilityConfig {
+        setResourceAttribute(key: key, value: value)
+        return self
+    }
+
+    /// Record metadata only: no prompts, outputs, or tool payloads.
+    @discardableResult
+    func metadataOnly(_ enabled: Bool = true) -> XybridObservabilityConfig {
+        setMetadataOnly(metadataOnly: enabled)
+        return self
+    }
+
+    /// Maximum bytes kept per captured content attribute.
+    @discardableResult
+    func maxContentBytes(_ bytes: UInt32) -> XybridObservabilityConfig {
+        setMaxContentBytes(bytes: bytes)
+        return self
+    }
+
+    /// Minimum interval between traced frames of one live session.
+    @discardableResult
+    func liveTraceIntervalMs(_ ms: UInt32) -> XybridObservabilityConfig {
+        setLiveTraceIntervalMs(ms: ms)
+        return self
+    }
+
+    /// Start exporting with this config, replacing any previously started one.
+    ///
+    /// - Throws: ``XybridError`` if this config was already started or is rejected.
+    func start() throws {
+        try self.`init`()
+    }
+}
+
 // MARK: - Public Type Re-exports
 
 /// A loaded model ready for inference.
@@ -648,6 +869,11 @@ private final class XybridTokenStreamState: @unchecked Sendable {
         case .complete:
             close()
             return nil
+        case .audio:
+            close()
+            throw XybridError.inferenceError(
+                message: "Token streams cannot deliver audio; use run for batch speech"
+            )
         }
     }
 
@@ -732,6 +958,7 @@ public extension XybridModel {
     /// try session.feed(samples: pcm)
     /// // when the user stops talking:
     /// let transcript = try session.flush()
+    /// label.text = transcript.text   // transcript.observation references the session
     /// ```
     ///
     /// - Parameter config: chunking options. The default is fixed-window
@@ -829,7 +1056,10 @@ public extension XybridPipeline {
 
     /// Run every stage without blocking the calling thread or actor.
     ///
-    /// Of `options`, only `correlationId` applies to a pipeline run; setting
+    /// Of `options`, `correlationId` and the observation controls
+    /// (`traceparent`, `tracestate`, `conversationId`, `suppressTrace`) apply to
+    /// a pipeline run: ``XybridPipelineResult/observation`` references its
+    /// workflow and each ``XybridStageResult/observation`` its stage. Setting
     /// `generationConfig` or `abortOn` throws ``XybridError/configError(message:)``.
     func runAsync(
         envelope: XybridEnvelope,
@@ -1034,7 +1264,8 @@ public extension XybridStreamingConfig {
             vad: .off,
             vadThreshold: 0.5,
             language: nil,
-            audioCtx: nil
+            audioCtx: nil,
+            observation: nil
         )
     }
 
@@ -1052,18 +1283,30 @@ public extension XybridStreamingConfig {
     ///   - language: language hint such as `"en"`; `nil` uses the model default.
     ///   - threshold: VAD sensitivity, 0.0–1.0. Lower catches quieter speech
     ///     and more background noise with it.
+    ///   - observation: parent trace context, conversation id and trace
+    ///     suppression for the session's workflow; `nil` for none.
     static func voiceActivity(
         modelDir: String,
         language: String? = nil,
-        threshold: Float = 0.5
+        threshold: Float = 0.5,
+        observation: XybridObservationOptions? = nil
     ) -> XybridStreamingConfig {
         XybridStreamingConfig(
             sampleRate: 16_000,
             vad: .enabled(modelDir: modelDir),
             vadThreshold: threshold,
             language: language,
-            audioCtx: nil
+            audioCtx: nil,
+            observation: observation
         )
+    }
+
+    /// This config with its observation controls replaced, for example
+    /// `.default.observed(by: context.childOptions)`.
+    func observed(by observation: XybridObservationOptions?) -> XybridStreamingConfig {
+        var config = self
+        config.observation = observation
+        return config
     }
 }
 
@@ -1131,6 +1374,41 @@ public extension XybridGenerationConfig {
         var copy = self
         copy.tools = tools
         return copy
+    }
+}
+
+public extension XybridRunOptions {
+    /// Build run options, defaulting every field you don't set.
+    ///
+    /// - Parameters:
+    ///   - traceparent: W3C `traceparent` of your own span; the run's trace
+    ///     becomes its child. Invalid values start a new trace.
+    ///   - tracestate: W3C `tracestate` accompanying `traceparent`.
+    ///   - conversationId: your conversation id, recorded on the run's trace.
+    ///   - suppressTrace: skip the detailed trace for this run; metrics are
+    ///     still recorded.
+    static func make(
+        generationConfig: XybridGenerationConfig? = nil,
+        abortOn: [XybridAbortSignal] = [],
+        fallbackToCloud: Bool = false,
+        maxGraceTokens: UInt32 = 0,
+        correlationId: String? = nil,
+        traceparent: String? = nil,
+        tracestate: String? = nil,
+        conversationId: String? = nil,
+        suppressTrace: Bool = false
+    ) -> XybridRunOptions {
+        XybridRunOptions(
+            generationConfig: generationConfig,
+            abortOn: abortOn,
+            fallbackToCloud: fallbackToCloud,
+            maxGraceTokens: maxGraceTokens,
+            correlationId: correlationId,
+            traceparent: traceparent,
+            tracestate: tracestate,
+            conversationId: conversationId,
+            suppressTrace: suppressTrace
+        )
     }
 }
 
@@ -1384,6 +1662,8 @@ extension XybridError: LocalizedError {
             return "Invalid image: \(message)"
         case .cancelled(let message):
             return "Cancelled: \(message)"
+        case .telemetryDelivery(let message):
+            return "Telemetry delivery failed: \(message)"
         }
     }
 }
@@ -1402,5 +1682,31 @@ extension XybridError: LocalizedError {
 extension FfiError: LocalizedError {
     public var errorDescription: String? {
         message.isEmpty ? "Unknown FFI error" : message
+    }
+}
+
+public extension XybridObservationOptions {
+    static func make(traceparent: String? = nil, tracestate: String? = nil,
+                     conversationId: String? = nil, suppressTrace: Bool = false) -> Self {
+        Self(traceparent: traceparent, tracestate: tracestate,
+             conversationId: conversationId, suppressTrace: suppressTrace)
+    }
+}
+public extension XybridObservationContext {
+    /// Explicit parent controls for a child, including an unsampled parent.
+    var childOptions: XybridObservationOptions {
+        .make(traceparent: traceparent, tracestate: tracestate)
+    }
+}
+public extension XybridObservabilityConfig {
+    @discardableResult func deviceId(_ id: String) -> Self { setDeviceId(id: id); return self }
+    @discardableResult func propagateContext(to origin: String) throws -> Self {
+        try allowProviderContext(origin: origin); return self
+    }
+    @discardableResult func redactLiteral(_ find: String, replacement: String) throws -> Self {
+        try addLiteralRedaction(find: find, replacement: replacement); return self
+    }
+    @discardableResult func omitContent(_ key: String) throws -> Self {
+        try omitContentAttribute(key: key); return self
     }
 }

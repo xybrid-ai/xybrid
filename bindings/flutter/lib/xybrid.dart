@@ -102,12 +102,40 @@ export 'src/result.dart'
 // answers, and the provenance of a finished run. `jsonSchemaToGbnf` turns a
 // JSON Schema into the grammar `GenerationConfig.grammar` expects.
 export 'src/rust/api/model.dart'
-    show FfiDownloadState, FfiDownloadStatus, jsonSchemaToGbnf;
+    show
+        FfiDownloadState,
+        FfiDownloadStatus,
+        FfiTtsStatus,
+        FfiTtsStreamResult,
+        jsonSchemaToGbnf;
 export 'src/rust/api/result.dart' show FfiExecutionTarget;
 export 'src/run_options.dart' show AbortPolicy, AbortSignal, RunOptions;
 export 'src/streaming.dart'
-    show XybridStreamSession, FfiPartialResult, FfiVadMode;
+    show
+        XybridStreamSession,
+        FfiPartialResult,
+        FfiVadMode,
+        FfiTranscriptionResult;
 export 'src/tools.dart' show ToolCall, ToolDefinition, ToolResult;
 export 'src/utils/utils.dart';
 export 'src/xybrid.dart'
     show Xybrid, CacheEntry, CacheEntryLocation, CacheStatus;
+
+export 'src/observability.dart'
+    show
+        ObservabilityConfig,
+        ObservationOptions,
+        ObservationRef,
+        ObservabilityStats,
+        WorkflowObservation,
+        ToolObservation,
+        InferenceObservation,
+        ModelLoadObservation,
+        ObservationContext,
+        InferenceRequest,
+        ToolCallInfo,
+        ModelLoadInfo,
+        ObservationUsage,
+        ExecutionLocation,
+        FfiRedactionRule,
+        XybridObservability;

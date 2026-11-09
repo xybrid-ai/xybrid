@@ -6,11 +6,14 @@ import 'package:xybrid_flutter/xybrid_flutter.dart';
 const _metrics = FfiInferenceMetrics(totalMs: 10, stageLatenciesMs: []);
 
 FfiResult _ffiResult({
+  ObservationRef? observation,
   String? text,
   String? reasoningContent,
   List<FfiToolCall> toolCalls = const [],
-}) => FfiResult(
+}) =>
+    FfiResult(
       success: true,
+      observation: observation,
       text: text,
       reasoningContent: reasoningContent,
       latencyMs: 10,
@@ -20,6 +23,15 @@ FfiResult _ffiResult({
     );
 
 void main() {
+  test('result exposes its observation reference for feedback', () {
+    const reference = ObservationRef(
+        traceId: '0af7651916cd43dd8448eb211c80319c',
+        spanId: 'b7ad6b7169203331');
+    final result = XybridResult.fromFfi(_ffiResult(observation: reference));
+    expect(result.observation, reference);
+    expect(XybridResult.fromFfi(_ffiResult()).observation, isNull);
+  });
+
   test('reasoning content surfaces separately from the answer', () {
     final result = XybridResult.fromFfi(
       _ffiResult(text: 'Paris', reasoningContent: 'The capital of France is…'),

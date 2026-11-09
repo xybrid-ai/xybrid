@@ -11,11 +11,13 @@ Add the Xybrid SDK from Maven Central:
 
 ```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.10.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.17.0")
 }
 ```
 
-Minimum SDK: **24** (Android 7.0)
+Minimum SDK: **29** (Android 10) for releases 0.16.0 and later: set `minSdk = 29` or higher in your app's `defaultConfig`, or the build fails at the manifest merge. Releases before 0.16.0 need **24** (Android 7.0).
+
+Downloading models from the registry needs network access, and the SDK declares no permissions: add `<uses-permission android:name="android.permission.INTERNET" />` to your app's `AndroidManifest.xml`.
 
 ## Quick Start
 
@@ -41,17 +43,49 @@ if (result.success) {
 }
 ```
 
-`Xybrid.init(context)` also registers `BatteryManager` and (on API 29+) `PowerManager.OnThermalStatusChangedListener` observers, forwarding readings to the routing engine.
+`Xybrid.init(context)` also registers `BatteryManager` and `PowerManager.OnThermalStatusChangedListener` observers, forwarding readings to the routing engine.
 
 ## Initialization
 
-Inference runs entirely on-device whether or not you authenticate. Pass an `apiKey` to light up the [dashboard](https://dashboard.xybrid.dev) — that single call starts the telemetry exporter, and your `model.run(...)` calls automatically emit execution traces:
+Inference runs entirely on-device whether or not you authenticate. The `apiKey` authenticates the cloud gateway; `gatewayUrl` overrides it:
 
 ```kotlin
 Xybrid.init(this, apiKey = BuildConfig.XYBRID_API_KEY)
 ```
 
-Without a key, telemetry is disabled and the first inference logs a one-shot hint pointing at the dashboard (suppress with the `XYBRID_QUIET=1` environment variable). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev). For a self-hosted dashboard, also pass `ingestUrl`.
+## Observability
+
+Trace export is off until you configure it — an API key alone does not enable it. Start it once, after `Xybrid.init`, with one of two presets:
+
+```kotlin
+import ai.xybrid.service
+import ai.xybrid.start
+
+// Traces to the Xybrid dashboard
+Xybrid.Observability.xybrid(BuildConfig.XYBRID_API_KEY)
+    .service("MyApp", version = BuildConfig.VERSION_NAME)
+    .start()
+
+// Traces, metrics, and logs to an OTLP/HTTP endpoint (e.g. an OpenTelemetry Collector)
+Xybrid.Observability.otlp("http://collector:4318").start()
+```
+
+Prompts and outputs are captured by default; add `.metadataOnly()` to export metadata only. `.tracesEndpoint(url)` points the dashboard preset at a self-hosted endpoint. Until export is configured, the first inference logs a one-shot hint (suppress with `XYBRID_QUIET=1`). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+
+Run options carry per-run trace context, and each result's `observation` identifies its trace:
+
+```kotlin
+val result = model.runAsync(
+    envelope,
+    runOptions(traceparent = parentTraceparent, conversationId = chatId),
+)
+result.observation?.let {
+    Xybrid.Observability.recordFeedback(it, score = 1.0, label = "thumbs_up")
+}
+Xybrid.Observability.flushAsync()
+```
+
+Feedback and evaluations (`recordEvaluation(target, name, ...)`) need a logs signal, so they return `false` with the dashboard preset, which sends traces only.
 
 ---
 
@@ -162,17 +196,24 @@ scope.launch {
 // From the AudioRecord loop, converted to float mono 16 kHz:
 session.feed(pcm)
 
-val transcript = session.flush()
+val result = session.flush()
+val transcript = result.text
 ```
 
 Partial text is **cumulative, not a delta**: render each one in place of the
 previous rather than appending. A partial produced before you subscribe is
 delivered immediately, so the opening words of an utterance are never lost.
 
-`flush()` ends the session and returns the full transcript — and reports an
-error if any chunk failed to transcribe, because that audio is gone and the
-transcript would otherwise look complete. `cancel()` ends the session and
-discards queued audio.
+`flush()` ends the session and returns an `XybridTranscriptionResult`: the full
+transcript in `text`, plus `durationMs`, `chunksProcessed` and the session's
+`observation` reference. It reports an error if any chunk failed to transcribe,
+because that audio is gone and the transcript would otherwise look complete.
+`cancel()` ends the session and discards queued audio.
+
+<Callout type="warn">
+Earlier releases returned the transcript as a `String`. Read `.text` from the
+result instead.
+</Callout>
 
 Voice-activity detection cuts chunks on speech boundaries instead of a fixed
 clock, which avoids the stutter you get when a window lands mid-word. It needs
@@ -239,10 +280,39 @@ try {
 
 ---
 
+## Speech (Phonon / Kitten TTS 2)
+
+The arm64-v8a library links the zzz speech engine, so arm64 devices run Phonon
+and Kitten TTS 2 on-device, as do arm64-v8a emulator images (on Apple Silicon
+Macs, for example). The armeabi-v7a and x86_64 libraries (including the one
+x86_64 emulator images load) are built without it: there the registry does
+not serve `phonon-31m-en` and a Kitten bundle fails to run. Keep the arm64-v8a
+ABI in any `abiFilters` or App Bundle split.
+
+```kotlin
+// Phonon from the registry: 24 kHz mono PCM16 little-endian audio.
+val phonon = Xybrid.model("phonon-31m-en").load()
+val pcm = phonon.runAsync(Envelope.text("Hello from Phonon.", voiceId = "easton")).audioBytes
+
+// Kitten TTS 2 from a local directory with a ZzzEmbed model_metadata.json.
+val kitten = Xybrid.model(ModelSource.directory(kittenDir.path)).load()
+val speech = kitten.runAsync(Envelope.text("Hello from Kitten."))
+```
+
+The engine's runtime terms and upstream licenses ship in the AAR under
+`assets/xybrid/zzz/`. Android merges them into your APK, so every app that
+ships the SDK carries them; do not exclude them from packaging. See
+[Phonon speech](https://github.com/xybrid-ai/xybrid/blob/master/docs/sdk/PHONON.md)
+for voices and options, and the
+[Kotlin README](https://github.com/xybrid-ai/xybrid/blob/master/bindings/kotlin/README.md#speech-phonon--kitten-tts-2)
+for the Kitten bundle and streaming playback.
+
+---
+
 ## Platform Support
 
 | Architecture | Status |
 |-------------|--------|
-| arm64-v8a | Supported |
-| armeabi-v7a | Supported |
-| x86_64 | Supported (emulator) |
+| arm64-v8a | Supported, with Phonon / Kitten TTS 2 speech (devices and arm64 emulator images) |
+| armeabi-v7a | Supported, without speech |
+| x86_64 | Supported (x86_64 emulator images), without speech |

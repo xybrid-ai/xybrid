@@ -12,14 +12,14 @@ Add Xybrid to your Xcode project:
 
 1. In Xcode, select **File > Add Package Dependencies...**
 2. Enter: `https://github.com/xybrid-ai/xybrid`
-3. Set **Dependency Rule** to **Up to Next Major Version** → `0.6.0`
+3. Set **Dependency Rule** to **Up to Next Major Version** → `0.17.0`
 4. Select the **Xybrid** library product
 
 Or add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.6.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.17.0")
 ]
 ```
 
@@ -37,8 +37,8 @@ Then add the dependency to your target:
 ```swift
 import Xybrid
 
-// Once, at app launch. Runs locally as-is; pass a free key from
-// dashboard.xybrid.dev to see your inference traces: initialize(apiKey: "...")
+// Once, at app launch. Runs locally as-is; an `apiKey` authenticates the cloud
+// gateway but exports nothing (see "Observability" below).
 Xybrid.initialize()
 
 // Describing the source is cheap; load() is the explicit async boundary.
@@ -77,6 +77,89 @@ let result = try await model.runAsync(envelope: XybridEnvelope.text(
 if let answer = result.text { print("Answer:", answer) }
 if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
 ```
+
+### Observability (OpenTelemetry)
+
+Export is off until you start it; an API key alone does not enable it. Once
+started, each run is exported as an OpenTelemetry trace, with prompts and
+outputs included unless you call `.metadataOnly()`.
+
+```swift
+// Traces to the Xybrid dashboard (free key at dashboard.xybrid.dev)
+try Xybrid.Observability.xybrid(apiKey: key)
+    .service("MyApp", version: "1.4.0")
+    .start()
+
+// Or traces, metrics, and logs to any OTLP/HTTP endpoint (OpenTelemetry Collector)
+try Xybrid.Observability.otlp(endpoint: "http://collector:4318")
+    .metadataOnly()
+    .start()
+
+// Join your own trace, and tag the run with your conversation id
+let result = try await model.runAsync(
+    envelope: envelope,
+    options: .make(traceparent: currentTraceparent, conversationId: chatId)
+)
+
+// Link user feedback to the run's trace (needs the OTLP preset's logs signal)
+if let observation = result.observation {
+    try Xybrid.Observability.recordFeedback(for: observation, score: 1, label: "thumbs_up")
+}
+
+// Before the app suspends
+try await Xybrid.Observability.flushAsync()
+```
+
+`Xybrid.Observability.stats` reports accepted, exported, dropped, failed, and
+pending counts per signal (`traces`, `logs`, `metrics`). A flush or shutdown that
+cannot deliver everything throws `XybridError.telemetryDelivery`; the inference
+already succeeded, so do not rerun it. `suppressTrace: true` in
+`XybridRunOptions.make(...)` skips the detailed trace for one run. Pipelines
+take the same trace fields and return `observation` references for the workflow
+and each stage; ASR sessions take them through
+`XybridStreamingConfig.default.observed(by:)` or
+`voiceActivity(modelDir:observation:)`, and `flush()` returns the session's
+reference.
+
+Record work Xybrid does not run itself (a tool, another runtime's inference)
+with a manual operation. Pass `context()?.childOptions` to its children. The
+first terminal call wins, and releasing an unfinished one cancels it without
+flushing:
+
+```swift
+try await Xybrid.Observability.withWorkflow("answer-question") { workflow in
+    let call = XybridToolCallInfo(name: "search", callId: nil, toolType: nil,
+                                  description: nil, argumentsJson: #"{"q":"otel"}"#)
+    let tool = try Xybrid.Observability.startTool(call, options: workflow.context()?.childOptions)
+    try tool.recordResult(resultJson: #"{"hits":3}"#)
+    tool.complete()
+}
+```
+
+`withWorkflow` completes on return, cancels on `CancellationError`, and fails
+with the label `application_error` (never the error text) otherwise.
+
+`Tests/XybridTests/ObservabilityRuntimeTests.swift` runs the shared
+[observability runtime scenario](../../tools/scripts/observability_capture/scenario.md)
+through this API against a local OTLP receiver. It skips unless the scenario
+driver supplies the receiver, which CI's `Observability runtime scenario (iOS
+Simulator)` job in `build-apple.yml` does. To run it on a Mac, with the local
+xcframework unzipped (see below) and a booted simulator:
+
+```bash
+./bindings/apple/scripts/set-natives-mode.sh --set-local
+SIM_ID=<booted simulator UDID>   # xcrun simctl list devices booted
+python3 tools/scripts/observability_capture/run_scenario.py --binding swift --out-dir out/swift -- \
+  env "TEST_RUNNER_XYBRID_SCENARIO_ENDPOINT={endpoint}" \
+      "TEST_RUNNER_XYBRID_SCENARIO_EXPECTATIONS={expectations}" \
+      "TEST_RUNNER_XYBRID_SCENARIO_WORKDIR={workdir}" \
+  xcodebuild test -scheme Xybrid -destination "platform=iOS Simulator,id=$SIM_ID" \
+    -only-testing:XybridTests/ObservabilityRuntimeTests CODE_SIGNING_ALLOWED=NO
+./bindings/apple/scripts/set-natives-mode.sh --set-remote   # before committing
+```
+
+`xcodebuild` passes a variable to the simulator's test runner only with the
+`TEST_RUNNER_` prefix, which it strips.
 
 ### Available Types
 
@@ -187,6 +270,39 @@ bindings/apple/XCFrameworks/
     └── ios-arm64-simulator/
         └── XybridFFI.framework/
 ```
+
+### Explicit zzz notice-bearing package (preparation)
+
+Future zzz-enabled Apple producers must explicitly build
+`//bindings/apple:XybridFFI_zzz` with `--config=ios --//:tts_zzz=true` and use
+`bazel-bin/bindings/apple/XybridFFI_zzz.xcframework.zip`. This wrapper consumes
+the actual `:XybridFFI` ZIP plus **both** `@zzz_ios//:notices` and
+`@zzz_ios_sim//:notices`. Each repository exports only independently verified
+schema-5 files as `notices/<canonical-relative-path>`; missing pins and frozen
+schema-4 inputs expose an analysis-failing `:notices` target. Existing native
+targets, default features, pins and standard release paths are unchanged.
+
+The final ZIP preserves every framework payload byte and includes the exact
+fourteen immutable notices under `XybridFFI.xcframework/Notices/zzz/`, including
+`LICENSES/`. Both input inventories must independently match the packaged
+verifier's fixed path/hash contract. Missing, additional, duplicated or changed
+notices fail; an already packaged notice set must be complete and identical.
+The wrapper accepts the actual two-slice arm64 iOS device/simulator layout,
+checks its plist, and rejects links, aliases, unsupported ZIP metadata and
+payloads beyond fixed byte/count bounds. It never extracts or executes ZIP
+contents and never replaces an existing output.
+
+A credential-free final-package check is available from the reviewed SDK tree:
+
+```bash
+python3 bindings/apple/pack_zzz_notices.py verify --archive path/to/XybridFFI_zzz.xcframework.zip
+```
+
+Exit zero means the expected ZIP layout, CRCs and all fourteen notice hashes
+passed. This check does not prove native symbols, runtime behavior, provenance
+or installed application notice retention. No schema-5 pins are activated by
+this preparation; a real Bazel build and final SDK qualification remain gates
+before publication. The standard release workflow still uses `:XybridFFI`.
 
 ### Environment Variables
 

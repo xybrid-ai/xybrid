@@ -40,8 +40,10 @@ Cross-platform example app for iOS, Android, and macOS using the Flutter SDK bin
 |------|------------------|--------------|
 | Flutter | 3.19.0+ | [flutter.dev/docs/get-started/install](https://flutter.dev/docs/get-started/install) |
 | Dart | 3.3.0+ | Included with Flutter |
-| Xcode | 14.0+ | Mac App Store (for iOS/macOS) |
+| Xcode | 15.0+ | Mac App Store (for iOS/macOS) |
 | Android Studio | Hedgehog+ | [developer.android.com/studio](https://developer.android.com/studio) (for Android) |
+| Deployment Target | iOS 16.0+, macOS 14.0+ (Apple Silicon) | - |
+| Android SDK | API 28+ (Android 9) | Via SDK Manager |
 
 ### Getting Started
 
@@ -121,7 +123,7 @@ Native Android example using Jetpack Compose and the Xybrid Kotlin SDK.
 |------|------------------|--------------|
 | Android Studio | Hedgehog (2023.1.1)+ | [developer.android.com/studio](https://developer.android.com/studio) |
 | JDK | 11+ | Included with Android Studio |
-| Android SDK | API 28+ | Via SDK Manager |
+| Android SDK | API 29+ (Android 10) | Via SDK Manager |
 | Rust | 1.70+ | [rustup.rs](https://rustup.rs) (for native lib build) |
 
 ### Getting Started
@@ -237,7 +239,7 @@ Native libraries need to be built from Rust before the SDK works:
 |-------|----------|
 | "SDK location not found" (Android) | Set `ANDROID_HOME` environment variable |
 | "Target 'aarch64-apple-ios' not installed" | Run `rustup target add aarch64-apple-ios` |
-| "minSdk is too high" (Android) | Use Android 9.0+ device/emulator (API 28) |
+| "minSdk is too high" (Android) | Use a device/emulator at or above the example's minimum: Android 10 (API 29) for Android (Kotlin), Android 9 (API 28) for Flutter and Unity |
 | Xcode signing errors | Configure development team in Xcode |
 
 ### Microphone permission denied

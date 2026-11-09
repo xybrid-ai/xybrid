@@ -15,7 +15,7 @@ import type {
 } from "../types.ts";
 import type { RuntimeInitializer } from "./initialization.ts";
 import { readResponseBytes } from "./response.ts";
-import type { BrowserRuntime, RuntimeInitConfig, RuntimeModel } from "./runtime.ts";
+import type { RuntimeInitConfig } from "./runtime.ts";
 import { AcceleratorUnavailableError } from "./runtime.ts";
 import { resolveWasmPath } from "./url.ts";
 
@@ -515,21 +515,4 @@ export const selectAccelerated = async <T>(
       );
     }
   }
-};
-
-export const compileModelBytes = async (
-  runtime: BrowserRuntime,
-  bytes: Uint8Array,
-  preference: LoadOptions["accelerator"],
-  preflight: AcceleratorPreflight = { status: "available" },
-  signal?: AbortSignal,
-): Promise<{ readonly model: RuntimeModel; readonly accelerator: SelectedAccelerator }> => {
-  const { value, accelerator } = await selectAccelerated(
-    preference,
-    (target) => runtime.compileBytes(bytes, target),
-    preflight,
-    signal,
-    (model) => model.delete(),
-  );
-  return { model: value, accelerator };
 };

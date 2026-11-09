@@ -1,0 +1,124 @@
+# Purpose: Manual: Produce a source-verified, notice-bearing Apple SDK candidate from genuine schema-5 engine pins on protected master.
+name: "SDK: Trusted zzz Apple candidate (manual)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Full candidate commit descended from this runtime master
+        required: true
+        type: string
+      version:
+        description: Exact SDK version already rendered in candidate metadata
+        required: true
+        type: string
+      release_date:
+        description: Approved candidate metadata date (YYYY-MM-DD)
+        required: true
+        type: string
+
+concurrency:
+  group: trusted-zzz-sdk-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  apple-candidate:
+    name: Trusted Apple SDK candidate
+    runs-on: macos-26
+    timeout-minutes: 90
+    environment: zzz-engine
+    # The existing environment has a reviewed master-only branch rule.
+    # This condition and every use/upload guard also check the master context.
+    if: github.repository == 'xybrid-ai/xybrid' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.run_attempt == 1
+    steps:
+      - name: Fresh trusted tooling at runtime master
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: trusted-tooling
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Separate master object store for candidate data
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: source-objects
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Verify source policy, materialize raw source and verify both exact submodules before private access
+        env:
+          CANDIDATE: ${{ inputs.candidate }}
+          SDK_VERSION: ${{ inputs.version }}
+          RELEASE_DATE: ${{ inputs.release_date }}
+          GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          python3 -I "$GITHUB_WORKSPACE/trusted-tooling/tools/scripts/zzz_sdk_stage.py" prepare \
+            --tooling "$GITHUB_WORKSPACE/trusted-tooling" --repo "$GITHUB_WORKSPACE/source-objects" \
+            --candidate "$CANDIDATE" --version "$SDK_VERSION" --release-date "$RELEASE_DATE" \
+            --root "$RUNNER_TEMP/zzz-trusted-$GITHUB_RUN_ID"
+
+      - name: Minimal trusted packaged-pull broker (mirror-read credentials only)
+        env:
+          ZZZ_GITHUB_TOKEN: ${{ secrets.ZZZ_GITHUB_TOKEN }}
+          ZZZ_RELEASE_REPOSITORY: ${{ secrets.ZZZ_RELEASE_REPOSITORY }}
+          CANDIDATE: ${{ inputs.candidate }}
+          SDK_VERSION: ${{ inputs.version }}
+          RELEASE_DATE: ${{ inputs.release_date }}
+          GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          python3 -I "$GITHUB_WORKSPACE/trusted-tooling/tools/scripts/zzz_sdk_stage.py" download \
+            --tooling "$GITHUB_WORKSPACE/trusted-tooling" --repo "$GITHUB_WORKSPACE/source-objects" \
+            --candidate "$CANDIDATE" --version "$SDK_VERSION" --release-date "$RELEASE_DATE" \
+            --root "$RUNNER_TEMP/zzz-trusted-$GITHUB_RUN_ID"
+
+      - name: Reverify source and fresh private staging, then build the actual notice-bearing XCFramework locally
+        env:
+          MACOS_SDK_MIRROR: ${{ vars.MACOS_SDK_MIRROR }}
+          CANDIDATE: ${{ inputs.candidate }}
+          SDK_VERSION: ${{ inputs.version }}
+          RELEASE_DATE: ${{ inputs.release_date }}
+          GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          python3 -I "$GITHUB_WORKSPACE/trusted-tooling/tools/scripts/zzz_sdk_stage.py" build \
+            --tooling "$GITHUB_WORKSPACE/trusted-tooling" --repo "$GITHUB_WORKSPACE/source-objects" \
+            --candidate "$CANDIDATE" --version "$SDK_VERSION" --release-date "$RELEASE_DATE" \
+            --root "$RUNNER_TEMP/zzz-trusted-$GITHUB_RUN_ID"
+
+      # Sole accepted upload path. No always()/failure upload or continue-on-error.
+      - name: Fresh master-attempt, source, submodule, staged-byte and final-package guard immediately before upload
+        env:
+          CANDIDATE: ${{ inputs.candidate }}
+          SDK_VERSION: ${{ inputs.version }}
+          RELEASE_DATE: ${{ inputs.release_date }}
+          GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          python3 -I "$GITHUB_WORKSPACE/trusted-tooling/tools/scripts/zzz_sdk_stage.py" pre-upload \
+            --tooling "$GITHUB_WORKSPACE/trusted-tooling" --repo "$GITHUB_WORKSPACE/source-objects" \
+            --candidate "$CANDIDATE" --version "$SDK_VERSION" --release-date "$RELEASE_DATE" \
+            --root "$RUNNER_TEMP/zzz-trusted-$GITHUB_RUN_ID"
+
+      - name: Upload exact Apple SDK candidate and source binding
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zzz-sdk-apple-${{ github.run_id }}-attempt-1
+          path: |
+            ${{ runner.temp }}/zzz-trusted-${{ github.run_id }}/upload/packages/xybrid-apple-v${{ inputs.version }}.xcframework.zip
+            ${{ runner.temp }}/zzz-trusted-${{ github.run_id }}/upload/source-binding.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1

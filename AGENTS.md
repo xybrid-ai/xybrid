@@ -86,8 +86,8 @@ is Flutter, Unity staging, and dev-env chores:
 
 ```bash
 cargo xtask build-flutter --platform <linux|macos|windows>  # Flutter native (deliberately cargo)
-cargo xtask build-ffi --target <triple> --release           # xybrid-bolt cdylib (Unity native)
-cargo xtask build-unity                                     # xybrid-bolt across Unity platforms
+cargo xtask build-ffi --target <triple> --release           # xybrid-bolt cdylib (Unity native; Android via Bazel)
+cargo xtask build-unity                                     # xybrid-bolt across Unity platforms (skips Android)
 cargo xtask deploy-unity-native --lib <path> --target <triple>  # stage a Bazel-built lib into Unity
 cargo xtask setup-test-env                                  # dev-env chore
 ```
@@ -97,6 +97,10 @@ through cargokit → cargo, so the contributor path must match. `build-ffi` /
 `build-unity` build `xybrid-bolt` (the pre-bolt `xybrid-ffi` C ABI is retired);
 `deploy-unity-native` exists so a Bazel-built lib can be staged into
 `bindings/unity/Runtime/Plugins/` with the right per-platform `.meta`.
+Unity Android natives are Bazel-only: `//crates/xybrid-bolt:xybrid_bolt_cdylib`
+links libc++ statically there and the Unity package ships no
+`libc++_shared.so`, while cargo-ndk links the shared runtime — so
+`build-ffi --deploy-unity` refuses Android and `build-unity` skips it.
 
 After editing `bindings/flutter/rust`, regenerate the Dart glue with
 `flutter_rust_bridge_codegen generate` (CLI version must match the pinned
@@ -121,6 +125,70 @@ Android is configured as `CMAKE_SYSTEM_NAME=Linux`, so a CMake hook
 (`bazel/ggml/android_system_name.cmake`) makes ggml build its Android variant
 set, and `CMAKE_PLATFORM_NO_VERSIONED_SONAME` keeps sonames unversioned (an APK
 only carries `lib*.so`).
+
+**The same platform carries the Android 10 floor; nothing else does.**
+`//bazel/ggml:android_arm64_cpu_variants` also carries
+`//bazel/toolchains/android:api29`, so the AAR's arm64 slice compiles and links
+with `@androidndk_api29` (the pinned NDK at API 29), which is why the Kotlin
+and React Native SDKs require Android 10 (`minSdk 29`). Every other Bazel
+Android target (the AAR's armeabi-v7a / x86_64 slices, the Flutter precompiled
+libraries, the Unity plugin via `--config=android-*`) stays on `@androidndk` at
+API 28 and must not require Android 10. The API-29 toolchain wins only because
+MODULE.bazel registers it before `@androidndk//:all`, whose toolchains match any
+Android platform of their CPU; keep that order. `ggml_cpu_backend.cpp` refuses
+to compile below API 29, so a fallback to API 28 fails the build. CI also reads
+the API level each library was linked for from its `.note.android.ident`
+(`tools/scripts/verify_android_api_level.py`): build-android.yml requires 29 for
+the AAR's arm64 libraries and 28 for its other slices, and
+`verify_unity_android_natives.py` and release-prep's Flutter payload check
+require 28.
+
+**Speech ships only in the AAR's arm64 slice.** The Kotlin AAR (so Kotlin and
+React Native) is the only standard binary built with `--//:tts_zzz=true`: its
+arm64-v8a `libxybrid_bolt.so` links the private zzz engine (Phonon, Kitten TTS
+2) statically, and armeabi-v7a / x86_64 build without it through
+`//bazel/zzz:android_without_slice`. Every crate that forwards `tts-zzz`
+(xybrid-core's features and zzz-sys dep, xybrid-sdk, both xybrid-bolt
+libraries, integration-tests' `tts_abort`) uses the identical select
+`{"//bazel/zzz:android_without_slice": [], "//:tts_zzz_enabled": [...],
+"//conditions:default": []}`. A mismatch still compiles and misroutes speech at
+runtime; `tools/scripts/tests/test_zzz_feature_wiring.py` and bazel.yml's
+speech guard catch it. A new Android ABI either gets a pinned slice or joins
+that group, or every flag-on AAR build fails as incompatible. The flag is
+`scope = "target"` so build tools in the exec configuration never resolve the
+build host's slice; keep it. The engine's fourteen notices ride in the AAR at
+`assets/xybrid/zzz/<path>` (`//bazel/zzz:notices.bzl`) and are never committed.
+release-prep's Build Android job takes the engine secrets from the
+`zzz-release` environment and fails without them; `zzz-engine` stays
+master-only for test-zzz-engine.yml, trusted-zzz-sdk.yml and the
+test-zzz-android.yml proof lane. `zzz-release`'s branch rule admits `release/v*`
+refs and GitHub checks only the run's ref, so any workflow on a `release/v*`
+branch can bind it: never bind it outside Build Android, and treat push access
+to `release/v*` as what guards the credentials (a repository ruleset should
+limit it to maintainers and the release automation). `tools/scripts/verify_zzz_android.py` gates the
+AAR, the `xybrid-android-<tag>.zip` and the Gradle-built AAR (speech in
+arm64-v8a only, the fourteen notices byte-exact, minSdk 29, no static TLS,
+libc imported from bionic) in
+release-prep, whose Verify Android Gradle packaging job replays the Gradle
+publish before the draft exists, and again in release-publish before Maven
+Central.
+
+**The engine is isolated at build time: only `zzz_embed_*` stays global.** Its
+archive bundles its own runtime and defines memcpy, strlen, expf,
+`__stack_chk_fail` and other libc, libm and compiler-rt names globally, and the
+AAR takes the whole archive into `libxybrid_bolt.so`, where those copies used
+to satisfy xybrid's own references instead of bionic's. zzz-sys therefore links
+`//bazel/zzz:android_engine` (`bazel/zzz/isolate.bzl`), never
+`@zzz_android//:zzz`: the target toolchain's `ld -r --unique` prelinks the
+archive into one object (each input section kept apart, so `--gc-sections`
+still drops dead engine code; any `ld -r` warning fails), `llvm-objcopy` makes
+every definition but the C API local, and the action fails unless exactly that
+API (`ZZZ_EMBED_API`, kept equal to `crates/zzz-sys/src/api.rs` by
+`test_zzz_isolation.py`) is left global. A new engine function goes into both
+lists. The AAR gate's libc canary and the proof lane's compare-imports
+check the shipped library, and `bazel/zzz/selftest` proves the mechanism on a
+fake engine in bazel.yml. The other static slices and Cargo builds still link
+the archive as is (a follow-up; see `crates/zzz-sys/README.md`).
 
 
 ### Prebuilt llama.cpp natives (the cargo fast path)
@@ -261,6 +329,14 @@ registers, `xybrid-bolt` reports a fallback: `swift` on Apple platforms,
 so a new binding there reports theirs only until it registers. Add a new name
 to the facade's `resolve_binding`; a test fails until you do. The table is in
 `docs/telemetry/registry.md`.
+
+The browser package (`bindings/web`, npm `@xybrid/web`) is a GGUF text-generation
+preview over the existing Rust/llama.cpp path. `pnpm build` invokes Bazel for CPU
+and experimental WebGPU WASM, then bundles the client and worker. `pnpm
+pack:release` checks the real npm archive in an isolated consumer; CI and release
+preparation run Chromium against its extracted contents. Release publication
+stages that same archive for npm approval. Setup is in
+`bindings/web/RELEASING.md`; installing the package never invokes native tools.
 
 **Dependency direction (do not reverse):**
 
@@ -430,7 +506,9 @@ patch, draft GitHub Release, the release PR, the tag, and the crates.io / pub.de
 ```bash
 git switch -c release/v<version> origin/master
 just bump-version <version>     # syncs every manifest: Cargo, pubspec, Unity,
-                                # Kotlin, Package.swift sdkVersion, Python pyproject
+                                # Kotlin, Package.swift sdkVersion, Python
+                                # pyproject, and the install-snippet pins in
+                                # the READMEs and docs pages (install_pins.py)
 ./bindings/apple/scripts/set-natives-mode.sh --set-remote   # useLocalNatives=false
 # fill the CHANGELOG entry for <version> (and bindings/flutter/CHANGELOG.md)
 git commit -am "bump: <version>" && git push -u origin release/v<version>
@@ -456,10 +534,79 @@ Pushing `release/v*` triggers `release-prep.yml`, which:
   not committed). Run `bindings/apple/scripts/set-natives-mode.sh --set-remote`
   before committing — remote (`false`) is the canonical committed state.
 
+Install snippets in the READMEs and docs pages that name a release are pins in
+`PINS` (`tools/scripts/install_pins.py`). A new snippet shape, or a new page
+carrying one, gets an entry there or no bump rewrites it. CI's `Version sync`
+job runs `version-sync.sh --check` and `test_install_pins.py` on every PR,
+docs-only ones included: a stale or dropped pin fails, and so does a known shape
+on an unlisted page or a package named with a version no pin owns. Pins follow
+prereleases too: an rc release PR merges to master, so until the final release
+the READMEs on master and docs.xybrid.dev say to install the rc.
+
 `just bump-version` only rewrites the workspace `version`; it does **not** touch
 internal path-dep `version = "..."` pins (e.g. `xybrid-sdk`/`xybrid-core` in
 sibling `Cargo.toml`s). If those drift, lockfile regen fails under `^0.1.x` —
 update them to match and re-run `cargo update -w` when bumping.
+
+**Native changes after the bump need a Flutter crate edit.** cargokit names
+the Flutter precompiled release after a hash of `bindings/flutter/rust` alone,
+and release-prep reuses whatever that release already holds. If anything the
+library is built from (any `Cargo.toml`, workspace crates, `vendor/` gitlinks,
+Bazel config) changes on a release branch after the bump, a master merge
+included, or you rebase or re-cut the branch after release-prep ran, change a
+line of `bindings/flutter/rust/Cargo.toml` too. The Verify release branch job
+runs `tools/scripts/check_flutter_precompiled_inputs.py`, which fails on the
+first case from history and on most of the second from the release's
+publication date.
+
+**llama.cpp stable updates (POC).** `llamacpp-update.yml` checks official
+`vX.Y.Z` releases daily and opens one version-specific update PR at a time.
+Keep the submodule gitlink, `LLAMA_CPP_COMMIT`, and
+`.github/llamacpp-version.json` consistent. Release preparation waits for
+successful validation and a matching, complete generated native manifest,
+then pushes `release/v<version>` through the existing pipeline. Stable `0.x`
+SDKs default to the next minor for classified patch or minor upstream updates;
+first tracked (bootstrap) updates, upstream major updates and SDKs >=1.0
+require an explicit version. The release PR remains the publishing approval
+point.
+Release-branch version sync records the exact upstream commit being shipped.
+Setup, dry runs, and conformance-fixture migration are documented in
+`docs/development/llamacpp-updates.md`.
+
+---
+
+## GitHub Actions workflows — names, files, keys
+
+The map of every workflow is
+[`.github/workflows/README.md`](.github/workflows/README.md). Its inventory table
+is generated from the workflow files, and these rules keep it true:
+
+- **Display name** is `"Group: Subject"` (quoted). Group is one of `CI`, `SDK`,
+  `Artifacts`, `Release`, `Security`, `Maintenance`, `Community`; `GROUPS` in
+  `tools/scripts/gen_workflow_index.py` is the source of truth and says what
+  each holds. A dispatch-only workflow ends its Subject with `(manual)`. Docs
+  that cite a display name change with it, so `git grep` the old name.
+- **Purpose** is the line directly above `name:`: `# Purpose: <one sentence>`,
+  starting `Manual:` for a dispatch-only workflow. Keep it true when triggers
+  change; a schedule edit can make "weekly" wrong.
+- **Concurrency groups** start with the file stem, never `${{ github.workflow }}`,
+  so a display name can change without changing the group. Use
+  `<file-stem>-${{ github.ref }}`, key on the tag or issue number for
+  event-driven workflows, or use the bare `<file-stem>` when every run must
+  queue behind the last (`llamacpp-update.yml`, `star-history.yml`).
+- **Regenerate the map.** After touching any workflow, run
+  `python3 tools/scripts/gen_workflow_index.py`. CI runs it with `--check` (job
+  `Workflow index`) and fails on drift or a broken rule. A rebase can bring in
+  master workflows written without these rules; fix them on your branch.
+- **Rename workflow files rarely.** GitHub ties run history and code-scanning
+  configurations (CodeQL `codeql.yml:analyze`, Scorecard `scorecard.yml:analysis`)
+  to the path, and `release-publish.yml` and the docs call
+  `gh workflow run <file>`. Change `name:` instead.
+- **Job names are matched as checks; never rename them.** `CI Success`
+  (`ci.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
+  gate `master` through branch protection. `tools/scripts/llamacpp_update.py`
+  also waits on job names (`REQUIRED_CHECKS`, `AUTOMATION_CHECKS`) before it
+  cuts a llama.cpp release. Edit a workflow's `name:` freely.
 
 ---
 

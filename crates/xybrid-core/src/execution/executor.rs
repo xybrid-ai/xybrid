@@ -43,17 +43,21 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::choice::onnx::OnnxChoiceScorer;
+use super::choice::{ensure_no_choice_kinds, validate_choice_request, EntryPoint};
 use super::listener::ExecutionGuard;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::llm_telemetry::{
     insert_llm_streaming_metrics, mirror_llm_metrics_to_span, stamp_llm_runtime_backend,
     stamp_llm_span_cost_attribution,
 };
+use super::template::{ChoiceScorerSpec, OnnxByteOptionScorerSpec};
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::tool_continuation::{
     reject_nested_tool_continuation_parts, run_tool_continuation, run_tool_continuation_streaming,
     text_messages_from_multimodal, ToolContinuation,
 };
+use crate::ir::ChoiceRequest;
 
 fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     if error.cloud_fallback_abort_reason().is_some() {
@@ -157,7 +161,6 @@ fn elapsed_millis_floor_one(start: std::time::Instant) -> u32 {
 
 // Internal: ONNX-specific types needed for optimized execution paths
 // These are implementation details, not part of the public API
-use crate::execution::session_factory::OnnxSessionFactory;
 use crate::runtime_adapter::onnx::{
     ExecutionProviderKind, ONNXSession, OnnxRuntime, SessionOptions,
 };
@@ -177,14 +180,39 @@ use crate::runtime_adapter::llm::LlmRuntimeAdapter;
 
 use super::modes::{
     execute_autoregressive_stage, execute_bert_inference, execute_single_shot_stage,
-    execute_tts_inference, execute_whisper_decoder_stage,
+    execute_tts_inference, execute_whisper_decoder_stage, tts_duration_output, tts_waveform_output,
 };
 use super::path::{file_identity, FileIdentity};
 use super::postprocessing;
 use super::preprocessing;
+use super::session_cache::OnnxSessionCache;
 use super::tokenizer_cache::TokenizerCache;
+use super::tts_timing::{self, PhonemeSpan};
 use super::types::{ExecutorResult, PreprocessedData, RawOutputs};
 use super::voice_loader::TtsVoiceLoader;
+
+/// One synthesized TTS chunk, before postprocessing.
+struct SynthesizedChunk {
+    /// The waveform, trailing artifact samples already cut off.
+    audio: Vec<f32>,
+    /// The chunk's phonemes as sample spans on `audio`, when the model
+    /// reported token durations that match its phoneme ids.
+    spans: Option<Vec<PhonemeSpan>>,
+}
+
+/// A choice scorer's ONNX session and the spec bound to it, reused across
+/// runs. Keyed by the model file's path and `(len, mtime)`, and also by the
+/// spec: the scorer was checked against this session, so the two are only
+/// ever used together. Unlike [`OnnxSessionCache`], it does not check
+/// external weight files.
+struct ChoiceScorerCache {
+    model_path: PathBuf,
+    /// `(len, modified)` of the model file at build time; `None` forces a
+    /// rebuild.
+    file_identity: Option<FileIdentity>,
+    session: Arc<ONNXSession>,
+    scorer: OnnxChoiceScorer,
+}
 
 /// Template Executor implementation.
 ///
@@ -221,19 +249,6 @@ use super::voice_loader::TtsVoiceLoader;
 /// # Ok(())
 /// # }
 /// ```
-/// A cached ONNX session for the TTS path, reused across runs to avoid the
-/// per-call graph load + Level-3 optimization that otherwise dominates short-TTS
-/// latency. Keyed by the model file path; the captured `(len, mtime)` identity
-/// self-invalidates the cache if the file at that path is replaced in place.
-struct TtsSessionCache {
-    model_path: PathBuf,
-    /// `(len, modified)` of the model file at build time. `None` when the file
-    /// metadata couldn't be read — treated as "unverifiable", forcing a rebuild
-    /// rather than trusting a possibly-stale session.
-    file_identity: Option<FileIdentity>,
-    session: Arc<ONNXSession>,
-}
-
 pub struct TemplateExecutor {
     /// Configured runtimes (e.g., "onnx", "candle")
     runtimes: HashMap<String, Box<dyn ModelRuntime>>,
@@ -250,10 +265,15 @@ pub struct TemplateExecutor {
     /// This ensures the struct has consistent fields regardless of features.
     #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
     llm_adapter_cache: Option<()>,
-    /// Cached ONNX session for the TTS path (see [`TtsSessionCache`]). Lives for
-    /// the executor's lifetime — i.e. the TTS model's load — and drops on unload,
-    /// exactly like `llm_adapter_cache`; no separate eviction needed.
-    tts_session_cache: Option<TtsSessionCache>,
+    /// The CPU session the TTS and token-ID paths build themselves (see
+    /// [`OnnxSessionCache`]). Lives for the executor's lifetime — i.e. the
+    /// model's load — and drops on unload, exactly like `llm_adapter_cache`;
+    /// no separate eviction needed.
+    onnx_session_cache: OnnxSessionCache,
+    /// Session and bound spec of the last choice scorer run (see
+    /// [`ChoiceScorerCache`]). Lives for the executor's lifetime, like the
+    /// session above.
+    choice_scorer_cache: Option<ChoiceScorerCache>,
     /// Parsed `tokenizer.json` files for the `Tokenize` and `WhisperDecode`
     /// steps (see [`TokenizerCache`]). Lives for the executor's lifetime, like
     /// the caches above, so each tokenizer is parsed once per loaded model.
@@ -264,6 +284,24 @@ pub struct TemplateExecutor {
     /// multimodal messages through their backend-owned mtmd path. This registry
     /// exists for backends that expose a separate image-encoder tensor seam.
     vision_encoders: HashMap<String, Box<dyn VisionEncoder>>,
+}
+
+/// Runtime wire label for a load of `path` that would actually load weights,
+/// or `None` when the runtime already holds them or cannot tell.
+///
+/// Only runtimes that report their cache are asked, so a runtime without one
+/// never reports a load it may not perform.
+pub(crate) fn pending_load_label(runtime: &dyn ModelRuntime, path: &Path) -> Option<&'static str> {
+    if let Some(onnx) = runtime.as_any().downcast_ref::<OnnxRuntime>() {
+        return (!onnx.has_session(path)).then_some("ort");
+    }
+    let label = match runtime.name() {
+        "whispercpp" => "whispercpp",
+        "zzz" => "zzz",
+        "candle" => "candle",
+        _ => return None,
+    };
+    (!runtime.is_loaded(path)).then_some(label)
 }
 
 impl TemplateExecutor {
@@ -317,7 +355,8 @@ impl TemplateExecutor {
             runtimes,
             base_path: base_path.into(),
             llm_adapter_cache: None,
-            tts_session_cache: None,
+            onnx_session_cache: OnnxSessionCache::default(),
+            choice_scorer_cache: None,
             tokenizer_cache: TokenizerCache::default(),
             vision_encoders: HashMap::new(),
         }
@@ -337,6 +376,16 @@ impl TemplateExecutor {
             "whispercpp".to_string(),
             Box::new(crate::runtime_adapter::WhisperCppRuntime::new()),
         );
+        #[cfg(feature = "tts-zzz")]
+        runtimes.insert(
+            "zzz".to_string(),
+            Box::new(crate::runtime_adapter::zzz::ZzzKittenRuntime::new()),
+        );
+        #[cfg(feature = "tts-zzz")]
+        runtimes.insert(
+            "zzz-phonon".to_string(),
+            Box::new(crate::runtime_adapter::zzz::ZzzPhononRuntime::new()),
+        );
         runtimes
     }
 
@@ -346,7 +395,13 @@ impl TemplateExecutor {
             EnvelopeKind::MultiPart(parts) => {
                 parts.iter().any(Self::requires_multimodal_generation)
             }
-            EnvelopeKind::Audio(_) | EnvelopeKind::Text(_) | EnvelopeKind::Embedding(_) => false,
+            // Choice kinds never reach generation: every entry refuses them
+            // first (see `validate_choice_request`).
+            EnvelopeKind::Audio(_)
+            | EnvelopeKind::Text(_)
+            | EnvelopeKind::Embedding(_)
+            | EnvelopeKind::ChoiceRequest(_)
+            | EnvelopeKind::ChoiceScores(_) => false,
         }
     }
 
@@ -498,6 +553,14 @@ impl TemplateExecutor {
             ExecutionTemplate::TfLite { model_file } => ("tflite", model_file),
             #[cfg(feature = "asr-whispercpp")]
             ExecutionTemplate::GgmlWhisper { model_file, .. } => ("whispercpp", model_file),
+            #[cfg(feature = "tts-zzz")]
+            ExecutionTemplate::ZzzEmbed { model_file, .. } => ("zzz", model_file),
+            #[cfg(feature = "tts-zzz")]
+            ExecutionTemplate::ZzzPhonon { model_file, .. } => ("zzz-phonon", model_file),
+            // A scorer's session lives in the executor's own cache.
+            ExecutionTemplate::ChoiceScorer {
+                scorer: ChoiceScorerSpec::OnnxByteOptionScorer(spec),
+            } => return self.cached_choice_scorer(spec).is_some(),
             _ => return false,
         };
         let model_full_path = Path::new(&self.base_path).join(model_file);
@@ -534,6 +597,10 @@ impl TemplateExecutor {
         input: &Envelope,
         #[allow(unused_variables)] config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        // A choice request runs only on a choice scorer, through this batch
+        // entry. Refuse anything else before any span, runtime or backend.
+        validate_choice_request(metadata, input, EntryPoint::Batch)?;
+
         debug!(
             target: "xybrid_core",
             "TemplateExecutor.execute START: model_id={}, template={:?}",
@@ -599,6 +666,18 @@ impl TemplateExecutor {
         // omitted. See `quantization_label_from_metadata`.
         if let Some(quant) = quantization_label_from_metadata(metadata) {
             xybrid_trace::add_metadata("quantization", quant);
+        }
+
+        // A choice scorer answers its request in one batch run. The validator
+        // above has already checked the request against the spec.
+        if let ExecutionTemplate::ChoiceScorer { scorer } = &metadata.execution_template {
+            return match &input.kind {
+                EnvelopeKind::ChoiceRequest(request) => self.execute_choice_scorer(scorer, request),
+                // Unreachable: the validator admits only a choice request.
+                _ => Err(AdapterError::InvalidInput(
+                    "a choice scorer accepts only a ChoiceRequest".to_string(),
+                )),
+            };
         }
 
         // Step 1: Handling ModelGraph (multi-model DAG)
@@ -805,6 +884,12 @@ impl TemplateExecutor {
                         .to_string(),
                 ));
             }
+            ExecutionTemplate::ChoiceScorer { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "ChoiceScorer execution should dispatch before the single-model path"
+                        .to_string(),
+                ));
+            }
             #[cfg(feature = "asr-whispercpp")]
             ExecutionTemplate::GgmlWhisper {
                 model_file,
@@ -831,6 +916,31 @@ impl TemplateExecutor {
                 return Err(AdapterError::RuntimeError(
                     "GGML Whisper execution requires the 'asr-whispercpp' feature".to_string(),
                 ));
+            }
+            #[cfg(feature = "tts-zzz")]
+            ExecutionTemplate::ZzzEmbed { .. } => {
+                // The four asset paths are bundle-declared and resolved
+                // inside execute_zzz (which has base_path and the whole
+                // template in scope), so this arm never reaches the generic
+                // single-model flow below.
+                return self.execute_zzz(metadata, input);
+            }
+            #[cfg(not(feature = "tts-zzz"))]
+            ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "zzz execution requires the 'tts-zzz' feature and its \
+                     privately staged pinned engine slice"
+                        .to_string(),
+                ));
+            }
+            #[cfg(feature = "tts-zzz")]
+            ExecutionTemplate::ZzzPhonon { .. } => {
+                self.prepare_phonon(metadata, input, config)?;
+                return self
+                    .runtimes
+                    .get_mut("zzz-phonon")
+                    .expect("prepared Phonon runtime exists")
+                    .execute(input);
             }
         };
 
@@ -867,12 +977,9 @@ impl TemplateExecutor {
                 .as_token_ids()
                 .ok_or_else(|| AdapterError::InvalidInput("Expected token IDs".to_string()))?;
 
-            // Create and run BERT session through the shared factory entry.
-            let session = OnnxSessionFactory::create_session(
-                &model_full_path,
-                ExecutionProviderKind::Cpu,
-                SessionOptions::default(),
-            )?;
+            // Reuse the CPU session across calls: building it dominates a
+            // short embedding.
+            let session = self.onnx_session_cache.get_or_build(&model_full_path)?;
             let raw_outputs =
                 execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
 
@@ -920,9 +1027,14 @@ impl TemplateExecutor {
 
             // Ensure model is loaded (runtime handles caching)
             debug!(target: "xybrid_core", "Loading model: {:?}", model_full_path);
-            runtime
-                .load(&model_full_path)
-                .map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
+            {
+                let _load = pending_load_label(&**runtime, &model_full_path)
+                    .map(xybrid_trace::model_load_stage);
+                runtime
+                    .load(&model_full_path)
+                    .inspect_err(|_| xybrid_trace::mark_stage_failed())
+                    .map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
+            }
 
             debug!(target: "xybrid_core", "Running inference");
             runtime.execute(&runtime_input)?
@@ -1072,6 +1184,17 @@ impl TemplateExecutor {
         context: &ConversationContext,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        // History is never scored, so a choice kind there is refused like one
+        // in the input — for every model, scorers included.
+        validate_choice_request(metadata, input, EntryPoint::Conversation)?;
+        ensure_no_choice_kinds(
+            &metadata.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )?;
+
         debug!(
             target: "xybrid_core",
             "TemplateExecutor.execute_with_context START: model_id={}, context_id={}",
@@ -1291,6 +1414,8 @@ impl TemplateExecutor {
         #[allow(unused_variables)] on_token: StreamingCallback<'_>,
         #[allow(unused_variables)] config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        validate_choice_request(metadata, input, EntryPoint::Streaming)?;
+
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
             if let super::template::ExecutionTemplate::VisionLanguage {
@@ -1468,6 +1593,15 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        validate_choice_request(metadata, input, EntryPoint::Streaming)?;
+        ensure_no_choice_kinds(
+            &metadata.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )?;
+
         debug!(
             target: "xybrid_core",
             "TemplateExecutor.execute_streaming_with_context START: model_id={}, context_id={}",
@@ -1689,7 +1823,10 @@ impl TemplateExecutor {
             }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -1753,7 +1890,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -1824,7 +1961,10 @@ impl TemplateExecutor {
             }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -1866,7 +2006,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -1977,7 +2117,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2046,7 +2186,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2069,6 +2209,9 @@ impl TemplateExecutor {
             let vision_encoder_path = Path::new(&self.base_path).join(&vision_encoder.file);
             llm_config =
                 llm_config.with_vision_encoder(vision_encoder_path.to_string_lossy().to_string());
+            if let Some(tokens) = vision_encoder.max_image_tokens {
+                llm_config = llm_config.with_max_image_tokens(tokens);
+            }
         }
         llm_config
     }
@@ -2121,7 +2264,10 @@ impl TemplateExecutor {
                 context_length,
             );
 
-            adapter.load_model_with_config(&llm_config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&llm_config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key, adapter));
         }
 
@@ -2195,7 +2341,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             registered_image_preprocess_ms,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2313,7 +2459,10 @@ impl TemplateExecutor {
                 context_length,
             );
 
-            adapter.load_model_with_config(&llm_config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&llm_config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -2343,7 +2492,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             registered_image_preprocess_ms,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2416,7 +2565,10 @@ impl TemplateExecutor {
             }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -2459,7 +2611,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2548,7 +2700,10 @@ impl TemplateExecutor {
 
             // Create adapter with the appropriate backend based on hint
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
 
             // Cache the adapter
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
@@ -2609,7 +2764,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2774,15 +2929,29 @@ impl TemplateExecutor {
         }
     }
 
-    /// Run postprocessing steps from metadata.
+    /// Run postprocessing steps from metadata and convert the result to an
+    /// envelope.
     fn run_postprocessing(
         &mut self,
         metadata: &ModelMetadata,
         outputs: RawOutputs,
     ) -> ExecutorResult<Envelope> {
+        self.run_postprocessing_raw(metadata, outputs)?
+            .to_envelope()
+    }
+
+    /// Run postprocessing steps from metadata, returning the last step's raw
+    /// output (`outputs` itself when there are no steps). Callers that need
+    /// more than the envelope, such as the TTS batch path reading the range of
+    /// samples `TTSAudioEncode` kept, convert it themselves.
+    fn run_postprocessing_raw(
+        &mut self,
+        metadata: &ModelMetadata,
+        outputs: RawOutputs,
+    ) -> ExecutorResult<RawOutputs> {
         if metadata.postprocessing.is_empty() {
             debug!(target: "xybrid_core", "No postprocessing steps configured");
-            return outputs.to_envelope();
+            return Ok(outputs);
         }
 
         info!(
@@ -2821,7 +2990,7 @@ impl TemplateExecutor {
         }
 
         debug!(target: "xybrid_core", "Postprocessing complete");
-        data.to_envelope()
+        Ok(data)
     }
 
     /// Get or load an ONNX session.
@@ -2833,9 +3002,14 @@ impl TemplateExecutor {
             let runtime = self.runtimes.get_mut("onnx").ok_or_else(|| {
                 AdapterError::RuntimeError("ONNX runtime not configured".to_string())
             })?;
-            runtime.load(&model_full_path).map_err(|e| {
-                AdapterError::RuntimeError(format!("Failed to load session: {}", e))
-            })?;
+            let _load = pending_load_label(&**runtime, &model_full_path)
+                .map(xybrid_trace::model_load_stage);
+            runtime
+                .load(&model_full_path)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())
+                .map_err(|e| {
+                    AdapterError::RuntimeError(format!("Failed to load session: {}", e))
+                })?;
         }
 
         // Get session (immutable borrow)
@@ -2855,41 +3029,87 @@ impl TemplateExecutor {
         super::path::resolve_file_path(&self.base_path, file)
     }
 
+    /// Scores a validated choice request on the scorer `scorer` describes.
+    ///
+    /// The session and the spec bound to it come from [`ChoiceScorerCache`];
+    /// the request is encoded for the bound model, run, and its logits checked
+    /// and normalised. When ONNX Runtime fails, its message is withheld.
+    fn execute_choice_scorer(
+        &mut self,
+        scorer: &ChoiceScorerSpec,
+        request: &ChoiceRequest,
+    ) -> ExecutorResult<Envelope> {
+        let ChoiceScorerSpec::OnnxByteOptionScorer(spec) = scorer;
+        let EnvelopeKind::Text(context) = &request.context().kind else {
+            // Unreachable: the validator admits only a text context.
+            return Err(super::choice::ChoiceError::UnsupportedContext {
+                kind: request.context().kind_str(),
+            }
+            .into());
+        };
+
+        let _span = xybrid_trace::SpanGuard::new("choice_scoring");
+        xybrid_trace::add_metadata(
+            "choice_count",
+            (request.choices().len() + spec.fixed_choices.len()).to_string(),
+        );
+        let (session, bound) = self.choice_scorer_session(spec)?;
+        let scores = bound.prepare(context, request.choices())?.run(&session)?;
+        Ok(Envelope::new(EnvelopeKind::ChoiceScores(scores)))
+    }
+
+    /// The cached scorer for `spec`, if its model file is unchanged since the
+    /// spec was bound to it.
+    fn cached_choice_scorer(&self, spec: &OnnxByteOptionScorerSpec) -> Option<&ChoiceScorerCache> {
+        let cache = self.choice_scorer_cache.as_ref()?;
+        let model_path = Path::new(&self.base_path).join(&spec.model_file);
+        let identity = file_identity(&model_path);
+        // As for the TTS cache, an unreadable identity forces a rebuild.
+        (cache.model_path == model_path
+            && identity.is_some()
+            && cache.file_identity == identity
+            && cache.scorer.spec() == spec)
+            .then_some(cache)
+    }
+
+    /// The session for `spec`'s model and the spec bound to it: cached, or
+    /// built, bound and cached on a miss. A scorer is only ever run on the
+    /// session it was bound to.
+    fn choice_scorer_session(
+        &mut self,
+        spec: &OnnxByteOptionScorerSpec,
+    ) -> ExecutorResult<(Arc<ONNXSession>, OnnxChoiceScorer)> {
+        if let Some(cache) = self.cached_choice_scorer(spec) {
+            return Ok((Arc::clone(&cache.session), cache.scorer.clone()));
+        }
+        // Release the previous session before loading the next one.
+        self.choice_scorer_cache = None;
+        let model_path = Path::new(&self.base_path).join(&spec.model_file);
+        let identity = file_identity(&model_path);
+        let path = model_path
+            .to_str()
+            .ok_or_else(|| AdapterError::InvalidInput("Invalid model path encoding".to_string()))?;
+        // ONNX Runtime may quote what the request's bytes produced, so neither
+        // this session's log nor its runs' may carry anything below fatal.
+        let session = Arc::new(ONNXSession::build_unlogged(
+            path,
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )?);
+        let scorer = OnnxChoiceScorer::bind(&session, spec)?;
+        self.choice_scorer_cache = Some(ChoiceScorerCache {
+            model_path,
+            file_identity: identity,
+            session: Arc::clone(&session),
+            scorer: scorer.clone(),
+        });
+        Ok((session, scorer))
+    }
+
     /// Execute TTS with automatic chunking for long text.
     ///
     /// Splits input text into chunks, processes each through preprocessing + TTS,
     /// and concatenates the audio output.
-    /// Returns the cached TTS ONNX session for `model_path`, building and caching
-    /// it on a miss. Caching skips the per-call `commit_from_file` + Level-3 graph
-    /// optimization — the dominant latency for short TTS. The cache invalidates if
-    /// the model file's `(len, mtime)` changes. TTS always runs on CPU with
-    /// default options, so path + file identity is a sufficient key.
-    fn tts_session(&mut self, model_path: &Path) -> ExecutorResult<Arc<ONNXSession>> {
-        let identity = file_identity(model_path);
-        if let Some(cache) = &self.tts_session_cache {
-            // Reuse only when the path matches AND the file identity is both
-            // readable and unchanged — an unreadable identity (`None`) forces a
-            // rebuild rather than trusting a possibly-stale session.
-            if cache.model_path == model_path
-                && identity.is_some()
-                && cache.file_identity == identity
-            {
-                return Ok(Arc::clone(&cache.session));
-            }
-        }
-        let session = Arc::new(OnnxSessionFactory::create_session(
-            model_path,
-            ExecutionProviderKind::Cpu,
-            SessionOptions::default(),
-        )?);
-        self.tts_session_cache = Some(TtsSessionCache {
-            model_path: model_path.to_path_buf(),
-            file_identity: identity,
-            session: Arc::clone(&session),
-        });
-        Ok(session)
-    }
-
     fn execute_tts_chunked(
         &mut self,
         metadata: &ModelMetadata,
@@ -2942,40 +3162,67 @@ impl TemplateExecutor {
         // Reuse the cached session across runs (and across chunks within this
         // run); the graph load is paid once, not per call. The voice embedding is
         // identical for every chunk, so load it once here.
-        let session = self.tts_session(model_path)?;
+        let session = self.onnx_session_cache.get_or_build(model_path)?;
+        let waveform_output = tts_waveform_output(session.output_names())?;
+        let duration_output = tts_duration_output(session.output_names(), waveform_output);
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
 
         let mut audio_chunks: Vec<Vec<f32>> = Vec::new();
+        // Spans of each pushed chunk, in `audio_chunks` order. Timings are
+        // reported only when every chunk was timed, so that when present they
+        // cover the whole clip rather than stopping partway through.
+        let mut timed_chunks: Option<Vec<Vec<PhonemeSpan>>> =
+            duration_output.map(|_| Vec::with_capacity(chunks.len()));
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(target: "xybrid_core", "TTS: Processing chunk {}/{}: {} chars", i + 1, chunks.len(), chunk.len());
-            let chunk_audio =
-                self.synthesize_chunk(&session, metadata, input, chunk, &voice_embedding, speed)?;
+            let synthesized = self.synthesize_chunk(
+                &session,
+                metadata,
+                input,
+                chunk,
+                &voice_embedding,
+                speed,
+                waveform_output,
+                duration_output,
+            )?;
             // Inference always yields a waveform; guard the degenerate empty case
             // so it can't enter the crossfade (matches the pre-refactor skip).
-            if chunk_audio.is_empty() {
+            if synthesized.audio.is_empty() {
                 continue;
             }
-            audio_chunks.push(chunk_audio);
+            audio_chunks.push(synthesized.audio);
+            timed_chunks = match (timed_chunks, synthesized.spans) {
+                (Some(mut all), Some(spans)) => {
+                    all.push(spans);
+                    Some(all)
+                }
+                _ => None,
+            };
         }
 
         // Concatenate chunks with crossfading
-        let all_audio =
-            postprocessing::audio::crossfade_audio_chunks(&audio_chunks, CROSSFADE_SAMPLES);
+        let (all_audio, starts) = postprocessing::audio::crossfade_audio_chunks_with_starts(
+            &audio_chunks,
+            CROSSFADE_SAMPLES,
+        );
 
         debug!(target: "xybrid_core", "TTS: Total audio samples: {}", all_audio.len());
 
-        // Convert concatenated audio to envelope
-        // The postprocessing will handle conversion to bytes
-        let output_names = session.output_names();
-        let output_name = output_names.first().map(|s| s.as_str()).unwrap_or("audio");
+        // Move each chunk's spans to where the chunk starts in the joined audio.
+        let spans = timed_chunks.map(|per_chunk| {
+            per_chunk
+                .into_iter()
+                .zip(starts)
+                .flat_map(|(mut spans, start)| {
+                    tts_timing::shift(&mut spans, start);
+                    spans
+                })
+                .collect()
+        });
 
-        let mut combined_outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
-        let audio_array = ndarray::Array1::from_vec(all_audio).into_dyn();
-        combined_outputs.insert(output_name.to_string(), audio_array);
-
-        // Run postprocessing on combined audio
-        self.run_postprocessing(metadata, RawOutputs::TensorMap(combined_outputs))
+        // Postprocessing turns the joined waveform into PCM bytes.
+        self.finish_tts_batch(metadata, waveform_output, all_audio, spans)
     }
 
     /// Execute TTS for a single (short) text input.
@@ -2987,7 +3234,9 @@ impl TemplateExecutor {
     ) -> ExecutorResult<Envelope> {
         // Reuse the cached TTS session — the first run builds it, later runs skip
         // the graph load + Level-3 optimization (the dominant short-TTS latency).
-        let session = self.tts_session(model_path)?;
+        let session = self.onnx_session_cache.get_or_build(model_path)?;
+        let waveform_output = tts_waveform_output(session.output_names())?;
+        let duration_output = tts_duration_output(session.output_names(), waveform_output);
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
         let text = match &input.kind {
@@ -3001,29 +3250,267 @@ impl TemplateExecutor {
 
         // The whole (short) text is one chunk; the synthesis body is shared with
         // the chunked/streaming paths via synthesize_chunk.
-        let audio =
-            self.synthesize_chunk(&session, metadata, input, &text, &voice_embedding, speed)?;
+        let synthesized = self.synthesize_chunk(
+            &session,
+            metadata,
+            input,
+            &text,
+            &voice_embedding,
+            speed,
+            waveform_output,
+            duration_output,
+        )?;
 
-        // Wrap the already-trimmed waveform for postprocessing (mirrors the
-        // chunked path's single-tensor map keyed by the model's output name).
-        let output_name = session
-            .output_names()
-            .first()
-            .map(|s| s.as_str())
-            .unwrap_or("audio")
-            .to_string();
+        self.finish_tts_batch(
+            metadata,
+            waveform_output,
+            synthesized.audio,
+            synthesized.spans,
+        )
+    }
+
+    /// Postprocess a batch TTS waveform (one chunk, or the crossfaded chunks
+    /// of a long text) into the audio envelope.
+    ///
+    /// The waveform goes through postprocessing as a single-tensor map keyed
+    /// by the waveform output's name. When `spans` (phoneme sample spans on
+    /// that waveform) are given and `TTSAudioEncode` reports which samples it
+    /// kept, they become [`PhonemeTiming`](crate::ir::PhonemeTiming)s on the
+    /// returned PCM, stored as JSON under
+    /// [`Envelope::PHONEME_TIMINGS_METADATA_KEY`]. Otherwise, or when no
+    /// phoneme is left once the audio is trimmed, the envelope is exactly what
+    /// [`Self::run_postprocessing`] returns.
+    fn finish_tts_batch(
+        &mut self,
+        metadata: &ModelMetadata,
+        waveform_output: &str,
+        audio: Vec<f32>,
+        spans: Option<Vec<PhonemeSpan>>,
+    ) -> ExecutorResult<Envelope> {
         let mut outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
-        outputs.insert(output_name, ndarray::Array1::from_vec(audio).into_dyn());
-        self.run_postprocessing(metadata, RawOutputs::TensorMap(outputs))
+        outputs.insert(
+            waveform_output.to_string(),
+            ndarray::Array1::from_vec(audio).into_dyn(),
+        );
+        let raw = self.run_postprocessing_raw(metadata, RawOutputs::TensorMap(outputs))?;
+        match (raw, spans) {
+            (RawOutputs::TtsAudio { pcm, kept }, Some(spans)) => {
+                let sample_rate = Self::tts_output_sample_rate(metadata);
+                let timings = tts_timing::finish(spans, kept, sample_rate);
+                debug!(
+                    target: "xybrid_core",
+                    "TTS: {} phoneme timing(s) over {} PCM samples",
+                    timings.len(),
+                    pcm.len() / 2
+                );
+                // The same envelope `RawOutputs::to_envelope` builds, without
+                // copying the PCM.
+                let mut envelope = Envelope::new(EnvelopeKind::Audio(pcm));
+                if let Some(json) = tts_timing::metadata_json(&timings) {
+                    envelope
+                        .metadata
+                        .insert(Envelope::PHONEME_TIMINGS_METADATA_KEY.to_string(), json);
+                }
+                Ok(envelope)
+            }
+            (raw, _) => raw.to_envelope(),
+        }
+    }
+
+    /// Resolve Phonon template defaults and request overrides before opening or reusing a session.
+    #[cfg(feature = "tts-zzz")]
+    fn prepare_phonon(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        config: Option<&GenerationConfig>,
+    ) -> ExecutorResult<()> {
+        use crate::runtime_adapter::zzz::{PhononDefaults, ZzzPhononRuntime};
+        let ExecutionTemplate::ZzzPhonon {
+            model_file,
+            voice,
+            language,
+            max_frames_per_chunk,
+            max_chunk_tokens,
+            temperature,
+            seed,
+        } = &metadata.execution_template
+        else {
+            return Err(AdapterError::InvalidInput(
+                "Phonon requires a ZzzPhonon template".into(),
+            ));
+        };
+        if !matches!(input.kind, EnvelopeKind::Text(_)) {
+            return Err(AdapterError::InvalidInput(
+                "Phonon requires text input".into(),
+            ));
+        }
+        fn parse<T: std::str::FromStr>(input: &Envelope, key: &str) -> ExecutorResult<Option<T>> {
+            input
+                .metadata
+                .get(key)
+                .map(|value| {
+                    value
+                        .parse()
+                        .map_err(|_| AdapterError::InvalidInput(format!("invalid Phonon {key}")))
+                })
+                .transpose()
+        }
+        crate::runtime_adapter::zzz::assert_engine_abi()?;
+        let mut settings = xybrid_zzz_sys::PhononSettings::default();
+        if let Some(value) = max_frames_per_chunk {
+            settings.max_frames_per_chunk = *value;
+        }
+        if let Some(value) = max_chunk_tokens {
+            settings.max_chunk_tokens = *value;
+        }
+        // An explicit generation config owns temperature, matching the LLM
+        // request precedence. Other LLM knobs are not speech frame/token caps.
+        settings.temperature = match config {
+            Some(config) => config.temperature,
+            None => parse::<f32>(input, "temperature")?
+                .or(*temperature)
+                .unwrap_or(settings.temperature),
+        };
+        settings.seed = parse::<u64>(input, "seed")?
+            .or(*seed)
+            .unwrap_or(settings.seed);
+        settings
+            .validate()
+            .map_err(|error| AdapterError::InvalidInput(error.to_string()))?;
+        let primary = Path::new(&self.base_path).join(model_file);
+        let defaults = PhononDefaults {
+            model: primary.clone(),
+            voice: input
+                .metadata
+                .get("voice_id")
+                .cloned()
+                .or_else(|| voice.clone()),
+            language: input
+                .metadata
+                .get("language")
+                .cloned()
+                .or_else(|| language.clone()),
+            settings,
+        };
+        let runtime = self
+            .runtimes
+            .get_mut("zzz-phonon")
+            .ok_or_else(|| AdapterError::RuntimeError("Phonon runtime is not configured".into()))?;
+        runtime
+            .as_any()
+            .downcast_ref::<ZzzPhononRuntime>()
+            .ok_or_else(|| AdapterError::RuntimeError("invalid Phonon runtime".into()))?
+            .apply_defaults(defaults);
+        runtime.load(&primary)
+    }
+
+    /// zzz CPU engine execution (Kitten TTS 2), dispatched directly from the
+    /// `ZzzEmbed` template arm — like GGUF executions, it bypasses the generic
+    /// single-model flow (no phonemize preprocessing, ONNX chunking does not
+    /// apply, and audio envelopes are built by the runtime itself).
+    ///
+    /// The session lives on the `zzz` runtime registered in
+    /// [`Self::default_runtimes`]; paths resolve against `base_path` here.
+    #[cfg(feature = "tts-zzz")]
+    fn prepare_zzz(&mut self, metadata: &ModelMetadata) -> ExecutorResult<()> {
+        let ExecutionTemplate::ZzzEmbed {
+            model_file,
+            decoder_file,
+            language_voice_file,
+            decoder_voice_file,
+            language,
+            threads,
+            max_tokens,
+            seed,
+            sentence_chunks,
+            accelerate,
+        } = &metadata.execution_template
+        else {
+            return Err(AdapterError::RuntimeError(
+                "execute_zzz requires a ZzzEmbed template".to_string(),
+            ));
+        };
+        crate::runtime_adapter::zzz::assert_engine_abi()?;
+        let resolve = |file: &String| Path::new(&self.base_path).join(file).to_path_buf();
+        // Primary language GGUF resolves from the template's model_file;
+        // `ModelRuntime::load` receives the same path the dispatcher
+        // computed, keeping session identity consistent with other runtimes.
+        let primary = resolve(model_file);
+        let defaults = crate::runtime_adapter::zzz::ZzzDefaults {
+            language_model: primary.clone(),
+            decoder_model: resolve(decoder_file),
+            language_voice: resolve(language_voice_file),
+            decoder_voice: resolve(decoder_voice_file),
+            language: language.clone(),
+            settings: xybrid_zzz_sys::KittenSettings {
+                threads: *threads,
+                max_tokens: *max_tokens,
+                seed: *seed,
+                flags: xybrid_zzz_sys::KittenFlags {
+                    sentence_chunks: *sentence_chunks,
+                    accelerate: *accelerate,
+                },
+            },
+        };
+        {
+            let runtime = self.runtimes.get_mut("zzz").ok_or_else(|| {
+                AdapterError::RuntimeError(
+                    "zzz runtime not configured; enable the 'tts-zzz' feature".to_string(),
+                )
+            })?;
+            let Some(engine) = runtime
+                .as_any()
+                .downcast_ref::<crate::runtime_adapter::zzz::ZzzKittenRuntime>()
+            else {
+                return Err(AdapterError::RuntimeError(
+                    "Runtime 'zzz' is not ZzzKittenRuntime".to_string(),
+                ));
+            };
+            engine.apply_defaults(defaults);
+
+            // Loading mutability requires `&mut dyn ModelRuntime`; borrow the
+            // entry again mutable (the immutable downcast above finished).
+            let runtime = self
+                .runtimes
+                .get_mut("zzz")
+                .expect("zzz runtime was present above");
+            let _load =
+                pending_load_label(&**runtime, &primary).map(xybrid_trace::model_load_stage);
+            runtime
+                .load(&primary)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())
+                .map_err(|error| AdapterError::RuntimeError(format!("Load failed: {error}")))?;
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "tts-zzz")]
+    fn execute_zzz(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+    ) -> ExecutorResult<Envelope> {
+        self.prepare_zzz(metadata)?;
+        self.runtimes
+            .get_mut("zzz")
+            .expect("prepared zzz runtime exists")
+            .execute(input)
     }
 
     /// Synthesize one TTS chunk to a trimmed f32 waveform: build the chunk
     /// envelope, preprocess → phonemes → inference (with the shared voice
-    /// embedding + speed), and trim trailing artifact samples. Postprocessing
-    /// (loudness normalization, PCM encode, crossfade / edge-fade) is left to the
-    /// caller — the batch and streaming paths differ there. Shared by
-    /// `execute_tts_single` / `_chunked` / `_streaming` so the synthesis body
-    /// lives in one place instead of being copy-pasted three ways.
+    /// embedding + speed), read the `waveform_output` tensor (picked by
+    /// `tts_waveform_output`), and trim trailing artifact samples.
+    /// Postprocessing (loudness normalization, PCM encode, crossfade /
+    /// edge-fade) is left to the caller — the batch and streaming paths differ
+    /// there. Shared by `execute_tts_single` / `_chunked` / `_streaming` so the
+    /// synthesis body lives in one place instead of being copy-pasted three ways.
+    ///
+    /// With a `duration_output` (picked by `tts_duration_output`), the chunk's
+    /// phonemes also come back as sample spans on the returned waveform. They
+    /// are `None` without one, or when the model's durations do not match the
+    /// phoneme ids; the audio is the same either way.
     fn synthesize_chunk(
         &mut self,
         session: &ONNXSession,
@@ -3032,7 +3519,9 @@ impl TemplateExecutor {
         chunk: &str,
         voice_embedding: &[f32],
         speed: f32,
-    ) -> ExecutorResult<Vec<f32>> {
+        waveform_output: &str,
+        duration_output: Option<&str>,
+    ) -> ExecutorResult<SynthesizedChunk> {
         let chunk_input = Envelope {
             kind: crate::ir::EnvelopeKind::Text(chunk.to_string()),
             metadata: input.metadata.clone(),
@@ -3041,18 +3530,40 @@ impl TemplateExecutor {
         let phoneme_ids = preprocessed
             .as_phoneme_ids()
             .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
-        let raw_outputs =
-            execute_tts_inference(session, phoneme_ids, voice_embedding.to_vec(), speed)?;
-        let mut audio: Vec<f32> = raw_outputs
-            .values()
-            .next()
-            .map(|t| t.iter().cloned().collect())
-            .unwrap_or_default();
+        let inference = execute_tts_inference(
+            session,
+            phoneme_ids,
+            voice_embedding.to_vec(),
+            speed,
+            waveform_output,
+            duration_output,
+        )?;
+        let mut audio: Vec<f32> = inference.waveform.iter().copied().collect();
+        // Durations describe the waveform as the model returned it, before the
+        // trailing artifact samples are cut off.
+        let raw_len = audio.len();
         let trim_count = metadata.trim_trailing_samples.unwrap_or(0);
         if trim_count > 0 && audio.len() > trim_count {
             audio.truncate(audio.len() - trim_count);
         }
-        Ok(audio)
+
+        let spans = match (inference.durations, preprocessed.as_phoneme_symbols()) {
+            (Some(durations), Some(symbols)) => {
+                let spans = tts_timing::chunk_spans(symbols, &durations, raw_len, audio.len());
+                if spans.is_none() {
+                    debug!(
+                        target: "xybrid_core",
+                        "TTS: {} duration(s) for {} phoneme id(s) over {} samples do not describe the waveform; no phoneme timings",
+                        durations.len(),
+                        symbols.len(),
+                        raw_len
+                    );
+                }
+                spans
+            }
+            _ => None,
+        };
+        Ok(SynthesizedChunk { audio, spans })
     }
 
     /// Check if this model is a TTS model (has Phonemize preprocessing).
@@ -3072,6 +3583,12 @@ impl TemplateExecutor {
             ExecutionTemplate::CoreMl { model_file } => model_file.clone(),
             ExecutionTemplate::TfLite { model_file } => model_file.clone(),
             ExecutionTemplate::SafeTensors { model_file, .. } => model_file.clone(),
+            // A scorer is refused before this point; it synthesizes nothing.
+            ExecutionTemplate::ChoiceScorer { .. } => {
+                return Err(AdapterError::InvalidInput(
+                    "Streaming TTS requires a single-model execution template".to_string(),
+                ))
+            }
             _ => {
                 return Err(AdapterError::InvalidInput(
                     "Streaming TTS requires a single-model execution template".to_string(),
@@ -3114,7 +3631,93 @@ impl TemplateExecutor {
         input: &Envelope,
         on_chunk: &mut dyn FnMut(Vec<u8>, u32) -> bool,
     ) -> ExecutorResult<()> {
+        self.execute_tts_streaming_controlled(metadata, input, &|| false, &mut |packet| {
+            on_chunk(packet.pcm, packet.sample_rate)
+        })
+        .and_then(|summary| {
+            if summary.status == super::TtsStatus::Limited {
+                Err(AdapterError::RuntimeError(
+                    "TTS output limited; partial audio delivered".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    /// Stream owned packets with cancellation that can reach native inference.
+    pub fn execute_tts_streaming_controlled(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        cancelled: &(dyn Fn() -> bool + Sync),
+        on_chunk: &mut dyn FnMut(super::TtsAudioChunk) -> bool,
+    ) -> ExecutorResult<super::TtsStreamResult> {
+        self.execute_tts_streaming_with_config(metadata, input, None, cancelled, on_chunk)
+    }
+
+    /// Stream TTS using the same generation-temperature override as batch execution.
+    pub fn execute_tts_streaming_with_config(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        config: Option<&GenerationConfig>,
+        cancelled: &(dyn Fn() -> bool + Sync),
+        on_chunk: &mut dyn FnMut(super::TtsAudioChunk) -> bool,
+    ) -> ExecutorResult<super::TtsStreamResult> {
+        // Other runtimes currently resolve their own generation configuration.
+        let _ = config;
+        use super::{TtsAudioChunk, TtsStatus, TtsStreamResult};
+        #[cfg(not(feature = "tts-zzz"))]
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. }
+        ) {
+            return Err(AdapterError::RuntimeError(
+                "zzz execution requires the 'tts-zzz' feature and its privately staged pinned engine slice".into(),
+            ));
+        }
+        #[cfg(feature = "tts-zzz")]
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ZzzPhonon { .. }
+        ) {
+            self.prepare_phonon(metadata, input, config)?;
+            return self
+                .runtimes
+                .get("zzz-phonon")
+                .expect("prepared Phonon runtime exists")
+                .as_any()
+                .downcast_ref::<crate::runtime_adapter::zzz::ZzzPhononRuntime>()
+                .expect("prepare_phonon checked runtime type")
+                .execute_stream(input, cancelled, on_chunk);
+        }
+        #[cfg(feature = "tts-zzz")]
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::ZzzEmbed { .. }
+        ) {
+            self.prepare_zzz(metadata)?;
+            let engine = self
+                .runtimes
+                .get("zzz")
+                .expect("prepared zzz runtime exists")
+                .as_any()
+                .downcast_ref::<crate::runtime_adapter::zzz::ZzzKittenRuntime>()
+                .expect("prepare_zzz checked runtime type");
+            return engine.execute_stream(input, cancelled, on_chunk);
+        }
+        let mut summary = TtsStreamResult {
+            status: TtsStatus::Completed,
+            sample_rate: Self::tts_output_sample_rate(metadata),
+            channels: 1,
+            samples: 0,
+            chunks: 0,
+            limited_chunks: 0,
+        };
         use crate::ir::EnvelopeKind;
+
+        validate_choice_request(metadata, input, EntryPoint::Streaming)?;
 
         const DEFAULT_MAX_TTS_CHARS: usize = 350;
         let max_tts_chars = metadata.max_chunk_chars.unwrap_or(DEFAULT_MAX_TTS_CHARS);
@@ -3128,26 +3731,37 @@ impl TemplateExecutor {
             }
         };
         if text.trim().is_empty() {
-            return Ok(());
+            return Ok(summary);
         }
 
         let model_path = self.tts_model_path(metadata)?;
         let sample_rate = Self::tts_output_sample_rate(metadata);
         let fade_samples = (sample_rate as usize * 5) / 1000; // ~5ms edge fade
         let chunks = super::text_chunking::chunk_text_for_tts(&text, max_tts_chars);
-        let session = self.tts_session(&model_path)?;
+        let session = self.onnx_session_cache.get_or_build(&model_path)?;
+        let waveform_output = tts_waveform_output(session.output_names())?;
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
-        let output_name = session
-            .output_names()
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "audio".to_string());
 
         for (i, chunk) in chunks.iter().enumerate() {
+            if cancelled() {
+                summary.status = TtsStatus::Cancelled;
+                break;
+            }
             debug!(target: "xybrid_core", "TTS stream: chunk {}/{} ({} chars)", i + 1, chunks.len(), chunk.len());
-            let chunk_audio =
-                self.synthesize_chunk(&session, metadata, input, chunk, &voice_embedding, speed)?;
+            // Streamed chunks carry no phoneme timings, so durations are not read.
+            let chunk_audio = self
+                .synthesize_chunk(
+                    &session,
+                    metadata,
+                    input,
+                    chunk,
+                    &voice_embedding,
+                    speed,
+                    waveform_output,
+                    None,
+                )?
+                .audio;
             if chunk_audio.is_empty() {
                 continue; // degenerate empty inference output — skip (pre-refactor behavior)
             }
@@ -3156,7 +3770,7 @@ impl TemplateExecutor {
             // applied to this chunk rather than the concatenated buffer).
             let mut outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
             outputs.insert(
-                output_name.clone(),
+                waveform_output.to_string(),
                 ndarray::Array1::from_vec(chunk_audio).into_dyn(),
             );
             let env = self.run_postprocessing(metadata, RawOutputs::TensorMap(outputs))?;
@@ -3170,12 +3784,27 @@ impl TemplateExecutor {
             };
             fade_pcm16_edges(&mut pcm, fade_samples);
 
-            if !on_chunk(pcm, sample_rate) {
+            if cancelled() {
+                summary.status = TtsStatus::Cancelled;
+                break;
+            }
+            let first_sample = summary.samples;
+            summary.samples += (pcm.len() / 2) as u64;
+            summary.chunks += 1;
+            if !on_chunk(TtsAudioChunk {
+                pcm,
+                sample_rate,
+                channels: 1,
+                first_sample,
+            }) {
+                summary.status = TtsStatus::Cancelled;
                 debug!(target: "xybrid_core", "TTS stream: stopped early at chunk {}", i + 1);
                 break;
             }
         }
-        Ok(())
+        // The next iteration checks interruption before more inference. Once
+        // the last packet is accepted, there is no remaining work to abort.
+        Ok(summary)
     }
 }
 
@@ -3260,10 +3889,11 @@ fn insert_image_preprocess_metric(
 /// current span. `image_preprocess_ms` is `None` for text-only paths and carries
 /// the vision timing for multimodal paths (the insert is a no-op when `None`).
 ///
-/// `tools_requested` is true when the request's `GenerationConfig.tools` was
-/// non-empty: the output text is then scanned for tool-call blocks (both the
-/// LFM2 and gemma-4 protocols) and any parsed calls ride the metadata
-/// side-channel as a `tool_calls` JSON array (same channel as `finish_reason`). The text itself stays intact —
+/// `tools` are the request's `GenerationConfig.tools`. When there are any,
+/// the output text is scanned for tool-call blocks (every supported
+/// protocol, LFM3 arguments typed against these tools' schemas) and any
+/// parsed calls ride the metadata side-channel as a `tool_calls` JSON array
+/// (same channel as `finish_reason`). The text itself stays intact —
 /// callers strip the blocks for display via `tool_call::strip_tool_calls`.
 /// Malformed blocks are untrusted model output and simply parse to nothing.
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -3272,7 +3902,7 @@ fn build_llm_response_envelope(
     backend_name: &str,
     cached_prefix: Option<usize>,
     image_preprocess_ms: Option<u32>,
-    tools_requested: bool,
+    tools: &[crate::gateway::Tool],
 ) -> Envelope {
     let mut response_metadata = std::collections::HashMap::new();
     response_metadata.insert(
@@ -3292,8 +3922,9 @@ fn build_llm_response_envelope(
     mirror_llm_metrics_to_span(&output, backend_name, cached_prefix);
 
     let mut emitted_tool_calls = false;
-    if tools_requested {
-        let calls = crate::runtime_adapter::tool_call::parse_tool_calls(&output.text);
+    if !tools.is_empty() {
+        let calls =
+            crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(&output.text, tools);
         if !calls.is_empty() {
             emitted_tool_calls = true;
             response_metadata.insert(
@@ -3332,6 +3963,12 @@ const REASONING_PROMPT_HEADROOM: usize = 512;
 /// `REASONING_PROMPT_HEADROOM` tokens of prompt room inside the model's
 /// operational context and never drops below the global default.
 pub fn model_default_gen_config(metadata: &ModelMetadata) -> GenerationConfig {
+    if let ExecutionTemplate::ZzzPhonon { temperature, .. } = &metadata.execution_template {
+        return GenerationConfig {
+            temperature: temperature.unwrap_or(0.0),
+            ..GenerationConfig::default()
+        };
+    }
     let (generation_params, context_length) = match &metadata.execution_template {
         ExecutionTemplate::Gguf {
             generation_params,
@@ -3343,6 +3980,8 @@ pub fn model_default_gen_config(metadata: &ModelMetadata) -> GenerationConfig {
             context_length,
             ..
         } => (generation_params.as_ref(), *context_length),
+        // A scorer generates nothing, so it has no sampling parameters.
+        ExecutionTemplate::ChoiceScorer { .. } => (None, 0),
         _ => (None, 0),
     };
 
@@ -3443,7 +4082,20 @@ mod tests {
         }
     }
 
+    /// The tools a tool-bearing request offers in the envelope tests.
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn requested_tools() -> Vec<crate::gateway::Tool> {
+        vec![crate::gateway::Tool::function(
+            "get_temperature",
+            "Current temperature of a room",
+            serde_json::json!({
+                "type": "object",
+                "properties": {"room": {"type": "string"}},
+                "required": ["room"]
+            }),
+        )]
+    }
+
     fn test_model_metadata(execution_template: ExecutionTemplate) -> ModelMetadata {
         ModelMetadata {
             model_id: "test-model".to_string(),
@@ -3702,7 +4354,7 @@ mod tests {
     #[test]
     fn build_llm_response_envelope_text_path_omits_image_metric() {
         let env =
-            build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, None, false);
+            build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, None, &[]);
         match &env.kind {
             EnvelopeKind::Text(t) => assert_eq!(t, "hello"),
             _ => panic!("expected a text envelope"),
@@ -3729,7 +4381,7 @@ mod tests {
             "llamacpp",
             None,
             Some(42),
-            false,
+            &[],
         );
         assert_eq!(
             env.metadata.get("image_preprocess_ms").map(String::as_str),
@@ -3745,7 +4397,7 @@ mod tests {
         output.text =
             "checking<|tool_call_start|>[get_temperature(room=\"kitchen\")]<|tool_call_end|>"
                 .to_string();
-        let env = build_llm_response_envelope(output, "llamacpp", None, None, true);
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, &requested_tools());
 
         let raw = env
             .metadata
@@ -3768,12 +4420,33 @@ mod tests {
         }
     }
 
+    /// LFM3 writes argument values as raw text; the envelope types them with
+    /// the request's schemas, so a string parameter keeps digits as text.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_llm_response_envelope_types_lfm3_arguments_with_the_request_tools() {
+        let mut output = sample_generation_output(7);
+        output.text = "<tool_call>\n<function=get_temperature>\n<parameter=room>\n12\n</parameter>\n</function>\n</tool_call>".to_string();
+
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, &requested_tools());
+
+        let calls: Vec<crate::gateway::ToolCall> =
+            serde_json::from_str(env.metadata.get("tool_calls").expect("tool_calls stamped"))
+                .unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.arguments, r#"{"room":"12"}"#);
+        assert_eq!(
+            env.metadata.get("finish_reason").map(String::as_str),
+            Some("tool_calls")
+        );
+    }
+
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn build_llm_response_envelope_omits_tool_calls_when_none_emitted() {
         let mut output = sample_generation_output(7);
         output.finish_reason = "length".to_string();
-        let env = build_llm_response_envelope(output, "llamacpp", None, None, true);
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, &requested_tools());
         assert!(
             !env.metadata.contains_key("tool_calls"),
             "a tools-bearing request whose output has no call block stamps nothing"
@@ -4125,7 +4798,7 @@ mod tests {
         output.text =
             "prose<|tool_call_start|>[get_temperature(room=\"kitchen\")]<|tool_call_end|>"
                 .to_string();
-        let env = build_llm_response_envelope(output, "llamacpp", None, None, false);
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, &[]);
         assert!(
             !env.metadata.contains_key("tool_calls"),
             "tool-call parsing only runs when the request offered tools"
@@ -4274,6 +4947,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::Gemma3Vision,
                 image_size: 896,
                 patch_size: Some(14),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4394,6 +5068,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4473,6 +5148,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4547,6 +5223,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4607,6 +5284,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4690,6 +5368,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4782,6 +5461,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: bundle_metadata,
@@ -4878,7 +5558,6 @@ mod tests {
     #[test]
     fn vision_language_streaming_uses_multimodal_streaming_span() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
-        let _trace_lock = crate::tracing::test_lock();
 
         let metadata = ModelMetadata {
             model_id: "gemma-3n-e2b".to_string(),
@@ -4897,6 +5576,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::Gemma3Vision,
                 image_size: 896,
                 patch_size: Some(14),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4920,8 +5600,7 @@ mod tests {
         let image = Envelope::image(image_bytes, "png").unwrap();
         let input = Envelope::user_message("Describe this image", vec![image]).unwrap();
 
-        crate::tracing::init_tracing(true);
-        crate::tracing::reset_tracing();
+        let stage_trace = crate::tracing::capture();
 
         let mut executor = TemplateExecutor::with_base_path("/models");
         cache_text_only_boundary_backend(
@@ -4934,8 +5613,7 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("does not support vision input"));
 
-        let json = crate::tracing::get_stages_json();
-        crate::tracing::reset_tracing();
+        let json = stage_trace.stages_json();
         let spans = json["spans"].as_array().unwrap();
         assert!(
             spans
@@ -4955,7 +5633,6 @@ mod tests {
         };
         use ndarray::{ArrayD, IxDyn};
         use std::sync::{Arc, Mutex};
-        let _trace_lock = crate::tracing::test_lock();
 
         struct SpyVisionEncoder {
             events: Arc<Mutex<Vec<&'static str>>>,
@@ -5063,6 +5740,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 2,
                 patch_size: Some(1),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5086,8 +5764,7 @@ mod tests {
         let image = Envelope::image(image_bytes, "png").unwrap();
         let input = Envelope::user_message("Describe this image", vec![image]).unwrap();
 
-        crate::tracing::init_tracing(true);
-        crate::tracing::reset_tracing();
+        let stage_trace = crate::tracing::capture();
 
         let events = Arc::new(Mutex::new(Vec::new()));
         let observed_shape = Arc::new(Mutex::new(None));
@@ -5130,8 +5807,7 @@ mod tests {
         assert_eq!(*image_count.lock().unwrap(), Some(1));
         assert_eq!(*events.lock().unwrap(), vec!["encoder", "llm"]);
 
-        let spans = crate::tracing::get_stages_json();
-        crate::tracing::reset_tracing();
+        let spans = stage_trace.stages_json();
         let vision_encoder_metadata = spans["spans"]
             .as_array()
             .and_then(|spans| {
@@ -5277,6 +5953,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::Gemma3Vision,
                 image_size: 896,
                 patch_size: Some(14),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5303,6 +5980,21 @@ mod tests {
             config.vision_encoder_path.as_deref(),
             Some("/models/mmproj.gguf")
         );
+        assert_eq!(config.max_image_tokens, None);
+
+        let mut capped = metadata;
+        capped
+            .vision_encoder
+            .as_mut()
+            .expect("fixture declares a vision encoder")
+            .max_image_tokens = Some(1024);
+        let config = executor.vision_language_llm_config(
+            &capped,
+            "/models/model.gguf".to_string(),
+            Some("chat_template.json"),
+            8192,
+        );
+        assert_eq!(config.max_image_tokens, Some(1024));
     }
 
     #[test]
@@ -5336,6 +6028,139 @@ mod tests {
     fn test_get_runtime_not_found() {
         let executor = TemplateExecutor::new("/test");
         assert!(executor.get_runtime("nonexistent").is_none());
+    }
+
+    // ============================================================================
+    // TTS batch finish (phoneme timings) Tests
+    // ============================================================================
+
+    /// A 220 Hz tone at 24 kHz between `lead` and `tail` silent samples.
+    fn padded_tone(lead: usize, voiced: usize, tail: usize) -> Vec<f32> {
+        let step = 2.0 * std::f32::consts::PI * 220.0 / 24_000.0;
+        let mut samples = vec![0.0; lead];
+        samples.extend((0..voiced).map(|i| 0.5 * (i as f32 * step).sin()));
+        samples.extend(vec![0.0; tail]);
+        samples
+    }
+
+    fn tts_encode_metadata() -> ModelMetadata {
+        ModelMetadata::onnx("test-tts", "1.0", "model.onnx").with_postprocessing(
+            super::super::template::PostprocessingStep::TTSAudioEncode {
+                sample_rate: 24_000,
+                apply_postprocessing: true,
+                trim_trailing_silence: false,
+            },
+        )
+    }
+
+    fn span(symbol: char, start: usize, end: usize) -> PhonemeSpan {
+        PhonemeSpan { symbol, start, end }
+    }
+
+    #[test]
+    fn tts_batch_without_spans_is_the_plain_postprocessed_audio() {
+        let metadata = tts_encode_metadata();
+        let audio = padded_tone(4800, 12_000, 7200);
+        let mut executor = TemplateExecutor::with_base_path("/models");
+
+        let mut outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
+        outputs.insert(
+            "audio".to_string(),
+            ndarray::Array1::from_vec(audio.clone()).into_dyn(),
+        );
+        let plain = executor
+            .run_postprocessing(&metadata, RawOutputs::TensorMap(outputs))
+            .unwrap();
+        let finished = executor
+            .finish_tts_batch(&metadata, "audio", audio, None)
+            .unwrap();
+
+        assert!(matches!(plain.kind, EnvelopeKind::Audio(_)));
+        assert_eq!(finished.kind, plain.kind);
+        assert!(!finished
+            .metadata
+            .contains_key(Envelope::PHONEME_TIMINGS_METADATA_KEY));
+    }
+
+    #[test]
+    fn tts_batch_maps_spans_onto_the_trimmed_pcm() {
+        let metadata = tts_encode_metadata();
+        let audio = padded_tone(4800, 12_000, 7200);
+        let (_, kept) = crate::phonemizer::postprocess_tts_audio_with_range(&audio, 24_000);
+        assert!(kept.start > 2400 && kept.end < audio.len(), "{kept:?}");
+
+        let spans = vec![
+            span('x', 0, 2400), // in the leading silence: trimmed off
+            span('a', 4800, 10_800),
+            span('b', 10_800, 16_800),
+            span('y', 22_000, 24_000), // in the trailing silence: trimmed off
+        ];
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        let envelope = executor
+            .finish_tts_batch(&metadata, "audio", audio, Some(spans))
+            .unwrap();
+
+        let EnvelopeKind::Audio(pcm) = &envelope.kind else {
+            panic!("expected audio, got {:?}", envelope.kind);
+        };
+        assert_eq!(pcm.len() / 2, kept.len());
+        let timings: Vec<crate::ir::PhonemeTiming> = serde_json::from_str(
+            envelope
+                .metadata
+                .get(Envelope::PHONEME_TIMINGS_METADATA_KEY)
+                .expect("phoneme timings"),
+        )
+        .unwrap();
+        let seconds = |sample: usize| ((sample - kept.start) as f64 / 24_000.0) as f32;
+        assert_eq!(
+            timings,
+            vec![
+                crate::ir::PhonemeTiming {
+                    phoneme: "a".to_string(),
+                    start: seconds(4800),
+                    end: seconds(10_800),
+                },
+                crate::ir::PhonemeTiming {
+                    phoneme: "b".to_string(),
+                    start: seconds(10_800),
+                    end: seconds(16_800),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn tts_batch_reports_no_timings_when_none_survive_the_trim() {
+        let metadata = tts_encode_metadata();
+        let audio = padded_tone(4800, 12_000, 7200);
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        let envelope = executor
+            .finish_tts_batch(&metadata, "audio", audio, Some(vec![span('x', 0, 2400)]))
+            .unwrap();
+
+        assert!(matches!(envelope.kind, EnvelopeKind::Audio(_)));
+        assert!(!envelope
+            .metadata
+            .contains_key(Envelope::PHONEME_TIMINGS_METADATA_KEY));
+    }
+
+    #[test]
+    fn tts_batch_without_an_audio_encode_step_reports_no_timings() {
+        // No TTSAudioEncode: there is no PCM for timings to describe.
+        let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx");
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        let envelope = executor
+            .finish_tts_batch(
+                &metadata,
+                "audio",
+                padded_tone(0, 2400, 0),
+                Some(vec![span('a', 0, 2400)]),
+            )
+            .unwrap();
+
+        assert!(!envelope
+            .metadata
+            .contains_key(Envelope::PHONEME_TIMINGS_METADATA_KEY));
     }
 
     // ============================================================================
@@ -5604,5 +6429,737 @@ mod tests {
         let mut pcm = 1234i16.to_le_bytes().to_vec();
         fade_pcm16_edges(&mut pcm, 4);
         assert_eq!(i16::from_le_bytes([pcm[0], pcm[1]]), 1234);
+    }
+
+    // =========================================================================
+    // Choice requests: refused before any runtime, backend or model file
+    // =========================================================================
+
+    fn text_input(text: &str) -> Envelope {
+        Envelope::new(EnvelopeKind::Text(text.to_string()))
+    }
+
+    fn choice_request_input() -> Envelope {
+        Envelope::choice_request(
+            text_input("FORM Intake"),
+            vec![
+                crate::ir::Choice::new("tel", "fill Tel: (503) 555-0142"),
+                crate::ir::Choice::new("name", "fill Name: Jane Doe"),
+            ],
+        )
+    }
+
+    fn choice_scores_input() -> Envelope {
+        Envelope::new(EnvelopeKind::ChoiceScores(crate::ir::ChoiceScores {
+            entries: vec![crate::ir::ChoiceScore {
+                id: "tel".to_string(),
+                logit: 1.0,
+                score: 1.0,
+                fixed: false,
+            }],
+            label_mass: None,
+        }))
+    }
+
+    /// Every choice kind a non-scorer must refuse, including one buried in a
+    /// multi-part message.
+    fn choice_kind_inputs() -> [Envelope; 3] {
+        [
+            choice_request_input(),
+            Envelope::new(EnvelopeKind::MultiPart(vec![
+                text_input("look at this"),
+                choice_request_input(),
+            ])),
+            choice_scores_input(),
+        ]
+    }
+
+    /// The capability an `UnsupportedModelCapability` refusal names.
+    fn refused_capability<T: std::fmt::Debug>(result: ExecutorResult<T>) -> String {
+        match result {
+            Err(AdapterError::UnsupportedModelCapability { capability, .. }) => capability,
+            other => panic!("expected UnsupportedModelCapability, got {other:?}"),
+        }
+    }
+
+    fn no_tokens() -> StreamingCallback<'static> {
+        Box::new(|_| panic!("a refused request must not stream a token"))
+    }
+
+    fn mock_runtime(executor: &TemplateExecutor) -> &crate::testing::mocks::MockRuntime {
+        executor
+            .get_runtime("onnx")
+            .and_then(|runtime| runtime.as_any().downcast_ref())
+            .expect("the test registered a MockRuntime as `onnx`")
+    }
+
+    fn executor_with_mock_onnx() -> TemplateExecutor {
+        let mut runtimes: HashMap<String, Box<dyn ModelRuntime>> = HashMap::new();
+        runtimes.insert(
+            "onnx".to_string(),
+            Box::new(crate::testing::mocks::MockRuntime::with_text("ran")),
+        );
+        TemplateExecutor::with_runtimes("", runtimes)
+    }
+
+    fn forms_scorer_metadata() -> ModelMetadata {
+        // The runtime CARGO_MANIFEST_DIR, not `env!`: under Bazel the test
+        // runs in a sandbox where the compile-time path points nowhere.
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let spec_path = Path::new(&manifest_dir)
+            .join("../../integration-tests/fixtures/choice/specs/cua-s1-forms.json");
+        let spec = std::fs::read_to_string(&spec_path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", spec_path.display()));
+        test_model_metadata(ExecutionTemplate::ChoiceScorer {
+            scorer: serde_json::from_str(&spec).expect("the committed FORMS spec parses"),
+        })
+    }
+
+    #[test]
+    fn choice_kinds_never_reach_a_runtime() {
+        let metadata = test_model_metadata(ExecutionTemplate::Onnx {
+            model_file: "model.onnx".to_string(),
+        });
+        let mut executor = executor_with_mock_onnx();
+        let context = ConversationContext::new();
+
+        for input in choice_kind_inputs() {
+            let refusals = [
+                refused_capability(executor.execute(&metadata, &input, None)),
+                refused_capability(executor.execute_streaming(
+                    &metadata,
+                    &input,
+                    no_tokens(),
+                    None,
+                )),
+                refused_capability(
+                    executor.execute_with_context(&metadata, &input, &context, None),
+                ),
+                refused_capability(executor.execute_streaming_with_context(
+                    &metadata,
+                    &input,
+                    &context,
+                    no_tokens(),
+                    None,
+                )),
+                refused_capability(executor.execute_tts_streaming(
+                    &metadata,
+                    &input,
+                    &mut |_, _| panic!("a refused request must not synthesize"),
+                )),
+            ];
+            assert!(
+                refusals.iter().all(|c| c == "choice requests"),
+                "{refusals:?}"
+            );
+        }
+        let runtime = mock_runtime(&executor);
+        assert_eq!(runtime.call_count(), 0);
+        assert_eq!(runtime.loaded_model(), None);
+
+        // Control: the same executor does reach the runtime for text, so the
+        // zero above is the guard's doing.
+        executor
+            .execute(&metadata, &text_input("hello"), None)
+            .expect("text runs on the mock");
+        assert_eq!(mock_runtime(&executor).call_count(), 1);
+    }
+
+    #[test]
+    fn choice_kinds_in_history_are_refused_before_any_runtime() {
+        let metadata = test_model_metadata(ExecutionTemplate::Onnx {
+            model_file: "model.onnx".to_string(),
+        });
+        let mut executor = executor_with_mock_onnx();
+
+        let mut in_history = ConversationContext::new();
+        in_history.push(text_input("earlier").with_role(MessageRole::User));
+        in_history.push(Envelope::new(EnvelopeKind::MultiPart(vec![
+            choice_request_input(),
+        ])));
+        let as_system = ConversationContext::new().with_system(choice_scores_input());
+
+        for context in [&in_history, &as_system] {
+            let input = text_input("hello").with_role(MessageRole::User);
+            assert_eq!(
+                refused_capability(executor.execute_with_context(&metadata, &input, context, None)),
+                "choice requests"
+            );
+            assert_eq!(
+                refused_capability(executor.execute_streaming_with_context(
+                    &metadata,
+                    &input,
+                    context,
+                    no_tokens(),
+                    None,
+                )),
+                "choice requests"
+            );
+        }
+        assert_eq!(mock_runtime(&executor).call_count(), 0);
+    }
+
+    #[test]
+    fn scorer_execution_fails_without_its_model_file() {
+        let metadata = forms_scorer_metadata();
+        // An empty model directory: the request is valid, so the executor
+        // opens the scorer and reports the missing file.
+        let dir = tempfile::tempdir().unwrap();
+        let mut executor = TemplateExecutor::new(dir.path().to_str().unwrap());
+
+        let fixed_only = Envelope::choice_request(text_input("FORM Intake"), Vec::new());
+        for input in [choice_request_input(), fixed_only] {
+            assert!(
+                matches!(
+                    executor.execute(&metadata, &input, None),
+                    Err(AdapterError::ModelNotFound(_))
+                ),
+                "a missing scorer file must fail the load"
+            );
+        }
+        assert!(!executor.is_model_loaded(&metadata));
+    }
+
+    #[test]
+    fn scorers_refuse_other_entries_and_other_input() {
+        let metadata = forms_scorer_metadata();
+        let dir = tempfile::tempdir().unwrap();
+        let mut executor = TemplateExecutor::new(dir.path().to_str().unwrap());
+        let request = choice_request_input();
+        let context = ConversationContext::new();
+
+        assert_eq!(
+            refused_capability(executor.execute(&metadata, &text_input("hello"), None)),
+            "Text input"
+        );
+        assert_eq!(
+            refused_capability(executor.execute_streaming(&metadata, &request, no_tokens(), None)),
+            "streaming"
+        );
+        assert_eq!(
+            refused_capability(executor.execute_with_context(&metadata, &request, &context, None)),
+            "conversation context"
+        );
+        assert_eq!(
+            refused_capability(executor.execute_streaming_with_context(
+                &metadata,
+                &request,
+                &context,
+                no_tokens(),
+                None,
+            )),
+            "streaming"
+        );
+        assert_eq!(
+            refused_capability(executor.execute_tts_streaming(
+                &metadata,
+                &request,
+                &mut |_, _| panic!("a scorer must not synthesize"),
+            )),
+            "streaming"
+        );
+    }
+
+    #[test]
+    fn invalid_scorer_requests_are_invalid_input() {
+        let metadata = forms_scorer_metadata();
+        let mut executor = TemplateExecutor::new("");
+        let empty_context =
+            Envelope::choice_request(text_input(""), vec![crate::ir::Choice::new("a", "x")]);
+        let reserved = Envelope::choice_request(
+            text_input("FORM Intake"),
+            vec![crate::ir::Choice::new("skip", "x")],
+        );
+        for input in [empty_context, reserved] {
+            assert!(matches!(
+                executor.execute(&metadata, &input, None),
+                Err(AdapterError::InvalidInput(_))
+            ));
+        }
+    }
+
+    // =========================================================================
+    // Choice scorers: run through the executor on the fake ONNX scorers
+    // =========================================================================
+
+    /// Whether ONNX Runtime can run here; without it these tests skip, unless
+    /// models are required (`XYBRID_REQUIRE_MODELS`), where they fail.
+    fn onnx_runtime_for_test() -> bool {
+        if crate::runtime_adapter::onnx::ort_runtime_available() {
+            return true;
+        }
+        assert!(
+            !crate::testing::model_fixtures::models_required(),
+            "XYBRID_REQUIRE_MODELS is set but ONNX Runtime is not loadable; set ORT_DYLIB_PATH"
+        );
+        eprintln!("Skipping test: ONNX Runtime is not loadable (set ORT_DYLIB_PATH)");
+        false
+    }
+
+    fn fake_scorer_dir() -> PathBuf {
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        Path::new(&manifest_dir).join("../../integration-tests/fixtures/choice/fake")
+    }
+
+    /// The FORMS spec over the fake scorer `model_file`, edited by `edit`.
+    fn fake_scorer_metadata(
+        model_file: &str,
+        edit: impl FnOnce(&mut OnnxByteOptionScorerSpec),
+    ) -> ModelMetadata {
+        let mut metadata = forms_scorer_metadata();
+        let ExecutionTemplate::ChoiceScorer { scorer } = &mut metadata.execution_template else {
+            unreachable!("forms_scorer_metadata builds a ChoiceScorer");
+        };
+        let ChoiceScorerSpec::OnnxByteOptionScorer(spec) = scorer;
+        spec.model_file = model_file.to_string();
+        edit(spec);
+        metadata
+    }
+
+    /// The scores a scorer bound straight to a fresh session of `model`
+    /// returns for `input`: what the executor must reproduce.
+    fn scored_directly(
+        model: &Path,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+    ) -> crate::ir::ChoiceScores {
+        let ExecutionTemplate::ChoiceScorer {
+            scorer: ChoiceScorerSpec::OnnxByteOptionScorer(spec),
+        } = &metadata.execution_template
+        else {
+            unreachable!("a scorer's metadata");
+        };
+        let EnvelopeKind::ChoiceRequest(request) = &input.kind else {
+            unreachable!("a choice request");
+        };
+        let EnvelopeKind::Text(context) = &request.context().kind else {
+            unreachable!("a text context");
+        };
+        let session = ONNXSession::build(
+            model.to_str().unwrap(),
+            ExecutionProviderKind::Cpu,
+            SessionOptions::default(),
+        )
+        .unwrap();
+        OnnxChoiceScorer::bind(&session, spec)
+            .unwrap()
+            .score(&session, context, request.choices())
+            .unwrap()
+    }
+
+    fn choice_scores(result: ExecutorResult<Envelope>) -> crate::ir::ChoiceScores {
+        match result.map(|envelope| envelope.kind) {
+            Ok(EnvelopeKind::ChoiceScores(scores)) => scores,
+            other => panic!("expected choice scores, got {other:?}"),
+        }
+    }
+
+    /// The session the executor holds for its last scorer. A test keeps the
+    /// clone across later runs, so a rebuilt session cannot reuse its address
+    /// and `Arc::ptr_eq` tells reuse from a rebuild.
+    fn cached_session(executor: &TemplateExecutor) -> Arc<ONNXSession> {
+        Arc::clone(&executor.choice_scorer_cache.as_ref().unwrap().session)
+    }
+
+    /// A request whose option bytes all stay below the byte table's 64
+    /// entries, so `byte_table.onnx` scores it like `dynamic.onnx`.
+    fn digits_request() -> Envelope {
+        Envelope::choice_request(
+            text_input("FORM Intake"),
+            vec![
+                crate::ir::Choice::new("first", "(503) 555-0142"),
+                crate::ir::Choice::new("second", "03/14/1987"),
+            ],
+        )
+    }
+
+    #[test]
+    fn scorer_execution_keeps_the_bound_session() {
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let dir = fake_scorer_dir();
+        let metadata = fake_scorer_metadata("dynamic.onnx", |_| {});
+        let mut executor = TemplateExecutor::new(dir.to_str().unwrap());
+        assert!(!executor.is_model_loaded(&metadata));
+
+        let request = choice_request_input();
+        let expected = scored_directly(&dir.join("dynamic.onnx"), &metadata, &request);
+        assert_eq!(
+            choice_scores(executor.execute(&metadata, &request, None)),
+            expected
+        );
+        assert!(executor.is_model_loaded(&metadata));
+        let session = cached_session(&executor);
+
+        // Later requests reuse the bound session.
+        assert_eq!(
+            choice_scores(executor.execute(&metadata, &request, None)),
+            expected
+        );
+        let fixed_only = Envelope::choice_request(text_input("FORM Intake"), Vec::new());
+        let ids: Vec<String> = choice_scores(executor.execute(&metadata, &fixed_only, None))
+            .entries
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect();
+        assert_eq!(ids, ["check", "click", "skip"]);
+        assert!(Arc::ptr_eq(&cached_session(&executor), &session));
+    }
+
+    #[test]
+    fn scorer_execution_binds_a_replaced_file_or_a_new_spec_again() {
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("scorer.onnx");
+        std::fs::copy(fake_scorer_dir().join("dynamic.onnx"), &model).unwrap();
+        // No fixed choices: theirs are words, which the byte table refuses.
+        let metadata = fake_scorer_metadata("scorer.onnx", |spec| spec.fixed_choices.clear());
+        let mut executor = TemplateExecutor::new(dir.path().to_str().unwrap());
+
+        let request = digits_request();
+        let before = choice_scores(executor.execute(&metadata, &request, None));
+        let session = cached_session(&executor);
+
+        // `byte_table.onnx` scores these bytes like `dynamic.onnx` but fails
+        // on a letter, which shows the new file is the one running.
+        std::fs::copy(fake_scorer_dir().join("byte_table.onnx"), &model).unwrap();
+        assert_eq!(
+            choice_scores(executor.execute(&metadata, &request, None)),
+            before
+        );
+        let replaced = cached_session(&executor);
+        assert!(!Arc::ptr_eq(&replaced, &session));
+        assert!(matches!(
+            executor.execute(&metadata, &choice_request_input(), None),
+            Err(AdapterError::InferenceFailed(_))
+        ));
+
+        // A different spec over the same file is bound again too.
+        let warmer = fake_scorer_metadata("scorer.onnx", |spec| {
+            spec.fixed_choices.clear();
+            spec.scoring_temperature = Some(2.0);
+        });
+        let tempered = choice_scores(executor.execute(&warmer, &request, None));
+        assert!(!Arc::ptr_eq(&cached_session(&executor), &replaced));
+        assert_eq!(
+            tempered,
+            scored_directly(&model, &warmer, &request),
+            "the cached scorer must not keep the old temperature"
+        );
+        assert_ne!(tempered, before);
+    }
+
+    #[test]
+    fn scorer_execution_never_shares_a_session_between_models() {
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let dir = fake_scorer_dir();
+        let dynamic = fake_scorer_metadata("dynamic.onnx", |_| {});
+        // Eight static rows: a scorer bound to the dynamic model would encode
+        // five and ONNX Runtime would refuse the run.
+        let fixed = fake_scorer_metadata("static_masked.onnx", |spec| spec.max_choices = 8);
+        let mut executor = TemplateExecutor::new(dir.to_str().unwrap());
+
+        let request = choice_request_input();
+        let expected_dynamic = scored_directly(&dir.join("dynamic.onnx"), &dynamic, &request);
+        let expected_fixed = scored_directly(&dir.join("static_masked.onnx"), &fixed, &request);
+        for (metadata, expected) in [
+            (&dynamic, &expected_dynamic),
+            (&fixed, &expected_fixed),
+            (&dynamic, &expected_dynamic),
+        ] {
+            assert_eq!(
+                &choice_scores(executor.execute(metadata, &request, None)),
+                expected
+            );
+        }
+    }
+
+    /// Set in the child processes the `scorer_execution_*_to_stderr` tests
+    /// start.
+    const LOG_CHILD: &str = "XYBRID_TEST_SCORER_LOG_CHILD";
+
+    /// Runs `test` alone in a child copy of this test binary and returns its
+    /// stderr, after checking that the test ran and passed.
+    ///
+    /// ONNX Runtime writes its own log to stderr (and the system log on Apple
+    /// and Android), outside the errors it returns. The child starts ONNX
+    /// Runtime with its environment logging warnings (`ORT_LOG=warning`, read
+    /// once per process), so anything a scorer let through would show here.
+    fn stderr_of_child_test(test: &str) -> String {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([test, "--exact", "--nocapture"])
+            .env(LOG_CHILD, "1")
+            .env("ORT_LOG", "warning")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "the child run failed or matched no test:\n{stdout}\n{stderr}"
+        );
+        stderr
+    }
+
+    /// Runs a request the byte-table scorer fails on and returns the error,
+    /// after checking that ONNX Runtime itself failed the run: 'l' is byte
+    /// 108, id 109, outside the 64-entry table, so ONNX Runtime fails it with
+    /// a message that quotes the id, and that message is withheld.
+    fn failed_byte_table_run() -> AdapterError {
+        let metadata = fake_scorer_metadata("byte_table.onnx", |spec| spec.fixed_choices.clear());
+        let mut executor = TemplateExecutor::new(fake_scorer_dir().to_str().unwrap());
+        let request = Envelope::choice_request(
+            text_input("FORM Intake"),
+            vec![
+                crate::ir::Choice::new("first", "0"),
+                crate::ir::Choice::new("second", "l"),
+            ],
+        );
+        let error = executor.execute(&metadata, &request, None).unwrap_err();
+        assert!(
+            matches!(&error, AdapterError::InferenceFailed(message) if message.contains("withheld")),
+            "ONNX Runtime was meant to fail the run: {error:?}"
+        );
+        error
+    }
+
+    #[test]
+    fn scorer_execution_withholds_the_runtime_message() {
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let error = failed_byte_table_run();
+        let rendered = format!("{error} {error:?}");
+        assert!(
+            !rendered.contains("idx=") && !rendered.contains("out of data bounds"),
+            "{rendered}"
+        );
+    }
+
+    /// A wrong-shaped logits output fails the run, and the error withholds
+    /// its shape: read as the logits, `shape_warning.onnx`'s `auxiliary`
+    /// output is as long as the first context byte id, 85 for 'T', so its
+    /// shape would quote a byte of the request.
+    #[test]
+    fn scorer_execution_withholds_the_output_shape() {
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let metadata = fake_scorer_metadata("shape_warning.onnx", |spec| {
+            spec.logits_output = "auxiliary".to_string();
+        });
+        let mut executor = TemplateExecutor::new(fake_scorer_dir().to_str().unwrap());
+        let request = Envelope::choice_request(
+            text_input("TASK fill the form"),
+            vec![
+                crate::ir::Choice::new("tel", "fill Tel: (503) 555-0142"),
+                crate::ir::Choice::new("name", "fill Name: Jane Doe"),
+            ],
+        );
+        let error = executor.execute(&metadata, &request, None).unwrap_err();
+        let AdapterError::InferenceFailed(message) = &error else {
+            panic!("a wrong-shaped output fails the run: {error:?}");
+        };
+        assert_eq!(
+            message,
+            "output 'auxiliary' does not have shape [1, 5] (its shape is withheld)"
+        );
+    }
+
+    /// A failed run's message, logged by ONNX Runtime through the run's
+    /// logger, does not reach stderr.
+    #[test]
+    fn scorer_execution_failure_writes_nothing_to_stderr() {
+        if std::env::var_os(LOG_CHILD).is_some() {
+            failed_byte_table_run();
+            return;
+        }
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let stderr = stderr_of_child_test(
+            "execution::executor::tests::scorer_execution_failure_writes_nothing_to_stderr",
+        );
+        assert!(
+            !stderr.contains("idx=") && !stderr.contains("out of data bounds"),
+            "ONNX Runtime logged the failed run:\n{stderr}"
+        );
+    }
+
+    /// A warning ONNX Runtime logs through the session's logger does not
+    /// reach stderr either: `shape_warning.onnx`'s extra output is as long
+    /// as the first context byte id, 85 for 'T', against a declared length
+    /// of one, and ONNX Runtime warns about that, quoting the length, while
+    /// the scorer still scores.
+    #[test]
+    fn scorer_execution_warnings_write_nothing_to_stderr() {
+        if std::env::var_os(LOG_CHILD).is_some() {
+            let dir = fake_scorer_dir();
+            let metadata = fake_scorer_metadata("shape_warning.onnx", |_| {});
+            let mut executor = TemplateExecutor::new(dir.to_str().unwrap());
+            let request = Envelope::choice_request(
+                text_input("TASK fill the form"),
+                vec![
+                    crate::ir::Choice::new("tel", "fill Tel: (503) 555-0142"),
+                    crate::ir::Choice::new("name", "fill Name: Jane Doe"),
+                ],
+            );
+            // Its logits are dynamic.onnx's, which has no extra output.
+            let expected = scored_directly(&dir.join("dynamic.onnx"), &metadata, &request);
+            assert_eq!(
+                choice_scores(executor.execute(&metadata, &request, None)),
+                expected
+            );
+            return;
+        }
+        if !onnx_runtime_for_test() {
+            return;
+        }
+        let stderr = stderr_of_child_test(
+            "execution::executor::tests::scorer_execution_warnings_write_nothing_to_stderr",
+        );
+        assert!(
+            !stderr.contains("VerifyOutputSizes") && !stderr.contains("actual shape"),
+            "ONNX Runtime logged the session's warning:\n{stderr}"
+        );
+    }
+
+    /// LLM backend that counts every call, so a test can prove a refused
+    /// request reached none.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[derive(Default)]
+    struct CountingBackend {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    impl CountingBackend {
+        fn record(&self) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(sample_generation_output(1))
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    struct CountingHandle(std::sync::Arc<CountingBackend>);
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    impl crate::runtime_adapter::LlmBackend for CountingHandle {
+        fn name(&self) -> &str {
+            "counting"
+        }
+
+        fn supported_formats(&self) -> Vec<&'static str> {
+            vec!["gguf"]
+        }
+
+        fn load(&mut self, _config: &crate::runtime_adapter::LlmConfig) -> ExecutorResult<()> {
+            Ok(())
+        }
+
+        fn is_loaded(&self) -> bool {
+            true
+        }
+
+        fn unload(&mut self) -> ExecutorResult<()> {
+            Ok(())
+        }
+
+        fn generate(
+            &self,
+            _messages: &[ChatMessage],
+            _config: &GenerationConfig,
+        ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            self.0.record()
+        }
+
+        fn generate_streaming(
+            &self,
+            _messages: &[ChatMessage],
+            _config: &GenerationConfig,
+            _on_token: StreamingCallback<'_>,
+        ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            self.0.record()
+        }
+
+        fn render_chat_prompt(
+            &self,
+            _messages: &[ChatMessage],
+            _config: &GenerationConfig,
+        ) -> ExecutorResult<String> {
+            self.0.record().map(|output| output.text)
+        }
+
+        fn generate_raw(
+            &self,
+            _prompt: &str,
+            _config: &GenerationConfig,
+        ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            self.0.record()
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn choice_kinds_never_reach_an_llm_backend() {
+        let metadata = llm_metadata_for_continuation_tests();
+        let mut executor = TemplateExecutor::default();
+        let backend = std::sync::Arc::new(CountingBackend::default());
+        executor.llm_adapter_cache = Some((
+            LlmAdapterCacheKey::new("model.gguf".to_string(), None, 2048, None, None),
+            crate::runtime_adapter::LlmRuntimeAdapter::with_backend(Box::new(CountingHandle(
+                backend.clone(),
+            ))),
+        ));
+        let mut in_history = ConversationContext::new();
+        in_history.push(choice_request_input());
+        let empty = ConversationContext::new();
+
+        for input in choice_kind_inputs() {
+            let refusals = [
+                refused_capability(executor.execute(&metadata, &input, None)),
+                refused_capability(executor.execute_streaming(
+                    &metadata,
+                    &input,
+                    no_tokens(),
+                    None,
+                )),
+                refused_capability(executor.execute_with_context(&metadata, &input, &empty, None)),
+                refused_capability(executor.execute_streaming_with_context(
+                    &metadata,
+                    &input,
+                    &empty,
+                    no_tokens(),
+                    None,
+                )),
+            ];
+            assert!(
+                refusals.iter().all(|c| c == "choice requests"),
+                "{refusals:?}"
+            );
+        }
+        let text = text_input("hello").with_role(MessageRole::User);
+        assert_eq!(
+            refused_capability(executor.execute_with_context(&metadata, &text, &in_history, None)),
+            "choice requests"
+        );
+        assert_eq!(backend.calls(), 0);
+
+        // Control: text reaches the backend through the same executor.
+        executor
+            .execute(&metadata, &text, None)
+            .expect("text runs on the counting backend");
+        assert!(backend.calls() > 0);
     }
 }

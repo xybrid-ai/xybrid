@@ -69,3 +69,38 @@ pub mod bindings {
     #[cfg(not(feature = "committed-bindings"))]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
+
+/// Hooks into xybrid's Core ML encoder bridge (`native/xybrid-whisper-coreml.h`),
+/// on iOS with the `coreml` feature. Hand-written: the bridge is xybrid's.
+#[cfg(all(feature = "coreml", target_os = "ios"))]
+pub mod coreml {
+    use std::os::raw::c_char;
+
+    /// The encoder loaded and matches the model.
+    pub const XYBRID_WHISPER_COREML_ACTIVE: i32 = 0;
+    /// No encoder init claimed the declaration.
+    pub const XYBRID_WHISPER_COREML_NOT_REQUESTED: i32 = 1;
+    /// Core ML could not load the encoder.
+    pub const XYBRID_WHISPER_COREML_LOAD_FAILED: i32 = 2;
+    /// The encoder's input does not match the model.
+    pub const XYBRID_WHISPER_COREML_MISMATCH: i32 = 3;
+    /// The system is older than iOS 16.
+    pub const XYBRID_WHISPER_COREML_UNSUPPORTED_OS: i32 = 4;
+
+    extern "C" {
+        /// Declares the encoder path and model dimensions for the next
+        /// `whisper_init_state` on this thread. Pair with [`xybrid_whisper_coreml_end_load`].
+        pub fn xybrid_whisper_coreml_begin_load(
+            encoder_path: *const c_char,
+            n_mels: i32,
+            n_audio_ctx: i32,
+            n_audio_state: i32,
+        );
+
+        /// Closes the innermost declaration on this thread and returns its outcome.
+        pub fn xybrid_whisper_coreml_end_load() -> i32;
+
+        /// Total failed encoder runs on this thread (monotonic).
+        pub fn xybrid_whisper_coreml_failure_count() -> u64;
+    }
+}

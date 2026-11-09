@@ -3,6 +3,7 @@
 // verified before a player build, so a project that installed the managed-only
 // package via OpenUPM/UPM never ships without its natives.
 
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -48,6 +49,41 @@ namespace Xybrid.Editor
                     $"[Xybrid] Native libraries for '{platform}' (v{version}) are not " +
                     "available; the build would ship without them.");
             }
+
+            if (report.summary.platform == BuildTarget.iOS)
+            {
+                EnsureIosFrameworkDependencies("Assets/Xybrid/Plugins/iOS/libxybrid_bolt.a");
+            }
+        }
+
+        /// <summary>Adds the archive's required frameworks before Unity collects plugins.</summary>
+        internal static bool EnsureIosFrameworkDependencies(string assetPath)
+        {
+            var importer = AssetImporter.GetAtPath(assetPath) as PluginImporter;
+            if (importer == null)
+            {
+                throw new BuildFailedException(
+                    $"[Xybrid] Could not import the iOS native archive at '{assetPath}'. " +
+                    "Download the iOS natives again from Xybrid > Native Libraries.");
+            }
+
+            // v0.14.0 bundles have no framework dependencies. Apply this even
+            // when the resolver's version marker says they are already current.
+            var existing = importer.GetPlatformData(BuildTarget.iOS, "FrameworkDependencies") ?? "";
+            var frameworks = new List<string>();
+            foreach (var framework in existing.Split(';'))
+            {
+                var name = framework.Trim();
+                if (name.Length != 0) frameworks.Add(name);
+            }
+            if (frameworks.Contains("Accelerate")) return false;
+
+            // ggml uses Accelerate's vDSP symbols. Unity places these declared
+            // system frameworks on the UnityFramework target, not the launcher.
+            frameworks.Add("Accelerate");
+            importer.SetPlatformData(BuildTarget.iOS, "FrameworkDependencies", string.Join(";", frameworks));
+            importer.SaveAndReimport();
+            return true;
         }
     }
 }

@@ -12,25 +12,18 @@ export {
   RuntimeInitializationError,
   UnsupportedFeatureError,
   UnsupportedTemplateError,
-  UnsupportedTensorTypeError,
   XybridError,
 } from "./errors.ts";
+export type { LoadMetrics, Memory, RunMetrics } from "./internal/protocol.ts";
 export { XybridLlm } from "./llm.ts";
-export { XybridModel } from "./model.ts";
 export type {
   AcceleratorPreference,
   DownloadProgress,
   GenerateOptions,
+  GgufLoadOptions,
   HuggingFaceLoadOptions,
   LlmLoadOptions,
   LoadOptions,
   RegistryLoadOptions,
-  RunResult,
   SelectedAccelerator,
-  TensorDataType,
-  TensorDetail,
-  TensorInput,
-  TensorInputs,
-  TensorOutput,
-  TensorValue,
 } from "./types.ts";

@@ -1,0 +1,1607 @@
+{
+  "schema_version": 1,
+  "id": "choice-255-options",
+  "profile": "lfm3-d1/text/v1",
+  "title": "255 options, the most the model takes",
+  "covers": ["choice-max-options", "choice-pool-fallback"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"option_000\": \"Option number 0\", \"option_001\": \"Option number 1\", \"option_002\": \"Option number 2\", \"option_003\": \"Option number 3\", \"option_004\": \"Option number 4\", \"option_005\": \"Option number 5\", \"option_006\": \"Option number 6\", \"option_007\": \"Option number 7\", \"option_008\": \"Option number 8\", \"option_009\": \"Option number 9\", \"option_010\": \"Option number 10\", \"option_011\": \"Option number 11\", \"option_012\": \"Option number 12\", \"option_013\": \"Option number 13\", \"option_014\": \"Option number 14\", \"option_015\": \"Option number 15\", \"option_016\": \"Option number 16\", \"option_017\": \"Option number 17\", \"option_018\": \"Option number 18\", \"option_019\": \"Option number 19\", \"option_020\": \"Option number 20\", \"option_021\": \"Option number 21\", \"option_022\": \"Option number 22\", \"option_023\": \"Option number 23\", \"option_024\": \"Option number 24\", \"option_025\": \"Option number 25\", \"option_026\": \"Option number 26\", \"option_027\": \"Option number 27\", \"option_028\": \"Option number 28\", \"option_029\": \"Option number 29\", \"option_030\": \"Option number 30\", \"option_031\": \"Option number 31\", \"option_032\": \"Option number 32\", \"option_033\": \"Option number 33\", \"option_034\": \"Option number 34\", \"option_035\": \"Option number 35\", \"option_036\": \"Option number 36\", \"option_037\": \"Option number 37\", \"option_038\": \"Option number 38\", \"option_039\": \"Option number 39\", \"option_040\": \"Option number 40\", \"option_041\": \"Option number 41\", \"option_042\": \"Option number 42\", \"option_043\": \"Option number 43\", \"option_044\": \"Option number 44\", \"option_045\": \"Option number 45\", \"option_046\": \"Option number 46\", \"option_047\": \"Option number 47\", \"option_048\": \"Option number 48\", \"option_049\": \"Option number 49\", \"option_050\": \"Option number 50\", \"option_051\": \"Option number 51\", \"option_052\": \"Option number 52\", \"option_053\": \"Option number 53\", \"option_054\": \"Option number 54\", \"option_055\": \"Option number 55\", \"option_056\": \"Option number 56\", \"option_057\": \"Option number 57\", \"option_058\": \"Option number 58\", \"option_059\": \"Option number 59\", \"option_060\": \"Option number 60\", \"option_061\": \"Option number 61\", \"option_062\": \"Option number 62\", \"option_063\": \"Option number 63\", \"option_064\": \"Option number 64\", \"option_065\": \"Option number 65\", \"option_066\": \"Option number 66\", \"option_067\": \"Option number 67\", \"option_068\": \"Option number 68\", \"option_069\": \"Option number 69\", \"option_070\": \"Option number 70\", \"option_071\": \"Option number 71\", \"option_072\": \"Option number 72\", \"option_073\": \"Option number 73\", \"option_074\": \"Option number 74\", \"option_075\": \"Option number 75\", \"option_076\": \"Option number 76\", \"option_077\": \"Option number 77\", \"option_078\": \"Option number 78\", \"option_079\": \"Option number 79\", \"option_080\": \"Option number 80\", \"option_081\": \"Option number 81\", \"option_082\": \"Option number 82\", \"option_083\": \"Option number 83\", \"option_084\": \"Option number 84\", \"option_085\": \"Option number 85\", \"option_086\": \"Option number 86\", \"option_087\": \"Option number 87\", \"option_088\": \"Option number 88\", \"option_089\": \"Option number 89\", \"option_090\": \"Option number 90\", \"option_091\": \"Option number 91\", \"option_092\": \"Option number 92\", \"option_093\": \"Option number 93\", \"option_094\": \"Option number 94\", \"option_095\": \"Option number 95\", \"option_096\": \"Option number 96\", \"option_097\": \"Option number 97\", \"option_098\": \"Option number 98\", \"option_099\": \"Option number 99\", \"option_100\": \"Option number 100\", \"option_101\": \"Option number 101\", \"option_102\": \"Option number 102\", \"option_103\": \"Option number 103\", \"option_104\": \"Option number 104\", \"option_105\": \"Option number 105\", \"option_106\": \"Option number 106\", \"option_107\": \"Option number 107\", \"option_108\": \"Option number 108\", \"option_109\": \"Option number 109\", \"option_110\": \"Option number 110\", \"option_111\": \"Option number 111\", \"option_112\": \"Option number 112\", \"option_113\": \"Option number 113\", \"option_114\": \"Option number 114\", \"option_115\": \"Option number 115\", \"option_116\": \"Option number 116\", \"option_117\": \"Option number 117\", \"option_118\": \"Option number 118\", \"option_119\": \"Option number 119\", \"option_120\": \"Option number 120\", \"option_121\": \"Option number 121\", \"option_122\": \"Option number 122\", \"option_123\": \"Option number 123\", \"option_124\": \"Option number 124\", \"option_125\": \"Option number 125\", \"option_126\": \"Option number 126\", \"option_127\": \"Option number 127\", \"option_128\": \"Option number 128\", \"option_129\": \"Option number 129\", \"option_130\": \"Option number 130\", \"option_131\": \"Option number 131\", \"option_132\": \"Option number 132\", \"option_133\": \"Option number 133\", \"option_134\": \"Option number 134\", \"option_135\": \"Option number 135\", \"option_136\": \"Option number 136\", \"option_137\": \"Option number 137\", \"option_138\": \"Option number 138\", \"option_139\": \"Option number 139\", \"option_140\": \"Option number 140\", \"option_141\": \"Option number 141\", \"option_142\": \"Option number 142\", \"option_143\": \"Option number 143\", \"option_144\": \"Option number 144\", \"option_145\": \"Option number 145\", \"option_146\": \"Option number 146\", \"option_147\": \"Option number 147\", \"option_148\": \"Option number 148\", \"option_149\": \"Option number 149\", \"option_150\": \"Option number 150\", \"option_151\": \"Option number 151\", \"option_152\": \"Option number 152\", \"option_153\": \"Option number 153\", \"option_154\": \"Option number 154\", \"option_155\": \"Option number 155\", \"option_156\": \"Option number 156\", \"option_157\": \"Option number 157\", \"option_158\": \"Option number 158\", \"option_159\": \"Option number 159\", \"option_160\": \"Option number 160\", \"option_161\": \"Option number 161\", \"option_162\": \"Option number 162\", \"option_163\": \"Option number 163\", \"option_164\": \"Option number 164\", \"option_165\": \"Option number 165\", \"option_166\": \"Option number 166\", \"option_167\": \"Option number 167\", \"option_168\": \"Option number 168\", \"option_169\": \"Option number 169\", \"option_170\": \"Option number 170\", \"option_171\": \"Option number 171\", \"option_172\": \"Option number 172\", \"option_173\": \"Option number 173\", \"option_174\": \"Option number 174\", \"option_175\": \"Option number 175\", \"option_176\": \"Option number 176\", \"option_177\": \"Option number 177\", \"option_178\": \"Option number 178\", \"option_179\": \"Option number 179\", \"option_180\": \"Option number 180\", \"option_181\": \"Option number 181\", \"option_182\": \"Option number 182\", \"option_183\": \"Option number 183\", \"option_184\": \"Option number 184\", \"option_185\": \"Option number 185\", \"option_186\": \"Option number 186\", \"option_187\": \"Option number 187\", \"option_188\": \"Option number 188\", \"option_189\": \"Option number 189\", \"option_190\": \"Option number 190\", \"option_191\": \"Option number 191\", \"option_192\": \"Option number 192\", \"option_193\": \"Option number 193\", \"option_194\": \"Option number 194\", \"option_195\": \"Option number 195\", \"option_196\": \"Option number 196\", \"option_197\": \"Option number 197\", \"option_198\": \"Option number 198\", \"option_199\": \"Option number 199\", \"option_200\": \"Option number 200\", \"option_201\": \"Option number 201\", \"option_202\": \"Option number 202\", \"option_203\": \"Option number 203\", \"option_204\": \"Option number 204\", \"option_205\": \"Option number 205\", \"option_206\": \"Option number 206\", \"option_207\": \"Option number 207\", \"option_208\": \"Option number 208\", \"option_209\": \"Option number 209\", \"option_210\": \"Option number 210\", \"option_211\": \"Option number 211\", \"option_212\": \"Option number 212\", \"option_213\": \"Option number 213\", \"option_214\": \"Option number 214\", \"option_215\": \"Option number 215\", \"option_216\": \"Option number 216\", \"option_217\": \"Option number 217\", \"option_218\": \"Option number 218\", \"option_219\": \"Option number 219\", \"option_220\": \"Option number 220\", \"option_221\": \"Option number 221\", \"option_222\": \"Option number 222\", \"option_223\": \"Option number 223\", \"option_224\": \"Option number 224\", \"option_225\": \"Option number 225\", \"option_226\": \"Option number 226\", \"option_227\": \"Option number 227\", \"option_228\": \"Option number 228\", \"option_229\": \"Option number 229\", \"option_230\": \"Option number 230\", \"option_231\": \"Option number 231\", \"option_232\": \"Option number 232\", \"option_233\": \"Option number 233\", \"option_234\": \"Option number 234\", \"option_235\": \"Option number 235\", \"option_236\": \"Option number 236\", \"option_237\": \"Option number 237\", \"option_238\": \"Option number 238\", \"option_239\": \"Option number 239\", \"option_240\": \"Option number 240\", \"option_241\": \"Option number 241\", \"option_242\": \"Option number 242\", \"option_243\": \"Option number 243\", \"option_244\": \"Option number 244\", \"option_245\": \"Option number 245\", \"option_246\": \"Option number 246\", \"option_247\": \"Option number 247\", \"option_248\": \"Option number 248\", \"option_249\": \"Option number 249\", \"option_250\": \"Option number 250\", \"option_251\": \"Option number 251\", \"option_252\": \"Option number 252\", \"option_253\": \"Option number 253\", \"option_254\": \"Option number 254\"}}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "choice",
+          "keys": ["option_000", "option_001", "option_002", "option_003", "option_004", "option_005", "option_006", "option_007", "option_008", "option_009", "option_010", "option_011", "option_012", "option_013", "option_014", "option_015", "option_016", "option_017", "option_018", "option_019", "option_020", "option_021", "option_022", "option_023", "option_024", "option_025", "option_026", "option_027", "option_028", "option_029", "option_030", "option_031", "option_032", "option_033", "option_034", "option_035", "option_036", "option_037", "option_038", "option_039", "option_040", "option_041", "option_042", "option_043", "option_044", "option_045", "option_046", "option_047", "option_048", "option_049", "option_050", "option_051", "option_052", "option_053", "option_054", "option_055", "option_056", "option_057", "option_058", "option_059", "option_060", "option_061", "option_062", "option_063", "option_064", "option_065", "option_066", "option_067", "option_068", "option_069", "option_070", "option_071", "option_072", "option_073", "option_074", "option_075", "option_076", "option_077", "option_078", "option_079", "option_080", "option_081", "option_082", "option_083", "option_084", "option_085", "option_086", "option_087", "option_088", "option_089", "option_090", "option_091", "option_092", "option_093", "option_094", "option_095", "option_096", "option_097", "option_098", "option_099", "option_100", "option_101", "option_102", "option_103", "option_104", "option_105", "option_106", "option_107", "option_108", "option_109", "option_110", "option_111", "option_112", "option_113", "option_114", "option_115", "option_116", "option_117", "option_118", "option_119", "option_120", "option_121", "option_122", "option_123", "option_124", "option_125", "option_126", "option_127", "option_128", "option_129", "option_130", "option_131", "option_132", "option_133", "option_134", "option_135", "option_136", "option_137", "option_138", "option_139", "option_140", "option_141", "option_142", "option_143", "option_144", "option_145", "option_146", "option_147", "option_148", "option_149", "option_150", "option_151", "option_152", "option_153", "option_154", "option_155", "option_156", "option_157", "option_158", "option_159", "option_160", "option_161", "option_162", "option_163", "option_164", "option_165", "option_166", "option_167", "option_168", "option_169", "option_170", "option_171", "option_172", "option_173", "option_174", "option_175", "option_176", "option_177", "option_178", "option_179", "option_180", "option_181", "option_182", "option_183", "option_184", "option_185", "option_186", "option_187", "option_188", "option_189", "option_190", "option_191", "option_192", "option_193", "option_194", "option_195", "option_196", "option_197", "option_198", "option_199", "option_200", "option_201", "option_202", "option_203", "option_204", "option_205", "option_206", "option_207", "option_208", "option_209", "option_210", "option_211", "option_212", "option_213", "option_214", "option_215", "option_216", "option_217", "option_218", "option_219", "option_220", "option_221", "option_222", "option_223", "option_224", "option_225", "option_226", "option_227", "option_228", "option_229", "option_230", "option_231", "option_232", "option_233", "option_234", "option_235", "option_236", "option_237", "option_238", "option_239", "option_240", "option_241", "option_242", "option_243", "option_244", "option_245", "option_246", "option_247", "option_248", "option_249", "option_250", "option_251", "option_252", "option_253", "option_254"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\nA Option number 0\nB Option number 1\nC Option number 2\nD Option number 3\nE Option number 4\nF Option number 5\nG Option number 6\nH Option number 7\nI Option number 8\nJ Option number 9\nK Option number 10\nL Option number 11\nM Option number 12\nN Option number 13\nO Option number 14\nP Option number 15\nQ Option number 16\nR Option number 17\nS Option number 18\nT Option number 19\nU Option number 20\nV Option number 21\nW Option number 22\nX Option number 23\nY Option number 24\nZ Option number 25\nAA Option number 26\nAB Option number 27\nAC Option number 28\nAD Option number 29\nAE Option number 30\nAF Option number 31\nAG Option number 32\nAH Option number 33\nAI Option number 34\n00 Option number 35\nAK Option number 36\nAL Option number 37\nAM Option number 38\nAN Option number 39\nAO Option number 40\nAP Option number 41\nAQ Option number 42\nAR Option number 43\nAS Option number 44\nAT Option number 45\nAU Option number 46\nAV Option number 47\nAW Option number 48\nAX Option number 49\nAY Option number 50\nAZ Option number 51\nBA Option number 52\nBB Option number 53\nBC Option number 54\nBD Option number 55\nBE Option number 56\nBF Option number 57\nBG Option number 58\n01 Option number 59\nBI Option number 60\nBJ Option number 61\nBK Option number 62\nBL Option number 63\nBM Option number 64\nBN Option number 65\nBO Option number 66\nBP Option number 67\nBQ Option number 68\nBR Option number 69\nBS Option number 70\nBT Option number 71\nBU Option number 72\nBV Option number 73\nBW Option number 74\nBX Option number 75\nBY Option number 76\nBZ Option number 77\nCA Option number 78\nCB Option number 79\nCC Option number 80\nCD Option number 81\nCE Option number 82\nCF Option number 83\nCG Option number 84\nCH Option number 85\nCI Option number 86\n02 Option number 87\nCK Option number 88\nCL Option number 89\nCM Option number 90\nCN Option number 91\nCO Option number 92\nCP Option number 93\nCQ Option number 94\nCR Option number 95\nCS Option number 96\nCT Option number 97\nCU Option number 98\nCV Option number 99\nCW Option number 100\nCX Option number 101\nCY Option number 102\nCZ Option number 103\nDA Option number 104\nDB Option number 105\nDC Option number 106\nDD Option number 107\nDE Option number 108\nDF Option number 109\nDG Option number 110\nDH Option number 111\nDI Option number 112\nDJ Option number 113\nDK Option number 114\nDL Option number 115\nDM Option number 116\nDN Option number 117\nDO Option number 118\nDP Option number 119\nDQ Option number 120\nDR Option number 121\nDS Option number 122\nDT Option number 123\nDU Option number 124\nDV Option number 125\nDW Option number 126\nDX Option number 127\nDY Option number 128\n03 Option number 129\nEA Option number 130\nEB Option number 131\nEC Option number 132\nED Option number 133\nEE Option number 134\nEF Option number 135\nEG Option number 136\n04 Option number 137\n05 Option number 138\n06 Option number 139\nEK Option number 140\nEL Option number 141\nEM Option number 142\nEN Option number 143\n07 Option number 144\nEP Option number 145\nEQ Option number 146\nER Option number 147\nES Option number 148\nET Option number 149\nEU Option number 150\nEV Option number 151\nEW Option number 152\nEX Option number 153\nEY Option number 154\nEZ Option number 155\nFA Option number 156\nFB Option number 157\nFC Option number 158\nFD Option number 159\nFE Option number 160\nFF Option number 161\n08 Option number 162\nFH Option number 163\nFI Option number 164\nFJ Option number 165\nFK Option number 166\nFL Option number 167\nFM Option number 168\n09 Option number 169\nFO Option number 170\nFP Option number 171\nFQ Option number 172\nFR Option number 173\nFS Option number 174\nFT Option number 175\n10 Option number 176\nFV Option number 177\nFW Option number 178\nFX Option number 179\nFY Option number 180\nFZ Option number 181\nGA Option number 182\nGB Option number 183\nGC Option number 184\nGD Option number 185\nGE Option number 186\nGF Option number 187\nGG Option number 188\nGH Option number 189\nGI Option number 190\n11 Option number 191\nGK Option number 192\nGL Option number 193\nGM Option number 194\nGN Option number 195\nGO Option number 196\nGP Option number 197\nGQ Option number 198\nGR Option number 199\nGS Option number 200\nGT Option number 201\nGU Option number 202\nGV Option number 203\nGW Option number 204\nGX Option number 205\nGY Option number 206\nGZ Option number 207\nHA Option number 208\nHB Option number 209\nHC Option number 210\nHD Option number 211\nHE Option number 212\nHF Option number 213\n12 Option number 214\nHH Option number 215\nHI Option number 216\nHJ Option number 217\nHK Option number 218\nHL Option number 219\nHM Option number 220\nHN Option number 221\nHO Option number 222\nHP Option number 223\nHQ Option number 224\nHR Option number 225\nHS Option number 226\nHT Option number 227\nHU Option number 228\nHV Option number 229\nHW Option number 230\nHX Option number 231\nHY Option number 232\nHZ Option number 233\nIA Option number 234\nIB Option number 235\nIC Option number 236\nID Option number 237\nIE Option number 238\nIF Option number 239\nIG Option number 240\nIH Option number 241\nII Option number 242\nIJ Option number 243\nIK Option number 244\nIL Option number 245\nIM Option number 246\nIN Option number 247\nIO Option number 248\nIP Option number 249\nIQ Option number 250\nIR Option number 251\nIS Option number 252\nIT Option number 253\nIU Option number 254\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 41, 31921, 1579, 229, 24, 207, 42, 31921, 1579, 229, 25, 207, 43, 31921, 1579, 229, 26, 207, 44, 31921, 1579, 229, 27, 207, 45, 31921, 1579, 229, 28, 207, 46, 31921, 1579, 229, 29, 207, 47, 31921, 1579, 229, 30, 207, 48, 31921, 1579, 229, 31, 207, 49, 31921, 1579, 229, 32, 207, 50, 31921, 1579, 229, 33, 207, 51, 31921, 1579, 229, 654, 207, 52, 31921, 1579, 229, 1131, 207, 53, 31921, 1579, 229, 873, 207, 54, 31921, 1579, 229, 1031, 207, 55, 31921, 1579, 229, 1035, 207, 56, 31921, 1579, 229, 885, 207, 57, 31921, 1579, 229, 942, 207, 58, 31921, 1579, 229, 916, 207, 59, 31921, 1579, 229, 632, 207, 60, 31921, 1579, 229, 412, 207, 61, 31921, 1579, 229, 397, 207, 62, 31921, 1579, 229, 1696, 207, 63, 31921, 1579, 229, 1518, 207, 64, 31921, 1579, 229, 1467, 207, 65, 31921, 1579, 229, 1325, 207, 66, 31921, 1579, 229, 1197, 207, 6713, 31921, 1579, 229, 1616, 207, 5193, 31921, 1579, 229, 1641, 207, 2843, 31921, 1579, 229, 1637, 207, 3875, 31921, 1579, 229, 1734, 207, 28527, 31921, 1579, 229, 1163, 207, 10593, 31921, 1579, 229, 2498, 207, 5157, 31921, 1579, 229, 2424, 207, 51133, 31921, 1579, 229, 2124, 207, 22348, 31921, 1579, 229, 2432, 207, 555, 31921, 1579, 229, 2036, 207, 24092, 31921, 1579, 229, 2523, 207, 2624, 31921, 1579, 229, 2591, 207, 3757, 31921, 1579, 229, 2481, 207, 2555, 31921, 1579, 229, 2687, 207, 117236, 31921, 1579, 229, 1607, 207, 3657, 31921, 1579, 229, 4035, 207, 66255, 31921, 1579, 229, 3843, 207, 1961, 31921, 1579, 229, 4112, 207, 2176, 31921, 1579, 229, 2836, 207, 2007, 31921, 1579, 229, 2136, 207, 66405, 31921, 1579, 229, 3694, 207, 10505, 31921, 1579, 229, 3244, 207, 66394, 31921, 1579, 229, 2666, 207, 29382, 31921, 1579, 229, 3255, 207, 18510, 31921, 1579, 229, 1337, 207, 105422, 31921, 1579, 229, 6643, 207, 7911, 31921, 1579, 229, 6557, 207, 20169, 31921, 1579, 229, 6688, 207, 5730, 31921, 1579, 229, 7033, 207, 13740, 31921, 1579, 229, 3377, 207, 26906, 31921, 1579, 229, 7067, 207, 38358, 31921, 1579, 229, 4988, 207, 50853, 31921, 1579, 229, 4545, 207, 4040, 31921, 1579, 229, 5098, 207, 13255, 31921, 1579, 229, 1697, 207, 66311, 31921, 1579, 229, 4940, 207, 106073, 31921, 1579, 229, 4869, 207, 12863, 31921, 1579, 229, 4946, 207, 13719, 31921, 1579, 229, 2251, 207, 4788, 31921, 1579, 229, 2257, 207, 13725, 31921, 1579, 229, 3088, 207, 20778, 31921, 1579, 229, 2874, 207, 66374, 31921, 1579, 229, 2698, 207, 15490, 31921, 1579, 229, 3301, 207, 7203, 31921, 1579, 229, 1975, 207, 29580, 31921, 1579, 229, 8960, 207, 36831, 31921, 1579, 229, 7832, 207, 32938, 31921, 1579, 229, 9125, 207, 105174, 31921, 1579, 229, 9212, 207, 105378, 31921, 1579, 229, 2224, 207, 52361, 31921, 1579, 229, 9024, 207, 106716, 31921, 1579, 229, 3055, 207, 8542, 31921, 1579, 229, 2274, 207, 40556, 31921, 1579, 229, 4238, 207, 4773, 31921, 1579, 229, 1845, 207, 6888, 31921, 1579, 229, 9230, 207, 6657, 31921, 1579, 229, 9192, 207, 27066, 31921, 1579, 229, 9364, 207, 39420, 31921, 1579, 229, 8957, 207, 5249, 31921, 1579, 229, 3019, 207, 11563, 31921, 1579, 229, 8701, 207, 5342, 31921, 1579, 229, 5042, 207, 64465, 31921, 1579, 229, 3251, 207, 6876, 31921, 1579, 229, 5100, 207, 24713, 31921, 1579, 229, 1974, 207, 41928, 31921, 1579, 229, 9505, 207, 3924, 31921, 1579, 229, 9262, 207, 9567, 31921, 1579, 229, 9561, 207, 67340, 31921, 1579, 229, 9787, 207, 6193, 31921, 1579, 229, 2311, 207, 9355, 31921, 1579, 229, 8740, 207, 3489, 31921, 1579, 229, 3669, 207, 106188, 31921, 1579, 229, 2860, 207, 38240, 31921, 1579, 229, 2461, 207, 106034, 31921, 1579, 229, 1595, 207, 67672, 31921, 1579, 229, 5267, 207, 66536, 31921, 1579, 229, 8769, 207, 67325, 31921, 1579, 229, 8383, 207, 6598, 31921, 1579, 229, 10480, 207, 15339, 31921, 1579, 229, 9453, 207, 16203, 31921, 1579, 229, 10676, 207, 16378, 31921, 1579, 229, 10369, 207, 4985, 31921, 1579, 229, 9259, 207, 6593, 31921, 1579, 229, 8829, 207, 105410, 31921, 1579, 229, 7483, 207, 35259, 31921, 1579, 229, 8438, 207, 20045, 31921, 1579, 229, 10283, 207, 106737, 31921, 1579, 229, 11216, 207, 58442, 31921, 1579, 229, 12056, 207, 11177, 31921, 1579, 229, 10436, 207, 20784, 31921, 1579, 229, 11913, 207, 44201, 31921, 1579, 229, 11211, 207, 20617, 31921, 1579, 229, 10541, 207, 10115, 31921, 1579, 229, 12626, 207, 66459, 31921, 1579, 229, 6004, 207, 9084, 31921, 1579, 229, 11328, 207, 10110, 31921, 1579, 229, 12178, 207, 26164, 31921, 1579, 229, 9792, 207, 33407, 31921, 1579, 229, 12214, 207, 66575, 31921, 1579, 229, 9152, 207, 105652, 31921, 1579, 229, 12430, 207, 97749, 31921, 1579, 229, 11583, 207, 66645, 31921, 1579, 229, 10073, 207, 5634, 31921, 1579, 229, 12435, 207, 19800, 31921, 1579, 229, 8048, 207, 51779, 31921, 1579, 229, 12696, 207, 4650, 31921, 1579, 229, 12955, 207, 3589, 31921, 1579, 229, 13154, 207, 7881, 31921, 1579, 229, 13152, 207, 20835, 31921, 1579, 229, 11799, 207, 9205, 31921, 1579, 229, 12858, 207, 5825, 31921, 1579, 229, 11225, 207, 3153, 31921, 1579, 229, 13630, 207, 5967, 31921, 1579, 229, 13947, 207, 67560, 31921, 1579, 229, 8799, 207, 5512, 31921, 1579, 229, 13387, 207, 4760, 31921, 1579, 229, 13716, 207, 2379, 31921, 1579, 229, 13689, 207, 4471, 31921, 1579, 229, 12947, 207, 9652, 31921, 1579, 229, 12067, 207, 66435, 31921, 1579, 229, 12790, 207, 1573, 31921, 1579, 229, 11897, 207, 2020, 31921, 1579, 229, 13514, 207, 3645, 31921, 1579, 229, 12489, 207, 50349, 31921, 1579, 229, 4910, 207, 30455, 31921, 1579, 229, 11548, 207, 59509, 31921, 1579, 229, 10573, 207, 8210, 31921, 1579, 229, 11109, 207, 64561, 31921, 1579, 229, 11470, 207, 105645, 31921, 1579, 229, 10439, 207, 5811, 31921, 1579, 229, 11259, 207, 67613, 31921, 1579, 229, 11223, 207, 9008, 31921, 1579, 229, 11408, 207, 50360, 31921, 1579, 229, 11132, 207, 32376, 31921, 1579, 229, 6759, 207, 6199, 31921, 1579, 229, 10492, 207, 4027, 31921, 1579, 229, 10331, 207, 66737, 31921, 1579, 229, 10284, 207, 16400, 31921, 1579, 229, 9951, 207, 106559, 31921, 1579, 229, 9928, 207, 50873, 31921, 1579, 229, 10281, 207, 9907, 31921, 1579, 229, 10698, 207, 37115, 31921, 1579, 229, 9672, 207, 4404, 31921, 1579, 229, 10732, 207, 16760, 31921, 1579, 229, 7879, 207, 15306, 31921, 1579, 229, 9925, 207, 66826, 31921, 1579, 229, 10019, 207, 13553, 31921, 1579, 229, 10055, 207, 13913, 31921, 1579, 229, 9386, 207, 14649, 31921, 1579, 229, 7805, 207, 654, 31921, 1579, 229, 8390, 207, 106087, 31921, 1579, 229, 7213, 207, 99542, 31921, 1579, 229, 6835, 207, 47382, 31921, 1579, 229, 6082, 207, 66644, 31921, 1579, 229, 4336, 207, 105533, 31921, 1579, 229, 5269, 207, 14971, 31921, 1579, 229, 5349, 207, 9287, 31921, 1579, 229, 4671, 207, 12396, 31921, 1579, 229, 4286, 207, 50335, 31921, 1579, 229, 3919, 207, 15404, 31921, 1579, 229, 3317, 207, 19227, 31921, 1579, 229, 3440, 207, 27647, 31921, 1579, 229, 3198, 207, 43203, 31921, 1579, 229, 2904, 207, 51640, 31921, 1579, 229, 2316, 207, 1131, 31921, 1579, 229, 1943, 207, 105072, 31921, 1579, 229, 1892, 207, 12161, 31921, 1579, 229, 1693, 207, 24233, 31921, 1579, 229, 1449, 207, 34963, 31921, 1579, 229, 1580, 207, 21281, 31921, 1579, 229, 1347, 207, 24457, 31921, 1579, 229, 1223, 207, 66543, 31921, 1579, 229, 1099, 207, 15932, 31921, 1579, 229, 843, 207, 15182, 31921, 1579, 229, 585, 207, 21648, 31921, 1579, 229, 523, 207, 106794, 31921, 1579, 229, 1217, 207, 66310, 31921, 1579, 229, 12350, 207, 105204, 31921, 1579, 229, 15285, 207, 105559, 31921, 1579, 229, 14004, 207, 66703, 31921, 1579, 229, 18027, 207, 105519, 31921, 1579, 229, 19702, 207, 12998, 31921, 1579, 229, 19011, 207, 66538, 31921, 1579, 229, 19798, 207, 16927, 31921, 1579, 229, 13424, 207, 13305, 31921, 1579, 229, 18277, 207, 5846, 31921, 1579, 229, 18332, 207, 33499, 31921, 1579, 229, 19588, 207, 873, 31921, 1579, 229, 18579, 207, 54691, 31921, 1579, 229, 18646, 207, 39836, 31921, 1579, 229, 19456, 207, 105565, 31921, 1579, 229, 20275, 207, 66779, 31921, 1579, 229, 21229, 207, 15346, 31921, 1579, 229, 20869, 207, 47347, 31921, 1579, 229, 13144, 207, 106850, 31921, 1579, 229, 18835, 207, 10472, 31921, 1579, 229, 18305, 207, 14298, 31921, 1579, 229, 20334, 207, 66517, 31921, 1579, 229, 20172, 207, 15692, 31921, 1579, 229, 17409, 207, 11800, 31921, 1579, 229, 21593, 207, 9345, 31921, 1579, 229, 21797, 207, 106018, 31921, 1579, 229, 21377, 207, 67596, 31921, 1579, 229, 21475, 207, 105259, 31921, 1579, 229, 14866, 207, 66709, 31921, 1579, 229, 19728, 207, 66458, 31921, 1579, 229, 19628, 207, 105047, 31921, 1579, 229, 20259, 207, 8119, 31921, 1579, 229, 20651, 207, 10500, 31921, 1579, 229, 19035, 207, 2981, 31921, 1579, 229, 22488, 207, 2229, 31921, 1579, 229, 21701, 207, 12893, 31921, 1579, 229, 21606, 207, 8025, 31921, 1579, 229, 22059, 207, 5320, 31921, 1579, 229, 13726, 207, 66676, 31921, 1579, 229, 21776, 207, 2166, 31921, 1579, 229, 22284, 207, 105955, 31921, 1579, 229, 22064, 207, 43118, 31921, 1579, 229, 22740, 207, 5868, 31921, 1579, 229, 20750, 207, 4915, 31921, 1579, 229, 22876, 207, 1786, 31921, 1579, 229, 22146, 207, 9654, 31921, 1579, 229, 23333, 207, 5563, 31921, 1579, 229, 22972, 207, 38340, 31921, 1579, 229, 7395, 207, 5822, 31921, 1579, 229, 21842, 207, 3196, 31921, 1579, 229, 21663, 207, 3029, 31921, 1579, 229, 22311, 207, 105854, 31921, 1579, 229, 22252, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 1569,
+          "select": [41, 334, 42, 378, 43, 340, 44, 388, 45, 407, 46, 410, 47, 417, 48, 403, 49, 358, 50, 461, 51, 483, 52, 402, 53, 356, 54, 427, 55, 480, 56, 372, 57, 1392, 58, 408, 59, 325, 60, 336, 61, 502, 62, 518, 63, 422, 64, 1549, 65, 766, 66, 895, 6713, 27196, 5193, 19033, 2843, 13677, 3875, 7437, 28527, 42605, 10593, 23398, 5157, 14321, 51133, 48643, 22348, 13508, 555, 24092, 28248, 2624, 10645, 3757, 10074, 2555, 6878, 117236, 93388, 3657, 7472, 66255, 94026, 1961, 9747, 2176, 11365, 2007, 14267, 66405, 50516, 10505, 22516, 66394, 48121, 29382, 93928, 18510, 119570, 105422, 47475, 7911, 31999, 20169, 37225, 5730, 11336, 13740, 39866, 26906, 25903, 38358, 93200, 50853, 22001, 4040, 13255, 42423, 66311, 49476, 106073, 55672, 12863, 21413, 13719, 19101, 4788, 117607, 13725, 22968, 20778, 30125, 66374, 94440, 15490, 21194, 7203, 34936, 29580, 40607, 36831, 55519, 32938, 63010, 105174, 52611, 105378, 117816, 52361, 22571, 106716, 8542, 12769, 40556, 22828, 4773, 16680, 6888, 5572, 6657, 10570, 27066, 20124, 39420, 31470, 5249, 9455, 11563, 15754, 5342, 64465, 53462, 6876, 10214, 24713, 20892, 41928, 14423, 3924, 3835, 9567, 12470, 67340, 117397, 6193, 11310, 9355, 13037, 3489, 15155, 106188, 51724, 38240, 21603, 106034, 51104, 67672, 51651, 66536, 62562, 67325, 6598, 27273, 15339, 25804, 16203, 12118, 16378, 51142, 4985, 7627, 6593, 39628, 105410, 49626, 35259, 37902, 20045, 22737, 106737, 21800, 58442, 11177, 36722, 20784, 20661, 44201, 45337, 20617, 16046, 10115, 45565, 66459, 9084, 21740, 10110, 17862, 26164, 44742, 33407, 52594, 66575, 47115, 105652, 41652, 97749, 105575, 66645, 5634, 19800, 43343, 51779, 57618, 4650, 16990, 3589, 18599, 7881, 34931, 20835, 44149, 9205, 39560, 5825, 3153, 5967, 67560, 5512, 18797, 4760, 20973, 2379, 12544, 4471, 9652, 18805, 66435, 1573, 16616, 2020, 16325, 3645, 25469, 50349, 10938, 30455, 21798, 59509, 8210, 12238, 64561, 105645, 5811, 16458, 67613, 117133, 9008, 9701, 50360, 54467, 32376, 40244, 6199, 42547, 4027, 66737, 94506, 16400, 18243, 106559, 50873, 45906, 9907, 19739, 37115, 24520, 4404, 16760, 48689, 15306, 44916, 66826, 13553, 24749, 13913, 43143, 14649, 44267, 654, 106087, 99542, 47382, 59906, 66644, 117966, 105533, 14971, 30102, 9287, 35525, 12396, 23219, 50335, 42777, 15404, 31663, 19227, 63106, 27647, 43203, 36803, 51640, 40958, 1131, 105072, 12161, 15970, 24233, 23910, 34963, 32879, 21281, 27741, 24457, 16758, 66543, 15932, 19789, 15182, 42879, 21648, 26542, 106794, 62575, 66310, 105204, 40960, 105559, 66703, 105519, 12998, 34825, 66538, 54720, 16927, 22547, 13305, 17404, 5846, 23324, 33499, 39991, 873, 54691, 61396, 39836, 117434, 105565, 66779, 49856, 15346, 54996, 47347, 36532, 106850, 10472, 48571, 14298, 33211, 66517, 15692, 21910, 11800, 34620, 9345, 11297, 106018, 67596, 50251, 105259, 66709, 66458, 105047, 8119, 42877, 10500, 42699, 2981, 15400, 2229, 9677, 12893, 46248, 8025, 19048, 5320, 61774, 66676, 2166, 3003, 105955, 43118, 5868, 13635, 4915, 24695, 1786, 6673, 9654, 21224, 5563, 10216, 38340, 37820, 5822, 19764, 3196, 3600, 3029, 12321, 105854, 56998]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "option_000",
+              "code": "A",
+              "range": [0, 2]
+            },
+            {
+              "key": "option_001",
+              "code": "B",
+              "range": [2, 4]
+            },
+            {
+              "key": "option_002",
+              "code": "C",
+              "range": [4, 6]
+            },
+            {
+              "key": "option_003",
+              "code": "D",
+              "range": [6, 8]
+            },
+            {
+              "key": "option_004",
+              "code": "E",
+              "range": [8, 10]
+            },
+            {
+              "key": "option_005",
+              "code": "F",
+              "range": [10, 12]
+            },
+            {
+              "key": "option_006",
+              "code": "G",
+              "range": [12, 14]
+            },
+            {
+              "key": "option_007",
+              "code": "H",
+              "range": [14, 16]
+            },
+            {
+              "key": "option_008",
+              "code": "I",
+              "range": [16, 18]
+            },
+            {
+              "key": "option_009",
+              "code": "J",
+              "range": [18, 20]
+            },
+            {
+              "key": "option_010",
+              "code": "K",
+              "range": [20, 22]
+            },
+            {
+              "key": "option_011",
+              "code": "L",
+              "range": [22, 24]
+            },
+            {
+              "key": "option_012",
+              "code": "M",
+              "range": [24, 26]
+            },
+            {
+              "key": "option_013",
+              "code": "N",
+              "range": [26, 28]
+            },
+            {
+              "key": "option_014",
+              "code": "O",
+              "range": [28, 30]
+            },
+            {
+              "key": "option_015",
+              "code": "P",
+              "range": [30, 32]
+            },
+            {
+              "key": "option_016",
+              "code": "Q",
+              "range": [32, 34]
+            },
+            {
+              "key": "option_017",
+              "code": "R",
+              "range": [34, 36]
+            },
+            {
+              "key": "option_018",
+              "code": "S",
+              "range": [36, 38]
+            },
+            {
+              "key": "option_019",
+              "code": "T",
+              "range": [38, 40]
+            },
+            {
+              "key": "option_020",
+              "code": "U",
+              "range": [40, 42]
+            },
+            {
+              "key": "option_021",
+              "code": "V",
+              "range": [42, 44]
+            },
+            {
+              "key": "option_022",
+              "code": "W",
+              "range": [44, 46]
+            },
+            {
+              "key": "option_023",
+              "code": "X",
+              "range": [46, 48]
+            },
+            {
+              "key": "option_024",
+              "code": "Y",
+              "range": [48, 50]
+            },
+            {
+              "key": "option_025",
+              "code": "Z",
+              "range": [50, 52]
+            },
+            {
+              "key": "option_026",
+              "code": "AA",
+              "range": [52, 54]
+            },
+            {
+              "key": "option_027",
+              "code": "AB",
+              "range": [54, 56]
+            },
+            {
+              "key": "option_028",
+              "code": "AC",
+              "range": [56, 58]
+            },
+            {
+              "key": "option_029",
+              "code": "AD",
+              "range": [58, 60]
+            },
+            {
+              "key": "option_030",
+              "code": "AE",
+              "range": [60, 62]
+            },
+            {
+              "key": "option_031",
+              "code": "AF",
+              "range": [62, 64]
+            },
+            {
+              "key": "option_032",
+              "code": "AG",
+              "range": [64, 66]
+            },
+            {
+              "key": "option_033",
+              "code": "AH",
+              "range": [66, 68]
+            },
+            {
+              "key": "option_034",
+              "code": "AI",
+              "range": [68, 70]
+            },
+            {
+              "key": "option_035",
+              "code": "00",
+              "range": [70, 71]
+            },
+            {
+              "key": "option_036",
+              "code": "AK",
+              "range": [71, 73]
+            },
+            {
+              "key": "option_037",
+              "code": "AL",
+              "range": [73, 75]
+            },
+            {
+              "key": "option_038",
+              "code": "AM",
+              "range": [75, 77]
+            },
+            {
+              "key": "option_039",
+              "code": "AN",
+              "range": [77, 79]
+            },
+            {
+              "key": "option_040",
+              "code": "AO",
+              "range": [79, 81]
+            },
+            {
+              "key": "option_041",
+              "code": "AP",
+              "range": [81, 83]
+            },
+            {
+              "key": "option_042",
+              "code": "AQ",
+              "range": [83, 85]
+            },
+            {
+              "key": "option_043",
+              "code": "AR",
+              "range": [85, 87]
+            },
+            {
+              "key": "option_044",
+              "code": "AS",
+              "range": [87, 89]
+            },
+            {
+              "key": "option_045",
+              "code": "AT",
+              "range": [89, 91]
+            },
+            {
+              "key": "option_046",
+              "code": "AU",
+              "range": [91, 93]
+            },
+            {
+              "key": "option_047",
+              "code": "AV",
+              "range": [93, 95]
+            },
+            {
+              "key": "option_048",
+              "code": "AW",
+              "range": [95, 97]
+            },
+            {
+              "key": "option_049",
+              "code": "AX",
+              "range": [97, 99]
+            },
+            {
+              "key": "option_050",
+              "code": "AY",
+              "range": [99, 101]
+            },
+            {
+              "key": "option_051",
+              "code": "AZ",
+              "range": [101, 103]
+            },
+            {
+              "key": "option_052",
+              "code": "BA",
+              "range": [103, 105]
+            },
+            {
+              "key": "option_053",
+              "code": "BB",
+              "range": [105, 107]
+            },
+            {
+              "key": "option_054",
+              "code": "BC",
+              "range": [107, 109]
+            },
+            {
+              "key": "option_055",
+              "code": "BD",
+              "range": [109, 111]
+            },
+            {
+              "key": "option_056",
+              "code": "BE",
+              "range": [111, 113]
+            },
+            {
+              "key": "option_057",
+              "code": "BF",
+              "range": [113, 115]
+            },
+            {
+              "key": "option_058",
+              "code": "BG",
+              "range": [115, 117]
+            },
+            {
+              "key": "option_059",
+              "code": "01",
+              "range": [117, 118]
+            },
+            {
+              "key": "option_060",
+              "code": "BI",
+              "range": [118, 120]
+            },
+            {
+              "key": "option_061",
+              "code": "BJ",
+              "range": [120, 122]
+            },
+            {
+              "key": "option_062",
+              "code": "BK",
+              "range": [122, 124]
+            },
+            {
+              "key": "option_063",
+              "code": "BL",
+              "range": [124, 126]
+            },
+            {
+              "key": "option_064",
+              "code": "BM",
+              "range": [126, 128]
+            },
+            {
+              "key": "option_065",
+              "code": "BN",
+              "range": [128, 130]
+            },
+            {
+              "key": "option_066",
+              "code": "BO",
+              "range": [130, 132]
+            },
+            {
+              "key": "option_067",
+              "code": "BP",
+              "range": [132, 134]
+            },
+            {
+              "key": "option_068",
+              "code": "BQ",
+              "range": [134, 136]
+            },
+            {
+              "key": "option_069",
+              "code": "BR",
+              "range": [136, 138]
+            },
+            {
+              "key": "option_070",
+              "code": "BS",
+              "range": [138, 140]
+            },
+            {
+              "key": "option_071",
+              "code": "BT",
+              "range": [140, 142]
+            },
+            {
+              "key": "option_072",
+              "code": "BU",
+              "range": [142, 144]
+            },
+            {
+              "key": "option_073",
+              "code": "BV",
+              "range": [144, 146]
+            },
+            {
+              "key": "option_074",
+              "code": "BW",
+              "range": [146, 148]
+            },
+            {
+              "key": "option_075",
+              "code": "BX",
+              "range": [148, 150]
+            },
+            {
+              "key": "option_076",
+              "code": "BY",
+              "range": [150, 152]
+            },
+            {
+              "key": "option_077",
+              "code": "BZ",
+              "range": [152, 153]
+            },
+            {
+              "key": "option_078",
+              "code": "CA",
+              "range": [153, 155]
+            },
+            {
+              "key": "option_079",
+              "code": "CB",
+              "range": [155, 157]
+            },
+            {
+              "key": "option_080",
+              "code": "CC",
+              "range": [157, 159]
+            },
+            {
+              "key": "option_081",
+              "code": "CD",
+              "range": [159, 161]
+            },
+            {
+              "key": "option_082",
+              "code": "CE",
+              "range": [161, 163]
+            },
+            {
+              "key": "option_083",
+              "code": "CF",
+              "range": [163, 165]
+            },
+            {
+              "key": "option_084",
+              "code": "CG",
+              "range": [165, 167]
+            },
+            {
+              "key": "option_085",
+              "code": "CH",
+              "range": [167, 169]
+            },
+            {
+              "key": "option_086",
+              "code": "CI",
+              "range": [169, 171]
+            },
+            {
+              "key": "option_087",
+              "code": "02",
+              "range": [171, 172]
+            },
+            {
+              "key": "option_088",
+              "code": "CK",
+              "range": [172, 174]
+            },
+            {
+              "key": "option_089",
+              "code": "CL",
+              "range": [174, 176]
+            },
+            {
+              "key": "option_090",
+              "code": "CM",
+              "range": [176, 178]
+            },
+            {
+              "key": "option_091",
+              "code": "CN",
+              "range": [178, 180]
+            },
+            {
+              "key": "option_092",
+              "code": "CO",
+              "range": [180, 182]
+            },
+            {
+              "key": "option_093",
+              "code": "CP",
+              "range": [182, 184]
+            },
+            {
+              "key": "option_094",
+              "code": "CQ",
+              "range": [184, 186]
+            },
+            {
+              "key": "option_095",
+              "code": "CR",
+              "range": [186, 188]
+            },
+            {
+              "key": "option_096",
+              "code": "CS",
+              "range": [188, 190]
+            },
+            {
+              "key": "option_097",
+              "code": "CT",
+              "range": [190, 192]
+            },
+            {
+              "key": "option_098",
+              "code": "CU",
+              "range": [192, 194]
+            },
+            {
+              "key": "option_099",
+              "code": "CV",
+              "range": [194, 196]
+            },
+            {
+              "key": "option_100",
+              "code": "CW",
+              "range": [196, 198]
+            },
+            {
+              "key": "option_101",
+              "code": "CX",
+              "range": [198, 200]
+            },
+            {
+              "key": "option_102",
+              "code": "CY",
+              "range": [200, 202]
+            },
+            {
+              "key": "option_103",
+              "code": "CZ",
+              "range": [202, 203]
+            },
+            {
+              "key": "option_104",
+              "code": "DA",
+              "range": [203, 205]
+            },
+            {
+              "key": "option_105",
+              "code": "DB",
+              "range": [205, 207]
+            },
+            {
+              "key": "option_106",
+              "code": "DC",
+              "range": [207, 209]
+            },
+            {
+              "key": "option_107",
+              "code": "DD",
+              "range": [209, 211]
+            },
+            {
+              "key": "option_108",
+              "code": "DE",
+              "range": [211, 213]
+            },
+            {
+              "key": "option_109",
+              "code": "DF",
+              "range": [213, 215]
+            },
+            {
+              "key": "option_110",
+              "code": "DG",
+              "range": [215, 217]
+            },
+            {
+              "key": "option_111",
+              "code": "DH",
+              "range": [217, 219]
+            },
+            {
+              "key": "option_112",
+              "code": "DI",
+              "range": [219, 221]
+            },
+            {
+              "key": "option_113",
+              "code": "DJ",
+              "range": [221, 223]
+            },
+            {
+              "key": "option_114",
+              "code": "DK",
+              "range": [223, 224]
+            },
+            {
+              "key": "option_115",
+              "code": "DL",
+              "range": [224, 226]
+            },
+            {
+              "key": "option_116",
+              "code": "DM",
+              "range": [226, 228]
+            },
+            {
+              "key": "option_117",
+              "code": "DN",
+              "range": [228, 230]
+            },
+            {
+              "key": "option_118",
+              "code": "DO",
+              "range": [230, 232]
+            },
+            {
+              "key": "option_119",
+              "code": "DP",
+              "range": [232, 234]
+            },
+            {
+              "key": "option_120",
+              "code": "DQ",
+              "range": [234, 235]
+            },
+            {
+              "key": "option_121",
+              "code": "DR",
+              "range": [235, 237]
+            },
+            {
+              "key": "option_122",
+              "code": "DS",
+              "range": [237, 239]
+            },
+            {
+              "key": "option_123",
+              "code": "DT",
+              "range": [239, 241]
+            },
+            {
+              "key": "option_124",
+              "code": "DU",
+              "range": [241, 243]
+            },
+            {
+              "key": "option_125",
+              "code": "DV",
+              "range": [243, 245]
+            },
+            {
+              "key": "option_126",
+              "code": "DW",
+              "range": [245, 247]
+            },
+            {
+              "key": "option_127",
+              "code": "DX",
+              "range": [247, 249]
+            },
+            {
+              "key": "option_128",
+              "code": "DY",
+              "range": [249, 250]
+            },
+            {
+              "key": "option_129",
+              "code": "03",
+              "range": [250, 251]
+            },
+            {
+              "key": "option_130",
+              "code": "EA",
+              "range": [251, 253]
+            },
+            {
+              "key": "option_131",
+              "code": "EB",
+              "range": [253, 255]
+            },
+            {
+              "key": "option_132",
+              "code": "EC",
+              "range": [255, 257]
+            },
+            {
+              "key": "option_133",
+              "code": "ED",
+              "range": [257, 259]
+            },
+            {
+              "key": "option_134",
+              "code": "EE",
+              "range": [259, 261]
+            },
+            {
+              "key": "option_135",
+              "code": "EF",
+              "range": [261, 263]
+            },
+            {
+              "key": "option_136",
+              "code": "EG",
+              "range": [263, 265]
+            },
+            {
+              "key": "option_137",
+              "code": "04",
+              "range": [265, 266]
+            },
+            {
+              "key": "option_138",
+              "code": "05",
+              "range": [266, 267]
+            },
+            {
+              "key": "option_139",
+              "code": "06",
+              "range": [267, 268]
+            },
+            {
+              "key": "option_140",
+              "code": "EK",
+              "range": [268, 269]
+            },
+            {
+              "key": "option_141",
+              "code": "EL",
+              "range": [269, 271]
+            },
+            {
+              "key": "option_142",
+              "code": "EM",
+              "range": [271, 273]
+            },
+            {
+              "key": "option_143",
+              "code": "EN",
+              "range": [273, 275]
+            },
+            {
+              "key": "option_144",
+              "code": "07",
+              "range": [275, 276]
+            },
+            {
+              "key": "option_145",
+              "code": "EP",
+              "range": [276, 278]
+            },
+            {
+              "key": "option_146",
+              "code": "EQ",
+              "range": [278, 279]
+            },
+            {
+              "key": "option_147",
+              "code": "ER",
+              "range": [279, 281]
+            },
+            {
+              "key": "option_148",
+              "code": "ES",
+              "range": [281, 283]
+            },
+            {
+              "key": "option_149",
+              "code": "ET",
+              "range": [283, 285]
+            },
+            {
+              "key": "option_150",
+              "code": "EU",
+              "range": [285, 287]
+            },
+            {
+              "key": "option_151",
+              "code": "EV",
+              "range": [287, 289]
+            },
+            {
+              "key": "option_152",
+              "code": "EW",
+              "range": [289, 290]
+            },
+            {
+              "key": "option_153",
+              "code": "EX",
+              "range": [290, 292]
+            },
+            {
+              "key": "option_154",
+              "code": "EY",
+              "range": [292, 293]
+            },
+            {
+              "key": "option_155",
+              "code": "EZ",
+              "range": [293, 294]
+            },
+            {
+              "key": "option_156",
+              "code": "FA",
+              "range": [294, 296]
+            },
+            {
+              "key": "option_157",
+              "code": "FB",
+              "range": [296, 298]
+            },
+            {
+              "key": "option_158",
+              "code": "FC",
+              "range": [298, 300]
+            },
+            {
+              "key": "option_159",
+              "code": "FD",
+              "range": [300, 302]
+            },
+            {
+              "key": "option_160",
+              "code": "FE",
+              "range": [302, 304]
+            },
+            {
+              "key": "option_161",
+              "code": "FF",
+              "range": [304, 306]
+            },
+            {
+              "key": "option_162",
+              "code": "08",
+              "range": [306, 307]
+            },
+            {
+              "key": "option_163",
+              "code": "FH",
+              "range": [307, 309]
+            },
+            {
+              "key": "option_164",
+              "code": "FI",
+              "range": [309, 311]
+            },
+            {
+              "key": "option_165",
+              "code": "FJ",
+              "range": [311, 312]
+            },
+            {
+              "key": "option_166",
+              "code": "FK",
+              "range": [312, 314]
+            },
+            {
+              "key": "option_167",
+              "code": "FL",
+              "range": [314, 316]
+            },
+            {
+              "key": "option_168",
+              "code": "FM",
+              "range": [316, 318]
+            },
+            {
+              "key": "option_169",
+              "code": "09",
+              "range": [318, 319]
+            },
+            {
+              "key": "option_170",
+              "code": "FO",
+              "range": [319, 321]
+            },
+            {
+              "key": "option_171",
+              "code": "FP",
+              "range": [321, 323]
+            },
+            {
+              "key": "option_172",
+              "code": "FQ",
+              "range": [323, 324]
+            },
+            {
+              "key": "option_173",
+              "code": "FR",
+              "range": [324, 326]
+            },
+            {
+              "key": "option_174",
+              "code": "FS",
+              "range": [326, 328]
+            },
+            {
+              "key": "option_175",
+              "code": "FT",
+              "range": [328, 330]
+            },
+            {
+              "key": "option_176",
+              "code": "10",
+              "range": [330, 331]
+            },
+            {
+              "key": "option_177",
+              "code": "FV",
+              "range": [331, 332]
+            },
+            {
+              "key": "option_178",
+              "code": "FW",
+              "range": [332, 333]
+            },
+            {
+              "key": "option_179",
+              "code": "FX",
+              "range": [333, 335]
+            },
+            {
+              "key": "option_180",
+              "code": "FY",
+              "range": [335, 337]
+            },
+            {
+              "key": "option_181",
+              "code": "FZ",
+              "range": [337, 338]
+            },
+            {
+              "key": "option_182",
+              "code": "GA",
+              "range": [338, 340]
+            },
+            {
+              "key": "option_183",
+              "code": "GB",
+              "range": [340, 342]
+            },
+            {
+              "key": "option_184",
+              "code": "GC",
+              "range": [342, 344]
+            },
+            {
+              "key": "option_185",
+              "code": "GD",
+              "range": [344, 346]
+            },
+            {
+              "key": "option_186",
+              "code": "GE",
+              "range": [346, 348]
+            },
+            {
+              "key": "option_187",
+              "code": "GF",
+              "range": [348, 350]
+            },
+            {
+              "key": "option_188",
+              "code": "GG",
+              "range": [350, 351]
+            },
+            {
+              "key": "option_189",
+              "code": "GH",
+              "range": [351, 353]
+            },
+            {
+              "key": "option_190",
+              "code": "GI",
+              "range": [353, 355]
+            },
+            {
+              "key": "option_191",
+              "code": "11",
+              "range": [355, 356]
+            },
+            {
+              "key": "option_192",
+              "code": "GK",
+              "range": [356, 357]
+            },
+            {
+              "key": "option_193",
+              "code": "GL",
+              "range": [357, 359]
+            },
+            {
+              "key": "option_194",
+              "code": "GM",
+              "range": [359, 361]
+            },
+            {
+              "key": "option_195",
+              "code": "GN",
+              "range": [361, 363]
+            },
+            {
+              "key": "option_196",
+              "code": "GO",
+              "range": [363, 365]
+            },
+            {
+              "key": "option_197",
+              "code": "GP",
+              "range": [365, 367]
+            },
+            {
+              "key": "option_198",
+              "code": "GQ",
+              "range": [367, 368]
+            },
+            {
+              "key": "option_199",
+              "code": "GR",
+              "range": [368, 370]
+            },
+            {
+              "key": "option_200",
+              "code": "GS",
+              "range": [370, 372]
+            },
+            {
+              "key": "option_201",
+              "code": "GT",
+              "range": [372, 374]
+            },
+            {
+              "key": "option_202",
+              "code": "GU",
+              "range": [374, 376]
+            },
+            {
+              "key": "option_203",
+              "code": "GV",
+              "range": [376, 377]
+            },
+            {
+              "key": "option_204",
+              "code": "GW",
+              "range": [377, 379]
+            },
+            {
+              "key": "option_205",
+              "code": "GX",
+              "range": [379, 380]
+            },
+            {
+              "key": "option_206",
+              "code": "GY",
+              "range": [380, 381]
+            },
+            {
+              "key": "option_207",
+              "code": "GZ",
+              "range": [381, 382]
+            },
+            {
+              "key": "option_208",
+              "code": "HA",
+              "range": [382, 384]
+            },
+            {
+              "key": "option_209",
+              "code": "HB",
+              "range": [384, 386]
+            },
+            {
+              "key": "option_210",
+              "code": "HC",
+              "range": [386, 388]
+            },
+            {
+              "key": "option_211",
+              "code": "HD",
+              "range": [388, 390]
+            },
+            {
+              "key": "option_212",
+              "code": "HE",
+              "range": [390, 392]
+            },
+            {
+              "key": "option_213",
+              "code": "HF",
+              "range": [392, 394]
+            },
+            {
+              "key": "option_214",
+              "code": "12",
+              "range": [394, 395]
+            },
+            {
+              "key": "option_215",
+              "code": "HH",
+              "range": [395, 397]
+            },
+            {
+              "key": "option_216",
+              "code": "HI",
+              "range": [397, 399]
+            },
+            {
+              "key": "option_217",
+              "code": "HJ",
+              "range": [399, 400]
+            },
+            {
+              "key": "option_218",
+              "code": "HK",
+              "range": [400, 402]
+            },
+            {
+              "key": "option_219",
+              "code": "HL",
+              "range": [402, 404]
+            },
+            {
+              "key": "option_220",
+              "code": "HM",
+              "range": [404, 406]
+            },
+            {
+              "key": "option_221",
+              "code": "HN",
+              "range": [406, 407]
+            },
+            {
+              "key": "option_222",
+              "code": "HO",
+              "range": [407, 409]
+            },
+            {
+              "key": "option_223",
+              "code": "HP",
+              "range": [409, 411]
+            },
+            {
+              "key": "option_224",
+              "code": "HQ",
+              "range": [411, 412]
+            },
+            {
+              "key": "option_225",
+              "code": "HR",
+              "range": [412, 414]
+            },
+            {
+              "key": "option_226",
+              "code": "HS",
+              "range": [414, 416]
+            },
+            {
+              "key": "option_227",
+              "code": "HT",
+              "range": [416, 418]
+            },
+            {
+              "key": "option_228",
+              "code": "HU",
+              "range": [418, 419]
+            },
+            {
+              "key": "option_229",
+              "code": "HV",
+              "range": [419, 421]
+            },
+            {
+              "key": "option_230",
+              "code": "HW",
+              "range": [421, 422]
+            },
+            {
+              "key": "option_231",
+              "code": "HX",
+              "range": [422, 423]
+            },
+            {
+              "key": "option_232",
+              "code": "HY",
+              "range": [423, 424]
+            },
+            {
+              "key": "option_233",
+              "code": "HZ",
+              "range": [424, 425]
+            },
+            {
+              "key": "option_234",
+              "code": "IA",
+              "range": [425, 427]
+            },
+            {
+              "key": "option_235",
+              "code": "IB",
+              "range": [427, 429]
+            },
+            {
+              "key": "option_236",
+              "code": "IC",
+              "range": [429, 431]
+            },
+            {
+              "key": "option_237",
+              "code": "ID",
+              "range": [431, 433]
+            },
+            {
+              "key": "option_238",
+              "code": "IE",
+              "range": [433, 435]
+            },
+            {
+              "key": "option_239",
+              "code": "IF",
+              "range": [435, 437]
+            },
+            {
+              "key": "option_240",
+              "code": "IG",
+              "range": [437, 439]
+            },
+            {
+              "key": "option_241",
+              "code": "IH",
+              "range": [439, 440]
+            },
+            {
+              "key": "option_242",
+              "code": "II",
+              "range": [440, 442]
+            },
+            {
+              "key": "option_243",
+              "code": "IJ",
+              "range": [442, 443]
+            },
+            {
+              "key": "option_244",
+              "code": "IK",
+              "range": [443, 444]
+            },
+            {
+              "key": "option_245",
+              "code": "IL",
+              "range": [444, 446]
+            },
+            {
+              "key": "option_246",
+              "code": "IM",
+              "range": [446, 448]
+            },
+            {
+              "key": "option_247",
+              "code": "IN",
+              "range": [448, 450]
+            },
+            {
+              "key": "option_248",
+              "code": "IO",
+              "range": [450, 452]
+            },
+            {
+              "key": "option_249",
+              "code": "IP",
+              "range": [452, 454]
+            },
+            {
+              "key": "option_250",
+              "code": "IQ",
+              "range": [454, 456]
+            },
+            {
+              "key": "option_251",
+              "code": "IR",
+              "range": [456, 458]
+            },
+            {
+              "key": "option_252",
+              "code": "IS",
+              "range": [458, 460]
+            },
+            {
+              "key": "option_253",
+              "code": "IT",
+              "range": [460, 462]
+            },
+            {
+              "key": "option_254",
+              "code": "IU",
+              "range": [462, 464]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x409e2def", "0x3f9a03f5", "0x40a19ab4", "0x3f7aab6a", "0x408fb164", "0x3f2740d6", "0x40880d54", "0x3f3fbb36", "0x40886950", "0x3f2be9ac", "0x40848919", "0x3f149e14", "0x408729ec", "0x3f5e5eda", "0x40848ff9", "0x3f11ce2e", "0x40871eee", "0x3f3f409e", "0x408f465c", "0x3faf353a", "0x408ddaab", "0x3f98d131", "0x407ded6b", "0x3ebcb028", "0x408859cf", "0x3e62f3a0", "0x40828f76", "0x3eeecdd8", "0x405b6e48", "0x3e487f00", "0x4083520c", "0x3f11c148", "0x408844a7", "0x3fb2b3f7", "0x4088f16e", "0x3f80a764", "0x406f6207", "0x3e138ba0", "0x40752106", "0x3e691760", "0x408abbbc", "0x3f979e5b", "0x407f045b", "0x3eedbbd8", "0x408cea0f", "0x3fad841f", "0x406db59e", "0x3ef53d7c", "0x4065c658", "0x3f3799bc", "0x40787000", "0x3f847086", "0x406a920b", "0x3fd27ba3", "0x40560fe1", "0x3c762200", "0x4053b6aa", "0x3f148ac6", "0x4064bfb2", "0x3e898624", "0x405abc86", "0x3f6afb09", "0x40514f0b", "0x3ef77968", "0x405437df", "0x3e9bd810", "0x40564da3", "0x3f4b4860", "0x405edb6c", "0x3f0d0fca", "0x40751db9", "0x406271d3", "0x3fba9585", "0x403bb6bc", "0x3f49fd2c", "0x4076a50e", "0x3f5c7b45", "0x40500f14", "0x3eb83dea", "0x40493d05", "0x3f1d3aad", "0x405c77ea", "0x3ef93432", "0x4069d04b", "0x3fd9a444", "0x40619603", "0x3f21889c", "0x40606096", "0x3f26cd06", "0x40585110", "0x3e9d28e0", "0x405466ee", "0x3f4b7f1e", "0x4070e3fe", "0x3f51baea", "0x40568da2", "0x3fd413fa", "0x403fc0fa", "0x3fa14372", "0x40406b8b", "0x3f90ef34", "0x40509f64", "0x3f8aa207", "0x4077e334", "0x3f81e875", "0x404ec82f", "0x3f4754b0", "0x4068ffa8", "0x3f0591df", "0x4064c6fd", "0x3f81c725", "0x405060d5", "0x3ed166ef", "0x404c095a", "0x3fe2eef9", "0x403c14c4", "0x3f334752", "0x407841e2", "0x405c26be", "0x3f8e25e5", "0x4061a4d1", "0x400ddd20", "0x403c84d9", "0x3fba1c24", "0x405a224a", "0x3f413e0a", "0x40504996", "0x3f6dd1f6", "0x40476bdc", "0x3f2b1e7c", "0x4039305e", "0x3f243254", "0x403c7882", "0x3f64e366", "0x4036641e", "0x3fc79d9c", "0x403c3e48", "0x3f850a1f", "0x4049da44", "0x3faf6e63", "0x404f585a", "0x3fa6aece", "0x4023d9f6", "0x3fa9009d", "0x403f7c9b", "0x3ff77a7c", "0x402985ba", "0x3fecf956", "0x4018d165", "0x3fc56f43", "0x40330f26", "0x3e87dc60", "0x403ce14f", "0x405481d0", "0x3ee5b88f", "0x401798f0", "0x3d924a80", "0x404f9c76", "0x3f99c04a", "0x403c9668", "0x3ef7530a", "0x402b90f7", "0x3ebf519c", "0x4056126a", "0x3f2d3afa", "0x401ee56a", "0x3f6b2e0e", "0x40567602", "0x3f4d7660", "0x40230f7e", "0x3e50d4ac", "0x4041fa68", "0x40308a66", "0x3fdcd83b", "0x40255e0a", "0x3e350b18", "0x402f1b68", "0x3ebe618e", "0x402df708", "0x3f4c4132", "0x403cef20", "0x3f05cb48", "0x4052442e", "0x3f675c41", "0x400241e6", "0x3f6dd08e", "0x403d313c", "0x3f1eda76", "0x40403a30", "0x3f6e6da4", "0x402cbdb7", "0x3e91ed54", "0x40121fe4", "0x3fa68123", "0x4033a703", "0x3f69e1f0", "0x401e7998", "0x3fbb2cff", "0x403be1ca", "0x3fd5a598", "0x3ffeab1a", "0x3da87310", "0x400b20f0", "0x404d67f2", "0x3d328aa0", "0x403ad301", "0x3eb70da0", "0x40548762", "0x3f9c71e8", "0x4062ceb6", "0x3fa39e27", "0x405f2050", "0x3f2d0da1", "0x40591017", "0x3fb083aa", "0x40243063", "0x3fccadfc", "0x4035b908", "0x3f60004e", "0x40258e96", "0xbeb9a304", "0x4035be4e", "0x3ffdb7ce", "0x405c0aa6", "0x4051a90a", "0x3f1a5828", "0x404182bc", "0x3f185884", "0x40498f96", "0x3f876b14", "0x4014a5ad", "0x3e6a2848", "0x40530d61", "0x3f4c7d37", "0x40206ca8", "0x40340f7a", "0x3f196f68", "0x403fa34c", "0x3f9b7d26", "0x40309830", "0x3eec5fc7", "0x401eb58c", "0x3f650638", "0x40345360", "0x3fc5ba20", "0x4020443a", "0x3faa086d", "0x401be1a2", "0x3fcbc55a", "0x40292507", "0x4023daea", "0x402984e6", "0x3f8b19a4", "0x4020568e", "0x3f0440ac", "0x403ac3a4", "0x3ebc9610", "0x40275395", "0x3da3fe60", "0x402651ac", "0x3f443044", "0x402c92b4", "0x3f06bb54", "0x402d1634", "0x3ebb28a2", "0x401ed328", "0x400786e8", "0x40312958", "0x403702ba", "0x404791b6", "0x3ec2845c", "0x404970ae", "0x3e886e30", "0x405a75db", "0x3f29f95f", "0x4013906d", "0x4025d304", "0xbd7c7b50", "0x4014f174", "0x404a92e5", "0x3f61c4ac", "0x403743a4", "0x3ec50542", "0x402ead45", "0x3dd0fcc0", "0x40335419", "0x3f2692d8", "0x4032bf48", "0x3de99478", "0x402cf14f", "0x405b4274", "0x3f0383d6", "0x3fe11ec9", "0x3ffd2870", "0x40535e1a", "0x3f07f8a7", "0x4013552a", "0x3ea41624", "0x40284cdc", "0x3ea2086a", "0x40348751", "0x3f320653", "0x401143c8", "0x3f3c2499", "0x4034f82c", "0x3f037580", "0x3fee9994", "0x400e3019", "0x3f421606", "0x401c2f87", "0x3ed70410", "0x3fdce794", "0x40428872", "0x3fb85df7", "0x403851d8", "0xbe754d20", "0x408007fe", "0x3f143d94", "0x40137422", "0x401af06a", "0x3ec15760", "0x40278136", "0x3f2f60eb", "0x400f947a", "0x4035d96a", "0x3e326e7e", "0x401641e8", "0x3f174c28", "0x40137436", "0x3c639d60", "0x3f97fff4", "0x3fefe6d3", "0x4013f6fc", "0x402aa822", "0x3f5aece8", "0x40224358", "0x3f5e70fc", "0x3fd6156e", "0x402e639e", "0x3f0869df", "0x40391050", "0x3f5b0de0", "0x4045980d", "0x3f4f493c", "0x4014c81a", "0x3f06b85e", "0x40270f4e", "0x3ef9a6f4", "0x402ec545", "0x3f29b23c", "0x4027d930", "0x403677d8", "0x3f3d1f2c", "0x401ebbed", "0x3e9864a0", "0x3fbd7e04", "0x3fc2a779", "0x403273dc", "0x3e2dd864", "0x4031d314", "0x3eff4ff3", "0x401f0bde", "0x3f7213d5", "0x403c331f", "0x3ec473ac", "0x402d6964", "0x3f95115c", "0x400ddd66", "0x402b94dc", "0x3eba6374", "0x4030b4a6", "0x3f153ee2", "0x402619d6", "0x3f2ea71c", "0x3ff219bd", "0x3f2be6d7", "0x3fecaced", "0x4025f8e6", "0x3f4d30f8", "0x3fdff052", "0x3ff74c0c", "0x3faf6263", "0x400a735c", "0x3efd801d", "0x400cef4a", "0x3f81c690", "0x40498302", "0x3f8f4304", "0x4042035e", "0x3f59c2ac", "0x401898f6", "0x3ddf3540", "0x4010dd2e", "0x3ef0e788", "0x3ff40057", "0x4037f952", "0x3f0e9c78", "0x400a5b4b", "0x3ddcd170", "0x3fef9188", "0x4006153c", "0x3ec2453a", "0x400a3eca", "0x3d9948d0", "0x40310f59", "0x3f932d8d", "0x4001c14b", "0x4005ddaa", "0x3f11aa74", "0x40321c69", "0x3f36297a", "0x400f5e15", "0x4029f0d5", "0x3e6aee28", "0x402ef833", "0x3f75bf5d", "0x401a7474", "0x3f39746d", "0x4001493d", "0x40363d62", "0x3fb366d3", "0x3ffef968", "0x3ff65bf1", "0x40072c5c", "0x400351d4", "0x40422ff4", "0x3d0e7440", "0x40083be2", "0xbed95bb8", "0x40081d9c", "0x3e5a0250", "0x4029cd8e", "0xbf3e9610", "0x4025eaf2", "0x3e622d20", "0x402ed4c9", "0xbf167304", "0x4003c7fb", "0xbe646a60", "0x3fe1755d", "0x4028e079", "0x3d30fc20", "0x3ff54c7a", "0x4035a8dd", "0x4017896a", "0xbf2deb87", "0x400dad8a", "0xbed7caa8", "0x402ccb2b", "0xbdc2a4f0", "0x3fc7239f", "0xbf16fd0c", "0x4011888d", "0xbede1dd4", "0x401c3f04", "0x3f87250a", "0x4012df31", "0xbeb86f33", "0x4040aaba", "0x3f0f53bc", "0x403476de", "0xbe89e299", "0x3fdaf219", "0x3e95288c"]
+      ],
+      "scores": [
+        ["0x409e2def", "0x40a19ab4", "0x408fb164", "0x40880d54", "0x40886950", "0x40848919", "0x408729ec", "0x40848ff9", "0x40871eee", "0x408f465c", "0x408ddaab", "0x407ded6b", "0x408859cf", "0x40828f76", "0x405b6e48", "0x4083520c", "0x408844a7", "0x4088f16e", "0x406f6207", "0x40752106", "0x408abbbc", "0x407f045b", "0x408cea0f", "0x406db59e", "0x4065c658", "0x40787000", "0x406a920b", "0x40560fe1", "0x4053b6aa", "0x4064bfb2", "0x405abc86", "0x40514f0b", "0x405437df", "0x40564da3", "0x405edb6c", "0x40751db9", "0x406271d3", "0x403bb6bc", "0x4076a50e", "0x40500f14", "0x40493d05", "0x405c77ea", "0x4069d04b", "0x40619603", "0x40606096", "0x40585110", "0x405466ee", "0x4070e3fe", "0x40568da2", "0x403fc0fa", "0x40406b8b", "0x40509f64", "0x4077e334", "0x404ec82f", "0x4068ffa8", "0x4064c6fd", "0x405060d5", "0x404c095a", "0x403c14c4", "0x407841e2", "0x405c26be", "0x4061a4d1", "0x403c84d9", "0x405a224a", "0x40504996", "0x40476bdc", "0x4039305e", "0x403c7882", "0x4036641e", "0x403c3e48", "0x4049da44", "0x404f585a", "0x4023d9f6", "0x403f7c9b", "0x402985ba", "0x4018d165", "0x40330f26", "0x403ce14f", "0x405481d0", "0x401798f0", "0x404f9c76", "0x403c9668", "0x402b90f7", "0x4056126a", "0x401ee56a", "0x40567602", "0x40230f7e", "0x4041fa68", "0x40308a66", "0x40255e0a", "0x402f1b68", "0x402df708", "0x403cef20", "0x4052442e", "0x400241e6", "0x403d313c", "0x40403a30", "0x402cbdb7", "0x40121fe4", "0x4033a703", "0x401e7998", "0x403be1ca", "0x3ffeab1a", "0x400b20f0", "0x404d67f2", "0x403ad301", "0x40548762", "0x4062ceb6", "0x405f2050", "0x40591017", "0x40243063", "0x4035b908", "0x40258e96", "0x4035be4e", "0x405c0aa6", "0x4051a90a", "0x404182bc", "0x40498f96", "0x4014a5ad", "0x40530d61", "0x40206ca8", "0x40340f7a", "0x403fa34c", "0x40309830", "0x401eb58c", "0x40345360", "0x4020443a", "0x401be1a2", "0x40292507", "0x4023daea", "0x402984e6", "0x4020568e", "0x403ac3a4", "0x40275395", "0x402651ac", "0x402c92b4", "0x402d1634", "0x401ed328", "0x400786e8", "0x40312958", "0x403702ba", "0x404791b6", "0x404970ae", "0x405a75db", "0x4013906d", "0x4025d304", "0x4014f174", "0x404a92e5", "0x403743a4", "0x402ead45", "0x40335419", "0x4032bf48", "0x402cf14f", "0x405b4274", "0x3fe11ec9", "0x3ffd2870", "0x40535e1a", "0x4013552a", "0x40284cdc", "0x40348751", "0x401143c8", "0x4034f82c", "0x3fee9994", "0x400e3019", "0x401c2f87", "0x3fdce794", "0x40428872", "0x403851d8", "0x408007fe", "0x40137422", "0x401af06a", "0x40278136", "0x400f947a", "0x4035d96a", "0x401641e8", "0x40137436", "0x3f97fff4", "0x3fefe6d3", "0x4013f6fc", "0x402aa822", "0x40224358", "0x3fd6156e", "0x402e639e", "0x40391050", "0x4045980d", "0x4014c81a", "0x40270f4e", "0x402ec545", "0x4027d930", "0x403677d8", "0x401ebbed", "0x3fbd7e04", "0x3fc2a779", "0x403273dc", "0x4031d314", "0x401f0bde", "0x403c331f", "0x402d6964", "0x400ddd66", "0x402b94dc", "0x4030b4a6", "0x402619d6", "0x3ff219bd", "0x3fecaced", "0x4025f8e6", "0x3fdff052", "0x3ff74c0c", "0x3faf6263", "0x400a735c", "0x400cef4a", "0x40498302", "0x4042035e", "0x401898f6", "0x4010dd2e", "0x3ff40057", "0x4037f952", "0x400a5b4b", "0x3fef9188", "0x4006153c", "0x400a3eca", "0x40310f59", "0x4001c14b", "0x4005ddaa", "0x40321c69", "0x400f5e15", "0x4029f0d5", "0x402ef833", "0x401a7474", "0x4001493d", "0x40363d62", "0x3ffef968", "0x3ff65bf1", "0x40072c5c", "0x400351d4", "0x40422ff4", "0x40083be2", "0x40081d9c", "0x4029cd8e", "0x4025eaf2", "0x402ed4c9", "0x4003c7fb", "0x3fe1755d", "0x4028e079", "0x3ff54c7a", "0x4035a8dd", "0x4017896a", "0x400dad8a", "0x402ccb2b", "0x3fc7239f", "0x4011888d", "0x401c3f04", "0x4012df31", "0x4040aaba", "0x403476de", "0x3fdaf219"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "choice",
+          "choice": "option_001",
+          "probabilities": {
+            "option_000": 0.016019970419230672,
+            "option_001": 0.01735468985779165,
+            "option_002": 0.011419709454494985,
+            "option_003": 0.009552493056749576,
+            "option_004": 0.0096330317480895298,
+            "option_005": 0.0087989650365056567,
+            "option_006": 0.0093562613861833174,
+            "option_007": 0.0088044882258793717,
+            "option_008": 0.0093468788986281071,
+            "option_009": 0.011308690945718642,
+            "option_010": 0.010939453004557849,
+            "option_011": 0.007724840845109074,
+            "option_012": 0.009619409579714782,
+            "option_013": 0.0084021058951335853,
+            "option_014": 0.005162456394558106,
+            "option_015": 0.0085526665079153647,
+            "option_016": 0.009600852175496952,
+            "option_017": 0.0097534593295815972,
+            "option_018": 0.0065176634647737992,
+            "option_019": 0.0069702294897130406,
+            "option_020": 0.010170115301393425,
+            "option_021": 0.0078238061625892398,
+            "option_022": 0.010701825136672775,
+            "option_023": 0.0063914712865702789,
+            "option_024": 0.0058256045312055811,
+            "option_025": 0.0072449293376846422,
+            "option_026": 0.0061613233281833241,
+            "option_027": 0.0048485931062535815,
+            "option_028": 0.0047173669548945529,
+            "option_029": 0.0057561924687383323,
+            "option_030": 0.0051207460210693735,
+            "option_031": 0.0045866758574060742,
+            "option_032": 0.0047452658018036038,
+            "option_033": 0.0048622779291827038,
+            "option_034": 0.0053733029242376273,
+            "option_035": 0.0069691795835506382,
+            "option_036": 0.0056033023963520797,
+            "option_037": 0.0035639119361575537,
+            "option_038": 0.0070947624233730893,
+            "option_039": 0.0045201864146675154,
+            "option_040": 0.0041739713286735565,
+            "option_041": 0.0052254204325071904,
+            "option_042": 0.006107083733244696,
+            "option_043": 0.0055473731071622023,
+            "option_044": 0.0054695872850652107,
+            "option_045": 0.004978007188671525,
+            "option_046": 0.004755467801296316,
+            "option_047": 0.0066334850703211601,
+            "option_048": 0.0048764994805931966,
+            "option_049": 0.0037361615439378145,
+            "option_050": 0.0037653579859009746,
+            "option_051": 0.0045500547206804775,
+            "option_052": 0.0071985257035431672,
+            "option_053": 0.0044532522454166926,
+            "option_054": 0.0060492104603860272,
+            "option_055": 0.0057581086267054667,
+            "option_056": 0.0045370828334809427,
+            "option_057": 0.0043126792927693407,
+            "option_058": 0.003579238709356948,
+            "option_059": 0.0072296972510656424,
+            "option_060": 0.0052060988796950695,
+            "option_061": 0.0055511224289751474,
+            "option_062": 0.0035975938297531764,
+            "option_063": 0.0050848285109945015,
+            "option_064": 0.0045322720510183687,
+            "option_065": 0.0040862975426917622,
+            "option_066": 0.0034603176298517268,
+            "option_067": 0.0035955683920850692,
+            "option_068": 0.0033490365653638982,
+            "option_069": 0.0035860265729029638,
+            "option_070": 0.0042040326414556446,
+            "option_071": 0.0044826486988363869,
+            "option_072": 0.0026968144385766382,
+            "option_073": 0.0037245218873731899,
+            "option_074": 0.0028815427146463542,
+            "option_075": 0.0023706538973335793,
+            "option_076": 0.0032211729784877839,
+            "option_077": 0.0036128065334635677,
+            "option_078": 0.004761305662410978,
+            "option_079": 0.0023370890202991657,
+            "option_080": 0.0044966039003823495,
+            "option_081": 0.0036004778297269733,
+            "option_082": 0.0029511796350186613,
+            "option_083": 0.0048491541089764542,
+            "option_084": 0.002545121171237957,
+            "option_085": 0.0048712445707293018,
+            "option_086": 0.0026720103359140308,
+            "option_087": 0.0038345264983587132,
+            "option_088": 0.0031277720988038241,
+            "option_089": 0.0027450026861587846,
+            "option_090": 0.0030758228253720782,
+            "option_091": 0.0030350541397669568,
+            "option_092": 0.003615085280423494,
+            "option_093": 0.0046382767675968405,
+            "option_094": 0.0018213684610206013,
+            "option_095": 0.003626008641286445,
+            "option_096": 0.0037568862597881897,
+            "option_097": 0.0029919650135517323,
+            "option_098": 0.002192332912427348,
+            "option_099": 0.0032435752489065606,
+            "option_100": 0.0025326283546803314,
+            "option_101": 0.0035709215407716058,
+            "option_102": 0.0017602143623367886,
+            "option_103": 0.0020202718379010521,
+            "option_104": 0.0043822377153203106,
+            "option_105": 0.0035270640461693391,
+            "option_106": 0.0047625162053542202,
+            "option_107": 0.0056271057357744443,
+            "option_108": 0.0053902230547711455,
+            "option_109": 0.0050215949824044927,
+            "option_110": 0.0027074723109222119,
+            "option_111": 0.0033229894748665213,
+            "option_112": 0.0027510911063252058,
+            "option_113": 0.003323789298815623,
+            "option_114": 0.0051994283070087447,
+            "option_115": 0.0046055528693156374,
+            "option_116": 0.0038136413384628068,
+            "option_117": 0.0041897289517554559,
+            "option_118": 0.0022579065665126589,
+            "option_119": 0.004681062378178202,
+            "option_120": 0.0025909729824715247,
+            "option_121": 0.0032590758724573106,
+            "option_122": 0.003731104342512248,
+            "option_123": 0.0031297410088386526,
+            "option_124": 0.0025395673554452387,
+            "option_125": 0.0032691904249595796,
+            "option_126": 0.0025861967875051698,
+            "option_127": 0.0024570373478479055,
+            "option_128": 0.0028688542385887903,
+            "option_129": 0.002696931747147946,
+            "option_130": 0.0028814338135818443,
+            "option_131": 0.0025883609039479417,
+            "option_132": 0.003524591955131873,
+            "option_133": 0.0028085577363521769,
+            "option_134": 0.0027756939353446013,
+            "option_135": 0.002986097737715401,
+            "option_136": 0.0030040720781290978,
+            "option_137": 0.0025430013674771984,
+            "option_138": 0.0019370246571145566,
+            "option_139": 0.0031505428994123875,
+            "option_140": 0.0033733664967731756,
+            "option_141": 0.0040933624803767528,
+            "option_142": 0.0041838236054553505,
+            "option_143": 0.0051042577511852755,
+            "option_144": 0.0022295174259530726,
+            "option_145": 0.0027596960338870462,
+            "option_146": 0.002265728531878188,
+            "option_147": 0.0042396052823330446,
+            "option_148": 0.0033833749081574917,
+            "option_149": 0.003060401495552533,
+            "option_150": 0.0032313248529168277,
+            "option_151": 0.0032094534383903849,
+            "option_152": 0.0029990181839239208,
+            "option_153": 0.0051521407968276251,
+            "option_154": 0.0014811641045760881,
+            "option_155": 0.0017447520573020574,
+            "option_156": 0.0046983390249594097,
+            "option_157": 0.0022234957506061703,
+            "option_158": 0.0028406912502411479,
+            "option_159": 0.0032769491102648579,
+            "option_160": 0.0021704207640236891,
+            "option_161": 0.0032938702868674273,
+            "option_162": 0.001602509230201435,
+            "option_163": 0.0020937848135089104,
+            "option_164": 0.0024657873923946837,
+            "option_165": 0.0014451343896432335,
+            "option_166": 0.0038594636750461393,
+            "option_167": 0.0034253547048364971,
+            "option_168": 0.0079199508690478114,
+            "option_169": 0.0022266405018008788,
+            "option_170": 0.0024301372468936008,
+            "option_171": 0.0028144123069878913,
+            "option_172": 0.0021281168774256072,
+            "option_173": 0.0033279040260052904,
+            "option_174": 0.0023007867897820457,
+            "option_175": 0.0022266484406999985,
+            "option_176": 0.00096627231802943591,
+            "option_177": 0.0016147415060611811,
+            "option_178": 0.0022399771217741899,
+            "option_179": 0.0029199869741028347,
+            "option_180": 0.0026472314356319722,
+            "option_181": 0.0013886855087584524,
+            "option_182": 0.003050131868766424,
+            "option_183": 0.0034552592753342025,
+            "option_184": 0.0039999818379270104,
+            "option_185": 0.0022614567463236836,
+            "option_186": 0.0027998199203592969,
+            "option_187": 0.0030637553706377215,
+            "option_188": 0.0028257349085231615,
+            "option_189": 0.0033520529462583762,
+            "option_190": 0.0025403067709382434,
+            "option_191": 0.0012028634954772059,
+            "option_192": 0.0012396868240693109,
+            "option_193": 0.00319842534177575,
+            "option_194": 0.0031750424281793855,
+            "option_195": 0.0025495915117363559,
+            "option_196": 0.0035842006074336516,
+            "option_197": 0.0030154985576303977,
+            "option_198": 0.0020858974195202993,
+            "option_199": 0.0029517042114907631,
+            "option_200": 0.0031338088038075501,
+            "option_201": 0.0027686299214204836,
+            "option_202": 0.0016356165169461418,
+            "option_203": 0.0015845952674909793,
+            "option_204": 0.0027644713080525875,
+            "option_205": 0.001470976557969727,
+            "option_206": 0.0016860282487365407,
+            "option_207": 0.0011077075089393816,
+            "option_208": 0.002004331219947658,
+            "option_209": 0.002063353403262668,
+            "option_210": 0.004187324607970693,
+            "option_211": 0.0038360949580854391,
+            "option_212": 0.0023645561967004366,
+            "option_213": 0.0021602816291608931,
+            "option_214": 0.0016538789109086247,
+            "option_215": 0.0034115443059411568,
+            "option_216": 0.0020021310226205121,
+            "option_217": 0.0016116018428788763,
+            "option_218": 0.0019046196116187864,
+            "option_219": 0.0019995282645178,
+            "option_220": 0.003146807343246915,
+            "option_221": 0.0018107097971623014,
+            "option_222": 0.0018997954718745209,
+            "option_223": 0.003185686052703301,
+            "option_224": 0.0021228405571386438,
+            "option_225": 0.0028956621695280858,
+            "option_226": 0.0030708847099069373,
+            "option_227": 0.0024164282033922453,
+            "option_228": 0.0018008161105769883,
+            "option_229": 0.0033431216025962994,
+            "option_230": 0.0017633623335855933,
+            "option_231": 0.0016768159694092175,
+            "option_232": 0.0019290367872827601,
+            "option_233": 0.0018441127005427856,
+            "option_234": 0.0038439085108259766,
+            "option_235": 0.0019530893183055751,
+            "option_236": 0.0019503928008182128,
+            "option_237": 0.0028910040182130391,
+            "option_238": 0.0027627115025231869,
+            "option_239": 0.0030659255543683344,
+            "option_240": 0.0018540832843936383,
+            "option_241": 0.0014840931748994386,
+            "option_242": 0.0028598926332711527,
+            "option_243": 0.0016664611158837845,
+            "option_244": 0.0033205384733136119,
+            "option_245": 0.0023354339033018813,
+            "option_246": 0.0020813464372468559,
+            "option_247": 0.0029938025348852921,
+            "option_248": 0.0012725947794527469,
+            "option_249": 0.0021772432249708676,
+            "option_250": 0.0024675309316357901,
+            "option_251": 0.002211556736878072,
+            "option_252": 0.0037762311582171643,
+            "option_253": 0.0032744900376923355,
+            "option_254": 0.0014286918396344303
+          },
+          "confidence": 0.01735468985779165
+        }
+      },
+      "usage": {
+        "input_tokens": 1570,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

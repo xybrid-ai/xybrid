@@ -1,126 +1,96 @@
 # Trace model
 
-This document describes the contract between the SDK and the dashboard for grouping telemetry events into traces. It is a description of what ships today, not a forward-looking design — the implementation references in code are the source of truth and the line-level pointers in this doc are kept current.
+The supported trace model is portable OpenTelemetry instrumentation, described
+in the [`xybrid-observability` contract](../../crates/xybrid-observability/CONTRACT.md).
+See [SDK observability](telemetry.md) for initialization and content policy.
+Legacy UUID event grouping, `TelemetryPipelineContextGuard`,
+`set_telemetry_pipeline_context` and flush-time context stamping are retired.
 
-For the wire-format details of the telemetry payload (device profile, event fields, opt-outs), see [`telemetry.md`](telemetry.md). This doc focuses on **how related events are grouped into a single trace**.
+## Logical operations and execution stages
 
-## What a trace is
-
-One trace = one end-user-visible inference. Concretely:
-
-| SDK entry point | Trace shape |
-|---|---|
-| `Pipeline::run(envelope)` / `run_async(envelope)` | One trace covers the whole call; multi-stage pipelines (ASR → LLM → TTS) collapse to a single row in the Traces dashboard. |
-| `XybridModel::run_with_context(...)` / `run_streaming_with_context(...)` | One trace per chat turn. Inner LLM events + the SDK's `ModelComplete` event share one `trace_id`. |
-| `executor.execute(...)` / `execute_with_context(...)` / `execute_streaming_with_context(...)` | Internal — these are the executor methods the SDK wrappers above call. Their outer spans do not emit user-facing telemetry events; see [Outer-span suppression](#outer-span-suppression). |
-
-Streaming token events are annotations on the existing trace, not new traces. The `trace_id` for a streaming call is the same as for the batch call shape.
-
-## How a `trace_id` is generated and propagated
-
-A `trace_id` is a `uuid::Uuid` generated at the SDK entry point and installed in a process-global exporter context. Every telemetry event published while that context is set inherits the `trace_id` at flush time.
-
-The lifecycle is enforced by an RAII guard so it is impossible to forget the cleanup:
-
-```rust
-// In xybrid-sdk/src/telemetry.rs
-pub(crate) struct TelemetryPipelineContextGuard;
-
-impl TelemetryPipelineContextGuard {
-    pub(crate) fn install(pipeline_id: Option<Uuid>, trace_id: Option<Uuid>) -> Self {
-        set_telemetry_pipeline_context(pipeline_id, trace_id);
-        Self
-    }
-}
-
-impl Drop for TelemetryPipelineContextGuard {
-    fn drop(&mut self) {
-        set_telemetry_pipeline_context(None, None);
-    }
-}
-```
-
-Callers install the guard once at the top of an entry point and let `Drop` handle every exit — success, `?` error propagation, and panic unwind. The clear runs *after* the `publish_telemetry_event` call earlier in the scope because the guard's `Drop` fires at end of scope, which preserves the "publish before clear" ordering the exporter's lazy-read flush relies on.
+A model call has one logical inference span. Concrete local/cloud attempts and
+internal preprocessing/decoding stages are its descendants. Retries and
+fallbacks describe where the same logical work executed; they do not require a
+new unrelated trace. A pipeline uses an `invoke_workflow` parent for its work.
+Streaming records chunks, timing and terminal usage on the logical inference;
+it does not create an inference span for each token.
 
 ```mermaid
-sequenceDiagram
-    participant Caller as Caller (CLI / app)
-    participant SDK as XybridModel / Pipeline
-    participant Exporter as HttpTelemetryExporter
-    participant Flush as Background flush thread
-
-    Caller->>SDK: run_streaming_with_context(envelope, ctx)
-    Note over SDK: trace_id = Uuid::new_v4()<br/>install guard
-    SDK->>Exporter: set_pipeline_context(None, Some(trace_id))
-    SDK->>SDK: execute_streaming_with_context (inner work)
-    SDK->>Exporter: publish_telemetry_event(ModelComplete)
-    Note over SDK: guard drops at scope exit
-    SDK->>Exporter: set_pipeline_context(None, None)
-    Flush->>Exporter: read pipeline_id / trace_id
-    Flush->>Flush: stamp each buffered event with trace_id
+flowchart TD
+    P[Application or pipeline workflow] --> I[Logical inference]
+    I --> A[Local execution attempt]
+    A --> S[Internal runtime stages]
+    I --> C[Cloud fallback attempt]
 ```
 
-## Trace-ID generation sites
+Not every run has multiple attempts or an enclosing workflow. Without an
+explicit or ambient parent, the logical operation starts its own trace. Backend
+rendering and grouping are concerns of the receiving observability product;
+local event names do not define OTLP span identity.
 
-| Site | What it scopes |
-|---|---|
-| `xybrid-sdk/src/pipeline/mod.rs` — `Pipeline::run` / `run_async` | One `trace_id` for the whole pipeline call; all stage events inherit it |
-| `xybrid-sdk/src/model.rs` — `XybridModel::run_with_context` / `run_streaming_with_context` (+ `_options` variants) | One `trace_id` per chat turn |
+## Context propagation
 
-Direct `executor.execute*()` calls (outside of `Pipeline::run` or `XybridModel`) do not install a trace context. Their outer spans are suppressed (see below), so the only telemetry events that surface are the SDK-level wrappers above.
+Trace IDs and span IDs follow W3C Trace Context. Context is captured when an
+operation starts, rather than looked up from a mutable process-global exporter
+when a queue is flushed. SDK worker hops propagate the parent, and scoped core
+recorders attach internal stages and outbound trace headers to the active run.
+Concurrent runs retain their own parentage.
 
-## Outer-span suppression
-
-The executor's `execute_*_with_context` methods used to wrap their work with an `ExecutionGuard` that emitted `ExecutionStarted` / `ExecutionCompleted` events. For chat-context paths, the SDK's `ModelComplete` event already carries the user-facing attribution (model_id, backend, EP, cached_tokens, duration, TTFT, …), so the outer guard's emits were duplicate noise that surfaced as separate rows on the Traces dashboard.
-
-`ExecutionGuard::new_silent` (in `xybrid-core/src/execution/listener.rs`) suppresses `Started` and `Completed` emits while preserving `Failed` emission via `set_failed`. The chat-context executor methods construct silent guards:
+An application can pass an incoming W3C parent through `RunOptions`:
 
 ```rust
-// In xybrid-core/src/execution/executor.rs
-let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute_streaming_with_context");
-let result = self.execute_streaming_with_context_impl(...);
-if let Err(e) = &result {
-    mark_execution_terminal(&guard, e); // still emits Failed
-}
+use xybrid_sdk::{RunOptions, observability::ObservationOptions};
+
+let observation = ObservationOptions::from_traceparent(
+    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    None, // optional tracestate
+)?;
+let options = RunOptions {
+    observation: Some(observation.with_conversation_id("application-conversation")),
+    ..RunOptions::default()
+};
+// Pass `options` through the normal model run API.
+# Ok::<(), xybrid_sdk::SdkError>(())
 ```
 
-Same shape for `execute_with_context`. The other `execute*` methods (`execute`, `execute_streaming`) still use the noisy `new()` because they have no SDK-level `ModelComplete` wrapper on top — that's the rule: a guard is silent when, and only when, an outer SDK event carries the same attribution.
+An explicit `ObservationOptions::parent` wins over the ambient parent.
+`TraceMode::Suppress` suppresses the run's trace and its SDK stage descendants;
+metrics can still be recorded. Resource and trace sampling are independent.
+Conversation IDs, correlation IDs and prompt references are caller-supplied
+metadata; they are not trace IDs and should not contain secrets.
 
-## Per-event override
+Direct `xybrid_core` execution does not automatically acquire an SDK observer.
+A caller that bypasses the SDK must supply observation/scoped recorder plumbing;
+the CLI's direct-core adapter does this. Do not restore a global legacy event
+exporter to correlate those calls.
 
-Most events inherit the `trace_id` from the exporter's pipeline context at flush time. Callers that need to stamp a specific `trace_id` on a single event can set the `__xybrid_trace_id` key in the event's `data` JSON metadata; the converter picks it up in preference to the global context:
+## References, feedback and evaluations
 
-```rust
-const CONTEXT_TRACE_ID_KEY: &str = "__xybrid_trace_id";
-// In convert_telemetry_event: if data has this key, use it; otherwise fall back to global
-```
+Successful `InferenceResult` values expose `observation_ref()`, containing the
+trace/span reference needed by `record_feedback` and `record_evaluation`. It can
+be absent when tracing is disabled or suppressed. Those reporting APIs require
+a configured logs destination; the Xybrid preset configures only traces.
 
-This path is used internally for events produced by code that runs outside the install/drop scope (e.g. delayed background-thread events). External callers should not need it.
+Pipeline results expose the workflow reference; each stage result exposes its
+logical inference reference. SDK streamed-TTS results wrap the core summary and
+its inference reference. Models expose an immutable `load_observation_ref()`;
+reloads and lazy materialization create separate load observations under the
+operation that triggered them. ASR partials carry the actual decoder execution
+reference, while terminal transcription results carry the session workflow
+reference. Returning a cached partial does not count another inference.
 
-## Dashboard collapse contract
+References use `{trace_id, span_id}`. A valid unsampled operation retains its
+reference; explicit trace suppression has none. References identify observations
+and do not prove that export succeeded. See the
+[binding and execution matrix](observability-coverage.md) for surface details.
 
-On the platform side, [`traces_list.pipe`](https://github.com/xybrid-ai/xybrid-platform/blob/main/tinybird/pipes/traces_list.pipe) groups events by a `trace_key` derived from `trace_id`. Two events that share a `trace_id` collapse to one row; the row's stage label is the one with the richest attribution (typically the inner `ModelComplete` / per-stage event, not the outer pipeline event).
+## Local capture is independent
 
-If an event arrives without a `trace_id`, the pipe falls back to per-event grouping. This is the backwards-compat path for old clients that pre-date the trace model — they still produce traces, just one row per event.
+`TelemetryEvent` subscriptions, execution listeners and core local trace capture
+are in-process diagnostics. They can carry their own producer context and raw
+stage data. They do not feed the OTLP exporter, and publishing a local event does
+not assign it an OpenTelemetry trace. OTLP content policy does not sanitize local
+event subscribers. See [SDK observability](telemetry.md#local-events-are-a-separate-surface).
 
-## Schema
-
-No telemetry schema change was needed for the trace model. `PlatformEvent.trace_id: Option<Uuid>` already existed in the wire format; the model is the contract about *who sets it* and *when*.
-
-## Known limitations and follow-ups
-
-| | |
-|---|---|
-| Single-stage `Pipeline::run` still emits a `PipelineComplete` event that surfaces as a separate `pipeline`-type Traces row with no per-inference attribution | Filed as `task-management/issues/dashboard-trace-model/05-single-stage-pipeline-row-noise.md`; fix shape is the sibling of the chat-context change one layer up — suppress for single-stage and share `trace_id` for multi-stage |
-| `trace_id` does not propagate across cloud-fallback boundaries | The cloud client opens its own trace context; cross-boundary correlation is out of scope today |
-| Direct `executor.execute*()` callers outside the SDK wrappers (CLI scripts, tests) get no `trace_id` and rely on the pipe's per-event fallback | Add a similar RAII guard at any new entry point that needs trace collapsing |
-
-## Code references
-
-| Concern | File |
-|---|---|
-| `TelemetryPipelineContextGuard`, `set_telemetry_pipeline_context`, `CONTEXT_TRACE_ID_KEY`, flush-time stamping | `crates/xybrid-sdk/src/telemetry.rs` |
-| Pipeline trace_id install | `crates/xybrid-sdk/src/pipeline/mod.rs` (`Pipeline::run`, `run_async`) |
-| Chat-context trace_id install | `crates/xybrid-sdk/src/model.rs` (`run_with_context`, `run_streaming_with_context`) |
-| Silent outer guard for chat-context executor methods | `crates/xybrid-core/src/execution/executor.rs` + `crates/xybrid-core/src/execution/listener.rs` (`ExecutionGuard::new_silent`) |
-| Per-event grouping fallback | `tinybird/pipes/traces_list.pipe` in `xybrid-platform` |
+Implementation: [`observability.rs`](../../crates/xybrid-sdk/src/observability.rs)
+and [core scoped tracing](../../crates/xybrid-core/src/tracing.rs).

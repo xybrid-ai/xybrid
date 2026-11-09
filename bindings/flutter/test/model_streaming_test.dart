@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:xybrid_flutter/src/rust/api/context.dart';
 import 'package:xybrid_flutter/src/rust/api/envelope.dart';
 import 'package:xybrid_flutter/src/rust/api/model.dart';
 import 'package:xybrid_flutter/src/rust/api/result.dart';
@@ -14,6 +15,8 @@ const _unsupported = 'Unsupported model capability: a multi-part message '
 class _StreamApi implements XybridRustLibApi {
   /// The native events every streaming run replays.
   List<FfiStreamEvent> events = const [];
+  Object? streamError;
+  FfiRunOptions? options;
 
   @override
   FfiModelLoader crateApiModelFfiModelLoaderFromRegistry({
@@ -28,6 +31,10 @@ class _StreamApi implements XybridRustLibApi {
     double? speed,
   }) =>
       _Envelope();
+
+  @override
+  FfiConversationContext crateApiContextFfiConversationContextCreate() =>
+      _Context();
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -50,6 +57,45 @@ class _Model implements FfiModel {
 
   final _StreamApi _api;
 
+  Stream<FfiStreamEvent> _stream() async* {
+    yield* Stream.fromIterable(_api.events);
+    final error = _api.streamError;
+    if (error != null) throw error;
+  }
+
+  @override
+  Future<FfiResult> run(
+      {required FfiEnvelope envelope,
+      FfiGenerationConfig? config,
+      FfiRunOptions? options}) async {
+    _api.options = options;
+    return FfiResult(
+        success: true,
+        text: 'Hello',
+        latencyMs: 10,
+        executionTarget: FfiExecutionTarget.local,
+        metrics: const FfiInferenceMetrics(totalMs: 10, stageLatenciesMs: []),
+        toolCalls: const []);
+  }
+
+  @override
+  Future<FfiResult> runWithContext(
+          {required FfiEnvelope envelope,
+          required FfiConversationContext context,
+          FfiGenerationConfig? config,
+          FfiRunOptions? options}) =>
+      run(envelope: envelope, config: config, options: options);
+
+  @override
+  Stream<FfiTtsStreamEvent> runTtsStream(
+      {required FfiEnvelope envelope,
+      FfiGenerationConfig? config,
+      FfiCancellationToken? cancellationToken,
+      FfiRunOptions? options}) {
+    _api.options = options;
+    return const Stream.empty();
+  }
+
   @override
   Stream<FfiStreamEvent> runStream({
     required FfiEnvelope envelope,
@@ -57,8 +103,25 @@ class _Model implements FfiModel {
     FfiCancellationToken? cancellationToken,
     required bool preempt,
     String? frameSessionId,
-  }) =>
-      Stream.fromIterable(_api.events);
+    FfiRunOptions? options,
+  }) {
+    _api.options = options;
+    return _stream();
+  }
+
+  @override
+  Stream<FfiStreamEvent> runStreamWithContext({
+    required FfiEnvelope envelope,
+    required FfiConversationContext context,
+    FfiGenerationConfig? config,
+    FfiCancellationToken? cancellationToken,
+    required bool preempt,
+    String? frameSessionId,
+    FfiRunOptions? options,
+  }) {
+    _api.options = options;
+    return _stream();
+  }
 
   @override
   Stream<FfiStreamEvent> runStreamWithFallback({
@@ -66,14 +129,21 @@ class _Model implements FfiModel {
     required FfiRunOptions options,
     FfiGenerationConfig? config,
     FfiCancellationToken? cancellationToken,
-  }) =>
-      Stream.fromIterable(_api.events);
+  }) {
+    _api.options = options;
+    return _stream();
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 class _Envelope implements FfiEnvelope {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _Context implements FfiConversationContext {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -88,14 +158,18 @@ FfiStreamEvent _finalToken(String text) => FfiStreamEvent.token(
       ),
     );
 
-FfiStreamEvent _complete(String text) => FfiStreamEvent.complete(
+FfiStreamEvent _complete(String text,
+        {ObservationRef? observation,
+        List<FfiToolCall> toolCalls = const []}) =>
+    FfiStreamEvent.complete(
       FfiResult(
         success: true,
+        observation: observation,
         text: text,
         latencyMs: 10,
         executionTarget: FfiExecutionTarget.local,
         metrics: const FfiInferenceMetrics(totalMs: 10, stageLatenciesMs: []),
-        toolCalls: const [],
+        toolCalls: toolCalls,
       ),
     );
 
@@ -108,6 +182,11 @@ void main() {
     model = await XybridModelLoader.fromRegistry('test-model').load();
   });
   tearDownAll(XybridRustLib.dispose);
+
+  setUp(() {
+    api.events = const [];
+    api.streamError = null;
+  });
 
   final runs = <String, Stream<StreamToken> Function()>{
     'runStreaming': () => model.runStreaming(XybridEnvelope.text('Hi')),
@@ -143,6 +222,164 @@ void main() {
         expect(tokens.single.finishReason, 'stop');
         expect(tokens.single.cumulativeText, 'Hello');
       });
+
+      test('traced completion retains its reference after a native final token',
+          () async {
+        const reference = ObservationRef(
+            traceId: '0af7651916cd43dd8448eb211c80319c',
+            spanId: 'b7ad6b7169203331');
+        const call =
+            FfiToolCall(id: 'call-1', name: 'weather', argumentsJson: '{}');
+        api.events = [
+          const FfiStreamEvent.token(FfiStreamToken(
+              token: '',
+              index: 0,
+              cumulativeText: '',
+              finishReason: 'tool_calls',
+              toolCalls: [call])),
+          _complete('', observation: reference, toolCalls: [call]),
+        ];
+        final tokens = await run().toList();
+        expect(tokens, hasLength(1));
+        expect(tokens.single.finishReason, 'tool_calls');
+        expect(tokens.last.observation, reference);
+        expect(tokens.last.metrics, isNotNull);
+        expect(tokens.expand((token) => token.toolCalls), hasLength(1));
+      });
+
+      test(
+          'traced length completion enriches exactly one native terminal token',
+          () async {
+        const reference = ObservationRef(
+            traceId: '0af7651916cd43dd8448eb211c80319c',
+            spanId: 'b7ad6b7169203331');
+        api.events = [
+          const FfiStreamEvent.token(FfiStreamToken(
+              token: 'Hello',
+              index: 4,
+              cumulativeText: 'Hello',
+              toolCalls: [])),
+          const FfiStreamEvent.token(FfiStreamToken(
+              token: '!',
+              index: 5,
+              cumulativeText: 'Hello!',
+              finishReason: 'length',
+              toolCalls: [])),
+          _complete('Hello!', observation: reference),
+        ];
+        final tokens = await run().toList();
+        expect(tokens, hasLength(2));
+        expect(tokens.where((token) => token.isFinal), hasLength(1));
+        final terminal = tokens.last;
+        expect(terminal.finishReason, 'length');
+        expect(terminal.index, 5);
+        expect(terminal.token, '!');
+        expect(terminal.cumulativeText, 'Hello!');
+        expect(terminal.observation, reference);
+        expect(terminal.metrics!.totalMs, 10);
+      });
+
+      test('terminal token survives a close without a completion event',
+          () async {
+        api.events = [_finalToken('Hello')];
+        expect((await run().toList()).single.finishReason, 'stop');
+      });
+
+      test('bridge error after a buffered terminal token is surfaced',
+          () async {
+        api.events = [_finalToken('Hello')];
+        api.streamError = _unsupported;
+        final tokens = await run().toList();
+        expect(tokens.map((token) => token.finishReason),
+            ['stop', 'error: $_unsupported']);
+      });
+
+      test('bridge stream errors become error tokens', () async {
+        api.streamError = _unsupported;
+
+        final tokens = await run().toList();
+
+        expect(tokens.single.isFinal, isTrue);
+        expect(tokens.single.isError, isTrue);
+        expect(tokens.single.errorMessage, _unsupported);
+      });
     });
   }
+
+  test(
+      'chunked TTS forwards observation options without changing its audio shape',
+      () async {
+    const options = RunOptions(
+        observation:
+            ObservationOptions(conversationId: 'tts-1', suppressTrace: true));
+    final chunks = await model
+        .runTtsStreaming(XybridEnvelope.text('Hi'), options: options)
+        .toList();
+    expect(chunks, isEmpty);
+    expect(api.options!.conversationId, 'tts-1');
+    expect(api.options!.suppressTrace, isTrue);
+  });
+
+  test('batch and context batch forward observation options', () async {
+    const options = RunOptions(
+        observation: ObservationOptions(
+            conversationId: 'conversation-1', suppressTrace: true));
+    await model.run(XybridEnvelope.text('Hi'), options: options);
+    expect(api.options!.conversationId, 'conversation-1');
+    expect(api.options!.suppressTrace, isTrue);
+    await model.runWithContext(XybridEnvelope.text('Hi'), ConversationContext(),
+        options: options);
+    expect(api.options!.conversationId, 'conversation-1');
+  });
+
+  test('normal and context streaming forward observation options', () async {
+    const options = RunOptions(
+        observation: ObservationOptions(
+            conversationId: 'conversation-1', suppressTrace: true));
+    api.events = [_complete('Hello')];
+    await model
+        .runStreaming(XybridEnvelope.text('Hi'), options: options)
+        .toList();
+    expect(api.options!.conversationId, 'conversation-1');
+    expect(api.options!.suppressTrace, isTrue);
+    await model
+        .runStreamingWithContext(
+            XybridEnvelope.text('Hi'), ConversationContext(),
+            options: options)
+        .toList();
+    expect(api.options!.conversationId, 'conversation-1');
+  });
+
+  group('runStreamingWithContext', () {
+    Stream<StreamToken> run() => model.runStreamingWithContext(
+          XybridEnvelope.text('Hi'),
+          ConversationContext(),
+        );
+
+    test('an error after the final token still ends the stream', () async {
+      api.events = [
+        _finalToken('Hello'),
+        const FfiStreamEvent.error(_unsupported),
+      ];
+
+      final tokens = await run().toList();
+
+      expect(
+        tokens.map((token) => token.finishReason),
+        ['stop', 'error: $_unsupported'],
+      );
+      expect(tokens.last.isError, isTrue);
+      expect(tokens.last.errorMessage, _unsupported);
+    });
+
+    test('bridge stream errors become error tokens', () async {
+      api.streamError = _unsupported;
+
+      final tokens = await run().toList();
+
+      expect(tokens.single.isFinal, isTrue);
+      expect(tokens.single.isError, isTrue);
+      expect(tokens.single.errorMessage, _unsupported);
+    });
+  });
 }

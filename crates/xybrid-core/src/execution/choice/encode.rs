@@ -94,17 +94,7 @@ pub fn encode_request(
     candidates: &[Candidate<'_>],
     rows: Option<usize>,
 ) -> ChoiceResult<EncodedRequest> {
-    if context.is_empty() {
-        return Err(ChoiceError::EmptyContext);
-    }
-    check_length(context, &spec.context, ChoiceField::Context)?;
-    for (index, candidate) in candidates.iter().enumerate() {
-        check_length(
-            &candidate.choice.text,
-            &spec.choice,
-            ChoiceField::Choice(index),
-        )?;
-    }
+    check_fields(spec, context, candidates)?;
 
     let rows = rows.unwrap_or(candidates.len());
     if candidates.len() > rows {
@@ -153,6 +143,28 @@ pub fn encode_request(
         context_truncated,
         choice_truncated,
     })
+}
+
+/// The field rules of [`encode_request`]: a non-empty context, and every
+/// `Reject` field within its `max_len`. Checking them needs no allocation, so
+/// the entry guards run them before any model is opened.
+pub(crate) fn check_fields(
+    spec: &OnnxByteOptionScorerSpec,
+    context: &str,
+    candidates: &[Candidate<'_>],
+) -> ChoiceResult<()> {
+    if context.is_empty() {
+        return Err(ChoiceError::EmptyContext);
+    }
+    check_length(context, &spec.context, ChoiceField::Context)?;
+    for (index, candidate) in candidates.iter().enumerate() {
+        check_length(
+            &candidate.choice.text,
+            &spec.choice,
+            ChoiceField::Choice(index),
+        )?;
+    }
+    Ok(())
 }
 
 fn check_length(text: &str, field: &ByteFieldSpec, which: ChoiceField) -> ChoiceResult<()> {

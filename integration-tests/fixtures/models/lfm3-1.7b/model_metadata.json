@@ -1,0 +1,38 @@
+{
+  "model_id": "lfm3-1.7b",
+  "version": "1.0",
+  "description": "Liquid LFM3 1.7B, quantization-aware distilled Q4_0 GGUF.",
+  "execution_template": {
+    "type": "Gguf",
+    "model_file": "LFM3-1.7B-QAD-Q4_0.gguf",
+    "context_length": 8192,
+    "generation_params": {
+      "max_tokens": 1024,
+      "temperature": 0.1,
+      "top_k": 50,
+      "repetition_penalty": 1.1
+    }
+  },
+  "preprocessing": [],
+  "postprocessing": [],
+  "files": [
+    "LFM3-1.7B-QAD-Q4_0.gguf"
+  ],
+  "metadata": {
+    "task": "text-generation",
+    "architecture": "lfm3",
+    "backend": "llamacpp",
+    "family": "lfm3",
+    "instruction_tuned": true,
+    "license_name": "LFM Open License v1.0",
+    "parameters": 1730000000,
+    "quantization": "q4_0",
+    "context_length": 262144,
+    "tool_calling": true,
+    "source_repo": "LiquidAI/LFM3-1.7B-GGUF",
+    "source_revision": "b3f2ae5d73cd3c91bf40e8ba752c648aa05dffdf",
+    "sha256": "43a7d09a0e9cba91b63eb7052488b9564569bddfd65754d2e426465e572a7452",
+    "ram_minimum_mb": 1536,
+    "ram_recommended_mb": 2048
+  }
+}

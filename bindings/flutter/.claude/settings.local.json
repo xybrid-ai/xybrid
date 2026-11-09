@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(flutter_rust_bridge_codegen generate:*)",
+      "Bash(flutter pub get:*)",
+      "Bash(dart analyze:*)",
+      "Bash(flutter pub run build_runner build:*)",
+      "Bash(flutter analyze:*)",
+      "WebFetch(domain:cjycode.com)",
+      "mcp__ide__getDiagnostics"
+    ]
+  }
+}

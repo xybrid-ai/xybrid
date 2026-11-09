@@ -43,8 +43,16 @@ The tool-call syntax is auto-detected from the model's own chat template:
 | Protocol family | Syntax | Example models |
 |-----------------|--------|----------------|
 | LFM2-family | `<\|tool_call_start\|>[name(k=v)]<\|tool_call_end\|>` (pythonic) | LFM2.5 230M / 350M |
+| LFM3 | `<tool_call><function=name><parameter=k>v</parameter></function></tool_call>` (XML) | LFM3 1.7B, LFM3-VL 2B |
 | gemma-4-family | `<\|tool_call>call:name{...}<tool_call\|>` | gemma-4 E2B |
 | FunctionGemma | `<start_function_call>call:name{...}<end_function_call>` | FunctionGemma 270M IT |
+
+LFM3 writes argument values as raw text. Xybrid types each one against the
+tool's JSON Schema, the way llama.cpp does: a `string` parameter keeps the
+text, and a parameter that takes numbers, booleans, arrays or objects gets the
+JSON value the text spells. Qwen3.5 writes the same XML notation, so its calls
+parse too, but a `tool_results` continuation for a Qwen3.5 template is
+rejected: xybrid implements LFM3's tool-result framing, not Qwen3.5's.
 
 A bundle advertises support with an advisory `tool_calling: true` flag in
 `model_metadata.json` (`ModelMetadata::supports_tool_calling()` /

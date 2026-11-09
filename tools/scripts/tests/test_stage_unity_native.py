@@ -57,6 +57,62 @@ class StageUnityNativeTests(unittest.TestCase):
             self.assertIn("Exclude OSXUniversal: 0", metadata)
             self.assertTrue((root / "Plugins" / "macOS.meta").is_file())
 
+    def test_ios_archive_is_staged_with_accelerate_dependency(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            native = root / "bazel-bin" / "libxybrid_bolt.a"
+            native.parent.mkdir()
+            native.write_bytes(b"ios-native")
+
+            destination = stage_native(
+                native,
+                "aarch64-apple-ios",
+                plugins_root=root / "Plugins",
+            )
+
+            self.assertEqual(root / "Plugins" / "iOS" / native.name, destination)
+            self.assertEqual(b"ios-native", destination.read_bytes())
+            metadata = destination.with_name(f"{native.name}.meta").read_text()
+            self.assertIn("Editor:\n      enabled: 0", metadata)
+            self.assertIn(
+                "iOS:\n      enabled: 1\n      settings:\n"
+                "        AddToEmbeddedBinaries: false\n"
+                "        CPU: ARM64\n"
+                "        CompileFlags:\n"
+                "        FrameworkDependencies: Accelerate\n",
+                metadata,
+            )
+            self.assertTrue((root / "Plugins" / "iOS.meta").is_file())
+
+    def test_existing_ios_metadata_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            native = root / "libxybrid_bolt.a"
+            native.write_bytes(b"new-ios-native")
+            output = root / "Plugins" / "iOS"
+            output.mkdir(parents=True)
+            metadata = output / f"{native.name}.meta"
+            existing = (
+                b"fileFormatVersion: 2\n"
+                b"guid: 0123456789abcdef0123456789abcdef\n"
+                b"PluginImporter:\n"
+                b"  platformData:\n"
+                b"    iOS:\n"
+                b"      enabled: 1\n"
+                b"      settings:\n"
+                b"        FrameworkDependencies: Metal;CustomFramework\n"
+            )
+            metadata.write_bytes(existing)
+
+            stage_native(
+                native,
+                "aarch64-apple-ios",
+                plugins_root=root / "Plugins",
+            )
+
+            self.assertEqual(existing, metadata.read_bytes())
+            self.assertEqual(b"new-ios-native", (output / native.name).read_bytes())
+
     def test_android_native_and_dependencies_use_the_target_abi(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -78,18 +134,68 @@ class StageUnityNativeTests(unittest.TestCase):
             output = root / "Plugins" / "Android" / "x86_64"
             self.assertEqual(output / native.name, destination)
             self.assertEqual(b"ort", (output / "libonnxruntime.so").read_bytes())
-            self.assertEqual(b"cxx", (output / "libc++_shared.so").read_bytes())
-            for library in (
-                "libxybrid_bolt.so",
-                "libonnxruntime.so",
-                "libc++_shared.so",
-            ):
+            # The Unity library links libc++ statically; a shared copy would
+            # collide with the one Unity's GameActivity packages.
+            self.assertFalse((output / "libc++_shared.so").exists())
+            self.assertFalse((output / "libc++_shared.so.meta").exists())
+            for library in ("libxybrid_bolt.so", "libonnxruntime.so"):
                 metadata = (output / f"{library}.meta").read_text()
                 self.assertIn("Android:\n      enabled: 1", metadata)
                 self.assertIn("CPU: x86_64", metadata)
             self.assertTrue((root / "Plugins" / "Android.meta").is_file())
             self.assertTrue(
                 (root / "Plugins" / "Android" / "x86_64.meta").is_file()
+            )
+
+    def test_stale_android_cxx_runtime_is_removed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            native = root / "bazel-bin" / "libxybrid_bolt.so"
+            native.parent.mkdir()
+            native.write_bytes(b"android-native")
+            dependencies = root / "ort-android" / "arm64-v8a"
+            dependencies.mkdir(parents=True)
+            (dependencies / "libonnxruntime.so").write_bytes(b"ort")
+            output = root / "Plugins" / "Android" / "arm64-v8a"
+            output.mkdir(parents=True)
+            (output / "libc++_shared.so").write_bytes(b"stale-cxx")
+            (output / "libc++_shared.so.meta").write_text("stale-guid")
+
+            stage_native(
+                native,
+                "aarch64-linux-android",
+                plugins_root=root / "Plugins",
+                android_dependencies=root / "ort-android",
+            )
+
+            self.assertFalse((output / "libc++_shared.so").exists())
+            self.assertFalse((output / "libc++_shared.so.meta").exists())
+            self.assertEqual(b"ort", (output / "libonnxruntime.so").read_bytes())
+            self.assertTrue((output / "libonnxruntime.so.meta").is_file())
+
+    def test_stale_android_cxx_runtime_is_removed_without_dependencies(self):
+        # armeabi-v7a has no vendored ORT, so staging returns early there.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            native = root / "bazel-bin" / "libxybrid_bolt.so"
+            native.parent.mkdir()
+            native.write_bytes(b"android-native")
+            output = root / "Plugins" / "Android" / "armeabi-v7a"
+            output.mkdir(parents=True)
+            (output / "libc++_shared.so").write_bytes(b"stale-cxx")
+            (output / "libc++_shared.so.meta").write_text("stale-guid")
+
+            stage_native(
+                native,
+                "armv7-linux-androideabi",
+                plugins_root=root / "Plugins",
+                android_dependencies=root / "ort-android",
+            )
+
+            self.assertFalse((output / "libc++_shared.so").exists())
+            self.assertFalse((output / "libc++_shared.so.meta").exists())
+            self.assertEqual(
+                b"android-native", (output / "libxybrid_bolt.so").read_bytes()
             )
 
     def test_existing_metadata_is_not_overwritten(self):

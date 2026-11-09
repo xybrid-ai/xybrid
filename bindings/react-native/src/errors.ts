@@ -28,6 +28,7 @@ export const XybridErrorCodes = [
   'xybrid_unsupported_backend_capability',
   'xybrid_invalid_image',
   'xybrid_cancelled',
+  'xybrid_telemetry_delivery',
   // React Native layer:
   /** The handle was never issued, was released, or names another kind of object. */
   'xybrid_handle',

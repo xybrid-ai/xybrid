@@ -1,4 +1,5 @@
-name: Build Apple
+# Purpose: Build and verify the Apple XCFramework, then unit-test the Swift wrapper and run the observability runtime scenario on an iOS Simulator.
+name: "SDK: Apple"
 
 on:
   pull_request:
@@ -9,6 +10,7 @@ on:
       - 'crates/xybrid-ffi-facade/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
+      - 'crates/xybrid-observability/**'
       - 'crates/xybrid-llama/**'
       - 'crates/llama-cpp-sys/**'
       # The Bazel graph that assembles the xcframework (G4): sim triple + ort-sys
@@ -21,6 +23,8 @@ on:
       - 'vendor/ort-ios/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
+      # The shared observability scenario the runtime job runs and checks.
+      - 'tools/scripts/observability_capture/**'
       - '.github/workflows/build-apple.yml'
       # Docs-only changes under the paths above (READMEs, examples) never
       # affect the native build — exclude markdown so they don't trigger it.
@@ -37,6 +41,7 @@ on:
       - 'crates/xybrid-ffi-facade/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
+      - 'crates/xybrid-observability/**'
       - 'crates/xybrid-llama/**'
       - 'crates/llama-cpp-sys/**'
       - 'MODULE.bazel'
@@ -46,12 +51,13 @@ on:
       - 'vendor/ort-ios/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
+      - 'tools/scripts/observability_capture/**'
       - '.github/workflows/build-apple.yml'
       - '!**.md'
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-apple-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all
@@ -165,20 +171,17 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
 
       - name: Run Swift unit tests (iOS Simulator)
-        # The generic build above can't execute tests (no bootable device);
-        # a concrete simulator runs XybridTests against the xcframework the
-        # previous step already flipped Package.swift to. iPhone 17 / iOS 26.5
-        # is the pair macos-26 ships with its default Xcode 26.6 (no iPhone 16
-        # on that image); bump DEVELOPER_DIR and OS= together when the image
-        # rolls forward. Timeout guards against a simulator/test hang.
+        # The generic build above can't execute tests (no bootable device).
+        # boot-ci-simulator.sh creates an iPhone on the newest available iOS
+        # runtime and boots it, rather than naming a pre-created device (see the
+        # script for why). Timeout guards against a simulator/test hang.
         timeout-minutes: 10
-        env:
-          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
         run: |
           set -euo pipefail
+          SIM_ID="$(./bindings/apple/scripts/boot-ci-simulator.sh)"
           xcodebuild test \
             -scheme Xybrid \
-            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 
@@ -188,3 +191,75 @@ jobs:
           name: XybridFFI-xcframework
           path: bindings/apple/XCFrameworks/XybridFFI.xcframework
           if-no-files-found: error
+
+  observability-runtime:
+    name: Observability runtime scenario (iOS Simulator)
+    # Runs the shared observability scenario
+    # (tools/scripts/observability_capture/scenario.md) through the public Swift
+    # API on an iOS Simulator, linked against the xcframework the job above
+    # built: parent-in, reference-out, manual operations, content redaction and
+    # omission, release and the flush/shutdown lifecycle. run_scenario.py starts
+    # capture_server.py, runs the test, stops the receiver and runs
+    # check_capture.py on what reached it. This is the Swift row of
+    # docs/sdk/observability-coverage.md.
+    #
+    # xcodebuild rather than `swift test --filter`: the xcframework ships only
+    # ios-arm64 + ios-arm64-simulator and Package.swift declares iOS only, so a
+    # macOS-host `swift test` has no slice to link. `-only-testing:` is the
+    # filter. xcodebuild hands the test runner only TEST_RUNNER_-prefixed
+    # variables (prefix stripped), hence the `env` below. The simulator reaches
+    # the receiver on the host as 127.0.0.1 and reads and writes host paths.
+    needs: build-xcframework
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download XCFramework
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: XybridFFI-xcframework
+          path: bindings/apple/XCFrameworks/XybridFFI.xcframework
+
+      - name: Build Swift tests (iOS Simulator)
+        run: |
+          set -euo pipefail
+          # CI-runtime flip to the downloaded xcframework. Do NOT commit this.
+          ./bindings/apple/scripts/set-natives-mode.sh --set-local
+          SIM_ID="$(./bindings/apple/scripts/boot-ci-simulator.sh "Xybrid observability iPhone")"
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          xcodebuild build-for-testing \
+            -scheme Xybrid \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Run observability scenario (iOS Simulator)
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          # {endpoint}, {expectations} and {workdir} are run_scenario.py
+          # placeholders, filled in once the receiver is listening.
+          python3 tools/scripts/observability_capture/run_scenario.py \
+            --binding swift --out-dir "$RUNNER_TEMP/observability-swift" --timeout 420 -- \
+            env \
+              "TEST_RUNNER_XYBRID_SCENARIO_ENDPOINT={endpoint}" \
+              "TEST_RUNNER_XYBRID_SCENARIO_EXPECTATIONS={expectations}" \
+              "TEST_RUNNER_XYBRID_SCENARIO_WORKDIR={workdir}" \
+              "TEST_RUNNER_XYBRID_SCENARIO_SPEC=$GITHUB_WORKSPACE/tools/scripts/observability_capture/scenario.json" \
+            xcodebuild test-without-building \
+              -scheme Xybrid \
+              -destination "platform=iOS Simulator,id=$SIM_ID" \
+              -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+              -only-testing:XybridTests/ObservabilityRuntimeTests \
+              -skipPackagePluginValidation \
+              CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload scenario report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: observability-runtime-swift
+          path: ${{ runner.temp }}/observability-swift
+          if-no-files-found: warn

@@ -10,10 +10,15 @@
     never imports it. It is a lower bound on Unity compatibility, not a substitute
     for the in-editor Mono/IL2CPP compile (AOT/reflection issues can sit on top).
 
+    The net8.0 target inspects every compiled P/Invoke declaration without
+    loading native code, so CI can check the library names selected for iOS
+    players, the Editor with iOS selected, and other platforms. Requires SDK 8+.
+
     See tools/scripts/gen_unity_bolt_csharp.py.
   -->
   <PropertyGroup>
-    <TargetFramework>netstandard2.1</TargetFramework>
+    <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
+    <OutputType Condition="'$(TargetFramework)' == 'net8.0'">Exe</OutputType>
     <!-- Unity has been capped at C# 9 from 2021.2 through Unity 6. -->
     <LangVersion>9</LangVersion>
     <!-- Match Unity's default (nullable disabled). The generated Bolt sources
@@ -32,6 +37,7 @@
          pre-bolt C ABI + Runtime/Native), so the whole Api folder compiles here
          — nothing drags a C-ABI binding into this project anymore. -->
     <Compile Include="../../bindings/unity/Runtime/Api/*.cs" />
+    <Compile Include="NativeImportCheck.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
     <!-- No System.Runtime.CompilerServices.Unsafe reference on purpose: Unity's
          scripting profile does not reference that assembly (a real `unity test`
          on 6.3 rejects `Unsafe.SizeOf` with CS0103), so neither does this gate.

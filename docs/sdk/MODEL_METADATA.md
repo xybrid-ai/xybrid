@@ -76,6 +76,29 @@ GGUF model execution for local LLMs via llama.cpp.
 | `chat_template` | string | no | `null` | Path to chat template JSON file |
 | `context_length` | integer | no | `4096` | Maximum context length in tokens |
 
+llama.cpp reserves the KV cache for all `context_length` tokens when the model
+loads, so memory follows this value, not the prompt length. When xybrid
+generates the file itself (a Hugging Face repo without one, `--model-file`,
+`fromModelFile`, `xybrid init`), `context_length` is the model's native context
+capped at 4,096 tokens, and the native value is recorded as
+`metadata.max_context_length`. Uncapped, LFM3 1.7B's 262,144 tokens would
+reserve about 5.9 GB of KV cache.
+
+To allow longer conversations, raise `context_length` in the generated file. It
+is written next to the GGUF for `--model-file` and `fromModelFile`, and to the
+model's cache directory for Hugging Face repos
+(`xybrid fetch --huggingface <repo>` prints it). `xybrid run --model-file`
+regenerates the metadata on every run instead of reading the file, so run the
+edited directory with `xybrid run --directory`.
+
+### `ZzzPhonon`
+
+Phonon speech from one GGUF through the opt-in `tts-zzz` CPU backend. The
+`model_file` field is required; optional bundled voice, language and sampling
+settings use the engine defaults when omitted. Temperature `0` selects the
+bundle's default. See [Phonon speech](PHONON.md) for metadata, request overrides,
+streaming, cancellation and custom native builds.
+
 ### `SafeTensors`
 
 SafeTensors model execution via Candle (pure Rust). Used for Whisper models.
@@ -121,7 +144,8 @@ TensorFlow Lite model execution (mobile).
 
 ### `LiteRtLm`
 
-LiteRT-LM text generation. Runs only in the browser SDK (`@xybrid/web`);
+Legacy LiteRT-LM metadata, retained for serialization compatibility. The current
+browser SDK (`@xybrid/web`) uses `Gguf` and rejects this template;
 native runtimes reject this template with an explicit error.
 
 ```json
@@ -135,7 +159,7 @@ native runtimes reject this template with an explicit error.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `model_file` | string | yes | Path to `.litertlm` file (relative to model directory) |
-| `context_length` | integer | no | Maximum context length in tokens; omit when unset and the engine default applies. Must be at least 1 when present; the browser SDK caps it at 32768 |
+| `context_length` | integer | no | Legacy context length in tokens; omit when unset. Must be at least 1 when present |
 
 ### `ModelGraph`
 
@@ -182,6 +206,91 @@ Each stage in a `ModelGraph` has an `execution_mode`:
 | `Autoregressive` | Loop until end token | Text generation, decoding |
 | `WhisperDecoder` | Whisper-specific with KV cache | Whisper ASR |
 | `IterativeRefinement` | Multiple passes with schedule | Diffusion models |
+
+### `ChoiceScorer`
+
+A decision model: it reads one context and a closed list of candidates and
+returns one score per candidate instead of generating output. It accepts only a
+choice request (`Envelope::choice_request` in Rust, `xybrid run --choice` from
+the CLI), and only through a batch run (`run`, `run_with_options`,
+`run_async`). Streaming, conversation history
+and pipelines refuse it, as does every other model, and the language bindings
+refuse to load it. `scorer` says how a request becomes
+model input, and its `"type"` names the kind of scorer. `OnnxByteOptionScorer`
+is the only kind today.
+
+```json
+{
+  "type": "ChoiceScorer",
+  "scorer": {
+    "type": "OnnxByteOptionScorer",
+    "model_file": "cua-s1-forms.onnx",
+    "context": {
+      "offset": 1,
+      "max_len": 224,
+      "overflow": "Truncate",
+      "ids_input": "context_ids",
+      "mask_input": "context_mask"
+    },
+    "choice": {
+      "offset": 1,
+      "max_len": 96,
+      "overflow": "Truncate",
+      "ids_input": "option_ids",
+      "mask_input": "option_token_mask"
+    },
+    "choice_mask_input": "option_mask",
+    "logits_output": "logits",
+    "max_choices": 64,
+    "fixed_choices": [
+      { "id": "check", "text": "check" },
+      { "id": "click", "text": "click" },
+      { "id": "skip", "text": "skip" }
+    ]
+  }
+}
+```
+
+`OnnxByteOptionScorer` reads the context and each candidate's text as UTF-8
+bytes: byte `b` becomes the id `b + offset`, a row is cut at `max_len` bytes
+(possibly inside a multi-byte character) and zero padded, and its mask is true
+where an id was written. The ONNX model takes five tensors and returns one
+float32 logit per candidate row:
+
+| Input | Type | Shape |
+|---|---|---|
+| `context.ids_input` | int64 | `[1, context.max_len]` |
+| `context.mask_input` | bool | `[1, context.max_len]` |
+| `choice.ids_input` | int64 | `[1, N, choice.max_len]` |
+| `choice.mask_input` | bool | `[1, N, choice.max_len]` |
+| `choice_mask_input` | bool | `[1, N]` |
+
+`N` is either a dynamic axis (one row per candidate) or a fixed size of at
+least `max_choices`, whose unused rows are masked and never scored.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `model_file` | string | yes | Path to the `.onnx` file (relative to the model directory) |
+| `context`, `choice` | object | yes | Byte encoding of the context and of each candidate's text: `offset` (at least 1, so no byte id is the padding id 0), `max_len` (at least 1), `overflow` (`"Truncate"` keeps the first `max_len` bytes, `"Reject"` refuses the request) and the `ids_input` and `mask_input` tensor names |
+| `choice_mask_input` | string | yes | Bool input marking which candidate rows are offered |
+| `logits_output` | string | yes | Float32 output holding one logit per candidate row |
+| `max_choices` | integer | yes | Most candidates one request may offer, fixed choices included; at least 2 |
+| `fixed_choices` | array | no | Candidates (`id`, `text`) the model always offers, after the caller's; their ids are reserved |
+| `scoring_temperature` | number | no | Divides every logit before the softmax; finite and greater than 0 (default 1) |
+
+Unknown fields are rejected. The spec is checked when the model loads, and an
+invalid one fails the load with `MetadataInvalid`. The first run (or
+`warmup()`) checks the ONNX model against it: input names, element types,
+ranks, fixed dimensions and the output's type.
+
+A request's candidates are the caller's choices followed by the fixed choices.
+Ids must be non-empty and unique, so a caller may not reuse a fixed id; there
+must be between 2 and `max_choices` candidates in all; and the context must be
+non-empty text. Scores come back in that order. Each has the raw `logit`, a
+`score` (the softmax of `logit / scoring_temperature` over the candidates) and
+whether it is `fixed`. Scores rank the offered candidates against each other;
+they are not calibrated probabilities that a candidate is right. Set
+`metadata.task` to `"decision"`.
 
 ---
 
@@ -255,8 +364,15 @@ Tokenizes text using a vocabulary file.
 | `vocab_file` | string | — | Path to vocabulary file |
 | `tokenizer_type` | string | — | `"BPE"`, `"WordPiece"`, or `"SentencePiece"` |
 | `max_length` | integer | `null` | Maximum sequence length (truncate if exceeded) |
+| `add_special_tokens` | boolean | `false` | Wrap the text in the special tokens the tokenizer's post-processor defines, such as `<bos>`/`<eos>` or `[CLS]`/`[SEP]`. Truncation keeps the closing ones; a `max_length` with no room for text before them is an error |
 
 **Input**: `Envelope::Text(string)` → **Output**: Token IDs
+
+An ONNX model fed token IDs gets `input_ids`, `attention_mask` and
+`token_type_ids`, whichever it declares. A multimodal embedding model's
+`image_features`, `video_features` and `audio_features` inputs (EmbeddingGemma
+2's ONNX export has them) get zero rows, so its text model runs alone. Any
+other input fails to run. The ONNX session is kept between calls.
 
 ### `MelSpectrogram`
 
@@ -356,6 +472,87 @@ Converts TTS float32 waveform output to PCM audio bytes.
 
 **Input**: Float32 waveform → **Output**: `Envelope::Audio(pcm_bytes)`
 
+The waveform is the model's only output or, when it has several, the output
+named `waveform` (preferred) or `audio`. KittenTTS 0.8, for example, also
+returns per-phoneme `duration`. A TTS model with several outputs and neither
+name fails to run.
+
+#### Optional `duration` output (phoneme timings)
+
+An ONNX TTS model can also return how long each input token lasts. When it
+does, the result reports when each phoneme is spoken in the returned audio,
+which is what lip sync and word highlighting need. Nothing in
+`model_metadata.json` turns this on: the SDK reads the first output named
+`duration`, `durations` or `pred_dur`, in that order, next to the waveform.
+A model with a single output has no duration output, since that output is the
+waveform.
+
+- **Shape.** One value per token id the model was fed, pads included, as
+  `[1, N]` or `[N]`. Values are whole frames: INT64 (Kokoro's type) or INT32;
+  float32 values are rounded.
+- **Unit.** The SDK does not assume a frame size. It scales the durations to
+  the length of the waveform the model returned, before any truncation, so a
+  phoneme's edges fall at `round(samples × running total / total)`. For
+  Kokoro-82M one frame is exactly 600 samples (25 ms at 24 kHz).
+- **Time origin.** Times are seconds from the first sample of the returned
+  audio. Leading silence removed by `apply_postprocessing` is subtracted, and
+  spans past the kept audio (trimmed trailing silence, `trim_trailing_samples`)
+  are cut short or dropped. Long text synthesized in chunks has each chunk's
+  spans moved to where that chunk starts in the crossfaded audio, and the
+  overlap at a join is cut, so spans never overlap.
+- **Entries.** One per token that `Phonemize` produced from the text, named by
+  its symbol in the tokens file: phoneme characters, stress marks (`ˈ`, `ˌ`),
+  spaces and punctuation. Padding (`add_padding`) and `silence_tokens` are not
+  listed, so there can be gaps between entries. The end pad is not listed
+  either: when it is audible, the silence trim keeps it and the audio runs on
+  after the last entry. KittenTTS 0.8 leaves up to about 0.1 s there (its
+  Micro and Mini end pads carry the release of the last sound); Kokoro-82M's
+  end pad is silent and trimmed, so its last entry ends with the audio.
+- **Alignment.** The times are the model's own alignment, not measured from
+  the audio. Kokoro-82M's entries run about 45 ms behind the audible speech at
+  speed 1.0, and its first phoneme after the leading pad drifts with speed:
+  late below 1.0 (up to about 0.3 s at 0.5), slightly early above it.
+  Mid-utterance entries stay within a few tens of milliseconds at any speed.
+  Lip sync usually starts each mouth shape a little early anyway; an app that
+  needs the first phoneme exact can snap it to the audio's onset.
+- **No timings.** If the duration output cannot be read as numbers, has a
+  different length than the token ids, or sums to zero, the run returns its
+  audio without timings. A model without a duration output returns the same
+  audio bytes as before and no `phoneme_timings` key.
+
+The timings ride in the audio envelope's metadata under `phoneme_timings` as a
+JSON array:
+
+```json
+[{"phoneme":"h","start":0.0125,"end":0.05},{"phoneme":"ə","start":0.05,"end":0.1}]
+```
+
+Rust reads them with `InferenceResult::phoneme_timings()` and Unity with
+`InferenceResult.PhonemeTimings`; see
+[Phoneme timings](API_REFERENCE.md#phoneme-timings-tts). Streaming synthesis,
+the zzz engine templates (`ZzzPhonon`, `ZzzEmbed`), codec TTS (NeuTTS) and
+runs answered by the cloud report none.
+
+**Adding the output to Kokoro.** Stock Kokoro-82M keeps its durations inside
+the graph and declares only `audio`.
+[`tools/conformance/expose_tts_duration.py`](../../tools/conformance/expose_tts_duration.py)
+finds that tensor by its structure (the single INT64 `Cast` feeding the
+`Gather` → `CumSum` that builds the alignment) and adds an `Identity` output
+named `duration` over it. Existing nodes, weights and initializers are left
+untouched, so the audio stays byte-identical:
+
+```bash
+uv run --no-project --python 3.12 --with-requirements tools/conformance/requirements-forms.txt \
+  python tools/conformance/expose_tts_duration.py kokoro-82m/model.onnx kokoro-82m-timed/model.onnx
+```
+
+Copy the rest of the model directory next to the new `model.onnx` and leave
+`model_file`, `preprocessing` and `postprocessing` as they are. Give the copy
+its own `model_id` (for example `kokoro-82m-timed`): `.xyb` bundles are
+extracted into a cache keyed by `model_id`, so a repacked bundle that keeps
+the old id loads the old, untimed model. To confirm the audio did not change,
+see [TTS duration output](../../tools/conformance/README.md#tts-duration-output).
+
 ### `WhisperDecode`
 
 Decodes Whisper token IDs to text using a HuggingFace tokenizer.
@@ -428,6 +625,17 @@ Mean pooling over token embeddings to produce a sentence embedding.
 { "type": "MeanPool", "dim": 1 }
 ```
 
+### `L2Normalize`
+
+Scales each vector along the last axis to unit length. Put it after `MeanPool`
+for a model whose sentence-transformers pipeline ends in `Normalize`: the
+vectors then match the reference, and cosine similarity is a dot product. An
+all-zero vector is left as is.
+
+```json
+{ "type": "L2Normalize" }
+```
+
 ---
 
 ## Voice Configuration
@@ -487,7 +695,7 @@ The `metadata` field is freeform, but these keys are conventional:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `task` | string | Model task: `"text-to-speech"`, `"speech-recognition"`, `"text-generation"`, `"image_classification"`, `"embedding"` |
+| `task` | string | Model task: `"text-to-speech"`, `"speech-recognition"`, `"text-generation"`, `"image_classification"`, `"embedding"`, `"decision"` |
 | `architecture` | string | Model architecture (e.g., `"qwen35"`, `"whisper"`) |
 | `backend` | string | Inference backend (e.g., `"llamacpp"`, `"onnxruntime"`) |
 | `parameters` | integer | Parameter count |
@@ -524,6 +732,44 @@ The `metadata` field is freeform, but these keys are conventional:
   "metadata": {
     "task": "image_classification",
     "num_classes": 10
+  }
+}
+```
+
+### ONNX Text Embedding (EmbeddingGemma 2)
+
+The text model of [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2)
+from `onnx-community/embeddinggemma-2-ONNX`. Keep `model_q4.onnx_data` next to
+`model_q4.onnx`: the graph reads its weights from that file. Avoid the `fp16`
+and `q4f16` exports: the model returns NaN or degraded vectors in float16.
+Callers add the prompt: `task: search result | query: ` before a query and
+`title: none | text: ` before a document.
+
+```json
+{
+  "model_id": "embeddinggemma-2",
+  "version": "q4",
+  "execution_template": {
+    "type": "Onnx",
+    "model_file": "model_q4.onnx"
+  },
+  "preprocessing": [
+    {
+      "type": "Tokenize",
+      "vocab_file": "tokenizer.json",
+      "tokenizer_type": "BPE",
+      "max_length": 8192,
+      "add_special_tokens": true
+    }
+  ],
+  "postprocessing": [
+    { "type": "MeanPool", "dim": 1 },
+    { "type": "L2Normalize" }
+  ],
+  "files": ["model_q4.onnx", "model_q4.onnx_data", "tokenizer.json"],
+  "metadata": {
+    "task": "text-embedding",
+    "embedding_dim": 768
   }
 }
 ```

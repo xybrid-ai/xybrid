@@ -94,7 +94,15 @@ impl ChatTemplateFormatter {
         for envelope in messages {
             let content = match &envelope.kind {
                 EnvelopeKind::Text(text) => text,
-                _ => continue, // Skip non-text envelopes
+                // Only text renders. The executor refuses choice kinds before
+                // any prompt is built; listing every kind keeps a new one from
+                // being skipped unnoticed.
+                EnvelopeKind::Audio(_)
+                | EnvelopeKind::Embedding(_)
+                | EnvelopeKind::Image { .. }
+                | EnvelopeKind::MultiPart(_)
+                | EnvelopeKind::ChoiceRequest(_)
+                | EnvelopeKind::ChoiceScores(_) => continue,
             };
 
             let role = envelope.role().unwrap_or(MessageRole::User);
@@ -126,7 +134,15 @@ impl ChatTemplateFormatter {
         for envelope in messages {
             let content = match &envelope.kind {
                 EnvelopeKind::Text(text) => text.as_str(),
-                _ => continue,
+                // Only text renders. The executor refuses choice kinds before
+                // any prompt is built; listing every kind keeps a new one from
+                // being skipped unnoticed.
+                EnvelopeKind::Audio(_)
+                | EnvelopeKind::Embedding(_)
+                | EnvelopeKind::Image { .. }
+                | EnvelopeKind::MultiPart(_)
+                | EnvelopeKind::ChoiceRequest(_)
+                | EnvelopeKind::ChoiceScores(_) => continue,
             };
 
             let role = envelope.role().unwrap_or(MessageRole::User);
@@ -208,7 +224,15 @@ impl ChatTemplateFormatter {
         for envelope in messages {
             let content = match &envelope.kind {
                 EnvelopeKind::Text(text) => text,
-                _ => continue, // Skip non-text envelopes
+                // Only text renders. The executor refuses choice kinds before
+                // any prompt is built; listing every kind keeps a new one from
+                // being skipped unnoticed.
+                EnvelopeKind::Audio(_)
+                | EnvelopeKind::Embedding(_)
+                | EnvelopeKind::Image { .. }
+                | EnvelopeKind::MultiPart(_)
+                | EnvelopeKind::ChoiceRequest(_)
+                | EnvelopeKind::ChoiceScores(_) => continue,
             };
 
             let role = envelope.role().unwrap_or(MessageRole::User);

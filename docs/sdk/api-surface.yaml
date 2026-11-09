@@ -377,8 +377,8 @@ classes:
           - { name: envelope, type: Envelope }
           - { name: options, type: RunOptions }
         return: "Stream<TtsStreamEvent>"
-        notes: "Streaming TTS (issue: realtime-vision C). Synthesizes the text sentence-chunk by sentence-chunk and emits each chunk's raw 16-bit LE PCM with its sample rate (FfiTtsStreamEvent::AudioChunk { pcm, sample_rate }) as it is produced, instead of one batched WAV — so playback can start after the first sentence. The consumer wraps each chunk into a WAV (the one-shot path's audioAsWav owns the header today). Cancellation mirrors runStreaming's sink-close-as-cancel: unsubscribing the Dart stream (barge-in) closes the FFI sink and stops synthesis at the next chunk boundary (one chunk's ONNX forward is uninterruptible). The batch crossfade is dropped; a short per-chunk edge fade masks the high-pass startup transient and the gapless-splice seam. Reuses the cached TTS ONNX session so chunk N+1 starts immediately."
-        status: { rust: implemented, dart: implemented, kotlin: na, swift: na, csharp: na }
+        notes: "Unity RunTtsStreaming and RunTtsStreamingAsync accept an optional audio callback and System.Threading.CancellationToken, returning TtsStreamResult (completed/cancelled/limited/failed). Native RunStream reuses the pull protocol with Audio events carrying owned PCM16 LE, sample_rate, channels, and first_sample per channel. Callbacks run on the draining worker; no foreign callbacks cross the native ABI. Kitten owns text splitting; sentence_chunks and macOS-only accelerate are bundle options. Cancellation reaches native inference independently of the model lock, discards queued packets, and checks queued requests before start. RunOptions resource abort policies apply before synthesis and at packet boundaries; Kitten also polls during inference. Resource aborts preserve AbortedForCloudFallback when permitted; max_grace_tokens counts audio packets, not watcher polls. Completed and limited backend outcomes take precedence over late resource signals; fallback requires confirmed interruption. User cancellation remains a cancelled summary without grace or cloud fallback. ONNX keeps its existing per-sentence postprocessing and boundary cancellation."
+        status: { rust: implemented, dart: implemented, kotlin: na, swift: na, csharp: implemented }
       runStreamingWithFallback:
         params:
           - { name: envelope, type: Envelope }
@@ -654,6 +654,23 @@ classes:
         # actually writes reads the same in every language.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
         since: "0.7.0"
+      phonemeTimings:
+        type: "List<PhonemeTiming>"
+        # When each phoneme is spoken in audioBytes, for lip sync. Filled by
+        # ONNX TTS models that declare a `duration` / `durations` / `pred_dur`
+        # output (MODEL_METADATA.md, TTSAudioEncode); empty otherwise, and for
+        # streaming TTS, zzz engines, codec TTS and cloud results. Rides in the
+        # result envelope's `phoneme_timings` metadata entry (a JSON array), so
+        # Kotlin, Swift and Python can parse that until they get the typed
+        # field; Dart results carry no metadata. Rust:
+        # InferenceResult::phoneme_timings().
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+        since: "0.17.0"
+      hasPhonemeTimings:
+        type: bool
+        # Convenience over `phonemeTimings.isEmpty`, like hasToolCalls.
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+        since: "0.17.0"
       audioAsWav:
         type: "Uint8List?"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -705,6 +722,28 @@ classes:
       latencyMs:
         type: int
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  PhonemeTiming:
+    type: data
+    section: "7. Result Types"
+    # One entry of XybridResult.phonemeTimings. start/end are seconds from the
+    # first sample of the returned audio (after silence trimming and chunk
+    # crossfades). Entries are in order, never overlap and stay inside the
+    # audio; pads and silence tokens are not listed. Rust:
+    # xybrid_core::ir::PhonemeTiming (also xybrid_sdk::ir), serialized as
+    # {"phoneme","start","end"} in the `phoneme_timings` metadata entry.
+    csharp_name: PhonemeTiming
+    since: "0.17.0"
+    properties:
+      phoneme:
+        type: String
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+      start:
+        type: double
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+      end:
+        type: double
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: implemented }
 
   PipelineResult:
     type: data
