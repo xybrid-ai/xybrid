@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registry probe that ends offline (it is given back) or with a compatibility
   refusal (it closes the circuit). `CircuitBreaker::is_refusing` checks without
   taking a request, and `CircuitBreaker::release` gives one back.
+- A registry call whose failures open a URL's circuit (three 5xx, or one 429)
+  now moves on to the next registry URL instead of failing with "circuit
+  open", and without first sleeping out a `Retry-After` for a retry the open
+  circuit would refuse. When no URL answers, the call reports the registry's
+  own error, so a 429 surfaces as `RateLimited` with its `Retry-After`.
 
 ### Migration
 

@@ -485,6 +485,15 @@ fn rate_limit_retry_after_secs_at(retry_after: Option<&str>, now: DateTime<Utc>)
         })
 }
 
+/// Why [`RegistryClient::execute_with_retry_for_url`] gave up on a URL.
+#[derive(Debug)]
+enum UrlFailure {
+    /// The URL's circuit refused the first attempt, so nothing reached it.
+    Refused,
+    /// The URL's last attempt failed with this error.
+    Failed(SdkError),
+}
+
 /// Registry client for model resolution and download.
 pub struct RegistryClient {
     /// Registry URLs in priority order (primary first, then fallbacks)
@@ -742,19 +751,13 @@ impl RegistryClient {
         let mut retry_after_budget = RetryAfterBudget::with_limit(self.retry_after_limit);
 
         for (idx, api_url) in self.api_urls.iter().enumerate() {
-            let circuit = &self.circuits[idx];
-
-            // Skip if circuit is open. `is_refusing` takes no request: the
-            // retry loop takes one per attempt, and one taken here would be a
-            // half-open circuit's only test request, which no attempt then gets.
-            if circuit.is_refusing() {
-                debug!("Skipping {} (circuit open)", api_url);
-                continue;
-            }
-
+            // The retry loop asks the circuit before each attempt, and a URL
+            // whose circuit refuses the first comes back `Refused`: skipped.
+            // There is no separate check here, which another call could pass
+            // between (taking a half-open circuit's only test request).
             match self.execute_with_retry_for_url(
                 api_url,
-                circuit,
+                &self.circuits[idx],
                 &mut retry_after_budget,
                 &mut operation,
             ) {
@@ -764,7 +767,10 @@ impl RegistryClient {
                     }
                     return Ok(result);
                 }
-                Err(err) => {
+                Err(UrlFailure::Refused) => {
+                    debug!("Skipping {} (circuit open)", api_url);
+                }
+                Err(UrlFailure::Failed(err)) => {
                     // Don't try fallback for non-retryable errors (like 404)
                     if !err.is_retryable() {
                         return Err(err);
@@ -787,48 +793,59 @@ impl RegistryClient {
     ///
     /// `retry_after_budget` is the whole call's (see
     /// [`Self::execute_with_fallback`]), not this URL's.
+    ///
+    /// A circuit that refuses a retry ends the loop with the URL's last
+    /// failure, which is retryable, so the caller moves on to the next URL.
+    /// Reporting the refusal itself (`SdkError::CircuitOpen`, not retryable)
+    /// would end the whole call on the failures that opened the circuit.
     fn execute_with_retry_for_url<T, F>(
         &self,
         api_url: &str,
         circuit: &Arc<CircuitBreaker>,
         retry_after_budget: &mut RetryAfterBudget,
         operation: &mut F,
-    ) -> Result<T, SdkError>
+    ) -> Result<T, UrlFailure>
     where
         F: FnMut(&str) -> Result<T, SdkError>,
     {
         let mut last_error: Option<SdkError> = None;
 
         for attempt in 0..self.retry_policy.max_attempts {
-            // Calculate delay for this attempt. The previous error is consumed
-            // here: the attempt below either returns or replaces it.
-            let delay = match last_error.take() {
-                None => self.retry_policy.delay_for_attempt(attempt),
-                Some(err) => match err.retry_after() {
+            // Before a retry, wait as long as the registry asked (charged to
+            // the call's budget), or else the policy backoff. The first
+            // attempt runs at once.
+            if let Some(err) = last_error.take() {
+                // The URL's circuit is open now (a 429 opens it at once, 5xx
+                // at the failure threshold), so the retry would be refused:
+                // report the failure now rather than wait for a retry that
+                // cannot run, or charge that wait to the budget.
+                if circuit.is_refusing() {
+                    return Err(UrlFailure::Failed(err));
+                }
+                let delay = match err.retry_after() {
                     Some(wait) if retry_after_budget.spend(wait) => wait,
                     // The registry wants longer than this call has left to
                     // wait (`MAX_RETRY_AFTER` in total): report it now rather
                     // than block the caller. Still retryable, so
                     // `execute_with_fallback` moves on to the next URL, which
                     // may still answer without a wait.
-                    Some(_) => return Err(err),
+                    Some(_) => return Err(UrlFailure::Failed(err)),
                     None => self.retry_policy.delay_for_attempt(attempt),
-                },
-            };
-
-            if !delay.is_zero() {
-                std::thread::sleep(delay);
+                };
+                if !delay.is_zero() {
+                    std::thread::sleep(delay);
+                }
+                last_error = Some(err);
             }
 
-            // Take this attempt's request from the breaker (it might have
-            // opened). In a half-open circuit that is one of its few test
-            // requests, so every outcome below settles it: unsettled, the
-            // circuit would refuse every later call.
+            // Take this attempt's request from the breaker. In a half-open
+            // circuit that is one of its few test requests, so every outcome
+            // below settles it: unsettled, the circuit would refuse every
+            // later call. Refusing the first attempt skips the URL; refusing
+            // a retry (another call reopened the circuit, or took its test
+            // request, during the wait) reports this URL's last failure.
             if !circuit.can_execute() {
-                return Err(SdkError::CircuitOpen(format!(
-                    "Circuit breaker open for {}",
-                    api_url
-                )));
+                return Err(last_error.map_or(UrlFailure::Refused, UrlFailure::Failed));
             }
 
             match operation(api_url) {
@@ -849,7 +866,7 @@ impl RegistryClient {
                     // circuit then tests the next call instead.
                     if matches!(&err, SdkError::Offline { .. }) {
                         circuit.release();
-                        return Err(err);
+                        return Err(UrlFailure::Failed(err));
                     }
 
                     // A successful compatibility check refused this model on
@@ -862,7 +879,7 @@ impl RegistryClient {
                             | SdkError::OsVersionUnsupported { .. }
                     ) {
                         circuit.record_success();
-                        return Err(err);
+                        return Err(UrlFailure::Failed(err));
                     }
 
                     circuit.record_failure();
@@ -874,7 +891,7 @@ impl RegistryClient {
 
                     // Don't retry non-retryable errors
                     if !err.is_retryable() {
-                        return Err(err);
+                        return Err(UrlFailure::Failed(err));
                     }
 
                     last_error = Some(err);
@@ -882,9 +899,9 @@ impl RegistryClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
+        Err(UrlFailure::Failed(last_error.unwrap_or_else(|| {
             SdkError::network(format!("All retry attempts exhausted for {}", api_url))
-        }))
+        })))
     }
 
     /// Handle HTTP response, converting errors appropriately.
@@ -4249,6 +4266,201 @@ mod tests {
         assert!(circuit.is_closed());
     }
 
+    /// The failures that open the primary's circuit end its retries, and the
+    /// call moves on to the fallback: the circuit refusing the next retry is
+    /// no reason to fail a call another URL can still answer.
+    #[test]
+    fn failures_that_open_the_primary_circuit_fall_back_to_the_next_url() {
+        use httpmock::prelude::*;
+
+        let primary = MockServer::start();
+        let fallback = MockServer::start();
+        let failing = primary.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(502);
+        });
+        let models = fallback.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(200)
+                .json_body(serde_json::json!({ "models": [], "total": 0 }));
+        });
+        let mut client =
+            RegistryClient::new(vec![primary.base_url(), fallback.base_url()]).unwrap();
+        // More attempts than the default circuit's three-failure threshold.
+        client.retry_policy = RetryPolicy {
+            max_attempts: 5,
+            initial_delay_ms: 10,
+            max_delay_ms: 10,
+            jitter_factor: 0.0,
+        };
+
+        let listed = client.list_models();
+
+        assert!(
+            matches!(&listed, Ok(models) if models.is_empty()),
+            "{listed:?}"
+        );
+        failing.assert_hits(3);
+        models.assert_hits(1);
+        assert!(client.circuits[0].is_open());
+    }
+
+    /// A 429 opens the URL's circuit at once, so no retry of that URL could
+    /// follow the wait: the call moves straight on to the fallback, without
+    /// sleeping out the `Retry-After` or charging it to the call's budget.
+    #[test]
+    fn rate_limit_that_opens_the_circuit_falls_back_without_waiting() {
+        use httpmock::prelude::*;
+
+        let primary = MockServer::start();
+        let fallback = MockServer::start();
+        let limited = primary.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(429).header("Retry-After", "1");
+        });
+        let models = fallback.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(200)
+                .json_body(serde_json::json!({ "models": [], "total": 0 }));
+        });
+        let client = RegistryClient::new(vec![primary.base_url(), fallback.base_url()]).unwrap();
+
+        let started = Instant::now();
+        let listed = client.list_models();
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(&listed, Ok(models) if models.is_empty()),
+            "{listed:?}"
+        );
+        limited.assert_hits(1);
+        models.assert_hits(1);
+        assert!(elapsed < Duration::from_secs(1), "waited {elapsed:?}");
+    }
+
+    /// With every URL's circuit opened by a 429, the caller gets the
+    /// registry's rate limit (and its `Retry-After`), not "circuit open".
+    #[test]
+    fn rate_limit_that_opens_the_last_circuit_is_reported_as_rate_limited() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let limited = server.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(429).header("Retry-After", "1");
+        });
+        let client = RegistryClient::with_url(server.base_url()).unwrap();
+
+        let started = Instant::now();
+        let result = client.list_models();
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(
+                result,
+                Err(SdkError::RateLimited {
+                    retry_after_secs: 1
+                })
+            ),
+            "{result:?}"
+        );
+        limited.assert_hits(1);
+        assert!(elapsed < Duration::from_secs(1), "waited {elapsed:?}");
+    }
+
+    /// A URL whose circuit refuses the first attempt (here another call holds
+    /// a half-open circuit's only test request) is skipped, untouched, and
+    /// the call goes on to the next URL rather than failing as "circuit open".
+    #[test]
+    fn url_whose_circuit_refuses_the_first_attempt_is_skipped() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use xybrid_core::http::CircuitState;
+
+        let mut client = RegistryClient::new(vec![
+            "https://primary.example.invalid".to_string(),
+            "https://fallback.example.invalid".to_string(),
+        ])
+        .unwrap();
+        let circuit = Arc::new(CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        }));
+        client.circuits[0] = circuit.clone();
+        circuit.record_failure();
+        assert!(circuit.can_execute(), "another call takes the test request");
+
+        let primary_calls = AtomicU32::new(0);
+        let mut op = |url: &str| -> Result<(), SdkError> {
+            if url.contains("primary") {
+                primary_calls.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(())
+        };
+        let refused = client.execute_with_retry_for_url(
+            "https://primary.example.invalid",
+            &circuit,
+            &mut RetryAfterBudget::new(),
+            &mut op,
+        );
+        assert!(matches!(refused, Err(UrlFailure::Refused)), "{refused:?}");
+
+        assert_eq!(client.execute_with_fallback(&mut op).ok(), Some(()));
+        assert_eq!(primary_calls.load(Ordering::SeqCst), 0);
+        // The other call's test request is still its own to settle.
+        assert_eq!(circuit.state(), CircuitState::HalfOpen);
+        assert!(circuit.is_refusing());
+    }
+
+    /// A retry the circuit refuses after its wait (another call reopened the
+    /// circuit meanwhile) ends with the URL's last failure, which lets the
+    /// call fall back, rather than with a non-retryable "circuit open".
+    #[test]
+    fn retry_refused_after_its_wait_reports_the_last_failure() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::mpsc;
+
+        let mut client = RegistryClient::with_url("https://primary.example.invalid").unwrap();
+        // Long enough for the other call to reopen the circuit mid-wait.
+        client.retry_policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_ms: 500,
+            max_delay_ms: 500,
+            jitter_factor: 0.0,
+        };
+        let circuit = client.circuits[0].clone();
+        let (failed, other_call) = mpsc::channel::<()>();
+        let reopener = {
+            let circuit = circuit.clone();
+            std::thread::spawn(move || {
+                other_call.recv().expect("the first attempt runs");
+                std::thread::sleep(Duration::from_millis(50));
+                circuit.record_rate_limited();
+            })
+        };
+
+        let calls = AtomicU32::new(0);
+        let mut op = |_url: &str| -> Result<(), SdkError> {
+            if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                failed.send(()).expect("the other call is waiting");
+            }
+            Err(SdkError::network("simulated 502"))
+        };
+        let result = client.execute_with_retry_for_url(
+            "https://primary.example.invalid",
+            &circuit,
+            &mut RetryAfterBudget::new(),
+            &mut op,
+        );
+        reopener.join().expect("the other call finishes");
+
+        assert!(
+            matches!(&result, Err(UrlFailure::Failed(err @ SdkError::NetworkError { .. })) if err.is_retryable()),
+            "{result:?}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
     #[test]
     fn retry_after_out_of_spec_values_are_read_not_defaulted() {
         let now = Utc.with_ymd_and_hms(2026, 10, 21, 7, 27, 0).unwrap();
@@ -4423,7 +4635,10 @@ mod tests {
             &mut RetryAfterBudget::new(),
             &mut op,
         );
-        assert!(matches!(result, Err(SdkError::Offline { .. })));
+        assert!(
+            matches!(result, Err(UrlFailure::Failed(SdkError::Offline { .. }))),
+            "{result:?}"
+        );
         assert_eq!(
             circuit.failure_count(),
             0,
