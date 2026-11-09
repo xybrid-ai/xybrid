@@ -578,3 +578,158 @@ test("R-CANCEL-9: span end, log emit and metric record stay prompt with every en
   expect(await flushing).toBe(false);
   for (const stats of Object.values(pipeline.stats())) expect(stats.pending).toBe(0);
 });
+
+const SIGNALS = ["traces", "logs", "metrics"] as const;
+type SignalName = (typeof SIGNALS)[number];
+
+/** A pipeline exporting only `signal`; exports start from `forceFlush` alone. */
+const onlySignal = (
+  server: TestServer,
+  signal: SignalName,
+  retry: { maxRetries?: number; initialDelayMs: number; maxDelayMs: number },
+): OtlpPipeline =>
+  track(
+    createOtlpPipeline({
+      [signal]: { endpoint: `${server.url}/v1/${signal}` },
+      batch: { scheduledDelayMs: 60_000, exportTimeoutMs: 10_000 },
+      metricExportIntervalMs: 60_000,
+      retry,
+    }),
+    server,
+  );
+
+/** Two items of `signal`: spans, log records or metric data points. */
+const emitTwo = (pipeline: OtlpPipeline, signal: SignalName): void => {
+  if (signal === "traces") {
+    span(pipeline, "one");
+    span(pipeline, "two");
+  } else if (signal === "logs") {
+    pipeline.loggerProvider?.getLogger("app").emit({ body: "one" });
+    pipeline.loggerProvider?.getLogger("app").emit({ body: "two" });
+  } else {
+    pipeline.meterProvider?.getMeter("app").createCounter("one").add(1);
+    pipeline.meterProvider?.getMeter("app").createCounter("two").add(1);
+  }
+};
+
+/** Every request re-sent the first one's bytes. */
+const expectIdenticalResends = (server: TestServer): void => {
+  for (const request of server.requests)
+    expect(request.body).toEqual(server.requests[0]?.body ?? Buffer.alloc(0));
+};
+
+const FAST = { maxRetries: 2, initialDelayMs: 1, maxDelayMs: 1 };
+/** Hang guard only: every export below ends by its 10 s deadline. */
+const HANG_GUARD_MS = 30_000;
+
+describe("D2: HTTP failure statuses, per signal", () => {
+  const cases = [
+    {
+      // A backoff of 60 s cannot fit the 10 s deadline, so only an honoured header retries.
+      name: "429 with Retry-After: 0, then 200, is retried at once",
+      reply: (index: number) =>
+        index === 0 ? { status: 429, headers: { "retry-after": "0" } } : { status: 200 },
+      retry: { maxRetries: 2, initialDelayMs: 60_000, maxDelayMs: 60_000 },
+      requests: 2,
+      exported: 2,
+    },
+    {
+      name: "429 without Retry-After is retried until the retry budget runs out",
+      reply: () => ({ status: 429 }),
+      retry: FAST,
+      requests: FAST.maxRetries + 1,
+      exported: 0,
+    },
+    {
+      name: "429 with a Retry-After past the deadline fails without a retry",
+      reply: () => ({ status: 429, headers: { "retry-after": "30" } }),
+      retry: FAST,
+      requests: 1,
+      exported: 0,
+    },
+    {
+      name: "400 is not retried",
+      reply: () => ({ status: 400 }),
+      retry: FAST,
+      requests: 1,
+      exported: 0,
+    },
+    {
+      name: "500 is not retried",
+      reply: () => ({ status: 500 }),
+      retry: FAST,
+      requests: 1,
+      exported: 0,
+    },
+  ];
+  for (const signal of SIGNALS) {
+    for (const { name, reply, retry, requests, exported } of cases) {
+      test(
+        `${signal}: ${name}`,
+        async () => {
+          const server = await startServer((request) => reply(request.index));
+          const pipeline = onlySignal(server, signal, retry);
+          emitTwo(pipeline, signal);
+          expect(await pipeline.forceFlush(20_000)).toBe(exported === 2);
+          expect(server.requests).toHaveLength(requests);
+          expect(server.received(`/v1/${signal}`)).toHaveLength(requests);
+          expectIdenticalResends(server);
+          expect(pipeline.stats()[signal]).toEqual({
+            accepted: 2,
+            exported,
+            dropped: 0,
+            failed: 2 - exported,
+            pending: 0,
+          });
+        },
+        HANG_GUARD_MS,
+      );
+    }
+  }
+});
+
+describe("D3: lost acknowledgements for logs and metrics", () => {
+  for (const signal of ["logs", "metrics"] as const) {
+    test(
+      `${signal}: a lost ack then 200 resends the same bytes and counts the items once`,
+      async () => {
+        const server = await startServer((request) =>
+          request.index === 0 ? { destroy: true } : { status: 200 },
+        );
+        const pipeline = onlySignal(server, signal, FAST);
+        emitTwo(pipeline, signal);
+        expect(await pipeline.forceFlush(20_000)).toBe(true);
+        expect(server.requests).toHaveLength(2);
+        expectIdenticalResends(server);
+        expect(pipeline.stats()[signal]).toEqual({
+          accepted: 2,
+          exported: 2,
+          dropped: 0,
+          failed: 0,
+          pending: 0,
+        });
+      },
+      HANG_GUARD_MS,
+    );
+
+    test(
+      `${signal}: acks lost on every attempt fail the items after maxRetries + 1 requests`,
+      async () => {
+        const server = await startServer(() => ({ destroy: true }));
+        const pipeline = onlySignal(server, signal, FAST);
+        emitTwo(pipeline, signal);
+        expect(await pipeline.forceFlush(20_000)).toBe(false);
+        expect(server.requests).toHaveLength(FAST.maxRetries + 1);
+        expectIdenticalResends(server);
+        expect(pipeline.stats()[signal]).toEqual({
+          accepted: 2,
+          exported: 0,
+          dropped: 0,
+          failed: 2,
+          pending: 0,
+        });
+      },
+      HANG_GUARD_MS,
+    );
+  }
+});

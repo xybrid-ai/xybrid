@@ -397,6 +397,42 @@ describe("bounded buffers (R-BUF-1, R-BUF-2, R-CNT-5)", () => {
     await loggerProvider.shutdown();
   });
 
+  test("metrics: a byte budget below one collection drops it whole, without a request", async () => {
+    const server = await startServer();
+    const pipeline = track(
+      createOtlpPipeline({
+        metrics: { endpoint: `${server.url}/v1/metrics` },
+        // Smaller than any encoded collection (the resource alone is larger), well under the
+        // request body bound, so the collection is refused by the budget, not as oversized.
+        batch: { maxBufferedBytes: 64 },
+        metricExportIntervalMs: 60_000,
+      }),
+      server,
+    );
+    const meter = pipeline.meterProvider?.getMeter("app");
+    if (meter === undefined) throw new Error("expected a meter provider");
+    meter.createCounter("one").add(1);
+    meter.createCounter("two").add(1);
+    expect(await pipeline.forceFlush(10_000)).toBe(false);
+    expect(pipeline.stats().metrics).toEqual({
+      accepted: 2,
+      exported: 0,
+      dropped: 2,
+      failed: 0,
+      pending: 0,
+    });
+    // The final collection (cumulative: the same two points) is refused the same way.
+    expect(await pipeline.shutdown(10_000)).toBe(false);
+    expect(pipeline.stats().metrics).toEqual({
+      accepted: 4,
+      exported: 0,
+      dropped: 4,
+      failed: 0,
+      pending: 0,
+    });
+    expect(server.requests).toHaveLength(0);
+  }, 30_000);
+
   test("large distinct scopes saturate the byte budget for spans and logs", async () => {
     const server = await startServer(() => ({ hang: true }));
     const pipeline = track(

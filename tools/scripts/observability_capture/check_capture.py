@@ -35,6 +35,9 @@ SIGNAL_KEYS = ("traces", "logs", "metrics")
 COUNTER_KEYS = ("accepted", "exported", "dropped", "failed", "pending")
 MANUAL_REFERENCES = ("workflow", "tool", "inference", "inference_failed", "inference_released")
 METRIC_KINDS = ("sum", "gauge", "histogram", "exponentialHistogram", "summary")
+INFERENCE_DURATION = "gen_ai.client.inference.duration"
+# OTLP AggregationTemporality DELTA, as a number or, in proto3 JSON, its enum name.
+DELTA_TEMPORALITY = (1, "1", "AGGREGATION_TEMPORALITY_DELTA")
 
 
 # ---------------------------------------------------------------------------
@@ -154,11 +157,51 @@ class LogRecord:
 
 
 @dataclass
+class MetricPoint:
+    """One OTLP/JSON metric data point: its attributes and, for histograms, its count."""
+
+    seq: int
+    name: str
+    kind: str
+    attributes: Dict[str, Any]
+    count: Optional[int]
+    delta: bool = False
+
+
+def point_count(point: Dict[str, Any]) -> Optional[int]:
+    """A histogram point's ``count`` (a uint64, so OTLP/JSON may quote it)."""
+    try:
+        return int(point["count"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def measurements(points: Iterable[MetricPoint]) -> int:
+    """How many measurements histogram ``points`` hold across every export.
+
+    A cumulative point (the Rust exporter's temporality) repeats every earlier
+    measurement of its series, so only the series' latest export counts. Every
+    delta point counts.
+    """
+    latest: Dict[Tuple[str, str], MetricPoint] = {}
+    total = 0
+    for point in points:
+        if point.delta:
+            total += point.count or 0
+            continue
+        series = (point.name, json.dumps(point.attributes, sort_keys=True, default=str))
+        if series not in latest or point.seq >= latest[series].seq:
+            latest[series] = point
+    return total + sum(point.count or 0 for point in latest.values())
+
+
+@dataclass
 class Capture:
     entries: List[Dict[str, Any]] = field(default_factory=list)
     spans: List[Span] = field(default_factory=list)
     logs: List[LogRecord] = field(default_factory=list)
     metric_points: int = 0
+    metric_data: List[MetricPoint] = field(default_factory=list)
     metric_names: List[str] = field(default_factory=list)
     resources: List[Tuple[str, int, Dict[str, Any]]] = field(default_factory=list)
     text: str = ""
@@ -222,10 +265,19 @@ class Capture:
                 capture.resources.append(("metrics", seq, resource))
                 for scope in resource_metrics.get("scopeMetrics", []) or []:
                     for metric in scope.get("metrics", []) or []:
-                        capture.metric_names.append(metric.get("name", ""))
+                        name = metric.get("name", "")
+                        capture.metric_names.append(name)
                         for kind in METRIC_KINDS:
                             if kind in metric:
-                                capture.metric_points += len((metric[kind] or {}).get("dataPoints", []) or [])
+                                data = metric[kind] or {}
+                                points = data.get("dataPoints", []) or []
+                                delta = data.get("aggregationTemporality") in DELTA_TEMPORALITY
+                                capture.metric_points += len(points)
+                                capture.metric_data.extend(
+                                    MetricPoint(seq=seq, name=name, kind=kind,
+                                                attributes=attributes(point.get("attributes")),
+                                                count=point_count(point), delta=delta)
+                                    for point in points if isinstance(point, dict))
         capture.text = "\n".join(texts)
         return capture
 
@@ -560,6 +612,14 @@ class Checker:
             failures.append(f"status code is {span.status_code}, expected ERROR ({STATUS_ERROR}) for a cancellation")
         if any(record.span_id == span.span_id for record in self.capture.logs):
             failures.append("a cancellation emitted an exception log; CONTRACT.md: a cancellation is not an exception")
+        # Metric points name no span, so this relies on the release being the scenario's only cancellation.
+        cancelled = measurements(point for point in self.capture.metric_data
+                                 if point.name == INFERENCE_DURATION
+                                 and point.attributes.get("error.type") == "cancelled")
+        if cancelled != 1:
+            failures.append(f"{INFERENCE_DURATION} holds {cancelled} measurement(s) with error.type 'cancelled', "
+                            f"expected 1: the release must record the operation's duration once, with the "
+                            f"cancelled outcome as on the span, and nothing else in the scenario cancels")
         before = self.stats("before_release").get("traces", {}).get("accepted")
         after = self.stats("after_release").get("traces", {}).get("accepted")
         if before is None or after is None:

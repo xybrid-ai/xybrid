@@ -175,10 +175,14 @@ context's `traceparent`/`tracestate`.
 4. Inference that records the released input messages, then is released
    without any terminal call: read stats (`before_release`), release the last
    owner, read stats again (`after_release`); reference
-   `inference_released`. It must export as `cancelled` with status ERROR, and
-   `traces.accepted` must grow by exactly one across the release (the release
-   ended it synchronously). The release must not flush; the checker notes how
-   many spans were still pending.
+   `inference_released`. It must export as `cancelled` with status ERROR,
+   record exactly one `gen_ai.client.inference.duration` measurement with
+   `error.type = cancelled`, and `traces.accepted` must grow by exactly one
+   across the release (the release ended it synchronously). Metric points name
+   no span, so nothing else in the scenario may cancel: the checker counts
+   every cancelled measurement (a cumulative series at its latest export, every
+   delta point). The release must not flush; the checker notes how many spans
+   were still pending.
 
 **(d) Automatic path.** Create `<workdir>/scenario-weightless/` holding only
 `model_metadata.json`. Load it from that directory with options
@@ -259,7 +263,7 @@ step threw: then set `scenario_error` to the error text and exit non-zero.
 | `content.omit` | No span or log carries `gen_ai.system_instructions`; the omitted marker appears nowhere. Absence only: see below. |
 | `resource.identity` | Every resource of every signal has the device id, service name and version, and `xybrid.sdk.binding`. |
 | `inference.failed` | `error.type = scenario_error`, status ERROR, status message = the redacted message, and a `gen_ai.client.operation.exception` log for that span. |
-| `inference.released` | `error.type = cancelled`, status ERROR, no exception log, `traces.accepted` grew by one across the release. |
+| `inference.released` | `error.type = cancelled`, status ERROR, no exception log, exactly one `gen_ai.client.inference.duration` measurement with `error.type = cancelled`, `traces.accepted` grew by one across the release. |
 | `automatic.load` | The load span is a child of the workflow with the conversation id; its error matches the recorded outcome. |
 | `automatic.run` | Exactly one workflow child besides the manual operations and the load, the run span: conversation id, model id, `error.type`, status ERROR; a non-null `references.run` names it. |
 | `trace.tree` | Every span in T has an exported parent; only the workflow hangs under P. Spans outside T are noted. |

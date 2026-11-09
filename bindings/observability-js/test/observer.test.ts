@@ -74,6 +74,71 @@ describe("parenting", () => {
     expect(inference?.spanContext().traceState?.get("vendor")).toBe("abc");
   });
 
+  test("interleaved async flows each keep their own ambient parent", async () => {
+    const { observer, spans, tracerProvider, collectMetrics } = createHarness();
+    const flows = 10;
+    const parents = Array.from({ length: flows }, (_, flow) =>
+      tracerProvider.getTracer("app").startSpan(`request ${flow}`),
+    );
+    // The test resumes each flow at each step, in an order it chooses; nothing is timed.
+    const deferred = () => {
+      let resolve = (): void => undefined;
+      const promise = new Promise<void>((settle) => {
+        resolve = settle;
+      });
+      return { promise, resolve };
+    };
+    const steps = parents.map(() => ({
+      start: deferred(),
+      started: deferred(),
+      end: deferred(),
+      ended: deferred(),
+    }));
+    const running = parents.map((parent, flow) =>
+      context.with(trace.setSpan(context.active(), parent), async () => {
+        const step = steps[flow];
+        if (step === undefined) throw new Error("no step for the flow");
+        await step.start.promise;
+        const op = observer.startInference(request);
+        op.setAttribute("flow", flow);
+        step.started.resolve();
+        await step.end.promise;
+        op.end();
+        step.ended.resolve();
+      }),
+    );
+    const resume = async (order: readonly number[], phase: "start" | "end"): Promise<void> => {
+      for (const flow of order) {
+        const step = steps[flow];
+        if (step === undefined) throw new Error("no step for the flow");
+        step[phase].resolve();
+        // A flow that throws instead of reaching its step fails the test here.
+        await Promise.race([step[phase === "start" ? "started" : "ended"].promise, running[flow]]);
+        // The flow's context never leaks into the code that resumed it.
+        expect(trace.getSpan(context.active())).toBeUndefined();
+      }
+    };
+    const reverse = [...parents.keys()].reverse();
+    const evensThenOdds = [...parents.keys()].sort((a, b) => (a % 2) - (b % 2) || a - b);
+    // Every inference starts in reverse order and is open before any of them ends.
+    await resume(reverse, "start");
+    await resume(evensThenOdds, "end");
+    await Promise.all(running);
+    for (const parent of parents) parent.end();
+
+    const inferences = spans.getFinishedSpans().filter((span) => span.name === "chat tiny");
+    expect(inferences.map((span) => span.attributes["flow"])).toEqual(evensThenOdds);
+    for (const span of inferences) {
+      const parent = parents[Number(span.attributes["flow"])]?.spanContext();
+      expect(span.parentSpanContext?.spanId).toBe(parent?.spanId ?? "");
+      expect(span.spanContext().traceId).toBe(parent?.traceId ?? "");
+    }
+    const duration = normalizeMetrics(await collectMetrics()).find(
+      (metric) => metric.name === "gen_ai.client.inference.duration",
+    );
+    expect(duration?.points.map((point) => ("count" in point ? point.count : 0))).toEqual([flows]);
+  });
+
   test("operation contexts parent children explicitly", () => {
     const { observer, spans } = createHarness();
     const workflow = observer.startWorkflow("agent");

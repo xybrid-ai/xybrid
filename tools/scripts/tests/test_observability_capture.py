@@ -105,6 +105,20 @@ def log_records(entries):
                 yield scope["logRecords"]
 
 
+def metric_points(entries, name):
+    for entry in entries:
+        for resource in (entry.get("body") or {}).get("resourceMetrics", []):
+            for scope in resource["scopeMetrics"]:
+                for metric in scope["metrics"]:
+                    if metric["name"] == name:
+                        yield metric["histogram"]["dataPoints"]
+
+
+def is_cancelled(point):
+    return any(a["key"] == "error.type" and a["value"].get("stringValue") == "cancelled"
+               for a in point.get("attributes", []))
+
+
 def results(entries, expectations, binding=None):
     checker = check_capture.Checker(check_capture.Capture.from_entries(entries), expectations, SPEC, binding)
     return {result.name: result for result in checker.run()}
@@ -274,6 +288,47 @@ class TerminalFaultTests(CheckerTestCase):
         stats = self.expected["stats"]
         stats["after_release"]["traces"] = dict(stats["before_release"]["traces"])
         self.assertOnlyFails("inference.released")
+
+    def cancelled_durations(self):
+        points = [point for points in metric_points(self.entries, "gen_ai.client.inference.duration")
+                  for point in points if is_cancelled(point)]
+        self.assertTrue(points, "the fixture records the release's cancelled duration")
+        return points
+
+    def test_release_without_a_cancelled_duration_point_fails(self):
+        # The span says cancelled, but the metric never recorded the outcome.
+        dropped = self.cancelled_durations()
+        for points in metric_points(self.entries, "gen_ai.client.inference.duration"):
+            points[:] = [point for point in points if point not in dropped]
+        outcome = self.assertOnlyFails("inference.released")
+        self.assertIn("error.type 'cancelled'", " ".join(outcome["inference.released"].failures))
+
+    def test_release_whose_duration_was_recorded_as_success_fails(self):
+        for point in self.cancelled_durations():
+            remove_attribute(point, "error.type")
+        self.assertOnlyFails("inference.released")
+
+    def test_release_recorded_twice_fails(self):
+        # Every cumulative export after the release says the cancellation was measured twice.
+        for point in self.cancelled_durations():
+            point["count"] = "2"
+        outcome = self.assertOnlyFails("inference.released")
+        self.assertIn("holds 2 measurement(s)", " ".join(outcome["inference.released"].failures))
+
+    def test_delta_exports_count_every_cancelled_point(self):
+        # The fixture's two exports each carry the cancelled point; as deltas they are two measurements.
+        for temporality in (1, "AGGREGATION_TEMPORALITY_DELTA"):
+            with self.subTest(temporality=temporality):
+                self.entries, self.expected = load_fixture()
+                self.assertEqual(len(self.cancelled_durations()), 2)
+                for entry in self.entries:
+                    for resource in (entry.get("body") or {}).get("resourceMetrics", []):
+                        for scope in resource["scopeMetrics"]:
+                            for metric in scope["metrics"]:
+                                if metric["name"] == "gen_ai.client.inference.duration":
+                                    metric["histogram"]["aggregationTemporality"] = temporality
+                outcome = self.assertOnlyFails("inference.released")
+                self.assertIn("holds 2 measurement(s)", " ".join(outcome["inference.released"].failures))
 
     def test_cancellation_reported_as_exception_fails(self):
         records = next(log_records(self.entries))
