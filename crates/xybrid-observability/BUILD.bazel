@@ -1,21 +1,18 @@
 # Portable instrumentation and the default OTLP/HTTP transport used by the SDK.
-# Cargo dependencies (including the optional transport deps) come from the hub.
+# Cargo dependencies (including the optional transport deps: opentelemetry-proto,
+# prost, reqwest with rustls, tokio, tokio-util, httpdate) come from the hub.
+# None of them is a proc macro, so every dep goes into `deps`.
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@crates//:defs.bzl", "all_crate_deps")
 load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
-# This crate has the same dependencies on every platform. The hub includes
-# proc macros in the normal list; rules_rust needs async-trait separately.
-_DEPS = all_crate_deps(normal = True)
-_PROC_MACROS = [dep for dep in _DEPS if dep.startswith("@crates//:async-trait-")]
-
+# This crate has the same dependencies on every platform.
 rust_library(
     name = "xybrid-observability",
     version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
     crate_features = ["default", "otlp"],
-    deps = [dep for dep in _DEPS if dep not in _PROC_MACROS],
-    proc_macro_deps = _PROC_MACROS,
+    deps = all_crate_deps(normal = True),
     visibility = ["//visibility:public"],
 )

@@ -88,7 +88,10 @@ _CLI_INTEGRATION_TESTS = {
         "//crates/xybrid-core:xybrid-core",
         "@crates//:tempfile",
     ],
-    "telemetry_status_test": [],
+    "telemetry_status_test": [
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
     "vlm_cli_test": [
         "//crates/xybrid-core:xybrid-core",
         "@crates//:image",

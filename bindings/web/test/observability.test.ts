@@ -6,7 +6,12 @@ import {
   SimpleSpanProcessor,
   TracerProvider,
 } from "@opentelemetry/sdk-trace";
-import { type ContentOptions, ObservationContext, Observer } from "@xybrid/observability";
+import {
+  type ContentOptions,
+  ObservationContext,
+  Observer,
+  serializeContext,
+} from "@xybrid/observability";
 import {
   InferenceError,
   InputValidationError,
@@ -199,8 +204,33 @@ describe("observed loads", () => {
       "xybrid.genai.resource.memory.used_bytes": 2048,
     });
     expect(span?.spanContext().traceId).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
-    expect(session.loaded.observation?.spanId).toBe(span?.spanContext().spanId ?? "");
+    expect(session.loaded.observation?.span_id).toBe(span?.spanContext().spanId ?? "");
   });
+
+  const parentContext = ObservationContext.fromTraceparent(PARENT);
+  if (parentContext === undefined) throw new Error("invalid test parent");
+  for (const [name, parent] of [
+    ["serialized", serializeContext(parentContext)],
+    ["structured clone", structuredClone(parentContext)],
+    [
+      "parentContext fields",
+      { traceId: parentContext.traceId, spanId: parentContext.spanId, traceFlags: 1 },
+    ],
+  ] as const) {
+    test(`load and generation accept ${name} parent parentContexts`, async () => {
+      const { observer, spans } = observe();
+      const { runtime } = scriptedRuntime({ deltas: ["hello"] }, false);
+      const session = await load(runtime, { observer, observation: { parent } });
+      await drain(session.generateStream("hi", { observation: { parent } }));
+      const finished = spans.getFinishedSpans();
+      expect(finished).toHaveLength(2);
+      for (const span of finished) {
+        expect(span.spanContext().traceId).toBe(parentContext.traceId);
+        expect(span.parentSpanContext?.spanId).toBe(parentContext.spanId);
+      }
+      await session.dispose();
+    });
+  }
 
   for (const fails of [false, true]) {
     for (const explicit of [false, true]) {
@@ -291,9 +321,14 @@ describe("observed loads", () => {
 describe("observed generation", () => {
   test("worker-measured times, usage, content and the observation ref", async () => {
     const { observer, spans } = observe();
-    const t0 = performance.timeOrigin + performance.now();
     const script: Script = {
       deltas: ["Hel", "lo", "!"],
+      run: runMetrics({ generatedTokens: 3 }),
+    };
+    const { runtime, calls } = scriptedRuntime(script, true);
+    const session = await load(runtime, { observer });
+    const t0 = Date.now();
+    Object.assign(script, {
       // The first token decodes to an incomplete character: first token precedes first chunk.
       tokens: [
         [t0 + 40, ""],
@@ -301,10 +336,7 @@ describe("observed generation", () => {
         [t0 + 70, "!"],
       ],
       completedAtMs: t0 + 90,
-      run: runMetrics({ generatedTokens: 3 }),
-    };
-    const { runtime, calls } = scriptedRuntime(script, true);
-    const session = await load(runtime, { observer });
+    });
     const text = await drain(
       session.generateStream("Say hello", {
         maxOutputTokens: 3,
@@ -356,8 +388,8 @@ describe("observed generation", () => {
       inference?.spanContext().spanId ?? "",
     );
     expect(session.lastRun?.observation).toEqual({
-      traceId: inference?.spanContext().traceId ?? "",
-      spanId: inference?.spanContext().spanId ?? "",
+      trace_id: inference?.spanContext().traceId ?? "",
+      span_id: inference?.spanContext().spanId ?? "",
     });
   });
 

@@ -11,7 +11,7 @@
 pub const GENAI_SEMCONV_REVISION: &str = "95aff9cdf605bbc7d7e8f7c4745a693bd0c4eea8";
 
 /// Version of the shared contract (`contract/catalog.json`).
-pub const CONTRACT_VERSION: &str = "1";
+pub const CONTRACT_VERSION: &str = "2";
 
 /// Instrumentation scope name used for traces, metrics, and logs.
 pub const SCOPE_NAME: &str = "xybrid-observability";
@@ -34,6 +34,12 @@ pub mod op {
     pub const INVOKE_WORKFLOW: &str = "invoke_workflow";
     /// Tool execution.
     pub const EXECUTE_TOOL: &str = "execute_tool";
+
+    /// Names `start_inference` resolves through the catalog
+    /// (`catalog.inference_operations`). Every other name is a custom
+    /// inference operation that uses the generative inference metrics.
+    pub const INFERENCE_OPERATIONS: [&str; 5] =
+        [CHAT, TEXT_COMPLETION, GENERATE_CONTENT, EMBEDDINGS, PREDICT];
 }
 
 /// Attribute keys.
@@ -292,6 +298,9 @@ pub const TOKEN_BUCKETS: [f64; 14] = [
 
 /// Default per-attribute byte budget for content attributes.
 pub const DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES: usize = 16_384;
+/// Redaction kind of error messages (`Redactor` and `omit_attribute`); not
+/// an attribute key.
+pub const ERROR_MESSAGE_KIND: &str = "error.message";
 /// Maximum characters of an error message recorded as span status.
 pub const MAX_ERROR_MESSAGE_CHARS: usize = 256;
 /// Marker appended to truncated strings.
@@ -302,3 +311,18 @@ pub const TRUNCATION_MIN_STRING_BYTES: usize = 32;
 pub const REDACTION_REPLACEMENT: &str = "[REDACTED]";
 /// Environment variable selecting the content capture mode.
 pub const CAPTURE_CONTENT_ENV: &str = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT";
+/// Legacy capture variable, honoured only when [`CAPTURE_CONTENT_ENV`] is
+/// unset (`true` means `span_only`; `false` and unknown values `no_content`).
+pub const CAPTURE_CONTENT_LEGACY_ENV: &str = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT";
+/// Default budget of content retained by one operation, in bytes (480 KiB).
+pub const DEFAULT_MAX_RETAINED_OPERATION_BYTES: usize = 491_520;
+/// Default preflight traversal budget per content value, in bytes (480 KiB).
+pub const DEFAULT_MAX_TRAVERSAL_BYTES: usize = 491_520;
+/// Maximum JSON nesting depth of a content value.
+pub const MAX_JSON_DEPTH: usize = 128;
+/// Bytes charged per JSON node by the conservative preflight cost.
+pub const PREFLIGHT_NODE_BYTES: usize = 16;
+/// Maximum `tracestate` list members (W3C Trace Context).
+pub const MAX_TRACESTATE_MEMBERS: usize = 32;
+/// Maximum normalized `tracestate` length in characters (W3C Trace Context).
+pub const MAX_TRACESTATE_CHARS: usize = 512;

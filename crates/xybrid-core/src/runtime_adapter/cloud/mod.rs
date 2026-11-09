@@ -590,7 +590,8 @@ fn stream_with_gateway_sse(
         );
     }
 
-    let mut http_req = crate::tracing::inject_trace_headers(
+    let mut http_req = crate::cloud::inject_transport_trace_headers(
+        &config.gateway_url,
         agent
             .post(&url)
             .set("Accept", "text/event-stream")
@@ -1618,6 +1619,107 @@ mod tests {
             None,
             "a loopback gateway must not inherit any credential: {request}"
         );
+    }
+
+    // ── Trace context: Xybrid hops only, third parties by allowlist ─────────
+
+    const RUN_TRACEPARENT: &str = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+
+    /// A traced run whose session allowlists at most one provider origin.
+    struct TracedRun {
+        allowed: Option<String>,
+    }
+
+    impl crate::tracing::TraceRecorder for TracedRun {
+        fn start_span(&self, _: &str, _: Option<u64>) -> u64 {
+            1
+        }
+        fn end_span(&self, _: u64) {}
+        fn add_metadata(&self, _: u64, _: &str, _: &str) {}
+        fn trace_headers(&self, _: Option<u64>) -> Option<crate::tracing::TraceHeaders> {
+            Some(crate::tracing::TraceHeaders {
+                traceparent: RUN_TRACEPARENT.into(),
+                tracestate: None,
+            })
+        }
+        fn allows_provider_context(&self, origin: &str) -> bool {
+            self.allowed.as_deref() == Some(origin)
+        }
+    }
+
+    fn traced(url: &str, allow: bool) -> crate::tracing::RecorderScope {
+        crate::tracing::RecorderScope::install(Arc::new(TracedRun {
+            allowed: allow.then(|| crate::tracing::provider_origin(url).unwrap()),
+        }))
+    }
+
+    const SSE_REPLY: &str = concat!(
+        "data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+
+    /// `backend: direct` for an OpenAI-compatible provider rides the gateway
+    /// transport to the provider's own origin. That origin is a third party:
+    /// neither the batch nor the SSE request may carry the run's context
+    /// unless the session allowlists exactly that origin. A loopback adapter
+    /// gateway that is not the configured platform gateway is treated the same.
+    #[test]
+    fn direct_provider_origins_get_trace_context_only_when_allowlisted() {
+        for allow in [false, true] {
+            let expected = allow.then_some(RUN_TRACEPARENT);
+
+            let (url, rx) = start_json_server(FAKE_DEEPSEEK_BODY, 200);
+            let _scope = traced(&url, allow);
+            let gateway_url = format!("{url}/v1");
+            let envelope = text_with(&[
+                ("provider", "openai"),
+                ("backend", "direct"),
+                ("gateway_url", gateway_url.as_str()),
+                ("api_key", "k"),
+                ("model", "deepseek-flash"),
+            ]);
+            CloudRuntimeAdapter::new().execute(&envelope).unwrap();
+            let request = rx.recv().unwrap();
+            assert_eq!(
+                header_value(&request, "traceparent"),
+                expected,
+                "batch, allowlisted={allow}: {request}"
+            );
+            drop(_scope);
+
+            let (url, rx) = start_sse_server(SSE_REPLY, 200);
+            let _scope = traced(&url, allow);
+            let gateway_url = format!("{url}/v1");
+            let envelope = text_with(&[
+                ("provider", "deepseek"),
+                ("backend", "direct"),
+                ("gateway_url", gateway_url.as_str()),
+                ("api_key", "k"),
+                ("model", "deepseek-flash"),
+            ]);
+            CloudRuntimeAdapter::new()
+                .execute_streaming(&envelope, Box::new(|_| Ok(())))
+                .unwrap();
+            let request = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(
+                header_value(&request, "traceparent"),
+                expected,
+                "SSE, allowlisted={allow}: {request}"
+            );
+            drop(_scope);
+
+            let (url, rx) = start_json_server(FAKE_DEEPSEEK_BODY, 200);
+            let _scope = traced(&url, allow);
+            CloudRuntimeAdapter::with_gateway(&url)
+                .execute(&text_with(&[("provider", "openai"), ("model", "m")]))
+                .unwrap();
+            let request = rx.recv().unwrap();
+            assert_eq!(
+                header_value(&request, "traceparent"),
+                expected,
+                "non-platform gateway, allowlisted={allow}: {request}"
+            );
+        }
     }
 
     #[test]

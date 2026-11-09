@@ -1,13 +1,16 @@
 """Regression tests for docs-only selection and the required CI gate."""
 
+import importlib.util
+import io
 import re
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ci_gate import PATH_FILTERS, check_jobs, classify
+from ci_gate import OPTIONAL_JOBS, PATH_FILTERS, check_jobs, classify
 
 
 def pr_files(*paths: str) -> list:
@@ -95,6 +98,84 @@ class ChangeSelectionTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
 
+    def test_every_file_the_generation_gate_tests_read_runs_tooling_tests(self):
+        # test_generation_gates.py asserts on build-flutter.yml, the FRB
+        # wrapper, ci.yml and every generator it globs. Editing any of them
+        # (say, deleting the FRB drift step) must run that test, or the PR
+        # skips it and still passes CI Success. Record what the suite really
+        # reads instead of restating it here, so the two cannot drift.
+        tests_dir = Path(__file__).resolve().parent
+        spec = importlib.util.spec_from_file_location(
+            "generation_gates_under_ci_gate", tests_dir / "test_generation_gates.py"
+        )
+        gates = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gates)
+        repo = gates.REPO_ROOT.resolve()
+        read, globbed = set(), []
+        read_text, glob = Path.read_text, Path.glob
+
+        def recording_read(path, *args, **kwargs):
+            read.add(path.resolve())
+            return read_text(path, *args, **kwargs)
+
+        def recording_glob(path, pattern, *args, **kwargs):
+            globbed.append(pattern)
+            return glob(path, pattern, *args, **kwargs)
+
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(gates.GenerationGateTests)
+        with mock.patch.object(Path, "read_text", recording_read), \
+                mock.patch.object(Path, "glob", recording_glob):
+            result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+        self.assertTrue(result.wasSuccessful(), result.failures + result.errors)
+
+        inputs = sorted(
+            path.relative_to(repo).as_posix() for path in read if path.is_relative_to(repo)
+        )
+        for expected in (".github/workflows/build-flutter.yml", "bindings/flutter/generate-frb.sh"):
+            self.assertIn(expected, inputs, "the generation gate tests no longer read this file")
+        # A listed generator (deleting one fails the suite) and any file its
+        # globs would discover (a new generator without a gate) must select
+        # the tooling tests too.
+        self.assertTrue(globbed, "the generation gate tests no longer glob for generators")
+        new_generators = [pattern.replace("*", "new") for pattern in globbed]
+        for path in inputs + sorted(gates.GATES) + new_generators:
+            with self.subTest(path=path):
+                outputs = classify("pull_request", pr_files(path))
+                self.assertEqual(outputs["relevant"], "true")
+                self.assertEqual(OPTIONAL_JOBS["tooling-tests"], "relevant")
+        for path in (
+            ".github/workflows/build-flutter.yml.bak", "bindings/flutter/generate-frb.sh.orig",
+            "bindings/flutter/lib/src/pipeline.dart", "bindings/apple/scripts/set-natives-mode.sh",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
+
+    def test_bolt_and_facade_sources_run_every_generated_binding_gate(self):
+        # Each committed binding is generated from the bolt crate (exports and
+        # doc comments) over facade types, so a source edit must run its drift
+        # check, and the Unity Api layer must recompile on top of it.
+        for path in (
+            "crates/xybrid-bolt/src/lib.rs", "crates/xybrid-bolt/Cargo.toml",
+            "crates/xybrid-ffi-facade/src/lib.rs",
+            "crates/xybrid-ffi-facade/src/observability_operations.rs",
+        ):
+            outputs = classify("pull_request", pr_files(path))
+            for flag in ("unity_bolt", "python_sdk", "kotlin_jni", "apple_bolt"):
+                with self.subTest(path=path, flag=flag):
+                    self.assertEqual(outputs[flag], "true")
+        for path in ("crates/xybrid-sdk/src/lib.rs", "bindings/unity/Tests/Editor/ObservationTests.cs"):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["unity_bolt"], "false")
+
+    def test_unity_drift_inputs_select_both_unity_jobs(self):
+        for path in (
+            "bindings/unity/Runtime/Bolt/XybridError.cs",
+            "bindings/unity/Runtime/Api/Observation.cs",
+            "tools/scripts/gen_unity_bolt_csharp.py",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["unity_bolt"], "true")
+
     def test_workflow_changes_run_every_optional_gate(self):
         outputs = classify("pull_request", pr_files(".github/workflows/ci.yml"))
         self.assertTrue(all(value == "true" for value in outputs.values()))
@@ -154,6 +235,28 @@ class RequiredGateTests(unittest.TestCase):
                     needs[job] = {"result": result}
                     with self.assertRaises(ValueError):
                         check_jobs(needs)
+
+    def test_unity_drift_is_optional_only_when_unity_inputs_are_untouched(self):
+        needs = self.needs("crates/xybrid-core/src/lib.rs")
+        needs["unity-bolt-drift"] = {"result": "skipped"}
+        check_jobs(needs)
+        for path in ("crates/xybrid-bolt/src/lib.rs", "bindings/unity/Runtime/Bolt/XybridError.cs"):
+            needs = self.needs(path)
+            needs["unity-bolt-drift"] = {"result": "skipped"}
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                check_jobs(needs)
+
+    def test_every_optional_job_is_required_by_ci_success_and_gated_by_its_flag(self):
+        workflow = (Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        required = re.search(r"^  ci-success:\n(?:    .*\n)*?    needs: \[([^\]]*)\]", workflow, re.M)[1]
+        required = [name.strip() for name in required.split(",")]
+        outputs = re.search(r"^  tooling-changes:\n((?:    .*\n|\n)*)", workflow, re.M)[1]
+        for job, flag in OPTIONAL_JOBS.items():
+            with self.subTest(job=job):
+                self.assertIn(job, required)
+                block = re.search(rf"^  {job}:\n((?:    .*\n|\n)*)", workflow, re.M)[1]
+                self.assertIn(f"if: needs.tooling-changes.outputs.{flag} == 'true'", block)
+                self.assertIn(f"{flag}: ${{{{ steps.filter.outputs.{flag} }}}}", outputs)
 
     def test_relevant_tooling_cannot_be_skipped(self):
         with self.assertRaises(ValueError):

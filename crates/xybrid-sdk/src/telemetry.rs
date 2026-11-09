@@ -84,13 +84,15 @@ fn parse_resource_telemetry_mode(raw: &str) -> Option<ResourceTelemetryMode> {
 
 // -- Process-wide resource-telemetry mode ----------------------------------
 //
-// `XybridModel::run*` / `Pipeline::run*` consult this to decide whether (and
-// how) to sample device resources for a run. Written by
-// `crate::observability::init_observability`; reads are cheap.
+// SDK operations that select no observability session (or a borrowed
+// observer) sample device resources with this mode; an operation pinned to a
+// configured session uses that session's mode instead. Written by
+// `XybridInit::resource_telemetry` and by installing a default session (its
+// configured mode); reads are cheap.
 static RESOURCE_TELEMETRY_MODE: RwLock<ResourceTelemetryMode> =
     RwLock::new(ResourceTelemetryMode::Off);
 
-fn set_resource_telemetry_mode(mode: ResourceTelemetryMode) {
+pub(crate) fn set_resource_telemetry_mode(mode: ResourceTelemetryMode) {
     if let Ok(mut guard) = RESOURCE_TELEMETRY_MODE.write() {
         *guard = mode;
     }
@@ -107,20 +109,29 @@ fn resolve_resource_telemetry_mode(configured: ResourceTelemetryMode) -> Resourc
     }
 }
 
-/// Pre-warm the global `ResourceMonitor` + publish the active mode to the
-/// process-wide state read by `begin_resource_run`. `Off` still stores the
-/// mode so a later rehydration can read a consistent value; the monitor
-/// just sits idle until something flips it on.
-pub(crate) fn activate_resource_telemetry(mode: ResourceTelemetryMode) {
+/// Resolve a configured mode against the env override and pre-warm the global
+/// `ResourceMonitor` when it samples, so the first run doesn't pay the cold
+/// read.
+pub(crate) fn prepare_resource_telemetry(mode: ResourceTelemetryMode) -> ResourceTelemetryMode {
     let mode = resolve_resource_telemetry_mode(mode);
     if !mode.is_off() {
         ResourceMonitor::global().prewarm();
     }
-    set_resource_telemetry_mode(mode);
+    mode
 }
 
-/// Current resource-telemetry mode for this process. `Off` until
-/// observability is initialized with a mode other than `Off`.
+/// Publish `mode` (after the env override) as the process-wide mode. `Off`
+/// still stores the mode so a later rehydration can read a consistent value;
+/// the monitor just sits idle until something flips it on.
+pub(crate) fn activate_resource_telemetry(mode: ResourceTelemetryMode) {
+    set_resource_telemetry_mode(prepare_resource_telemetry(mode));
+}
+
+/// Process-wide resource-telemetry mode: the one SDK operations that select
+/// no observability session sample with. `Off` until set by
+/// `XybridInit::resource_telemetry` or by installing a default session
+/// configured with another mode. An operation pinned to a session
+/// (`ObservationOptions::with_session`) uses that session's mode instead.
 pub fn resource_telemetry_mode() -> ResourceTelemetryMode {
     match RESOURCE_TELEMETRY_MODE.read() {
         Ok(g) => *g,
@@ -128,12 +139,16 @@ pub fn resource_telemetry_mode() -> ResourceTelemetryMode {
     }
 }
 
-/// Begin a resource-telemetry scope for one `Model::run*` / `Pipeline::run*`
-/// call. Returns a guard that produces the summary on `finish()`. Callers
-/// who want the summary attached to their outgoing `TelemetryEvent` can use
-/// [`attach_resource_summary`] at emit time.
+/// Begin a resource-telemetry scope. Returns a guard that produces the
+/// summary on `finish()`. Callers who want the summary attached to their
+/// outgoing `TelemetryEvent` can use [`attach_resource_summary`] at emit time.
+///
+/// On a thread running an SDK operation (for example in a streaming callback,
+/// or under a [`CapturedScope`](crate::observability::CapturedScope)) it
+/// samples with that operation's mode, which follows the session it is pinned
+/// to. Elsewhere it uses the process-wide [`resource_telemetry_mode`].
 pub fn begin_resource_run() -> xybrid_core::device::RunGuard {
-    ResourceMonitor::global().begin_run(resource_telemetry_mode())
+    ResourceMonitor::global().begin_run(crate::observability::current_resource_telemetry())
 }
 
 /// Mutate a `TelemetryEvent.data` JSON string to add `resource_summary`.
@@ -1269,6 +1284,7 @@ mod tests {
             available_mem_min_mb: Some(512),
             memory_pressure_peak: xybrid_core::device::MemoryPressure::Critical,
             thermal_state_peak: xybrid_core::device::ThermalState::Hot,
+            thermal_measured: true,
             battery_pct_end: Some(51),
             sample_count: 3,
             sampling_mode: "debug_local".to_string(),

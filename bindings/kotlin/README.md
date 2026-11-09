@@ -236,8 +236,32 @@ result.observation?.let {
 Xybrid.Observability.flushAsync()
 ```
 
-`Xybrid.Observability.stats` reports spans exported, dropped, and failed.
-`suppressTrace = true` in `runOptions` skips the detailed trace for one run.
+`Xybrid.Observability.stats` reports accepted, exported, dropped, failed, and
+pending counts per signal (`traces`, `logs`, `metrics`). A flush or shutdown that
+cannot deliver everything throws `XybridError.TelemetryDelivery`; the inference
+already succeeded, so do not rerun it. `suppressTrace = true` in `runOptions`
+skips the detailed trace for one run. Pipelines take the same trace fields and
+return `observation` references for the workflow and each stage; ASR sessions
+take them through `streamingConfigWithVad(..., observation = ...)` or the
+config's `observation`.
+
+Record work Xybrid does not run itself (a tool, another runtime's inference)
+with a manual operation. Pass `context()?.childOptions` to its children. The
+first terminal call wins, and closing an unfinished one cancels it without
+flushing:
+
+```kotlin
+Xybrid.Observability.withWorkflow("answer-question") { workflow ->
+    val call = XybridToolCallInfo("search", null, null, null, "{\"q\":\"otel\"}")
+    Xybrid.Observability.startTool(call, workflow.context()?.childOptions).use { tool ->
+        tool.recordResult("{\"hits\":3}")
+        tool.complete()
+    }
+}
+```
+
+`withWorkflow` completes on return, cancels on `CancellationException`, and
+fails with the label `application_error` (never the exception text) otherwise.
 
 ### Error Handling
 

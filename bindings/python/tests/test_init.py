@@ -19,6 +19,35 @@ from unittest.mock import patch
 
 SDK_ROOT = Path(__file__).resolve().parents[1]
 TEST_PACKAGE = "_xybrid_init_test"
+# Records boltffi lays out as fixed-size C structs (every field a scalar) are
+# types of the compiled bridge, aliased by the generated package as
+# `Name = _native.Name`; it then attaches the wire codec to them.
+NATIVE_STRUCTS = frozenset(
+    re.findall(
+        r"^(\w+) = _native\.\1$",
+        (SDK_ROOT / "xybrid" / "_bolt" / "__init__.py").read_text(),
+        re.MULTILINE,
+    )
+)
+
+
+def _native_struct(name: str) -> type:
+    """A positional record standing in for one compiled-bridge struct type."""
+
+    def __init__(self, *args, **kwargs):
+        fields = type(self).__match_args__
+        values = dict(zip(fields, args), **kwargs)
+        if len(args) > len(fields) or set(values) != set(fields):
+            raise TypeError(f"{name} takes exactly {fields}")
+        for field in fields:
+            object.__setattr__(self, field, values[field])
+
+    def __eq__(self, other):
+        return type(other) is type(self) and all(
+            getattr(self, field) == getattr(other, field) for field in self.__match_args__
+        )
+
+    return type(name, (), {"__init__": __init__, "__eq__": __eq__, "__hash__": None})
 
 
 class _NativeStub(ModuleType):
@@ -30,6 +59,10 @@ class _NativeStub(ModuleType):
     def __getattr__(self, name):
         if name.startswith("_register_"):
             return lambda *args: None
+        if name in NATIVE_STRUCTS:
+            struct_type = _native_struct(name)
+            setattr(self, name, struct_type)
+            return struct_type
         raise AttributeError(name)
 
     def _initialize_loader(self, path):
@@ -173,6 +206,25 @@ class InitTests(unittest.TestCase):
         self.native.init_error = None
         self.sdk.init(api_key="key", ingest_url="https://collector.example")
         self.assertTrue(self.sdk.is_initialized())
+
+    def test_native_struct_aliases_are_the_only_bridge_types_the_package_imports(self):
+        # Guards the stub above: if the generator aliases another bridge type,
+        # NATIVE_STRUCTS must pick it up rather than every test failing on import.
+        self.assertIn("XybridSignalStats", NATIVE_STRUCTS)
+        self.assertIs(self.sdk.XybridSignalStats, self.native.XybridSignalStats)
+
+    def test_per_signal_stats_round_trip_through_the_generated_codec(self):
+        stats = self.sdk.XybridObservabilityStats(
+            enabled=True,
+            traces=self.sdk.XybridSignalStats(1, 2, 3, 4, 5),
+            logs=self.sdk.XybridSignalStats(0, 0, 0, 0, 0),
+            metrics=self.sdk.XybridSignalStats(6, 7, 8, 9, 2**64 - 1),
+        )
+        wire = stats._boltffi_wire()
+        self.assertEqual(len(wire), 1 + 3 * 5 * 8)
+        decoded = self.sdk.XybridObservabilityStats._boltffi_from_wire(wire)
+        self.assertEqual(decoded, stats)
+        self.assertEqual(decoded.metrics.pending, 2**64 - 1)
 
     def test_documented_run_options_match_generated_constructor(self):
         readme = (SDK_ROOT / "README.md").read_text()

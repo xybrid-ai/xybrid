@@ -366,7 +366,7 @@ fn partial_len(path: &Path) -> u64 {
 /// known before the first request, so finishing file 1 of 2 reads 50% instead
 /// of restarting the bar. Entries with no declared size contribute `0`, and a
 /// total of `0` is treated as "unknown" by [`ProgressReporter`].
-fn total_declared_bytes(resolved: &ResolvedVariant) -> u64 {
+pub(crate) fn total_declared_bytes(resolved: &ResolvedVariant) -> u64 {
     // One undeclared size poisons the whole aggregate: the missing artifact's
     // bytes would push the running count past the "total", pin progress at the
     // in-flight ceiling for the rest of the download, and let the terminal
@@ -593,6 +593,7 @@ impl RegistryClient {
     /// When [`is_telemetry_opted_out`] is true, returns the request unchanged so
     /// no header is set on the wire.
     fn apply_client_header(&self, req: ureq::Request) -> ureq::Request {
+        let req = xybrid_core::tracing::inject_trace_headers(req);
         self.apply_client_header_with_optout(req, is_telemetry_opted_out())
     }
 
@@ -1090,6 +1091,7 @@ impl RegistryClient {
             );
             if hash == resolved.sha256 {
                 // Already cached and verified
+                crate::observability::record_load_cache_hit(true);
                 info!("Cache hit for '{}' at {}", mask, cache_path.display());
                 return Ok(cache_path);
             }
@@ -1116,6 +1118,7 @@ impl RegistryClient {
         }
 
         // Download from HuggingFace
+        crate::observability::record_load_cache_hit(false);
         info!("Downloading '{}' from {}", mask, resolved.download_url);
         // Time only the wallclock spent inside the download itself so
         // the emitted `ModelDownload.duration_ms` reflects bytes-on-the-
@@ -1252,6 +1255,7 @@ impl RegistryClient {
         // immediately. This avoids hitting the network (and tripping the circuit
         // breaker) when the user is offline with a previously-downloaded model.
         if let Some(extract_dir) = self.resolve_offline(mask) {
+            crate::observability::record_load_cache_hit(true);
             debug!(
                 "Using locally extracted model '{}' at {} (skipping registry)",
                 mask,
@@ -1286,11 +1290,23 @@ impl RegistryClient {
     where
         F: Fn(DownloadStatus),
     {
+        let declared_bytes = total_declared_bytes(resolved);
+        if declared_bytes > 0 {
+            crate::observability::record_load_size(declared_bytes);
+        }
+        // Single-file responses can supply a previously unknown (or corrected)
+        // size in their headers. Preserve that fact even if fetching later fails.
+        let observed_progress = |status: DownloadStatus| {
+            if let Some(bytes) = status.total_bytes {
+                crate::observability::record_load_size(bytes);
+            }
+            progress_callback(status);
+        };
         let reporter = ProgressReporter::new(
-            Some(total_declared_bytes(resolved)),
+            Some(declared_bytes),
             1 + resolved.artifacts.len(),
             cancel,
-            &progress_callback,
+            &observed_progress,
         );
 
         let extract_dir = if resolved.passthrough {
@@ -1335,6 +1351,7 @@ impl RegistryClient {
             }
 
             if cache_valid {
+                crate::observability::record_load_cache_hit(true);
                 if resolved.sha256.is_empty()
                     || resolved
                         .artifacts
@@ -1365,6 +1382,7 @@ impl RegistryClient {
         std::fs::create_dir_all(&extract_dir)
             .map_err(|e| SdkError::cache_src("Failed to create extraction directory", e))?;
 
+        crate::observability::record_load_cache_hit(false);
         self.download_passthrough_file(
             mask,
             &resolved.file,

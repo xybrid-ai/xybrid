@@ -285,7 +285,8 @@ pub use xybrid_core::ir::{
 pub use xybrid_core::ir::PhonemeTiming;
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)
 pub use observability::{
-    flush_observability, init_observability, shutdown_observability, ObservabilityConfig,
+    flush_observability, flush_observability_async, init_observability, shutdown_observability,
+    shutdown_observability_async, CapturedContext, ObservabilityConfig, ObservabilitySession,
     ObservationContext, ObservationOptions, ObservationRef,
 };
 pub use streaming::{FfiPartialResult, FfiStreamState, FfiStreamStats, FfiStreamingConfig};
@@ -763,6 +764,11 @@ impl XybridInit {
     /// Configure resource sampling (CPU, memory, thermal, battery) around
     /// runs. Defaults to `Off`. Overrides the mode set on the observability
     /// configuration.
+    ///
+    /// Without [`Self::observability`] it sets the process-wide mode, used by
+    /// operations that select no observability session. An operation pinned
+    /// to a session (`ObservationOptions::with_session`) keeps that session's
+    /// mode.
     pub fn resource_telemetry(mut self, mode: xybrid_core::device::ResourceTelemetryMode) -> Self {
         self.resource_telemetry = Some(mode);
         self
@@ -935,6 +941,9 @@ pub struct PipelineResult {
     pub total_latency_ms: u32,
     /// Final output envelope kind
     pub final_output: String,
+    /// Reference of the run's `invoke_workflow` operation, when traced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observation_ref: Option<ObservationRef>,
 }
 
 /// Legacy error type for pipeline YAML execution (kept for backward compatibility).
@@ -1029,14 +1038,30 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
     let mut orchestrator = Orchestrator::new();
     let orchestrator_bridge = telemetry::subscribe_orchestrator_events(&orchestrator);
 
-    // Execute the pipeline
+    // Execute the pipeline as one observed workflow.
     let start_time = std::time::Instant::now();
-    let results: Vec<StageExecutionResult> = orchestrator
-        .execute_pipeline(&stages, &input, &metrics, &availability_fn)
-        .map_err(|e| {
-            orchestrator_bridge.drain();
-            PipelineConfigError::ExecutionError(format!("{}", e))
-        })?;
+    let workflow = observability::WorkflowScope::start(
+        config.name.as_deref().unwrap_or("pipeline"),
+        &RunOptions::default(),
+    );
+    let executed = execute_legacy_stages(
+        &mut orchestrator,
+        &stages,
+        &input,
+        &metrics,
+        &availability_fn,
+        workflow.context(),
+    );
+    let observation_ref = workflow.end(
+        &executed
+            .as_ref()
+            .map(|_| ())
+            .map_err(|e| SdkError::pipeline(e.to_string())),
+    );
+    let results: Vec<StageExecutionResult> = executed.map_err(|e| {
+        orchestrator_bridge.drain();
+        PipelineConfigError::ExecutionError(format!("{}", e))
+    })?;
     orchestrator_bridge.drain();
     let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
@@ -1062,7 +1087,52 @@ pub fn run_pipeline(config_path: &str) -> Result<PipelineResult, PipelineConfigE
         stages: stage_timings,
         total_latency_ms,
         final_output,
+        observation_ref,
     })
+}
+
+/// Runs legacy stages through the routed stage observation path used by
+/// [`PipelineRef`] runs: once a stage's route is known it becomes a stage
+/// inference (with its execution attempt) under `parent`, so legacy runs get
+/// the same stage operations, usage and failure classes.
+fn execute_legacy_stages(
+    orchestrator: &mut Orchestrator,
+    stages: &[StageDescriptor],
+    input: &Envelope,
+    metrics: &DeviceMetrics,
+    availability_fn: &dyn Fn(&str) -> LocalAvailability,
+    parent: Option<ObservationContext>,
+) -> xybrid_core::orchestrator::OrchestratorResult<Vec<StageExecutionResult>> {
+    let options = RunOptions::default();
+    orchestrator.execute_pipeline_with_stage(
+        stages,
+        input,
+        metrics,
+        availability_fn,
+        |orchestrator, stage, input, metrics, availability| {
+            let mut observation = None;
+            let result = orchestrator.execute_stage_routed(
+                stage,
+                input,
+                metrics,
+                availability,
+                &mut |route| {
+                    observation = Some(observability::StageObservation::start(
+                        stage,
+                        input,
+                        route,
+                        &options,
+                        parent.clone(),
+                        observability::PipelinePurpose::Run,
+                    ));
+                },
+            );
+            if let Some(observation) = observation {
+                observation.finish(&result);
+            }
+            result
+        },
+    )
 }
 
 /// Run a pipeline from a configuration file asynchronously.
@@ -1145,15 +1215,52 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
     let mut orchestrator = Orchestrator::new();
     let orchestrator_bridge = telemetry::subscribe_orchestrator_events(&orchestrator);
 
-    // Execute the pipeline asynchronously
+    // Execute the pipeline asynchronously as one observed workflow; its
+    // context is installed on every poll, never held across an await. The
+    // stages run on the blocking pool through the same observed, routed path
+    // as `run_pipeline`, so their stage spans (the `pipeline:` span included)
+    // open and close inside one synchronous call rather than across polls.
     let start_time = std::time::Instant::now();
-    let results: Vec<StageExecutionResult> = orchestrator
-        .execute_pipeline_async(&stages, &input, &metrics, &availability_fn)
-        .await
-        .map_err(|e| {
+    let workflow = observability::AsyncWorkflow::start(
+        config.name.as_deref().unwrap_or("pipeline"),
+        &RunOptions::default(),
+    );
+    let parent = workflow.context();
+    let executed = workflow
+        .instrument(async move {
+            let recorder = xybrid_core::tracing::current_recorder();
+            tokio::task::spawn_blocking(move || {
+                let _scope = recorder.map(xybrid_core::tracing::RecorderScope::install);
+                let executed = execute_legacy_stages(
+                    &mut orchestrator,
+                    &stages,
+                    &input,
+                    &metrics,
+                    &availability_fn,
+                    parent,
+                )
+                .map_err(|e| e.to_string());
+                // Keep the orchestrator (and its event bus) alive until the
+                // bridge has drained below.
+                (orchestrator, executed)
+            })
+            .await
+        })
+        .await;
+    let (_orchestrator, executed) = match executed {
+        Ok(done) => done,
+        Err(join) => {
+            let error = format!("pipeline task failed: {join}");
+            workflow.end(&Err::<(), _>(&error));
             orchestrator_bridge.drain();
-            PipelineConfigError::ExecutionError(format!("{}", e))
-        })?;
+            return Err(PipelineConfigError::ExecutionError(error));
+        }
+    };
+    let observation_ref = workflow.end(&executed);
+    let results: Vec<StageExecutionResult> = executed.map_err(|e| {
+        orchestrator_bridge.drain();
+        PipelineConfigError::ExecutionError(e)
+    })?;
     orchestrator_bridge.drain();
     let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
@@ -1179,6 +1286,7 @@ pub async fn run_pipeline_async(config_path: &str) -> Result<PipelineResult, Pip
         stages: stage_timings,
         total_latency_ms,
         final_output,
+        observation_ref,
     })
 }
 

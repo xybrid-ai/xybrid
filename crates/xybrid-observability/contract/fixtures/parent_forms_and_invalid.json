@@ -1,0 +1,259 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "An explicit parent may be passed as a context object, its serialized {traceparent, tracestate} form, a structured clone, or a traceparent string with the same result. Invalid explicit parents are rejected at the API boundary and never become roots; an invalid tracestate is dropped while its traceparent stays valid.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.execute_tool.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "execute_tool",
+              "gen_ai.tool.name": "lookup"
+            },
+            "count": 5,
+            "sum": 0.005
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.invoke_workflow.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "invoke_workflow",
+              "gen_ai.workflow.name": "agent"
+            },
+            "count": 1,
+            "sum": 0.012
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.name": "lookup"
+        },
+        "end_ms": 2,
+        "id": "t_object",
+        "kind": "INTERNAL",
+        "name": "execute_tool lookup",
+        "parent": "wf",
+        "start_ms": 1,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0,
+        "trace_id": "0af7651916cd43dd8448eb211c80319c",
+        "tracestate": "congo=t61rcWkgMzE,rojo=00f067aa0ba902b7"
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.name": "lookup"
+        },
+        "end_ms": 4,
+        "id": "t_serialized",
+        "kind": "INTERNAL",
+        "name": "execute_tool lookup",
+        "parent": "wf",
+        "start_ms": 3,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0,
+        "trace_id": "0af7651916cd43dd8448eb211c80319c",
+        "tracestate": "congo=t61rcWkgMzE,rojo=00f067aa0ba902b7"
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.name": "lookup"
+        },
+        "end_ms": 6,
+        "id": "t_cloned",
+        "kind": "INTERNAL",
+        "name": "execute_tool lookup",
+        "parent": "wf",
+        "start_ms": 5,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0,
+        "trace_id": "0af7651916cd43dd8448eb211c80319c",
+        "tracestate": "congo=t61rcWkgMzE,rojo=00f067aa0ba902b7"
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.name": "lookup"
+        },
+        "end_ms": 8,
+        "id": "t_traceparent",
+        "kind": "INTERNAL",
+        "name": "execute_tool lookup",
+        "parent": "wf",
+        "start_ms": 7,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0,
+        "trace_id": "0af7651916cd43dd8448eb211c80319c",
+        "tracestate": "congo=t61rcWkgMzE,rojo=00f067aa0ba902b7"
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.name": "lookup"
+        },
+        "end_ms": 11,
+        "id": "t_bad_tracestate",
+        "kind": "INTERNAL",
+        "name": "execute_tool lookup",
+        "parent": null,
+        "parent_span_id": "00f067aa0ba902b7",
+        "start_ms": 10,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0,
+        "trace_id": "0af7651916cd43dd8448eb211c80319c",
+        "tracestate": ""
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "invoke_workflow",
+          "gen_ai.workflow.name": "agent"
+        },
+        "end_ms": 12,
+        "id": "wf",
+        "kind": "INTERNAL",
+        "name": "invoke_workflow agent",
+        "parent": null,
+        "parent_span_id": "b7ad6b7169203331",
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0,
+        "trace_id": "0af7651916cd43dd8448eb211c80319c",
+        "tracestate": "congo=t61rcWkgMzE,rojo=00f067aa0ba902b7"
+      }
+    ]
+  },
+  "name": "parent_forms_and_invalid",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "wf",
+      "name": "agent",
+      "op": "start_workflow",
+      "parent_traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+      "parent_tracestate": "congo=t61rcWkgMzE, rojo=00f067aa0ba902b7"
+    },
+    {
+      "at_ms": 1,
+      "id": "t_object",
+      "name": "lookup",
+      "op": "start_tool",
+      "parent": "wf",
+      "parent_form": "object"
+    },
+    {
+      "at_ms": 2,
+      "id": "t_object",
+      "op": "end"
+    },
+    {
+      "at_ms": 3,
+      "id": "t_serialized",
+      "name": "lookup",
+      "op": "start_tool",
+      "parent": "wf",
+      "parent_form": "serialized"
+    },
+    {
+      "at_ms": 4,
+      "id": "t_serialized",
+      "op": "end"
+    },
+    {
+      "at_ms": 5,
+      "id": "t_cloned",
+      "name": "lookup",
+      "op": "start_tool",
+      "parent": "wf",
+      "parent_form": "cloned"
+    },
+    {
+      "at_ms": 6,
+      "id": "t_cloned",
+      "op": "end"
+    },
+    {
+      "at_ms": 7,
+      "id": "t_traceparent",
+      "name": "lookup",
+      "op": "start_tool",
+      "parent": "wf",
+      "parent_form": "traceparent"
+    },
+    {
+      "at_ms": 8,
+      "id": "t_traceparent",
+      "op": "end"
+    },
+    {
+      "at_ms": 9,
+      "expect_error": "invalid_parent",
+      "id": "t_zero_span",
+      "name": "lookup",
+      "op": "start_tool",
+      "parent_traceparent": "00-0af7651916cd43dd8448eb211c80319c-0000000000000000-01"
+    },
+    {
+      "at_ms": 9,
+      "expect_error": "invalid_parent",
+      "id": "t_uppercase",
+      "name": "lookup",
+      "op": "start_tool",
+      "parent_traceparent": "00-0AF7651916CD43DD8448EB211C80319C-b7ad6b7169203331-01"
+    },
+    {
+      "at_ms": 9,
+      "expect_error": "invalid_parent",
+      "id": "t_version_ff",
+      "name": "lookup",
+      "op": "start_tool",
+      "parent_traceparent": "ff-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+    },
+    {
+      "at_ms": 10,
+      "id": "t_bad_tracestate",
+      "name": "lookup",
+      "op": "start_tool",
+      "parent_traceparent": "00-0af7651916cd43dd8448eb211c80319c-00f067aa0ba902b7-01",
+      "parent_tracestate": "a=1,a=2"
+    },
+    {
+      "at_ms": 11,
+      "id": "t_bad_tracestate",
+      "op": "end"
+    },
+    {
+      "at_ms": 12,
+      "id": "wf",
+      "op": "end"
+    }
+  ]
+}

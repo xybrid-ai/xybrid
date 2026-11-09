@@ -1,12 +1,12 @@
 /**
- * Semantic constants of observability contract v1.
+ * Semantic constants of observability contract v2.
  *
  * `test/catalog.test.ts` asserts every value here against
  * `crates/xybrid-observability/contract/catalog.json`, the source of truth shared with the Rust
  * crate. Change both together.
  */
 
-export const CONTRACT_VERSION = "1";
+export const CONTRACT_VERSION = "2";
 export const GENAI_SEMCONV_REVISION = "95aff9cdf605bbc7d7e8f7c4745a693bd0c4eea8";
 export const INSTRUMENTATION_SCOPE_NAME = "xybrid-observability";
 export const EXTENSION_NAMESPACE = "xybrid.genai";
@@ -59,6 +59,25 @@ export const OPERATIONS = {
   string,
   { span_name: string; duration_metric: MetricName; category: string }
 >;
+
+/** `start_inference` names that use their own `OPERATIONS` entry. */
+export const INFERENCE_OPERATIONS = [
+  "chat",
+  "text_completion",
+  "generate_content",
+  "embeddings",
+  "predict",
+] as const;
+
+/**
+ * Any other `start_inference` name (provider-specific, or a catalog name of another API). The
+ * span name is built literally as `{operation} {model}`, never by template substitution.
+ */
+export const CUSTOM_INFERENCE_OPERATION = {
+  span_name: "{operation} {model}",
+  duration_metric: "gen_ai.client.inference.duration",
+  category: "inference",
+} as const satisfies { span_name: string; duration_metric: MetricName; category: string };
 
 /** Attribute keys, grouped as in the catalog. */
 export const ATTR = {
@@ -166,6 +185,11 @@ export const ENUMS = {
   finish_reason: ["stop", "length", "content_filter", "tool_call", "compaction", "error"],
   content_capture: ["no_content", "span_only", "event_only", "span_and_event"],
   "xybrid.genai.resource.thermal.state": ["nominal", "fair", "serious", "critical"],
+  trace_mode: ["default", "suppress"],
+  redaction_rule: ["replace_literal", "omit_attribute"],
+  signal: ["traces", "logs", "metrics"],
+  export_counter: ["accepted", "exported", "dropped", "failed", "pending"],
+  header_policy: ["merge_environment", "isolated"],
 } as const;
 
 export const BUCKET_BOUNDARIES = {
@@ -253,6 +277,12 @@ export const METRIC_DIMENSIONS = {
     "xybrid.genai.attempt.reason",
     "error.type",
   ],
+  model_load: [
+    "gen_ai.operation.name",
+    "gen_ai.provider.name",
+    "gen_ai.request.model",
+    "error.type",
+  ],
 } as const;
 
 export type ContentCapture = (typeof ENUMS.content_capture)[number];
@@ -264,20 +294,53 @@ export const DEFAULTS = {
   truncation_marker: "…[truncated]",
   truncation_min_string_bytes: 32,
   redaction_replacement: "[REDACTED]",
+  max_retained_operation_bytes: 491520,
+  max_traversal_bytes: 491520,
+  max_json_depth: 128,
+  preflight_node_bytes: 16,
   batch: {
     max_queue_size: 2048,
     max_export_batch_size: 256,
     scheduled_delay_ms: 2000,
     export_timeout_ms: 10000,
   },
-  retry: { max_retries: 2, initial_delay_ms: 200, max_delay_ms: 2000 },
+  retry: {
+    max_retries: 2,
+    initial_delay_ms: 200,
+    max_delay_ms: 2000,
+    retryable_status: [429, 502, 503, 504],
+  },
   max_request_body_bytes: 491520,
+  max_buffered_bytes_per_signal: 33554432,
+  max_response_body_bytes: 65536,
   shutdown_timeout_ms: 5000,
   flush_timeout_ms: 5000,
   metric_export_interval_ms: 30000,
+  max_tracestate_members: 32,
+  max_tracestate_chars: 512,
 } as const;
 
-export const ENV = { content_capture: "OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT" } as const;
+export const ENV = {
+  content_capture: "OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT",
+  content_capture_legacy: "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT",
+  sdk_disabled: "OTEL_SDK_DISABLED",
+  otlp_endpoint: "OTEL_EXPORTER_OTLP_ENDPOINT",
+  otlp_signal_endpoint: "OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT",
+  otlp_headers: "OTEL_EXPORTER_OTLP_HEADERS",
+  otlp_signal_headers: "OTEL_EXPORTER_OTLP_{SIGNAL}_HEADERS",
+  otlp_protocol: "OTEL_EXPORTER_OTLP_PROTOCOL",
+  otlp_signal_protocol: "OTEL_EXPORTER_OTLP_{SIGNAL}_PROTOCOL",
+  otlp_timeout: "OTEL_EXPORTER_OTLP_TIMEOUT",
+  otlp_signal_timeout: "OTEL_EXPORTER_OTLP_{SIGNAL}_TIMEOUT",
+  signal_exporter: "OTEL_{SIGNAL}_EXPORTER",
+  bsp_max_queue_size: "OTEL_BSP_MAX_QUEUE_SIZE",
+  bsp_max_export_batch_size: "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
+  bsp_schedule_delay: "OTEL_BSP_SCHEDULE_DELAY",
+  bsp_export_timeout: "OTEL_BSP_EXPORT_TIMEOUT",
+  metric_export_interval: "OTEL_METRIC_EXPORT_INTERVAL",
+  service_name: "OTEL_SERVICE_NAME",
+  resource_attributes: "OTEL_RESOURCE_ATTRIBUTES",
+} as const;
 
 export const PRESETS = {
   xybrid_traces: {
@@ -285,5 +348,124 @@ export const PRESETS = {
     auth_header: "Authorization",
     auth_scheme: "Bearer",
     signals: ["traces"],
+    protocol: "http/protobuf",
+    header_policy: "isolated",
   },
+} as const;
+
+/** Catalog value type of an attribute. */
+export type AttributeType = "int" | "double" | "boolean" | "string" | "string[]" | "json";
+
+/**
+ * Value type of every catalog attribute (all groups merged). `gen_ai.prompt.variable.{key}`
+ * stands for every prompt variable key; use {@link catalogAttributeType} for lookups.
+ */
+export const ATTRIBUTE_TYPES: Readonly<Record<string, AttributeType>> = {
+  "gen_ai.operation.name": "string",
+  "gen_ai.provider.name": "string",
+  "gen_ai.request.model": "string",
+  "gen_ai.request.max_tokens": "int",
+  "gen_ai.request.temperature": "double",
+  "gen_ai.request.top_p": "double",
+  "gen_ai.request.top_k": "int",
+  "gen_ai.request.seed": "int",
+  "gen_ai.request.stop_sequences": "string[]",
+  "gen_ai.request.frequency_penalty": "double",
+  "gen_ai.request.presence_penalty": "double",
+  "gen_ai.request.choice.count": "int",
+  "gen_ai.request.stream": "boolean",
+  "gen_ai.output.type": "string",
+  "gen_ai.conversation.id": "string",
+  "gen_ai.response.id": "string",
+  "gen_ai.response.model": "string",
+  "gen_ai.response.finish_reasons": "string[]",
+  "gen_ai.response.time_to_first_chunk": "double",
+  "gen_ai.usage.input_tokens": "int",
+  "gen_ai.usage.output_tokens": "int",
+  "gen_ai.usage.cache_read.input_tokens": "int",
+  "gen_ai.usage.cache_write.input_tokens": "int",
+  "gen_ai.usage.reasoning.output_tokens": "int",
+  "gen_ai.usage.text.input_tokens": "int",
+  "gen_ai.usage.image.input_tokens": "int",
+  "gen_ai.usage.audio.input_tokens": "int",
+  "gen_ai.usage.text.output_tokens": "int",
+  "gen_ai.usage.image.output_tokens": "int",
+  "gen_ai.usage.audio.output_tokens": "int",
+  "gen_ai.embeddings.dimension.count": "int",
+  "gen_ai.prompt.name": "string",
+  "gen_ai.prompt.version": "string",
+  "gen_ai.workflow.name": "string",
+  "gen_ai.tool.name": "string",
+  "gen_ai.tool.call.id": "string",
+  "gen_ai.tool.type": "string",
+  "gen_ai.tool.description": "string",
+  "gen_ai.token.modality": "string",
+  "gen_ai.evaluation.name": "string",
+  "gen_ai.evaluation.score.value": "double",
+  "gen_ai.evaluation.score.label": "string",
+  "gen_ai.evaluation.explanation": "string",
+  "error.type": "string",
+  "server.address": "string",
+  "server.port": "int",
+  "exception.type": "string",
+  "exception.message": "string",
+  "gen_ai.input.messages": "json",
+  "gen_ai.output.messages": "json",
+  "gen_ai.system_instructions": "json",
+  "gen_ai.tool.call.arguments": "json",
+  "gen_ai.tool.call.result": "json",
+  "gen_ai.prompt.variable.{key}": "string",
+  "gen_ai.tool.definitions": "json",
+  "xybrid.genai.execution.location": "string",
+  "xybrid.genai.runtime.name": "string",
+  "xybrid.genai.runtime.version": "string",
+  "xybrid.genai.accelerator": "string",
+  "xybrid.genai.task": "string",
+  "xybrid.genai.input.modalities": "string[]",
+  "xybrid.genai.output.modalities": "string[]",
+  "xybrid.genai.response.time_to_first_token": "double",
+  "xybrid.genai.response.time_per_output_token": "double",
+  "xybrid.genai.response.chunk_count": "int",
+  "xybrid.genai.attempt.index": "int",
+  "xybrid.genai.attempt.reason": "string",
+  "xybrid.genai.attempt.count": "int",
+  "xybrid.genai.content.truncated_attributes": "string[]",
+  "xybrid.genai.model.size_bytes": "int",
+  "xybrid.genai.model.cache_hit": "boolean",
+  "xybrid.genai.model.format": "string",
+  "xybrid.genai.resource.cpu.utilization": "double",
+  "xybrid.genai.resource.memory.used_bytes": "int",
+  "xybrid.genai.resource.process.rss_bytes": "int",
+  "xybrid.genai.resource.process.peak_rss_bytes": "int",
+  "xybrid.genai.resource.thermal.state": "string",
+  "xybrid.genai.resource.battery.level": "double",
+  "xybrid.genai.resource.battery.charging": "boolean",
+  "xybrid.genai.resource.accelerator.utilization": "double",
+  "xybrid.genai.resource.accelerator.memory.used_bytes": "int",
+  "xybrid.genai.feedback.comment": "string",
+};
+
+/** The catalog type of `key`, covering every `gen_ai.prompt.variable.<name>`. */
+export const catalogAttributeType = (key: string): AttributeType | undefined =>
+  Object.hasOwn(ATTRIBUTE_TYPES, key)
+    ? ATTRIBUTE_TYPES[key]
+    : key.startsWith("gen_ai.prompt.variable.")
+      ? "string"
+      : undefined;
+
+/** OTLP encoding the package's exporters enforce for telemetry of `enforced_scope`. */
+export const WIRE = {
+  enforced_scope: "xybrid-observability",
+  attribute_value_types: {
+    int: "intValue",
+    double: "doubleValue",
+    boolean: "boolValue",
+    string: "stringValue",
+    "string[]": "arrayValue of stringValue",
+    json: "stringValue holding compact JSON on spans; structured AnyValue on log events",
+  },
+  metric_value_types: { int: "asInt", double: "asDouble" },
+  json_null: "AnyValue with no value set (OTLP/JSON {})",
+  rust_null_carrier:
+    "opentelemetry::logs::AnyValue::Bytes(empty), seen only between the Rust observer and the paired exporter",
 } as const;

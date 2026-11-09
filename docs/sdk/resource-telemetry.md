@@ -25,6 +25,15 @@ configured sampling mode when observability is initialized. This does not turn
 on export by itself. Resource sampling is independent of content capture and of
 trace sampling/suppression.
 
+The mode belongs to the session. An operation pinned to an
+`ObservabilitySession` (`ObservationOptions::with_session`) samples with that
+session's mode whether or not it is the default. Operations that select no
+session use the process-wide mode. Installing a default session sets it to that
+session's mode; `xybrid_sdk::init().resource_telemetry(...)` without an
+observability configuration also sets it, and the most recent setting wins. An
+operation fixes its mode when it starts, so replacing the default session does
+not change sampling for work already under way.
+
 | Mode | Per-run collection | Periodic sampler | Separate raw-sample output |
 |---|---|---|---|
 | `Off` | None | No | No |

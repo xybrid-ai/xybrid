@@ -1297,12 +1297,13 @@ fn connect_and_auth_never_start_otlp_export() {
     exported.assert_hits(0);
 
     // Any other command does start the configured exporter, and says so on
-    // stderr only.
-    let run = sandbox.run_with(&["telemetry", "status"], &otlp);
+    // stderr only. (`telemetry status` only reports the configuration, so a
+    // local command stands in.)
+    let run = sandbox.run_with(&["cache", "status"], &otlp);
     assert_eq!(run.code, Some(0), "{run}");
     assert!(run.stderr.contains("Observability enabled"), "{run}");
     assert!(!run.stdout.contains("Observability enabled"), "{run}");
-    let quiet = sandbox.run_with(&["--quiet", "telemetry", "status"], &otlp);
+    let quiet = sandbox.run_with(&["--quiet", "cache", "status"], &otlp);
     assert!(!quiet.stderr.contains("Observability enabled"), "{quiet}");
 }
 
@@ -1329,11 +1330,30 @@ fn observability_resolves_the_saved_key_and_requires_one() {
         "--observability",
         "--traces-endpoint",
         &traces,
-        "telemetry",
+        "cache",
         "status",
     ]);
     assert_eq!(run.code, Some(0), "the saved key is enough: {run}");
     assert!(run.stderr.contains("Observability enabled"), "{run}");
+    run.assert_no_secret(KEY);
+
+    // `telemetry status` reports the same resolution without exporting.
+    let run = sandbox.run(&[
+        "--platform-url",
+        &url,
+        "--observability",
+        "--traces-endpoint",
+        &traces,
+        "telemetry",
+        "status",
+        "--json",
+    ]);
+    assert_eq!(run.code, Some(0), "{run}");
+    let status: Value = serde_json::from_str(&run.stdout).expect("status JSON");
+    assert_eq!(status["export_configured"], true, "{run}");
+    assert_eq!(status["export_source"], "flags", "{run}");
+    assert_eq!(status["signals"]["traces"]["origin"], url.as_str(), "{run}");
+    assert!(!run.stderr.contains("Observability enabled"), "{run}");
     run.assert_no_secret(KEY);
 
     // ...but it never leaves its platform.

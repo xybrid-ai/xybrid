@@ -86,6 +86,27 @@ jobs:
       - name: Compare committed Swift and C header with fresh generation
         run: bindings/apple/scripts/gen-bolt-bindings.sh --check
 
+  # The committed Unity C# (bindings/unity/Runtime/Bolt) is generator output
+  # like Kotlin/Swift/Python, but only its compile was gated: a bolt export or
+  # doc-comment change could ship without regenerating it. Generation is
+  # host-agnostic (boltffi + a cargo metadata build), so this runs on Linux;
+  # the netstandard2.1 compile stays in unity-bolt-compile.
+  unity-bolt-drift:
+    name: Unity C# generation drift
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.unity_bolt == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install the pinned boltffi CLI
+        run: cargo install boltffi_cli --version 0.30.1 --locked
+      - name: Compare committed Unity C# with fresh generation
+        run: python3 tools/scripts/gen_unity_bolt_csharp.py --check
+
   tooling-tests:
     name: Tooling tests (${{ matrix.platform }})
     needs: tooling-changes
@@ -510,6 +531,9 @@ jobs:
           pnpm typecheck
           pnpm test
           pnpm pack:release
+      - name: Check packed consumers against aligned OpenTelemetry 3.0 and 3.1 families
+        working-directory: bindings/observability-js
+        run: pnpm test:families
 
   web:
     needs: tooling-changes
@@ -633,7 +657,7 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, workflow-index, version-sync, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, observability, web]
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, unity-bolt-drift, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, workflow-index, version-sync, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, observability, web]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Verify required job results

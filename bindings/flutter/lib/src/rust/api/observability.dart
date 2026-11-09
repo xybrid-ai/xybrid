@@ -9,9 +9,11 @@
 
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
+part 'observability.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `from_sdk`, `to_facade`, `to_facade`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `eq`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `from_sdk`, `to_facade`, `to_facade`, `to_sdk`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Start exporting, replacing the previous configuration. Configuration
 /// errors cross the bridge; failed initialization can be retried.
@@ -70,6 +72,9 @@ class FfiObservabilityConfig {
   final bool metadataOnly;
   final int? maxContentBytes;
   final int? liveTraceIntervalMs;
+  final String? deviceId;
+  final List<FfiRedactionRule> redactionRules;
+  final List<String> providerOrigins;
 
   const FfiObservabilityConfig({
     this.apiKey,
@@ -83,6 +88,9 @@ class FfiObservabilityConfig {
     required this.metadataOnly,
     this.maxContentBytes,
     this.liveTraceIntervalMs,
+    this.deviceId,
+    required this.redactionRules,
+    required this.providerOrigins,
   });
 
   @override
@@ -97,7 +105,10 @@ class FfiObservabilityConfig {
       resourceAttributes.hashCode ^
       metadataOnly.hashCode ^
       maxContentBytes.hashCode ^
-      liveTraceIntervalMs.hashCode;
+      liveTraceIntervalMs.hashCode ^
+      deviceId.hashCode ^
+      redactionRules.hashCode ^
+      providerOrigins.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -114,29 +125,29 @@ class FfiObservabilityConfig {
           resourceAttributes == other.resourceAttributes &&
           metadataOnly == other.metadataOnly &&
           maxContentBytes == other.maxContentBytes &&
-          liveTraceIntervalMs == other.liveTraceIntervalMs;
+          liveTraceIntervalMs == other.liveTraceIntervalMs &&
+          deviceId == other.deviceId &&
+          redactionRules == other.redactionRules &&
+          providerOrigins == other.providerOrigins;
 }
 
 /// Delivery counters (zero when no packaged exporter is active).
 class FfiObservabilityStats {
   final bool enabled;
-  final BigInt spansExported;
-  final BigInt spansDropped;
-  final BigInt exportFailures;
+  final FfiSignalStats traces;
+  final FfiSignalStats logs;
+  final FfiSignalStats metrics;
 
   const FfiObservabilityStats({
     required this.enabled,
-    required this.spansExported,
-    required this.spansDropped,
-    required this.exportFailures,
+    required this.traces,
+    required this.logs,
+    required this.metrics,
   });
 
   @override
   int get hashCode =>
-      enabled.hashCode ^
-      spansExported.hashCode ^
-      spansDropped.hashCode ^
-      exportFailures.hashCode;
+      enabled.hashCode ^ traces.hashCode ^ logs.hashCode ^ metrics.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -144,9 +155,44 @@ class FfiObservabilityStats {
       other is FfiObservabilityStats &&
           runtimeType == other.runtimeType &&
           enabled == other.enabled &&
-          spansExported == other.spansExported &&
-          spansDropped == other.spansDropped &&
-          exportFailures == other.exportFailures;
+          traces == other.traces &&
+          logs == other.logs &&
+          metrics == other.metrics;
+}
+
+/// Parent and content-correlation controls shared by load and ASR APIs.
+class FfiObservationOptions {
+  final String? traceparent;
+  final String? tracestate;
+  final String? conversationId;
+  final bool suppressTrace;
+
+  const FfiObservationOptions({
+    this.traceparent,
+    this.tracestate,
+    this.conversationId,
+    required this.suppressTrace,
+  });
+
+  static Future<FfiObservationOptions> default_() => XybridRustLib.instance.api
+      .crateApiObservabilityFfiObservationOptionsDefault();
+
+  @override
+  int get hashCode =>
+      traceparent.hashCode ^
+      tracestate.hashCode ^
+      conversationId.hashCode ^
+      suppressTrace.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiObservationOptions &&
+          runtimeType == other.runtimeType &&
+          traceparent == other.traceparent &&
+          tracestate == other.tracestate &&
+          conversationId == other.conversationId &&
+          suppressTrace == other.suppressTrace;
 }
 
 /// Trace and span ids of a run, for feedback and evaluation correlation.
@@ -169,4 +215,53 @@ class FfiObservationRef {
           runtimeType == other.runtimeType &&
           traceId == other.traceId &&
           spanId == other.spanId;
+}
+
+@freezed
+sealed class FfiRedactionRule with _$FfiRedactionRule {
+  const FfiRedactionRule._();
+
+  const factory FfiRedactionRule.replaceLiteral({
+    required String find,
+    required String replacement,
+  }) = FfiRedactionRule_ReplaceLiteral;
+  const factory FfiRedactionRule.omitAttribute({
+    required String key,
+  }) = FfiRedactionRule_OmitAttribute;
+}
+
+/// Delivery counts for a single signal. Pending includes queued and in-flight items.
+class FfiSignalStats {
+  final BigInt accepted;
+  final BigInt exported;
+  final BigInt dropped;
+  final BigInt failed;
+  final BigInt pending;
+
+  const FfiSignalStats({
+    required this.accepted,
+    required this.exported,
+    required this.dropped,
+    required this.failed,
+    required this.pending,
+  });
+
+  @override
+  int get hashCode =>
+      accepted.hashCode ^
+      exported.hashCode ^
+      dropped.hashCode ^
+      failed.hashCode ^
+      pending.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiSignalStats &&
+          runtimeType == other.runtimeType &&
+          accepted == other.accepted &&
+          exported == other.exported &&
+          dropped == other.dropped &&
+          failed == other.failed &&
+          pending == other.pending;
 }

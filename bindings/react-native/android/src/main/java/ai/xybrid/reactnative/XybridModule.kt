@@ -200,6 +200,47 @@ class XybridModule(reactContext: ReactApplicationContext) : NativeXybridSpec(rea
       )
     }
 
+  override fun observationStart(kind: String, descriptor: ReadableMap, options: ReadableMap?, promise: Promise) =
+    now(promise) {
+      val entry = XybridObservationEntry.start(kind, descriptor.toHashMap(), XybridCodec.decodeObservation(options?.toHashMap()))
+      handles.insert(entry, "observation")
+    }
+
+  override fun observationContext(handle: String, promise: Promise) =
+    now(promise) {
+      handles.use(handle, XybridObservationEntry::class.java) { it.context() }
+    }
+
+  override fun observationReference(handle: String, promise: Promise) =
+    now(promise) {
+      handles.use(handle, XybridObservationEntry::class.java) { it.reference() }
+    }
+
+  override fun observationComplete(handle: String, promise: Promise) =
+    now(promise) {
+      handles.use(handle, XybridObservationEntry::class.java) { it.complete() }
+    }
+
+  override fun observationFail(handle: String, errorType: String, message: String?, promise: Promise) =
+    now(promise) {
+      handles.use(handle, XybridObservationEntry::class.java) { it.fail(errorType, message) }
+    }
+
+  override fun observationCancel(handle: String, promise: Promise) =
+    now(promise) {
+      handles.use(handle, XybridObservationEntry::class.java) { it.cancel() }
+    }
+
+  override fun observationIsFinished(handle: String, promise: Promise) =
+    now(promise) {
+      handles.use(handle, XybridObservationEntry::class.java) { it.isFinished() }
+    }
+
+  override fun observationRecord(handle: String, field: String, value: ReadableMap, promise: Promise) =
+    now(promise) {
+      handles.use(handle, XybridObservationEntry::class.java) { it.record(field, value.toHashMap()) }
+    }
+
   // -- Device state push ------------------------------------------------------
 
   override fun setBatteryLevel(percent: Double, promise: Promise) = now(promise) {
@@ -275,17 +316,16 @@ class XybridModule(reactContext: ReactApplicationContext) : NativeXybridSpec(rea
       val o = XybridCodec.obj(raw, what)
       val kind = XybridCodec.string(o, "kind", what)
       val value = XybridCodec.string(o, "value", what)
-      val model = when (kind) {
-        "registry" -> XybridModel.fromRegistry(value)
-        "registrySpeculative" -> XybridModel.fromRegistrySpeculative(value)
-        "bundle" -> XybridModel.fromBundle(XybridCodec.filePath(value))
-        "directory" -> XybridModel.fromDirectory(XybridCodec.filePath(value))
-        "huggingFace" -> XybridCodec.optionalString(o, "revision", what)
-          ?.let { XybridModel.fromHuggingfaceWithRevision(value, it) }
-          ?: XybridModel.fromHuggingface(value)
-        "modelFile" -> XybridModel.fromModelFile(XybridCodec.filePath(value))
+      val modelSource = when (kind) {
+        "registry" -> ai.xybrid.XybridModelSource.Registry(value, false)
+        "registrySpeculative" -> ai.xybrid.XybridModelSource.Registry(value, true)
+        "bundle" -> ai.xybrid.XybridModelSource.Bundle(XybridCodec.filePath(value))
+        "directory" -> ai.xybrid.XybridModelSource.Directory(XybridCodec.filePath(value))
+        "huggingFace" -> ai.xybrid.XybridModelSource.HuggingFace(value, XybridCodec.optionalString(o, "revision", what))
+        "modelFile" -> ai.xybrid.XybridModelSource.ModelFile(XybridCodec.filePath(value))
         else -> throw BridgeException.InvalidArgument("unknown model source kind '$kind'")
       }
+      val model = XybridModel.load(modelSource, XybridCodec.decodeObservation(o["observation"]))
       handles.insert(model, "model")
     }
   }
@@ -294,6 +334,7 @@ class XybridModule(reactContext: ReactApplicationContext) : NativeXybridSpec(rea
     handles.use(model, XybridModel::class.java) { m ->
       mapOf(
         "modelId" to m.modelId(),
+        "loadObservationRef" to m.loadObservationRef()?.let(XybridCodec::encodeObservationRef),
         "version" to m.version(),
         "outputType" to XybridCodec.encodeOutputType(m.outputType()),
         "isLlm" to m.isLlm(),
@@ -473,9 +514,11 @@ class XybridModule(reactContext: ReactApplicationContext) : NativeXybridSpec(rea
             handles.dispose(stream)
             mapOf("kind" to "complete", "result" to XybridCodec.encodeResult(result))
           }
-          XybridStreamEventKind.AUDIO -> throw BridgeException.InvalidArgument(
-            "Token streams cannot deliver audio; use run for batch speech"
-          )
+          XybridStreamEventKind.AUDIO -> {
+            val packet = event.audio
+              ?: throw XybridError.InferenceError("stream returned an audio event without audio")
+            mapOf("kind" to "audio", "audio" to XybridCodec.encodeTtsAudio(packet))
+          }
         }
       } catch (t: Throwable) {
         // Dispose also aborts a stream rejected for an unsupported event.
@@ -633,7 +676,7 @@ class XybridModule(reactContext: ReactApplicationContext) : NativeXybridSpec(rea
   }
 
   override fun sessionFlush(session: String, promise: Promise) =
-    background(promise) { handles.use(session, SessionEntry::class.java) { it.session.flush() } }
+    background(promise) { handles.use(session, SessionEntry::class.java) { XybridCodec.encodeTranscription(it.session.flush()) } }
 
   override fun sessionReset(session: String, promise: Promise) =
     background(promise) { handles.use(session, SessionEntry::class.java) { it.session.reset() } }
@@ -728,6 +771,24 @@ private object SdkSetup {
         config.setService(XybridCodec.string(service, "name", serviceWhat), XybridCodec.optionalString(service, "version", serviceWhat))
       }
       XybridCodec.stringMap(o, "resourceAttributes", what).forEach { (key, value) -> config.setResourceAttribute(key, value) }
+      o["providerOrigins"]?.let { raw ->
+        val origins = raw as? List<*> ?: throw BridgeException.InvalidArgument("providerOrigins must be strings")
+        origins.forEach { origin ->
+          config.allowProviderContext(origin as? String ?: throw BridgeException.InvalidArgument("providerOrigins must be strings"))
+        }
+      }
+      XybridCodec.optionalString(o, "deviceId", what)?.let(config::setDeviceId)
+      o["redactionRules"]?.let { raw ->
+        val rules = raw as? List<*> ?: throw BridgeException.InvalidArgument("redactionRules must be an array")
+        rules.forEach { entry ->
+          val rule = XybridCodec.obj(entry, "redaction rule")
+          when (XybridCodec.string(rule, "kind", "redaction rule")) {
+            "replaceLiteral" -> config.addLiteralRedaction(XybridCodec.string(rule, "find", "redaction rule"), XybridCodec.string(rule, "replacement", "redaction rule"))
+            "omitAttribute" -> config.omitContentAttribute(XybridCodec.string(rule, "key", "redaction rule"))
+            else -> throw BridgeException.InvalidArgument("unknown redaction rule")
+          }
+        }
+      }
       XybridCodec.optionalBoolean(o, "metadataOnly", what)?.let(config::setMetadataOnly)
       XybridCodec.optionalUInt(o, "maxContentBytes", what)?.let(config::setMaxContentBytes)
       XybridCodec.optionalUInt(o, "liveTraceIntervalMs", what)?.let(config::setLiveTraceIntervalMs)

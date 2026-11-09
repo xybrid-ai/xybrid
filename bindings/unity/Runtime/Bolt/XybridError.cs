@@ -50,6 +50,7 @@ namespace XybridBolt
                 20 => new UnsupportedBackendCapability(reader.ReadString()),
                 21 => new InvalidImage(reader.ReadString()),
                 22 => new Cancelled(reader.ReadString()),
+                23 => new TelemetryDelivery(reader.ReadString()),
                 uint tag => throw new global::System.InvalidOperationException($"Invalid XybridError tag: {tag}"),
             };
 
@@ -235,6 +236,14 @@ namespace XybridBolt
                     }
                     break;
                 }
+                case TelemetryDelivery value:
+                {
+                    writer.WriteU32(23);
+                    {
+                        writer.WriteString(value.Message);
+                    }
+                    break;
+                }
                 default:
                     throw new global::System.InvalidOperationException("Unknown XybridError variant");
             }
@@ -288,6 +297,11 @@ namespace XybridBolt
         /// The host called `cancel` — today, on a model download.
         /// </summary>
         public sealed record Cancelled(string Message) : XybridError;
+
+        /// <summary>
+        /// Telemetry delivery is incomplete or unknown; do not rerun inference.
+        /// </summary>
+        public sealed record TelemetryDelivery(string Message) : XybridError;
 
     }
 

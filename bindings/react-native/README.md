@@ -97,8 +97,44 @@ await Observability.flush(2000); // e.g. when the app backgrounds
 `suppressTrace: true` skips a run's detailed trace (metrics are still
 recorded). Feedback and evaluations (`Observability.recordEvaluation`) need a
 logs signal, so they resolve `false` with the Xybrid preset, which exports
-traces only. `Observability.stats()` reports exported and dropped spans;
-`Observability.shutdown(timeoutMs)` flushes and stops export.
+traces only. `Observability.stats()` reports accepted, exported, dropped,
+failed and pending counts per signal (`traces`, `logs`, `metrics`);
+`Observability.shutdown(timeoutMs)` flushes and stops export. A flush or
+shutdown that cannot deliver everything rejects with
+`xybrid_telemetry_delivery`; the inference already succeeded, so do not rerun it.
+
+References (`result.observation`, pipeline and stage `observation`, a session's
+`flush()` result, `info().loadObservationRef`) use the portable
+`{ trace_id, span_id }` shape, so they can be passed to `@xybrid/observability`
+or your server unchanged. Pipelines, `ModelLoader.withObservation(...)`,
+`model.stream({ observation })` and `runTtsStreaming` take the same trace
+fields as `run`.
+
+Record work Xybrid does not run itself (a tool, another runtime's inference)
+with a manual operation, and pass its `context()` as a child's options. The
+first terminal call wins. Call `dispose()` when done: releasing an unfinished
+operation cancels it without flushing, and so does module teardown.
+
+```ts
+import { ToolObservation, WorkflowObservation } from '@xybrid/react-native';
+
+const workflow = await WorkflowObservation.start('answer-question');
+try {
+  const tool = await ToolObservation.start(
+    { name: 'search', argumentsJson: '{"q":"otel"}' },
+    await workflow.context(),
+  );
+  await tool.recordResult('{"hits":3}');
+  await tool.complete();
+  await tool.dispose();
+  await workflow.complete();
+} catch (error) {
+  await workflow.fail('application_error');
+  throw error;
+} finally {
+  await workflow.dispose();
+}
+```
 
 ### Load and run
 
@@ -252,7 +288,7 @@ const session = await asr.stream({ language: 'en' });
   for await (const partial of session.partials()) setCaption(partial.text);
 })();
 await session.feed(float32Samples);       // from your audio callback
-const transcript = await session.flush(); // when the user stops talking
+const { text } = await session.flush();  // when the user stops talking
 await session.release();
 ```
 

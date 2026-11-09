@@ -11,6 +11,9 @@ export type WireObservabilityConfig = (
   jsonProtocol?: boolean;
   service?: { name: string; version?: string };
   resourceAttributes?: Record<string, string>;
+  deviceId?: string;
+  providerOrigins?: string[];
+  redactionRules?: Array<{ kind: 'replaceLiteral'; find: string; replacement: string } | { kind: 'omitAttribute'; key: string }>;
   metadataOnly?: boolean;
   maxContentBytes?: number;
   liveTraceIntervalMs?: number;
@@ -75,6 +78,32 @@ export class ObservabilityConfig {
   /** Attach a resource attribute (for example `deployment.environment`). */
   setResourceAttribute(key: string, value: string): this {
     this.wire.resourceAttributes = { ...this.wire.resourceAttributes, [key]: value };
+    return this;
+  }
+
+  /** Permit W3C propagation to this exact provider origin. */
+  allowProviderContext(origin: string): this {
+    (this.wire.providerOrigins ??= []).push(origin);
+    return this;
+  }
+
+  /** Caller-supplied stable device identity; never detected automatically. */
+  setDeviceId(id: string): this {
+    this.wire.deviceId = id;
+    return this;
+  }
+
+  /** Replace literal text in governed string values, in insertion order. */
+  addLiteralRedaction(find: string, replacement: string): this {
+    if (find.length === 0) throw new TypeError('redaction find must be nonempty');
+    (this.wire.redactionRules ??= []).push({ kind: 'replaceLiteral', find, replacement });
+    return this;
+  }
+
+  /** Omit one exact governed content attribute. */
+  omitContentAttribute(key: string): this {
+    if (key.length === 0) throw new TypeError('redaction key must be nonempty');
+    (this.wire.redactionRules ??= []).push({ kind: 'omitAttribute', key });
     return this;
   }
 

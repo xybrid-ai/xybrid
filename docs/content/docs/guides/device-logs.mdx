@@ -58,15 +58,12 @@ Info level and below, which Console hides by default.
 
 ## What to look for
 
-**Telemetry not reaching the dashboard.** Each failed export logs the attempt
-count and the underlying transport error:
-
-```
-W/xybrid: Transport error sending telemetry batch (attempt 1/3): Connection Failed
-```
-
-If you see nothing at all, telemetry isn't enabled — it starts only when an
-API key is configured at init.
+**Telemetry not reaching the dashboard.** Export requires explicit
+observability configuration; an API key alone enables authentication. Check
+per-signal `accepted`, `exported`, `dropped`, `failed` and `pending` stats,
+and handle delivery errors from flush/shutdown. Export diagnostics omit
+payloads, credentials and response bodies. An empty log does not establish
+whether export is enabled or delivered.
 
 **Models failing to download.** The registry client logs every endpoint it
 tries before giving up:
@@ -76,7 +73,7 @@ W/xybrid: URL https://registry.xybrid.dev failed: Registry unreachable:
           Failed to resolve model (connection refused or host unreachable), trying next
 ```
 
-Both lines above share one common cause worth checking early: **networks that
+Export and registry failures can share one cause worth checking early: **networks that
 block outbound TCP 443** (corporate and guest Wi-Fi are the usual suspects).
 The device can look "online" — ping works, captive portal passed — while every
 HTTPS connection from the app times out. Try another network or a hotspot

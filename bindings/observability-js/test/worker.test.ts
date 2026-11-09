@@ -8,7 +8,7 @@ test("context crosses a worker boundary and parents the worker's span", async ()
   const message = { context: serializeContext(op.context()) };
   // What postMessage does to the payload.
   expect(deserializeContext(structuredClone(message).context)?.spanId).toBe(
-    op.observationRef()?.spanId ?? "",
+    op.observationRef()?.span_id ?? "",
   );
   const worker = new Worker(new URL("./support/worker.ts", import.meta.url).href);
   try {
@@ -19,8 +19,8 @@ test("context crosses a worker boundary and parents the worker's span", async ()
         worker.postMessage(message);
       },
     );
-    expect(reply.traceId).toBe(op.observationRef()?.traceId ?? "");
-    expect(reply.parentSpanId).toBe(op.observationRef()?.spanId ?? "");
+    expect(reply.traceId).toBe(op.observationRef()?.trace_id ?? "");
+    expect(reply.parentSpanId).toBe(op.observationRef()?.span_id ?? "");
     // Workers report wall-clock epoch milliseconds, comparable with the main thread's.
     expect(Math.abs(reply.startedAtMs - Date.now())).toBeLessThan(60_000);
   } finally {

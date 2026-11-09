@@ -1,0 +1,228 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 128,
+    "max_retained_operation_bytes": 300,
+    "redact_substrings": []
+  },
+  "description": "Re-recording a content attribute replaces it (last write wins, one key on the span, one truncated entry). A record that would push the operation's retained content past max_retained_operation_bytes is omitted and listed, and a re-record that ends in omission removes the previous value.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.01
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.execute_tool.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "execute_tool",
+              "gen_ai.tool.name": "lookup"
+            },
+            "count": 1,
+            "sum": 0.01
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.input.messages": [
+            {
+              "parts": [
+                {
+                  "content": "second",
+                  "type": "text"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "gen_ai.system_instructions": [
+            {
+              "content": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…[truncated]",
+              "type": "text"
+            }
+          ],
+          "xybrid.genai.content.truncated_attributes": [
+            "gen_ai.system_instructions",
+            "gen_ai.output.messages"
+          ],
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 10,
+        "id": "chat",
+        "kind": "INTERNAL",
+        "name": "chat tiny",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.call.arguments": {
+            "q": "zzzzzzzzzz"
+          },
+          "gen_ai.tool.name": "lookup",
+          "xybrid.genai.content.truncated_attributes": [
+            "gen_ai.tool.call.result"
+          ]
+        },
+        "end_ms": 30,
+        "id": "tool",
+        "kind": "INTERNAL",
+        "name": "execute_tool lookup",
+        "parent": null,
+        "start_ms": 20,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 1
+      }
+    ]
+  },
+  "name": "content_retained_budget",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 1,
+      "id": "chat",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "first",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 2,
+      "id": "chat",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "second",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 3,
+      "id": "chat",
+      "op": "system_instructions",
+      "value": [
+        {
+          "content": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "at_ms": 4,
+      "id": "chat",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "stop",
+          "parts": [
+            {
+              "content": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 10,
+      "id": "chat",
+      "op": "end"
+    },
+    {
+      "arguments": {
+        "q": "zzzzzzzzzz"
+      },
+      "at_ms": 20,
+      "id": "tool",
+      "name": "lookup",
+      "op": "start_tool"
+    },
+    {
+      "at_ms": 21,
+      "id": "tool",
+      "op": "tool_result",
+      "value": {
+        "r": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+      }
+    },
+    {
+      "at_ms": 22,
+      "id": "tool",
+      "op": "tool_result",
+      "value": {
+        "r": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww"
+      }
+    },
+    {
+      "at_ms": 23,
+      "id": "tool",
+      "op": "tool_result",
+      "value": {
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": 1,
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": 2
+      }
+    },
+    {
+      "at_ms": 30,
+      "id": "tool",
+      "op": "end"
+    }
+  ]
+}

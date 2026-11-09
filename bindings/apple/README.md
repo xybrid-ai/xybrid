@@ -110,9 +110,34 @@ if let observation = result.observation {
 try await Xybrid.Observability.flushAsync()
 ```
 
-`Xybrid.Observability.stats` reports spans exported, dropped, and failed.
-`suppressTrace: true` in `XybridRunOptions.make(...)` skips the detailed trace
-for one run.
+`Xybrid.Observability.stats` reports accepted, exported, dropped, failed, and
+pending counts per signal (`traces`, `logs`, `metrics`). A flush or shutdown that
+cannot deliver everything throws `XybridError.telemetryDelivery`; the inference
+already succeeded, so do not rerun it. `suppressTrace: true` in
+`XybridRunOptions.make(...)` skips the detailed trace for one run. Pipelines
+take the same trace fields and return `observation` references for the workflow
+and each stage; ASR sessions take them through
+`XybridStreamingConfig.default.observed(by:)` or
+`voiceActivity(modelDir:observation:)`, and `flush()` returns the session's
+reference.
+
+Record work Xybrid does not run itself (a tool, another runtime's inference)
+with a manual operation. Pass `context()?.childOptions` to its children. The
+first terminal call wins, and releasing an unfinished one cancels it without
+flushing:
+
+```swift
+try await Xybrid.Observability.withWorkflow("answer-question") { workflow in
+    let call = XybridToolCallInfo(name: "search", callId: nil, toolType: nil,
+                                  description: nil, argumentsJson: #"{"q":"otel"}"#)
+    let tool = try Xybrid.Observability.startTool(call, options: workflow.context()?.childOptions)
+    try tool.recordResult(resultJson: #"{"hits":3}"#)
+    tool.complete()
+}
+```
+
+`withWorkflow` completes on return, cancels on `CancellationError`, and fails
+with the label `application_error` (never the error text) otherwise.
 
 ### Available Types
 

@@ -19,6 +19,47 @@ namespace XybridBolt
 
 
         /// <summary>
+        /// Load any supported source with explicit observation controls.
+        /// </summary>
+        public static XybridModel Load(global::XybridBolt.XybridModelSource source, global::XybridBolt.XybridObservationOptions? observation)
+        {
+            WireWriter sourceWriter = new WireWriter();
+            {
+                source.Encode(sourceWriter);
+            }
+            byte[] sourceBytes = sourceWriter.ToArray();
+            WireWriter observationWriter = new WireWriter();
+            {
+                if (observation is { } boltffiValue0)
+                {
+                    observationWriter.WriteU8(1);
+                    boltffiValue0.Encode(observationWriter);
+                }
+                else
+                {
+                    observationWriter.WriteU8(0);
+                }
+            }
+            byte[] observationBytes = observationWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelLoad(sourceBytes, (nuint)sourceBytes.Length, observationBytes, (nuint)observationBytes.Length, out ulong boltffiHandle);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridModel handle") : new XybridModel(boltffiHandle);
+        }
+
+
+
+        /// <summary>
         /// Load from the xybrid registry. Recommended path.
         /// </summary>
         public static XybridModel FromRegistry(string id)
@@ -227,6 +268,29 @@ namespace XybridBolt
         }
 
 
+        /// <summary>
+        /// The immutable observation of the load that created this model.
+        /// </summary>
+        public global::XybridBolt.XybridObservationRef? LoadObservationRef()
+        {
+            ThrowIfDisposed();
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridModelLoadObservationRef(this.Handle);
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadU8() == 0 ? default(global::XybridBolt.XybridObservationRef?) : global::XybridBolt.XybridObservationRef.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+                // StreamNext can block for the full inter-token gap. Keep
+                // this wrapper alive so its finalizer cannot free the
+                // native handle while the call is still using it.
+                global::System.GC.KeepAlive(this);
+            }
+        }
+
+
         public string ModelId()
         {
             ThrowIfDisposed();
@@ -239,10 +303,6 @@ namespace XybridBolt
             finally
             {
                 NativeMethods.FreeBuf(boltffiResultBuffer);
-                // StreamNext can block for the full inter-token gap. Keep
-                // this wrapper alive so its finalizer cannot free the
-                // native handle while the call is still using it.
-                global::System.GC.KeepAlive(this);
             }
         }
 

@@ -2,9 +2,24 @@
 library;
 
 import 'rust/api/observability.dart' as ffi;
+import 'rust/api/manual_observation.dart' as manual;
+
+export 'rust/api/observability.dart' show FfiRedactionRule;
 
 /// Trace and span identifiers returned by a traced inference.
 typedef ObservationRef = ffi.FfiObservationRef;
+
+/// Manual native handles. Dispose unfinished handles to cancel without flushing.
+typedef WorkflowObservation = manual.FfiWorkflowObservation;
+typedef ToolObservation = manual.FfiToolObservation;
+typedef InferenceObservation = manual.FfiInferenceObservation;
+typedef ModelLoadObservation = manual.FfiModelLoadObservation;
+typedef ObservationContext = manual.FfiObservationContext;
+typedef InferenceRequest = manual.FfiInferenceRequest;
+typedef ToolCallInfo = manual.FfiToolCallInfo;
+typedef ModelLoadInfo = manual.FfiModelLoadInfo;
+typedef ObservationUsage = manual.FfiUsage;
+typedef ExecutionLocation = manual.FfiExecutionLocation;
 
 /// Native exporter status and delivery counters.
 typedef ObservabilityStats = ffi.FfiObservabilityStats;
@@ -24,6 +39,9 @@ class ObservabilityConfig {
   final bool metadataOnly;
   final int? maxContentBytes;
   final int? liveTraceIntervalMs;
+  final String? deviceId;
+  final List<ffi.FfiRedactionRule> redactionRules;
+  final List<String> providerOrigins;
 
   const ObservabilityConfig.xybrid({
     required String this.apiKey,
@@ -36,6 +54,9 @@ class ObservabilityConfig {
     this.metadataOnly = false,
     this.maxContentBytes,
     this.liveTraceIntervalMs,
+    this.deviceId,
+    this.redactionRules = const [],
+    this.providerOrigins = const [],
   }) : endpoint = null;
 
   const ObservabilityConfig.otlp({
@@ -49,6 +70,9 @@ class ObservabilityConfig {
     this.metadataOnly = false,
     this.maxContentBytes,
     this.liveTraceIntervalMs,
+    this.deviceId,
+    this.redactionRules = const [],
+    this.providerOrigins = const [],
   }) : apiKey = null;
 
   /// @nodoc
@@ -65,11 +89,14 @@ class ObservabilityConfig {
         metadataOnly: metadataOnly,
         maxContentBytes: maxContentBytes,
         liveTraceIntervalMs: liveTraceIntervalMs,
+        deviceId: deviceId,
+        redactionRules: redactionRules,
+        providerOrigins: providerOrigins,
       );
 }
 
-/// Per-run observation controls. Invalid [traceparent] values are ignored by
-/// the native SDK; the run then starts a new trace. Suppressing the detailed
+/// Observation controls. Invalid explicit [traceparent] values are rejected.
+/// Suppressing the detailed
 /// trace still records aggregate metrics.
 class ObservationOptions {
   final String? traceparent;
@@ -83,12 +110,37 @@ class ObservationOptions {
     this.conversationId,
     this.suppressTrace = false,
   });
+
+  /// @nodoc
+  ffi.FfiObservationOptions toFfi() => ffi.FfiObservationOptions(
+        traceparent: traceparent,
+        tracestate: tracestate,
+        conversationId: conversationId,
+        suppressTrace: suppressTrace,
+      );
 }
 
 /// Native observer control plane. Call after `Xybrid.init()`. All export runs
 /// in Rust; Dart supplies configuration and W3C context, never span batches.
 class XybridObservability {
   XybridObservability._();
+
+  static Future<WorkflowObservation> startWorkflow(String name,
+          {ObservationOptions? options}) =>
+      WorkflowObservation.newInstance(name: name, options: options?.toFfi());
+
+  static Future<ToolObservation> startTool(ToolCallInfo call,
+          {ObservationOptions? options}) =>
+      ToolObservation.newInstance(call: call, options: options?.toFfi());
+
+  static Future<InferenceObservation> startInference(InferenceRequest request,
+          {ObservationOptions? options}) =>
+      InferenceObservation.newInstance(
+          request: request, options: options?.toFfi());
+
+  static Future<ModelLoadObservation> startModelLoad(ModelLoadInfo info,
+          {ObservationOptions? options}) =>
+      ModelLoadObservation.newInstance(info: info, options: options?.toFfi());
 
   /// Start exporting or replace the active configuration. Errors propagate;
   /// a corrected configuration may be submitted after an unsuccessful init.
