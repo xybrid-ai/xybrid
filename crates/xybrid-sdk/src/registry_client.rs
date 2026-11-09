@@ -744,8 +744,10 @@ impl RegistryClient {
         for (idx, api_url) in self.api_urls.iter().enumerate() {
             let circuit = &self.circuits[idx];
 
-            // Skip if circuit is open
-            if !circuit.can_execute() {
+            // Skip if circuit is open. `is_refusing` takes no request: the
+            // retry loop takes one per attempt, and one taken here would be a
+            // half-open circuit's only test request, which no attempt then gets.
+            if circuit.is_refusing() {
                 debug!("Skipping {} (circuit open)", api_url);
                 continue;
             }
@@ -818,7 +820,10 @@ impl RegistryClient {
                 std::thread::sleep(delay);
             }
 
-            // Check circuit breaker again (might have opened)
+            // Take this attempt's request from the breaker (it might have
+            // opened). In a half-open circuit that is one of its few test
+            // requests, so every outcome below settles it: unsettled, the
+            // circuit would refuse every later call.
             if !circuit.can_execute() {
                 return Err(SdkError::CircuitOpen(format!(
                     "Circuit breaker open for {}",
@@ -839,19 +844,24 @@ impl RegistryClient {
                     // user sees "circuit open" even after they come back
                     // online), and skip the retry loop within this URL since
                     // backoff won't help a DNS failure. Return immediately and
-                    // let `execute_with_fallback` try the next URL.
+                    // let `execute_with_fallback` try the next URL. The request
+                    // never reached the registry, so give it back: a half-open
+                    // circuit then tests the next call instead.
                     if matches!(&err, SdkError::Offline { .. }) {
+                        circuit.release();
                         return Err(err);
                     }
 
                     // A successful compatibility check refused this model on
                     // this runtime; the registry is healthy. Repeated refusals
-                    // must not open its circuit for other, compatible models.
+                    // must not open its circuit for other, compatible models,
+                    // and as the registry's answer this closes a half-open one.
                     if matches!(
                         &err,
                         SdkError::UnsupportedBackendCapability { .. }
                             | SdkError::OsVersionUnsupported { .. }
                     ) {
+                        circuit.record_success();
                         return Err(err);
                     }
 
@@ -4157,6 +4167,86 @@ mod tests {
         // without waiting again (a per-URL budget would retry it too).
         primary_limited.assert_hits(2);
         fallback_limited.assert_hits(1);
+    }
+
+    /// Once a URL's open duration is over, the next call is its half-open
+    /// probe and reaches the registry. The fallback loop's circuit check and
+    /// the retry loop's must not each take a request: with only one to give,
+    /// the second is refused, nothing is sent, and the circuit never closes.
+    #[test]
+    fn half_open_circuit_lets_the_probe_reach_the_registry() {
+        use httpmock::prelude::*;
+        use xybrid_core::http::CircuitState;
+
+        let server = MockServer::start();
+        let models = server.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(200)
+                .json_body(serde_json::json!({ "models": [], "total": 0 }));
+        });
+        let mut client = RegistryClient::with_url(server.base_url()).unwrap();
+        client.circuits = vec![Arc::new(CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        }))];
+        client.circuits[0].record_failure();
+        assert!(client.circuits[0].is_open());
+
+        let listed = client.list_models();
+
+        assert!(
+            matches!(&listed, Ok(models) if models.is_empty()),
+            "{listed:?}"
+        );
+        models.assert_hits(1);
+        assert_eq!(client.circuits[0].state(), CircuitState::Closed);
+    }
+
+    /// A half-open probe that ends offline or with a compatibility refusal
+    /// records no failure, yet still settles its test request: offline gives
+    /// it back for the next call, and a refusal (the registry answering)
+    /// closes the circuit. Left taken, every later call would be refused.
+    #[test]
+    fn half_open_probe_that_records_no_failure_still_settles_its_request() {
+        use xybrid_core::http::CircuitState;
+
+        let mut client = RegistryClient::with_url("https://primary.example.invalid").unwrap();
+        let circuit = Arc::new(CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        }));
+        client.circuits = vec![circuit.clone()];
+
+        circuit.record_failure();
+        let offline = client.execute_with_fallback(|_| -> Result<(), SdkError> {
+            Err(SdkError::offline("simulated offline"))
+        });
+        assert!(
+            matches!(offline, Err(SdkError::Offline { .. })),
+            "{offline:?}"
+        );
+        assert_eq!(circuit.state(), CircuitState::HalfOpen);
+        assert!(!circuit.is_refusing(), "the test request was given back");
+        assert_eq!(client.execute_with_fallback(|_| Ok(())).ok(), Some(()));
+        assert!(circuit.is_closed());
+
+        circuit.record_failure();
+        let refused = client.execute_with_fallback(|_| -> Result<(), SdkError> {
+            Err(SdkError::OsVersionUnsupported {
+                model_id: "phonon-31m-en".into(),
+                platform: "ios-arm64".into(),
+                os: "ios-15.7".into(),
+                min_os: vec!["ios-16.0".into()],
+                message: "This model needs iOS 16 or later".into(),
+            })
+        });
+        assert!(
+            matches!(refused, Err(SdkError::OsVersionUnsupported { .. })),
+            "{refused:?}"
+        );
+        assert!(circuit.is_closed());
     }
 
     #[test]
