@@ -43,15 +43,16 @@
 //! // Anonymous — local inference, nothing exported
 //! xybrid_sdk::init().run();
 //!
-//! // Cloud routing plus traces to the Xybrid dashboard
+//! // Cloud routing plus traces to the Xybrid console
 //! xybrid_sdk::init()
-//!     .api_key("xy_live_...")
-//!     .observability(ObservabilityConfig::xybrid("xy_live_..."))
+//!     .api_key("sk_live_...")
+//!     .observability(ObservabilityConfig::xybrid("sk_live_..."))
 //!     .run();
 //! ```
 //!
-//! Get a free key at <https://dashboard.xybrid.dev>. The first inference
-//! without observability configured emits a one-shot info log pointing at
+//! Get a project key with `xybrid connect` (a claimable workspace, no account
+//! needed) or from <https://console.xybrid.dev>. The first inference without
+//! observability configured emits a one-shot info log pointing at both and at
 //! the observability docs; set `XYBRID_QUIET=1` to suppress it.
 //!
 //! ## Batch Inference
@@ -694,16 +695,16 @@ pub fn init() -> XybridInit {
 /// xybrid_sdk::init().run();
 /// ```
 ///
-/// Cloud routing, traces to the Xybrid dashboard, resource sampling on:
+/// Cloud routing, traces to the Xybrid console, resource sampling on:
 ///
 /// ```no_run
 /// use xybrid_sdk::observability::ObservabilityConfig;
 /// use xybrid_sdk::ResourceTelemetryMode;
 ///
 /// xybrid_sdk::init()
-///     .api_key("xy_live_...")
+///     .api_key("sk_live_...")
 ///     .observability(
-///         ObservabilityConfig::xybrid("xy_live_...")
+///         ObservabilityConfig::xybrid("sk_live_...")
 ///             .resource_telemetry(ResourceTelemetryMode::Summary { interval_ms: 5000 }),
 ///     )
 ///     .run();

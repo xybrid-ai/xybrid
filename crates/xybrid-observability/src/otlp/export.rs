@@ -47,10 +47,17 @@ impl ExportCore {
         self.sender.signal()
     }
 
+    /// Whether the destination's response hook disabled it: nothing more is
+    /// sent, and untried items are dropped.
+    pub(crate) fn is_disabled(&self) -> bool {
+        self.sender.is_disabled()
+    }
+
     /// Sends a trace or log batch: each part is encoded with its own
     /// resource/scope grouping and halved while its final body exceeds the
     /// bound; a single oversized item is dropped. Every part shares
-    /// `deadline`; parts not sent by then fail.
+    /// `deadline`; parts not sent by then fail. Parts not sent because the
+    /// destination was disabled meanwhile are dropped.
     pub(crate) async fn send_split<M: Grouped>(
         &self,
         resource: &ResourceInfo,
@@ -66,6 +73,13 @@ impl ExportCore {
             let n = items.len() as u64;
             if n == 0 {
                 continue;
+            }
+            if self.is_disabled() {
+                outcome.add(Outcome::dropped(n));
+                for rest in work.drain(..) {
+                    outcome.add(Outcome::dropped(rest.len() as u64));
+                }
+                break;
             }
             if cancel.is_cancelled() || tokio::time::Instant::now() >= deadline {
                 outcome.add(Outcome::failed(n));
@@ -113,6 +127,9 @@ impl ExportCore {
         deadline: tokio::time::Instant,
         cancel: &CancellationToken,
     ) -> Outcome {
+        if self.is_disabled() {
+            return Outcome::dropped(points);
+        }
         match body {
             Some(body) if body.len() <= self.max_body => {
                 delivered(self.sender.deliver(body, deadline, cancel).await, points)
@@ -142,6 +159,7 @@ fn delivered(delivery: Delivery, n: u64) -> Outcome {
             }
         }
         Delivery::Failed => Outcome::failed(n),
+        Delivery::Disabled => Outcome::dropped(n),
     }
 }
 
@@ -275,7 +293,9 @@ impl ExporterShared {
             Outcome::dropped(n)
         } else if st.closed {
             Outcome::failed(n)
-        } else if st.buffered.saturating_add(bytes) > self.max_buffered_bytes {
+        } else if self.core.is_disabled()
+            || st.buffered.saturating_add(bytes) > self.max_buffered_bytes
+        {
             Outcome::dropped(n)
         } else {
             st.stats.pending += n;

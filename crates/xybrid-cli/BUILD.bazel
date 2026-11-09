@@ -98,6 +98,15 @@ _CLI_INTEGRATION_TESTS = {
         "@crates//:serde_json",
         "@crates//:tempfile",
     ],
+    # `run`'s workspace notices against a loopback httpmock trace ingest, in an
+    # isolated HOME / XYBRID_CREDENTIALS_FILE. Offline: the run is a missing
+    # bundle, so its one span goes out in the final drain.
+    "workspace_notice_cli_test": [
+        "@crates//:chrono",
+        "@crates//:httpmock",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
 }
 
 # Two of the four open with `#![cfg(feature = "llm-llamacpp")]`; without the
