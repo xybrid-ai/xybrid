@@ -143,13 +143,29 @@ rust_test(
     crate = ":xybrid-sdk",
     # The registry load tests read the committed CUA-S1-FORMS scorer spec.
     data = ["//integration-tests:choice_fixtures"],
-    deps = ["@crates//:httpmock"],
+    # opentelemetry/opentelemetry_sdk: in-memory span capture in the
+    # observability tests (an application-owned tracer provider).
+    deps = [
+        "@crates//:httpmock",
+        "@crates//:opentelemetry",
+        "@crates//:opentelemetry_sdk",
+    ],
 )
 
 # Integration tests: each tests/*.rs is its own binary, so each gets its own
 # target with `srcs` + an explicit dep on whichever library it links as an
 # external crate (some reach xybrid-core directly, not through the sdk).
 _SDK_INTEGRATION_TESTS = {
+    "load_observability": [
+        ":xybrid-sdk",
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:httpmock",
+        "@crates//:opentelemetry",
+        "@crates//:opentelemetry_sdk",
+        "@crates//:serde_json",
+        "@crates//:sha2",
+        "@crates//:tempfile",
+    ],
     "async_test": [
         ":xybrid-sdk",
         "@crates//:tokio",

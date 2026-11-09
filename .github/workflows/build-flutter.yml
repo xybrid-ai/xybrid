@@ -7,6 +7,12 @@ on:
     paths:
       - 'bindings/flutter/**'
       - 'crates/xybrid-ffi-facade/**'
+      # The Flutter crate links the SDK and core through the facade, and FRB
+      # mirrors types it reaches there: a change in them can break the native
+      # build or leave the committed glue stale.
+      - 'crates/xybrid-sdk/**'
+      - 'crates/xybrid-core/**'
+      - 'crates/xybrid-observability/**'
       - 'xtask/**'
       - '.github/workflows/build-flutter.yml'
       # Docs-only changes under the paths above (READMEs, examples) never
@@ -24,6 +30,9 @@ on:
     paths:
       - 'bindings/flutter/**'
       - 'crates/xybrid-ffi-facade/**'
+      - 'crates/xybrid-sdk/**'
+      - 'crates/xybrid-core/**'
+      - 'crates/xybrid-observability/**'
       - 'xtask/**'
       - '.github/workflows/build-flutter.yml'
       - '!**.md'
@@ -193,18 +202,24 @@ jobs:
           echo "CXXFLAGS=-MD" >> $GITHUB_ENV
 
       - name: Run FRB codegen
+        shell: bash
         working-directory: bindings/flutter
-        run: flutter_rust_bridge_codegen generate
+        run: ./generate-frb.sh
 
+      # FRB writes both sides: the Dart glue and the Rust frb_generated.rs.
+      # Diff both, and fail on a generated file that was never committed.
       - name: Check FRB bindings are up-to-date
         shell: bash
         run: |
-          if ! git diff --exit-code bindings/flutter/lib/src/rust/; then
+          FRB_OUTPUTS="bindings/flutter/lib/src/rust/ bindings/flutter/rust/src/frb_generated.rs"
+          untracked="$(git status --porcelain --untracked-files=all -- $FRB_OUTPUTS | grep '^??' || true)"
+          if ! git diff --exit-code -- $FRB_OUTPUTS || [ -n "$untracked" ]; then
+            echo "$untracked"
             echo ""
             echo "ERROR: Flutter Rust Bridge bindings are out of date."
-            echo "A Rust API change was committed without regenerating Dart bindings."
+            echo "A Rust API change was committed without regenerating the Dart and Rust glue."
             echo ""
-            echo "Fix: run 'flutter_rust_bridge_codegen generate' in bindings/flutter/ and commit the result."
+            echo "Fix: run './generate-frb.sh' in bindings/flutter/ and commit the result."
             exit 1
           fi
           echo "FRB bindings are up-to-date."

@@ -286,6 +286,24 @@ pub struct TemplateExecutor {
     vision_encoders: HashMap<String, Box<dyn VisionEncoder>>,
 }
 
+/// Runtime wire label for a load of `path` that would actually load weights,
+/// or `None` when the runtime already holds them or cannot tell.
+///
+/// Only runtimes that report their cache are asked, so a runtime without one
+/// never reports a load it may not perform.
+pub(crate) fn pending_load_label(runtime: &dyn ModelRuntime, path: &Path) -> Option<&'static str> {
+    if let Some(onnx) = runtime.as_any().downcast_ref::<OnnxRuntime>() {
+        return (!onnx.has_session(path)).then_some("ort");
+    }
+    let label = match runtime.name() {
+        "whispercpp" => "whispercpp",
+        "zzz" => "zzz",
+        "candle" => "candle",
+        _ => return None,
+    };
+    (!runtime.is_loaded(path)).then_some(label)
+}
+
 impl TemplateExecutor {
     /// Create a new TemplateExecutor with default runtimes.
     ///
@@ -1009,9 +1027,14 @@ impl TemplateExecutor {
 
             // Ensure model is loaded (runtime handles caching)
             debug!(target: "xybrid_core", "Loading model: {:?}", model_full_path);
-            runtime
-                .load(&model_full_path)
-                .map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
+            {
+                let _load = pending_load_label(&**runtime, &model_full_path)
+                    .map(xybrid_trace::model_load_stage);
+                runtime
+                    .load(&model_full_path)
+                    .inspect_err(|_| xybrid_trace::mark_stage_failed())
+                    .map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
+            }
 
             debug!(target: "xybrid_core", "Running inference");
             runtime.execute(&runtime_input)?
@@ -1800,7 +1823,10 @@ impl TemplateExecutor {
             }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -1935,7 +1961,10 @@ impl TemplateExecutor {
             }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -2235,7 +2264,10 @@ impl TemplateExecutor {
                 context_length,
             );
 
-            adapter.load_model_with_config(&llm_config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&llm_config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key, adapter));
         }
 
@@ -2427,7 +2459,10 @@ impl TemplateExecutor {
                 context_length,
             );
 
-            adapter.load_model_with_config(&llm_config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&llm_config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -2530,7 +2565,10 @@ impl TemplateExecutor {
             }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -2662,7 +2700,10 @@ impl TemplateExecutor {
 
             // Create adapter with the appropriate backend based on hint
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
 
             // Cache the adapter
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
@@ -2961,9 +3002,14 @@ impl TemplateExecutor {
             let runtime = self.runtimes.get_mut("onnx").ok_or_else(|| {
                 AdapterError::RuntimeError("ONNX runtime not configured".to_string())
             })?;
-            runtime.load(&model_full_path).map_err(|e| {
-                AdapterError::RuntimeError(format!("Failed to load session: {}", e))
-            })?;
+            let _load = pending_load_label(&**runtime, &model_full_path)
+                .map(xybrid_trace::model_load_stage);
+            runtime
+                .load(&model_full_path)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())
+                .map_err(|e| {
+                    AdapterError::RuntimeError(format!("Failed to load session: {}", e))
+                })?;
         }
 
         // Get session (immutable borrow)
@@ -3429,8 +3475,11 @@ impl TemplateExecutor {
                 .runtimes
                 .get_mut("zzz")
                 .expect("zzz runtime was present above");
+            let _load =
+                pending_load_label(&**runtime, &primary).map(xybrid_trace::model_load_stage);
             runtime
                 .load(&primary)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())
                 .map_err(|error| AdapterError::RuntimeError(format!("Load failed: {error}")))?;
             Ok(())
         }

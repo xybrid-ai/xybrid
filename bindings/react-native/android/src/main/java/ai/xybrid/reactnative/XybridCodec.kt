@@ -14,6 +14,8 @@ import ai.xybrid.XybridGenerationConfig
 import ai.xybrid.XybridInferenceMetrics
 import ai.xybrid.XybridMetadataEntry
 import ai.xybrid.XybridObservabilityStats
+import ai.xybrid.XybridObservationOptions
+import ai.xybrid.XybridTranscriptionResult
 import ai.xybrid.XybridObservationRef
 import ai.xybrid.XybridOutputType
 import ai.xybrid.XybridPartialResult
@@ -352,19 +354,25 @@ internal object XybridCodec {
 
   // -- Observability --------------------------------------------------------------
 
+  // The portable reference shape shared with the JavaScript packages.
   fun encodeObservationRef(ref: XybridObservationRef): Map<String, Any?> =
-    mapOf("traceId" to ref.traceId, "spanId" to ref.spanId)
+    mapOf("trace_id" to ref.traceId, "span_id" to ref.spanId)
 
   fun decodeObservationRef(any: Any?): XybridObservationRef {
     val o = obj(any, "observation")
-    return XybridObservationRef(string(o, "traceId", "observation"), string(o, "spanId", "observation"))
+    return XybridObservationRef(string(o, "trace_id", "observation"), string(o, "span_id", "observation"))
   }
+
+  fun encodeSignalStats(stats: ai.xybrid.XybridSignalStats): Map<String, Any?> = mapOf(
+    "accepted" to stats.accepted.toDouble(), "exported" to stats.exported.toDouble(),
+    "dropped" to stats.dropped.toDouble(), "failed" to stats.failed.toDouble(), "pending" to stats.pending.toDouble(),
+  )
 
   fun encodeObservabilityStats(stats: XybridObservabilityStats): Map<String, Any?> = mapOf(
     "enabled" to stats.enabled,
-    "spansExported" to stats.spansExported.toDouble(),
-    "spansDropped" to stats.spansDropped.toDouble(),
-    "exportFailures" to stats.exportFailures.toDouble(),
+    "traces" to encodeSignalStats(stats.traces),
+    "logs" to encodeSignalStats(stats.logs),
+    "metrics" to encodeSignalStats(stats.metrics),
   )
 
   /** An object of strings, in key order; absent means empty. */
@@ -374,6 +382,12 @@ internal object XybridCodec {
       name to (map[name] as? String ?: throw BridgeException.InvalidArgument("$what: '$key.$name' must be a string"))
     }
   }
+
+  fun encodeTtsAudio(packet: ai.xybrid.XybridTtsAudioChunk): Map<String, Any?> = mapOf(
+    "pcmBase64" to java.util.Base64.getEncoder().encodeToString(packet.pcm),
+    "sampleRate" to packet.sampleRate.toDouble(), "channels" to packet.channels.toDouble(),
+    "firstSample" to packet.firstSample.toDouble(),
+  )
 
   fun encodeStreamToken(token: XybridStreamToken): Map<String, Any?> {
     val out = linkedMapOf<String, Any?>(
@@ -440,6 +454,7 @@ internal object XybridCodec {
     "latencyMs" to stage.latencyMs.toDouble(),
     "executionTarget" to encodeExecutionTarget(stage.executionTarget),
     "metrics" to encodeMetrics(stage.metrics),
+    "observation" to stage.observation?.let(::encodeObservationRef),
   )
 
   fun encodePipelineResult(result: XybridPipelineResult): Map<String, Any?> = mapOf(
@@ -447,6 +462,7 @@ internal object XybridCodec {
     "outputType" to encodeOutputType(result.outputType),
     "latencyMs" to result.latencyMs.toDouble(),
     "stages" to result.stages.map(::encodeStageResult),
+    "observation" to result.observation?.let(::encodeObservationRef),
   )
 
   fun encodePartial(partial: XybridPartialResult): Map<String, Any?> = mapOf(
@@ -454,7 +470,26 @@ internal object XybridCodec {
     "isStable" to partial.isStable,
     "chunkSequence" to partial.chunkSequence.toDouble(),
     "audioDurationMs" to partial.audioDurationMs.toDouble(),
+    "decoderObservation" to partial.decoderObservation?.let(::encodeObservationRef),
   )
+
+  fun encodeTranscription(result: XybridTranscriptionResult): Map<String, Any?> = mapOf(
+    "text" to result.text, "durationMs" to result.durationMs.toDouble(),
+    "chunksProcessed" to result.chunksProcessed.toDouble(),
+    "observation" to result.observation?.let(::encodeObservationRef),
+  )
+
+  fun decodeObservation(any: Any?): XybridObservationOptions? {
+    if (any == null) return null
+    val what = "observation options"
+    val o = obj(any, what)
+    return XybridObservationOptions(
+      traceparent = optionalString(o, "traceparent", what),
+      tracestate = optionalString(o, "tracestate", what),
+      conversationId = optionalString(o, "conversationId", what),
+      suppressTrace = optionalBoolean(o, "suppressTrace", what) ?: false,
+    )
+  }
 
   // -- Live ASR -------------------------------------------------------------------
 
@@ -470,6 +505,7 @@ internal object XybridCodec {
       vadThreshold = optionalFloat(o, "vadThreshold", what) ?: 0.5f,
       language = optionalString(o, "language", what),
       audioCtx = optionalUInt(o, "audioCtx", what),
+      observation = decodeObservation(o["observation"]),
     )
   }
 
@@ -500,6 +536,7 @@ internal object XybridCodec {
     is XybridError.UnsupportedBackendCapability -> "xybrid_unsupported_backend_capability"
     is XybridError.InvalidImage -> "xybrid_invalid_image"
     is XybridError.Cancelled -> "xybrid_cancelled"
+    is XybridError.TelemetryDelivery -> "xybrid_telemetry_delivery"
   }
 
   /** `(code, message)` for anything a bridged call can throw. */

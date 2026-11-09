@@ -75,6 +75,13 @@ FfiBuf_u8 boltffi_buf_from_bytes(const uint8_t *ptr, uintptr_t len);
 FfiBuf_u8 boltffi_buf_with_len(uintptr_t len);
 FfiStatus boltffi_last_error_message(FfiString *out);
 void boltffi_clear_last_error(void);
+typedef struct {
+    uint64_t accepted;
+    uint64_t exported;
+    uint64_t dropped;
+    uint64_t failed;
+    uint64_t pending;
+} ___XybridSignalStats;
 typedef uint32_t ___XybridError;
 #define XYBRID_ERROR_MODEL_NOT_FOUND ((___XybridError)0)
 #define XYBRID_ERROR_DIRECTORY_NOT_FOUND ((___XybridError)1)
@@ -99,6 +106,7 @@ typedef uint32_t ___XybridError;
 #define XYBRID_ERROR_UNSUPPORTED_BACKEND_CAPABILITY ((___XybridError)20)
 #define XYBRID_ERROR_INVALID_IMAGE ((___XybridError)21)
 #define XYBRID_ERROR_CANCELLED ((___XybridError)22)
+#define XYBRID_ERROR_TELEMETRY_DELIVERY ((___XybridError)23)
 typedef uint32_t ___XybridEnvelopeKind;
 #define XYBRID_ENVELOPE_KIND_TEXT ((___XybridEnvelopeKind)0)
 #define XYBRID_ENVELOPE_KIND_AUDIO ((___XybridEnvelopeKind)1)
@@ -144,6 +152,15 @@ typedef int32_t ___XybridThermalState;
 typedef uint32_t ___XybridVadMode;
 #define XYBRID_VAD_MODE_OFF ((___XybridVadMode)0)
 #define XYBRID_VAD_MODE_ENABLED ((___XybridVadMode)1)
+typedef uint32_t ___XybridModelSource;
+#define XYBRID_MODEL_SOURCE_REGISTRY ((___XybridModelSource)0)
+#define XYBRID_MODEL_SOURCE_DIRECTORY ((___XybridModelSource)1)
+#define XYBRID_MODEL_SOURCE_BUNDLE ((___XybridModelSource)2)
+#define XYBRID_MODEL_SOURCE_HUGGING_FACE ((___XybridModelSource)3)
+#define XYBRID_MODEL_SOURCE_MODEL_FILE ((___XybridModelSource)4)
+typedef int32_t ___XybridExecutionLocation;
+#define XYBRID_EXECUTION_LOCATION_LOCAL ((___XybridExecutionLocation)0)
+#define XYBRID_EXECUTION_LOCATION_REMOTE ((___XybridExecutionLocation)1)
 void boltffi_release_class_xybrid_bolt_xybrid_download(uint64_t handle);
 uint64_t boltffi_init_class_xybrid_bolt_xybrid_download_from_registry(const uint8_t *id_ptr, uintptr_t id_len);
 uint64_t boltffi_init_class_xybrid_bolt_xybrid_download_from_registry_with_platform(const uint8_t *id_ptr, uintptr_t id_len, const uint8_t *platform_ptr, uintptr_t platform_len);
@@ -163,6 +180,7 @@ uint64_t boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new(void);
 FfiStatus boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel(uint64_t receiver);
 bool boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled(uint64_t receiver);
 void boltffi_release_class_xybrid_bolt_xybrid_model(uint64_t handle);
+FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_model_load(const uint8_t *source_ptr, uintptr_t source_len, const uint8_t *observation_ptr, uintptr_t observation_len, uint64_t *return_out);
 FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_model_from_registry(const uint8_t *id_ptr, uintptr_t id_len, uint64_t *return_out);
 FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_model_from_registry_speculative(const uint8_t *id_ptr, uintptr_t id_len, uint64_t *return_out);
 FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_model_from_directory(const uint8_t *path_ptr, uintptr_t path_len, uint64_t *return_out);
@@ -170,6 +188,7 @@ FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_model_from_bundle(const uint8_t 
 FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface(const uint8_t *repo_ptr, uintptr_t repo_len, uint64_t *return_out);
 FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision(const uint8_t *repo_ptr, uintptr_t repo_len, const uint8_t *revision_ptr, uintptr_t revision_len, uint64_t *return_out);
 FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file(const uint8_t *path_ptr, uintptr_t path_len, uint64_t *return_out);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_ref(uint64_t receiver);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_model_id(uint64_t receiver);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_version(uint64_t receiver);
 ___XybridOutputType boltffi_method_class_xybrid_bolt_xybrid_model_output_type(uint64_t receiver);
@@ -224,6 +243,10 @@ FfiStatus boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_servi
 FfiStatus boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_resource_attribute(uint64_t receiver, const uint8_t *key_ptr, uintptr_t key_len, const uint8_t *value_ptr, uintptr_t value_len);
 FfiStatus boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_metadata_only(uint64_t receiver, bool metadata_only);
 FfiStatus boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_max_content_bytes(uint64_t receiver, uint32_t bytes);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_observability_config_allow_provider_context(uint64_t receiver, const uint8_t *origin_ptr, uintptr_t origin_len);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_device_id(uint64_t receiver, const uint8_t *id_ptr, uintptr_t id_len);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_observability_config_add_literal_redaction(uint64_t receiver, const uint8_t *find_ptr, uintptr_t find_len, const uint8_t *replacement_ptr, uintptr_t replacement_len);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_observability_config_omit_content_attribute(uint64_t receiver, const uint8_t *key_ptr, uintptr_t key_len);
 FfiStatus boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_live_trace_interval_ms(uint64_t receiver, uint32_t ms);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_observability_config_init(uint64_t receiver);
 void boltffi_release_class_xybrid_bolt_xybrid_bundle(uint64_t handle);
@@ -238,6 +261,49 @@ FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_bundle_file_name(uint64_t rece
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_bundle_manifest_json(uint64_t receiver, FfiBuf_u8 *return_out);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_bundle_metadata_json(uint64_t receiver, FfiBuf_u8 *return_out);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_bundle_extract(uint64_t receiver, const uint8_t *output_dir_ptr, uintptr_t output_dir_len);
+void boltffi_release_class_xybrid_bolt_xybrid_workflow_observation(uint64_t handle);
+FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_workflow_observation_new(const uint8_t *name_ptr, uintptr_t name_len, const uint8_t *options_ptr, uintptr_t options_len, uint64_t *return_out);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_context(uint64_t receiver);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_observation_ref(uint64_t receiver);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_complete(uint64_t receiver);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_fail(uint64_t receiver, const uint8_t *error_type_ptr, uintptr_t error_type_len, const uint8_t *message_ptr, uintptr_t message_len);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_cancel(uint64_t receiver);
+bool boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_is_finished(uint64_t receiver);
+void boltffi_release_class_xybrid_bolt_xybrid_tool_observation(uint64_t handle);
+FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_tool_observation_new(const uint8_t *call_ptr, uintptr_t call_len, const uint8_t *options_ptr, uintptr_t options_len, uint64_t *return_out);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_tool_observation_context(uint64_t receiver);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_tool_observation_observation_ref(uint64_t receiver);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_tool_observation_complete(uint64_t receiver);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_tool_observation_fail(uint64_t receiver, const uint8_t *error_type_ptr, uintptr_t error_type_len, const uint8_t *message_ptr, uintptr_t message_len);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_tool_observation_cancel(uint64_t receiver);
+bool boltffi_method_class_xybrid_bolt_xybrid_tool_observation_is_finished(uint64_t receiver);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_tool_observation_record_result(uint64_t receiver, const uint8_t *result_json_ptr, uintptr_t result_json_len);
+void boltffi_release_class_xybrid_bolt_xybrid_inference_observation(uint64_t handle);
+FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_inference_observation_new(const uint8_t *request_ptr, uintptr_t request_len, const uint8_t *options_ptr, uintptr_t options_len, uint64_t *return_out);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_inference_observation_context(uint64_t receiver);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_inference_observation_observation_ref(uint64_t receiver);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_inference_observation_complete(uint64_t receiver);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_inference_observation_fail(uint64_t receiver, const uint8_t *error_type_ptr, uintptr_t error_type_len, const uint8_t *message_ptr, uintptr_t message_len);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_inference_observation_cancel(uint64_t receiver);
+bool boltffi_method_class_xybrid_bolt_xybrid_inference_observation_is_finished(uint64_t receiver);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_system_instructions(uint64_t receiver, const uint8_t *parts_json_ptr, uintptr_t parts_json_len);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_input_messages(uint64_t receiver, const uint8_t *messages_json_ptr, uintptr_t messages_json_len);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_output_messages(uint64_t receiver, const uint8_t *messages_json_ptr, uintptr_t messages_json_len);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_tool_definitions(uint64_t receiver, const uint8_t *definitions_json_ptr, uintptr_t definitions_json_len);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_chunk(uint64_t receiver);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_first_token(uint64_t receiver, const uint8_t *at_epoch_ms_ptr, uintptr_t at_epoch_ms_len);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_usage(uint64_t receiver, const uint8_t *usage_ptr, uintptr_t usage_len);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_finish_reasons(uint64_t receiver, const uint8_t *reasons_ptr, uintptr_t reasons_len);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_response(uint64_t receiver, const uint8_t *response_id_ptr, uintptr_t response_id_len, const uint8_t *model_ptr, uintptr_t model_len);
+void boltffi_release_class_xybrid_bolt_xybrid_model_load_observation(uint64_t handle);
+FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_model_load_observation_new(const uint8_t *info_ptr, uintptr_t info_len, const uint8_t *options_ptr, uintptr_t options_len, uint64_t *return_out);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_context(uint64_t receiver);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_observation_ref(uint64_t receiver);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_complete(uint64_t receiver);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_fail(uint64_t receiver, const uint8_t *error_type_ptr, uintptr_t error_type_len, const uint8_t *message_ptr, uintptr_t message_len);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_cancel(uint64_t receiver);
+bool boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_is_finished(uint64_t receiver);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_record_cache_hit(uint64_t receiver, bool hit);
 FfiBuf_u8 boltffi_function_xybrid_bolt_tool_results_envelope(const uint8_t *user_text_ptr, uintptr_t user_text_len, const uint8_t *prior_assistant_text_ptr, uintptr_t prior_assistant_text_len, const uint8_t *results_ptr, uintptr_t results_len, FfiBuf_u8 *return_out);
 FfiBuf_u8 boltffi_function_xybrid_bolt_json_schema_to_gbnf(const uint8_t *schema_json_ptr, uintptr_t schema_json_len, FfiBuf_u8 *return_out);
 FfiStatus boltffi_function_xybrid_bolt_set_thermal_state(___XybridThermalState state);

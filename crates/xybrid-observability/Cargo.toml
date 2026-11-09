@@ -23,21 +23,33 @@ serde_json = "1.0"
 thiserror = "1.0"
 log = "0.4"
 
-# OTLP/HTTP pipeline (feature `otlp`). The transport is a small ureq client so
-# applications do not inherit a second HTTP/TLS stack.
+# OTLP/HTTP pipeline and paired exporters (feature `otlp`). The package owns
+# its transport end to end: opentelemetry-proto messages encoded with prost or
+# serde, sent by reqwest (rustls, no OpenSSL) on a private Tokio runtime.
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "metrics", "logs"], optional = true }
-opentelemetry-otlp = { version = "0.33", default-features = false, features = ["http-proto", "http-json", "trace", "metrics", "logs"], optional = true }
-opentelemetry-http = { version = "0.33", default-features = false, optional = true }
-ureq = { version = "2.9", default-features = false, features = ["tls"], optional = true }
-async-trait = { version = "0.1", optional = true }
+opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic-messages", "trace", "logs", "metrics", "with-serde"], optional = true }
+prost = { version = "0.14", default-features = false, features = ["std"], optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }
+tokio = { version = "1.0", default-features = false, features = ["rt", "rt-multi-thread", "time", "sync", "net"], optional = true }
+tokio-util = { version = "0.7", default-features = false, optional = true }
+httpdate = { version = "1", optional = true }
 
 [dev-dependencies]
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "metrics", "logs", "testing"] }
 httpmock = "0.7"
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "macros", "time"] }
 
 [features]
 default = ["otlp"]
-otlp = ["dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:opentelemetry-http", "dep:ureq", "dep:async-trait"]
+otlp = [
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-proto",
+    "dep:prost",
+    "dep:reqwest",
+    "dep:tokio",
+    "dep:tokio-util",
+    "dep:httpdate",
+]
 # Manual clock for deterministic tests (M-TEST-UTIL).
 test-util = []
 

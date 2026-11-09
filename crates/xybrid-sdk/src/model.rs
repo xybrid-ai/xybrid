@@ -222,6 +222,10 @@ pub enum SdkError {
     /// the caller just asked for.
     #[error("Cancelled: {message}")]
     Cancelled { message: String },
+    /// Telemetry was lost or its delivery could not be confirmed. Retrying
+    /// the inference would duplicate work and cannot recover these records.
+    #[error("Telemetry delivery failed: {0}")]
+    TelemetryDelivery(String),
 }
 
 /// Generates the `message`-only and `_src` (cause-chaining) constructors for
@@ -312,6 +316,7 @@ impl SdkError {
             // Retrying a cancelled download would resume exactly what the
             // caller just stopped.
             SdkError::Cancelled { .. } => false,
+            SdkError::TelemetryDelivery(_) => false,
         }
     }
 
@@ -1004,6 +1009,8 @@ pub struct StreamConfig {
     pub audio_ctx: Option<u32>,
     /// Path to VAD model (uses default if None)
     pub vad_model_dir: Option<String>,
+    /// Observation controls for the ASR session workflow and its decoders.
+    pub observation: Option<crate::observability::ObservationOptions>,
 }
 
 impl Default for StreamConfig {
@@ -1014,6 +1021,7 @@ impl Default for StreamConfig {
             language: Some("en".to_string()),
             audio_ctx: None,
             vad_model_dir: None,
+            observation: None,
         }
     }
 }
@@ -1103,6 +1111,9 @@ impl ModelHandle {
                     "Reloading auto-released model {}",
                     self.metadata.model_id
                 );
+                // The materialization the triggering run performs next is a
+                // reload, observed as its own `load_model` operation.
+                crate::observability::mark_reload();
                 self.state = LoadState::Loaded;
                 Ok(())
             }
@@ -1489,6 +1500,7 @@ pub struct ModelLoader {
     /// Per-load auto-release override. `None` inherits the process-global
     /// default set via [`crate::set_auto_release`].
     auto_release: Option<AutoReleasePolicy>,
+    observation: Option<crate::observability::ObservationOptions>,
 }
 
 /// Copy a caller's [`GenerationConfig`] onto a cloud-bound envelope's metadata.
@@ -1839,6 +1851,12 @@ fn cloud_api_key_present() -> bool {
 }
 
 impl ModelLoader {
+    /// Sets observation controls for this load, including its parent and session.
+    pub fn observation(mut self, options: crate::observability::ObservationOptions) -> Self {
+        self.observation = Some(options);
+        self
+    }
+
     /// Create loader from registry (recommended).
     ///
     /// Uses the registry API to resolve the model ID to the best variant
@@ -1861,6 +1879,7 @@ impl ModelLoader {
             version: None, // Version is resolved by registry API
             speculative_cloud: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -1882,6 +1901,7 @@ impl ModelLoader {
             version: None,
             speculative_cloud: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -1898,6 +1918,7 @@ impl ModelLoader {
             version: Some(version.to_string()),
             speculative_cloud: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -1922,6 +1943,7 @@ impl ModelLoader {
             version: Some(version.to_string()),
             speculative_cloud: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -1940,6 +1962,7 @@ impl ModelLoader {
             version: None,
             speculative_cloud: None,
             auto_release: None,
+            observation: None,
         })
     }
 
@@ -1975,6 +1998,7 @@ impl ModelLoader {
             version: None,
             speculative_cloud: None,
             auto_release: None,
+            observation: None,
         })
     }
 
@@ -2007,6 +2031,7 @@ impl ModelLoader {
             version: None,
             speculative_cloud: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -2029,6 +2054,7 @@ impl ModelLoader {
             version: Some(revision.to_string()),
             speculative_cloud: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -2055,6 +2081,7 @@ impl ModelLoader {
             version: None,
             speculative_cloud: None,
             auto_release: None,
+            observation: None,
         }
     }
 
@@ -2264,8 +2291,64 @@ impl ModelLoader {
     /// # Ok(())
     /// # }
     /// ```
-    #[allow(deprecated)]
     pub fn load_with_progress<F>(&self, progress_callback: F) -> SdkResult<XybridModel>
+    where
+        F: Fn(DownloadStatus),
+    {
+        let load = crate::observability::LoadScope::start(
+            &self.observed_model_name(),
+            None,
+            self.observation.as_ref(),
+        );
+        if let ModelSource::Bundle { path } = &self.source {
+            if let Ok(metadata) = std::fs::metadata(path) {
+                load.size_bytes(metadata.len());
+            }
+        }
+        if let ModelSource::Directory { path } = &self.source {
+            load.describe_directory(&self.observed_model_name(), path);
+        }
+        let result = self.load_body(|status| {
+            if let Some(bytes) = status.total_bytes {
+                load.size_bytes(bytes);
+            }
+            progress_callback(status);
+        });
+        if let Ok(model) = &result {
+            let handle = model.handle.read().unwrap_or_else(|e| e.into_inner());
+            load.describe_directory(&model.model_id, &handle.model_dir);
+        }
+        let reference = load.end(&result);
+        result.map(|mut model| {
+            model.load_observation = reference;
+            model
+        })
+    }
+
+    /// The model a load observation names before resolution: the requested
+    /// id, a directory's declared `model_id`, or a bundle's file name.
+    fn observed_model_name(&self) -> String {
+        if let Some(id) = &self.model_id {
+            return id.clone();
+        }
+        match &self.source {
+            ModelSource::Directory { path } => {
+                std::fs::read_to_string(path.join("model_metadata.json"))
+                    .ok()
+                    .and_then(|json| serde_json::from_str::<ModelMetadata>(&json).ok())
+                    .map(|metadata| metadata.model_id)
+            }
+            ModelSource::Bundle { path } => path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_owned),
+            _ => None,
+        }
+        .unwrap_or_else(|| "model".to_owned())
+    }
+
+    #[allow(deprecated)]
+    fn load_body<F>(&self, progress_callback: F) -> SdkResult<XybridModel>
     where
         F: Fn(DownloadStatus),
     {
@@ -2335,9 +2418,13 @@ impl ModelLoader {
     pub async fn load_async(&self) -> SdkResult<XybridModel> {
         // For now, wrap the sync version. Real async would use tokio::fs and async HTTP.
         let loader = self.clone();
-        tokio::task::spawn_blocking(move || loader.load())
-            .await
-            .map_err(|e| SdkError::load_src("Task join error", e))?
+        let context = crate::observability::CapturedContext::capture();
+        tokio::task::spawn_blocking(move || {
+            let _context = context.enter();
+            loader.load()
+        })
+        .await
+        .map_err(|e| SdkError::load_src("Task join error", e))?
     }
 
     /// Load model from registry using RegistryClient.
@@ -2385,6 +2472,10 @@ impl ModelLoader {
     {
         if speculate && client.resolve_offline(id).is_none() {
             let resolved = client.resolve(id, platform)?;
+            let declared_bytes = crate::registry_client::total_declared_bytes(&resolved);
+            if declared_bytes > 0 {
+                crate::observability::record_load_size(declared_bytes);
+            }
             if crate::registry_client::resolved_is_chat(&resolved) {
                 return Ok(Self::load_speculative(client, id, resolved));
             }
@@ -2460,9 +2551,19 @@ impl ModelLoader {
         let bg_download = Arc::clone(&download);
         let id_owned = id.to_string();
         let thread_name = format!("speculative-download-{id_owned}");
+        // The background install is its own `load_model` operation under the
+        // load that started it (it may outlive that span, which is valid).
+        let context = crate::observability::CapturedContext::capture();
         if let Err(err) = std::thread::Builder::new()
             .name(thread_name)
             .spawn(move || {
+                let _context = context.enter();
+                let load = crate::observability::LoadScope::start_with_trigger(
+                    &id_owned,
+                    None,
+                    None,
+                    "speculative_background",
+                );
                 let built = client
                     .fetch_extracted_resolved(
                         &id_owned,
@@ -2475,6 +2576,10 @@ impl ModelLoader {
                         |status| bg_download.set_progress(status),
                     )
                     .and_then(|dir| Self::create_model_handle(&dir));
+                if let Ok(real) = &built {
+                    load.describe_directory(&id_owned, &real.model_dir);
+                }
+                load.end(&built);
                 match built {
                     Ok(real) => {
                         *bg_handle.write().unwrap_or_else(|e| e.into_inner()) = real;
@@ -2529,6 +2634,7 @@ impl ModelLoader {
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(download),
             last_accessed,
+            load_observation: None,
         }
     }
 
@@ -2621,6 +2727,7 @@ impl ModelLoader {
         log::debug!(target: "xybrid_sdk", "Shared Hugging Face cache snapshot for '{}' at commit {}", repo, snapshot.commit);
         let shared_files =
             crate::cache::hf_shared::select_snapshot_files(&snapshot, repo, variant)?;
+        crate::observability::record_load_cache_hit(true);
         let result = (|| {
             let cache_dir = huggingface_materialized_cache_dir(
                 cache_layout,
@@ -2715,6 +2822,7 @@ impl ModelLoader {
                 let dangling = crate::cache::hf_shared::remove_dangling_files(&cache_dir);
                 if dangling == 0 {
                     log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
+                    crate::observability::record_load_cache_hit(true);
                     return self.load_from_directory(&cache_dir);
                 }
                 log::warn!(
@@ -2807,6 +2915,7 @@ impl ModelLoader {
                                 .unwrap_or(cache_dir);
                             if crate::cache::hf_shared::remove_dangling_files(&cache_dir) == 0 {
                                 log::info!(target: "xybrid_sdk", "Loading offline HuggingFace revision from cache: {}", cache_dir.display());
+                                crate::observability::record_load_cache_hit(true);
                                 return self.load_from_directory(&cache_dir);
                             }
                             log::warn!(
@@ -2866,6 +2975,7 @@ impl ModelLoader {
                         variant,
                     )?;
                     log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", materialized_dir.display());
+                    crate::observability::record_load_cache_hit(true);
                     return self.load_from_directory(&materialized_dir);
                 }
                 log::info!(
@@ -2993,6 +3103,7 @@ impl ModelLoader {
             &_progress_callback as &dyn Fn(DownloadStatus),
         );
         let mut reused_files = 0usize;
+        let mut all_files_reused = true;
         // Lazily fetched `filename -> blob hash` map for content-addressed
         // reuse; outer None = not fetched yet, inner None = fetch failed.
         let mut remote_blob_ids: Option<Option<std::collections::HashMap<String, String>>> = None;
@@ -3068,6 +3179,9 @@ impl ModelLoader {
 
             // Download file (hf-hub caches internally), then materialize it
             // (symlink on unix, copy elsewhere — avoids duplication)
+            // hf-hub does not report whether `get` downloads or reuses its
+            // own cache, so that branch cannot establish a cache miss.
+            all_files_reused = false;
             let cached_path = repo_api.get(filename).map_err(|e| {
                 SdkError::network_src(
                     format!("Failed to download '{}' from '{}'", filename, repo),
@@ -3096,6 +3210,9 @@ impl ModelLoader {
                 "Reused {}/{} files for '{}' from the shared Hugging Face cache",
                 reused_files, total_files, repo
             );
+        }
+        if all_files_reused && total_files > 0 {
+            crate::observability::record_load_cache_hit(true);
         }
 
         // Report completion
@@ -3230,6 +3347,7 @@ impl ModelLoader {
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
             last_accessed,
+            load_observation: None,
         }
     }
 
@@ -3445,6 +3563,7 @@ pub struct XybridModel {
     /// Ordering is `Relaxed`: an LRU order that is a few microseconds stale
     /// picks a slightly different victim, which is not a correctness question.
     last_accessed: Arc<AtomicU64>,
+    load_observation: Option<ObservationRef>,
 }
 
 /// Model size in MB if the bundle declares one, for LRU tie-breaking only.
@@ -3503,6 +3622,11 @@ fn publish_model_warmup_event(
 }
 
 impl XybridModel {
+    /// Immutable reference to this handle's original load operation.
+    pub fn load_observation_ref(&self) -> Option<&ObservationRef> {
+        self.load_observation.as_ref()
+    }
+
     /// Get the model ID.
     pub fn model_id(&self) -> &str {
         &self.model_id
@@ -3759,16 +3883,18 @@ impl XybridModel {
                 Location::Local
             },
             parent,
+            provider: None,
+            server: None,
         })
     }
 
     /// Runs the local leg. After an earlier (cloud) attempt it is recorded as
     /// a fallback attempt of the same logical request.
-    fn local_leg<T>(
+    fn local_leg(
         &self,
         obs: &RunObservation,
-        leg: impl FnOnce() -> SdkResult<T>,
-    ) -> SdkResult<T> {
+        leg: impl FnOnce() -> SdkResult<InferenceResult>,
+    ) -> SdkResult<InferenceResult> {
         if obs.attempt_count() == 0 {
             return leg();
         }
@@ -4077,11 +4203,22 @@ impl XybridModel {
         // its own event_type so the platform can render with a `warmup`
         // badge and default-filter it out of cost-attribution rollups.
         let start = Instant::now();
-        let resource_guard = crate::telemetry::begin_resource_run();
-        let span = SpanScope::start(
+        let load = {
+            let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
+            let format = RunSubject::from_metadata(&self.model_id, &handle.metadata).format;
+            crate::observability::LoadSubject::new(
+                &self.model_id,
+                format,
+                "warmup",
+                crate::observability::declared_model_size(&handle.metadata),
+            )
+        };
+        let span = SpanScope::start_loading(
             &format!("warmup {}", self.model_id),
             vec![KeyValue::new("gen_ai.request.model", self.model_id.clone())],
+            Some(load),
         );
+        let resource_guard = span.begin_resources();
 
         let event_fields = (|| {
             let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -4142,9 +4279,9 @@ impl XybridModel {
     /// ```
     pub async fn warmup_async(&self) -> SdkResult<()> {
         let model = self.clone();
-        let parent = crate::observability::ambient_parent();
+        let context = crate::observability::CapturedContext::capture();
         tokio::task::spawn_blocking(move || {
-            let _parent = parent.map(crate::observability::ParentScope::install);
+            let _context = context.enter();
             model.warmup()
         })
         .await
@@ -4233,9 +4370,9 @@ impl XybridModel {
         }
         self.local_leg(obs, || {
             let start = Instant::now();
-            // Resource-telemetry scope for this run; a no-op guard when
-            // `resource_telemetry_mode()` is `Off`.
-            let resource_guard = crate::telemetry::begin_resource_run();
+            // Resource-telemetry scope for this run, sampled with the mode of
+            // its session; a no-op guard when that mode is `Off`.
+            let resource_guard = obs.begin_resources();
 
             // Recover from poisoned RwLock to prevent permanent lock errors
             let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -4304,12 +4441,15 @@ impl XybridModel {
         envelope: &Envelope,
         options: &RunOptions,
         on_chunk: F,
-    ) -> SdkResult<xybrid_core::execution::TtsStreamResult>
+    ) -> SdkResult<crate::result::TtsStreamResult>
     where
         F: FnMut(xybrid_core::execution::TtsAudioChunk) -> bool,
     {
         self.run_tts_streaming_observed(envelope, options, on_chunk)
-            .map(|(summary, _)| summary)
+            .map(|(summary, observation)| crate::result::TtsStreamResult {
+                summary,
+                observation,
+            })
     }
 
     fn run_tts_streaming_observed<F>(
@@ -4351,7 +4491,7 @@ impl XybridModel {
         let chunks = obs.chunk_sink();
         let result = (|| {
             let start = Instant::now();
-            let resource_guard = crate::telemetry::begin_resource_run();
+            let resource_guard = obs.begin_resources();
 
             let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
             if options
@@ -4464,8 +4604,7 @@ impl XybridModel {
                     i64::from(summary.chunks),
                 ));
                 if summary.status == xybrid_core::execution::TtsStatus::Cancelled {
-                    obs.cancel();
-                    Ok((summary, None))
+                    Ok((summary, obs.cancel()))
                 } else {
                     Ok((summary, obs.succeed_without_output()))
                 }
@@ -4483,16 +4622,20 @@ impl XybridModel {
         envelope: &Envelope,
         options: &RunOptions,
         on_chunk: F,
-    ) -> SdkResult<xybrid_core::execution::TtsStreamResult>
+    ) -> SdkResult<crate::result::TtsStreamResult>
     where
         F: FnMut(xybrid_core::execution::TtsAudioChunk) -> bool + Send + 'static,
     {
         let model = self.clone();
         let envelope = envelope.clone();
         let options = options.clone();
-        tokio::task::spawn_blocking(move || model.run_tts_streaming(&envelope, &options, on_chunk))
-            .await
-            .map_err(|e| SdkError::inference_src("TTS worker failed", e))?
+        let context = crate::observability::CapturedContext::capture();
+        tokio::task::spawn_blocking(move || {
+            let _context = context.enter();
+            model.run_tts_streaming(&envelope, &options, on_chunk)
+        })
+        .await
+        .map_err(|e| SdkError::inference_src("TTS worker failed", e))?
     }
 
     /// Run batch inference with per-run controls.
@@ -4617,7 +4760,7 @@ impl XybridModel {
             }
             self.local_leg(&obs, || {
                 let start = Instant::now();
-                let resource_guard = crate::telemetry::begin_resource_run();
+                let resource_guard = obs.begin_resources();
 
                 // Recover from poisoned RwLock to prevent permanent lock errors
                 let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -5435,7 +5578,7 @@ impl XybridModel {
 
         let local_tokens = Arc::new(AtomicU32::new(0));
         let local_start = Instant::now();
-        let local_resource_guard = crate::telemetry::begin_resource_run();
+        let local_resource_guard = obs.begin_resources();
 
         let local_result = {
             let local_tokens = local_tokens.clone();
@@ -5519,7 +5662,7 @@ impl XybridModel {
         let (tx, rx) = mpsc::channel::<StreamEvent>(100);
         let model = self.clone();
         // Captured on the caller's thread: the run happens on a blocking worker.
-        let parent = crate::observability::ambient_parent();
+        let context = crate::observability::CapturedContext::capture();
 
         // Clone tx for the completion event (before moving into spawn_blocking)
         let tx_completion = tx.clone();
@@ -5527,7 +5670,8 @@ impl XybridModel {
         // Spawn blocking task to run inference
         tokio::task::spawn(async move {
             let result = tokio::task::spawn_blocking(move || -> SdkResult<InferenceResult> {
-                let obs = model.observe(&envelope, &[], None, config.as_ref(), true, parent);
+                let _context = context.enter();
+                let obs = model.observe(&envelope, &[], None, config.as_ref(), true, None);
                 let chunks = obs.chunk_sink();
                 let mut on_token = move |token: PartialToken| {
                     chunks.chunk();
@@ -5601,9 +5745,10 @@ impl XybridModel {
         let envelope = envelope.clone();
         let config = config.cloned();
         // Captured on the caller's thread: the run happens on a blocking worker.
-        let parent = crate::observability::ambient_parent();
+        let context = crate::observability::CapturedContext::capture();
         tokio::task::spawn_blocking(move || {
-            model.run_observed(&envelope, config.as_ref(), None, parent)
+            let _context = context.enter();
+            model.run_observed(&envelope, config.as_ref(), None, None)
         })
         .await
         .map_err(|e| SdkError::inference_src("Task join error", e))?
@@ -5699,6 +5844,8 @@ impl XybridModel {
             core_config,
             &self.model_id,
             Arc::clone(&handle.executor),
+            config.observation.as_ref(),
+            Some(&handle.metadata),
         )
     }
 
@@ -5737,6 +5884,7 @@ impl Clone for XybridModel {
             // Shared too: a run on any clone must count as use of the model
             // the registry knows about, not of this clone.
             last_accessed: self.last_accessed.clone(),
+            load_observation: self.load_observation.clone(),
         }
     }
 }
@@ -6186,6 +6334,8 @@ mod tests {
 
     #[test]
     fn release_memory_sees_registered_models() {
+        // `release_memory()` in a concurrent test would evict this model.
+        let _residency = crate::model_registry::residency_test_lock();
         let model = test_loaded_model(false);
         crate::model_registry::register(&model.model_id, &model.handle, &model.last_accessed, None);
 
@@ -6645,6 +6795,7 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::new(SpeculativeDownload::default())),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         };
         assert!(speculating.cloud_serve(), "not loaded -> cloud");
 
@@ -6689,6 +6840,7 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::new(SpeculativeDownload::default())),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         };
 
         // Pre-swap: the optimistic cached values stand (the cloud leg streams
@@ -6743,6 +6895,7 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::clone(&download)),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         };
 
         // Download already landed, so a token-less failure can retry locally.
@@ -6952,6 +7105,10 @@ mod tests {
             (SdkError::CircuitOpen("x".into()), false),
             (SdkError::NotLoaded, false),
             (SdkError::ConfigError("x".into()), false),
+            (
+                SdkError::TelemetryDelivery("lost acknowledgement".into()),
+                false,
+            ),
             (
                 SdkError::OsVersionUnsupported {
                     model_id: "phonon-31m-en".into(),
@@ -7483,6 +7640,7 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         }
     }
 
@@ -7505,6 +7663,217 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
+        }
+    }
+
+    #[test]
+    fn streamed_tts_result_carries_an_exported_reference() {
+        use crate::observability::test_support::*;
+        let (session, memory, _provider) = memory_session();
+        let mut metadata = ModelMetadata::onnx("tts-model", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("task".into(), serde_json::json!("text-to-speech"));
+        let model = test_model_with_metadata(metadata);
+        let options = RunOptions::new().with_observation(
+            crate::observability::ObservationOptions::default().with_session(&session),
+        );
+        // Blank text completes before any asset is touched.
+        let result = model
+            .run_tts_streaming(&text_envelope("   "), &options, |_| panic!("no audio"))
+            .unwrap();
+        assert_eq!(result.status, xybrid_core::execution::TtsStatus::Completed);
+        let reference = result.observation.clone().expect("streamed TTS reference");
+        let span = memory.by_ref(&reference);
+        assert_eq!(span.name, "generate_content tts-model");
+        assert_eq!(
+            attr(&span, "xybrid.tts.status").as_deref(),
+            Some("completed")
+        );
+        assert_eq!(
+            attr(&span, "gen_ai.request.stream").as_deref(),
+            Some("true")
+        );
+    }
+
+    /// A loadable ONNX model directory whose weights are missing: loading the
+    /// handle succeeds, materializing the weights on first execute fails.
+    fn weightless_onnx_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let metadata = ModelMetadata::onnx("weightless", "1.0", "model.onnx");
+        std::fs::write(
+            dir.path().join("model_metadata.json"),
+            serde_json::to_vec(&metadata).unwrap(),
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn explicit_lazy_and_reload_loads_are_separate_load_operations() {
+        // `release_memory()` in a concurrent test would evict this model.
+        let _residency = crate::model_registry::residency_test_lock();
+        use crate::observability::test_support::*;
+        use crate::observability::{semconv, ObservationContext, ObservationOptions};
+        let (session, memory, _provider) = memory_session();
+        let parent = ObservationContext::from_traceparent(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            None,
+        )
+        .unwrap();
+        let dir = weightless_onnx_dir();
+        let model = ModelLoader::from_directory(dir.path())
+            .unwrap()
+            .observation(
+                ObservationOptions::default()
+                    .with_session(&session)
+                    .with_parent(parent.clone()),
+            )
+            .load()
+            .unwrap();
+        let reference = model
+            .load_observation_ref()
+            .cloned()
+            .expect("load reference");
+        assert_eq!(model.clone().load_observation_ref(), Some(&reference));
+        let load = memory.by_ref(&reference);
+        assert_eq!(load.name, "load_model weightless");
+        assert_eq!(parent_id(&load), parent.span_id());
+        assert_eq!(attr(&load, "xybrid.load.trigger").as_deref(), Some("load"));
+        assert_eq!(
+            attr(&load, semconv::attr::RUNTIME_NAME).as_deref(),
+            Some("onnxruntime")
+        );
+        assert_eq!(
+            attr(&load, semconv::attr::MODEL_FORMAT).as_deref(),
+            Some("onnx")
+        );
+
+        let options = RunOptions::new()
+            .with_observation(ObservationOptions::default().with_session(&session));
+        let input = text_envelope("hello");
+        // First execute after the load materializes the weights (and fails here).
+        assert!(model.run_with_options(&input, &options).is_err());
+        // An automatically released model reloads on its next run.
+        model.handle.write().unwrap().evict();
+        assert!(model.run_with_options(&input, &options).is_err());
+
+        let loads: Vec<_> = memory
+            .spans()
+            .into_iter()
+            .filter(|s| s.name == "load_model weightless" && span_id(s) != reference.span_id)
+            .collect();
+        let triggers: Vec<String> = loads
+            .iter()
+            .map(|s| attr(s, "xybrid.load.trigger").unwrap())
+            .collect();
+        assert_eq!(triggers, ["lazy", "reload"]);
+        for load in &loads {
+            assert_eq!(
+                attr(load, semconv::attr::ERROR_TYPE).as_deref(),
+                Some("load_error")
+            );
+            assert_eq!(
+                attr(load, semconv::attr::RUNTIME_NAME).as_deref(),
+                Some("onnxruntime")
+            );
+            // Each load hangs beneath the run that triggered it.
+            let mut current = load.clone();
+            let run = loop {
+                let parent = memory
+                    .spans()
+                    .into_iter()
+                    .find(|s| span_id(s) == parent_id(&current))
+                    .expect("a load has an exported ancestor");
+                if attr(&parent, semconv::attr::OPERATION_NAME).as_deref() == Some("predict") {
+                    break parent;
+                }
+                current = parent;
+            };
+            assert_eq!(run.name, "predict weightless");
+        }
+    }
+
+    #[test]
+    fn local_trace_collection_does_not_suppress_worker_backed_loads() {
+        use crate::observability::test_support::*;
+        use crate::observability::ObservationOptions;
+        let _residency = crate::model_registry::residency_test_lock();
+        let (session, memory, _provider) = memory_session();
+        let dir = weightless_onnx_dir();
+        let loader = ModelLoader::from_directory(dir.path())
+            .unwrap()
+            .observation(ObservationOptions::default().with_session(&session));
+        // A local collecting recorder has no trace context, but it is not an
+        // explicit suppression: the async load must stay observed, like the
+        // synchronous one.
+        let local = xybrid_core::tracing::capture();
+        let model = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(loader.load_async())
+            .unwrap();
+        drop(local);
+        let reference = model
+            .load_observation_ref()
+            .expect("the async load is observed under a local capture");
+        assert_eq!(memory.by_ref(reference).name, "load_model weightless");
+    }
+
+    #[test]
+    fn explicitly_selected_session_samples_resources_while_the_default_is_off() {
+        // `release_memory()` in a concurrent test would evict this model.
+        let _residency = crate::model_registry::residency_test_lock();
+        use crate::observability::test_support::*;
+        use crate::observability::{
+            install_default_session, ObservabilitySession, ObservationOptions, Observer,
+        };
+        use xybrid_core::device::ResourceTelemetryMode;
+        let _default = default_session_lock();
+        // The default (and so the process-wide mode) samples nothing.
+        let previous =
+            install_default_session(ObservabilitySession::borrowed(Observer::disabled()));
+        let (session, memory, _provider) = resource_session(ResourceTelemetryMode::Boundary);
+        let selected = ObservationOptions::default().with_session(&session);
+        let options = RunOptions::new().with_observation(selected.clone());
+
+        let dir = weightless_onnx_dir();
+        let model = ModelLoader::from_directory(dir.path())
+            .unwrap()
+            .observation(selected)
+            .load()
+            .unwrap();
+        // The first execute materializes the weights lazily (and fails here).
+        assert!(model
+            .run_with_options(&text_envelope("hello"), &options)
+            .is_err());
+        let mut metadata = ModelMetadata::onnx("tts-model", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("task".into(), serde_json::json!("text-to-speech"));
+        // Blank text completes before any asset is touched.
+        let tts = test_model_with_metadata(metadata)
+            .run_tts_streaming(&text_envelope("   "), &options, |_| panic!("no audio"))
+            .unwrap();
+
+        // Uninstalls the application-installed default without shutting it down.
+        crate::observability::shutdown_observability(std::time::Duration::ZERO).unwrap();
+        if let Some(previous) = previous {
+            install_default_session(previous);
+        }
+        let explicit = memory.by_ref(model.load_observation_ref().expect("load reference"));
+        let lazy = memory
+            .spans()
+            .into_iter()
+            .find(|s| attr(s, "xybrid.load.trigger").as_deref() == Some("lazy"))
+            .expect("lazy load");
+        let run = memory.by_ref(tts.observation.as_ref().expect("TTS reference"));
+        for span in [explicit, lazy, run] {
+            assert!(
+                has_resources(&span),
+                "{} ignored its selected session's resource mode",
+                span.name
+            );
         }
     }
 
@@ -7557,6 +7926,7 @@ mod tests {
                 AbortSignal::ThermalCritical,
                 ResourceSnapshot {
                     thermal_state: ThermalState::Critical,
+                    thermal_measured: true,
                     ..Default::default()
                 },
                 xybrid_core::abort::AbortReason::StressThermal,
@@ -8699,6 +9069,7 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         }
     }
 
@@ -9631,6 +10002,7 @@ mod tests {
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::clone(&download)),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
+            load_observation: None,
         };
         // Point any cloud leg at the mock, with a key, so a leaked request
         // would be counted rather than fail before sending.

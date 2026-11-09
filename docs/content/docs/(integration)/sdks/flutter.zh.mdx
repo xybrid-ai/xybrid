@@ -40,15 +40,23 @@ void main() async {
 }
 ```
 
-无论是否鉴权，推理都完全在本地运行。传入 `apiKey` 即可点亮[控制台](https://dashboard.xybrid.dev)——这一次调用会启动遥测导出器，你的 `model.run()` / `pipeline.run()` 调用便会自动上报执行轨迹：
+本地推理无需鉴权。`apiKey` 配置云端访问；若要向[控制台](https://dashboard.xybrid.dev)
+发送执行轨迹，还需显式配置可观测性：
 
 ```dart
 await Xybrid.init(
   apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+  observability: ObservabilityConfig.xybrid(
+    apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+    metadataOnly: true,
+  ),
 );
 ```
 
-未提供密钥时，遥测处于禁用状态，首次推理会打印一条一次性提示指向控制台（可通过环境变量 `XYBRID_QUIET=1` 关闭）。在 [dashboard.xybrid.dev](https://dashboard.xybrid.dev) 免费获取密钥。若使用自托管控制台，请额外传入 `ingestUrl`；若需 CPU/内存采样，请传入 `resourceTelemetry`。
+仅设置 API Key 不会启用导出。示例选择仅采集元数据；否则启用可观测性后默认会采集受内容策略管理的文本。
+使用 `ObservabilityConfig.otlp(endpoint: 'http://collector:4318')` 可向 Collector
+导出，无需 Xybrid 密钥。CPU/内存采样通过 `resourceTelemetry` 单独配置。
+`ingestUrl` 保留为旧版显式 OTLP 轨迹导出入口；新集成请使用 `observability`。
 
 ## 核心模式：加载 → 运行
 
@@ -85,6 +93,21 @@ final envelope = XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000);
 final result = await model.run(envelope);
 print(result.text); // "Hello, how are you?"
 ```
+
+实时转写时，打开一个会话，并在音频到达时送入 PCM float32、单声道、16 kHz 采样。
+`flush()` 结束会话并返回 `FfiTranscriptionResult`：转写文本在 `text` 中，另含
+`durationMs`、`chunksProcessed` 以及会话的 `observation` 引用。
+
+```dart
+final session = await XybridStreamSession.fromModel(model);
+session.partials.listen((partial) => caption = partial.text); // listen first
+session.feed(samples);
+final transcript = (await session.flush()).text;
+```
+
+<Callout type="warn">
+早期版本的 `flush()` 以 `String` 返回转写文本。现在请改为读取结果的 `.text`。
+</Callout>
 
 ## LLM 对话与流式输出
 
@@ -135,10 +158,11 @@ SDK 的主入口。
 ```dart
 class Xybrid {
   static Future<void> init({
-    String? apiKey,            // 鉴权遥测；省略则匿名运行
+    String? apiKey,            // 云端鉴权；不会自动启用导出
     String? gatewayUrl,        // 覆盖 LLM 网关 URL
     String? ingestUrl,         // 覆盖遥测上报 URL（自托管）
     String? resourceTelemetry, // 启用 CPU/内存采样
+    ObservabilityConfig? observability, // 显式 OTLP 导出配置
   });
   static bool get isInitialized;
   static void setApiKey(String apiKey);
@@ -285,7 +309,7 @@ class XybridPipeline {
   int get stageCount;
   List<String> get stageNames;
 
-  Future<XybridResult> run(XybridEnvelope envelope);
+  Future<XybridResult> run(XybridEnvelope envelope, {ObservationOptions? observation});
 }
 ```
 
@@ -307,6 +331,10 @@ final result = await pipeline.run(
 // 结果为最后阶段输出的 TTS 音频
 final wav = result.audioAsWav();
 ```
+
+`observation:` 接受与 `RunOptions.observation` 相同的 `ObservationOptions`。
+`result.observation` 是流水线的工作流引用，`result.metrics.stageLatenciesMs[i].observation`
+是每个阶段推理的引用。
 
 ---
 

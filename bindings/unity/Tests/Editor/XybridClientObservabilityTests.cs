@@ -50,7 +50,7 @@ namespace Xybrid.Tests.Editor
             XybridClient.Initialize();
 
             Assert.IsFalse(XybridClient.IsObservabilityEnabled);
-            Assert.AreEqual(0UL, XybridClient.ObservabilityStats().SpansExported);
+            Assert.AreEqual(0UL, XybridClient.ObservabilityStats().Traces.Exported);
         }
 
         [Test]

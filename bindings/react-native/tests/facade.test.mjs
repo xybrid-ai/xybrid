@@ -3,6 +3,7 @@
 // and streams are cleaned up.
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { installFakeNative, loadLibrary, loadReactNativeStub } from './support/fake-native.mjs';
@@ -195,6 +196,33 @@ test('breaking out of a stream disposes it (which aborts generation)', async () 
   assert.deepEqual(names(calls), ['streamStart', 'streamNext', 'dispose']);
 });
 
+test('speech streaming preserves audio packets, observation controls and terminal reference', async () => {
+  const observation = { trace_id: 'a'.repeat(32), span_id: 'b'.repeat(16) };
+  const audio = { pcmBase64: 'AQA=', sampleRate: 24000, channels: 1, firstSample: 0 };
+  const events = [
+    { kind: 'audio', audio },
+    { kind: 'complete', result: { ...wireResult(''), observation } },
+  ];
+  const calls = installFakeNative({ streamStart: () => 'speech:1', streamNext: () => events.shift() });
+  const traceparent = `00-${'a'.repeat(32)}-${'c'.repeat(16)}-01`;
+  const stream = new Model('model:1').runTtsStreaming(Envelope.text('Hello'), { traceparent });
+  assert.deepEqual(await stream.next(), { done: false, value: audio });
+  const terminal = await stream.next();
+  assert.equal(terminal.done, true);
+  assert.deepEqual(terminal.value.observation, observation);
+  assert.equal(calls[0][3].traceparent, traceparent);
+  assert.deepEqual(calls.at(-1), ['dispose', 'speech:1']);
+});
+
+test('ending speech iteration cancels the native stream', async () => {
+  const calls = installFakeNative({
+    streamStart: () => 'speech:2',
+    streamNext: () => ({ kind: 'audio', audio: { pcmBase64: '', sampleRate: 24000, channels: 1, firstSample: 0 } }),
+  });
+  for await (const _ of new Model('model:1').runTtsStreaming(Envelope.text('Hello'))) break;
+  assert.deepEqual(calls.at(-1), ['dispose', 'speech:2']);
+});
+
 test('a failing pull still disposes the stream and rethrows', async () => {
   const failure = Object.assign(new Error('boom'), { code: 'xybrid_inference_error' });
   const calls = installFakeNative({
@@ -257,13 +285,16 @@ test('live ASR sessions feed base64 Float32 and pull partials until null', async
   const calls = installFakeNative({
     openStreamingSession: () => 'session:1',
     sessionNextPartial: () => partials.shift(),
-    sessionFlush: () => 'hello',
+    sessionFlush: () => ({ text: 'hello', durationMs: 200, chunksProcessed: 2,
+      observation: { trace_id: 'a'.repeat(32), span_id: 'b'.repeat(16) } }),
   });
   const session = await new Model('model:1').stream({ language: 'en' });
   await session.feed(new Float32Array([0.25]));
   const texts = [];
   for await (const partial of session.partials()) texts.push(partial.text);
-  assert.equal(await session.flush(), 'hello');
+  const terminal = await session.flush();
+  assert.equal(terminal.text, 'hello');
+  assert.equal(terminal.observation.span_id, 'b'.repeat(16));
   await session.release();
   assert.deepEqual(texts, ['he', 'hello']);
   assert.deepEqual(calls[0], ['openStreamingSession', 'model:1', { language: 'en' }]);
@@ -308,14 +339,15 @@ test('observability configs build natively only on init, with every setter appli
 });
 
 test('observability controls forward timeouts, refs and feedback', async () => {
-  const stats = { enabled: true, spansExported: 3, spansDropped: 0, exportFailures: 0 };
+  const signal = (exported) => ({ accepted: exported, exported, dropped: 0, failed: 0, pending: 0 });
+  const stats = { enabled: true, traces: signal(3), logs: signal(0), metrics: signal(1) };
   const calls = installFakeNative({
     observabilityStats: () => stats,
     observabilityDefaultTracesEndpoint: () => 'https://ingest.xybrid.dev/v1/traces',
     observabilityRecordFeedback: () => true,
     observabilityRecordEvaluation: () => false,
   });
-  const ref = { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16) };
+  const ref = { trace_id: 'a'.repeat(32), span_id: 'b'.repeat(16) };
   assert.deepEqual(await Observability.stats(), stats);
   assert.equal(await Observability.defaultTracesEndpoint(), 'https://ingest.xybrid.dev/v1/traces');
   await Observability.flush();
@@ -331,7 +363,7 @@ test('observability controls forward timeouts, refs and feedback', async () => {
 });
 
 test('run results carry the observation and runs forward the trace fields', async () => {
-  const observation = { traceId: 'c'.repeat(32), spanId: 'd'.repeat(16) };
+  const observation = { trace_id: 'c'.repeat(32), span_id: 'd'.repeat(16) };
   const calls = installFakeNative({ run: () => ({ ...wireResult(), observation }) });
   const result = await new Model('model:1').run(Envelope.text('hi'), {
     traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
@@ -461,4 +493,174 @@ test('every public entry point named in parity.json exists', async () => {
       assert.equal(typeof value, 'function', `${api} is not exported`);
     }
   }
+});
+
+test('manual operations forward parents, measurements and disposal', async () => {
+  const parent = { traceparent: '00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-00' };
+  const reference = { trace_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', span_id: 'cccccccccccccccc' };
+  const calls = installFakeNative({
+    observationStart: (kind) => `observation:${kind}`,
+    observationContext: () => parent,
+    observationReference: () => reference,
+    observationIsFinished: () => true,
+  });
+  const workflow = await lib.WorkflowObservation.start('chat', parent);
+  assert.deepEqual(await workflow.context(), parent);
+  assert.deepEqual(await workflow.observationRef(), reference);
+  const inference = await lib.InferenceObservation.start({ operation: 'chat', provider: 'litert' }, await workflow.context());
+  await inference.recordChunk();
+  await inference.recordFirstToken(123);
+  await inference.recordUsage({ inputTokens: 0, outputTokens: 3 });
+  await inference.recordInputMessages('[{"role":"user","parts":[]}]');
+  await inference.recordOutputMessages('[{"role":"assistant","parts":[]}]');
+  await inference.recordSystemInstructions('[]');
+  await inference.recordToolDefinitions('[]');
+  await inference.recordFinishReasons(['stop']);
+  await inference.recordResponse('resp', 'model');
+  await inference.complete();
+  assert.equal(await inference.isFinished(), true);
+  await inference.dispose();
+  const tool = await lib.ToolObservation.start({ name: 'lookup', argumentsJson: '{}' }, parent);
+  await tool.recordResult('{"ok":true}');
+  await tool.fail('application_error');
+  await tool.dispose();
+  const load = await lib.ModelLoadObservation.start({ model: 'm', sizeBytes: 0 }, parent);
+  await load.recordCacheHit(false);
+  await load.cancel();
+  await load.dispose();
+  await workflow.complete();
+  await workflow.dispose();
+  assert.deepEqual(calls[0], ['observationStart', 'workflow', { name: 'chat' }, parent]);
+  assert.ok(calls.some(([method, handle, field, value]) => method === 'observationRecord'
+    && handle === 'observation:inference' && field === 'usage'
+    && value.inputTokens === 0 && value.outputTokens === 3));
+  assert.deepEqual(calls.filter(([method]) => method === 'dispose').map(([, handle]) => handle),
+    ['observation:inference', 'observation:tool', 'observation:modelLoad', 'observation:workflow']);
+});
+
+test('pipeline wire conversion preserves workflow and stage references', async () => {
+  const reference = { trace_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', span_id: 'bbbbbbbbbbbbbbbb' };
+  installFakeNative({
+    loadPipeline: () => 'pipeline:refs',
+    runPipeline: () => ({ envelope: { kind: 'text', text: 'ok', metadata: {} }, outputType: 'text', latencyMs: 1,
+      observation: reference, stages: [{ stageId: 's', envelope: { kind: 'text', text: 'ok', metadata: {} },
+        outputType: 'text', latencyMs: 1, executionTarget: 'local', metrics, observation: reference }] }),
+  });
+  const pipeline = await Pipeline.fromYaml('name: refs');
+  const result = await pipeline.run(Envelope.text('hi'));
+  assert.deepEqual(result.observation, reference);
+  assert.deepEqual(result.stages[0].observation, reference);
+  await pipeline.release();
+});
+
+test('model loads forward observation controls and expose the load reference', async () => {
+  const reference = { trace_id: 'e'.repeat(32), span_id: 'f'.repeat(16) };
+  const calls = installFakeNative({
+    loadModel: () => 'model:observed',
+    modelInfo: () => ({ modelId: 'm', loadObservationRef: reference, defaultGenerationConfig: {} }),
+  });
+  const parent = { traceparent: `00-${'e'.repeat(32)}-${'1'.repeat(16)}-01`, conversationId: 'chat-42' };
+  const loader = ModelLoader.fromDirectory('/models/m');
+  const observed = loader.withObservation(parent);
+  parent.conversationId = 'mutated-after-capture';
+  const model = await observed.load();
+  await loader.load();
+  assert.deepEqual(calls[0], ['loadModel', {
+    kind: 'directory', value: '/models/m',
+    observation: { traceparent: `00-${'e'.repeat(32)}-${'1'.repeat(16)}-01`, conversationId: 'chat-42' },
+  }]);
+  assert.deepEqual(calls[1], ['loadModel', { kind: 'directory', value: '/models/m' }], 'the original loader is unchanged');
+  assert.deepEqual((await model.info()).loadObservationRef, reference);
+});
+
+test('live ASR sessions forward observation controls and decoder references', async () => {
+  const decoder = { trace_id: 'a'.repeat(32), span_id: 'c'.repeat(16) };
+  const workflow = { trace_id: 'a'.repeat(32), span_id: 'b'.repeat(16) };
+  const partials = [{ text: 'hi', isStable: true, chunkSequence: 0, audioDurationMs: 100, decoderObservation: decoder }, null];
+  const calls = installFakeNative({
+    openStreamingSession: () => 'session:observed',
+    sessionNextPartial: () => partials.shift(),
+    sessionFlush: () => ({ text: 'hi', durationMs: 100, chunksProcessed: 1, observation: workflow }),
+  });
+  const observation = { traceparent: `00-${'a'.repeat(32)}-${'d'.repeat(16)}-01`, suppressTrace: false };
+  const session = await new Model('model:1').stream({ observation });
+  const seen = [];
+  for await (const partial of session.partials()) seen.push(partial.decoderObservation);
+  const terminal = await session.flush();
+  await session.release();
+  assert.deepEqual(calls[0], ['openStreamingSession', 'model:1', { observation }]);
+  assert.deepEqual(seen, [decoder]);
+  assert.deepEqual(terminal.observation, workflow);
+  assert.deepEqual(calls.at(-1), ['dispose', 'session:observed']);
+});
+
+test('observability configs forward propagation, device identity and content rules', async () => {
+  const calls = installFakeNative();
+  await ObservabilityConfig.otlp('http://collector:4318')
+    .allowProviderContext('https://api.provider.example')
+    .allowProviderContext('https://other.example:8443')
+    .setDeviceId('device-1')
+    .addLiteralRedaction('secret', '[redacted]')
+    .omitContentAttribute('gen_ai.tool.call.arguments')
+    .init();
+  assert.deepEqual(calls, [['observabilityInit', {
+    kind: 'otlp',
+    endpoint: 'http://collector:4318',
+    providerOrigins: ['https://api.provider.example', 'https://other.example:8443'],
+    deviceId: 'device-1',
+    redactionRules: [
+      { kind: 'replaceLiteral', find: 'secret', replacement: '[redacted]' },
+      { kind: 'omitAttribute', key: 'gen_ai.tool.call.arguments' },
+    ],
+  }]]);
+  assert.throws(() => ObservabilityConfig.otlp('http://c').addLiteralRedaction('', 'x'), TypeError);
+  assert.throws(() => ObservabilityConfig.otlp('http://c').omitContentAttribute(''), TypeError);
+});
+
+test('a released observation handle rejects later calls with a typed handle error', async () => {
+  // A registry-backed fake, shaped like XybridHandles: dispose removes the
+  // entry (the native side then cancels unfinished work), later calls reject.
+  const live = new Map();
+  const released = (handle) => Object.assign(new Error(`unknown or released handle: ${handle}`), { code: 'xybrid_handle' });
+  const entry = (handle) => {
+    if (!live.has(handle)) throw released(handle);
+    return live.get(handle);
+  };
+  const calls = installFakeNative({
+    observationStart: (kind) => { const handle = `observation:${kind}:${live.size}`; live.set(handle, { finished: false }); return handle; },
+    observationComplete: (handle) => { entry(handle).finished = true; },
+    observationIsFinished: (handle) => entry(handle).finished,
+    dispose: (handle) => { live.delete(handle); },
+  });
+  const workflow = await lib.WorkflowObservation.start('released');
+  await workflow.dispose();
+  await workflow.dispose(); // idempotent, like the native registry
+  await assert.rejects(workflow.complete(), (error) => isXybridError(error) && error.code === 'xybrid_handle');
+  await assert.rejects(workflow.isFinished(), (error) => error.code === 'xybrid_handle');
+  assert.equal(live.size, 0);
+  assert.deepEqual(names(calls), ['observationStart', 'dispose', 'dispose', 'observationComplete', 'observationIsFinished']);
+});
+
+test('observation handles live in the registry that module invalidation disposes', () => {
+  // Native shims cannot run here, so pin the wiring the cancellation-on-
+  // teardown guarantee rests on: each observation is an entry of the module's
+  // one handle registry, invalidate() disposes that registry, and disposing an
+  // entry releases the generated handle (cancel without flush).
+  const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+  const kotlinModule = read('android/src/main/java/ai/xybrid/reactnative/XybridModule.kt');
+  const kotlinEntry = read('android/src/main/java/ai/xybrid/reactnative/XybridObservationEntry.kt');
+  const kotlinHandles = read('android/src/main/java/ai/xybrid/reactnative/XybridHandles.kt');
+  const swiftModule = read('ios/XybridModuleImpl.swift');
+  const swiftEntry = read('ios/XybridObservationEntry.swift');
+
+  assert.match(kotlinModule, /handles\.insert\(entry, "observation"\)/);
+  assert.match(kotlinModule, /override fun invalidate\(\) \{[\s\S]*?handles\.disposeAll\(\)[\s\S]*?\n  \}/);
+  assert.match(kotlinEntry, /class XybridObservationEntry[\s\S]*?: AutoCloseable \{\s*override fun close\(\) = owner\.close\(\)/);
+  assert.match(kotlinHandles, /onClose: \(\(\) -> Unit\)\? = \(value as\? AutoCloseable\)/);
+  for (const kind of ['XybridWorkflowObservation', 'XybridToolObservation', 'XybridInferenceObservation', 'XybridModelLoadObservation']) {
+    assert.match(kotlinEntry, new RegExp(`val op = ${kind}\\.new\\([^\\n]*\\n\\s*XybridObservationEntry\\(op,`), `${kind} is the entry's owner`);
+    assert.match(swiftEntry, new RegExp(`let op = try ${kind}\\(`), `${kind} is retained by the entry`);
+  }
+  assert.match(swiftModule, /self\.handles\.insert\(entry, kind: "observation"\)/);
+  assert.match(swiftModule, /@objc public func invalidate\(\) \{[\s\S]*?handles\.disposeAll\(\)[\s\S]*?\n  \}/);
 });

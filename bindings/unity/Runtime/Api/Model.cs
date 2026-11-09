@@ -27,6 +27,9 @@ namespace Xybrid
         /// <summary>Gets the model ID.</summary>
         public string ModelId => _modelId;
 
+        /// <summary>The immutable reference for this model's initial load.</summary>
+        public XybridBolt.XybridObservationRef? LoadObservation => _bolt.LoadObservationRef();
+
         internal Model(XybridBolt.XybridModel bolt)
         {
             _bolt = bolt;
@@ -414,7 +417,7 @@ namespace Xybrid
         /// Dispose the model after this call returns.
         /// </remarks>
         public TtsStreamResult RunTtsStreaming(Envelope envelope, Action<TtsAudioChunk> onAudio = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default, ObservationOptions observation = null)
         {
             ThrowIfDisposed();
             if (envelope == null) throw new ArgumentNullException(nameof(envelope));
@@ -426,7 +429,7 @@ namespace Xybrid
                 bool terminal = false;
                 try
                 {
-                    streamId = _bolt.RunStream(envelope.Bolt, null, cancel.Token);
+                    streamId = _bolt.RunStream(envelope.Bolt, ToOptions(null, observation), cancel.Token);
                     while (true)
                     {
                         var item = _bolt.StreamNext(streamId.Value);
@@ -439,7 +442,7 @@ namespace Xybrid
                     var result = TtsStreamResult.FromBolt(_bolt.StreamResult(streamId.Value));
                     return cancellationToken.IsCancellationRequested
                         ? new TtsStreamResult(TtsStatus.Cancelled, result.SampleRate, result.Channels,
-                            result.Samples, result.Chunks, result.LimitedChunks)
+                            result.Samples, result.Chunks, result.LimitedChunks, observation: result.Observation)
                         : result;
                 }
                 catch (XybridBolt.XybridErrorException ex)
@@ -471,11 +474,12 @@ namespace Xybrid
 
         /// <summary>Run speech delivery on a worker, including callbacks.</summary>
         public Task<TtsStreamResult> RunTtsStreamingAsync(Envelope envelope,
-            Action<TtsAudioChunk> onAudio = null, CancellationToken cancellationToken = default)
+            Action<TtsAudioChunk> onAudio = null, CancellationToken cancellationToken = default,
+            ObservationOptions observation = null)
         {
             // Do not pass the token to Task.Run: a queued cancellation must
             // return the explicit Cancelled outcome, not skip the delegate.
-            return Task.Run(() => RunTtsStreaming(envelope, onAudio, cancellationToken));
+            return Task.Run(() => RunTtsStreaming(envelope, onAudio, cancellationToken, observation));
         }
 
         // ================================================================
@@ -536,23 +540,8 @@ namespace Xybrid
 
         private static XybridBolt.XybridRunOptions? ToOptions(
             GenerationConfig config,
-            ObservationOptions observation)
-        {
-            if (config == null && observation == null)
-            {
-                return null;
-            }
-            return new XybridBolt.XybridRunOptions(
-                config?.ToBolt(),
-                Array.Empty<XybridBolt.XybridAbortSignal>(),
-                false,
-                0u,
-                null,
-                observation?.Traceparent,
-                observation?.Tracestate,
-                observation?.ConversationId,
-                observation?.SuppressTrace ?? false);
-        }
+            ObservationOptions observation) =>
+            ObservationOptions.ToRunOptions(config, observation);
 
         private static byte[] TtsAudio(InferenceResult result)
         {
@@ -593,13 +582,22 @@ namespace Xybrid
         /// <see cref="StreamingConfigs.VoiceActivity"/> to chunk on speech
         /// boundaries instead.
         /// </param>
+        /// <param name="observation">
+        /// Optional parent trace context, conversation id and trace suppression
+        /// for the session's workflow; replaces any observation already in
+        /// <paramref name="config"/>. Pass null to keep the config's own.
+        /// <c>Flush()</c> returns the workflow reference and each partial the
+        /// reference of its decoder run.
+        /// </param>
         /// <returns>A session; dispose it to stop transcribing.</returns>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">
-        /// Thrown if this is not an ASR model, or the sample rate is not 16 kHz.
+        /// Thrown if this is not an ASR model, the sample rate is not 16 kHz, or
+        /// an explicit traceparent is invalid.
         /// </exception>
         public XybridBolt.XybridStreamingSession Stream(
-            XybridBolt.XybridStreamingConfig? config = null)
+            XybridBolt.XybridStreamingConfig? config = null,
+            ObservationOptions observation = null)
         {
             ThrowIfDisposed();
 
@@ -607,7 +605,7 @@ namespace Xybrid
             {
                 return XybridBolt.XybridStreamingSession.ForModel(
                     _bolt,
-                    config ?? StreamingConfigs.Default);
+                    StreamingConfigs.WithObservation(config ?? StreamingConfigs.Default, observation));
             }
             catch (Exception ex) when (
                 ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)

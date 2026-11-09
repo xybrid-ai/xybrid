@@ -236,7 +236,7 @@ fn observability_http_trace_includes_resource_identity() {
         1,
         "local events must not be converted to OTLP spans"
     );
-    assert_eq!(observability::stats().unwrap().spans_exported, 1);
+    assert_eq!(observability::stats().unwrap().traces.exported, 1);
     assert_eq!(
         local_events.try_recv().unwrap().event_type,
         "DeviceProfileEvent"

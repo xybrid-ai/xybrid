@@ -235,7 +235,7 @@ class _LiveAsrScreenState extends State<LiveAsrScreen> {
       _partialSub = null;
       if (!mounted) return;
       setState(() {
-        _finalText = transcript;
+        _finalText = transcript.text;
         _liveText = '';
         _session = null;
         _phase = _Phase.ready;

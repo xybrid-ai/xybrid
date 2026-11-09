@@ -72,6 +72,25 @@ impl StartOptions {
         self
     }
 
+    /// Sets the parent from W3C headers. An invalid `traceparent` is rejected
+    /// here, so it can never fall back to the ambient context or start a new
+    /// root; an invalid `tracestate` is discarded.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::Error::InvalidTraceparent`] when `traceparent` is invalid.
+    pub fn with_traceparent(
+        mut self,
+        traceparent: &str,
+        tracestate: Option<&str>,
+    ) -> crate::Result<Self> {
+        self.parent = Some(ObservationContext::from_traceparent(
+            traceparent,
+            tracestate,
+        )?);
+        Ok(self)
+    }
+
     /// Sets the trace hint.
     #[must_use]
     pub fn with_trace(mut self, trace: TraceMode) -> Self {

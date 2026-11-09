@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { canonicalPart } from "../src/content.ts";
+import { ContentProcessor } from "../src/content.ts";
 import {
   boundJson,
   type ContentCapture,
@@ -282,24 +282,61 @@ describe("failing redactors", () => {
     expect(spans.getFinishedSpans()[1]?.attributes["gen_ai.prompt.variable.secret"]).toBe("safe");
   });
 
-  test("intentional null and undefined redactor results keep their existing JSON semantics", () => {
-    for (const value of [null, undefined]) {
-      const { observer, spans } = createHarness({ content: { redact: () => value } });
-      const op = observer.startInference(request);
-      op.recordToolDefinitions([{ name: "private" }]);
-      op.end();
-      expect(spans.getFinishedSpans()[0]?.attributes["gen_ai.tool.definitions"]).toBe("null");
-    }
+  test("a redactor returning undefined drops silently; null records JSON null", () => {
+    const dropped = createHarness({ content: { redact: () => undefined } });
+    const first = dropped.observer.startInference(request);
+    first.recordToolDefinitions([{ name: "private" }]);
+    first.end();
+    const droppedSpan = dropped.spans.getFinishedSpans()[0];
+    expect(droppedSpan?.attributes["gen_ai.tool.definitions"]).toBeUndefined();
+    expect(droppedSpan?.attributes["xybrid.genai.content.truncated_attributes"]).toBeUndefined();
+
+    const nulled = createHarness({ content: { redact: () => null } });
+    const second = nulled.observer.startInference({
+      ...request,
+      prompt: { name: "template", variables: { secret: "private" } },
+    });
+    second.recordToolDefinitions([{ name: "private" }]);
+    second.end();
+    const nulledSpan = nulled.spans.getFinishedSpans()[0];
+    expect(nulledSpan?.attributes["gen_ai.tool.definitions"]).toBe("null");
+    // A string kind cannot record null: it fails closed and is listed.
+    expect(nulledSpan?.attributes["gen_ai.prompt.variable.secret"]).toBeUndefined();
+    expect(nulledSpan?.attributes["xybrid.genai.content.truncated_attributes"]).toEqual([
+      "gen_ai.prompt.variable.secret",
+    ]);
   });
 });
 
-test("message parts retain explicit null tool arguments and responses", () => {
-  expect(canonicalPart({ type: "tool_call", arguments: null })).toEqual({
-    type: "tool_call",
-    arguments: null,
-  });
-  expect(canonicalPart({ type: "tool_call_response", response: null })).toEqual({
-    type: "tool_call_response",
-    response: null,
+test("message parts omit null tool arguments and always carry a tool response", () => {
+  const processor = new ContentProcessor({ maxTraversalBytes: 1 << 20 });
+  const outcome = processor.process(
+    "gen_ai.input.messages",
+    [
+      {
+        role: "assistant",
+        parts: [
+          { type: "tool_call", id: "a", name: "f", arguments: null },
+          { type: "tool_call", name: "g" },
+          { type: "tool_call_response", id: "a" },
+          { type: "tool_call_response", id: "b", response: null },
+        ],
+      },
+    ],
+    "input_messages",
+  );
+  expect(outcome).toEqual({
+    kind: "value",
+    value: [
+      {
+        role: "assistant",
+        parts: [
+          { type: "tool_call", id: "a", name: "f" },
+          { type: "tool_call", name: "g" },
+          { type: "tool_call_response", id: "a", response: null },
+          { type: "tool_call_response", id: "b", response: null },
+        ],
+      },
+    ],
   });
 });

@@ -299,7 +299,9 @@ impl RemoteAuthority {
         metrics: &DeviceMetrics,
     ) -> Option<AuthorityDecision<ResolvedTarget>> {
         let url = self.target_advice_url(context, metrics)?;
-        let mut request = ureq::get(&url).timeout(Duration::from_millis(750));
+        let mut request = crate::tracing::inject_trace_headers(
+            ureq::get(&url).timeout(Duration::from_millis(750)),
+        );
         let auth_header = self
             .api_key
             .as_ref()

@@ -98,8 +98,19 @@ namespace Xybrid
         /// Read <see cref="PipelineResult.Stage"/> for an intermediate output,
         /// such as the transcript of an ASR stage. The first run downloads any
         /// model the pipeline still needs, so call it off the main thread.
+        /// <see cref="PipelineResult.Observation"/> references the pipeline's
+        /// workflow and each <see cref="StageResult.Observation"/> its stage.
         /// </remarks>
-        public PipelineResult Run(Envelope envelope)
+        /// <param name="envelope">The first stage's input.</param>
+        /// <param name="observation">
+        /// Optional parent trace context, conversation id and trace suppression
+        /// for the pipeline's workflow. Pass null for none. Per-stage generation
+        /// settings belong in the pipeline YAML.
+        /// </param>
+        /// <exception cref="XybridException">
+        /// Thrown if a stage fails, or for an invalid explicit traceparent.
+        /// </exception>
+        public PipelineResult Run(Envelope envelope, ObservationOptions observation = null)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -109,7 +120,10 @@ namespace Xybrid
 
             try
             {
-                return PipelineResult.FromBolt(_bolt.Run(envelope.Bolt, null));
+                // Generation settings are rejected by pipeline runs, so only the
+                // observation controls ride the options.
+                return PipelineResult.FromBolt(
+                    _bolt.Run(envelope.Bolt, ObservationOptions.ToRunOptions(null, observation)));
             }
             catch (Exception ex) when (
                 ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)

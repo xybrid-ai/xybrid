@@ -471,8 +471,38 @@ XybridClient.ShutdownObservability();
 
 Prompts and outputs are captured once export is enabled. Other setters:
 `WithTracesEndpoint`, `WithHeader`, `WithJsonProtocol`,
-`WithResourceAttribute`, `WithMaxContentBytes`, `WithLiveTraceInterval`.
-`XybridClient.ObservabilityStats()` reports delivery counters. See
+`WithResourceAttribute`, `WithMaxContentBytes`, `WithLiveTraceInterval`,
+`AllowProviderContext`, `WithDeviceId`, `WithLiteralRedaction`,
+`WithoutContentAttribute`.
+
+The same `ObservationOptions` go to `Pipeline.Run(envelope, observation)`
+(`PipelineResult.Observation` and each `StageResult.Observation` hold the
+references), `ModelLoader.Load(observation)` (`Model.LoadObservation`),
+`Model.Stream(config, observation)` for live ASR (`Flush()` returns the
+session's reference) and `RunTtsStreaming(..., observation)`.
+
+Record work Xybrid does not run itself with a manual operation. Each is
+`IDisposable`: the first terminal call wins, and disposing an unfinished one
+cancels it without flushing.
+
+```csharp
+using (var workflow = WorkflowObservation.Start("answer-question"))
+{
+    var children = workflow.Context is XybridBolt.XybridObservationContext context
+        ? new ObservationOptions { Traceparent = context.Traceparent, Tracestate = context.Tracestate }
+        : null;
+    using (var tool = ToolObservation.Start(
+               new XybridBolt.XybridToolCallInfo("search", null, null, null, "{\"q\":\"otel\"}"), children))
+    {
+        tool.RecordResult("{\"hits\":3}");
+        tool.Complete();
+    }
+    workflow.Complete();
+}
+```
+
+`XybridClient.ObservabilityStats()` reports delivery counters per signal
+(`Traces`, `Logs`, `Metrics`). See
 [examples/unity/Observability](../../examples/unity/Observability/README.md)
 for the mobile lifecycle wiring.
 

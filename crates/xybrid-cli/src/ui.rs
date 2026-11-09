@@ -279,6 +279,11 @@ pub fn err(msg: &str) {
     eprintln!("  {} {}", error("✖"), msg);
 }
 
+/// Print a status message on stderr, so machine-readable stdout stays clean.
+pub fn status(msg: &str) {
+    eprintln!("  {} {}", dim("›"), dim(msg));
+}
+
 /// Print an info/hint message.
 pub fn hint(msg: &str) {
     println!("  {} {}", dim("›"), dim(msg));

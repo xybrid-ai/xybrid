@@ -61,6 +61,28 @@ pub enum CloudError {
     CircuitOpen(String),
 }
 
+impl CloudError {
+    /// Low-cardinality class of this error, safe to export as `error.type`:
+    /// a closed vocabulary that never carries a message, URL or credential.
+    pub(crate) fn error_type(&self) -> &'static str {
+        match self {
+            CloudError::BackendUnavailable(_) => "backend_unavailable",
+            CloudError::GatewayError(_) => "gateway_error",
+            CloudError::AuthenticationError(_) => "authentication_error",
+            CloudError::NetworkError(_) => "network_error",
+            CloudError::ApiError { .. } => "api_error",
+            CloudError::ParseError(_) => "parse_error",
+            CloudError::RateLimited { .. } => "rate_limited",
+            CloudError::Timeout { .. } => "timeout",
+            CloudError::InvalidRequest(_) => "invalid_request",
+            CloudError::ModelNotFound(_) => "model_not_found",
+            CloudError::ContentBlocked { .. } => "content_blocked",
+            CloudError::ConfigError(_) => "config_error",
+            CloudError::CircuitOpen(_) => "circuit_open",
+        }
+    }
+}
+
 impl From<std::io::Error> for CloudError {
     fn from(err: std::io::Error) -> Self {
         CloudError::NetworkError(err.to_string())

@@ -112,9 +112,14 @@ RECORD_STRUCT_RE = re.compile(
 # XybridStageResult), plus 2 for model cache management (XybridCacheEntry /
 # XybridCacheStatus), plus 2 for observability (XybridObservationRef /
 # XybridObservabilityStats).
+# Observability v2 adds eight: per-signal stats (XybridSignalStats), observation
+# controls (XybridObservationOptions), the terminal ASR result
+# (XybridTranscriptionResult) and the manual-observation records
+# (XybridObservationContext / XybridToolCallInfo / XybridInferenceRequest /
+# XybridUsage / XybridModelLoadInfo).
 # Bump this deliberately: the count is a tripwire for unreviewed boltffi output
 # drift, not a value to auto-sync.
-EXPECTED_RECORD_STRUCTS = 23
+EXPECTED_RECORD_STRUCTS = 31
 
 
 # --- Transform (g): Unsafe.SizeOf<T>() -> Marshal.SizeOf<T>(). boltffi's wire
@@ -160,7 +165,7 @@ CONTEXT_PARTIAL_REPLACEMENT = (
 )
 
 RESULT_FILE = "XybridResult.cs"
-RESULT_REASONING_TARGET = "string? ReasoningContent, XybridObservationRef? Observation) {"
+RESULT_REASONING_TARGET = "string? ReasoningContent, XybridObservationRef? Observation = null) {"
 RESULT_REASONING_REPLACEMENT = (
     "string? ReasoningContent = null, XybridObservationRef? Observation = null) {"
 )
@@ -347,7 +352,13 @@ def _downlevel_record_structs(content: str) -> tuple[str, int]:
             for p in match.group("params").split(",")
             if p.strip()
         ]
-        ctor_params = ", ".join(f"{ty} {pn}" for ty, pn in fields)
+        ctor_params = ", ".join(
+            f"{ty} {pn}" + (
+                " = null" if pn in ("Observation", "DecoderObservation")
+                and ty in ("XybridObservationRef?", "XybridObservationOptions?") else ""
+            )
+            for ty, pn in fields
+        )
         assigns = " ".join(f"this.{pn} = {pn};" for _, pn in fields)
         props = "\n".join(f"        public {ty} {pn} {{ get; }}" for ty, pn in fields)
         return (

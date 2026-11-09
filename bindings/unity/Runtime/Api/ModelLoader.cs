@@ -215,36 +215,37 @@ namespace Xybrid
         /// <exception cref="ObjectDisposedException">Thrown if this loader is disposed.</exception>
         /// <exception cref="XybridException">Thrown if model loading fails.</exception>
         /// <exception cref="ModelNotFoundException">Thrown if the model cannot be found.</exception>
-        public Model Load()
+        public Model Load(ObservationOptions observation = null)
         {
             ThrowIfDisposed();
 
             try
             {
-                XybridBolt.XybridModel bolt;
+                XybridBolt.XybridModelSource source;
                 switch (_source)
                 {
                     case Source.Registry:
-                        bolt = XybridBolt.XybridModel.FromRegistry(_value);
+                        source = new XybridBolt.XybridModelSource.Registry(_value, false);
                         break;
                     case Source.Bundle:
-                        bolt = XybridBolt.XybridModel.FromBundle(_value);
+                        source = new XybridBolt.XybridModelSource.Bundle(_value);
                         break;
                     case Source.Directory:
-                        bolt = XybridBolt.XybridModel.FromDirectory(_value);
+                        source = new XybridBolt.XybridModelSource.Directory(_value);
                         break;
                     case Source.HuggingFace:
-                        bolt = XybridBolt.XybridModel.FromHuggingface(_value);
+                        source = new XybridBolt.XybridModelSource.HuggingFace(_value, null);
                         break;
                     case Source.ModelFile:
-                        bolt = XybridBolt.XybridModel.FromModelFile(_value);
+                        source = new XybridBolt.XybridModelSource.ModelFile(_value);
                         break;
                     case Source.RegistrySpeculative:
-                        bolt = XybridBolt.XybridModel.FromRegistrySpeculative(_value);
+                        source = new XybridBolt.XybridModelSource.Registry(_value, true);
                         break;
                     default:
                         throw new InvalidOperationException("Unknown model source.");
                 }
+                var bolt = XybridBolt.XybridModel.Load(source, observation?.ToBolt());
 
                 return new Model(bolt);
             }

@@ -57,7 +57,7 @@ async function usage(): Promise<void> {
   await Xybrid.initialize({ apiKey: 'key', ingestUrl: 'https://ingest.example' });
 
   // @ts-expect-error an evaluation needs a name.
-  await Observability.recordEvaluation({ traceId: 't', spanId: 's' }, { scoreValue: 1 });
+  await Observability.recordEvaluation({ trace_id: 't', span_id: 's' }, { scoreValue: 1 });
 
   try {
     await model.warmup();

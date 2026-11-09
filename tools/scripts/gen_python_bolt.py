@@ -157,13 +157,22 @@ def generate() -> list[Path]:
             "    observation: XybridObservationRef | None\n",
             "    observation: XybridObservationRef | None = None\n",
         ),
+        (
+            "    observation: XybridObservationOptions | None\n",
+            "    observation: XybridObservationOptions | None = None\n",
+        ),
+        (
+            "    decoder_observation: XybridObservationRef | None\n",
+            "    decoder_observation: XybridObservationRef | None = None\n",
+        ),
     )
     for name in ("__init__.py", "__init__.pyi"):
         path = RAW_DIR / name
         source = path.read_text()
         for target, replacement in defaults:
-            if source.count(target) != 1:
-                sys.exit(f"error: expected one XybridResult `{target.strip()}` field in {path}")
+            expected = 4 if target.strip() == "observation: XybridObservationRef | None" else 1
+            if source.count(target) != expected:
+                sys.exit(f"error: expected {expected} `{target.strip()}` fields in {path}")
             source = source.replace(target, replacement)
         if name == "__init__.py":
             source = _add_result_wire_compatibility(source)

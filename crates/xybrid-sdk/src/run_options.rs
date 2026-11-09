@@ -647,6 +647,7 @@ mod tests {
             .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::ThermalCritical));
         let reader = Arc::new(CountingResourceReader::new(ResourceSnapshot {
             thermal_state: ThermalState::Critical,
+            thermal_measured: true,
             ..Default::default()
         }));
         let mut state = AbortState::with_resource_reader(&options, reader);
@@ -1084,6 +1085,7 @@ mod tests {
     fn streaming_thermal_abort_check_stays_within_low_end_android_budget() {
         let snapshot = ResourceSnapshot {
             thermal_state: ThermalState::Critical,
+            thermal_measured: true,
             ..Default::default()
         };
         let reader = Arc::new(CountingResourceReader::new(snapshot));

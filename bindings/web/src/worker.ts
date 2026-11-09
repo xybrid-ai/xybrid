@@ -1,3 +1,4 @@
+import { epochClock } from "./internal/clock.ts";
 import type { LoadMetrics, Memory, Request, Response } from "./internal/protocol.ts";
 
 type Runtime = {
@@ -131,6 +132,7 @@ const generate = async (request: Extract<Request, { type: "generate" }>): Promis
   module.xybridCancelled = false;
   // Observed runs report wall-clock epoch times, never worker-relative offsets.
   const observed = request.observation !== undefined;
+  const epochNow = observed ? epochClock() : undefined;
   const started = performance.now();
   let firstTokenAt: number | null = null;
   let lastTokenAt: number | null = null;
@@ -144,7 +146,7 @@ const generate = async (request: Extract<Request, { type: "generate" }>): Promis
     peakMemory.allocatedBytes = Math.max(peakMemory.allocatedBytes, current.allocatedBytes);
     send(
       observed
-        ? { type: "token", id: request.id, tokenId, text, atMs: performance.timeOrigin + now }
+        ? { type: "token", id: request.id, tokenId, text, atMs: epochNow?.() ?? Date.now() }
         : { type: "token", id: request.id, tokenId, text },
     );
   };
@@ -169,7 +171,7 @@ const generate = async (request: Extract<Request, { type: "generate" }>): Promis
   send({
     type: "complete",
     id: request.id,
-    ...(observed ? { completedAtMs: performance.timeOrigin + completedAt } : {}),
+    ...(observed ? { completedAtMs: epochNow?.() ?? Date.now() } : {}),
     metrics: {
       cancelled: status === 1,
       promptTokens: module._xybrid_web_prompt_tokens(handle),

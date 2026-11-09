@@ -153,7 +153,7 @@ const model = await XybridLlm.fromUrl("/models/model.gguf", {
 for await (const delta of model.generateStream(prompt, {
   observation: { conversationId: "chat-42", parent: request.context() },
 })) output.append(delta);
-const ref = model.lastRun?.observation;   // { traceId, spanId } for feedback/evaluations
+const ref = model.lastRun?.observation;   // { trace_id, span_id } for feedback/evaluations
 ```
 
 - Loads are `load_model` operations (model, `gguf`, size, accelerator, memory).

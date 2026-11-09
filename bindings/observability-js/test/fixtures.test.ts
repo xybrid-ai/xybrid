@@ -10,12 +10,9 @@ describe("contract fixtures", () => {
 
   for (const fixture of fixtures) {
     test(fixture.name, async () => {
+      // runFixture rejects a null expectation, unknown fields and failed inline assertions.
       const actual = await runFixture(fixture);
-      // Every fixture runs; expectations are asserted once the contract owner fills them.
-      expect(actual.spans.length + actual.metrics.length).toBeGreaterThan(0);
-      if (fixture.expect !== null) {
-        expect(firstDifference(actual, fixture.expect)).toBeNull();
-      }
+      expect(firstDifference(actual, fixture.expect)).toBeNull();
     });
   }
 });

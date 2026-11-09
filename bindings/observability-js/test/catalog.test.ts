@@ -4,20 +4,25 @@ import { fileURLToPath } from "node:url";
 import {
   ATTEMPT_SPAN_NAME,
   ATTR,
+  ATTRIBUTE_TYPES,
   BUCKET_BOUNDARIES,
   CONTRACT_VERSION,
+  CUSTOM_INFERENCE_OPERATION,
+  catalogAttributeType,
   DEFAULTS,
   ENUMS,
   ENV,
   EVENTS,
   EXTENSION_NAMESPACE,
   GENAI_SEMCONV_REVISION,
+  INFERENCE_OPERATIONS,
   INSTRUMENTATION_SCOPE_NAME,
   JSON_ATTRIBUTES,
   METRIC_DIMENSIONS,
   METRICS,
   OPERATIONS,
   PRESETS,
+  WIRE,
 } from "../src/index.ts";
 
 type Catalog = {
@@ -26,6 +31,8 @@ type Catalog = {
   instrumentation_scope: { name: string };
   extension_namespace: string;
   operations: Record<string, unknown>;
+  inference_operations: string[];
+  custom_inference_operation: Record<string, unknown>;
   attempt_span_name: string;
   attributes: Record<string, Record<string, string>>;
   enums: Record<string, string[]>;
@@ -36,6 +43,7 @@ type Catalog = {
   defaults: Record<string, unknown>;
   env: Record<string, string>;
   presets: Record<string, unknown>;
+  wire: Record<string, unknown>;
 };
 
 const catalog = JSON.parse(
@@ -60,6 +68,24 @@ describe("catalog parity", () => {
   });
 
   test("operations", () => expect(OPERATIONS).toEqual(catalog.operations as never));
+  test("inference operations", () => {
+    expect([...INFERENCE_OPERATIONS] as string[]).toEqual(catalog.inference_operations);
+    expect(CUSTOM_INFERENCE_OPERATION).toEqual(
+      withoutComment(catalog.custom_inference_operation) as never,
+    );
+  });
+  test("wire", () => expect(WIRE).toEqual(withoutComment(catalog.wire) as never));
+  test("attribute value types", () => {
+    const groups = ["standard", "content", "schema_content", "extension"];
+    const merged = Object.assign(
+      {},
+      ...groups.map((group) => withoutComment(catalog.attributes[group] ?? {})),
+    );
+    expect(ATTRIBUTE_TYPES).toEqual(merged);
+    expect(catalogAttributeType("gen_ai.prompt.variable.city")).toBe("string");
+    expect(catalogAttributeType("gen_ai.request.temperature")).toBe("double");
+    expect(catalogAttributeType("app.custom")).toBeUndefined();
+  });
   test("metrics", () => expect(METRICS).toEqual(catalog.metrics as never));
   test("bucket boundaries", () =>
     expect(BUCKET_BOUNDARIES).toEqual(catalog.bucket_boundaries as never));

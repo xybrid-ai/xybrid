@@ -19,14 +19,20 @@ import { createOtlpPipeline, otlpConfigFromEnv } from "@xybrid/observability/otl
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Pretends to be a local model: streams a tool call, then an answer. */
-async function* fakeModel(prompt: string): AsyncGenerator<string> {
+/** Pretends to be a local model: streams words, timestamping when it decoded each one. */
+async function* fakeModel(prompt: string): AsyncGenerator<{ text: string; decodedAtMs: number }> {
   await sleep(30);
   for (const word of `Looking up the weather for: ${prompt}`.split(" ")) {
+    const decodedAtMs = Date.now();
     await sleep(5);
-    yield `${word} `;
+    yield { text: `${word} `, decodedAtMs };
   }
 }
+
+// Content options: an example declarative rule applied after any redaction callback.
+const content = {
+  rules: [{ type: "replace_literal", find: "Paris", replace: "[CITY]" }] as const,
+};
 
 const setup = (): { observer: Observer; shutdown: () => Promise<unknown> } => {
   const env = otlpConfigFromEnv();
@@ -36,7 +42,7 @@ const setup = (): { observer: Observer; shutdown: () => Promise<unknown> } => {
       ...env,
     });
     return {
-      observer: pipeline.observer(),
+      observer: pipeline.observer(content),
       shutdown: async () => {
         await pipeline.shutdown();
         console.log("export stats", pipeline.stats());
@@ -60,6 +66,7 @@ const setup = (): { observer: Observer; shutdown: () => Promise<unknown> } => {
       tracerProvider,
       meterProvider,
       loggerProvider: loggerProvider as LoggerProviderLike,
+      content,
     }),
     shutdown: () =>
       Promise.all([tracerProvider.shutdown(), meterProvider.shutdown(), loggerProvider.shutdown()]),
@@ -86,12 +93,11 @@ const chat = observer.startInference(
 );
 chat.recordInputMessages([{ role: "user", parts: [{ type: "text", content: question }] }]);
 let text = "";
-let first = true;
 for await (const delta of fakeModel(question)) {
-  if (first) chat.recordFirstToken();
-  first = false;
+  // The model measured when it decoded the token; only the first call counts.
+  chat.recordFirstToken(delta.decodedAtMs);
   chat.recordChunk();
-  text += delta;
+  text += delta.text;
 }
 chat.recordOutputMessages([
   {
@@ -125,6 +131,6 @@ const target = chat.observationRef();
 if (target !== undefined) {
   observer.recordEvaluation(target, { name: "relevance", scoreValue: 0.9, scoreLabel: "relevant" });
   observer.recordFeedback(target, { score: 1, label: "thumbs_up", comment: "helpful" });
-  console.log(`trace ${target.traceId} span ${target.spanId}`);
+  console.log(`trace ${target.trace_id} span ${target.span_id}`);
 }
 await shutdown();

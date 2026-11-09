@@ -1,343 +1,295 @@
-//! Tracing visualization utilities for flame graph-like output
-//!
-//! This module provides ASCII flame graph visualization of pipeline execution traces.
-
-use colored::*;
-use std::collections::HashMap;
+//! Command-owned OpenTelemetry capture. No process-wide collector or reset.
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-/// A span representing a unit of work with timing
-#[derive(Debug, Clone)]
-pub struct Span {
-    pub name: String,
-    pub start: Instant,
-    pub end: Option<Instant>,
-    pub parent_id: Option<usize>,
-    pub metadata: HashMap<String, String>,
-}
+use anyhow::{Context as _, Result};
+use opentelemetry::trace::TraceId;
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider, Span, SpanData, SpanProcessor};
+use opentelemetry_sdk::Resource;
+use xybrid_observability::otlp::{trace_json, ObservabilityPipeline, OtlpConfig};
+use xybrid_sdk::observability::{self, ObservabilitySession, Observer};
 
-impl Span {
-    pub fn duration(&self) -> Option<Duration> {
-        self.end.map(|e| e.duration_since(self.start))
-    }
+pub use xybrid_core::tracing::{add_metadata, SpanGuard};
 
-    pub fn duration_ms(&self) -> Option<u64> {
-        self.duration().map(|d| d.as_millis() as u64)
-    }
-}
-
-/// Tree node for building hierarchical span visualization
 #[derive(Debug)]
-struct SpanNode {
-    span_id: usize,
-    children: Vec<SpanNode>,
+struct Captured {
+    trace: Option<TraceId>,
+    spans: Vec<SpanData>,
+    bytes: usize,
+    dropped: usize,
+    resource: Resource,
 }
 
-/// Collector for tracing spans during pipeline execution
-#[derive(Debug, Default)]
-pub struct SpanCollector {
-    spans: Vec<Span>,
-    stack: Vec<usize>, // Stack of active span IDs
+#[derive(Clone, Debug)]
+struct CaptureProcessor(Arc<Mutex<Captured>>);
+
+impl SpanProcessor for CaptureProcessor {
+    fn on_start(&self, _: &mut Span, _: &opentelemetry::Context) {}
+    fn on_end(&self, span: SpanData) {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.trace != Some(span.span_context.trace_id()) {
+            return;
+        }
+        // Include SDK allocations and encoded representations, with headroom for
+        // capacities and grouping. These limits bound data we own, not process RSS.
+        let bytes = trace_json(vec![span.clone()], &state.resource)
+            .map(|body| body.len().saturating_mul(4).saturating_add(2048))
+            .unwrap_or(usize::MAX);
+        if state.spans.len() >= 10_000
+            || bytes > (32 * 1024 * 1024usize).saturating_sub(state.bytes)
+        {
+            state.dropped += 1;
+        } else {
+            state.bytes += bytes;
+            state.spans.push(span);
+        }
+    }
+    fn force_flush(&self) -> OTelSdkResult {
+        Ok(())
+    }
+    fn shutdown_with_timeout(&self, _: Duration) -> OTelSdkResult {
+        Ok(())
+    }
+    fn set_resource(&mut self, resource: &Resource) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .resource = resource.clone();
+    }
 }
 
-impl SpanCollector {
-    pub fn new() -> Self {
-        Self::default()
+/// Owns the providers and a bounded capture of one command's trace.
+pub struct LocalCapture {
+    state: Arc<Mutex<Captured>>,
+    provider: Option<SdkTracerProvider>,
+    pipeline: Option<ObservabilityPipeline>,
+    session: ObservabilitySession,
+}
+
+impl LocalCapture {
+    /// Builds the command's providers: a bounded in-memory capture, plus the
+    /// OTLP pipeline when `config` is set. Both describe the process with the
+    /// SDK's resource attributes, so a captured or exported trace carries the
+    /// same `telemetry.sdk.*`, `xybrid.sdk.*` and device attributes as an SDK
+    /// session.
+    ///
+    /// # Errors
+    /// Invalid `device` id or OTLP configuration.
+    pub fn configure(config: Option<OtlpConfig>, device: Option<&str>) -> Result<Self> {
+        let attributes = observability::resource_attributes(true, device)?;
+        let state = Arc::new(Mutex::new(Captured {
+            trace: None,
+            spans: Vec::new(),
+            bytes: 0,
+            dropped: 0,
+            resource: Resource::builder_empty().build(),
+        }));
+        let processor = CaptureProcessor(state.clone());
+        let (provider, pipeline, observer) = match config {
+            Some(mut config) => {
+                // The validated id replaces any copy the flags already added.
+                config
+                    .resource
+                    .attributes
+                    .retain(|kv| kv.key.as_str() != "device.id");
+                config.resource.attributes.extend(attributes);
+                let pipeline = ObservabilityPipeline::build_with_span_processor(config, processor)?;
+                let observer = pipeline.observer();
+                (None, Some(pipeline), observer)
+            }
+            None => {
+                let resource = Resource::builder_empty()
+                    .with_service_name("xybrid-cli")
+                    .with_attribute(opentelemetry::KeyValue::new(
+                        "service.version",
+                        env!("CARGO_PKG_VERSION"),
+                    ))
+                    .with_attributes(attributes);
+                let provider = SdkTracerProvider::builder()
+                    .with_span_processor(processor)
+                    .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOn)))
+                    .with_resource(resource.build())
+                    .build();
+                let observer = Observer::builder().tracer_provider(&provider).build();
+                (Some(provider), None, observer)
+            }
+        };
+        let session = ObservabilitySession::borrowed(observer);
+        observability::install_default_session(session.clone());
+        Ok(Self {
+            state,
+            provider,
+            pipeline,
+            session,
+        })
     }
 
-    /// Start a new span, returns span ID
-    pub fn start_span(&mut self, name: impl Into<String>) -> usize {
-        let parent_id = self.stack.last().copied();
-        let span_id = self.spans.len();
-
-        self.spans.push(Span {
-            name: name.into(),
-            start: Instant::now(),
-            end: None,
-            parent_id,
-            metadata: HashMap::new(),
-        });
-
-        self.stack.push(span_id);
-        span_id
+    /// Whether the captured trace is also exported over OTLP.
+    pub fn exports(&self) -> bool {
+        self.pipeline.is_some()
     }
 
-    /// End the current span
-    pub fn end_span(&mut self) {
-        if let Some(span_id) = self.stack.pop() {
-            if let Some(span) = self.spans.get_mut(span_id) {
-                span.end = Some(Instant::now());
+    /// Spans captured so far (sorted by start time on [`Self::finish`]).
+    #[cfg(test)]
+    pub(crate) fn captured(&self) -> Vec<SpanData> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .spans
+            .clone()
+    }
+
+    pub fn begin(&self) -> observability::ManualObservation<observability::WorkflowOperation> {
+        let root = observability::start_workflow(
+            "xybrid-cli run",
+            &observability::ObservationOptions::default().with_session(&self.session),
+        );
+        if let Some(context) = root.context() {
+            self.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .trace = TraceId::from_hex(&context.trace_id()).ok();
+        }
+        root
+    }
+
+    pub fn finish(&self, render: bool, path: Option<&std::path::Path>) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.spans.sort_by_key(|span| span.start_time);
+        if render {
+            println!("Execution trace ({} spans)", state.spans.len());
+            for span in &state.spans {
+                let parent = span.parent_span_id.to_string();
+                let duration = span
+                    .end_time
+                    .duration_since(span.start_time)
+                    .unwrap_or_default();
+                println!(
+                    "  {}  {}  parent={}  {:8.3} ms  {}",
+                    span.span_context.span_id(),
+                    span.name,
+                    parent,
+                    duration.as_secs_f64() * 1000.0,
+                    if matches!(span.status, opentelemetry::trace::Status::Error { .. }) {
+                        "error"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            if state.dropped > 0 {
+                println!("{} spans not captured (capture budget)", state.dropped);
             }
         }
-    }
-
-    /// End a specific span by ID
-    pub fn end_span_by_id(&mut self, span_id: usize) {
-        if let Some(span) = self.spans.get_mut(span_id) {
-            span.end = Some(Instant::now());
+        if let Some(path) = path {
+            let body = trace_json(std::mem::take(&mut state.spans), &state.resource)?;
+            let directory = path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(std::path::Path::new("."));
+            let mut file = tempfile::NamedTempFile::new_in(directory)?;
+            std::io::Write::write_all(&mut file, &body)?;
+            file.persist(path)
+                .with_context(|| format!("Failed to export trace to {}", path.display()))?;
         }
-        // Remove from stack if present
-        self.stack.retain(|&id| id != span_id);
+        Ok(())
     }
 
-    /// Add metadata to current span
-    pub fn add_metadata(&mut self, key: impl Into<String>, value: impl Into<String>) {
-        if let Some(&span_id) = self.stack.last() {
-            if let Some(span) = self.spans.get_mut(span_id) {
-                span.metadata.insert(key.into(), value.into());
-            }
+    pub fn shutdown(&self) -> Result<()> {
+        if let Some(pipeline) = &self.pipeline {
+            pipeline.shutdown(Duration::from_secs(5))?;
         }
+        if let Some(provider) = &self.provider {
+            provider.shutdown_with_timeout(Duration::from_secs(5))?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xybrid_sdk::observability::{start_tool, ObservationOptions, ToolCallInfo};
+
+    fn lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::OBSERVABILITY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Get all collected spans
-    pub fn spans(&self) -> &[Span] {
-        &self.spans
-    }
-
-    /// Build span tree from root spans
-    fn build_tree(&self) -> Vec<SpanNode> {
-        // Find root spans (no parent)
-        let root_ids: Vec<usize> = self
-            .spans
+    #[test]
+    fn local_capture_renders_exports_otlp_json_and_feeds_the_analyzer() {
+        let _lock = lock();
+        assert!(LocalCapture::configure(None, Some("bad\ndevice")).is_err());
+        let capture = LocalCapture::configure(None, Some("cli-device")).unwrap();
+        assert!(!capture.exports(), "local-only capture exports nothing");
+        let root = capture.begin();
+        {
+            let _scope = root.enter();
+            let _stage = SpanGuard::new("inference:local-model");
+            start_tool(ToolCallInfo::new("lookup"), &ObservationOptions::default()).end();
+        }
+        root.end();
+        let captured = capture.captured();
+        let root_span = captured
             .iter()
-            .enumerate()
-            .filter(|(_, span)| span.parent_id.is_none())
-            .map(|(id, _)| id)
+            .find(|s| s.name == "invoke_workflow xybrid-cli run")
+            .unwrap();
+        let stage = captured
+            .iter()
+            .find(|s| s.name == "inference:local-model")
+            .unwrap();
+        let tool = captured
+            .iter()
+            .find(|s| s.name == "execute_tool lookup")
+            .unwrap();
+        assert_eq!(stage.parent_span_id, root_span.span_context.span_id());
+        assert_eq!(
+            tool.parent_span_id,
+            stage.span_context.span_id(),
+            "operations inside an open CLI stage are its children"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trace.json");
+        capture.finish(true, Some(&path)).unwrap();
+        capture.shutdown().unwrap();
+        let trace: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let resource = trace["resourceSpans"][0]["resource"]["attributes"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let value = |key: &str| {
+            resource
+                .iter()
+                .find(|a| a["key"] == key)
+                .map(|a| a["value"]["stringValue"].clone())
+        };
+        assert_eq!(
+            value("telemetry.sdk.name"),
+            Some(serde_json::json!("xybrid"))
+        );
+        assert_eq!(value("device.id"), Some(serde_json::json!("cli-device")));
+        assert_eq!(value("service.name"), Some(serde_json::json!("xybrid-cli")));
+        assert!(value("xybrid.sdk.version").is_some());
+
+        let summary = crate::commands::trace::summarize(&trace).unwrap();
+        assert_eq!(summary["operation_counts"]["execute_tool"], 1);
+        assert_eq!(summary["operation_counts"]["invoke_workflow"], 1);
+        let names: Vec<&str> = summary["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| o["name"].as_str().unwrap())
             .collect();
-
-        root_ids.into_iter().map(|id| self.build_node(id)).collect()
+        assert!(names.contains(&"execute_tool lookup"));
     }
-
-    fn build_node(&self, span_id: usize) -> SpanNode {
-        let children: Vec<SpanNode> = self
-            .spans
-            .iter()
-            .enumerate()
-            .filter(|(_, span)| span.parent_id == Some(span_id))
-            .map(|(id, _)| self.build_node(id))
-            .collect();
-
-        SpanNode { span_id, children }
-    }
-
-    /// Generate ASCII flame graph visualization
-    pub fn render_flame_graph(&self) -> String {
-        let mut output = String::new();
-        let tree = self.build_tree();
-
-        // Calculate total duration for scaling
-        let total_duration: u64 = self
-            .spans
-            .iter()
-            .filter(|s| s.parent_id.is_none())
-            .filter_map(|s| s.duration_ms())
-            .sum();
-
-        if total_duration == 0 {
-            return "No spans recorded".to_string();
-        }
-
-        output.push_str(&format!(
-            "\n{}\n",
-            "═══════════════════════════════════════════════════════════════════════════════"
-                .bright_cyan()
-        ));
-        output.push_str(&format!(
-            "{}\n",
-            "                         PIPELINE EXECUTION TRACE".bold()
-        ));
-        output.push_str(&format!(
-            "{}\n\n",
-            "═══════════════════════════════════════════════════════════════════════════════"
-                .bright_cyan()
-        ));
-
-        for node in &tree {
-            self.render_node(&mut output, node, 0, total_duration);
-        }
-
-        output.push_str(&format!(
-            "\n{}\n",
-            "───────────────────────────────────────────────────────────────────────────────"
-                .bright_black()
-        ));
-
-        // Summary
-        output.push_str(&format!(
-            "Total Duration: {}\n",
-            format!("{}ms", total_duration).bright_yellow()
-        ));
-
-        let span_count = self.spans.len();
-        output.push_str(&format!(
-            "Total Spans: {}\n",
-            span_count.to_string().bright_cyan()
-        ));
-
-        output
-    }
-
-    fn render_node(&self, output: &mut String, node: &SpanNode, depth: usize, total_ms: u64) {
-        let span = &self.spans[node.span_id];
-        let duration_ms = span.duration_ms().unwrap_or(0);
-
-        // Calculate bar width (max 50 chars)
-        let bar_width = if total_ms > 0 {
-            ((duration_ms as f64 / total_ms as f64) * 50.0) as usize
-        } else {
-            0
-        };
-        let bar_width = bar_width.clamp(1, 50);
-
-        // Indentation
-        let indent = "  ".repeat(depth);
-        let connector = if depth > 0 { "├─ " } else { "" };
-
-        // Color code based on duration
-        let (bar_char, color) = if duration_ms < 50 {
-            ('█', "green")
-        } else if duration_ms < 200 {
-            ('█', "yellow")
-        } else {
-            ('█', "red")
-        };
-
-        let bar: String = std::iter::repeat_n(bar_char, bar_width).collect();
-        let colored_bar = match color {
-            "green" => bar.bright_green(),
-            "yellow" => bar.bright_yellow(),
-            "red" => bar.bright_red(),
-            _ => bar.white(),
-        };
-
-        // Format name with metadata
-        let mut display_name = span.name.clone();
-        if let Some(target) = span.metadata.get("target") {
-            display_name = format!("{} [{}]", display_name, target);
-        }
-
-        // Duration string
-        let duration_str = format!("{}ms", duration_ms);
-        let colored_duration = match color {
-            "green" => duration_str.bright_green(),
-            "yellow" => duration_str.bright_yellow(),
-            "red" => duration_str.bright_red(),
-            _ => duration_str.white(),
-        };
-
-        output.push_str(&format!(
-            "{}{}{} {} {}\n",
-            indent,
-            connector.bright_black(),
-            colored_bar,
-            display_name.cyan(),
-            colored_duration
-        ));
-
-        // Render children
-        for child in &node.children {
-            self.render_node(output, child, depth + 1, total_ms);
-        }
-    }
-
-    /// Generate JSON trace output (compatible with Chrome trace format)
-    pub fn to_chrome_trace_json(&self) -> String {
-        let events: Vec<serde_json::Value> = self
-            .spans
-            .iter()
-            .flat_map(|span| {
-                let mut events = vec![];
-                let name = &span.name;
-                let ts = 0; // Would need real timestamps
-
-                // Begin event
-                events.push(serde_json::json!({
-                    "name": name,
-                    "cat": "pipeline",
-                    "ph": "B",
-                    "ts": ts,
-                    "pid": 1,
-                    "tid": 1,
-                    "args": span.metadata
-                }));
-
-                // End event
-                if let Some(duration) = span.duration() {
-                    events.push(serde_json::json!({
-                        "name": name,
-                        "cat": "pipeline",
-                        "ph": "E",
-                        "ts": ts + duration.as_micros() as u64,
-                        "pid": 1,
-                        "tid": 1
-                    }));
-                }
-
-                events
-            })
-            .collect();
-
-        serde_json::json!({ "traceEvents": events }).to_string()
-    }
-}
-
-// Thread-safe global span collector
-lazy_static::lazy_static! {
-    pub static ref GLOBAL_COLLECTOR: Arc<Mutex<SpanCollector>> = Arc::new(Mutex::new(SpanCollector::new()));
-}
-
-/// Global functions for easy tracing
-pub fn start_span(name: impl Into<String>) -> usize {
-    GLOBAL_COLLECTOR.lock().unwrap().start_span(name)
-}
-
-pub fn end_span() {
-    GLOBAL_COLLECTOR.lock().unwrap().end_span()
-}
-
-pub fn end_span_by_id(id: usize) {
-    GLOBAL_COLLECTOR.lock().unwrap().end_span_by_id(id)
-}
-
-pub fn add_metadata(key: impl Into<String>, value: impl Into<String>) {
-    GLOBAL_COLLECTOR.lock().unwrap().add_metadata(key, value)
-}
-
-pub fn render_trace() -> String {
-    GLOBAL_COLLECTOR.lock().unwrap().render_flame_graph()
-}
-
-pub fn reset_collector() {
-    *GLOBAL_COLLECTOR.lock().unwrap() = SpanCollector::new();
-}
-
-/// RAII guard for automatic span ending
-pub struct SpanGuard {
-    _id: usize,
-}
-
-impl SpanGuard {
-    pub fn new(name: impl Into<String>) -> Self {
-        let id = start_span(name);
-        Self { _id: id }
-    }
-}
-
-impl Drop for SpanGuard {
-    fn drop(&mut self) {
-        end_span();
-    }
-}
-
-/// Macro for easy span creation
-#[macro_export]
-macro_rules! trace_span {
-    ($name:expr) => {
-        let _guard = $crate::tracing_viz::SpanGuard::new($name);
-    };
-    ($name:expr, $($key:expr => $value:expr),+) => {
-        let _guard = $crate::tracing_viz::SpanGuard::new($name);
-        $( $crate::tracing_viz::add_metadata($key, $value); )+
-    };
 }

@@ -60,7 +60,9 @@ export type {
   ModelInfo,
   MultiPartEnvelope,
   ObservabilityStats,
+  SignalStats,
   ObservationRef,
+  ObservationOptions,
   OutputType,
   PartialResult,
   PipelineInfo,
@@ -69,8 +71,10 @@ export type {
   StageResult,
   StreamToken,
   StreamingConfig,
+  TranscriptionResult,
   TextEnvelope,
   ThermalState,
+  TtsAudioChunk,
   ToolCall,
   ToolDefinition,
   ToolResult,
@@ -97,3 +101,4 @@ export function jsonSchemaToGbnf(schema: object | string): Promise<string> {
     typeof schema === 'string' ? schema : JSON.stringify(schema),
   );
 }
+export * from './operations';

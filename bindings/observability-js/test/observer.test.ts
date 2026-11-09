@@ -83,8 +83,8 @@ describe("parenting", () => {
     const [toolSpan, workflowSpan] = spans.getFinishedSpans();
     expect(toolSpan?.parentSpanContext?.spanId).toBe(workflowSpan?.spanContext().spanId);
     expect(workflow.observationRef()).toEqual({
-      traceId: workflowSpan?.spanContext().traceId ?? "",
-      spanId: workflowSpan?.spanContext().spanId ?? "",
+      trace_id: workflowSpan?.spanContext().traceId ?? "",
+      span_id: workflowSpan?.spanContext().spanId ?? "",
     });
   });
 });
@@ -187,7 +187,7 @@ describe("events", () => {
     const [record] = logs.getFinishedLogRecords();
     expect(record?.attributes["xybrid.genai.feedback.comment"]).toBeUndefined();
     expect(record?.attributes["gen_ai.evaluation.name"]).toBe("user_feedback");
-    expect(record?.spanContext?.spanId).toBe(target.spanId);
+    expect(record?.spanContext?.spanId).toBe(target.span_id);
   });
 
   test("content never reaches metric dimensions", async () => {
@@ -258,14 +258,14 @@ describe("generic spans", () => {
     const [span] = spans.getFinishedSpans();
     expect(span?.name).toBe("decode");
     expect(span?.kind).toBe(0);
-    expect(span?.parentSpanContext?.spanId).toBe(parent.observationRef()?.spanId ?? "");
+    expect(span?.parentSpanContext?.spanId).toBe(parent.observationRef()?.span_id ?? "");
     expect(span?.attributes).toEqual({
       "xybrid.pipeline.stage": "decode",
       tokens: 4,
       "error.type": "timeout",
     });
     expect(span?.status).toEqual({ code: 2, message: "slow" });
-    expect(stage.observationRef()?.spanId).toBe(span?.spanContext().spanId ?? "");
+    expect(stage.observationRef()?.span_id).toBe(span?.spanContext().spanId ?? "");
     const names = normalizeMetrics(await collectMetrics()).map((metric) => metric.name);
     expect(names).toEqual(["gen_ai.client.inference.duration"]);
   });
