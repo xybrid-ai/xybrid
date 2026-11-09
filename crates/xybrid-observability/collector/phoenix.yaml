@@ -43,6 +43,12 @@ processors:
           - set(attributes["llm.token_count.completion"], attributes["gen_ai.usage.output_tokens"]) where attributes["openinference.span.kind"] == "LLM" and attributes["gen_ai.usage.output_tokens"] != nil
           - set(attributes["llm.token_count.prompt_details.cache_read"], attributes["gen_ai.usage.cache_read.input_tokens"]) where attributes["openinference.span.kind"] == "LLM" and attributes["gen_ai.usage.cache_read.input_tokens"] != nil
           - set(attributes["llm.token_count.completion_details.reasoning"], attributes["gen_ai.usage.reasoning.output_tokens"]) where attributes["openinference.span.kind"] == "LLM" and attributes["gen_ai.usage.reasoning.output_tokens"] != nil
+          # Phoenix (21+) also derives llm.token_count.* from gen_ai.usage.* on
+          # every span kind it receives, and sums token counts over a trace. An
+          # attempt's usage would then count again next to its request's
+          # totals, so attempts reach Phoenix without gen_ai.usage.* (per-attempt
+          # usage stays in the canonical export to Xybrid or your own sinks).
+          - delete_matching_keys(attributes, "^gen_ai[.]usage[.]") where attributes["xybrid.genai.attempt.index"] != nil
           # Content.
           - set(attributes["input.value"], attributes["gen_ai.input.messages"]) where attributes["gen_ai.input.messages"] != nil
           - set(attributes["input.mime_type"], "application/json") where attributes["gen_ai.input.messages"] != nil

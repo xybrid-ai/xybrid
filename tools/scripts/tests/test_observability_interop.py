@@ -745,6 +745,44 @@ class WireTest(unittest.TestCase):
             stripped.write_text("".join(json.dumps(entry) + "\n" for entry in wire))
             self.assertEqual(failed(self.wire_checks("langfuse", stripped, "rust", truth)), ["mapping.usage"])
 
+    def test_phoenix_wire_derives_openinference_attributes_like_phoenix(self):
+        attributes = {"gen_ai.request.model": "req", "gen_ai.usage.input_tokens": 3, "gen_ai.usage.output_tokens": 4.0}
+        stored = destinations.phoenix_wire_attributes(attributes)
+        self.assertEqual((stored["llm.model_name"], stored["llm.token_count.prompt"],
+                          stored["llm.token_count.completion"], stored["llm.token_count.total"]), ("req", 3, 4, 7))
+        explicit = destinations.phoenix_wire_attributes({**attributes, "llm.token_count.prompt": 9,
+                                                         "llm.model_name": "resp"})
+        self.assertEqual((explicit["llm.token_count.prompt"], explicit["llm.model_name"]), (9, "resp"))
+        embedding = destinations.phoenix_wire_attributes({"gen_ai.operation.name": "embeddings",
+                                                          "gen_ai.request.model": "emb"})
+        self.assertEqual(embedding.get("embedding.model_name"), "emb")
+        self.assertNotIn("llm.model_name", embedding)
+        self.assertEqual(destinations.phoenix_wire_attributes({"llm.token_count.prompt": 1}),
+                         {"llm.token_count.prompt": 1})
+
+    def test_phoenix_profile_keeping_attempt_usage_fails(self):
+        # Phoenix derives llm.token_count.* from gen_ai.usage.* on any span
+        # kind, so an attempt that reaches it with usage is counted twice.
+        directory = FIXTURES / "wire" / "phoenix-rust"
+        entries = [json.loads(line) for line in (directory / "ground-truth.jsonl").read_text().splitlines() if line]
+        truth = expectations.GroundTruth.build(workloads.WORKLOADS["rust"], entries)
+        wire = [json.loads(line) for line in (directory / "wire.jsonl").read_text().splitlines() if line]
+        attempts = 0
+        for entry in wire:
+            for resource in entry["body"].get("resourceSpans") or []:
+                for scope in resource["scopeSpans"]:
+                    for span in scope["spans"]:
+                        keys = {item["key"] for item in span["attributes"]}
+                        if "xybrid.genai.attempt.index" in keys:
+                            self.assertFalse(any(key.startswith("gen_ai.usage.") for key in keys), span["name"])
+                            span["attributes"].append({"key": "gen_ai.usage.input_tokens", "value": {"intValue": "24"}})
+                            attempts += 1
+        self.assertGreater(attempts, 0)
+        with tempfile.TemporaryDirectory() as tmp:
+            kept = Path(tmp) / "wire.jsonl"
+            kept.write_text("".join(json.dumps(entry) + "\n" for entry in wire))
+            self.assertEqual(failed(self.wire_checks("phoenix", kept, "rust", truth)), ["mapping.usage"])
+
     def test_langfuse_wire_type_mapping(self):
         directory = FIXTURES / "wire" / "langfuse-rust"
         wire = [json.loads(line) for line in (directory / "wire.jsonl").read_text().splitlines() if line]

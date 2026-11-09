@@ -107,7 +107,9 @@ DESTINATIONS: Dict[str, Dict[str, Any]] = {
         "model": "response_first",
         "model_roles": ("inference",),
         "provider_roles": ("inference",),
-        # llm.token_count.* only on LLM spans: attempts carry none.
+        # llm.token_count.* only on LLM spans: attempts carry none. Phoenix
+        # derives token counts from gen_ai.usage.* on any span, so the profile
+        # removes those from attempts.
         "usage": {"inference": "equal", "attempt": "absent"},
         "counted": None,
         "error": "status",
@@ -124,9 +126,11 @@ DESTINATIONS: Dict[str, Dict[str, Any]] = {
             "llm.model_name <- response model (else request model); llm.provider <- gen_ai.provider.name",
             "llm.token_count.prompt/completion <- gen_ai.usage.* on LLM spans only",
             "input.value/output.value <- messages (tool: arguments/result)",
-            "every canonical attribute is kept as sent (first-chunk and first-token times included)",
+            "every other canonical attribute is kept as sent (first-chunk and first-token times included)",
         ],
         "drops": [
+            "gen_ai.usage.* on attempt spans: Phoenix would derive llm.token_count.* from them and count the "
+            "request's tokens twice",
             "gen_ai.evaluation.result log records: Phoenix ingests no OTLP logs; annotations come only from "
             "its own API (route the records elsewhere with sinks.yaml)",
             "metrics (nop unless sinks.yaml)",

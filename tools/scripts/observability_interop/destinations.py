@@ -449,12 +449,56 @@ def langfuse_wire_usage(attributes: Mapping[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in usage.items() if value is not None}
 
 
+# Phoenix 21 (phoenix/trace/gen_ai/conversion.py, merged by otel.py's
+# _merge_synthesized_attributes) derives OpenInference attributes from
+# gen_ai.* on ingest and adds each one the span does not already carry. These
+# are the derivations the checks read; token counts come from any span kind.
+PHOENIX_USAGE_KEYS = (("gen_ai.usage.input_tokens", "llm.token_count.prompt"),
+                      ("gen_ai.usage.output_tokens", "llm.token_count.completion"))
+
+
+def _phoenix_int(value: Any) -> Optional[int]:
+    """Phoenix's ``_coerce_int``: ints, integral floats and int strings."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
+def phoenix_wire_attributes(attributes: Mapping[str, Any]) -> Dict[str, Any]:
+    """The attributes Phoenix stores for a span sent with ``attributes``."""
+    stored = dict(attributes)
+    if not any(str(key).startswith("gen_ai.") for key in attributes):
+        return stored
+    derived: Dict[str, Any] = {}
+    model = attributes.get("gen_ai.request.model")
+    if isinstance(model, str) and model:
+        key = "embedding.model_name" if attributes.get("gen_ai.operation.name") == "embeddings" else "llm.model_name"
+        derived[key] = model
+    tokens = {target: _phoenix_int(attributes.get(source)) for source, target in PHOENIX_USAGE_KEYS}
+    derived.update({key: value for key, value in tokens.items() if value is not None})
+    if all(value is not None for value in tokens.values()):
+        derived["llm.token_count.total"] = sum(tokens.values())
+    for key, value in derived.items():
+        stored.setdefault(key, value)
+    return stored
+
+
 def wire_spans(destination: str, entries: Sequence[Mapping[str, Any]]) -> List[DestSpan]:
     """The profile's output as the backend would receive it.
 
     Langfuse fields follow its OTel ingestion (type, input/output, level,
     ``langfuse_wire_model`` and ``langfuse_wire_usage``); Phoenix reads
-    the OpenInference attributes as sent; Xybrid reads canonical attributes,
+    the OpenInference attributes as sent plus what it derives from gen_ai.*
+    (``phoenix_wire_attributes``); Xybrid reads canonical attributes,
     with ``span_type`` and the counted flag derived by the platform's own rule.
     """
     out = []
@@ -480,10 +524,11 @@ def wire_spans(destination: str, entries: Sequence[Mapping[str, Any]]) -> List[D
                 first_chunk_s=number(attributes.get(TTFC)), first_token_s=number(attributes.get(TTFT)),
                 raw={"span": span, "attributes": attributes}))
         elif destination == "phoenix":
+            stored = phoenix_wire_attributes(attributes)
             out.append(openinference_span(
-                trace_id, span_id, parent, span.get("name"), text(attributes.get("openinference.span.kind")),
-                "ERROR" if code == 2 else ("OK" if code == 1 else "UNSET"), message, attributes,
-                {"span": span, "attributes": attributes}))
+                trace_id, span_id, parent, span.get("name"), text(stored.get("openinference.span.kind")),
+                "ERROR" if code == 2 else ("OK" if code == 1 else "UNSET"), message, stored,
+                {"span": span, "attributes": stored}))
         else:
             span_type, is_request = xybrid_span_type(attributes)
             out.append(DestSpan(
