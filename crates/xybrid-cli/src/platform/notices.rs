@@ -17,9 +17,9 @@
 //! the platform's own word when ingest gave one, the stored reminder
 //! otherwise ([`report_workspace_notice`]). An expired key is reported on
 //! every run it happens; a provisional one shares the reminder's daily slot,
-//! so a day brings one claim nudge. A provisional deadline also refreshes the
-//! saved credential's first, when the run used that credential's key on its
-//! own platform's ingest ([`refresh_key_deadline`]).
+//! so a day brings one claim nudge. Before it is shown, a provisional
+//! deadline refreshes the saved credential's, when the run used that
+//! credential's key on its own platform's ingest ([`refresh_key_deadline`]).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
