@@ -362,7 +362,9 @@ mod tests {
         );
         let generic = RpcStatus::new(16, "Invalid API key");
         let wrong_code = RpcStatus::new(14, "workspace_expired");
-        let cases: Vec<(u16, Vec<&[u8]>, Option<&RpcStatus>, &str)> = vec![
+        /// Status, `X-Xybrid-Workspace` values, status body, case name.
+        type Case<'a> = (u16, Vec<&'a [u8]>, Option<&'a RpcStatus>, &'a str);
+        let cases: Vec<Case<'_>> = vec![
             (401, vec![], Some(&generic), "generic 401"),
             (401, vec![], Some(&expired), "body without the marker"),
             (

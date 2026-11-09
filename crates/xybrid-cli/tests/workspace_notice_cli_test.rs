@@ -395,7 +395,12 @@ fn quiet_ci_and_xybrid_quiet_suppress_the_notice_not_the_export() {
     let server = MockServer::start();
     let ingest = expired_ingest(&server);
     let traces = server.url("/v1/traces");
-    let cases: [(&[&str], &[(&str, &str)]); 3] = [
+    /// Extra global flags, extra environment.
+    type Case = (
+        &'static [&'static str],
+        &'static [(&'static str, &'static str)],
+    );
+    let cases: [Case; 3] = [
         (&["--quiet"], &[]),
         (&[], &[("XYBRID_QUIET", "1")]),
         (&[], &[("CI", "true")]),

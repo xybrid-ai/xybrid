@@ -105,8 +105,8 @@ pub(crate) fn workspace_notice_text(notice: WorkspaceNotice) -> Option<String> {
                 .to_string(),
         ),
         WorkspaceNotice::Provisional { key_expires_at } => Some(format!(
-            "Xybrid stored this run's traces in an unclaimed workspace: its key stops working on \
-             {} unless you claim it. Claim it: xybrid auth claim",
+            "Xybrid accepted this run's traces into an unclaimed workspace: its key stops \
+             working on {} unless you claim it. Claim it: xybrid auth claim",
             human_date(key_expires_at.into())
         )),
         _ => None,
