@@ -34,6 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writes an artifact. See `docs/sdk/observability-coverage.md` for migration and
   execution coverage.
 
+### Fixed
+
+- Cloud calls no longer sleep for whatever `Retry-After` a server sends. A 429
+  whose error code or type is `insufficient_quota` (a spent quota, such as an
+  unclaimed agent workspace's) fails at once with the server's message instead
+  of being retried. Other waits are honored up to
+  `xybrid_core::http::MAX_RETRY_AFTER` (60 s per call, in total); a longer
+  `Retry-After` returns the rate-limit error at once. Registry and
+  model-download retries follow the same bound.
+
 ### Migration
 
 - Analyze saved traces with `xybrid trace FILE`; the session/latest selectors
