@@ -342,7 +342,7 @@ pub trait RetryableError {
 /// policy backoff for that retry, and is honored only while it fits in the
 /// call's [`RetryAfterBudget`] ([`MAX_RETRY_AFTER`] in total). One that does
 /// not fit returns [`RetryResult::Exhausted`] with that error at once, without
-/// sleeping.
+/// sleeping or asking `circuit` for another request.
 ///
 /// # Example
 ///
@@ -385,6 +385,23 @@ where
     let mut attempts_made: u32 = 0;
 
     for attempt in 0..policy.max_attempts {
+        let server_wait = last_error.as_ref().and_then(E::retry_after);
+
+        // The server wants longer than this call may still wait: report its
+        // error now instead of sleeping or retrying early. Settled before the
+        // circuit breaker is asked, because `can_execute` takes one of a
+        // half-open circuit's few test requests, and a request taken for an
+        // attempt that never runs is never recorded: the circuit would refuse
+        // every later call.
+        if let Some(err) = last_error
+            .take_if(|_| server_wait.is_some_and(|wait| wait > retry_after_budget.remaining()))
+        {
+            return RetryResult::Exhausted {
+                last_error: err,
+                attempts: attempts_made,
+            };
+        }
+
         // Check circuit breaker if provided
         if let Some(cb) = circuit {
             if !cb.can_execute() {
@@ -395,24 +412,16 @@ where
             }
         }
 
-        // Calculate delay for this attempt (0 for first attempt). The previous
-        // error is consumed here: the attempt below either returns or
-        // replaces it.
-        let delay = match last_error.take() {
+        // The attempt runs now. Wait as long as the server asked, charging it
+        // to the budget (it fits: checked above, and nothing was charged
+        // since), or else the policy backoff (0 for the first attempt). The
+        // previous error, if any, is replaced by this attempt's or returned.
+        let delay = match server_wait {
+            Some(wait) => {
+                retry_after_budget.spend(wait);
+                wait
+            }
             None => policy.delay_for_attempt(attempt),
-            Some(err) => match err.retry_after() {
-                // Use server-specified retry-after while the budget lasts
-                Some(wait) if retry_after_budget.spend(wait) => wait,
-                // The server wants longer than this call may wait: report its
-                // error now instead of sleeping or retrying early.
-                Some(_) => {
-                    return RetryResult::Exhausted {
-                        last_error: err,
-                        attempts: attempts_made,
-                    }
-                }
-                None => policy.delay_for_attempt(attempt),
-            },
         };
 
         if !delay.is_zero() {
@@ -877,6 +886,51 @@ mod tests {
         });
         assert!(matches!(result, RetryResult::Failure(_)));
         assert!(breaker.is_open());
+    }
+
+    /// Giving up on a `Retry-After` past the budget takes no request from the
+    /// breaker. Here the failure opens the circuit and its zero open duration
+    /// is over at once, so a request taken for the retry would be the only
+    /// half-open one; never run, it would never be recorded, and the circuit
+    /// would refuse every later call.
+    #[test]
+    fn retry_after_beyond_budget_leaves_the_half_open_request_free() {
+        use crate::http::{CircuitConfig, CircuitState};
+
+        let policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_ms: 0,
+            max_delay_ms: 0,
+            jitter_factor: 0.0,
+        };
+        let breaker = CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        });
+
+        let mut calls = 0;
+        let result: RetryResult<(), TestError> = with_retry(&policy, Some(&breaker), || {
+            calls += 1;
+            Err(TestError {
+                retryable: true,
+                retry_after: Some(MAX_RETRY_AFTER + Duration::from_secs(1)),
+            })
+        });
+        assert_eq!(calls, 1);
+        assert!(matches!(result, RetryResult::Exhausted { attempts: 1, .. }));
+        assert!(!breaker.is_closed(), "the failure opened the circuit");
+
+        // The next call is the half-open probe, and its outcome decides the
+        // circuit.
+        let mut state_during_probe = None;
+        let result: RetryResult<(), TestError> = with_retry(&policy, Some(&breaker), || {
+            state_during_probe = Some(breaker.state());
+            Ok(())
+        });
+        assert!(result.is_success(), "{result:?}");
+        assert_eq!(state_during_probe, Some(CircuitState::HalfOpen));
+        assert!(breaker.is_closed());
     }
 
     #[test]
