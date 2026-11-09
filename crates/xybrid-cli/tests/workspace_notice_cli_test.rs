@@ -78,6 +78,13 @@ fn iso(at: DateTime<Utc>) -> String {
     at.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
+/// A deadline as the CLI's notices print it (local date).
+fn shown(at: DateTime<Utc>) -> String {
+    at.with_timezone(&chrono::Local)
+        .format("%a, %b %-d %Y")
+        .to_string()
+}
+
 /// An ingest that accepts `key`'s traces as a provisional workspace's. The
 /// answer is slowed down so it lands while the CLI is shutting down.
 fn provisional_ingest<'a>(server: &'a MockServer, key: &str, until: DateTime<Utc>) -> Mock<'a> {
@@ -473,7 +480,7 @@ fn a_provisional_deadline_refreshes_only_the_saved_credential_it_came_from() {
 
     // The saved key itself (resolved from the store, no flag): the platform's
     // newer deadline replaces the saved one. Today's claim slot is used, so
-    // neither the start-of-run reminder nor the notice repeats it.
+    // neither the held reminder nor the notice repeats it.
     let refreshed = deadline(5);
     let own = provisional_ingest(&server, KEY, refreshed);
     let bundle = sandbox.missing_bundle();
@@ -497,4 +504,115 @@ fn a_provisional_deadline_refreshes_only_the_saved_credential_it_came_from() {
     assert_eq!(sandbox.saved_key_deadline(), refreshed, "{run}");
     assert_eq!(run.claim_nudges(), 0, "one claim nudge a day: {run}");
     run.assert_no_secret();
+}
+
+/// `xybrid --platform-url <origin> --observability --traces-endpoint <ingest>
+/// run …` with the key the store holds for this project (no key flag).
+fn saved_key_run(sandbox: &Sandbox, origin: &str, traces: &str) -> Run {
+    let bundle = sandbox.missing_bundle();
+    sandbox.run_with(
+        &[
+            "--platform-url",
+            origin,
+            "--observability",
+            "--traces-endpoint",
+            traces,
+            "run",
+            "--bundle",
+            &bundle,
+            "--input-text",
+            "hi",
+        ],
+        &[],
+    )
+}
+
+#[test]
+fn a_connected_project_gets_one_claim_line_with_the_platforms_deadline() {
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let origin = server.base_url();
+    let traces = server.url("/v1/traces");
+    // `connect` saved one deadline; the platform now reports another.
+    let saved = deadline(2);
+    let reported = deadline(5);
+    sandbox.save_credential(&origin, saved);
+    let ingest = provisional_ingest(&server, KEY, reported);
+
+    let run = saved_key_run(&sandbox, &origin, &traces);
+    assert_eq!(run.code, Some(1), "{run}");
+    ingest.assert_hits(1);
+    // The reminder waited for ingest's answer (first received in the final
+    // drain): one claim line, carrying the platform's deadline.
+    assert_eq!(run.claim_nudges(), 1, "{run}");
+    assert!(run.stderr.contains("unclaimed workspace"), "{run}");
+    assert!(run.stderr.contains(&shown(reported)), "{run}");
+    assert!(
+        !run.stderr.contains(&shown(saved)),
+        "not the stale date: {run}"
+    );
+    assert_eq!(sandbox.saved_key_deadline(), reported);
+    run.assert_no_secret();
+
+    let again = saved_key_run(&sandbox, &origin, &traces);
+    ingest.assert_hits(2);
+    assert_eq!(again.claim_nudges(), 0, "once a day: {again}");
+}
+
+#[test]
+fn without_word_from_ingest_the_held_reminder_still_prints() {
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let origin = server.base_url();
+    let traces = server.url("/v1/traces");
+    let saved = deadline(2);
+    sandbox.save_credential(&origin, saved);
+    // Accepted without the workspace header: no notice from ingest.
+    let ingest = server.mock(|when, then| {
+        when.method(POST).path("/v1/traces");
+        then.status(200);
+    });
+
+    // A quiet run neither prints the held reminder nor uses up the day's.
+    let quiet = sandbox.run_with(
+        &[
+            "--quiet",
+            "--platform-url",
+            &origin,
+            "--observability",
+            "--traces-endpoint",
+            &traces,
+            "run",
+            "--bundle",
+            &sandbox.missing_bundle(),
+            "--input-text",
+            "hi",
+        ],
+        &[],
+    );
+    ingest.assert_hits(1);
+    assert_eq!(quiet.claim_nudges(), 0, "{quiet}");
+
+    let run = saved_key_run(&sandbox, &origin, &traces);
+    assert_eq!(run.code, Some(1), "{run}");
+    ingest.assert_hits(2);
+    assert_eq!(run.claim_nudges(), 1, "{run}");
+    assert!(run.stderr.contains("when last checked"), "{run}");
+    assert!(run.stderr.contains(&shown(saved)), "{run}");
+    assert_eq!(sandbox.saved_key_deadline(), saved);
+    run.assert_no_secret();
+}
+
+#[test]
+fn an_expiry_after_accepted_batches_does_not_claim_the_whole_run_was_lost() {
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let ingest = expired_ingest(&server);
+    let run = sandbox.observed_run(&server.url("/v1/traces"), KEY, &[], &[]);
+    ingest.assert_hits(1);
+    assert!(
+        run.stderr.contains("sent after that were not stored"),
+        "{run}"
+    );
+    assert!(!run.stderr.contains("this run's traces were not"), "{run}");
 }

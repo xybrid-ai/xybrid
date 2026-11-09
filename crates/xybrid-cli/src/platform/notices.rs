@@ -12,11 +12,14 @@
 //!
 //! The workspace notice comes from Xybrid's trace ingest, through the SDK's
 //! [`WorkspaceFeedback`](xybrid_sdk::observability::WorkspaceFeedback), and is
-//! read after the export's final drain. An expired key is reported on every
-//! run it happens; a provisional one shares the reminder's daily slot, so a
-//! day brings one claim nudge. A provisional deadline also refreshes the
-//! saved credential's, when the run used that credential's key on its own
-//! platform's ingest ([`refresh_key_deadline`]).
+//! read after the export's final drain. A run that exports through the Xybrid
+//! preset holds its claim reminder until then, so it prints one claim line:
+//! the platform's own word when ingest gave one, the stored reminder
+//! otherwise ([`report_workspace_notice`]). An expired key is reported on
+//! every run it happens; a provisional one shares the reminder's daily slot,
+//! so a day brings one claim nudge. A provisional deadline also refreshes the
+//! saved credential's first, when the run used that credential's key on its
+//! own platform's ingest ([`refresh_key_deadline`]).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -100,8 +103,9 @@ pub(crate) fn workspace_notice_text(notice: WorkspaceNotice) -> Option<String> {
     match notice {
         WorkspaceNotice::Expired => Some(
             "Xybrid stopped accepting traces from this key: its workspace was not claimed in \
-             time and the key expired, so this run's traces were not stored (local inference \
-             is unaffected). Claim the workspace to restore the key: xybrid auth claim"
+             time and the key expired, so traces this run sent after that were not stored \
+             (local inference is unaffected). Claim the workspace to restore the key: xybrid \
+             auth claim"
                 .to_string(),
         ),
         WorkspaceNotice::Provisional { key_expires_at } => Some(format!(
@@ -113,10 +117,23 @@ pub(crate) fn workspace_notice_text(notice: WorkspaceNotice) -> Option<String> {
     }
 }
 
-/// Print the workspace notice of this run's trace export to stderr, if any.
-/// An expiry is reported every time; a provisional deadline at most once a
-/// day, sharing the claim reminder's slot.
-pub(crate) fn report_workspace_notice(notice: Option<WorkspaceNotice>, quiet: bool, json: bool) {
+/// Print, after the export's final drain, what this run's trace export
+/// learned about the key's workspace, to stderr. A run exporting through the
+/// Xybrid preset defers its claim reminder to here, so without a notice (no
+/// response, or an accepted export without the header) the stored reminder
+/// stands in (`credential` as for [`maybe_claim_reminder`]). An expiry is
+/// reported every time; a provisional deadline at most once a day, sharing
+/// the claim reminder's slot.
+pub(crate) fn report_workspace_notice(
+    notice: Option<WorkspaceNotice>,
+    credential: impl FnOnce() -> Option<Credential>,
+    quiet: bool,
+    json: bool,
+) {
+    if notice.is_none() {
+        maybe_claim_reminder(credential, quiet, json);
+        return;
+    }
     let line = workspace_notice_line(notice, suppressed(quiet, json), || {
         take_daily_slot(Notice::ClaimReminder)
     });
@@ -126,7 +143,9 @@ pub(crate) fn report_workspace_notice(notice: Option<WorkspaceNotice>, quiet: bo
 }
 
 /// The workspace notice to print, if any. `take_slot` claims the day's
-/// reminder slot; it only runs for a provisional notice that may be shown.
+/// reminder slot; it runs for any notice that may be shown. A provisional
+/// notice needs the slot; an expiry is shown regardless, and only uses the
+/// slot up so the stored reminder does not repeat the nudge later that day.
 fn workspace_notice_line(
     notice: Option<WorkspaceNotice>,
     suppressed: bool,
@@ -134,9 +153,10 @@ fn workspace_notice_line(
 ) -> Option<String> {
     let notice = notice.filter(|_| !suppressed)?;
     let text = workspace_notice_text(notice)?;
+    let slot = take_slot();
     match notice {
         WorkspaceNotice::Expired => Some(text),
-        _ => take_slot().then_some(text),
+        _ => slot.then_some(text),
     }
 }
 
@@ -338,7 +358,12 @@ mod tests {
         let expired = workspace_notice_text(WorkspaceNotice::Expired).unwrap();
         assert!(expired.contains("xybrid auth claim"), "{expired}");
         assert!(expired.contains("expired"), "{expired}");
-        assert!(expired.contains("not stored"), "{expired}");
+        // Batches accepted before the deadline were stored.
+        assert!(
+            expired.contains("sent after that were not stored"),
+            "{expired}"
+        );
+        assert!(!expired.contains("this run's traces were not"), "{expired}");
         let deadline = Utc::now() + Duration::days(3);
         let provisional = workspace_notice_text(WorkspaceNotice::Provisional {
             key_expires_at: deadline.into(),
@@ -361,9 +386,18 @@ mod tests {
             let line = workspace_notice_line(notice, true, || panic!("no slot when suppressed"));
             assert_eq!(line, None);
         }
-        assert_eq!(workspace_notice_line(None, false, || true), None);
-        // An expiry never waits for the daily slot.
-        assert!(workspace_notice_line(expired, false, || panic!("not gated")).is_some());
+        assert_eq!(
+            workspace_notice_line(None, false, || panic!("nothing to show")),
+            None
+        );
+        // An expiry never waits for the daily slot, but uses it up.
+        let mut taken = false;
+        let take = || {
+            taken = true;
+            false
+        };
+        assert!(workspace_notice_line(expired, false, take).is_some());
+        assert!(taken);
         // A provisional deadline shares the reminder's slot.
         assert!(workspace_notice_line(provisional, false, || true).is_some());
         assert_eq!(workspace_notice_line(provisional, false, || false), None);

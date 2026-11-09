@@ -551,21 +551,6 @@ fn main() -> Result<()> {
         // stderr: stdout belongs to the command's own output.
         ui::status("Observability enabled");
     }
-    // The reminder follows the project's saved credential whenever it is the
-    // key in use, including when it arrives through XYBRID_API_KEY (an
-    // exported .env) or --api-key.
-    platform::notices::maybe_claim_reminder(
-        || {
-            key.as_ref().and_then(|key| {
-                resolve::stored_matching(key, host.as_ref(), project_root.as_deref())
-            })
-        },
-        cli.quiet,
-        json,
-    );
-    if key.is_some() && !exporting && cli.command.runs_inference() {
-        platform::notices::maybe_export_tip(cli.quiet, json);
-    }
     // Xybrid ingest's word on the key's workspace. Taken now: shutdown below
     // uninstalls the SDK's default session, and the export's final drain may
     // bring the first response. Read after that drain.
@@ -574,6 +559,21 @@ fn main() -> Result<()> {
         None if exporting => xybrid_sdk::observability::workspace_feedback(),
         None => None,
     };
+    // The reminder follows the project's saved credential whenever it is the
+    // key in use, including when it arrives through XYBRID_API_KEY (an
+    // exported .env) or --api-key. A run exporting through the Xybrid preset
+    // holds it until ingest answered, so the run prints one claim line, with
+    // the platform's deadline when ingest reported one.
+    let saved_credential = || {
+        key.as_ref()
+            .and_then(|key| resolve::stored_matching(key, host.as_ref(), project_root.as_deref()))
+    };
+    if workspace.is_none() {
+        platform::notices::maybe_claim_reminder(saved_credential, cli.quiet, json);
+    }
+    if key.is_some() && !exporting && cli.command.runs_inference() {
+        platform::notices::maybe_export_tip(cli.quiet, json);
+    }
     // Where the key went, for refreshing its saved deadline from the notice.
     let export_endpoint = match (&workspace, key.as_ref()) {
         (Some(_), Some(key)) if cli.observability => trace_endpoint(&cli, key, host.as_ref()).ok(),
@@ -631,7 +631,7 @@ fn main() -> Result<()> {
                 key_expires_at.into(),
             );
         }
-        platform::notices::report_workspace_notice(notice, quiet, json);
+        platform::notices::report_workspace_notice(notice, saved_credential, quiet, json);
     }
 
     if let Err(ref err) = result {
