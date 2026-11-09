@@ -5,6 +5,8 @@
 
 #![cfg(feature = "otlp")]
 
+mod support;
+
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -18,6 +20,8 @@ use xybrid_observability::{
     ContentCapture, ContentPolicy, Feedback, InferenceRequest, InputMessage, Location, Observer,
     StartOptions,
 };
+
+use support::{Action, Server};
 
 fn span(observer: &Observer) {
     observer
@@ -291,6 +295,89 @@ fn a_disabling_retryable_response_ends_the_retries() {
     busy.assert_hits(1);
     let stats = pipeline.stats().traces;
     assert_eq!((stats.failed, stats.dropped, stats.exported), (1, 1, 0));
+}
+
+#[test]
+fn a_disabling_retryable_response_fails_at_once_without_its_retry_wait() {
+    let server = MockServer::start();
+    // Retry-After fits the export budget: a continuing hook would wait it out.
+    let busy = server.mock(|when, then| {
+        when.method(POST).path("/v1/traces");
+        then.status(503).header("Retry-After", "4");
+    });
+    let config = base()
+        .with_traces(Some(
+            SignalEndpoint::new(server.url("/v1/traces")).with_response_hook(ResponseHook::new(
+                |response| {
+                    if response.status() == 503 {
+                        ResponseAction::Disable
+                    } else {
+                        ResponseAction::Continue
+                    }
+                },
+            )),
+        ))
+        .with_batch(BatchLimits {
+            scheduled_delay: Duration::from_secs(60),
+            export_timeout: Duration::from_secs(10),
+            ..BatchLimits::default()
+        });
+    let pipeline = ObservabilityPipeline::build(config).unwrap();
+    span(&pipeline.observer());
+    let started = Instant::now();
+    assert!(pipeline
+        .force_flush(Duration::from_secs(8))
+        .unwrap_err()
+        .is_delivery());
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_secs(2),
+        "the failed batch settled without the 4 s Retry-After wait: {took:?}"
+    );
+    pipeline.shutdown(Duration::from_secs(5)).unwrap();
+    busy.assert_hits(1);
+    let stats = pipeline.stats().traces;
+    assert_eq!((stats.failed, stats.dropped, stats.exported), (1, 0, 0));
+}
+
+#[test]
+fn a_stalled_failure_body_keeps_the_retry_budget() {
+    // Two 503s whose bodies stall after the headers, then a 200. Without a
+    // hook the 503 bodies are never read; with one they are, briefly.
+    let stalled = Action::Trickle {
+        status: 503,
+        total: 64,
+        chunk: 1,
+        every: Duration::from_secs(30),
+    };
+    let server = Server::sequence(vec![stalled.clone(), stalled, Action::ok()]);
+    let recorder = Recorder::default();
+    let config = base()
+        .with_traces(Some(
+            server
+                .endpoint("traces", Protocol::HttpProtobuf)
+                .with_response_hook(recorder.hook(keep)),
+        ))
+        .with_batch(BatchLimits {
+            scheduled_delay: Duration::from_secs(60),
+            export_timeout: Duration::from_secs(4),
+            ..BatchLimits::default()
+        });
+    let pipeline = ObservabilityPipeline::build(config).unwrap();
+    span(&pipeline.observer());
+    let started = Instant::now();
+    pipeline
+        .force_flush(Duration::from_secs(8))
+        .expect("the third attempt is acknowledged within the 4 s budget");
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(4), "{took:?}");
+    pipeline.shutdown(Duration::from_secs(5)).unwrap();
+    assert_eq!(server.count(), 3);
+    let seen = recorder.seen();
+    assert_eq!(recorder.statuses("traces"), [503, 503, 200]);
+    assert_eq!(seen[0].body, None, "a stalled body is unreadable, not waited for");
+    let stats = pipeline.stats().traces;
+    assert_eq!((stats.exported, stats.failed), (1, 0));
 }
 
 #[test]

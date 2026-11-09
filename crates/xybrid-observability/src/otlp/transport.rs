@@ -20,6 +20,12 @@ use super::hook::{ExportResponse, ResponseAction, ResponseHook};
 use super::runtime::tokio_after;
 use crate::error::{Error, Result};
 
+/// How long a failure body is read for a response hook (never past the
+/// attempt's own timeout). A `google.rpc.Status` is a few bytes that arrive
+/// with the headers; a body still stalled after this is treated as
+/// unreadable, so a retryable status keeps its retry budget.
+const FAILURE_BODY_READ_LIMIT: Duration = Duration::from_secs(1);
+
 /// Builds the shared HTTP client: rustls, HTTP/1.1, no redirects, no proxy
 /// discovery, no client-level timeout (each attempt carries its own).
 pub(crate) fn client() -> Result<Client> {
@@ -167,18 +173,29 @@ impl Sender {
                     let status = response.status();
                     let wait = retry_after(response.headers());
                     // A hook sees the headers and the bounded body of every
-                    // response; without one, only a 2xx body is read.
+                    // response; without one, only a 2xx body is read. A
+                    // failure body is read only for the hook, and briefly:
+                    // a stalled one must not use up the retry budget.
                     let headers = self.hook.as_ref().map(|_| response.headers().clone());
-                    let body = if status.is_success() || headers.is_some() {
-                        match cancel
-                            .run_until_cancelled(timeout_at(deadline, read_capped(response)))
+                    let read_until = if status.is_success() {
+                        Some(deadline)
+                    } else if headers.is_some() {
+                        Some(
+                            tokio_after(Instant::now(), FAILURE_BODY_READ_LIMIT)
+                                .min(attempt_deadline),
+                        )
+                    } else {
+                        None
+                    };
+                    let body = match read_until {
+                        Some(until) => match cancel
+                            .run_until_cancelled(timeout_at(until, read_capped(response)))
                             .await
                         {
                             Some(Ok(body)) => body,
                             _ => None,
-                        }
-                    } else {
-                        None
+                        },
+                        None => None,
                     };
                     if let (Some(hook), Some(headers)) = (&self.hook, &headers) {
                         let seen = ExportResponse::new(
@@ -208,7 +225,9 @@ impl Sender {
                     (true, wait)
                 }
             };
-            if !retryable || retry >= self.retry.max_retries {
+            // A disabled destination never retries, so it never waits for a
+            // backoff or `Retry-After` either: the items fail now.
+            if !retryable || retry >= self.retry.max_retries || self.is_disabled() {
                 return Delivery::Failed;
             }
             let wait = retry_after.unwrap_or_else(|| backoff(&self.retry, retry));

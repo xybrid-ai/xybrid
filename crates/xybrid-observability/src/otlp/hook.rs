@@ -38,8 +38,9 @@ pub enum ResponseAction {
     #[default]
     Continue,
     /// Stop this destination for good. The response itself is still handled
-    /// as usual (a 2xx acknowledges its items; any other status fails them),
-    /// but no further request is made: pending and later items are dropped.
+    /// as usual (a 2xx acknowledges its items; any other status fails them at
+    /// once, without a retry or retry wait), but no further request is made:
+    /// pending and later items are dropped.
     Disable,
 }
 
@@ -131,8 +132,10 @@ impl<'a> ExportResponse<'a> {
     }
 
     /// The response body, at most `max_response_body_bytes` of it; `None`
-    /// when it was larger, could not be read, or the export's deadline ended
-    /// the read.
+    /// when it was larger or could not be read in time. A 2xx body is read
+    /// within the export's deadline; any other body for at most one second
+    /// and never past the attempt's timeout, so a stalled failure body does
+    /// not use up the retry budget.
     #[must_use]
     pub fn body(&self) -> Option<&'a [u8]> {
         self.body

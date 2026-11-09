@@ -745,12 +745,13 @@ nulls arrive as `bytesValue: ""` and JS whole-number doubles as `intValue`.
   carry a `ResponseHook`, called exactly once for every HTTP response of that
   destination (scheduled batches, flushes, retries, the shutdown drain; no call
   for a transport error or timeout). With a hook, failure bodies are read too,
-  under the same 64 KiB and deadline bounds, and the hook sees the status,
-  headers, body and the decoded `google.rpc.Status`. It may disable its
-  destination for the rest of that pipeline's or exporter set's life: the
-  response itself is handled as usual (2xx acknowledges, anything else fails,
-  no further retry), no further request is made, and items pending or offered
-  later are dropped. Other destinations, other pipelines and local processors
+  under the 64 KiB bound and for at most one second (never past the attempt's
+  timeout), so a stalled failure body cannot use up the retry budget; the hook
+  sees the status, headers, body and the decoded `google.rpc.Status`. It may
+  disable its destination for the rest of that pipeline's or exporter set's
+  life: the response itself is handled as usual (2xx acknowledges, anything
+  else fails at once, with no further retry or retry wait), no further request
+  is made, and items pending or offered later are dropped. Other destinations, other pipelines and local processors
   are unaffected; a pipeline built again from the same configuration starts
   enabled. The package interprets no vendor response itself; adapters attach
   hooks to the destinations they trust (`SignalEndpoint::is_xybrid_preset`).
