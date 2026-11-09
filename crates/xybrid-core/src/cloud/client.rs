@@ -124,8 +124,10 @@ impl Cloud {
         &self,
         request: CompletionRequest,
     ) -> Result<CompletionResponse, CloudError> {
-        // Check circuit breaker before attempting
-        if !self.gateway_circuit.can_execute() {
+        // Fail fast while the circuit is open. `is_refusing` takes no request:
+        // `with_retry` takes one per attempt, and one taken here would be a
+        // half-open circuit's only test request, which no attempt then gets.
+        if self.gateway_circuit.is_refusing() {
             return Err(CloudError::CircuitOpen(
                 "Gateway circuit breaker is open due to recent failures. Try again later.".into(),
             ));
@@ -1438,6 +1440,79 @@ mod tests {
             }
             other => panic!("expected GatewayError, got {other:?}"),
         }
+    }
+
+    /// Once the open duration is over, the next call is the half-open probe
+    /// and reaches the gateway. The fail-fast check ahead of the retry loop
+    /// must not take that request itself: the loop takes one for each
+    /// attempt, and with only one to give, a second ask is refused every
+    /// time, so no request would ever be sent and the circuit would never
+    /// close.
+    #[test]
+    fn half_open_circuit_lets_the_probe_reach_the_gateway() {
+        use crate::http::CircuitState;
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let gateway = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    json!({
+                        "id": "chatcmpl-1",
+                        "model": "test-model",
+                        "choices": [{
+                            "message": { "role": "assistant", "content": "back" },
+                            "finish_reason": "stop",
+                        }],
+                    })
+                    .to_string(),
+                );
+        });
+        let mut cloud = loopback_gateway(&server);
+        cloud.gateway_circuit = Arc::new(CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        }));
+        cloud.gateway_circuit.record_failure();
+        assert!(cloud.is_circuit_open());
+
+        let response = cloud
+            .complete(CompletionRequest::new("hello"))
+            .expect("the half-open probe is sent");
+
+        assert_eq!(response.text, "back");
+        gateway.assert_hits(1);
+        assert_eq!(cloud.gateway_circuit.state(), CircuitState::Closed);
+    }
+
+    /// A circuit still inside its open duration fails fast, without a request
+    /// and without waiting through the retry loop.
+    #[test]
+    fn open_circuit_fails_fast_without_a_request() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let gateway = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200);
+        });
+        let cloud = loopback_gateway(&server);
+        for _ in 0..CircuitConfig::default().failure_threshold {
+            cloud.gateway_circuit.record_failure();
+        }
+
+        let started = Instant::now();
+        let err = cloud
+            .complete(CompletionRequest::new("hello"))
+            .expect_err("circuit open");
+
+        assert!(matches!(err, CloudError::CircuitOpen(_)), "{err:?}");
+        assert!(started.elapsed() < Duration::from_millis(100));
+        gateway.assert_hits(0);
+        assert!(cloud.is_circuit_open());
     }
 
     #[test]
