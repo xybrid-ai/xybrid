@@ -274,6 +274,11 @@ pub fn warning(msg: &str) {
     println!("  {} {}", warn("!"), msg);
 }
 
+/// Print a warning message on stderr, keeping stdout for command output.
+pub fn warning_stderr(msg: &str) {
+    eprintln!("  {} {}", warn("!"), msg);
+}
+
 /// Print an error message.
 pub fn err(msg: &str) {
     eprintln!("  {} {}", error("✖"), msg);
@@ -287,6 +292,11 @@ pub fn status(msg: &str) {
 /// Print an info/hint message.
 pub fn hint(msg: &str) {
     println!("  {} {}", dim("›"), dim(msg));
+}
+
+/// Print an info/hint message on stderr, keeping stdout for command output.
+pub fn hint_stderr(msg: &str) {
+    eprintln!("  {} {}", dim("›"), dim(msg));
 }
 
 // ── Table ────────────────────────────────────────────────────
