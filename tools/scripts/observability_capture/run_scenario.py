@@ -62,6 +62,45 @@ def substitute(command: List[str], values: Dict[str, str]) -> List[str]:
     return out
 
 
+def run_command(command: List[str], env: Dict[str, str], timeout: float) -> int:
+    """Runs the scenario command in its own process group, so a timeout stops
+    everything it started (``flutter test``, ``gradle``, ``xcodebuild`` and
+    ``adb`` spawn children), not just the direct child."""
+    process = subprocess.Popen(command, env=env, start_new_session=os.name == "posix")
+    try:
+        return process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"error: the scenario command ran past {timeout:.0f}s", file=sys.stderr)
+        stop_group(process)
+        return 124
+
+
+def stop_group(process: subprocess.Popen) -> None:
+    """Terminates the command's process group, escalating to SIGKILL, and
+    makes sure no member of the group outlives the leader."""
+    if os.name != "posix":
+        process.kill()
+        process.wait()
+        return
+    import signal
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            break
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            continue
+        break
+    # The leader is gone; children it started may not be.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
+
+
 def stop(server: subprocess.Popen) -> None:
     if server.poll() is None:
         server.terminate()
@@ -133,11 +172,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             env.update({f"XYBRID_SCENARIO_{key.upper()}": value for key, value in values.items()})
             print(f"==> receiver on {values['endpoint']} (bound {args.bind}:{port}); running the {args.binding} scenario",
                   flush=True)
-            try:
-                status = subprocess.run(substitute(command, values), env=env, timeout=args.timeout).returncode
-            except subprocess.TimeoutExpired:
-                print(f"error: the scenario command ran past {args.timeout:.0f}s", file=sys.stderr)
-                status = 124
+            status = run_command(substitute(command, values), env, args.timeout)
             time.sleep(max(args.grace, 0.0))
         finally:
             stop(server)

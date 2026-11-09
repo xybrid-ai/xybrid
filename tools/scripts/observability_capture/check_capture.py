@@ -299,7 +299,10 @@ class Checker:
         workflow = self.span("workflow")
         if workflow is None:
             return []
-        return [span for span in self.capture.spans if span.parent_span_id == workflow.span_id]
+        # A child must be in the workflow's own trace: a span that only names
+        # the workflow as its parent from another trace is not its child.
+        return [span for span in self.capture.spans
+                if span.parent_span_id == workflow.span_id and span.trace_id == workflow.trace_id]
 
     def load_span(self) -> Optional[Span]:
         if self.ref("load") is not None:
@@ -307,7 +310,8 @@ class Checker:
         name = f"load_model {self.spec['model']['model_id']}"
         workflow = self.span("workflow")
         matches = [span for span in self.capture.spans
-                   if span.name == name and workflow is not None and span.parent_span_id == workflow.span_id]
+                   if span.name == name and workflow is not None and span.parent_span_id == workflow.span_id
+                   and span.trace_id == workflow.trace_id]
         return matches[0] if len(matches) == 1 else None
 
     def run_spans(self) -> List[Span]:

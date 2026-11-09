@@ -23,12 +23,14 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+import zlib
 from pathlib import Path
 from unittest import mock
 
 HARNESS = Path(__file__).resolve().parents[1] / "observability_capture"
 sys.path.insert(0, str(HARNESS))
 
+import capture_server  # noqa: E402
 import check_capture  # noqa: E402
 import run_scenario  # noqa: E402
 
@@ -293,6 +295,11 @@ class AutomaticPathFaultTests(CheckerTestCase):
         self.refs["load"] = None
         self.assertFails("automatic.load")
 
+    def test_run_in_another_trace_under_the_workflow_id_fails(self):
+        # Same parentSpanId as the workflow, but a different trace: not its child.
+        run_span(self.entries, self.expected)["traceId"] = "f" * 32
+        self.assertFails("automatic.run")
+
     def test_run_that_claims_success_fails(self):
         self.expected["automatic"]["run"] = {"outcome": "ok", "error": None}
         self.assertFails("automatic.run")
@@ -542,6 +549,38 @@ class ServerProcess:
         return [json.loads(line) for line in self.capture.read_text().splitlines() if line]
 
 
+class BoundedDecompressTests(unittest.TestCase):
+    @staticmethod
+    def bomb(encoding, expanded):
+        """A body that expands to ``expanded`` zero bytes, built in chunks."""
+        wbits = 16 + zlib.MAX_WBITS if encoding == "gzip" else zlib.MAX_WBITS
+        encoder = zlib.compressobj(9, zlib.DEFLATED, wbits)
+        chunk = b"\0" * (1 << 20)
+        parts = [encoder.compress(chunk) for _ in range(expanded // len(chunk))]
+        return b"".join(parts) + encoder.flush()
+
+    def test_a_bomb_is_refused_without_expanding_it(self):
+        import tracemalloc
+        limit = capture_server.MAX_BODY_BYTES
+        for encoding in ("gzip", "deflate"):
+            body = self.bomb(encoding, 4 * limit)
+            tracemalloc.start()
+            try:
+                with self.assertRaises(capture_server.DecodedTooLarge):
+                    capture_server.bounded_decompress(body, encoding)
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            self.assertLess(peak, 1.5 * limit, f"{encoding}: decoding allocated {peak} bytes")
+
+    def test_bodies_within_the_limit_round_trip(self):
+        payload = json.dumps({"resourceSpans": []}).encode()
+        self.assertEqual(capture_server.bounded_decompress(gzip.compress(payload), "gzip"), payload)
+        self.assertEqual(capture_server.bounded_decompress(zlib.compress(payload), "deflate"), payload)
+        with self.assertRaises(zlib.error):
+            capture_server.bounded_decompress(zlib.compress(payload)[:-4], "deflate")
+
+
 @unittest.skipIf(os.name == "nt", "SIGTERM delivery is POSIX-only")
 class CaptureServerTests(unittest.TestCase):
     def setUp(self):
@@ -572,6 +611,20 @@ class CaptureServerTests(unittest.TestCase):
         self.assertEqual(base64.b64decode(lines[2]["body_base64"]), b"\x0a\x02\x08\x01")
         self.assertIn("JSON", lines[2]["error"])
         self.assertEqual(lines[3]["path"], "/v1/other")
+
+    def test_compressed_body_that_expands_past_the_limit_is_refused(self):
+        bomb = gzip.compress(b"\0" * (capture_server.MAX_BODY_BYTES + 1), compresslevel=9)
+        self.assertLess(len(bomb), capture_server.MAX_BODY_BYTES)
+        self.assertEqual(post(self.server.url + "/v1/traces", bomb, encoding="gzip")[0], 413)
+        deflated = zlib.compress(b"\0" * (capture_server.MAX_BODY_BYTES + 1), 9)
+        self.assertEqual(post(self.server.url + "/v1/traces", deflated, encoding="deflate")[0], 413)
+        ok = zlib.compress(json.dumps({"resourceSpans": []}).encode())
+        self.assertEqual(post(self.server.url + "/v1/traces", ok, encoding="deflate")[0], 200)
+        self.server.stop()
+        lines = self.server.lines()
+        self.assertEqual([line["encoding"] for line in lines[:2]], ["invalid", "invalid"])
+        self.assertIn("exceeds", lines[0]["error"])
+        self.assertEqual(lines[2]["body"], {"resourceSpans": []})
 
     def test_invalid_json_is_kept_for_diagnosis(self):
         self.assertEqual(post(self.server.url + "/v1/traces", b"not json")[0], 200)
@@ -623,6 +676,25 @@ class DriverTests(unittest.TestCase):
                 mock.patch.dict(os.environ, inherited):
             status = run_scenario.main(argv)
         return status, out
+
+    def test_a_timeout_stops_every_process_the_command_started(self):
+        pidfile = self.temp / "grandchild.pid"
+        # The command starts a long-lived grandchild and then waits on it.
+        script = f"sleep 300 & echo $! > {pidfile}; wait"
+        with contextlib.redirect_stderr(io.StringIO()):
+            status = run_scenario.run_command(["sh", "-c", script], dict(os.environ), 1.0)
+        self.assertEqual(status, 124)
+        pid = int(pidfile.read_text())
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            os.kill(pid, 9)
+            self.fail("the grandchild outlived the timed-out command")
 
     def test_replayed_run_passes_and_writes_the_report(self):
         status, out = self.drive()

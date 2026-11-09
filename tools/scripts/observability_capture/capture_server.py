@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import gzip
 import json
 import os
 import signal
@@ -41,6 +40,35 @@ SIGNALS = {"/v1/traces": "traces", "/v1/logs": "logs", "/v1/metrics": "metrics"}
 # A request larger than this is refused (413) rather than buffered. The
 # exporter's own batches are far smaller; this only bounds a misbehaving client.
 MAX_BODY_BYTES = 64 * 1024 * 1024
+# Output produced per decompression step (bounds the overshoot past the limit).
+DECODE_STEP = 1 << 20
+
+
+class DecodedTooLarge(Exception):
+    """A compressed request that would expand past ``MAX_BODY_BYTES``."""
+
+
+def bounded_decompress(raw: bytes, encoding: str) -> bytes:
+    """Decompresses gzip or deflate in 1 MiB steps and stops as soon as the
+    output passes ``MAX_BODY_BYTES``, so a small compressed body cannot expand
+    without bound (the receiver may listen on every interface)."""
+    wbits = 16 + zlib.MAX_WBITS if encoding == "gzip" else zlib.MAX_WBITS
+    decoder = zlib.decompressobj(wbits)
+    out = bytearray()
+    pending = raw
+    while True:
+        out += decoder.decompress(pending, DECODE_STEP)
+        if len(out) > MAX_BODY_BYTES:
+            raise DecodedTooLarge()
+        pending = decoder.unconsumed_tail
+        if not pending:
+            break
+    out += decoder.flush()
+    if len(out) > MAX_BODY_BYTES:
+        raise DecodedTooLarge()
+    if not decoder.eof:
+        raise zlib.error("truncated compressed body")
+    return bytes(out)
 
 
 class Recorder:
@@ -139,11 +167,15 @@ def make_handler(recorder: Recorder):
                 "size": len(raw),
             }
             try:
-                if content_encoding == "gzip":
-                    raw = gzip.decompress(raw)
-                elif content_encoding == "deflate":
-                    raw = zlib.decompress(raw)
-            except (OSError, zlib.error) as error:
+                if content_encoding in ("gzip", "deflate"):
+                    raw = bounded_decompress(raw, content_encoding)
+            except DecodedTooLarge:
+                entry.update(encoding="invalid", body=None,
+                             error=f"decoded {content_encoding} body exceeds {MAX_BODY_BYTES} bytes")
+                recorder.record(entry)
+                self._reply(413, b'{"message":"decoded request body too large"}')
+                return
+            except (OSError, EOFError, zlib.error) as error:
                 entry.update(encoding="invalid", body=None, error=f"cannot decode {content_encoding}: {error}")
                 entry["body_base64"] = base64.b64encode(raw).decode("ascii")
                 recorder.record(entry)
