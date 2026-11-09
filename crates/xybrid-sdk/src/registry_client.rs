@@ -54,7 +54,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use xybrid_core::execution::{ExecutionTemplate, ModelMetadata};
-use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
+use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryAfterBudget, RetryPolicy};
 
 /// How often a retry backoff wakes to check for cancellation.
 const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -462,7 +462,9 @@ const DOWNLOAD_OFFLINE_RETRY_CAP: Duration = Duration::from_secs(10);
 /// Default retry delay when a 429 response omits or mangles Retry-After.
 const DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS: u64 = 60;
 
-/// Cap Retry-After to avoid a registry hint sleeping the client indefinitely.
+/// Largest Retry-After reported in [`SdkError::RateLimited`], for callers that
+/// wait on it themselves. The retry loops here never wait longer than
+/// [`xybrid_core::http::MAX_RETRY_AFTER`]: a hint above that ends them at once.
 const MAX_RATE_LIMIT_RETRY_AFTER_SECS: u64 = 5 * 60;
 
 fn rate_limit_retry_after_secs(retry_after: Option<&str>) -> u64 {
@@ -788,14 +790,22 @@ impl RegistryClient {
         F: FnMut(&str) -> Result<T, SdkError>,
     {
         let mut last_error: Option<SdkError> = None;
+        let mut retry_after_budget = RetryAfterBudget::new();
 
         for attempt in 0..self.retry_policy.max_attempts {
-            // Calculate delay for this attempt
-            let delay = if let Some(ref err) = last_error {
-                err.retry_after()
-                    .unwrap_or_else(|| self.retry_policy.delay_for_attempt(attempt))
-            } else {
-                self.retry_policy.delay_for_attempt(attempt)
+            // Calculate delay for this attempt. The previous error is consumed
+            // here: the attempt below either returns or replaces it.
+            let delay = match last_error.take() {
+                None => self.retry_policy.delay_for_attempt(attempt),
+                Some(err) => match err.retry_after() {
+                    Some(wait) if retry_after_budget.spend(wait) => wait,
+                    // The registry wants longer than one call may wait
+                    // (`MAX_RETRY_AFTER`): report it now rather than block
+                    // the caller. Still retryable, so `execute_with_fallback`
+                    // moves on to the next URL.
+                    Some(_) => return Err(err),
+                    None => self.retry_policy.delay_for_attempt(attempt),
+                },
             };
 
             if !delay.is_zero() {
@@ -1594,6 +1604,7 @@ impl RegistryClient {
         let mut furthest: u64 = 0;
         let mut failed_attempts: u32 = 0;
         let mut offline = OfflineWindow::default();
+        let mut retry_after_budget = RetryAfterBudget::new();
         let mut next_delay: Option<Duration> = None;
 
         loop {
@@ -1644,11 +1655,18 @@ impl RegistryClient {
                 }
                 policy.delay_for_attempt(failed_attempts)
             };
+            let delay = match err.retry_after() {
+                Some(wait) if retry_after_budget.spend(wait) => wait,
+                // The server wants longer than one download may wait
+                // (`MAX_RETRY_AFTER`): fail now rather than sit on it.
+                Some(_) => return Err(err),
+                None => delay,
+            };
             warn!(
                 "Download of {} interrupted at {} bytes, retrying: {}",
                 url, on_disk, err
             );
-            next_delay = Some(err.retry_after().unwrap_or(delay));
+            next_delay = Some(delay);
         }
     }
 
@@ -4059,6 +4077,96 @@ mod tests {
         assert_eq!(
             rate_limit_retry_after_secs_at(Some("Wed, 21 Oct 2026 07:37:00 GMT"), now),
             MAX_RATE_LIMIT_RETRY_AFTER_SECS
+        );
+    }
+
+    /// A registry `Retry-After` longer than one call may wait ends the retry
+    /// loop at once instead of blocking the caller for it.
+    #[test]
+    fn registry_retry_after_beyond_the_budget_returns_at_once() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let rate_limited = server.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(429).header("Retry-After", "86400");
+        });
+        let client = RegistryClient::with_url(server.base_url()).unwrap();
+
+        let started = Instant::now();
+        let result = client.list_models();
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(result, Err(SdkError::RateLimited { .. })),
+            "{result:?}"
+        );
+        rate_limited.assert_hits(1);
+        assert!(elapsed < Duration::from_secs(1), "waited {elapsed:?}");
+    }
+
+    #[test]
+    fn download_retry_after_beyond_the_budget_fails_at_once() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let rate_limited = server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(429).header("Retry-After", "86400");
+        });
+        let temp = tempfile::TempDir::new().unwrap();
+        let client = fast_retry_client(temp.path());
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        let started = Instant::now();
+        let result = client.download_with_progress(&server.url("/model.gguf"), &dest, &reporter);
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(result, Err(SdkError::RateLimited { .. })),
+            "{result:?}"
+        );
+        rate_limited.assert_hits(1);
+        assert!(elapsed < Duration::from_secs(1), "waited {elapsed:?}");
+    }
+
+    #[test]
+    fn download_short_retry_after_is_still_honored() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let rate_limited = server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(429).header("Retry-After", "1");
+        });
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut client = fast_retry_client(temp.path());
+        client.download_retry_policy.max_attempts = 2;
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        let started = Instant::now();
+        let result = client.download_with_progress(&server.url("/model.gguf"), &dest, &reporter);
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(
+                result,
+                Err(SdkError::RateLimited {
+                    retry_after_secs: 1
+                })
+            ),
+            "{result:?}"
+        );
+        // Retried once, after the server's second rather than the policy's
+        // zero backoff.
+        rate_limited.assert_hits(2);
+        assert!(
+            elapsed >= Duration::from_secs(1),
+            "retried early: {elapsed:?}"
         );
     }
 
