@@ -42,7 +42,7 @@ use crate::platform::current_platform;
 use crate::source::detect_platform;
 use crate::telemetry_optout::is_telemetry_opted_out;
 use crate::{get_binding, DEFAULT_BINDING, SDK_VERSION};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -54,7 +54,10 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use xybrid_core::execution::{ExecutionTemplate, ModelMetadata};
-use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryAfterBudget, RetryPolicy};
+use xybrid_core::http::{
+    parse_retry_after, CircuitBreaker, CircuitConfig, RetryAfterBudget, RetryPolicy,
+    MAX_RETRY_AFTER,
+};
 
 /// How often a retry backoff wakes to check for cancellation.
 const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -471,29 +474,15 @@ fn rate_limit_retry_after_secs(retry_after: Option<&str>) -> u64 {
     rate_limit_retry_after_secs_at(retry_after, Utc::now())
 }
 
+/// The seconds a 429's `Retry-After` asks for, read the way the core cloud
+/// client reads it ([`parse_retry_after`]), capped at
+/// [`MAX_RATE_LIMIT_RETRY_AFTER_SECS`].
 fn rate_limit_retry_after_secs_at(retry_after: Option<&str>, now: DateTime<Utc>) -> u64 {
-    let Some(value) = retry_after.map(str::trim).filter(|value| !value.is_empty()) else {
-        return DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS;
-    };
-
-    if let Ok(seconds) = value.parse::<u64>() {
-        return seconds.min(MAX_RATE_LIMIT_RETRY_AFTER_SECS);
-    }
-
-    parse_retry_after_http_date(value, now).unwrap_or(DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS)
-}
-
-fn parse_retry_after_http_date(value: &str, now: DateTime<Utc>) -> Option<u64> {
-    let parsed = DateTime::parse_from_rfc2822(value)
-        .map(|date| date.with_timezone(&Utc))
-        .or_else(|_| {
-            NaiveDateTime::parse_from_str(value, "%a, %d %b %Y %H:%M:%S GMT")
-                .map(|date| DateTime::<Utc>::from_naive_utc_and_offset(date, Utc))
+    retry_after
+        .and_then(|value| parse_retry_after(value, now.into()))
+        .map_or(DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS, |wait| {
+            wait.as_secs().min(MAX_RATE_LIMIT_RETRY_AFTER_SECS)
         })
-        .ok()?;
-
-    let seconds = parsed.signed_duration_since(now).num_seconds().max(0) as u64;
-    Some(seconds.min(MAX_RATE_LIMIT_RETRY_AFTER_SECS))
 }
 
 /// Registry client for model resolution and download.
@@ -515,6 +504,10 @@ pub struct RegistryClient {
     download_stall_timeout: Duration,
     /// See [`DOWNLOAD_OFFLINE_PATIENCE`].
     download_offline_patience: Duration,
+    /// Server-directed (`Retry-After`) waiting one call may do, across every
+    /// registry URL it tries or every attempt of one download:
+    /// [`MAX_RETRY_AFTER`], which tests shorten.
+    retry_after_limit: Duration,
     /// Binding identifier reported via the `X-Xybrid-Client` header.
     binding: &'static str,
 }
@@ -562,6 +555,7 @@ impl RegistryClient {
             download_retry_policy: RetryPolicy::conservative(),
             download_stall_timeout: DOWNLOAD_STALL_TIMEOUT,
             download_offline_patience: DOWNLOAD_OFFLINE_PATIENCE,
+            retry_after_limit: MAX_RETRY_AFTER,
             binding: get_binding(),
         })
     }
@@ -737,12 +731,15 @@ impl RegistryClient {
 
     /// Execute an operation with fallback to secondary URLs.
     ///
-    /// Tries each URL in order until one succeeds or all fail.
+    /// Tries each URL in order until one succeeds or all fail. Every URL
+    /// draws on one [`RetryAfterBudget`], so a call waits on `Retry-After` at
+    /// most [`MAX_RETRY_AFTER`] in total, however many URLs it tries.
     fn execute_with_fallback<T, F>(&self, mut operation: F) -> Result<T, SdkError>
     where
         F: FnMut(&str) -> Result<T, SdkError>,
     {
         let mut last_error: Option<SdkError> = None;
+        let mut retry_after_budget = RetryAfterBudget::with_limit(self.retry_after_limit);
 
         for (idx, api_url) in self.api_urls.iter().enumerate() {
             let circuit = &self.circuits[idx];
@@ -753,7 +750,12 @@ impl RegistryClient {
                 continue;
             }
 
-            match self.execute_with_retry_for_url(api_url, circuit, &mut operation) {
+            match self.execute_with_retry_for_url(
+                api_url,
+                circuit,
+                &mut retry_after_budget,
+                &mut operation,
+            ) {
                 Ok(result) => {
                     if idx > 0 {
                         info!("Request succeeded using fallback URL: {}", api_url);
@@ -780,17 +782,20 @@ impl RegistryClient {
     }
 
     /// Execute an operation with retry for a specific URL.
+    ///
+    /// `retry_after_budget` is the whole call's (see
+    /// [`Self::execute_with_fallback`]), not this URL's.
     fn execute_with_retry_for_url<T, F>(
         &self,
         api_url: &str,
         circuit: &Arc<CircuitBreaker>,
+        retry_after_budget: &mut RetryAfterBudget,
         operation: &mut F,
     ) -> Result<T, SdkError>
     where
         F: FnMut(&str) -> Result<T, SdkError>,
     {
         let mut last_error: Option<SdkError> = None;
-        let mut retry_after_budget = RetryAfterBudget::new();
 
         for attempt in 0..self.retry_policy.max_attempts {
             // Calculate delay for this attempt. The previous error is consumed
@@ -799,10 +804,11 @@ impl RegistryClient {
                 None => self.retry_policy.delay_for_attempt(attempt),
                 Some(err) => match err.retry_after() {
                     Some(wait) if retry_after_budget.spend(wait) => wait,
-                    // The registry wants longer than one call may wait
-                    // (`MAX_RETRY_AFTER`): report it now rather than block
-                    // the caller. Still retryable, so `execute_with_fallback`
-                    // moves on to the next URL.
+                    // The registry wants longer than this call has left to
+                    // wait (`MAX_RETRY_AFTER` in total): report it now rather
+                    // than block the caller. Still retryable, so
+                    // `execute_with_fallback` moves on to the next URL, which
+                    // may still answer without a wait.
                     Some(_) => return Err(err),
                     None => self.retry_policy.delay_for_attempt(attempt),
                 },
@@ -1604,7 +1610,7 @@ impl RegistryClient {
         let mut furthest: u64 = 0;
         let mut failed_attempts: u32 = 0;
         let mut offline = OfflineWindow::default();
-        let mut retry_after_budget = RetryAfterBudget::new();
+        let mut retry_after_budget = RetryAfterBudget::with_limit(self.retry_after_limit);
         let mut next_delay: Option<Duration> = None;
 
         loop {
@@ -4105,6 +4111,68 @@ mod tests {
         assert!(elapsed < Duration::from_secs(1), "waited {elapsed:?}");
     }
 
+    /// One call's `Retry-After` waiting is bounded across every registry URL
+    /// it tries, not per URL: once the primary has used the budget, the
+    /// fallback gets its one attempt but no wait.
+    #[test]
+    fn registry_retry_after_budget_is_shared_across_fallback_urls() {
+        use httpmock::prelude::*;
+
+        let primary = MockServer::start();
+        let fallback = MockServer::start();
+        fn limited(server: &MockServer) -> httpmock::Mock<'_> {
+            server.mock(|when, then| {
+                when.method(GET).path("/v1/models");
+                then.status(429).header("Retry-After", "1");
+            })
+        }
+        let (primary_limited, fallback_limited) = (limited(&primary), limited(&fallback));
+        let mut client =
+            RegistryClient::new(vec![primary.base_url(), fallback.base_url()]).unwrap();
+        // A one-second budget stands in for `MAX_RETRY_AFTER`.
+        client.retry_after_limit = Duration::from_secs(1);
+        // A 429 opens a URL's circuit at once; let it half-open straight away
+        // so the retry after the wait reaches the server.
+        client.circuits = (0..2)
+            .map(|_| {
+                Arc::new(CircuitBreaker::new(CircuitConfig {
+                    open_duration_ms: 0,
+                    ..CircuitConfig::default()
+                }))
+            })
+            .collect();
+
+        let result = client.list_models();
+
+        assert!(
+            matches!(
+                result,
+                Err(SdkError::RateLimited {
+                    retry_after_secs: 1
+                })
+            ),
+            "{result:?}"
+        );
+        // The primary waits the whole budget once; the fallback is tried
+        // without waiting again (a per-URL budget would retry it too).
+        primary_limited.assert_hits(2);
+        fallback_limited.assert_hits(1);
+    }
+
+    #[test]
+    fn retry_after_out_of_spec_values_are_read_not_defaulted() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 21, 7, 27, 0).unwrap();
+
+        // Too large for u64: still "much later", not the 60 s default.
+        assert_eq!(
+            rate_limit_retry_after_secs_at(Some("99999999999999999999999"), now),
+            MAX_RATE_LIMIT_RETRY_AFTER_SECS
+        );
+        // Fractional: rounded up, not defaulted.
+        assert_eq!(rate_limit_retry_after_secs_at(Some("1.5"), now), 2);
+        assert_eq!(rate_limit_retry_after_secs_at(Some(" 7 "), now), 7);
+    }
+
     #[test]
     fn download_retry_after_beyond_the_budget_fails_at_once() {
         use httpmock::prelude::*;
@@ -4259,8 +4327,12 @@ mod tests {
             Err(SdkError::offline("simulated offline"))
         };
 
-        let result =
-            client.execute_with_retry_for_url("https://primary.example.invalid", &circuit, &mut op);
+        let result = client.execute_with_retry_for_url(
+            "https://primary.example.invalid",
+            &circuit,
+            &mut RetryAfterBudget::new(),
+            &mut op,
+        );
         assert!(matches!(result, Err(SdkError::Offline { .. })));
         assert_eq!(
             circuit.failure_count(),
@@ -4289,8 +4361,12 @@ mod tests {
             Err(SdkError::offline("simulated offline"))
         };
 
-        let result =
-            client.execute_with_retry_for_url("https://primary.example.invalid", &circuit, &mut op);
+        let result = client.execute_with_retry_for_url(
+            "https://primary.example.invalid",
+            &circuit,
+            &mut RetryAfterBudget::new(),
+            &mut op,
+        );
         assert!(result.is_err());
         assert_eq!(
             call_count.load(Ordering::SeqCst),
