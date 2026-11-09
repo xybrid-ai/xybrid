@@ -16,6 +16,7 @@ import {
   JSON_ATTRIBUTES,
   type JsonValue,
   METRICS,
+  type MemoryPressure,
   type ModelLoadOperation,
   ObservationContext,
   type ObservationRef,
@@ -121,7 +122,10 @@ const USAGE_FIELDS = [
 ];
 const RESOURCE_FIELDS = [
   "cpu_utilization",
+  "cpu_peak_utilization",
   "memory_used_bytes",
+  "memory_min_available_bytes",
+  "memory_pressure",
   "process_rss_bytes",
   "process_peak_rss_bytes",
   "thermal_state",
@@ -597,7 +601,11 @@ export const runFixture = async (fixture: Fixture): Promise<NormalizedOutput> =>
       case "resource":
         handle<InferenceOperation | ModelLoadOperation>(id).recordResource({
           cpuUtilization: num(step["cpu_utilization"]),
+          cpuPeakUtilization: num(step["cpu_peak_utilization"]),
           memoryUsedBytes: num(step["memory_used_bytes"]),
+          memoryMinAvailableBytes: num(step["memory_min_available_bytes"]),
+          // The fixture passes whatever string it holds; the package enforces the vocabulary.
+          memoryPressure: str(step["memory_pressure"]) as MemoryPressure | undefined,
           processRssBytes: num(step["process_rss_bytes"]),
           processPeakRssBytes: num(step["process_peak_rss_bytes"]),
           thermalState: str(step["thermal_state"]),

@@ -138,7 +138,14 @@ format, device-ID generation and flush-time UUID stamping are not the current
 OTLP protocol.
 
 Resource sampling is separately opt-in and defaults to `Off` for every exporter
-preset. See [resource telemetry](resource-telemetry.md).
+preset. When enabled, observed model loads and inferences carry the run's
+measured average and peak CPU utilization, minimum available memory, memory
+pressure (`normal`, `warn` or `critical`), peak process RSS, thermal state and
+ending battery level as `xybrid.genai.resource.*` span attributes. Values that
+were not measured are absent, never zero or a default level. CPU utilization is
+system-wide and its first reading covers time before the run, so it shows load
+around the run rather than load the run caused. See
+[resource telemetry](resource-telemetry.md).
 
 ## Sessions, explicit parents and manual operations
 

@@ -38,7 +38,9 @@ use std::fmt;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use xybrid_core::device::{ResourceTelemetryMode, ResourceUsageSummary, ThermalState};
+use xybrid_core::device::{
+    MemoryPressure, ResourceTelemetryMode, ResourceUsageSummary, ThermalState,
+};
 use xybrid_core::execution::{ExecutionTemplate, ModelMetadata};
 use xybrid_core::ir::{Envelope, EnvelopeKind, ImageSource};
 use xybrid_core::tracing::{RecorderScope, TraceHeaders, TraceRecorder};
@@ -1646,19 +1648,30 @@ fn output_message(output: &Envelope) -> Option<OutputMessage> {
 
 /// Converts a measured resource summary to a portable sample.
 ///
-/// `cpu_peak_pct`, `available_mem_min_mb` and `memory_pressure_peak` are not
-/// exported: the contract's resource catalog has no peak-CPU, available-memory
-/// or memory-pressure attribute, and `memory.used_bytes` (system memory in
-/// use) cannot be derived from available memory without the device total,
-/// which the summary does not carry.
+/// Only measured values are mapped: a field the summary does not hold stays
+/// absent, and an `Unknown` memory pressure or an unmeasured thermal state is
+/// not reported as a level. `memory.used_bytes` (system memory in use) cannot
+/// be derived from available memory without the device total, which the
+/// summary does not carry; sample count and sampling configuration stay local.
+/// The CPU fields can include load from just before the run: the start
+/// bookend's reading covers the time since the shared monitor's previous
+/// refresh (docs/sdk/resource-telemetry.md).
 pub(crate) fn resource_sample(summary: &ResourceUsageSummary) -> ResourceSample {
+    const MIB: u64 = 1024 * 1024;
     ResourceSample {
         cpu_utilization: summary.cpu_avg_pct.map(|p| f64::from(p) / 100.0),
+        cpu_peak_utilization: summary.cpu_peak_pct.map(|p| f64::from(p) / 100.0),
         memory_used_bytes: None,
+        memory_min_available_bytes: summary.available_mem_min_mb.map(|mb| u64::from(mb) * MIB),
+        memory_pressure: match summary.memory_pressure_peak {
+            MemoryPressure::Unknown => None,
+            MemoryPressure::Normal => Some("normal"),
+            MemoryPressure::Warn => Some("warn"),
+            MemoryPressure::Critical => Some("critical"),
+        }
+        .map(str::to_owned),
         process_rss_bytes: None,
-        process_peak_rss_bytes: summary
-            .process_rss_peak_mb
-            .map(|mb| u64::from(mb) * 1024 * 1024),
+        process_peak_rss_bytes: summary.process_rss_peak_mb.map(|mb| u64::from(mb) * MIB),
         thermal_state: summary.thermal_measured.then(|| {
             match summary.thermal_state_peak {
                 ThermalState::Normal => "nominal",
@@ -4717,6 +4730,65 @@ mod tests {
             resource_sample(&measured).thermal_state.as_deref(),
             Some("nominal")
         );
+    }
+
+    #[test]
+    fn resource_summaries_export_peak_cpu_minimum_memory_and_pressure_only_when_measured() {
+        let unmeasured = ResourceUsageSummary {
+            cpu_avg_pct: None,
+            cpu_peak_pct: None,
+            process_rss_peak_mb: None,
+            available_mem_min_mb: None,
+            memory_pressure_peak: MemoryPressure::Unknown,
+            thermal_state_peak: ThermalState::Normal,
+            thermal_measured: false,
+            battery_pct_end: None,
+            sample_count: 0,
+            sampling_mode: "off".into(),
+            sampling_interval_ms: None,
+        };
+        assert_eq!(resource_sample(&unmeasured), ResourceSample::default());
+
+        let measured = ResourceUsageSummary {
+            cpu_avg_pct: Some(40.0),
+            cpu_peak_pct: Some(90.0),
+            available_mem_min_mb: Some(1024),
+            memory_pressure_peak: MemoryPressure::Warn,
+            sample_count: 3,
+            sampling_mode: "summary".into(),
+            sampling_interval_ms: Some(1000),
+            ..unmeasured.clone()
+        };
+        let sample = resource_sample(&measured);
+        assert_eq!(sample.cpu_utilization, Some(0.4));
+        assert_eq!(sample.cpu_peak_utilization, Some(0.9));
+        assert_eq!(sample.memory_min_available_bytes, Some(1_073_741_824));
+        assert_eq!(sample.memory_pressure.as_deref(), Some("warn"));
+        assert_eq!(sample.memory_used_bytes, None);
+
+        // Zero available memory is a measurement, not a missing value.
+        let exhausted = ResourceUsageSummary {
+            available_mem_min_mb: Some(0),
+            ..unmeasured.clone()
+        };
+        assert_eq!(
+            resource_sample(&exhausted).memory_min_available_bytes,
+            Some(0)
+        );
+
+        for (pressure, level) in [
+            (MemoryPressure::Normal, "normal"),
+            (MemoryPressure::Warn, "warn"),
+            (MemoryPressure::Critical, "critical"),
+        ] {
+            let summary = ResourceUsageSummary {
+                memory_pressure_peak: pressure,
+                ..unmeasured.clone()
+            };
+            let sample = resource_sample(&summary);
+            assert_eq!(sample.memory_pressure.as_deref(), Some(level));
+            assert!(semconv::MEMORY_PRESSURE_LEVELS.contains(&level));
+        }
     }
 
     #[test]

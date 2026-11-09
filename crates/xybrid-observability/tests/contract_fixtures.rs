@@ -325,7 +325,10 @@ fn usage(v: &Value) -> Usage {
 
 const RESOURCE_FIELDS: &[&str] = &[
     "cpu_utilization",
+    "cpu_peak_utilization",
     "memory_used_bytes",
+    "memory_min_available_bytes",
+    "memory_pressure",
     "process_rss_bytes",
     "process_peak_rss_bytes",
     "thermal_state",
@@ -1346,6 +1349,10 @@ fn catalog_matches_constants() {
         catalog["enums"]["redaction_rule"],
         json!(["replace_literal", "omit_attribute"])
     );
+    assert_eq!(
+        catalog["enums"][attr::RESOURCE_MEMORY_PRESSURE],
+        json!(semconv::MEMORY_PRESSURE_LEVELS)
+    );
     for (rule, kind) in [
         (
             RedactionRule::replace_literal("a", "b").unwrap(),
@@ -1385,6 +1392,9 @@ fn catalog_matches_constants() {
         attr::TOOL_DEFINITIONS,
         attr::FEEDBACK_COMMENT,
         attr::RESOURCE_ACCELERATOR_MEMORY_USED_BYTES,
+        attr::RESOURCE_CPU_PEAK_UTILIZATION,
+        attr::RESOURCE_MEMORY_MIN_AVAILABLE_BYTES,
+        attr::RESOURCE_MEMORY_PRESSURE,
     ] {
         assert!(
             wire::attribute_type(key).is_some(),

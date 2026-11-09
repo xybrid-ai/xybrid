@@ -32,6 +32,7 @@ import {
   INFERENCE_OPERATIONS,
   INSTRUMENTATION_SCOPE_NAME,
   METRICS,
+  type MemoryPressure,
   type MetricName,
   OPERATIONS,
 } from "./catalog.ts";
@@ -192,9 +193,20 @@ export type Usage = {
   readonly audioOutputTokens?: number | undefined;
 };
 
+/**
+ * A host-measured resource sample. Omit what was not measured; peak, minimum and state fields
+ * describe the operation's measurement window (CONTRACT.md "Resource samples").
+ */
 export type ResourceSample = {
+  /** CPU utilization, 0–1. */
   readonly cpuUtilization?: number | undefined;
+  /** Highest CPU utilization observed in the window, 0–1. */
+  readonly cpuPeakUtilization?: number | undefined;
   readonly memoryUsedBytes?: number | undefined;
+  /** Lowest system memory available for allocation in the window, bytes. */
+  readonly memoryMinAvailableBytes?: number | undefined;
+  /** Most severe memory pressure in the window; any other value is ignored. */
+  readonly memoryPressure?: MemoryPressure | undefined;
   readonly processRssBytes?: number | undefined;
   readonly processPeakRssBytes?: number | undefined;
   readonly thermalState?: "nominal" | "fair" | "serious" | "critical" | (string & {}) | undefined;
@@ -262,11 +274,14 @@ const USAGE_ATTRIBUTES: readonly (readonly [keyof Usage, string])[] = [
   ["audioOutputTokens", ATTR.USAGE_AUDIO_OUTPUT_TOKENS],
 ];
 
-type Check = "count" | "finite" | "string" | "boolean";
+type Check = "count" | "finite" | "string" | "boolean" | "memory_pressure";
 
 const RESOURCE_ATTRIBUTES: readonly (readonly [keyof ResourceSample, string, Check])[] = [
   ["cpuUtilization", ATTR.RESOURCE_CPU_UTILIZATION, "finite"],
+  ["cpuPeakUtilization", ATTR.RESOURCE_CPU_PEAK_UTILIZATION, "finite"],
   ["memoryUsedBytes", ATTR.RESOURCE_MEMORY_USED_BYTES, "count"],
+  ["memoryMinAvailableBytes", ATTR.RESOURCE_MEMORY_MIN_AVAILABLE_BYTES, "count"],
+  ["memoryPressure", ATTR.RESOURCE_MEMORY_PRESSURE, "memory_pressure"],
   ["processRssBytes", ATTR.RESOURCE_PROCESS_RSS_BYTES, "count"],
   ["processPeakRssBytes", ATTR.RESOURCE_PROCESS_PEAK_RSS_BYTES, "count"],
   ["thermalState", ATTR.RESOURCE_THERMAL_STATE, "string"],
@@ -313,6 +328,13 @@ const text = (value: unknown): string | undefined =>
 const strings = (value: unknown): string[] | undefined =>
   Array.isArray(value) && value.length > 0 ? value.map(String) : undefined;
 
+/** A level of the closed `memory.pressure` vocabulary; an unknown level is not a measurement. */
+const memoryPressure = (value: unknown, key: string): MemoryPressure | undefined => {
+  if (value === undefined || value === null) return undefined;
+  const levels: readonly unknown[] = ENUMS[ATTR.RESOURCE_MEMORY_PRESSURE];
+  return levels.includes(value) ? (value as MemoryPressure) : ignored(key);
+};
+
 const checked = (value: unknown, check: Check, key: string): AttributeValue | undefined => {
   switch (check) {
     case "count":
@@ -321,6 +343,8 @@ const checked = (value: unknown, check: Check, key: string): AttributeValue | un
       return finite(value, key);
     case "string":
       return text(value);
+    case "memory_pressure":
+      return memoryPressure(value, key);
     default:
       return typeof value === "boolean" ? value : undefined;
   }

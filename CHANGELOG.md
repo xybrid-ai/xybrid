@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   streamed TTS and live ASR, including native bindings and React Native cleanup.
 - Caller-owned device IDs, declarative redaction and opt-in third-party context
   propagation. Export remains explicitly configured and offline use stays available.
+- Resource samples export peak CPU utilization
+  (`xybrid.genai.resource.cpu.peak_utilization`, 0–1), minimum available memory
+  (`xybrid.genai.resource.memory.min_available_bytes`) and memory pressure
+  (`xybrid.genai.resource.memory.pressure`: `normal`, `warn` or `critical`).
+  The Rust SDK maps them from its resource summary; unmeasured values stay
+  absent. Rust and JS `ResourceSample` gained the matching optional fields.
 
 ### Changed
 

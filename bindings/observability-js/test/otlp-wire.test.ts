@@ -49,7 +49,7 @@ const scenario = (providers: Providers): void => {
   clock.advance(1000);
   op.recordChunk();
   op.recordTokenTiming({ timePerOutputTokenS: 2 });
-  op.recordResource({ cpuUtilization: 1, batteryLevel: 1 });
+  op.recordResource({ cpuUtilization: 1, cpuPeakUtilization: 1, batteryLevel: 1 });
   op.recordUsage({ inputTokens: 3, outputTokens: 4 });
   op.end();
   const tool = observer.startTool({ name: "lookup", arguments: { x: null, e: "" } });
@@ -109,6 +109,7 @@ const assertWire = (server: TestServer, protocol: OtlpProtocol): void => {
   expect(spanAttribute("gen_ai.request.top_p")).toEqual({ doubleValue: 1 });
   expect(spanAttribute("gen_ai.response.time_to_first_chunk")).toEqual({ doubleValue: 1 });
   expect(spanAttribute("xybrid.genai.resource.cpu.utilization")).toEqual({ doubleValue: 1 });
+  expect(spanAttribute("xybrid.genai.resource.cpu.peak_utilization")).toEqual({ doubleValue: 1 });
   expect(spanAttribute("xybrid.genai.resource.battery.level")).toEqual({ doubleValue: 1 });
   expect(spanAttribute("xybrid.genai.response.time_per_output_token")).toEqual({ doubleValue: 2 });
   expect(spanAttribute("gen_ai.request.max_tokens")).toEqual({ intValue: 64 });
