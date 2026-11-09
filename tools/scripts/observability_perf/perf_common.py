@@ -227,6 +227,20 @@ def load_thresholds(path: Optional[Path] = None) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def failed_gates(evaluation: Dict[str, Any]) -> List[str]:
+    """Ids of the rows that fail once thresholds are agreed (empty while they
+    are proposals). A row fails when ``within`` is False or its benchmark was
+    requested but did not run; an unevaluated row (``within`` None, e.g. no
+    e2e reference) is not a failure."""
+    if evaluation.get("status") != "agreed":
+        return []
+    failed = []
+    for row in evaluation.get("results") or []:
+        if row.get("within") is False or row.get("not_run"):
+            failed.append("/".join(str(part) for part in (row.get("id"), row.get("mode") or row.get("subject")) if part))
+    return failed
+
+
 def evaluate_bound(observed: Optional[float], bound: Dict[str, Any], reference: Optional[float] = None) -> Optional[bool]:
     """Whether ``observed`` is within ``bound``: ``max_abs`` (same unit),
     ``max_pct`` (of ``reference``), and/or ``min_abs``. With both ``max_abs``

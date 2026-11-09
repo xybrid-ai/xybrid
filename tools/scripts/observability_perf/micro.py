@@ -367,7 +367,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
         rows = [(c.get("policy"), c.get("workload"), (c.get("per_call_ns") or {}).get("p50"),
                  (c.get("per_call_ns") or {}).get("p99"), c.get("outcome")) for c in js.get("content") or []]
         lines += ["", pc.table(["policy", "workload", "p50 ns", "p99 ns", "outcome"], rows)]
-    lines += ["", f"## Proposed thresholds ({report['thresholds']['status']})", ""]
+    lines += ["", f"## Thresholds ({report['thresholds']['status']})", ""]
     ref = report.get("reference") or {}
     lines.append(f"Reference from the e2e `off` mode: token time {pc.fmt(ref.get('token_ns'))} ns, "
                  f"time to first callback {pc.fmt(ref.get('ttft_ns'))} ns"
@@ -376,7 +376,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
     rows = [(r["id"], r["subject"], json.dumps(r["bound"]), r["observed"], r.get("unit"),
              "not run" if r.get("not_run") else r["within"])
             for r in report["thresholds"]["results"]]
-    lines.append(pc.table(["id", "subject", "proposed bound", "observed", "unit", "within"], rows))
+    lines.append(pc.table(["id", "subject", "bound", "observed", "unit", "within"], rows))
     stale = [c["id"] for c in report.get("criterion") or [] if c.get("stale")]
     if stale:
         lines += ["", f"Stale Criterion entries (older than this run, excluded): {', '.join(stale)}"]
@@ -440,8 +440,10 @@ def main_from_args(args: argparse.Namespace) -> int:
         "js_requested": not args.skip_js,
     }
     pc.write_json(out_dir / "raw.json", raw)
-    write_report(out_dir, Path(args.e2e_report) if args.e2e_report else None,
-                 Path(args.thresholds) if args.thresholds else None)
+    report = write_report(out_dir, Path(args.e2e_report) if args.e2e_report else None,
+                          Path(args.thresholds) if args.thresholds else None)
     failed = [r for r in runs if r["exit_code"] != 0]
-    print(json.dumps({"out_dir": str(out_dir), "runs": len(runs), "failed": len(failed)}))
-    return 1 if failed else 0
+    thresholds_failed = pc.failed_gates(report["thresholds"])
+    print(json.dumps({"out_dir": str(out_dir), "runs": len(runs), "failed": len(failed),
+                      "thresholds_status": report["thresholds"]["status"], "thresholds_failed": thresholds_failed}))
+    return 1 if failed or thresholds_failed else 0

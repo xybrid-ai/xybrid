@@ -410,6 +410,9 @@ aggregate counts stay exact. Unsampled spans keep their references (see
 
 Dropping (Rust) or garbage-collecting (JS) an un-ended handle never ends it
 implicitly in JS; in Rust `Drop` ends it as cancelled so spans are not leaked.
+A JS handle that is never ended, cancelled or released is lost: no span, no
+duration metric, no outcome. JS has no reliable finalization, so end handles
+in a `finally` block (or cancel them) on every path.
 Ending twice is a no-op; the first terminal call wins and later recording calls
 are ignored. Recording calls never throw.
 
@@ -667,10 +670,14 @@ nulls arrive as `bytesValue: ""` and JS whole-number doubles as `intValue`.
 - Operation hot paths (start, chunk, usage, end) never do network I/O, never
   block on export, and never flush.
 - No disk spool. Delivery is bounded per signal (traces, logs, metrics):
-  queued plus in-flight items never exceed `batch.max_queue_size`, and queued
-  plus in-flight bytes (a conservative per-item estimate computed at admission)
-  never exceed `max_buffered_bytes_per_signal` (32 MiB). Items over either limit
-  are dropped and counted.
+  queued plus in-flight bytes (a conservative per-item estimate computed at
+  admission) never exceed `max_buffered_bytes_per_signal` (32 MiB). For traces
+  and logs, queued plus in-flight items also never exceed
+  `batch.max_queue_size`. Metrics have no item queue: the periodic reader
+  exports one collection at a time, admitted whole against the byte budget, so
+  metric data points are bounded by that budget and by the instruments'
+  cardinality, not by `max_queue_size`. Items over a limit are dropped and
+  counted (a refused metrics collection counts all its data points).
 - Per-signal counters (`PipelineStats { traces, logs, metrics }`, each
   `accepted`, `exported`, `dropped`, `failed`, `pending`):
   - `accepted`: every item offered (sampled spans that ended, log records
@@ -708,7 +715,10 @@ nulls arrive as `bytesValue: ""` and JS whole-number doubles as `intValue`.
 - Rust: `Result<()>` with `Error::Timeout` or `Error::Delivery`, plus
   `force_flush_async`/`shutdown_async`; sync calls are safe inside another Tokio
   runtime. JS: `Promise<boolean>`, `true` only for success, resolved after
-  counters settle.
+  counters settle. JS timers never keep a process alive; an export in flight
+  does until it completes or its deadline aborts it, so a process that exits
+  without shutdown can linger up to `export_timeout` against an unresponsive
+  endpoint.
 - Exporter diagnostics never include payloads, headers, response bodies or
   content.
 

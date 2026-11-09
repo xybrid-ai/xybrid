@@ -623,8 +623,9 @@ def _per_request(sink: Dict[str, Any], signal_name: str) -> float:
 
 def evaluate_thresholds(thresholds: Dict[str, Any], comparisons: Dict[str, Any], summary: Dict[str, Any],
                         raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Evaluates the proposed e2e thresholds; every result stays a proposal
-    until ``thresholds.json`` says the user agreed (``status: agreed``)."""
+    """Evaluates the e2e thresholds. Results are proposals unless
+    ``thresholds.json`` says ``status: agreed``; then ``within`` (the median
+    delta) is a gate (``perf_common.failed_gates``)."""
     out = {"status": thresholds.get("status", "proposed"), "source": "thresholds.json", "results": []}
     for item in thresholds.get("e2e", []):
         for mode in item["modes"]:
@@ -721,14 +722,14 @@ def render_markdown(report: Dict[str, Any]) -> str:
     lines += ["", "## Sanity (does each mode measure what it claims)", ""]
     lines.append(pc.table(["check", "ok", "detail"],
                           [(c["check"], c["ok"], c["detail"]) for c in report["analysis"]["sanity"]]))
-    lines += ["", f"## Proposed thresholds ({report['thresholds']['status']})", ""]
+    lines += ["", f"## Thresholds ({report['thresholds']['status']})", ""]
     rows = []
     for r in report["thresholds"]["results"]:
         observed = r.get("observed_regression", r.get("observed"))
         rows.append((r["id"], r["mode"], r["metric"], json.dumps(r.get("bound", {"max_abs": r.get("limit")})),
                      observed, r.get("observed_regression_pct"), r.get("worst_case_regression"), r["within"],
                      r.get("within_at_ci_worst_case")))
-    lines.append(pc.table(["id", "mode", "metric", "proposed bound", "observed regression", "observed %",
+    lines.append(pc.table(["id", "mode", "metric", "bound", "observed regression", "observed %",
                            "CI worst case", "within", "within at CI worst case"], rows))
     lines.append("")
     lines.append("Regressions are positive (slower, later, larger). `within` uses the median delta, "
@@ -865,9 +866,11 @@ def cmd_e2e(args: argparse.Namespace) -> int:
     # A failed sanity check means a mode did not measure what it claims, so
     # its comparison with `off` is not evidence either way.
     sanity_failed = [c["check"] for c in report["analysis"]["sanity"] if c["ok"] is False]
+    thresholds_failed = pc.failed_gates(report["thresholds"])
     print(json.dumps({"out_dir": str(out_dir), "processes": len(processes), "failed": failed,
-                      "sanity_failed": sanity_failed, "thresholds_status": report["thresholds"]["status"]}))
-    return 1 if failed or sanity_failed else 0
+                      "sanity_failed": sanity_failed, "thresholds_status": report["thresholds"]["status"],
+                      "thresholds_failed": thresholds_failed}))
+    return 1 if failed or sanity_failed or thresholds_failed else 0
 
 
 def cmd_report(args: argparse.Namespace) -> int:

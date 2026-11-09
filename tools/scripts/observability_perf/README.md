@@ -12,7 +12,7 @@ thresholds; it does not decide pass or fail from a single sample.
 | `run_perf.py` | Entry point: `fetch-model`, `e2e`, `micro`, `report`. |
 | `micro.py` | Runs and collects the Rust Criterion benches and the Node bench. |
 | `perf_common.py` | Environment capture, distributions, bootstrap comparisons, thresholds, Markdown. |
-| `thresholds.json` | The **proposed** thresholds with their rationale (`status: proposed`). |
+| `thresholds.json` | The **agreed** thresholds with their rationale (`status: agreed`, 2026-11-09). |
 | `fake_driver.py` | Stand-in for the real driver: same arguments and JSON, no model (dry runs, tests). |
 | [`crates/xybrid-sdk/examples/observability_perf.rs`](../../../crates/xybrid-sdk/examples/observability_perf.rs) | The e2e driver: one process, one telemetry mode, a real GGUF through `XybridModel::run_streaming`. |
 | [`crates/xybrid-observability/benches/`](../../../crates/xybrid-observability/benches/) | Criterion benches `stream_overhead`, `content_pipeline`, `saturation`. |
@@ -180,15 +180,25 @@ JSON side report next to Criterion's output (`XYBRID_OBS_BENCH_DIR`, default
 every benchmark once with smaller side reports (a smoke check); `micro
 --profile dev --quick` does a fast but unoptimized pass.
 
-## Proposed thresholds
+## Thresholds
 
-Not agreed yet: `thresholds.json` has `status: proposed`, and every report
-labels its evaluation that way. Each e2e row compares the **regression** of a
-mode against `off` (slower, later or larger is positive) with the bound, both
-at the median delta (`within`) and at the end of its 95% interval in the
-regressing direction (`within at CI worst case`). With both an absolute and a
-relative allowance, the larger applies. To adopt them, edit the bounds and set
-`"status": "agreed"`; `report` re-renders without re-running.
+Agreed on 2026-11-09 (`thresholds.json` has `status: agreed`) after two
+real-model runs on an Apple M5 Max (10 and 20 rounds per mode) and the micro
+benches, in which every bound held. Each e2e row compares the **regression**
+of a mode against `off` (slower, later or larger is positive) with the bound.
+With both an absolute and a relative allowance, the larger applies.
+
+The gate is `within`: the median delta for e2e rows, the measured value for
+micro rows. A failed gate makes `e2e` and `micro` exit 1 and lists the rows
+under `thresholds_failed`. `within at CI worst case` (the end of the bootstrap
+95% interval in the regressing direction) is reported for information only:
+on a desktop the e2e noise floor is a few percent (the `blocked` mode, which
+does no telemetry work on the token path, spanned -1.9% to +3.7% tokens/s over
+20 rounds), far above the per-token cost the micro benches measure (about
+0.003% of a token), so the interval end mostly measures the machine. Run on an
+idle machine, and add rounds when the intervals are wide. A file with
+`"status": "proposed"` turns the gate off again; `report` re-renders without
+re-running.
 
 The anchor is the measured per-token time. On an M-series Mac a 0.8B Q4 model
 decodes at roughly 100-250 tokens/s (4-10 ms per token), while `record_chunk`
@@ -198,7 +208,7 @@ tight enough to catch a regression that puts real work (allocation storms,
 locks shared with an exporter, I/O, a flush) on the token path, loose enough
 not to flag run-to-run noise.
 
-| id | what | proposed bound | rationale |
+| id | what | bound | rationale |
 |---|---|---|---|
 | E1, E2 | tokens/s (runtime; callback-derived), enabled modes vs `off` | <= 1% slower | per-token cost ~0.01% expected; 1% catches ~50-100 us per token |
 | E3 | first callback | <= max(2 ms, 2%) later | operation start plus one prompt through the content pipeline (tens of us for 2 KiB) |

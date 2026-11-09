@@ -60,6 +60,10 @@ with `recordCacheHit(hit)`, and `op.startAttempt({ index, reason, provider, loca
 for retries and fallbacks under one logical request. Hot paths never await,
 flush, or do I/O. Recording calls never throw.
 
+End every handle on every path (`try`/`finally`, or `cancel()` when the work
+is abandoned). Garbage collection never ends a handle, so one that is never
+ended, cancelled or released is lost: no span, no duration metric, no outcome.
+
 Measurements are truthful: what was not measured is absent, never zero.
 `recordChunk()` marks delivered output (time to first chunk, then the gap since
 the previous call); it never sets first-token time, which comes only from
@@ -239,6 +243,12 @@ environment reads; a supplied environment map supports browsers and tests.
 `otlpConfigFromEnv()` honors `OTEL_SDK_DISABLED=true` and signal exporter
 settings. Tune `batch.maxBufferedBytes` and `batch.exportTimeoutMs` before
 construction; invalid limits throw before workers or timers start.
+
+The pipeline's timers never keep a Node process alive, but an export in flight
+does, until it completes or its deadline aborts it. Against an unresponsive
+endpoint a process that exits without `shutdown()` therefore lingers for up to
+`batch.exportTimeoutMs` (10 s by default). Call `shutdown(timeoutMs)` before
+exiting to bound that wait, and to deliver or count what is still queued.
 
 ### Application-owned providers
 

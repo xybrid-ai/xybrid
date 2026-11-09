@@ -9,7 +9,9 @@ driver (sinks, blocked endpoint, report), the Criterion collector, and that
 the driver, the harness and the Rust/JS workloads stay in step.
 """
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import re
@@ -147,9 +149,17 @@ class StatisticsTests(unittest.TestCase):
         self.assertIsNone(pc.evaluate_bound(None, bound, 1.0))
         self.assertIsNone(pc.evaluate_bound(1.0, {"max_pct": 1.0}, None))
 
-    def test_thresholds_file_is_a_proposal_with_known_kinds(self):
+    def test_failed_gates_only_count_agreed_failures(self):
+        rows = [{"id": "E1", "mode": "content", "within": False}, {"id": "E2", "mode": "content", "within": True},
+                {"id": "M1", "subject": "memory_content", "within": None},
+                {"id": "J1", "subject": "JS benchmark", "within": None, "not_run": "no results"}]
+        self.assertEqual(pc.failed_gates({"status": "proposed", "results": rows}), [])
+        self.assertEqual(pc.failed_gates({"status": "agreed", "results": rows}), ["E1/content", "J1/JS benchmark"])
+
+    def test_thresholds_file_is_agreed_with_known_kinds(self):
         thresholds = pc.load_thresholds()
-        self.assertEqual(thresholds["status"], "proposed")
+        self.assertEqual(thresholds["status"], "agreed")
+        self.assertTrue(thresholds["agreed"]["on"])
         metrics = set(run_perf.RUN_METRICS) | set(run_perf.PROCESS_METRICS)
         for item in thresholds["e2e"] + thresholds["e2e_absolute"]:
             self.assertIn(item["metric"], metrics, item["id"])
@@ -220,10 +230,13 @@ class EnvironmentTests(unittest.TestCase):
 class EndToEndFakeDriverTests(unittest.TestCase):
     """A whole e2e run against fake_driver.py: sinks, blocked endpoint, report."""
 
-    def run_e2e(self, out_dir, model_dir, extra_env=None, modes="off,metadata,content,blocked"):
+    def run_e2e(self, out_dir, model_dir, extra_env=None, modes="off,metadata,content,blocked", thresholds=None):
+        # The fake driver is deliberately slower when enabled, so these runs
+        # use a proposed copy of the thresholds unless a test passes its own.
         argv = ["e2e", "--driver-cmd", f"{sys.executable} {FAKE_DRIVER}", "--model-dir", str(model_dir),
                 "--allow-unpinned-model", "--rounds", "2", "--runs-per-process", "2", "--max-tokens", "16",
-                "--cooldown-s", "0", "--modes", modes, "--out-dir", str(out_dir)]
+                "--cooldown-s", "0", "--modes", modes, "--out-dir", str(out_dir),
+                "--thresholds", str(thresholds or self.proposed)]
         with mock.patch.dict(os.environ, extra_env or {}):
             return run_perf.main(argv)
 
@@ -235,9 +248,32 @@ class EndToEndFakeDriverTests(unittest.TestCase):
         (self.model / "model_metadata.json").write_text("{}")
         (self.model / "tiny.gguf").write_bytes(b"\0" * 64)
         self.out = root / "out"
+        self.proposed = root / "thresholds-proposed.json"
+        self.proposed.write_text(json.dumps({**pc.load_thresholds(), "status": "proposed"}))
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_agreed_thresholds_gate_the_exit_status(self):
+        # The fake driver is slower when enabled: a 0% tokens/s bound fails
+        # it, a 1000% bound does not. Proposed bounds never gate.
+        def thresholds(status, max_pct):
+            path = Path(self.tmp.name) / f"thresholds-{status}-{max_pct}.json"
+            path.write_text(json.dumps({"status": status, "e2e": [
+                {"id": "T1", "metric": "runtime_tokens_per_s", "modes": ["content"], "bound": {"max_pct": max_pct},
+                 "rationale": "test"}], "e2e_absolute": [], "micro": []}))
+            return path
+
+        for status, max_pct, code, failed in (("agreed", 0.0, 1, ["T1/content"]), ("agreed", 1000.0, 0, []),
+                                              ("proposed", 0.0, 0, [])):
+            with self.subTest(status=status, max_pct=max_pct):
+                out = Path(self.tmp.name) / f"out-{status}-{max_pct}"
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    self.assertEqual(self.run_e2e(out, self.model, modes="off,content",
+                                                  thresholds=thresholds(status, max_pct)), code)
+                summary = json.loads(stdout.getvalue().strip().splitlines()[-1])
+                self.assertEqual((summary["thresholds_status"], summary["thresholds_failed"]), (status, failed))
 
     def test_report_covers_every_mode_and_passes_sanity(self):
         self.assertEqual(self.run_e2e(self.out, self.model), 0)
