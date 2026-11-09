@@ -20,35 +20,62 @@ import Xybrid
 final class ObservabilityRuntimeTests: XCTestCase {
     func testSharedScenarioExportsWhatItReports() throws {
         let environment = ProcessInfo.processInfo.environment
+        // A physical device cannot read or write the host's paths: the host
+        // passes the spec inline and reads expectations.json back from the
+        // test output (bindings/apple/scripts/observability-scenario-device.sh).
+        let onDevice = environment["XYBRID_SCENARIO_DEVICE"] == "1"
         guard let endpoint = nonEmpty(environment["XYBRID_SCENARIO_ENDPOINT"]),
-              let expectationsPath = nonEmpty(environment["XYBRID_SCENARIO_EXPECTATIONS"])
+              onDevice || nonEmpty(environment["XYBRID_SCENARIO_EXPECTATIONS"]) != nil
         else {
             throw XCTSkip(
                 "Set XYBRID_SCENARIO_ENDPOINT and XYBRID_SCENARIO_EXPECTATIONS (run_scenario.py does) "
                     + "to run the observability runtime scenario"
             )
         }
-        let expectations = URL(fileURLWithPath: expectationsPath)
-        let workdir = nonEmpty(environment["XYBRID_SCENARIO_WORKDIR"])
-            .map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? expectations.deletingLastPathComponent().appendingPathComponent("work", isDirectory: true)
-        let spec = nonEmpty(environment["XYBRID_SCENARIO_SPEC"])
-            .map { URL(fileURLWithPath: $0) }
-            ?? defaultSpecURL()
+        let local = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("xybrid-observability-scenario", isDirectory: true)
+        let expectations = onDevice
+            ? local.appendingPathComponent("expectations.json")
+            : URL(fileURLWithPath: environment["XYBRID_SCENARIO_EXPECTATIONS"]!)
+        let workdir = onDevice
+            ? local.appendingPathComponent("work", isDirectory: true)
+            : nonEmpty(environment["XYBRID_SCENARIO_WORKDIR"])
+                .map { URL(fileURLWithPath: $0, isDirectory: true) }
+                ?? expectations.deletingLastPathComponent().appendingPathComponent("work", isDirectory: true)
+        let spec = try specURL(environment, onDevice: onDevice, local: local)
 
         let scenario = ObservabilityScenario(endpoint: endpoint, workdir: workdir)
         let error = scenario.run(spec: spec)
         try scenario.write(to: expectations)
+        if onDevice {
+            // One line, so the host can find it in the xcodebuild output.
+            let data = try Data(contentsOf: expectations)
+            print("\(deviceExpectationsMarker)\(data.base64EncodedString())")
+        }
         if let error {
             XCTFail("The observability scenario stopped: \(error)")
         }
     }
 }
 
-// MARK: - Scenario
+/// Prefix of the line carrying expectations.json (base64) on a device run.
+private let deviceExpectationsMarker = "XYBRID_SCENARIO_EXPECTATIONS_BASE64="
 
-private let scenarioBinding = "swift"
-private let scenarioSchema = "xybrid-observability-scenario/1"
+/// The spec: inline (base64) on a device, else a host path or this checkout's copy.
+private func specURL(_ environment: [String: String], onDevice: Bool, local: URL) throws -> URL {
+    if onDevice {
+        guard let encoded = nonEmpty(environment["XYBRID_SCENARIO_SPEC_BASE64"]),
+              let data = Data(base64Encoded: encoded)
+        else {
+            throw XCTSkip("A device run needs XYBRID_SCENARIO_SPEC_BASE64 (the scenario.json bytes)")
+        }
+        try FileManager.default.createDirectory(at: local, withIntermediateDirectories: true)
+        let url = local.appendingPathComponent("scenario.json")
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+    return nonEmpty(environment["XYBRID_SCENARIO_SPEC"]).map { URL(fileURLWithPath: $0) } ?? defaultSpecURL()
+}
 
 private func nonEmpty(_ value: String?) -> String? {
     guard let value, !value.isEmpty else { return nil }
