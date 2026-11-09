@@ -14,7 +14,7 @@
 #     -destination "platform=iOS,id=<udid>" -derivedDataPath <derived-data> \
 #     -allowProvisioningUpdates DEVELOPMENT_TEAM=<team> -skipPackagePluginValidation
 #
-# then, from the repository root:
+# (both from the repository root, where Package.swift is), then:
 #
 #   python3 tools/scripts/observability_capture/run_scenario.py --binding swift \
 #     --endpoint-host <host LAN address> --out-dir out/swift-device -- \
@@ -37,7 +37,7 @@ LOG="$OUT_DIR/xcodebuild-test.log"
 mkdir -p "$OUT_DIR"
 
 status=0
-(cd "$ROOT/bindings/apple" && xcodebuild test-without-building \
+(cd "$ROOT" && xcodebuild test-without-building \
     -scheme Xybrid \
     -destination "platform=iOS,id=$DEVICE" \
     -derivedDataPath "$DERIVED" \
