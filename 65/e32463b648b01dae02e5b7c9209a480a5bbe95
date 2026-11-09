@@ -1,0 +1,1774 @@
+integration-tests/fixtures/decision/cases/state-numbers.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+tools/scripts/version-sync.sh
+  s_455d29975ccac4::t_0e6173258c47dc 45-46,54-59,126-137,266-281,289,311-316,328,349-351,370,382,397,410
+crates/xybrid-core/src/execution/modes/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 41
+bindings/react-native/example/speech.ts
+  s_455d29975ccac4::t_0e6173258c47dc 111
+bindings/unity/Runtime/Api/ModelLoader.cs
+  s_455d29975ccac4::t_0e6173258c47dc 218,224,228,231,234,237,240,243,248
+bindings/flutter/example/macos/Podfile
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/unity/Runtime/Bolt/XybridObservationRef.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-37
+crates/xybrid-observability/src/lib.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-85
+crates/xybrid-observability/src/otlp/batch.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-615
+docs/content/docs/quickstart.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 15,22-23,59,90,94-97,123,128-129,156,230
+integration-tests/fixtures/decision/cases/choice-criteria-empty.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+integration-tests/fixtures/decision/cases/depth-noul-description-over-limit.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-42
+integration-tests/fixtures/decision/cases/score-criteria-object.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+examples/unity/Observability/ProjectSettings/AudioManager.asset
+  s_455d29975ccac4::t_0e6173258c47dc 1-19
+crates/xybrid-llama/src/generation.rs
+  s_455d29975ccac4::t_0e6173258c47dc 24,45-74,108-117,119,121,123,264-358,478,509,561,590,726-728,733,845-943,947,1060-1119
+tools/scripts/tests/test_observability_capture.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-722
+crates/whisper-cpp-sys/Cargo.toml
+  s_455d29975ccac4::t_0e6173258c47dc 49
+bindings/observability-js/src/trace-context.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-379
+bindings/unity/Tests/Editor/XybridClientObservabilityTests.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-135
+integration-tests/fixtures/decision/cases/score-1-level.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+bindings/kotlin/src/test/kotlin/ai/xybrid/ResultWireCompatibilityTest.kt
+  s_455d29975ccac4::t_0e6173258c47dc 4-6,21-51,56,80,85-86
+  s_455d29975ccac4::t_e122793b0df4d8 87
+integration-tests/fixtures/decision/cases/state-true.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_455d29975ccac4::t_0e6173258c47dc 18-19,22,46-53,58-59,65,86,89,106,110-166,258,332-465,600,602-608,610,623,809-812,1051
+bindings/react-native/src/pipeline.ts
+  s_455d29975ccac4::t_0e6173258c47dc 6,10-23,63,65-66,70
+bindings/observability-js/test/semantics.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-630
+crates/xybrid-cli/src/main.rs
+  s_455d29975ccac4::t_0e6173258c47dc 10,27-34,37,42-45,49-52,54,56,64-66,70-72,81-91,296,301-304,362-365,380,382-385,429-459,488-490,494-499,502-509,511-618,712-813,815-872,877,879,950-951,1110,1122-1129,1258-1629
+  s_455d29975ccac4::t_5f58410d1822d4 1630
+crates/xybrid-core/src/cloud/error.rs
+  s_455d29975ccac4::t_0e6173258c47dc 64-85
+bindings/unity/Runtime/Bolt/XybridObservationOptions.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-70
+bindings/observability-js/src/otlp/transport.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-214
+crates/xybrid-cli/Cargo.toml
+  s_455d29975ccac4::t_0e6173258c47dc 78,84-86,98-102,107-108
+crates/xybrid-observability/contract/fixtures/suppressed_trace_keeps_metrics.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-134
+crates/xybrid-core/src/execution/modes/single_shot.rs
+  s_455d29975ccac4::t_0e6173258c47dc 30-31,34
+bindings/python/xybrid/_sugar.py
+  s_455d29975ccac4::t_0e6173258c47dc 24,231-236,411-454,468
+crates/xybrid-sdk/src/pipeline/mod.rs
+  s_455d29975ccac4::t_fd637dd8a3842b 1695,1726,1940,1942-1953,1956,1963-1967,2062,2089
+  s_455d29975ccac4::t_0e6173258c47dc 442-443,457-458,672,1119-1132,1149-1164,1218,1220,1226,1287,1298,1369,1378,1420,1428-1435,1448-1477,1496,1520,1522-1523,1564-1625,1631-1634,1648-1649,1651-1686,1728,1730-1740,1760,1916-1919,1921-1939,1941,1957-1962,1968-1981,1983-1991,1993-2012,2014-2061,2063-2088,2090-2108,2113-2116,2156-2460,2530,2551
+  s_455d29975ccac4::t_a24d373e33f874 1201,1215,1221-1225,1288-1297
+bindings/observability-js/src/catalog.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-481
+bindings/unity/Runtime/BoltSupplement/BindingRegistration.cs
+  s_455d29975ccac4::t_0e6173258c47dc 8,69,71
+docs/content/docs/guides/device-logs.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 61-66,76
+examples/ios/XybridExample/LiveVision.swift
+  s_455d29975ccac4::t_0e6173258c47dc 349,357
+integration-tests/fixtures/decision/cases/choice-non-letter-short-keys.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-101
+integration-tests/fixtures/decision/cases/noul-criteria-empty-object.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+integration-tests/fixtures/decision/cases/parse-model-field.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/unity/Runtime/Bolt/XybridSignalStats.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/react-native/ios/XybridCodec.swift
+  s_455d29975ccac4::t_0e6173258c47dc 282-286,350,354-397,472,482,492,496-511,528-529,561
+bindings/unity/Runtime/Bolt/XybridModelLoadObservation.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/flutter/ios/xybrid_flutter.podspec
+  s_455d29975ccac4::t_0e6173258c47dc 33-38
+crates/xybrid-observability/CONTRACT.md
+  s_455d29975ccac4::t_0e6173258c47dc 1-932
+bindings/flutter/lib/src/run_options.dart
+  s_455d29975ccac4::t_0e6173258c47dc 5,37-38,41,50,61,72-75
+docs/content/docs/guides/reasoning.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 41,142-149,155
+examples/ios/XybridExample/ExtractionView.swift
+  s_455d29975ccac4::t_0e6173258c47dc 290
+examples/unity/Observability/clean.sh
+  s_455d29975ccac4::t_0e6173258c47dc 1-6
+crates/xybrid-sdk/tests/metadata_gen_test.rs
+  s_455d29975ccac4::t_0e6173258c47dc 85-86,90-96
+crates/xybrid-core/src/runtime_adapter/types.rs
+  s_455d29975ccac4::t_0e6173258c47dc 442-444,630-636,738,772-778,1084-1096
+  s_455d29975ccac4::t_93ea50989c2b5b 1097-1098
+bindings/react-native/src/model.ts
+  s_455d29975ccac4::t_0e6173258c47dc 12,15,43,45-52,98,145-154,206-229
+  s_455d29975ccac4::t_2971c80b3af636 230-231
+crates/xybrid-observability/src/otlp/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-118
+integration-tests/fixtures/decision/cases/budget-at-limit.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+crates/xybrid-cli/src/platform/shell.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-229
+.github/workflows/test-ci.yml
+  s_455d29975ccac4::t_0e6173258c47dc 35,65-67
+bindings/unity/Tests/Editor/ObservationTests.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-111
+bindings/apple/include/xybrid-bolt.h
+  s_455d29975ccac4::t_0e6173258c47dc 78-84,109,156-164,184,192,237-252,265-307,314,335-340
+bindings/web/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 71-80,136-172
+  s_455d29975ccac4::t_3d05e5a07d4948 173
+crates/xybrid-observability/contract/fixtures/event_only_content.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-227
+docs/guides/custom-models.md
+  s_455d29975ccac4::t_0e6173258c47dc 597-598
+crates/xybrid-cli/src/platform/pow.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-143
+docs/content/docs/concepts/models.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 91
+bindings/react-native/RELEASING.md
+  s_455d29975ccac4::t_0e6173258c47dc 26-28,30,38
+crates/xybrid-observability/contract/fixtures/custom_operation_metrics.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-254
+crates/xybrid-sdk/tests/trace_propagation.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-484
+bindings/observability-js/pnpm-workspace.yaml
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+integration-tests/fixtures/decision/cases/choice-26-options.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-233
+crates/xybrid-core/tests/vision_metadata.rs
+  s_455d29975ccac4::t_0e6173258c47dc 111-139
+  s_455d29975ccac4::t_e79ddb6d4f6589 110
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 42-44,51,491,497-503,566,576-580,596-602,685-709,980,997,1012-1015,1023,1025-1026,1067,1076-1078,1081,1083-1084,1109-1110,1126-1133,1135-1149,1172,1180,1186-1188,1190,1194,1200-1202,1204-1206,1209-1221,1309,1344,1350-1354,1369,1375-1377,1379-1381,1398-1402,1492,1577-1584,1587,1593-1594,1601-1606,1662,1782-1789,1792,1798-1800,1812,1818-1820,1822-1824,1839,1960-2005,2007-2025
+bindings/unity/Runtime/Bolt/XybridObservabilityConfig.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/unity/Runtime/Bolt/XybridExecutionLocation.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-13
+integration-tests/fixtures/decision/cases/depth-description-over-limit.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-42
+integration-tests/fixtures/decision/cases/depth-state-empty-at-limit.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+integration-tests/fixtures/decision/cases/choice-36-options.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-293
+integration-tests/fixtures/decision/cases/choice-empty-key.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-92
+bindings/flutter/lib/src/rust/frb_generated.io.dart
+  s_455d29975ccac4::t_0e6173258c47dc 13,15,47-50,54-57,70-77,104-108,114-118,134-143,169-173,179-183,199-208,224-228,234-238,254-263,323-325,329-346,359-367,413-415,428-430,440-457,464-466,476-478,497-499,506-511,515-520,553-555,580-582,610-624,652-654,688-692,698-702,718-727,753-757,763-767,783-792,808-812,818-822,838-847,910-913,918-937,953-963,1014-1017,1033-1036,1047-1069,1076-1078,1089-1091,1111-1113,1121-1127,1132-1138,1174-1177,1205-1208,1238-1253,1284-1287,1322-1326,1332-1336,1352-1361,1387-1391,1397-1401,1417-1426,1442-1446,1452-1456,1472-1481,1544-1547,1552-1571,1588-1599,1653-1656,1672-1675,1687-1710,1719-1722,1733-1736,1760-1763,1771-1777,1782-1788,1826-1829,1861-1864,1894-1909,1942-1945,2072-2103,2136-2167,2264-2326
+  s_455d29975ccac4::t_91e15b7631e9fa 2327
+integration-tests/fixtures/decision/cases/choice-lowercase-keys.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-95
+integration-tests/fixtures/decision/cases/escape-overlap-variant.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-92
+integration-tests/fixtures/decision/cases/state-number.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+integration-tests/fixtures/decision/cases/state-u64-above-i64.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-87
+tools/scripts/check_flutter_precompiled_inputs.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-399
+.github/workflows/unity-editor.yml
+  s_455d29975ccac4::t_0e6173258c47dc 15-17,20,30-35,41,51-52,58,242-327,345-353
+  s_455d29975ccac4::t_378baf1abb6eb2 354-355
+examples/unity/Observability/Assets/Scenes/ObservabilityScene.unity.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-7
+.gitattributes
+  s_455d29975ccac4::t_0e6173258c47dc 13-19
+crates/xybrid-core/src/cloud/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 64-66
+crates/xybrid-core/tests/lfm3_smoke.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-553
+crates/xybrid-observability/tests/content_work_bound.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-212
+bindings/react-native/tests/facade.test.mjs
+  s_455d29975ccac4::t_0e6173258c47dc 6,18-19,199-225,288-289,295-297,305-381,392-396,400,497-666
+docs/sdk/trace-model.md
+  s_455d29975ccac4::t_0e6173258c47dc 3-7,9,11-16,19-23,26-29,31,33-37,39,42-53,56-96
+crates/xybrid-core/src/runtime_adapter/tool_call/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1,4-11,18-19,22-23,30,32,51-54,70-73,91-107,131-133,153-154,166-171,183-184,190-191,204-205,216,225,232-251,254,257-259,282-324,336-338,407-408,456-461,470-472,491-498,504-506,680-697,735
+crates/xybrid-core/src/phonemizer.rs
+  s_455d29975ccac4::t_0e6173258c47dc 7-10,13,67,69-86,88,114,117,157-168,174,177-178,236-296
+  s_455d29975ccac4::t_15aa01e4370d3a 297
+integration-tests/fixtures/decision/cases/choice-letter-keys.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-95
+bindings/web/src/internal/rust-llm-runtime.ts
+  s_455d29975ccac4::t_0e6173258c47dc 4,8-9,15-16,25,30,39-42,46-49,103,112,117-119,153
+integration-tests/fixtures/decision/cases/instructions-scalars.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-269
+integration-tests/fixtures/decision/cases/math-temperature-rounds-to-zero.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-34
+integration-tests/fixtures/decision/cases/state-wrapped-messages.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/flutter/rust/BUILD.bazel
+  s_455d29975ccac4::t_0e6173258c47dc 17-20,23,27-39,54-56,67-70
+integration-tests/fixtures/decision/cases/parse-question-unknown-field.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-92
+integration-tests/fixtures/decision/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 1-221
+integration-tests/fixtures/decision/cases/noul-all-null.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+tools/conformance/decision/.gitignore
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+tools/conformance/decision/oracle.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-1129
+crates/xybrid-observability/contract/fixtures/inference_streaming_remote.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-328
+xtask/src/setup_env.rs
+  s_455d29975ccac4::t_0e6173258c47dc 2,6,43-50
+bindings/flutter/lib/src/rust/api/streaming.dart
+  s_455d29975ccac4::t_0e6173258c47dc 11,18,46,77,84,92-93,103-104,125,132,140-141,151-184
+bindings/kotlin/consumer-smoke/app/src/androidTest/kotlin/ai/xybrid/smoke/ObservabilityScenarioTest.kt
+  s_455d29975ccac4::t_0e6173258c47dc 1-51
+bindings/flutter/test/run_options_test.dart
+  s_455d29975ccac4::t_0e6173258c47dc 5-25
+bindings/react-native/src/types.ts
+  s_455d29975ccac4::t_0e6173258c47dc 144-151,179-207,232-233,293-294,354,368,380,398-399,409-424
+crates/xybrid-sdk/BUILD.bazel
+  s_455d29975ccac4::t_0e6173258c47dc 146-152,159-168,184-189,234-239,244-245
+bindings/flutter/lib/src/rust/api/observability.dart
+  s_455d29975ccac4::t_0e6173258c47dc 1-267
+crates/xybrid-core/src/ir/decision/tests.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-426
+examples/unity/Observability/ProjectSettings/TagManager.asset
+  s_455d29975ccac4::t_0e6173258c47dc 1-44
+examples/unity/Observability/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 1-192
+tools/conformance/verify_tts_duration.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-97
+.agents/skills/xybrid-init/SKILL.md
+  s_455d29975ccac4::t_0e6173258c47dc 98
+tools/scripts/tests/test_generation_gates.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-133
+crates/xybrid-sdk/src/registry_client.rs
+  s_455d29975ccac4::t_620190e04634ae 1139,1153-1160,1830,1861,1879
+  s_455d29975ccac4::t_1f4f8669e67818 1932,1952
+  s_455d29975ccac4::t_1ef498405824f9 5430,5461,5473
+  s_455d29975ccac4::t_0e6173258c47dc 122-127,134-140,151-154,158-254,372,997,1085,1099-1101,1129-1136,1140-1145,1152,1266-1276,1325,1332,1337,1576,1603,1740,1866-1878,1880-1882,2953-2956,2994-2997,4835,4844,4853,4858-4872,4883,4888-5103,5223
+bindings/unity/Runtime/Bolt/XybridPipeline.cs
+  s_455d29975ccac4::t_0e6173258c47dc 108
+tools/conformance/gen_fake_tts.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-337
+crates/xybrid-llama/tests/choice_logits.rs
+  s_455d29975ccac4::t_0e6173258c47dc 51-55
+crates/xybrid-core/src/ir/decision/decode.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-568
+crates/xybrid-observability/Cargo.toml
+  s_455d29975ccac4::t_0e6173258c47dc 1-72
+examples/unity/Observability/ProjectSettings/DynamicsManager.asset
+  s_455d29975ccac4::t_0e6173258c47dc 1-36
+integration-tests/fixtures/decision/cases/noul-criteria-array.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+docs/content/docs/concepts/models.zh.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 91
+crates/xybrid-observability/src/otlp/encode.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-976
+integration-tests/fixtures/decision/cases/parse-empty-body.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+integration-tests/fixtures/decision/cases/parse-images-empty.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-87
+crates/xybrid-observability/contract/fixtures/inference_error_partial_stream.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-143
+bindings/web/src/internal/runtime.ts
+  s_455d29975ccac4::t_0e6173258c47dc 2,18-31,36-38
+bindings/apple/Tests/XybridTests/ObservationTests.swift
+  s_455d29975ccac4::t_0e6173258c47dc 1-42
+bindings/flutter/rust/src/api/observability.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-341
+bindings/observability-js/test/catalog.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-121
+bindings/python/tests/test_init.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-270
+crates/xybrid-cli/src/ui.rs
+  s_455d29975ccac4::t_0e6173258c47dc 277-281,287-291,297-300
+  s_455d29975ccac4::t_973d492660ac30 301
+crates/xybrid-core/src/orchestrator.rs
+  s_455d29975ccac4::t_0e6173258c47dc 108-135,298-315,397-402,516-545,566,694,696,1378-1424
+  s_455d29975ccac4::t_5e56e7550f9d01 1425
+crates/xybrid-observability/contract/fixtures/refs_without_tracer.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-99
+crates/xybrid-core/src/execution/llm_telemetry.rs
+  s_455d29975ccac4::t_0e6173258c47dc 176-177,207,212,330,336,406,411
+crates/xybrid-sdk/src/model_registry.rs
+  s_455d29975ccac4::t_0e6173258c47dc 114-123
+crates/xybrid-observability/collector/phoenix.yaml
+  s_455d29975ccac4::t_0e6173258c47dc 1-80
+crates/xybrid-sdk/src/run_options.rs
+  s_455d29975ccac4::t_0e6173258c47dc 149-151,153-155,205-207,213-221,650,1088
+crates/xybrid-core/src/ir/decision/json/write.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-165
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 8-19,26,43-44,49-52,56-59,97-111,161,165,312,335-337
+  s_455d29975ccac4::t_e77f25a98b7a67 338
+examples/unity/Observability/Assets/Scripts/XybridObservabilityExample.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-222
+crates/xybrid-cli/src/commands/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 7-8,22,25
+bindings/unity/Runtime/Api/ObservationOptions.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/observability-js/examples/runtime-readiness.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-113
+bindings/observability-js/biome.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-37
+hermetic_llvm.patch
+  s_455d29975ccac4::t_0e6173258c47dc 27-28,36,40,45,47-49,51,96-97,102-120,122-123,127
+integration-tests/tests/coreml_native.rs
+  s_455d29975ccac4::t_0e6173258c47dc 11-14
+bindings/apple/scripts/gen-bolt-bindings.sh
+  s_455d29975ccac4::t_0e6173258c47dc 8-10,80,82,85,88-99,109-110,125-127,136-137
+bindings/flutter/lib/src/rust/api/result.dart
+  s_455d29975ccac4::t_0e6173258c47dc 12,83,109,123,139,159-161,165,169-170,178-179
+bindings/observability-js/src/otlp/stats.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/web/scripts/check-pack.test.mjs
+  s_455d29975ccac4::t_0e6173258c47dc 1-153
+crates/xybrid-llama/src/lib.rs
+  s_455d29975ccac4::t_0e6173258c47dc 27-29,78-79,88-91
+crates/xybrid-observability/src/types.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-484
+bindings/unity/Runtime/Bolt/XybridStreamingConfig.cs
+  s_455d29975ccac4::t_0e6173258c47dc 27,33,41-42,78-82,85
+  s_455d29975ccac4::t_1544855edae7f0 83-84,86-88
+bindings/kotlin/bazel/jni/jni_glue.c
+  s_455d29975ccac4::t_0e6173258c47dc 644-669,828-836,1429,1433,1438,1448-1465,1472,1481,1493,1496-1497,1499-1502,1506,1518,1521,1523-1540,1544,1556,1569-1597,1604-1622,1628,1631-1637,1644-1691,1695,1698,1708,1711,1866,1869-1870,1872,1875,1878-1880,1882-1885,1889,1893,1896,1898,1901,1904-1905,1907,1910,1914,1916,1919,1922,1932,1935-1936,1938,1941,1945,1957,1960,1970,1973-1974,1976-1977,1979-1980,1982-1985,1988,1991-1993,1995-2701,2981,2985,2990,2994-3007,3012,3015-3020,3025-3095
+  s_455d29975ccac4::t_40a77d0e0190ca 3096
+bindings/kotlin/build.gradle.kts
+  s_455d29975ccac4::t_0e6173258c47dc 8
+crates/xybrid-ffi-facade/tests/observability.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-335
+examples/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 43,45-46
+integration-tests/fixtures/decision/cases/parse-videos.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+bindings/kotlin/bazel/jni/xybrid_bolt.h
+  s_455d29975ccac4::t_0e6173258c47dc 78-84,109,156-164,184,192,237-252,265-307,314,335-340
+.github/workflows/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 65,75-77,80,148-150
+bindings/unity/Runtime/Api/InferenceResult.cs
+  s_455d29975ccac4::t_0e6173258c47dc 6-7,28-59,171-200,213-215,228-229,239,241-246,259-261,375-731
+bindings/unity/package.json
+  s_455d29975ccac4::t_0e6173258c47dc 3
+crates/xybrid-core/src/device/os_version.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-230
+integration-tests/fixtures/tts/fake/with_duration/tokens.txt
+  s_455d29975ccac4::t_0e6173258c47dc 1-41
+bindings/unity/Runtime/Bolt/XybridError.cs
+  s_455d29975ccac4::t_0e6173258c47dc 53,239-246,301-304
+  s_455d29975ccac4::t_6423328b698681 305
+integration-tests/fixtures/decision/cases/choice-letter-and-word-keys.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-95
+crates/xybrid-observability/contract/fixtures/refs_unsampled_parent.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-218
+crates/xybrid-observability/contract/fixtures/model_load.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-89
+crates/xybrid-observability/contract/fixtures/declarative_redaction_rules.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-258
+bindings/kotlin/consumer-smoke/app/src/debug/res/xml/observability_scenario_network_security.xml
+  s_455d29975ccac4::t_0e6173258c47dc 1-8
+bindings/unity/Runtime/Bolt/XybridModel.cs
+  s_455d29975ccac4::t_0e6173258c47dc 21-61,271-274,277,281,294-307
+  s_455d29975ccac4::t_11c11813b62888 308-309
+crates/llama-cpp-sys/wrapper.h
+  s_455d29975ccac4::t_0e6173258c47dc 109,234-235
+crates/xybrid-cli/tests/telemetry_status_test.rs
+  s_455d29975ccac4::t_0e6173258c47dc 37,89-207
+crates/xybrid-observability/contract/fixtures/timing_out_of_order.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-196
+docs/sdk/model_metadata.schema.json
+  s_455d29975ccac4::t_0e6173258c47dc 1924-1932
+integration-tests/fixtures/decision/cases/noul-extra-criteria-key.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-86
+bindings/observability-js/test/content-pipeline.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-599
+bindings/unity/Runtime/Bolt/XybridWorkflowObservation.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+docs/content/docs/(integration)/sdks/unity.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 59,65-96,246-248,250-251,256-266,273-282,323
+examples/unity/Observability/Assets/Plugins.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-28
+bindings/observability-js/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 1-355
+bindings/unity/Runtime/Bolt/XybridToolObservation.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-221
+integration-tests/fixtures/decision/cases/parse-type-missing.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+examples/unity/Observability/ProjectSettings/EditorBuildSettings.asset
+  s_455d29975ccac4::t_0e6173258c47dc 1-12
+bindings/unity/Runtime/Bolt/XybridModelLoadInfo.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-83
+bindings/unity/Runtime/Bolt/XybridUsage.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-91
+examples/unity/Observability/.gitignore
+  s_455d29975ccac4::t_0e6173258c47dc 1-59
+bindings/web/src/types.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-2,6-25,30-36,62-63
+integration-tests/fixtures/decision/cases/math-pos-inf-alias.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-79
+integration-tests/fixtures/decision/cases/score-structured-levels.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-124
+tools/conformance/decision/NOTICE
+  s_455d29975ccac4::t_0e6173258c47dc 1-43
+integration-tests/fixtures/decision/cases/math-temperature-negative.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-34
+bindings/flutter/rust/src/lib.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1
+tools/conformance/decision/cases.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-613
+bindings/react-native/tests/kotlin/CodecTest.kt
+  s_455d29975ccac4::t_0e6173258c47dc 14-15,17,19,23,131-134,147-150,187,190-191,209-248
+  s_455d29975ccac4::t_088bbbe76b08a9 249
+tools/scripts/install_pins.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-243
+docs/content/docs/guides/tool-calling.zh.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 40,43-47
+  s_455d29975ccac4::t_5cfe7729d4f1da 48
+tools/scripts/tests/test_verify_apple_min_os.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-265
+crates/xybrid-sdk/tests/choice_scoring.rs
+  s_455d29975ccac4::t_0e6173258c47dc 34-36,574-576,578-581,584-585,622-635,744-752,756-759,774-775,782-807,830-833
+tools/conformance/decision/test_access.h
+  s_455d29975ccac4::t_0e6173258c47dc 1-104
+integration-tests/fixtures/decision/artifacts.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/unity/Runtime/Bolt/XybridObservationOptions.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+integration-tests/fixtures/decision/cases/noul-empty-string-description.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+crates/xybrid-cli/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 61-132
+integration-tests/fixtures/decision/cases/depth-description-at-limit.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-89
+bindings/unity/Tests/Editor/ObservabilityRuntimeScenarioTests.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/unity/Runtime/Bolt/XybridExecutionLocation.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/web/test/observability.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-937
+crates/xybrid-core/src/execution/preprocessing/image.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1699,1715,1734,1741
+crates/xybrid-ffi-facade/src/observability_operations.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-348
+bindings/unity/Runtime/Bolt/XybridTranscriptionResult.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-54
+examples/unity/Observability/ProjectSettings/ProjectSettings.asset
+  s_455d29975ccac4::t_0e6173258c47dc 1-822
+integration-tests/fixtures/decision/cases/score-null-levels.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-100
+MODULE.bazel
+  s_455d29975ccac4::t_0e6173258c47dc 12-14,69,130,164,182,348-349,357,374,382,386,417-429,432-436,448-479,486,526-527
+integration-tests/fixtures/decision/cases/math-media-temperature-unused.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-98
+crates/xybrid-observability/src/observer.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-568
+docs/sdk/API_REFERENCE.md
+  s_455d29975ccac4::t_0e6173258c47dc 388,1444-1445,1534-1598,1618-1619
+bindings/unity/Runtime/Bolt/XybridPartialResult.cs
+  s_455d29975ccac4::t_0e6173258c47dc 22,27,34-35,52-61
+  s_455d29975ccac4::t_63ab59bcd1e02c 62
+.github/workflows/test-whispercpp.yml
+  s_455d29975ccac4::t_0e6173258c47dc 59,69-71
+bindings/flutter/example/android/app/build.gradle.kts
+  s_455d29975ccac4::t_0e6173258c47dc 27-28
+bindings/web/test/clock.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-21
+crates/xybrid-llama/src/vision.rs
+  s_455d29975ccac4::t_0e6173258c47dc 45-49,57,70
+crates/xybrid-observability/contract/fixtures/span_and_event_tool_content.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-117
+bindings/flutter/CHANGELOG.md
+  s_455d29975ccac4::t_0e6173258c47dc 5-76,80-81
+bindings/flutter/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 18,31,45,57-202,476-478,481-493,555
+bindings/flutter/test/observability_test.dart
+  s_455d29975ccac4::t_0e6173258c47dc 1-233
+bindings/unity/Editor/ObservabilityDomainReloadGuard.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/observability-js/test/runtime-readiness.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-71
+crates/xybrid-observability/tests/delivery.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-951
+crates/xybrid-observability/src/otlp/export.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-725
+integration-tests/fixtures/decision/cases/math-neg-inf-some.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-128
+integration-tests/fixtures/decision/cases/parse-type-not-string.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 18,48,56-86,192-193,199-200,203-205
+  s_455d29975ccac4::t_88464c9b7c4f68 206
+bindings/flutter/generate-frb.sh
+  s_455d29975ccac4::t_0e6173258c47dc 1-19
+crates/llama-cpp-sys/src/bindings.rs
+  s_455d29975ccac4::t_0e6173258c47dc 16,155-166,690-693,726-730,765-773,795-807,812-813,834-835,852-856,869,908-919,928-936,940,944-945,948,1052-1054,1210
+integration-tests/fixtures/decision/cases/score-11-levels.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+docs/content/docs/guides/vision-models.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 31-52
+examples/flutter/android/app/build.gradle.kts
+  s_455d29975ccac4::t_0e6173258c47dc 27-28
+integration-tests/fixtures/decision/cases/depth-score-level-over-limit.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-42
+bindings/kotlin/consumer-smoke/app/src/debug/AndroidManifest.xml
+  s_455d29975ccac4::t_0e6173258c47dc 1-6
+integration-tests/fixtures/decision/cases/escape-user-defined-not-broken.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/react-native/src/NativeXybrid.ts
+  s_455d29975ccac4::t_0e6173258c47dc 27,42-65,149
+bindings/flutter/lib/src/rust/api/sdk_client.dart
+  s_455d29975ccac4::t_0e6173258c47dc 13,37,48-52,65-69,92,161-165
+docs/content/docs/cli/index.zh.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 83-86,90-95
+integration-tests/fixtures/decision/cases/noul-structured-descriptions.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+integration-tests/fixtures/decision/cases/parse-duplicate-question-ids.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-124
+integration-tests/fixtures/decision/cases/score-2-levels.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-93
+tools/conformance/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 7-10,94-100,113,231-311
+crates/xybrid-llama/src/ffi.rs
+  s_455d29975ccac4::t_0e6173258c47dc 274-278,639,648-649
+bindings/observability-js/src/index.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-101
+docs/guides/custom-models.zh.md
+  s_455d29975ccac4::t_0e6173258c47dc 589-590
+crates/llama-cpp-sys/wrapper.cpp
+  s_455d29975ccac4::t_0e6173258c47dc 155-160,167-168,177-179,554-563
+  s_455d29975ccac4::t_51f32731a163cc 564-565
+integration-tests/fixtures/decision/cases/card-text-example.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-185
+bindings/python/xybrid/_bolt/_native.c
+  s_455d29975ccac4::t_0e6173258c47dc 65-66,81-82,171-202,227-312,325,367-378,451,459,504-519,532-574,602-607,934-943,1014-1023,1465-1525,1527,1529,1531,1535,1537,1539,1541,1545,1547,1549,1551,1555,1557,1559,1561,1565,1567,1569,1571,1575,1577,1579,1581,1585,1587,1589,1591,1595,1597,1599,1601,1605,1607,1609,1611-1621,1745,1747,1749,1751,1755,1757,1759,1761,1765,1767,1769,1771,1775,1777,1779,1781,1785,1787,1789,1791,1795,1797,1799,1801,1805,1807,1809,1811,1815,1817,1819,1821,1825,1827,1829,1831,1835,1837,1839,1841,1845,1847,1849,1851,1855,1857,1859,1861,1865,1867,1869,1871,1875,1877,1879,1881,1885,1887,1889,1891,1895,1897,1899,1901,1905,1907,1909,1911,1915,1917,1919,1921,1925,1927,1929,1931,1935,1937,1939,1941,1945,1947,1949,1951,1955,1957,1959,1961,1965,1967,1969,1971,1975,1977,1979,1981,1985,1987,1989,1991,1995,1997,1999,2001,2005,2007,2009,2011,2015,2017,2019,2021,2025,2027,2029,2031,2035,2037,2039,2041,2045,2047,2049,2051,2055,2057,2059,2061,2065,2067,2069,2071,2075,2077,2079,2081,2085,2087,2089,2091,2095,2097,2099,2101,2105,2107,2109,2111,2115,2117,2119,2121,2125,2127,2129,2131,2135,2137,2139,2141,2145,2147,2149,2151,2155,2157,2159,2161,2165,2167,2169,2171,2175,2177,2179,2181,2185,2187,2189,2191,2195,2197,2199,2201,2205,2207,2209,2211,2215,2217,2219,2221,2224-2232,2234-2242,2244-2252,2254-2262,2264-2271,2274-2281,2284-2291,2294-2302,2304-2311,2314-2321,2324-2331,2334-2341,2344-2352,2354-2362,2364-2372,2374-2382,2384-2827,2831-3751,3753-3754,3757-3817,3819-3821,3823-3824,3826-3831,3833-3834,3836-3845,3848-3876,3878-3882,3885-3887,3890-3892,3895-3900,3902-3903,3909-3921,3932-3985,3988-4022,4025-4036,4039-4066,4069-4084,4088-4099,4103,4105-4114,4118-4214,4217-4255,4258-4274,4278,4280-4289,4293-4315,4318-4335,4339,4341-4350,4353-4484,4487-4540,4543-4559,4563,4565-4574,4578-4708,4711-4764,4767-4783,4787,4789-4799,4801-4932,4935-4988,4991-5007,5011,5013-5020,5022,5026-5028,5031-5032,5035-5037,5040-5042,5045-5047,5051-5055,5057-5059,5061-5068,5072,5074-5083,5087-5089,5092-5093,5096-5098,5101-5103,5106-5108,5112-5114,5116,5118-5120,5122-5129,5132-5144,5148-5245,5247,5249-5262,5264-5276,5278,5281,5283-5284,5288,5290,5294-5301,5308,5310-5314,5316-5317,5319,5323-5332,5334-5336,5338-5340,5342-5354,5356-5360,5362-5364,5366-5382,5384-5407,5410-5453,5455-5461,5463-5474,5477,5480,5483-5486,5489-5490,5493-5495,5498-5501,5503-5505,5509-5526,5529-5535,5538,5541,5545-5547,5550-5566,5570-5587,5591,5593-5603,5606-5608,5611-5612,5615-5627,5631-5649,5652,5654-5664,5667-5669,5672-5673,5676-5678,5681-5683,5686-5688,5692-5709,5713,5715-5725,5728-5730,5733-5749,5753-5770,5774,5776-5786,5789-5791,5794-5810,5814-5831,5835,5837-5847,5850-5861,5864-5866,5869-5871,5875-5876,5878,5881-5882,5885-5888,5890,5896,5898-5908,5911-5914,5916-5918,5920-5923,5925-5939,5942-5943,5946,5949,5951,5957-5974,5977-5978,5981-5983,5986-5989,5991-5993,5997-6001,6003-6005,6007-6014,6017-6023,6026,6029-6036,6038-6050,6052-6055,6058-6059,6064-6065,6068-6071,6073,6079,6081,6084,6087,6094,6100-6105,6108-6109,6112-6125,6129-6130,6133-6136,6139-6142,6147-6153,6175-6177,6180,6183-6190,6195-6215,6239-6243,6247,6249,6251-6253,6256-6258,6261-6294,6307-6308,6312,6315,6319-6321,6325,6331-6396,6398,6400,6406,6408,6411,6414,6421,6423,6432,6437,6446,6456,6459,6467,6469,6472,6475,6482,6484-6485,6487-6489,6491-6494,6496-6499,6501-6511,6513,6517,6520,6523-6524,6527-6534,6536-6537,6539-6546,6548-6550,6552-6565,6568-6569,6574-6576,6578-6581,6583,6589,6591-6656,6659-6664,6667-6673,6675-6681,6683-6689,6691-6693,6695-6741,6743-6758,6760-6763,6765-6769,6771-6775,6777-6781,6783-6787,6789-6796,6798-6807,6810-6813,6815-6824,6826-6859,6861-6862,6864,6867-6869,6871-6872,6875-6883,6885,6887,6890,6893,6900,6902-6903,6905-6907,6909-6912,6914-6917,6919-6929,6931,6935,6938,6941-6942,6945-6952,6954-6955,6957-6964,6966-6968,6970-6983,6986-6987,6992-6994,6996-6999,7001,7007,7009,7012,7015,7022,7024,7033,7038,7047,7057,7060,7068,7070,7073,7076,7083,7085,7094,7099,7108,7118,7121,7129,7131,7134,7137,7144,7146-7147,7149,7151,7153-7156,7158-7161,7164-7166,7169-7170,7172,7175-7176,7179-7180,7182,7184,7190,7192,7195,7198,7205,7207,7216-7267,7270-7303,7307-7319,7322-7323,7325-7328,7332-7335,7338-7339,7342-7359,7366,7368,7371,7374,7380,7382,7391,7396,7405,7415,7418,7425,7427,7430,7433,7439,7441,7450,7455,7464,7474,7477,7484-7499,7501-7513,7515,7518,7521-7526,7532-7533,7536,7539-7552,7556-7560,7562-7563,7566-7588,7590-7595,7597,7600,7602-7603,7606-7607,7613-7630,7632-7644,7646,7649,7652-7657,7663-7664,7667,7670-7686,7690-7694,7696-7697,7700-7728,7730-7735,7737,7740,7742-7743,7746-7747,7753-7786,7789,7792-7797,7803-7804,7807-7826,7828-7833,7836-7837,7840-7868,7870-7875,7877-7883,7886-7887,7893-7906,7908-7920,7922,7925,7928-7933,7939-7940,7943,7946-7956,7960-7964,7966-7986,7990-7993,7995,7998,8000-8001,8004-8005,8011-8028,8030-8042,8044,8047-8048,8050-8056,8058-8063,8065-8084,8086-8092,8094-8126,8130-8138,8140-8141,8144-8145,8151-8166,8168-8180,8182,8185,8188-8193,8199-8200,8203-8219,8221-8226,8229-8262,8264,8267,8269-8270,8273-8274,8280-8297,8299-8311,8313,8316,8319-8324,8330-8332,8334,8337-8353,8355-8361,8363-8395,8397-8402,8404,8407,8409-8410,8413-8414,8420-8437,8439-8451,8453-8457,8459-8465,8467,8470-8472,8474-8493,8495-8501,8503-8535,8537-8551,8553-8554,8560,8562,8565,8568,8574,8576,8585,8590,8599,8609,8612,8619,8621,8624,8627,8633,8635,8644,8649,8658,8668,8671,8678-8681,8683,8685,8687,8689-8690,8693,8696,8699-8700,8707,8710,8714,8716-8717,8724-8725,8731,8740,8745-8746,8748,8755,8759,8761,8765,8767,8775,8777,8780,8783,8785,8789-8946,8951-8952,8955,8958-8959,8962-8965,8969-8981,8983-8985,8987-8988,8990-8991,8993-8999,9001-9005,9008-9014,9016-9018,9021-9040,9042-9043,9047-9076,9079-9083,9086-9087,9089-9091,9093-9094,9096-9102,9104-9108,9111-9117,9119-9121,9123-9124,9126-9130,9133-9134,9136-9138,9141-9148,9153-9154,9157,9160-9161,9164-9165,9167-9168,9171-9176,9178-9180,9182-9184,9187-9188,9190-9192,9195-9204,9209-9226,9229-9230,9233,9236-9240,9243,9247-9261,9263-9286,9289-9315,9317-9321,9324-9335,9337-9356,9359-9385,9387-9391,9394-9405,9407-9426,9429-9435,9437-9439,9442-9457,9459-9460,9464-9503,9506-9513,9516-9517,9519-9521,9523-9524,9526-9532,9534-9538,9541-9547,9549-9554,9556-9558,9561-9567,9569-9578,9581-9582,9584-9586,9589-9596,9601-9619,9621-9638,9641-9643,9646-9647,9649-9651,9653-9658,9661-9667,9669-9678,9681-9698,9700-9702,9705-9711,9713-9722,9725-9735,9737-9742,9745-9751,9753-9762,9765-9766,9768-9770,9773-9780,9785-9802,9805-9807,9810-9811,9813-9815,9817-9822,9825-9831,9833-9842,9845-9858,9860-9862,9865-9874,9876-9889,9892-9912,9914-9915,9917,9920-9934,9936-9938,9942-9954,9956-9958,9960-9962,9964-9965,9967-9968,9970-9971,9973-9974,9976-9989,9992-9997,9999-10001,10004-10005,10008,10011-10022,10024,10028-10034,10036-10038,10040,10042,10044-10045,10047-10061,10064-10066,10069-10070,10073,10077,10080-10085,10090-10102,10105-10106,10109,10113,10116,10119-10136,10138-10140,10144,10146-10156,10159-10160,10163,10170,10173,10176,10179-10190,10192-10194,10198,10200-10201,10205,10208,10215-10224,10226,10230,10232-10233,10237,10240,10247-10254,10258,10262,10266,10269,10276,10280-10283,10289-10290,10293,10297,10300,10310,10315-10319,10324-10325,10328,10332,10335,10343,10345,10350-10354,10360,10363,10367,10370,10378,10380,10385,10387-10393,10398-10399,10402,10409,10412,10415-10421,10423-10428,10431-10432,10435-10436,10439,10443-10446,10451,10456,10459,10466,10471,10476,10479,10486,10491,10495,10498,10505,10509,10512-10513,10516,10520,10525,10532,10535,10542,10548-10552,10557-10558,10561,10565,10568,10571,10579-10580,10582,10587-10591,10596-10597,10600,10604,10607-10610,10618-10619,10621,10626-10627,10630-10631,10634,10638,10641-10643,10648-10649,10653,10656,10660,10663,10668,10673,10676,10683,10688,10693,10696,10703,10708,10713,10716,10723,10728,10730,10733-10734,10737,10744-10749,10754-10775,10779,10782,10786,10789,10791,10795-10798,10802,10805,10809,10812,10814,10818,10820-10822,10826,10829,10836,10839-10841,10843,10847,10849-10854,10857-10858,10861,10868-10876,10878-10879,10883,10885,10888-10889,10892,10899-10904,10909,10911-10916,10919-10920,10923,10930-10938,10940-10941,10945,10947-10952,10955-10956,10959,10966-10974,10976-10977,10981,10983,10986-10987,10990,10997-11002,11007,11009,11012-11013,11016,11023-11028,11033,11035-11039,11042-11043,11046,11053-11065,11067-11068,11072,11074-11076,11079-11080,11083,11090-11095,11097,11101,11103-11110,11113-11114,11117,11124,11127-11139,11141-11143,11147,11149-11151,11156-11157,11160,11164,11167,11170,11178-11179,11181,11186,11188,11191-11192,11195,11202,11205-11219,11222-11223,11226-11229,11237-11238,11244-11266,11271-11272,11275,11279,11282,11290,11292,11297,11301-11302,11305,11312-11322,11325-11326,11329-11332,11337,11341-11342,11345,11352,11357,11361-11362,11365,11372-11382,11385-11386,11389,11392-11402,11405-11406,11409-11412,11417,11419,11422-11423,11426,11433,11436-11449,11452-11453,11456,11459,11467,11473,11475,11481,11484,11491,11499,11505,11507-11509,11514-11515,11518,11525-11528,11539,11544,11548,11551,11558,11562-11568,11574-11575,11578,11582,11585-11588,11598-11599,11604-11605,11609,11612,11616,11619-11629,11632-11639,11644-11645,11649,11652,11656,11659-11677,11680-11695,11697-11698,11702,11704-11765,11769,11774-11775,11778,11782,11785,11788,11796,11798,11804,11809,11812,11819,11824,11829,11832,11839,11844,11849,11852,11859-11861,11866-11874,11876-11878,11880,11882,11884-11885,11887-11899,11902-11903,11906-11907,11910,11914-11919,11922-11925,11929,11932,11936,11939,11944,11946-11948,11954,11957,11964,11967,11978,11983-12008,12014,12017,12021,12024,12027,12035,12037-12038,12043,12048,12051,12058,12063,12068,12071,12078,12083,12088,12091,12098-12100,12105,12107-12112,12115-12116,12119,12126,12129,12132-12134,12136-12137,12141,12145-12146,12149,12156,12163-12164,12168,12171,12175,12178,12183,12185-12189,12193,12196,12203,12206-12211,12217-12218,12222,12224-12228,12232,12235,12242-12250,12256-12257,12261,12263-12267,12270-12271,12274,12281,12284-12289,12295-12296,12300,12302-12306,12310,12313,12320-12328,12334-12335,12339,12343-12344,12347,12354,12361,12363-12365,12370-12371,12374,12381-12384,12395,12400-12404,12407-12408,12411,12415,12418,12421-12423,12425,12429,12431-12433,12435-12437,12440,12447-12452,12454,12458,12460-12465,12468-12469,12472,12479-12487,12489-12490,12494-12495,12498-12525,12528,12532,12535-12546,12548-12550,12554,12559,12562,12569,12574,12579,12582,12589,12594,12599,12602,12609-12611,12616,12618-12623,12626-12627,12630,12637,12640-12645,12647-12648,12652,12657,12660,12667-12669,12674,12679,12682,12689,12694,12696,12700,12703,12710,12713,12733,12747,12749-12756,12768-12769,12955-12956,12969,13495,13499,13502,13506,13512,13516-13536,13539,13543-13553,13557,13562-13565,13568-13569,13572,13576-13586,13590-13711,14092,14106,14108-14114,14126-14127,14147,14155,14200-14215,14228-14270,14313-14318,14339-14342
+integration-tests/fixtures/decision/cases/instructions-null.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+integration-tests/fixtures/decision/cases/escape-key-collision-nested.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-91
+tools/scripts/verify_apple_min_os.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-255
+integration-tests/fixtures/decision/cases/choice-keys-special-tokens.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-101
+examples/unity/Observability/ProjectSettings/ProjectVersion.txt
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+integration-tests/fixtures/decision/cases/choice-criteria-order.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-101
+crates/xybrid-observability/src/context.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-606
+integration-tests/fixtures/decision/cases/math-media-temperature.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-99
+integration-tests/fixtures/decision/cases/math-reference-choice.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-91
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_455d29975ccac4::t_0e6173258c47dc 38-41,47,50,52,70-74,88,104,191-193,288-434,474-553,751,773,790-791,797,804,901-905,1349,1351-1361
+bindings/python/tests/test_sdk.py
+  s_455d29975ccac4::t_0e6173258c47dc 457-531
+bindings/observability-js/scripts/dump-fixtures.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-16
+crates/xybrid-cli/tests/init_json_test.rs
+  s_455d29975ccac4::t_0e6173258c47dc 16-19
+crates/xybrid-core/tests/llamacpp_stream_text.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-173
+crates/xybrid-sdk/src/lib.rs
+  s_455d29975ccac4::t_0e6173258c47dc 14-16,20-21,37-38,41-43,46,49,54-55,166,277-286,288-292,294,296-298,682-688,698,701-703,706-709,713,716,719,728,734-735,759-761,765-772,787-788,791,805-812,814-815,945-947,1042,1044-1065,1091,1095-1138,1219-1223,1225-1255,1257-1264,1290,1345-1348,1353-1357
+  s_455d29975ccac4::t_896cf7ade5ebf9 1358-1359
+examples/flutter/lib/screens/live_asr_demo_screen.dart
+  s_455d29975ccac4::t_0e6173258c47dc 238
+bindings/flutter/macos/xybrid_flutter.podspec
+  s_455d29975ccac4::t_0e6173258c47dc 25-31
+crates/xybrid/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 9
+integration-tests/fixtures/tts/fake/without_duration/tokens.txt
+  s_455d29975ccac4::t_0e6173258c47dc 1-41
+crates/xybrid-core/src/runtime_adapter/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 58
+crates/xybrid-core/src/execution/modes/tts.rs
+  s_455d29975ccac4::t_0e6173258c47dc 8-10,55-94,96-98,107-116,123-124,222-227,333-381
+bindings/observability-js/src/otlp/protobuf-wire.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-299
+crates/xybrid-observability/contract/fixtures/media_modalities.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-466
+bindings/apple/XybridFFI-Info.plist
+  s_455d29975ccac4::t_0e6173258c47dc 10,12
+crates/xybrid-sdk/src/download.rs
+  s_455d29975ccac4::t_0e6173258c47dc 427-429,433,435-441,455
+docs/sdk/telemetry.md
+  s_455d29975ccac4::t_0e6173258c47dc 1-28,31-71,74,76-77,80-200
+crates/xybrid-sdk/examples/observability_session.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-45
+integration-tests/tests/reasoning_budget.rs
+  s_455d29975ccac4::t_0e6173258c47dc 19-21,89-154
+  s_455d29975ccac4::t_daa240c94a3044 155
+crates/xybrid-cli/src/commands/trace.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-3,5,8-11,14-61,63-76,80-82,85-92,97-117
+integration-tests/fixtures/decision/cases/state-chat-messages.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/unity/Runtime/Bolt/XybridToolObservation.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+crates/xybrid-cli/tests/connect_auth_cli_test.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-2651
+crates/xybrid-core/src/execution/session_cache.rs
+  s_455d29975ccac4::t_0e6173258c47dc 86-89
+integration-tests/BUILD.bazel
+  s_455d29975ccac4::t_0e6173258c47dc 71-83,86-87,108-119,149,157,161-162,168-169
+  s_455d29975ccac4::t_9aadf9fbd2b4d9 170
+bindings/react-native/src/xybrid.ts
+  s_455d29975ccac4::t_0e6173258c47dc 11-12
+crates/xybrid-observability/src/otlp/stats.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-83
+bindings/python/tests/observability_scenario.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-238
+bindings/observability-js/src/otlp/metrics.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-206
+bindings/observability-js/test/support/otlp-decode.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-326
+integration-tests/fixtures/decision/cases/parse-files-data-url.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+bindings/unity/Runtime/Bolt/XybridEnvelopeKind.cs
+  s_455d29975ccac4::t_ace49f950ca341 18,77-88,104
+  s_455d29975ccac4::t_6c9e53197ed64a 105
+bindings/apple/scripts/boot-ci-simulator.sh
+  s_455d29975ccac4::t_0e6173258c47dc 1-50
+bindings/flutter/android/build.gradle
+  s_455d29975ccac4::t_0e6173258c47dc 48-49,57-62,77,86,93,110-115,118-122,124-126
+bindings/observability-js/.gitignore
+  s_455d29975ccac4::t_0e6173258c47dc 1-6
+bindings/observability-js/tsdown.config.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-12
+bindings/react-native/ios/XybridModule.mm
+  s_455d29975ccac4::t_0e6173258c47dc 129-177,543-582
+crates/xybrid-core/src/execution/types.rs
+  s_455d29975ccac4::t_0e6173258c47dc 12,47-50,142-151,252-262,288-290,394-409
+docs/content/docs/guides/tool-calling.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 46,50-55
+  s_455d29975ccac4::t_acfe67403d9453 56
+.github/workflows/ci.yml
+  s_455d29975ccac4::t_0e6173258c47dc 1,89-109,223-235,613-653,679,717-719
+  s_455d29975ccac4::t_d9986ac074b8b7 776
+  s_455d29975ccac4::t_dff9354ab55ba6 720
+crates/xybrid-cli/examples/voice-assistant-demo.README.md
+  s_455d29975ccac4::t_0e6173258c47dc 56-58,65,69-70
+examples/unity/Observability/Assets/Scenes/ObservabilityScene.unity
+  s_455d29975ccac4::t_0e6173258c47dc 1-172
+examples/unity/Observability/Assets/Scripts/XybridObservabilityExample.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-11
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_455d29975ccac4::t_84153be20a1d53 2809
+  s_455d29975ccac4::t_0e6173258c47dc 13,15,182-275,298-300,309-311,315-316,324-325,334-335,348-349,355-356,378-380,390,399-452,480-482,523-525,530-537,540-542,545-562,589-597,606-614,641-658,1400-1403,1405-1408,1411-1412,1414-1416,1421-1426,1429-1432,1434-1437,1440-1441,1443-1445,1450-1455,1458-1462,1464-1467,1470,1473-1475,1480-1485,1488-1493,1495-1500,1503,1506-1507,1512-1517,1520-1523,1525-1528,1531,1534-1536,1542,1544-1545,1549-1552,1556-1557,1563,1566-1567,1572-1577,1580-1583,1586,1592,1595-1597,1599,1602-1607,1610-1613,1615,1617-1618,1621,1624-1625,1631-1636,1639-1643,1646,1648,1656-1658,1660,1663-1668,1671-1674,1676,1678-1680,1683-1684,1686-1688,1693-1698,1701-1706,1708,1710-1712,1715-1716,1718-1720,1725-1730,1733-1736,1740,1742,1747,1750-1752,1757-1762,1765-1769,1772,1774-1775,1783-1785,1787,1790-1795,1798-1801,1804,1806,1812,1814-1816,1818,1821-1826,1829-1833,1836,1838,1844,1846-1848,1850,1853-1858,1861-1863,1866,1868,1876-1878,1880,1883-2260,2262-2266,2268-2276,2278-2284,2286-2289,2291-2296,2298-2306,2308-2315,2317-2802,2804-2808,2835-2859,2861-2885,2887-2909,2911-2927,2930-2934,2936-2959,2961-2985,2987-3006,3008,3012,3016-3017,3025-3026,3031,3033-3034,3038-3043,3045-3069,3071-3096,3098-3117,3121,3127,3130-3131,3136,3138-3150,3152-3179,3181-3196,3200-3203,3205,3207,3211,3214,3220-3225,3228-3231,3233,3235,3239,3242,3248-3253,3256-3258,3262,3268-3269,3271,3277-3282,3285-3288,3292,3294-3295,3301,3303-3304,3309,3311-3312,3316-3319,3321-3323,3327-3328,3330-3332,3337-3342,3345-3348,3350-3352,3357,3360-3361,3366,3368-3369,3373-3377,3379-3381,3385-3386,3388-3390,3395-3400,3403-3406,3408,3410-3411,3415-3416,3418-3420,3425-3430,3433-3434,3438,3444-3445,3447-3449,3454-3459,3462-3465,3467,3469,3473,3476-3477,3483-3488,3491-3495,3497,3499,3503,3506-3507,3513-3518,3521-3526,3528,3530-3532,3537,3539-3540,3545-3550,3553-3554,3558,3564-3565,3567-3568,3574-3579,3582-3584,3588-3589,3594-3595,3598-3599,3604-3609,3612-3615,3618,3624,3627-3629,3631,3634-3639,3918,3934-3940,3942-3959,3970,4050,4386-4391,4393-4416,4418-4439,4441-4464,4466-4489,4491-4515,4517-4539,4541-4563,4565-4587,4589-4607,4614,4617,4623,4625,4630-4635,4639-4643,4647-4648,4650-4651,4656,4658-4659,4663-4669,4671-4674,4678-4679,4681-4682,4687-4690,4694-4697,4699-4700,4704,4707-4708,4713,4715-4716,4743-4750,4759-4766,4791-4806,4854-4862,4871-4879,4904-4920,4962-4970,4979-4987,5012-5028,5054-5062,5071-5079,5104-5120,5230-5236,5243-5275,5300-5317,5438-5443,5502-5523,5556-5621,5626-5651,5657-5658,5668-5685,5708-5709,5711-5720,5728-5729,5731-5758,5766-5767,5771,5821-5822,5828,5851-5865,5892-5911,5922-5924,5934-5965,6048-6053,6102-6107,6164-6194,6250-6262,6327-6335,6345-6353,6381-6398,6444-6452,6462-6470,6498-6515,6543-6551,6561-6569,6597-6614,6729-6735,6743-6777,6805-6824,6951-6958,7031-7061,7097-7198,7206-7207,7212-7213,7223-7241,7268-7269,7280,7295-7298,7309-7312,7324-7339,7345-7350,7405-7406,7411-7412,7432-7447,7471-7493,7507-7509,7518-7558,7667-7679,7760-7772,7867-7914,8017-8025,8091-8100,8110-8119,8149-8168,8219-8228,8238-8247,8278-8297,8327-8336,8346-8355,8385-8404,8544-8550,8558-8592,8621-8641,8751-8757,8805-8822,8846-8913,8915-8916,8927-8928,8938-8955,8973-8974,8990-8993,9005-9015,9022-9023,9067-9068,9086-9096,9115-9131,9144,9146,9153-9176,9266-9275,9350-9359,9446-9489,9586-9593,9783-9894,9948-9953,9959-9961,9963,10002-10003,10010-10011,10046-10047,10055-10056,10088-10089,10094-10095,10110-10111,10113-10117,10180-10242,10287-10291,10320-10321,10330-10334,10394,10421-10540
+  s_455d29975ccac4::t_98c44f18048f2f 87,2261,2267,2277,2285,2290,2297,2307,2316,2803,2810-2834,2860,2886,2910,2935,2960,2986,3019,3044,3070,3097,3124,3151,3180,3208,3236,3265,3297,3324,3353,3382,3412,3441,3470,3500,3533,3561,3591,3621,3646,3670,3693,3717,3740,3764,3789,3813,3837,3863,3887,3914,3941,3966,3994,4020,4046,4069,4095,4118,4143,4169,4194,4220,4244,4268,4292,4317,4341,4366,4392,4417,4440,4465,4490,4516,4540,4564,4588,4611,4644,4675,4701
+  s_455d29975ccac4::t_15dadfe24837aa 3960,10541
+crates/xybrid-observability/contract/fixtures/parent_forms_and_invalid.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-259
+docs/content/docs/(integration)/sdks/android.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 14,18-20,50,56-88,199-200,207-216
+examples/unity/Observability/Packages/packages-lock.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-341
+tools/scripts/ci_gate.py
+  s_455d29975ccac4::t_0e6173258c47dc 12-26,33
+crates/xybrid-cli/src/commands/telemetry.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1,4-9,13-18,21-25,28-63
+crates/xybrid-observability/tests/transport.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-485
+examples/unity/Observability/ProjectSettings/Physics2DSettings.asset
+  s_455d29975ccac4::t_0e6173258c47dc 1-56
+.github/workflows/build-flutter.yml
+  s_455d29975ccac4::t_0e6173258c47dc 1,10-15,17-19,36-38,40,61-63,211,213,215-216,220-223,226,228,294-363
+  s_455d29975ccac4::t_59fa0b5ae62c79 364
+crates/xybrid-llama/src/utf8.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-163
+crates/xybrid-sdk/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 13-14,17-19,22,25,29-34,83,85-89,91,94-111,114-117,119-123,125-129,131,133-139,141-143,145,147,149-156,158-173
+bindings/flutter/rust/src/api/result.rs
+  s_455d29975ccac4::t_0e6173258c47dc 7,17-18,26,71,122
+crates/xybrid-cli/tests/vlm_cli_test.rs
+  s_455d29975ccac4::t_0e6173258c47dc 16-19
+bindings/react-native/tests/wire.test.mjs
+  s_455d29975ccac4::t_0e6173258c47dc 110-123,152,154,174
+integration-tests/fixtures/tts/fake/without_duration/misaki/us_gold.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-14
+bindings/unity/Runtime/Bolt/XybridInferenceObservation.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+integration-tests/fixtures/decision/cases/upstream-test-payload.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-192
+tools/conformance/decision/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 1-346
+integration-tests/fixtures/decision/cases/math-pos-inf.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-79
+bindings/react-native/src/context.ts
+  s_455d29975ccac4::t_0e6173258c47dc 28
+integration-tests/fixtures/decision/cases/noul-yes-no-aliases.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-87
+tools/scripts/observability_capture/check_capture.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-829
+bindings/unity/Runtime/Bolt/XybridObservationRef.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+integration-tests/fixtures/decision/cases/parse-files-null.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-87
+integration-tests/fixtures/choice/provenance.json
+  s_455d29975ccac4::t_0e6173258c47dc 103,113-114,235-236,281,288-289,303
+integration-tests/fixtures/decision/oracle.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-177
+bindings/python/tests/test_observability.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-424
+integration-tests/fixtures/decision/cases/choice-criteria-array.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+integration-tests/fixtures/decision/cases/parse-trailing-data.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+crates/xybrid-observability/contract/fixtures/first_chunk_vs_first_token.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-325
+crates/xybrid-sdk/src/observability/session.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-440
+crates/xybrid-observability/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 1-82
+integration-tests/fixtures/decision/cases/math-one-option.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-79
+integration-tests/fixtures/tts/fake/without_duration/model_metadata.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-37
+bindings/unity/Tests/Editor/ObservabilityConfigTests.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-131
+bindings/react-native/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 6,26,58,69-138,291
+bindings/flutter/test/pipeline_observability_test.dart
+  s_455d29975ccac4::t_0e6173258c47dc 1-129
+bindings/python/tests/test_observability_scenario.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-59
+examples/unity/Observability/ProjectSettings/QualitySettings.asset
+  s_455d29975ccac4::t_0e6173258c47dc 1-236
+bindings/apple/Tests/XybridTests/ModelLoaderTests.swift
+  s_455d29975ccac4::t_0e6173258c47dc 58-59,63-110
+  s_455d29975ccac4::t_ca309fe0456e4c 111
+bindings/flutter/lib/xybrid.dart
+  s_455d29975ccac4::t_0e6173258c47dc 106-111,115-119,124-142
+bindings/react-native/package.json
+  s_455d29975ccac4::t_0e6173258c47dc 3,73
+bazel/zzz/BUILD.bazel
+  s_455d29975ccac4::t_0e6173258c47dc 22
+crates/xybrid-cli/src/platform/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-175
+docs/content/docs/(integration)/sdks/react-native.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 12,17,22,44-46,49,52,57-63,111
+.github/workflows/bazel.yml
+  s_455d29975ccac4::t_0e6173258c47dc 89,523
+integration-tests/fixtures/decision/cases/choice-falsy-descriptions.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-137
+integration-tests/fixtures/decision/cases/instructions-missing.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+integration-tests/fixtures/decision/cases/parse-question-not-object.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+crates/xybrid-cli/src/commands/models.rs
+  s_455d29975ccac4::t_1ef498405824f9 540
+bindings/observability-js/scripts/check-pack.mjs
+  s_455d29975ccac4::t_0e6173258c47dc 1-140
+crates/xybrid-cli/src/commands/run.rs
+  s_455d29975ccac4::t_2ab71734060a30 1000,1107-1109,1115-1120,1128-1133,1147-1163,1206
+  s_455d29975ccac4::t_0e6173258c47dc 5-7,780-782,973-975,977-982,984-990,992-999,1001-1002,1004,1006-1013,1015,1019,1021-1023,1025-1027,1029-1030,1097-1098,1100,1102-1103,1105-1106,1110-1114,1122-1123,1126,1134-1136,1138-1146,1164-1196,1198-1205,1207-1208,1210,1212-1229,1232,1236,1238-1240,1242-1244,1246-1247,1792-1794
+integration-tests/fixtures/decision/cases/parse-images-http-url.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+integration-tests/fixtures/decision/cases/noul-partial-false.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/python/pyproject.toml
+  s_455d29975ccac4::t_0e6173258c47dc 7
+crates/xybrid-cli/src/commands/repl/agent_loop.rs
+  s_455d29975ccac4::t_0e6173258c47dc 128-175,483-487,507-512,519-524,634-682
+  s_455d29975ccac4::t_974c556da7e6bb 683
+crates/xybrid-whisper/Cargo.toml
+  s_455d29975ccac4::t_0e6173258c47dc 27
+crates/xybrid-sdk/tests/decision_ir.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-174
+integration-tests/fixtures/decision/cases/choice-mixed-case-keys.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-101
+integration-tests/fixtures/decision/cases/escape-adjacent-and-partial.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+.github/workflows/test-candle.yml
+  s_455d29975ccac4::t_0e6173258c47dc 67,76-78,89,99-101
+integration-tests/fixtures/decision/cases/score-10-levels.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-149
+bindings/observability-js/src/observer.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-1628
+bindings/unity/Runtime/Api/PipelineResult.cs
+  s_455d29975ccac4::t_0e6173258c47dc 52-54,67,109-111,121
+crates/xybrid-observability/src/otlp/config.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-1076
+crates/xybrid-observability/src/otlp/transport.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-255
+crates/xybrid-sdk/tests/fixture_validation_test.rs
+  s_455d29975ccac4::t_0e6173258c47dc 18-20,374-375,378,382-388
+.github/workflows/build-android.yml
+  s_455d29975ccac4::t_0e6173258c47dc 1,13,18-20,56,61,449-548
+bindings/observability-js/tsconfig.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-29
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_455d29975ccac4::t_0e6173258c47dc 131
+examples/android/app/src/main/java/ai/xybrid/example/MainActivity.kt
+  s_455d29975ccac4::t_0e6173258c47dc 4-8,10,31,33-51
+integration-tests/fixtures/decision/cases/noul-false-first.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/unity/Runtime/Bolt/XybridSignalStats.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-52
+crates/xybrid-llama/src/model.rs
+  s_455d29975ccac4::t_0e6173258c47dc 15,163-171,173,176-203,214-215,240-250,316
+integration-tests/fixtures/tts/fake/with_duration/misaki/us_gold.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-14
+crates/xybrid-core/src/ir/envelope.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1218-1236,1249-1252
+tools/conformance/decision/CMakeLists.txt
+  s_455d29975ccac4::t_0e6173258c47dc 1-157
+bindings/observability-js/test/otlp-lifecycle.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-180
+bindings/unity/Runtime/Bolt/XybridObservabilityStats.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/web/src/internal/observability.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-307
+crates/zzz-sys/build.rs
+  s_455d29975ccac4::t_0e6173258c47dc 19-20,54,73-80,112-113,139-143
+integration-tests/fixtures/models/.gitignore
+  s_455d29975ccac4::t_0e6173258c47dc 14-15
+bindings/observability-js/test/otlp.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-399
+crates/xybrid-observability/contract/fixtures/evaluation_and_feedback.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-120
+.github/workflows/build-natives.yml
+  s_455d29975ccac4::t_0e6173258c47dc 113,116,119-123,125,137,140
+integration-tests/fixtures/decision/cases/math-nan-alias.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-88
+tools/conformance/decision/oracle.cpp
+  s_455d29975ccac4::t_0e6173258c47dc 1-1011
+tools/scripts/observability_capture/fixtures/python/expectations.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-155
+integration-tests/fixtures/decision/cases/escape-key-collision-state.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-87
+bindings/unity/Runtime/Api/Pipeline.cs
+  s_455d29975ccac4::t_0e6173258c47dc 101-102,104-113,123-126
+bindings/observability-js/src/otlp/encoding.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-251
+bindings/react-native/parity.json
+  s_455d29975ccac4::t_0e6173258c47dc 4-133,136-659,662-670,674-1048,1073-1074
+  s_455d29975ccac4::t_25b32a82a94834 671-673
+bindings/observability-js/test/observer.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-272
+bindings/web/src/internal/clock.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-6
+crates/xybrid-observability/src/preflight.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-589
+crates/xybrid-observability/tests/contract_fixtures.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-1482
+docs/content/docs/cli/reference/repl.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 24
+integration-tests/fixtures/decision/cases/parse-spoken-instructions.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+bindings/flutter/rust/src/frb_generated.rs
+  s_455d29975ccac4::t_98c44f18048f2f 48,2432-2433,2456-2457,2491-2492,2517,3299-3346,7965-7997,8113-8130,8135,8140,8145,8150,8155,8160,8165,8170,8175,8180,8185,8190,8195,8200,8205,8210,8215,8220,8225,8230,8235,8240,8245,8250,8255,8258,8261-8262,8265-8266
+  s_455d29975ccac4::t_0e6173258c47dc 31,1153-2250,2258-2431,2434-2455,2458-2490,2493-2516,2518-3298,3347-3503,3520,3526,3533,3550,3556,3563,3577-3714,3717-3730,3732,3739,3746,3760-3762,3765-3778,3780,3787-3836,3840-3841,3843-3845,3857-3859,3861-3888,3892,3900,3915,3939,3949,3957,3972,3975,3996,4007-4008,4012-4013,4015-4017,4030,4033-4046,4048-4056,4060,4068,4083,4103-4105,4113-4114,4118-4119,4121-4123,4136,4139-4152,4154-4162,4166-4167,4171-4172,4174-4176,4189,4191-4192,4194-4207,4209-4219,4223,4231,4246-4247,4250,4265-4268,4276,4284,4298-4303,4306-4310,4317,4325,4340,4359-4360,4362-4363,4370,4378,4393,4395,4398,4413-4414,4416-4417,4424,4432,4447,4467,4477,4485,4500,4504,4519-4523,4530,4538,4553,4557,4572-4576,4583-4584,4588-4589,4591-4593,4606,4608-4609,4611-4624,4626-4636,4640,4648,4663,4667,4682-4686,4693,4701-4741,4756,4760,4775-4779,4786,4793,4808-4811,4817,4824,4839-4842,4848,4855,4870-4873,4879,4886,4902-4904,4910,4914-4915,4917-4919,4932-4936,4940,4947,4961,4964-4966,4972,4979,4993,4996-4998,5004-5037,5041-5042,5044-5046,5059-5064,5068,5074,5076,5090,5092-5097,5102,5108,5110,5125-5129,5134,5138-5139,5141-5143,5155-5157,5159-5167,5171,5178,5192,5194-5198,5204,5211,5226-5228,5234-5269,5276,5290,5294,5301,5308,5322-5323,5325-5329,5335,5342,5358-5360,5366,5373,5387,5390-5392,5398,5405,5421-5423,5429,5433-5434,5436-5438,5451-5456,5460,5468,5485-5486,5493,5497-5498,5500-5502,5515-5519,5523,5531,5545,5549-5550,5557,5564,5580-5582,5588,5595,5609,5613,5620,5627,5641,5645,5652,5659,5673,5677,5684,5691,5705,5708-5710,5716,5723,5737,5740-5742,5748,5755,5769,5771-5773,5779,5786,5802-5803,5809,5816,5833,5839,5847,5863-5866,5873-5874,5878-5879,5881-5883,5896-5902,5906-5907,5911-5912,5914-5916,5928,5930-5935,5939-5940,5944-5945,5947-5949,5962-5969,5973,5980,5994-5995,5997-5998,6004,6011,6025,6027-6028,6034,6041,6057-6058,6064,6071,6085-6090,6092-6099,6105,6112,6126-6130,6132-6138,6144,6152,6166,6169-6171,6190-6192,6196-6198,6208-6213,6261-6270,6281-6290,6321-6340,6393-6404,6415-6426,6457-6478,6691-6702,6785-6817,6869-6979,6987-6988,6994,7015-7038,7067-7068,7080,7097-7100,7111-7114,7128-7145,7151-7152,7156,7219-7220,7226,7259-7276,7305-7334,7349-7351,7364-7404,7532-7545,7622-7633,7726-7775,7879-7887,7911-7917,7921-7964,7998-8001,8083-8084,8087,8092,8095,8100,8103-8112,8259-8260,8263-8264,8326-8345,8361-8380,8426-8463,8673-8693,8767-8955,8958-8961,8967,8970-8971,8973,8978,8980-8984,8988,8991-8992,8994,8999,9001-9007,9011,9014-9015,9017,9022,9024-9028,9032,9035-9036,9038,9050,9092-9121,9152,9178-9181,9209-9232,9238,9321,9383-9406,9451-9495,9505-9507,9529-9578,9707-9718,9726-9737,9759-9777,9827-9839,9851-9863,9876-9898,9909-9911,10125-10140,10197-10217,10275-10344,10352-10355,10379-10398,10416-10419,10435-10438,10451-10461,10467-10470,10521-10524,10555-10565,10584-10613,10623,10625,10638-10664,10781-10790,10851-10860,10941-10980,11071-11078,11126,11183-11196,11211-11224,11267-11294,11338,11397-11410,11425-11438,11481-11507
+  s_455d29975ccac4::t_636953221f1002 11508
+crates/xybrid-core/src/runtime_adapter/cloud/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 593-599,1624-1723
+  s_455d29975ccac4::t_67c69b65afc473 1724
+README.md
+  s_455d29975ccac4::t_0e6173258c47dc 43,81-83,85-86,124,127-128,143,147-150,165,182,187-188,241
+README.zh-CN.md
+  s_455d29975ccac4::t_0e6173258c47dc 42,78-80,82-83,142,159,163-166,181,230
+tools/scripts/observability_capture/run_scenario.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-198
+bindings/unity/Runtime/Bolt/XybridModelLoadObservation.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-208
+integration-tests/fixtures/decision/cases/math-neg-inf-all.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-88
+bindings/observability-js/src/version.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/unity/Runtime/Bolt/XybridModelSource.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+integration-tests/fixtures/decision/cases/choice-256-options.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+crates/xybrid-core/src/execution/executor.rs
+  s_455d29975ccac4::t_0e6173258c47dc 295,302,306-314,404-421,1201-1208,2098-2101,2165,2226-2229,2271,2382,2451,2474-2476,2529-2532,2606,2723-2726,2756,2819-2822,2865,2946-2949,3010,3175-3176,3182-3194,3197,3236,3248-3255,3410,3415-3419,3422,3430,3434,3437-3444,3448-3451,3455-3465,3467-3468,3482,3496,3504,3507-3532,3538-3560,3721-3722,3725,3752-3756,3766-3767,3776,3782,3784-3787,3792-3809,3995-4007,4135-4139,4148,4168-4170,4331-4344,4604,4631,4647,4670-4690,4696,5049,5198,5320,5401,5477,5539,5624,5718,5838,5863,5876,6003,6028,6071,6217,6245-6259,6712-6843
+  s_455d29975ccac4::t_12449def9ecaec 6844
+integration-tests/fixtures/decision/NOTICE
+  s_455d29975ccac4::t_0e6173258c47dc 1-33
+tools/conformance/decision/identity.cmake
+  s_455d29975ccac4::t_0e6173258c47dc 1-104
+examples/android/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 58-59,65-67,75,81-86
+crates/xybrid-observability/tests/wire.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-729
+crates/xybrid-core/src/streaming/session.rs
+  s_455d29975ccac4::t_0e6173258c47dc 45-58,400,504,541,548-552,837-840,846-859,932-1002
+  s_455d29975ccac4::t_3e047116b238ff 1003
+bindings/flutter/lib/src/rust/api/observability.freezed.dart
+  s_455d29975ccac4::t_0e6173258c47dc 1-395
+integration-tests/fixtures/decision/cases/parse-videos-null.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-87
+.github/actions/bazel-repo-cache/action.yml
+  s_455d29975ccac4::t_0e6173258c47dc 28-30,63,67,71,75
+integration-tests/fixtures/decision/cases/state-number-overflow.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+Package.swift
+  s_455d29975ccac4::t_0e6173258c47dc 40,45
+crates/xybrid-observability/tests/support/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-490
+crates/xybrid-sdk/examples/support/observability.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-45
+bindings/kotlin/src/test/kotlin/ai/xybrid/ObservationTest.kt
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+bindings/unity/Runtime/Bolt/XybridToolCallInfo.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-83
+bindings/observability-js/test/worker.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-30
+bindings/unity/Runtime/Api/ObservabilityConfig.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-511
+crates/xybrid-core/src/runtime_adapter/onnx/session.rs
+  s_455d29975ccac4::t_0e6173258c47dc 549,551-581,808-865,1065-1073
+  s_455d29975ccac4::t_b0a9cf47f4c8d3 1074
+integration-tests/fixtures/decision/cases/choice-27-options.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-239
+bindings/web/browser-test/runtime.spec.ts
+  s_455d29975ccac4::t_0e6173258c47dc 4,145-279
+  s_455d29975ccac4::t_e53c5c9dfa20fa 280-281
+bindings/react-native/src/wire.ts
+  s_455d29975ccac4::t_0e6173258c47dc 18,70-73,89,104,108,118,285-288,291-293,320,326-334,379,400,415
+bindings/unity/Runtime/Api/ObservationOptions.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-81
+bindings/web/src/version.ts
+  s_455d29975ccac4::t_0e6173258c47dc 2
+crates/xybrid-cli/src/tracing_viz.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1,3,5-11,13,16-21,24-49,51-52,54-55,57-61,63-71,73-102,104-128,131-133,136-141,143,146-157,160-189,191-200,202,205-207,209-210,212,216-219,221-224,227-293
+integration-tests/fixtures/decision/cases/math-reference-noul.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-80
+bindings/observability-js/test/fixtures.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-18
+bindings/python/xybrid/__init__.py
+  s_455d29975ccac4::t_0e6173258c47dc 4-5,12,26,43-52,59-79
+examples/ios/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 7,73-74,82,87-92,99,143-154,187,200
+integration-tests/fixtures/decision/cases/math-temperature-buckets-score-noul.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-297
+crates/xybrid-observability/collector/xybrid.yaml
+  s_455d29975ccac4::t_0e6173258c47dc 1-48
+tools/scripts/tests/test_install_pins.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-386
+crates/xybrid-observability/contract/fixtures/content_metadata_only.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-152
+crates/xybrid-whisper/tests/transcribe_smoke.rs
+  s_455d29975ccac4::t_0e6173258c47dc 41
+bindings/web/src/llm.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1,10,29-36,40,72,83-136,163-171,173,178,193-196,201-202,207-213,218-220,224-227,238-242,261-267,269-284,290-295,309-316,320-323,328,330-350,360,467,469-472,474,481,483-495,504,506-518,557-598,616-640,662
+crates/xybrid-core/src/ir/decision/validate.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-536
+bindings/flutter/test/model_streaming_test.dart
+  s_455d29975ccac4::t_0e6173258c47dc 19,60-61,63-96,106-110,120-124,132-135,161-164,167,172,226-296,309-351
+  s_455d29975ccac4::t_fc115eaa3d3391 352
+bindings/observability-js/test/otlp-wire.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-299
+bindings/react-native/src/session.ts
+  s_455d29975ccac4::t_0e6173258c47dc 3,17,53-54
+bindings/unity/Runtime/Api/Observation.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-183
+crates/xybrid-cli/src/platform/resolve.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-184
+crates/xybrid-core/src/execution/postprocessing/audio.rs
+  s_455d29975ccac4::t_0e6173258c47dc 7,13-16,22-27,42-46,48-52,54,64-66,68-69,74-76,82-85,93-98,104,125,127,151-167,170-172,174,178,184,198,204-370
+bindings/unity/Tests/Editor/ObservabilityConfigTests.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+crates/xybrid-mlx/Cargo.toml
+  s_455d29975ccac4::t_368a3899675fb3 24
+crates/xybrid-core/src/streaming/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 57-58
+bindings/web/scripts/prepare-observability.mjs
+  s_455d29975ccac4::t_0e6173258c47dc 1-25
+crates/xybrid-observability/contract/fixtures/cancellation.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-81
+bindings/web/pnpm-workspace.yaml
+  s_455d29975ccac4::t_0e6173258c47dc 3-7
+crates/xybrid-observability/contract/fixtures/retry_fallback_attempts.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-342
+crates/xybrid-observability/contract/fixtures/null_and_empty_values.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-346
+crates/xybrid-observability/tests/lifecycle.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-687
+crates/xybrid/Cargo.toml
+  s_455d29975ccac4::t_0e6173258c47dc 17
+crates/xybrid-observability/contract/catalog.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-255
+crates/xybrid-observability/contract/fixtures/content_retained_budget.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-228
+crates/xybrid-core/src/tracing.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1,3-7,9-11,13-14,16,18-19,21,23-25,30,72,76,109,115-116,160-161,180,207,219-258,261-268,270-276,279-281,283-290,293-305,309-347,350,352-357,359,362-372,375,377-382,384-421,423-433,436-438,441-452,456-467,470-511,513-515,519,521-545,549-550,557-576,581-673,709-733,760-968
+integration-tests/fixtures/decision/cases/depth-noul-description-at-limit.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+integration-tests/fixtures/decision/cases/budget-over-limit.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-75
+integration-tests/fixtures/decision/cases/parse-missing-state.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+bindings/python/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 46,52-113,157-160
+bindings/web/RELEASING.md
+  s_455d29975ccac4::t_0e6173258c47dc 4-5,19-29,36-37,43-50,56-59,62-68,74-76,89-92,105,117,120-124
+bindings/flutter/test/observability_scenario_test.dart
+  s_455d29975ccac4::t_0e6173258c47dc 1-379
+tools/scripts/tests/test_ci_gate.py
+  s_455d29975ccac4::t_0e6173258c47dc 3-5,9,13,63-208,252-289
+  s_455d29975ccac4::t_6e4970cd069b3f 290
+bindings/python/xybrid/_errors.py
+  s_455d29975ccac4::t_0e6173258c47dc 16-18,23,50,239-245,316-341
+bindings/unity/Runtime/Bolt/XybridStageResult.cs
+  s_455d29975ccac4::t_0e6173258c47dc 29,32,39,48-49,72-81
+  s_455d29975ccac4::t_3a506d3c62237f 82
+bindings/unity/Tests/Editor/ResultWireCompatibilityTests.cs
+  s_455d29975ccac4::t_0e6173258c47dc 4-5,27-184
+  s_455d29975ccac4::t_396ec89c002b95 185
+docs/sdk/PHONON.md
+  s_455d29975ccac4::t_0e6173258c47dc 11-15,17,50-56,89-119
+  s_455d29975ccac4::t_adae7c1f341604 120
+rules_rust.patch
+  s_455d29975ccac4::t_0e6173258c47dc 4,9,14-26
+crates/xybrid-observability/src/operation.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-1776
+crates/xybrid-observability/src/wire.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-343
+docs/INSTALLATION.zh.md
+  s_455d29975ccac4::t_0e6173258c47dc 232-233
+bindings/flutter/rust/Cargo.toml
+  s_455d29975ccac4::t_0e6173258c47dc 3-10
+bindings/kotlin/consumer-smoke/app/src/androidTest/kotlin/ai/xybrid/smoke/ObservabilityScenario.kt
+  s_455d29975ccac4::t_0e6173258c47dc 1-321
+docs/sdk/observability-coverage.md
+  s_455d29975ccac4::t_0e6173258c47dc 1-167
+integration-tests/fixtures/decision/cases/budget-second-question-over.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-110
+examples/unity/Observability/Assets/Scripts.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-8
+bindings/python/examples/quickstart.py
+  s_455d29975ccac4::t_0e6173258c47dc 56-57,90-93
+bindings/observability-js/scripts/build.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-13
+crates/xybrid-observability/BUILD.bazel
+  s_455d29975ccac4::t_0e6173258c47dc 1-18
+crates/xybrid-observability/src/clock.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-179
+docs/content/docs/cli/index.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 54,83-86,90-96
+bindings/unity/Runtime/Bolt/XybridPipelineResult.cs
+  s_455d29975ccac4::t_0e6173258c47dc 21,24,29,36-37,58-67
+  s_455d29975ccac4::t_a92f1f39db04ba 68
+integration-tests/fixtures/decision/cases/parse-files-empty.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-87
+integration-tests/fixtures/decision/cases/state-null.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-95
+tools/scripts/tests/test_flutter_build_scripts.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-219
+integration-tests/tests/tts_phoneme_timings.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-396
+integration-tests/fixtures/decision/cases/instructions-array.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/react-native/ios/XybridObservationEntry.swift
+  s_455d29975ccac4::t_0e6173258c47dc 1-139
+crates/xybrid-core/src/device/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 44-46,63
+integration-tests/fixtures/decision/cases/multi-question-order.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-222
+bindings/unity/Runtime/Bolt/XybridObservationContext.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+integration-tests/fixtures/decision/cases/math-nan.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-79
+bindings/observability-js/test/otlp-batching.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-469
+crates/xybrid-core/src/ir/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 9,13-20
+.github/workflows/llamacpp-validate.yml
+  s_455d29975ccac4::t_0e6173258c47dc 11-12,16,24-25,29,84-91
+  s_455d29975ccac4::t_bc75fe11d80c6a 92
+tools/scripts/observability_capture/scenario.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-61
+crates/xybrid-observability/contract/fixtures/event_only_tool_content.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-109
+crates/xybrid-cli/src/commands/connect.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-2140
+bindings/observability-js/test/otlp-config.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-533
+BUILD.bazel
+  s_455d29975ccac4::t_0e6173258c47dc 219-223,228-229,468-469,488-489,624
+crates/xybrid-core/src/device/resource/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 124-126,143,189-191,221,236,266-269,288,477,700,711
+crates/xybrid-sdk/examples/cloud_fallback_demo.rs
+  s_455d29975ccac4::t_0e6173258c47dc 95-97,118,275-279
+crates/xybrid-sdk/src/cache/cache_manager.rs
+  s_455d29975ccac4::t_0e6173258c47dc 619,629
+crates/xybrid-observability/src/error.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-71
+bindings/flutter/rust/src/api/model.rs
+  s_455d29975ccac4::t_0e6173258c47dc 273-274,276-280,311-314,378-404,651,656-696,863-874,978-985,1082,1084-1088,1091,1135,1164,1168-1175,1236,1259-1270,1304-1306,1343,1345-1349,1357,1393,1402,1427,1431-1438,1679,1701-1766,1885
+  s_455d29975ccac4::t_2f7aca6dae4125 1700
+integration-tests/fixtures/decision/cases/choice-criteria-missing.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+bindings/react-native/tests/types/api.ts
+  s_455d29975ccac4::t_0e6173258c47dc 8-9,13,16,50-60
+  s_455d29975ccac4::t_ad7ef3c1448996 61
+tools/scripts/tests/test_version_sync.py
+  s_455d29975ccac4::t_0e6173258c47dc 1,3-6,10-12,29-84
+  s_455d29975ccac4::t_036d915b0e303b 85-86
+tools/scripts/tests/test_zzz_pull.py
+  s_455d29975ccac4::t_0e6173258c47dc 250-283,1050-1178
+  s_455d29975ccac4::t_743756899f04ce 1179
+bindings/unity/Runtime/Bolt/XybridObservationContext.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-44
+docs/content/docs/(integration)/sdks/unity.zh.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 59,65-96,242-244,246-247,252-262,268-274,314
+crates/xybrid-core/src/ir/decision/request.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-919
+bindings/unity/Runtime/Api/TtsStreaming.cs
+  s_455d29975ccac4::t_0e6173258c47dc 36,38-39,43,61
+crates/xybrid-core/Cargo.toml
+  s_455d29975ccac4::t_0e6173258c47dc 28-29,32-33,42-46
+  s_455d29975ccac4::t_368a3899675fb3 123
+bindings/python/xybrid/_bolt/__init__.py
+  s_455d29975ccac4::t_0e6173258c47dc 393,397,414-427,442,446,449,453,456,460,463,467,470,474,491-497,505,509,512,516-523,541,545-559,625-626,629,632-637,639-640,642-643,653-654,657-671,681-778,856-890,970-971,1336-1352,1648-1776,2040-2047,2056-2059,2080-2083,2092-2097,2101-2102,2106,2116,2118-2119,2123,2128-2165,2232-2233,2245,2275-2279,2289,2370-2371,2381,2403,2426-2427,2435,2455,2756,2765,2786,2794-2833,2847,2855,2875,2883-3221,3371,3378,3503-3507,3554-3557,3777,3861,3865-3866,3870,3879,3881-3891,3893-3895,3897-3899,3901-3903,3905-3907,3909-3911,3913-3919,3921-3953,3956,3958,4031-4270,4302-4308,4310,4399-4435,4439,4452,4466,4468-4475,4501,4520-4526,4536,4538-4541,4569-4574
+crates/xybrid-core/src/ir/decision/error.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-691
+examples/flutter/ios/Runner.xcodeproj/project.pbxproj
+  s_455d29975ccac4::t_0e6173258c47dc 476,606,657
+crates/xybrid-core/src/execution/template/metadata.rs
+  s_455d29975ccac4::t_0e6173258c47dc 445-450,706-708
+  s_455d29975ccac4::t_975b56d22e2783 709
+bindings/flutter/lib/src/observability.dart
+  s_455d29975ccac4::t_0e6173258c47dc 1-178
+bindings/react-native/src/observability.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-193
+tools/scripts/observability_capture/fixtures/python/capture.jsonl
+  s_455d29975ccac4::t_0e6173258c47dc 1-4
+integration-tests/fixtures/decision/cases/choice-120-options.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-797
+crates/xybrid-sdk/src/stream.rs
+  s_455d29975ccac4::t_0e6173258c47dc 53-54,64,78-79,116,165-166,168,171-175,180,241-242,245-247,265-272,275-279,284-290,303,307-309,317,333,381-441
+  s_455d29975ccac4::t_18b59af5e3febf 442
+integration-tests/fixtures/decision/cases/state-object-nested.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/observability-js/clean.sh
+  s_455d29975ccac4::t_0e6173258c47dc 1-6
+bindings/observability-js/scripts/check-families.mjs
+  s_455d29975ccac4::t_0e6173258c47dc 1-166
+tools/scripts/tests/test_check_flutter_precompiled_inputs.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-414
+crates/xybrid-cli/src/commands/run/observability.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-219,224-272,275-533,535-713
+  s_455d29975ccac4::t_1ef498405824f9 220-223,273-274,534
+examples/unity/Observability/ProjectSettings/TimeManager.asset
+  s_455d29975ccac4::t_0e6173258c47dc 1-9
+integration-tests/fixtures/decision/cases/depth-instructions-over-limit.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-42
+tools/scripts/tests/test_zzz_feature_wiring.py
+  s_455d29975ccac4::t_0e6173258c47dc 74
+.github/workflows/test-choice-conformance.yml
+  s_455d29975ccac4::t_0e6173258c47dc 298
+crates/xybrid-observability/collector/langfuse.yaml
+  s_455d29975ccac4::t_0e6173258c47dc 1-70
+integration-tests/fixtures/decision/cases/parse-duplicate-criteria-keys.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-91
+integration-tests/fixtures/decision/cases/parse-type-unknown.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+bindings/observability-js/test/trace-context.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-244
+crates/xybrid-observability/contract/fixtures/streaming_response_model_metrics.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-281
+integration-tests/fixtures/decision/cases/noul-criteria-null.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+tools/scripts/tests/test_release_publish.py
+  s_455d29975ccac4::t_0e6173258c47dc 1,10-57,62,91-204
+  s_455d29975ccac4::t_3bf4ca03c9a0a7 205-206
+integration-tests/fixtures/chat_render/templates/lfm3.jinja
+  s_455d29975ccac4::t_0e6173258c47dc 1-280
+bindings/observability-js/test/support/fixtures.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-844
+crates/xybrid-core/src/ir/decision/answer.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-1463
+.bazelrc
+  s_455d29975ccac4::t_0e6173258c47dc 62,123
+.github/workflows/build-apple.yml
+  s_455d29975ccac4::t_0e6173258c47dc 1,13,26-27,44,54,174-177,181,184,194-265
+bindings/observability-js/src/content.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-811
+examples/flutter/macos/Podfile
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/observability-js/src/otlp/config.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-586
+crates/llama-cpp-sys/build.rs
+  s_455d29975ccac4::t_0e6173258c47dc 9,45
+crates/xybrid-cli/src/platform/env_file.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-1471
+crates/xybrid-cli/src/platform/git.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-333
+crates/xybrid-cli/src/platform/notices.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-226
+crates/xybrid-observability/src/otlp/runtime.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-310
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 18,54,62-92,205-206,213-222
+integration-tests/.gitignore
+  s_455d29975ccac4::t_0e6173258c47dc 12-14
+docs/content/docs/guides/vision-models.zh.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 28-48
+docs/telemetry/registry.md
+  s_455d29975ccac4::t_0e6173258c47dc 6-7,17,97-98,127-132,154,158-229
+  s_455d29975ccac4::t_299690f461f368 230
+integration-tests/fixtures/decision/cases/choice-52-letter-keys.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-389
+integration-tests/fixtures/decision/cases/math-score-bias.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-152
+integration-tests/fixtures/decision/cases/depth-score-level-at-limit.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-339
+integration-tests/fixtures/tts/fake/with_duration/model_metadata.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-37
+bindings/flutter/rust/src/api/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 80,82
+tools/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 18
+bindings/python/xybrid/_bolt/__init__.pyi
+  s_455d29975ccac4::t_0e6173258c47dc 108-125,172-173,220-221,240-241,350-360,377-467,608-613,741-779,861,931-933,965-966,1090,1138,1141,1144,1146-1173,1175-1190,1193,1234-1359,1384-1390,1460-1490
+crates/xybrid-observability/contract/fixtures/resource_peaks_and_pressure.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-148
+integration-tests/fixtures/models/models.json
+  s_455d29975ccac4::t_0e6173258c47dc 185-299,1290,1304,1310-1324
+bindings/flutter/lib/src/rust/api/model.dart
+  s_455d29975ccac4::t_98c44f18048f2f 20,22
+  s_455d29975ccac4::t_0e6173258c47dc 13,79-81,87-89,128-129,164-165,191-192,207-208,312-314,544-547,565-568,580-582,585-588,604-607,809-815,827-829,836-878
+  s_455d29975ccac4::t_022f1c9961354a 879
+integration-tests/fixtures/decision/cases/parse-missing-questions.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+.github/workflows/build-unity.yml
+  s_455d29975ccac4::t_0e6173258c47dc 49,57,476,482
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridObservationEntry.kt
+  s_455d29975ccac4::t_0e6173258c47dc 1-124
+crates/xybrid-core/src/execution/tts_timing.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-413
+integration-tests/fixtures/decision/cases/escape-state-control-tokens.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+integration-tests/tests/llamacpp_release.rs
+  s_455d29975ccac4::t_0e6173258c47dc 5-10,14-15,20-24,27-41,49,51-91,114-260
+bindings/flutter/lib/src/result.dart
+  s_455d29975ccac4::t_0e6173258c47dc 11,20-22,26-28,43-52,96-98,160-161
+crates/xybrid-core/tests/vlm_lfm2_smoke.rs
+  s_455d29975ccac4::t_0e6173258c47dc 98,102
+examples/flutter/ios/Podfile
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/web/src/internal/protocol.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-2,19-20,32-33,35-36,47-54,59-60
+integration-tests/fixtures/decision/cases/depth-state-empty-over-limit.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-42
+integration-tests/fixtures/decision/cases/math-nan-primary.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-79
+examples/unity/Observability/ProjectSettings/EditorSettings.asset
+  s_455d29975ccac4::t_0e6173258c47dc 1-46
+integration-tests/fixtures/decision/cases/choice-null-descriptions.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-101
+crates/xybrid-observability/contract/fixtures/content_fail_closed.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-621
+crates/xybrid-bolt/src/lib.rs
+  s_455d29975ccac4::t_0e6173258c47dc 154-157,205-207,246-248,583-590,601-631,723-724,809,832-833,845,864-865,875,1177-1182,1184,1187,1498-1519,1530,1548,1558-1578,1658-1662,1749-1771,1789-1827,2249,2351,2354-2358,2360-2361,2364-2397,2399-2406,2409-2412,2414-2415,2418,2420-2424,2427-2432,2434-2489,2491,2495-2512,2515-2517,2520-2522,2525-2527,2530-2534,2537-2539,2542,2544-2556,2559-2577,2580,2812-2815,2834,2858,2883-2894,2903-2906,2909-2910,3023,3104-3461
+.github/workflows/release-prep.yml
+  s_455d29975ccac4::t_0e6173258c47dc 116-117,193-207,239,260-271,276-279,286-287,322-336,342-343,347,365,440,492-495,520-526,564,575,1514-1516
+crates/xybrid-cli/src/platform/host.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-414
+bindings/apple/Tests/XybridTests/ObservabilityRuntimeTests.swift
+  s_455d29975ccac4::t_0e6173258c47dc 1-417
+bindings/unity/Runtime/Api/ObservabilityConfig.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+crates/xybrid-core/src/runtime_adapter/llama_cpp/chat.rs
+  s_455d29975ccac4::t_0e6173258c47dc 6-13,20-21,38-41,48-52,64,76-79,104,110,124-146,160,182-183,190,205,237-240,242-250,258-261,267,269-273,275-282,285-310,313,317,319,322,388-391,395-397,440,444,451-503
+  s_455d29975ccac4::t_3079bb3df319af 504
+docs/INSTALLATION.md
+  s_455d29975ccac4::t_0e6173258c47dc 322-327,376-386
+crates/xybrid-sdk/src/model.rs
+  s_455d29975ccac4::t_1ef498405824f9 6216,8584
+  s_455d29975ccac4::t_96dbb190479786 13-16
+  s_455d29975ccac4::t_0e6173258c47dc 129-139,233-236,320,342,490-492,642,661-708,948-955,957-959,1035-1036,1047,1137-1139,1698,1802-1815,2046-2051,2075,2098,2116,2142,2162,2199,2233,2257,2285,2520-2576,2646-2652,2709-2712,2801-2803,2807-2813,2827-2830,2882,2975,3070,3163,3223,3351,3427-3429,3459-3461,3595,3821,3877-3881,4088,4090-4093,4099-4163,4170,4179-4182,4458-4473,4475,4486,4490-4493,4533-4534,4536-4537,4588-4599,4604-4607,4609-4614,4618,4623-4627,4629-4630,4632,4634-4641,4645-4658,4660-4662,4664-4665,4689-4704,4709-4712,4729,4739-4743,4745-4751,4753-4757,4759-4796,4798-4815,4818-4834,4836-4838,4840-4862,4871,4878-4884,4910-4914,4921-4922,4925-4930,4981-4990,4994-5005,5007-5009,5011-5012,5014,5016-5023,5027-5042,5044-5047,5049-5052,5066-5071,5130-5132,5138,5149-5168,5170-5182,5184-5198,5200,5308,5371-5373,5378,5389-5397,5399-5414,5418,5424-5428,5430-5443,5445,5548,5556-5597,5809-5815,5818,5822,5833-5835,5849,5851-5852,5900-5902,5910-5925,5927-5929,5975,5978-5979,5981-5982,6078-6079,6118,6671-6672,7143,7188,7243,7453-7466,8633,8656-8866,8919,10062,10995
+  s_455d29975ccac4::t_3520b40e4bb673 1834,1997,2030,2849,3871,4495,4643,4659,4817,4835,5025,5043
+  s_455d29975ccac4::t_5e2285af0e9413 1816,4816
+integration-tests/fixtures/decision/cases/state-array.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/web/scripts/check-pack.mjs
+  s_455d29975ccac4::t_0e6173258c47dc 5-15,24-32,90-102,115-156,166-174,176-180,182-183
+integration-tests/fixtures/decision/cases/math-noul-tie.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-80
+bindings/flutter/example/macos/Runner.xcodeproj/project.pbxproj
+  s_455d29975ccac4::t_0e6173258c47dc 560,642,692
+bindings/flutter/test/model_errors_test.dart
+  s_455d29975ccac4::t_0e6173258c47dc 73,82
+bindings/flutter/pubspec.yaml
+  s_455d29975ccac4::t_0e6173258c47dc 3
+bindings/unity/Tests/Editor/ObservabilityRuntimeScenarioTests.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-591
+bindings/unity/Editor/ObservabilityDomainReloadGuard.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-64
+bindings/observability-js/test/support/harness.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-166
+integration-tests/fixtures/chat_render/render_embedded.json
+  s_455d29975ccac4::t_0e6173258c47dc 2-3,151-249
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_455d29975ccac4::t_0e6173258c47dc 209-216,223-227,234-237,246-250,260-284,376-377,387-388,398,412-414,423-424,437,504-505,513-514,522,532-533,544,560-561,567-568,574,582-583,592,859,866-867,874,883-884,894-930,945,951-952,958,966-967,976-1328,1372-1373,1424-1425,1500-1502,1718-1779,1903,1911,1977-2000,2124-2130,2475,2607,2615,2618-2619,2622-2632,2637-2638,2641,2645-2658,2662-2680,2684-2685,2690,2701-2728,2731-2752,2755,2757-2778,2781,2783,2900-3361,3415-3421,3426-3431,3640-3642,3647-3651,3654-3766
+integration-tests/fixtures/decision/cases/state-false.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+integration-tests/fixtures/decision/schema.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-333
+bindings/flutter/test/result_test.dart
+  s_455d29975ccac4::t_0e6173258c47dc 9,13-14,16,26-34
+bindings/observability-js/test/export-deadline.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-580
+bindings/unity/Tests/Editor/XybridClientObservabilityTests.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/unity/Runtime/Api/XybridClient.cs
+  s_455d29975ccac4::t_0e6173258c47dc 16-17,94-95,140-145,147,154,164,167-172,318-319,322-325,328-329,331,333-337,339,346-350,352-361,366-372,374-385,387-389,391,393-395,399,401-405,407-408,410,412-466,468-482,484-493
+examples/android/local.properties.example
+  s_455d29975ccac4::t_0e6173258c47dc 7-8,11-13
+bindings/python/examples/observability.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-68
+bindings/observability-js/RELEASING.md
+  s_455d29975ccac4::t_0e6173258c47dc 1-65
+tools/scripts/observability_capture/scenario.md
+  s_455d29975ccac4::t_0e6173258c47dc 1-314
+crates/xybrid-cli/src/platform/client.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-402
+bindings/flutter/rust/src/api/pipeline.rs
+  s_455d29975ccac4::t_0e6173258c47dc 7,33-44,46-49,68,75-86,124-125,134-139,141-144,171-225,256,261
+bindings/observability-js/src/otlp/batch-processor.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-297
+crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs
+  s_455d29975ccac4::t_0e6173258c47dc 58-60,196-208,242-244,247-248,268-271,277-279,319-323,438-451,639-667,884-932,1053-1065,1112-1128,1321-1342,1421-1461
+crates/xybrid-sdk/tests/load_observability.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-286
+.github/workflows/release-publish.yml
+  s_455d29975ccac4::t_0e6173258c47dc 20-29,32-37,44,79-80,85,151-188,207-210,214-215,229-231,253,324,352,444-447,500,653-726,735,772-773,779-781,786,799-812,834
+CHANGELOG.md
+  s_455d29975ccac4::t_0e6173258c47dc 12-232,240-244,251-252,273-274,278-285,290-293
+integration-tests/fixtures/decision/cases/depth-instructions-at-limit.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/unity/Runtime/Bolt/XybridObservabilityStats.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-46
+agents/skills/xybrid-init/SKILL.md
+  s_455d29975ccac4::t_0e6173258c47dc 93
+bindings/flutter/rust/src/api/streaming.rs
+  s_455d29975ccac4::t_0e6173258c47dc 35,74,99-104,121,131-154,166,239,354
+crates/xybrid-core/src/cloud/client.rs
+  s_455d29975ccac4::t_0e6173258c47dc 4,131-134,137-144,191-196,418-435
+  s_455d29975ccac4::t_248de6a46869da 436-437
+integration-tests/fixtures/decision/cases/math-underflow.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-151
+integration-tests/fixtures/decision/cases/parse-top-level-array.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+integration-tests/fixtures/decision/cases/state-whitespace.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+crates/xybrid-sdk/examples/telemetry_test.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1,3-6,9,14-15,17-18,20-29,32,34,36-42,45-54,57-61
+crates/xybrid-sdk/tests/telemetry_integration.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1,3-4,8,14-18,36,38-51,86,88-99,101-106,108-109,113-127,134,183-184,186-229,231-232,234-248,584-585,627-628,645,1282-1283,1286,1293,1295-1299,1301-1310,1312-1314,1322
+bindings/observability-js/src/otlp/sender.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-123
+examples/unity/Observability/Assets/Scenes.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-8
+integration-tests/fixtures/models/lfm3-1.7b/model_metadata.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-38
+bindings/unity/Runtime/Bolt/XybridToolCallInfo.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+integration-tests/fixtures/models/lfm3-vl-2b/model_metadata.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-44
+tools/scripts/gen_kotlin_bolt.py
+  s_455d29975ccac4::t_0e6173258c47dc 28-30,121-122,139-143,152-153,195-200,202-214
+bindings/flutter/cargokit/gradle/plugin.gradle
+  s_455d29975ccac4::t_0e6173258c47dc 6-7,16,21-23,69,82,136-139,141,143,145-146,161-162,164-166,168-171,174-177,181-185
+bindings/unity/Runtime/Bolt/XybridModelSource.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-98
+crates/xybrid-sdk/src/observability/manual.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-122
+crates/xybrid-sdk/src/result.rs
+  s_455d29975ccac4::t_0e6173258c47dc 9,159-160,233,242-257,278,348-350,361-377,594-659,787-802
+crates/xybrid-core/tests/pipeline_yaml_integration.rs
+  s_455d29975ccac4::t_0e6173258c47dc 402-405,443-446,468-471,493-496,515-518
+crates/xybrid-sdk/examples/voice_assistant_demo.rs
+  s_455d29975ccac4::t_0e6173258c47dc 3-6,21,28-29,34-35,37-40,57-59,74,96,110,127-130,132,141,143-151
+crates/xybrid-observability/contract/fixtures/no_content_tool_content.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-82
+integration-tests/fixtures/decision/cases/state-negative-float.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/unity/Runtime/Bolt/XybridTranscriptionResult.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+crates/zzz-sys/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 38-77,125
+integration-tests/fixtures/decision/cases/state-string-escapes.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+tools/conformance/decision/clean.sh
+  s_455d29975ccac4::t_0e6173258c47dc 1-6
+tools/conformance/decision/tests/test_collect.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-249
+tools/scripts/gen_unity_bolt_csharp.py
+  s_455d29975ccac4::t_0e6173258c47dc 113-119,122,168-171,200-201,216-218,227-228,321-322,355-361
+crates/xybrid-sdk/examples/llm_streaming_metrics.rs
+  s_455d29975ccac4::t_0e6173258c47dc 3,11-12,23-24,32,41,64-65,156-157,159
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 14,18-20,43,49-81,184-185,191-192,195-197
+  s_455d29975ccac4::t_96370ad84bcd22 198
+examples/android/app/build.gradle.kts
+  s_455d29975ccac4::t_0e6173258c47dc 12,25,40,42
+integration-tests/fixtures/decision/cases/math-median-b3.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-89
+integration-tests/fixtures/decision/cases/question-id-special-tokens.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-132
+integration-tests/fixtures/decision/cases/parse-unknown-top-level-field.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-87
+bindings/flutter/rust/src/api/sdk_client.rs
+  s_455d29975ccac4::t_0e6173258c47dc 85-94,96-99,109,114-115,127-145,266-270,272-274,277,283-304,306,309,312,329-330,351-367,420-421,428-429,436-437,444-453,455-456
+integration-tests/fixtures/decision/cases/state-unicode-escapes.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+tools/unity-runtime-smoke/Assets/SmokeDriver.cs
+  s_455d29975ccac4::t_0e6173258c47dc 34-37,39,41
+bindings/unity/Runtime/Api/Model.cs
+  s_455d29975ccac4::t_0e6173258c47dc 30-32,44,60-61,71,124,146-147,162,308,322-323,338,349,364-365,384,420,432,445,477-478,482,541-544,585-591,595-596,599-600,608
+bindings/flutter/lib/src/model_loader.dart
+  s_455d29975ccac4::t_0e6173258c47dc 14,20-21,26,30-88,106-122,307-310,455-456,524,530,566,573,633,643,646,667-668,674,680-684,774,784,821
+  s_455d29975ccac4::t_88f71b5424043d 22-25,27-29,89-105,716
+examples/unity/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 10
+crates/xybrid-cli/src/platform/credentials.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-1297
+bindings/react-native/src/index.ts
+  s_455d29975ccac4::t_0e6173258c47dc 21-27,62-65,74,77,104
+AGENTS.md
+  s_455d29975ccac4::t_0e6173258c47dc 508-511,537-545,551-560
+  s_455d29975ccac4::t_83abd97b0d0b31 561
+integration-tests/tests/system_validation.rs
+  s_455d29975ccac4::t_0e6173258c47dc 298-300
+tools/scripts/gen_python_bolt.py
+  s_455d29975ccac4::t_0e6173258c47dc 20-21,88,108-112,122,154-168,172-176
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_455d29975ccac4::t_0e6173258c47dc 930,938,983-998,1011-1053,1060,1081-1086,1426-1442,1445,1454-1457,1478-1482,1494-1537,1659-1663,1666,1678,1706-1710,1719-1720,1823-1827,1830,1840,1862-1863,1894-1898,1901,1909,1929-1930,2292-2293,2296,2305,2326-2327,2339-2387,2408-2409,2412,2420,2440-2441,2454,2456-2464,2466-2471,2484-2491,2494-2496,2499,2501-2513,2516-2528,2531-2536,2539-2544,2547-2556,2558-2564,2567-2574,2577,2579-2590,2593-2607,2610-2618,2621-2623,2626,2629-2637,2640-2642,2645-2652,2656-2661,2664-2666,2669,2671-2690,2693-2705,2708-2715,2718-2734,2737-2739,2742,2744-2756,2759-2764,2767-2774,2779-2786,2789,2797-2809,2811-2817,2830-2838,2841-2843,2846,2849-2860,2863-2868,2871-2878,2883-2890,2893,2902-2905,2907-2916,2918,2935-2937,2939,2944,2947-2949,2951,2956,2959-3553,3561-4190,4192-4216,4218-4237,4241-4247,4251,4253-4338,4341,4343,4347,4349-4352,4354,4356,4360,4362-4365,4367,4369-4382,4388-4393,4395-4409,4413,4415-4418,4422,4424-4425,4427,4431,4433-4434,4438,4443,4448,4453,4455-4461,4465,4467-4477,4479,4481,4487,4489-4497,4501,4503-4511,4515,4517-4518,4522,4524-4527,4531,4533-4534,4538,4540-4543,4547,4549-4550,4554,4556-4557,4561,4566,4571,4576,4578,4582,4584-4587,4589,4591,4595-4596,4598-4601,4603,4605,4608-4620,4624-4639,4642-4646,4649-4664,4667-4682,4686,4688-4689,4693,4695-4696,4700,4702-4710,4713-4724,4728-4731,4733-4745,4749-4752,4754-4762,4765-4769,4773-4776,4778-4779,4781-4782,4784,4786-4820,4823-4827,4829,4832-4836,4838,4841-4847,4851,4853-4856,4860,4862-4863,4867,4869-4870,4874,4876-4877,4879,4883,4885-4888,4892,4894-4897,4901,4903-4906,4908,4910,4915,4920,4925,4930,4932,4936,4938-4944,4946,4948-4949,4955,4957-4960,4964,4966-4967,4969,4973,4975-4976,4980,4982-5008,5012,5017,5022,5027,5029,5033,5035-5041,5043,5045-5046,5052,5054-5057,5061,5063-5066,5070,5072-5073,5077,5079-5091,5095,5097-5098,5102,5104-5105,5109,5111-5119,5123,5128,5133,5138,5140,5144,5146-5152,5154,5156-5157,5163,5165-5196,5198,5200-5201,5206,5208-5225,5227,5229,5234,5236-5239,5241,5243,5248,5250-5253,5255,5257,5262,5264-5272,5276,5278-5279,5283,5285-5339,5343,5348,5353,5358,5360,5364,5366-5372,5374,5376-5377,5383,5385-5386,5388,5392,5394-5395,5397,5401,5403-5404,5408,5410-5422,5426,5428-5429,5433,5435-5436,5440,5442-5443,5630-5635,5637,5645,5883,5885-5886,5892-5926,5928-5948,5952-5956,5958-5982
+bindings/flutter/lib/src/rust/api/manual_observation.dart
+  s_455d29975ccac4::t_0e6173258c47dc 1-363
+integration-tests/fixtures/decision/cases/choice-keys-equal-after-escape.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-95
+bindings/react-native/tests/swift/main.swift
+  s_455d29975ccac4::t_0e6173258c47dc 107-110,124-126,128-129,165-166,169-170,193-239
+  s_455d29975ccac4::t_91621f662744f2 171-174
+  s_455d29975ccac4::t_bd87fb402de281 240
+crates/xybrid-cli/tests/reasoning_budget_cli_test.rs
+  s_455d29975ccac4::t_0e6173258c47dc 15-18
+crates/xybrid-observability/contract/fixtures/explicit_remote_parent.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-123
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 8-19,26,43-45,50-53,57-62,102-118,169,173,320,343-345
+  s_455d29975ccac4::t_7832273a1fd79b 346
+bindings/kotlin/consumer-smoke/observability-scenario.sh
+  s_455d29975ccac4::t_0e6173258c47dc 1-88
+bindings/observability-js/package.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-106
+bindings/unity/Runtime/Api/XybridException.cs
+  s_455d29975ccac4::t_0e6173258c47dc 137
+docs/sdk/resource-telemetry.md
+  s_455d29975ccac4::t_0e6173258c47dc 1-21,23-37,39-50,54-56,58-62,64-67,69-70,72,74-144
+bindings/flutter/lib/src/pipeline.dart
+  s_455d29975ccac4::t_0e6173258c47dc 9,96-97,99-100
+bindings/unity/Runtime/Bolt/XybridModelLoadInfo.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridCodec.kt
+  s_455d29975ccac4::t_0e6173258c47dc 16-19,293-296,354,358-394,460,468,476-482,485-496,511,542
+bindings/unity/Runtime/Api/Observation.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/unity/Runtime/Bolt/XybridInferenceRequest.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+crates/llama-cpp-sys/natives-manifest.txt
+  s_455d29975ccac4::t_0e6173258c47dc 12-35
+crates/xybrid-core/src/execution/tool_continuation.rs
+  s_455d29975ccac4::t_0e6173258c47dc 25-27,49-57,68,77-79,91-92,133-140,147-149,152-155,268-575
+  s_455d29975ccac4::t_bd0fb0f69bee14 576
+bindings/flutter/rust/src/api/manual_observation.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-373
+bindings/unity/Tests/Editor/ObservationTests.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+crates/xybrid-sdk/tests/support/otlp.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-114
+bindings/observability-js/test/wire.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-170
+integration-tests/fixtures/decision/cases/math-choice-tie.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-97
+integration-tests/fixtures/decision/cases/math-temperature-bucket-fallback.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-145
+integration-tests/fixtures/decision/cases/parse-not-json.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+crates/xybrid-sdk/Cargo.toml
+  s_455d29975ccac4::t_0e6173258c47dc 17-18,25,43,48,153-155
+bindings/react-native/android/build.gradle
+  s_455d29975ccac4::t_0e6173258c47dc 62
+crates/xybrid-ffi-facade/src/lib.rs
+  s_455d29975ccac4::t_0e6173258c47dc 34-36,129-132,165,220-222,247-251,267,1092-1140,1144-1153,1199-1201,1337-1363,1531,1534-1537,1622,1632,1715,1724,1754,1763-1766,1832-1833,1879,2107-2116,2231-2237,2457,2468,2481-2494,2649,2660,2686-2691,2707,2717-2736,2810,2902,3071-3072,3074-3075,3237-3241,3246-3248,3397,3400-3403,3410-3514,3516-3537,3539,3543-3545,3548-3550,3553-3555,3558-3562,3566-3568,3571-3573,3576-3609,3612-3623,3626-3649,3656-3664,3666-3674,3676,3678-3684,3687-3701,3704-3766,3892-3895,4064-4075,4127,4144,4191-4231,4297-4318,4460,4645,5158,5168,5283-5286,5388,5390-5391,5402-5421,5423-5436,5438-5440,5442-5453,5455-5456,5458-5464,5474
+bindings/apple/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 15,22,40-41,81-162
+  s_455d29975ccac4::t_c5ec3ed2b79931 163
+crates/xybrid-cli/src/commands/auth.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-866
+crates/xybrid-observability/contract/fixtures/model_load_provider_fallback.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-114
+crates/xybrid-sdk/src/observability.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-1447,1449,1451-4977
+  s_455d29975ccac4::t_e2a8861a657f2b 1448,1450
+crates/zzz-sys/zzz_pull.py
+  s_455d29975ccac4::t_0e6173258c47dc 6-18,221-232,235-236,426-443,453-474,657,667
+crates/xybrid-observability/contract/fixtures/workflow_tool_inference.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-329
+integration-tests/fixtures/decision/cases/question-empty-id.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-87
+tools/conformance/decision/build.sh
+  s_455d29975ccac4::t_0e6173258c47dc 1-30
+docs/content/docs/cli/reference/trace.zh.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 3,6-7,12-14,17-20,22-25,27,29-32,34,36,38-40
+bindings/unity/Runtime/Bolt/XybridUsage.cs.meta
+  s_455d29975ccac4::t_0e6173258c47dc 1-2
+bindings/unity/Runtime/Api/StreamingConfigs.cs
+  s_455d29975ccac4::t_0e6173258c47dc 11-12,48,53-54,65-87
+bindings/observability-js/examples/node-basic.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-136
+README.ja-JP.md
+  s_455d29975ccac4::t_0e6173258c47dc 42,78-80,82-83,142,159,163-166,181,230
+bindings/flutter/lib/src/rust/api/model.freezed.dart
+  s_455d29975ccac4::t_0e6173258c47dc 1230,1237,1244,1380,1390,1400,1468-1469,1484-1495,1501-1504,1508,1515-1516,1520-1529,1535,1538,1545,1548,1555,1560,1601-1602,1604-1611,1686,1696,1706
+bindings/observability-js/test/content.test.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-342
+crates/xybrid-observability/src/operation/tests.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-508
+docs/content/docs/quickstart.zh.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 15,22-23,59,90,94-97,123,128-129,156,229
+examples/flutter/macos/Runner.xcodeproj/project.pbxproj
+  s_455d29975ccac4::t_0e6173258c47dc 560,642,692
+crates/xybrid-llama/Cargo.toml
+  s_455d29975ccac4::t_0e6173258c47dc 24
+bindings/flutter/lib/src/xybrid.dart
+  s_455d29975ccac4::t_0e6173258c47dc 20,34-35,50,71-72,74-79,82-85,94,96-104,106,116-118,129-130,137-138,265-270,279-280,312,319-322,329-335,342-344
+crates/xybrid-core/src/ir/decision/json/tests.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-953
+crates/xybrid-observability/contract/fixtures/inference_chat_local.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-301
+crates/xybrid-core/src/execution/preprocessing/text.rs
+  s_455d29975ccac4::t_0e6173258c47dc 11,194-217,219,223,227-229,232,235,241,244,718,1222,1473-1549
+crates/xybrid-core/src/ir/decision/json/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-543
+examples/unity/Observability/Packages/manifest.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-45
+integration-tests/fixtures/decision/cases/choice-one-option.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-83
+integration-tests/fixtures/decision/cases/math-temperature-buckets-choice.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-310
+xtask/src/main.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1278-1279
+bindings/kotlin/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 15,19-28,202-265,334,540-541
+bindings/unity/Runtime/Bolt/XybridStreamingSession.cs
+  s_455d29975ccac4::t_0e6173258c47dc 86,105
+bindings/react-native/src/operations.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-98
+crates/xybrid-core/src/features.rs
+  s_455d29975ccac4::t_0e6173258c47dc 27-33,188-197
+  s_455d29975ccac4::t_5c6ed264dfd949 198-199
+crates/xybrid-core/src/runtime_adapter/onnx/runtime.rs
+  s_455d29975ccac4::t_0e6173258c47dc 3,25-29
+  s_455d29975ccac4::t_6bf8a2d9816714 30-31
+crates/xybrid-cli/src/commands/fetch.rs
+  s_455d29975ccac4::t_0e6173258c47dc 410
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_455d29975ccac4::t_0e6173258c47dc 9,159-243,319-325,328,337,517-521,679,702-703,706-707,731-732,737,752,755-800
+crates/xybrid-observability/tests/pipeline.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-283
+crates/xybrid-observability/examples/standalone.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-248
+integration-tests/fixtures/decision/cases/escape-everywhere.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-180
+integration-tests/fixtures/decision/cases/noul-partial-true.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/flutter/lib/src/streaming.dart
+  s_455d29975ccac4::t_0e6173258c47dc 11,14-15,27,46,54,76
+integration-tests/fixtures/decision/cases/parse-duplicate-state-keys.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-86
+crates/xybrid-core/src/runtime_adapter/onnx/adapter.rs
+  s_455d29975ccac4::t_0e6173258c47dc 192
+docs/sdk/api-surface.yaml
+  s_455d29975ccac4::t_0e6173258c47dc 666-682,735-755
+  s_455d29975ccac4::t_d2e66285578ad5 756
+integration-tests/fixtures/decision/cases/math-temperature-default.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-185
+crates/xybrid-cli/src/platform/install_id.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-144
+bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+  s_455d29975ccac4::t_0e6173258c47dc 120
+crates/xybrid-core/tests/tts_smoke.rs
+  s_455d29975ccac4::t_0e6173258c47dc 10-14,30-35,61-75,168,184-292,329-336,340-341,350,393-394,403-404
+crates/xybrid-sdk/src/telemetry.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1,3-8,13-14,18-19,21,52-53,61-64,85-93,95-98,101-109,112-118,120-121,123-128,130-138,140,142-152,154-174,176,178-198,200-225,227-251,253-257,259-265,270-280,284-298,529-531,536-537,539-540,544,549-550,555-557,565-566,571,575-576,581-582,586,588-594,598,600,605-606,636-652,732-734,900-901,959,974,1116,1118-1149,1151-1153,1155-1157,1159-1163,1165,1167-1172,1175-1190,1192-1199,1201-1206,1208-1210,1212,1215-1228,1268-1275,1287,1325-1329,1370-1373,1375-1376,1379,1445-1446,1466,1469-1470,1571-1572,1583,1597-1600,1657-1660,1921-1925,1929-1930,1932-1934,1936-1938,1942-1945,1947,1949,1955,1957,1959-1960,1964-1968,1971-1972,1977-1978,1985,1987-1990
+  s_455d29975ccac4::t_9fd074d87b8863 1991
+integration-tests/fixtures/decision/cases/escape-zwsp-in-input.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+integration-tests/fixtures/decision/cases/math-reference-score.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-96
+integration-tests/fixtures/decision/cases/parse-message-image-part.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+tools/conformance/expose_tts_duration.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-113
+bindings/observability-js/src/wire.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-162
+crates/xybrid-observability/tests/threads.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-288
+integration-tests/tests/tts_abort.rs
+  s_455d29975ccac4::t_0e6173258c47dc 97,217
+crates/xybrid-core/src/ir/decision/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-235
+bindings/observability-js/test/support/otlp-server.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-192
+integration-tests/fixtures/decision/cases/math-alias-max.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-122
+crates/xybrid-core/src/runtime_adapter/tool_call/lfm3.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-695
+integration-tests/fixtures/decision/cases/math-median-not-mode.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-110
+integration-tests/fixtures/decision/cases/choice-structured-descriptions.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-107
+.github/workflows/test-policy-routing.yml
+  s_455d29975ccac4::t_0e6173258c47dc 57,69-71
+crates/xybrid-observability/contract/fixtures/refs_noop_tracer.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-98
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_455d29975ccac4::t_0e6173258c47dc 40-43,46,49-54,74-77,92,96,102,181-183,477-695,961,1059-1062,1267-1268,1286-1287,1291-1292,1299-1300,1303-1310,1380-1414,1665-1666,1687-1712
+bindings/flutter/lib/src/llm.dart
+  s_455d29975ccac4::t_0e6173258c47dc 8,43,49-51,80
+bindings/observability-js/src/otlp/index.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-211
+bindings/observability-js/test/support/worker.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-19
+bindings/react-native/src/errors.ts
+  s_455d29975ccac4::t_0e6173258c47dc 31
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_455d29975ccac4::t_0e6173258c47dc 638-643,645,673,1056,1058,1060,1073,1075-1133,1136-1141,1143-1273,1342-1344,1366-1377,1390-1394,1472-1517,1546-1570,1624-1662,1691-1701,1703-1711,1713-1714,1716-1717,1719-1720,1722-1723,1725-1730,1744-1746,1750-1755,1762-1766,1796,1867-1884
+Cargo.toml
+  s_455d29975ccac4::t_0e6173258c47dc 7,26,38
+bindings/flutter/lib/src/rust/api/pipeline.dart
+  s_455d29975ccac4::t_0e6173258c47dc 13,17,48-49,58-59
+bindings/unity/Runtime/Bolt/XybridWorkflowObservation.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-194
+crates/xybrid-cli/BUILD.bazel
+  s_455d29975ccac4::t_0e6173258c47dc 41-55,74-82,91-94
+docs/content/docs/concepts/hybrid-execution.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 206-208
+crates/xybrid-core/src/execution/mod.rs
+  s_455d29975ccac4::t_0e6173258c47dc 107-109
+docs/sdk/MODEL_METADATA.md
+  s_455d29975ccac4::t_0e6173258c47dc 79-93,480-554
+  s_455d29975ccac4::t_32b97451fee2d6 555
+examples/ios/XybridExample/ContentView.swift
+  s_455d29975ccac4::t_0e6173258c47dc 76-77,79-80,82-98
+integration-tests/fixtures/decision/cases/math-temperature-tiny.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-91
+integration-tests/fixtures/decision/cases/parse-questions-empty.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+tools/scripts/observability_capture/capture_server.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-259
+examples/unity/Observability/ProjectSettings/GraphicsSettings.asset
+  s_455d29975ccac4::t_0e6173258c47dc 1-63
+crates/xybrid-core/src/ir/decision/json/parse.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-441
+crates/xybrid-sdk/src/metadata_gen.rs
+  s_455d29975ccac4::t_0e6173258c47dc 203-204,508,544-553,577-580,991-996,1001-1015,1100-1106,1117-1127,1148,1150-1155,1291,1302-1395,1401,2404-2442,2520-2610,2729-2816,2997-3000,3495-3498
+  s_455d29975ccac4::t_e2a8861a657f2b 1396
+  s_455d29975ccac4::t_c03ac25421043d 1397-1400,1402-1403
+bindings/unity/Runtime/Bolt/XybridRunOptions.cs
+  s_455d29975ccac4::t_0e6173258c47dc 10-13,16,22-25,33-37,77-112
+bindings/observability-js/scripts/packed-smoke.mjs
+  s_455d29975ccac4::t_0e6173258c47dc 1-139
+bindings/unity/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 45,62,116-117,152,156-188,395-397,439-525
+bindings/web/package.json
+  s_455d29975ccac4::t_0e6173258c47dc 3,24,29,31,35-39,41-42,58,65-69
+crates/xybrid-core/src/cloud_llm/client.rs
+  s_455d29975ccac4::t_0e6173258c47dc 137,217
+.github/llamacpp-version.json
+  s_455d29975ccac4::t_0e6173258c47dc 2-4,7-8
+bindings/unity/Runtime/Bolt/XybridInferenceObservation.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-431
+crates/xybrid-core/tests/whispercpp_asr.rs
+  s_455d29975ccac4::t_0e6173258c47dc 25
+integration-tests/fixtures/decision/cases/parse-questions-array.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-32
+integration-tests/fixtures/decision/cases/state-empty-string.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-95
+tools/scripts/tests/test_flutter_platform_floors.py
+  s_455d29975ccac4::t_0e6173258c47dc 1-92
+crates/xybrid-core/BUILD.bazel
+  s_455d29975ccac4::t_0e6173258c47dc 149,188-192,195-198,200-201,209,214
+integration-tests/fixtures/decision/cases/math-median-exact-half.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-89
+crates/xybrid-sdk/src/observability/asr.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-229
+docs/content/docs/cli/reference/trace.mdx
+  s_455d29975ccac4::t_0e6173258c47dc 3,6-8,13-15,18-21,23-28,30,32-36,38-40,42,44-46
+integration-tests/fixtures/decision/cases/instructions-object.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-84
+bindings/unity/Runtime/Bolt/XybridObservabilityConfig.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-369
+bindings/unity/Runtime/Bolt/XybridResult.cs
+  s_455d29975ccac4::t_0e6173258c47dc 28,31,40,54-56,65-66,117-121,124
+  s_455d29975ccac4::t_e4bbf09f1ceaf3 122-123,125-127
+crates/xybrid-cli/src/platform/report.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-452
+crates/xybrid-observability/src/semconv.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-339
+examples/flutter/README.md
+  s_455d29975ccac4::t_0e6173258c47dc 25,31
+examples/unity/Observability/ProjectSettings/InputManager.asset
+  s_455d29975ccac4::t_0e6173258c47dc 1-87
+crates/xybrid-core/src/orchestrator/authority/remote.rs
+  s_455d29975ccac4::t_0e6173258c47dc 302-304
+crates/xybrid-observability/src/content.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-1684
+integration-tests/fixtures/decision/cases/choice-255-options.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-1607
+bindings/unity/Runtime/Bolt/XybridInferenceRequest.cs
+  s_455d29975ccac4::t_0e6173258c47dc 1-150
+crates/xybrid-observability/contract/fixtures/tracestate_normalization.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-570
+bindings/flutter/lib/src/rust/frb_generated.web.dart
+  s_455d29975ccac4::t_0e6173258c47dc 16,18,49-52,56-59,72-79,106-110,116-120,136-145,171-175,181-185,201-210,226-230,236-240,256-265,325-327,331-348,361-369,415-417,430-432,442-459,466-468,478-480,499-501,508-513,517-522,555-557,582-584,612-626,654-656,690-694,700-704,720-729,755-759,765-769,785-794,810-814,820-824,840-849,912-915,920-939,955-965,1016-1019,1035-1038,1049-1071,1078-1080,1091-1093,1113-1115,1123-1129,1134-1140,1176-1179,1207-1210,1240-1255,1286-1289,1324-1328,1334-1338,1354-1363,1389-1393,1399-1403,1419-1428,1444-1448,1454-1458,1474-1483,1546-1549,1554-1573,1590-1601,1655-1658,1674-1677,1689-1712,1721-1724,1735-1738,1762-1765,1773-1779,1784-1790,1828-1831,1863-1866,1896-1911,1944-1947,2005-2016,2029-2040,2077-2100,2156-2163,2172-2179,2204-2218
+  s_455d29975ccac4::t_873f0a471ca072 2219
+bindings/observability-js/src/otlp/exporters.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1-268
+crates/xybrid-observability/contract/fixtures/content_truncation_redaction.json
+  s_455d29975ccac4::t_0e6173258c47dc 1-166
+bindings/web/src/worker.ts
+  s_455d29975ccac4::t_0e6173258c47dc 1,133-135,147-151,170,174,180
+crates/xybrid-observability/src/otlp/pipeline.rs
+  s_455d29975ccac4::t_0e6173258c47dc 1-833
+Cargo.lock
+  s_455d29975ccac4::t_9c7b113cd618d1 1090-1101,1158-1163,2759,3236,3669-3712,4073-4111,4337-4345,5684-5689,6380,6394,6401,6413-6415,6427,6430,6436,6508,6520,6529,6542,6551,6559-6577,6580,6588-6589,6604,6608,6613,6620,6629,6638,6646,6658
+bindings/flutter/example/macos/Podfile.lock
+  s_455d29975ccac4::t_0dbd1fadd6f4cd 31,33
+bindings/flutter/example/pubspec.lock
+  s_455d29975ccac4::t_e950a6523ee795 422
+bindings/observability-js/pnpm-lock.yaml
+  s_455d29975ccac4::t_2d17e1661a8c88 1-888
+bindings/web/pnpm-lock.yaml
+  s_455d29975ccac4::t_71c85d84056945 7-9,14-16,30-44,328-369,1081-1119
+examples/flutter/ios/Podfile.lock
+  s_455d29975ccac4::t_7873686f60a58a 69,71
+examples/flutter/macos/Podfile.lock
+  s_455d29975ccac4::t_74f6cb61467594 51,53
+vendor/llama-cpp
+  s_455d29975ccac4::t_1d3c10f8652538 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "65e32463b648b01dae02e5b7c9209a480a5bbe95",
+  "prompts": {},
+  "sessions": {
+    "s_455d29975ccac4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c02e4c0b-e792-4d4d-b80d-6c1851e3f9c0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
