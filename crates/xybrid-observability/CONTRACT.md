@@ -13,11 +13,19 @@ The contract follows the OpenTelemetry GenAI semantic conventions pinned at
 revision `95aff9cdf605bbc7d7e8f7c4745a693bd0c4eea8` of
 [semantic-conventions-genai](https://github.com/open-telemetry/semantic-conventions-genai/tree/95aff9cdf605bbc7d7e8f7c4745a693bd0c4eea8).
 Those conventions are in Development status. Moving to a newer revision is a
-contract change: bump `contract_version`, update both packages and the
-fixtures in one change, and call it out in the changelog. No schema URL is
-advertised because the GenAI repository has not published a stable one.
+contract change (see "Versioning"): update both packages and the fixtures in
+one change, and call it out in the changelog. No schema URL is advertised
+because the GenAI repository has not published a stable one.
 
 MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
+
+### Versioning
+
+`contract_version` (catalog and both packages) names the contract a release
+ships. Once a release has shipped a version, any change to the catalog or to
+behaviour described here bumps it. Until then the version stays open: changes
+land in it and are listed under its "Changes from" section. No release has
+shipped the contract yet, so v2 is still open.
 
 ### Changes from v1
 
@@ -33,7 +41,9 @@ preserved; catalog int/double types are enforced on the wire; exporters split
 batches by encoded size under one absolute deadline, never follow redirects and
 isolate the Xybrid preset's headers; delivery is bounded by item and byte
 budgets with per-signal counters; flush and shutdown have defined barriers and
-results; the fixture format gained steps and stricter normalization.
+results; resource samples gained peak CPU utilization, minimum available memory
+and a closed memory-pressure vocabulary (see "Resource samples"); the fixture
+format gained steps and stricter normalization.
 
 ## Scope and independence
 
@@ -297,6 +307,58 @@ workflow, tool, or attempt spans.
 
 Empty request arrays (`stop_sequences`, input/output modalities) and an empty
 finish-reason list are absent.
+
+## Resource samples
+
+`record_resource(sample)` exists on inference, attempt and model-load operations
+(Rust and JS `ResourceSample`). The host measures; the packages never probe the
+device. Every field is optional and becomes the span attribute below only when
+present and valid:
+
+| Field (Rust / JS) | Attribute | Type and unit | Meaning |
+|---|---|---|---|
+| `cpu_utilization` / `cpuUtilization` | `xybrid.genai.resource.cpu.utilization` | double, 0–1 | System CPU utilization: one reading, or the mean of the window's readings |
+| `cpu_peak_utilization` / `cpuPeakUtilization` | `xybrid.genai.resource.cpu.peak_utilization` | double, 0–1 | Highest system CPU utilization reading taken in the window |
+| `memory_used_bytes` / `memoryUsedBytes` | `xybrid.genai.resource.memory.used_bytes` | int, bytes | System memory in use |
+| `memory_min_available_bytes` / `memoryMinAvailableBytes` | `xybrid.genai.resource.memory.min_available_bytes` | int, bytes | Lowest system memory available for allocation in the window |
+| `memory_pressure` / `memoryPressure` | `xybrid.genai.resource.memory.pressure` | string, closed vocabulary | Most severe system memory pressure in the window |
+| `process_rss_bytes` / `processRssBytes` | `xybrid.genai.resource.process.rss_bytes` | int, bytes | Process resident set size |
+| `process_peak_rss_bytes` / `processPeakRssBytes` | `xybrid.genai.resource.process.peak_rss_bytes` | int, bytes | Highest process resident set size in the window |
+| `thermal_state` / `thermalState` | `xybrid.genai.resource.thermal.state` | string | Device thermal state: `nominal`, `fair`, `serious`, `critical` |
+| `battery_level` / `batteryLevel` | `xybrid.genai.resource.battery.level` | double, 0–1 | Battery charge |
+| `battery_charging` / `batteryCharging` | `xybrid.genai.resource.battery.charging` | boolean | Whether the device is charging |
+| `accelerator_utilization` / `acceleratorUtilization` | `xybrid.genai.resource.accelerator.utilization` | double, 0–1 | Accelerator utilization |
+| `accelerator_memory_used_bytes` / `acceleratorMemoryUsedBytes` | `xybrid.genai.resource.accelerator.memory.used_bytes` | int, bytes | Accelerator memory in use |
+
+- The *window* is the span of time the host sampled for the operation, normally
+  its start to its end. Peak, minimum and pressure are extremes of the readings
+  the host took in the window, not of continuous time; a host with one reading
+  reports it for both the value and the extreme.
+- A reading is what the host's probe returned when the host took it. A
+  utilization probe usually averages over the time since its previous reading,
+  so a reading taken at the start of the window can describe load from before
+  the window. A host documents what its readings cover; the packages cannot
+  tell.
+- `memory.pressure` is one of `normal`, `warn`, `critical`
+  (`catalog.enums`, least to most severe): `normal` means memory is not
+  constrained, `warn` that the host classifies available memory as low, and
+  `critical` a severe shortage in which allocations or the process are at risk.
+  The host maps its platform signal (libdispatch's normal/warn/critical
+  memory-pressure events, a threshold on available/total memory, …) and
+  documents the mapping. There is no `unknown` level: a host that could not
+  classify omits the field. Both packages ignore any other value (JS logs a
+  debug diagnostic), so the attribute never carries a value outside the
+  vocabulary. `thermal.state` is recorded as given; its catalog enum lists the
+  expected values.
+- Nothing is defaulted: a field that was not measured is absent, never `0`,
+  `nominal` or `normal`. Zero is a measurement and is kept (for example
+  `memory.min_available_bytes = 0`). Non-finite doubles are ignored; JS also
+  ignores byte counts that are negative, fractional or not safe integers. 0–1
+  values are neither clamped nor range-checked.
+- Recording again sets the attributes of the present, valid fields and keeps
+  earlier values of the others.
+- Resource attributes are span attributes only. They record no metrics and are
+  never metric dimensions.
 
 ## Metric dimensions
 
@@ -803,7 +865,7 @@ Step operations (fields beyond `op`, `id`, `at_ms`):
 | `usage` | `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_write_input_tokens`, `reasoning_output_tokens`, `{text,image,audio}_{input,output}_tokens` |
 | `finish_reasons` | `value` (string array) |
 | `response` | `response_id`, `model` |
-| `resource` | `cpu_utilization`, `memory_used_bytes`, `process_rss_bytes`, `process_peak_rss_bytes`, `thermal_state`, `battery_level`, `battery_charging`, `accelerator_utilization`, `accelerator_memory_used_bytes` |
+| `resource` | `cpu_utilization`, `cpu_peak_utilization`, `memory_used_bytes`, `memory_min_available_bytes`, `memory_pressure`, `process_rss_bytes`, `process_peak_rss_bytes`, `thermal_state`, `battery_level`, `battery_charging`, `accelerator_utilization`, `accelerator_memory_used_bytes` |
 | `model_cache_hit` | `value` |
 | `end` / `cancel` | `time_ms` |
 | `end_with_error` | `error_type`, `message`, `time_ms` |

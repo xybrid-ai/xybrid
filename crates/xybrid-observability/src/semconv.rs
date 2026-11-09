@@ -195,8 +195,15 @@ pub mod attr {
     pub const MODEL_FORMAT: &str = "xybrid.genai.model.format";
     /// `xybrid.genai.resource.cpu.utilization`
     pub const RESOURCE_CPU_UTILIZATION: &str = "xybrid.genai.resource.cpu.utilization";
+    /// `xybrid.genai.resource.cpu.peak_utilization`
+    pub const RESOURCE_CPU_PEAK_UTILIZATION: &str = "xybrid.genai.resource.cpu.peak_utilization";
     /// `xybrid.genai.resource.memory.used_bytes`
     pub const RESOURCE_MEMORY_USED_BYTES: &str = "xybrid.genai.resource.memory.used_bytes";
+    /// `xybrid.genai.resource.memory.min_available_bytes`
+    pub const RESOURCE_MEMORY_MIN_AVAILABLE_BYTES: &str =
+        "xybrid.genai.resource.memory.min_available_bytes";
+    /// `xybrid.genai.resource.memory.pressure`, one of [`super::MEMORY_PRESSURE_LEVELS`].
+    pub const RESOURCE_MEMORY_PRESSURE: &str = "xybrid.genai.resource.memory.pressure";
     /// `xybrid.genai.resource.process.rss_bytes`
     pub const RESOURCE_PROCESS_RSS_BYTES: &str = "xybrid.genai.resource.process.rss_bytes";
     /// `xybrid.genai.resource.process.peak_rss_bytes`
@@ -295,6 +302,10 @@ pub const TOKEN_BUCKETS: [f64; 14] = [
     16_777_216.0,
     67_108_864.0,
 ];
+
+/// Values of `xybrid.genai.resource.memory.pressure`, least to most severe
+/// (`catalog.enums`). A recorded value outside this list is ignored.
+pub const MEMORY_PRESSURE_LEVELS: [&str; 3] = ["normal", "warn", "critical"];
 
 /// Default per-attribute byte budget for content attributes.
 pub const DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES: usize = 16_384;

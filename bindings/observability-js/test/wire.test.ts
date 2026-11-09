@@ -33,7 +33,13 @@ const scenario = async () => {
   clock.advance(1000);
   op.recordChunk();
   op.recordTokenTiming({ timePerOutputTokenS: 2 });
-  op.recordResource({ cpuUtilization: 1, batteryLevel: 1 });
+  op.recordResource({
+    cpuUtilization: 1,
+    cpuPeakUtilization: 1,
+    memoryMinAvailableBytes: 1073741824,
+    memoryPressure: "warn",
+    batteryLevel: 1,
+  });
   op.recordUsage({ inputTokens: 3, outputTokens: 4 });
   op.end();
   const ref = op.observationRef();
@@ -66,6 +72,11 @@ describe("enforceCatalogTypes", () => {
     expect(attributes["gen_ai.response.time_to_first_chunk"]).toEqual({ doubleValue: 1 });
     expect(attributes["xybrid.genai.response.time_per_output_token"]).toEqual({ doubleValue: 2 });
     expect(attributes["xybrid.genai.resource.cpu.utilization"]).toEqual({ doubleValue: 1 });
+    expect(attributes["xybrid.genai.resource.cpu.peak_utilization"]).toEqual({ doubleValue: 1 });
+    expect(attributes["xybrid.genai.resource.memory.min_available_bytes"]).toEqual({
+      intValue: 1073741824,
+    });
+    expect(attributes["xybrid.genai.resource.memory.pressure"]).toEqual({ stringValue: "warn" });
     expect(attributes["xybrid.genai.resource.battery.level"]).toEqual({ doubleValue: 1 });
     expect(attributes["gen_ai.request.max_tokens"]).toEqual({ intValue: 64 });
     expect(attributes["server.port"]).toEqual({ intValue: 443 });

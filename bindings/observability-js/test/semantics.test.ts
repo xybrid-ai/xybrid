@@ -26,6 +26,7 @@ import {
   TracerProvider,
 } from "@opentelemetry/sdk-trace";
 import {
+  ENUMS,
   type LoggerProviderLike,
   ObservationContext,
   Observer,
@@ -370,7 +371,10 @@ describe("numeric inputs (D10, R-NUM-1)", () => {
     op.recordUsage({ inputTokens: 5 });
     op.recordResource({
       cpuUtilization: Number.NaN,
+      cpuPeakUtilization: Number.POSITIVE_INFINITY,
       memoryUsedBytes: -10,
+      memoryMinAvailableBytes: 1.5,
+      memoryPressure: "high" as never,
       processRssBytes: 1024,
       batteryLevel: Number.POSITIVE_INFINITY,
     });
@@ -391,7 +395,10 @@ describe("numeric inputs (D10, R-NUM-1)", () => {
     expect(attributes["gen_ai.usage.cache_read.input_tokens"]).toBeUndefined();
     expect(attributes["gen_ai.usage.reasoning.output_tokens"]).toBeUndefined();
     expect(attributes["xybrid.genai.resource.cpu.utilization"]).toBeUndefined();
+    expect(attributes["xybrid.genai.resource.cpu.peak_utilization"]).toBeUndefined();
     expect(attributes["xybrid.genai.resource.memory.used_bytes"]).toBeUndefined();
+    expect(attributes["xybrid.genai.resource.memory.min_available_bytes"]).toBeUndefined();
+    expect(attributes["xybrid.genai.resource.memory.pressure"]).toBeUndefined();
     expect(attributes["xybrid.genai.resource.process.rss_bytes"]).toBe(1024);
     expect(attributes["xybrid.genai.resource.battery.level"]).toBeUndefined();
     expect(attributes["xybrid.genai.response.time_per_output_token"]).toBeUndefined();
@@ -415,6 +422,22 @@ describe("numeric inputs (D10, R-NUM-1)", () => {
         sum: 5,
       },
     ]);
+  });
+
+  test("memory pressure accepts exactly the catalog levels; zero available memory is kept", () => {
+    const { observer, spans } = createHarness();
+    for (const level of ENUMS["xybrid.genai.resource.memory.pressure"]) {
+      const load = observer.startModelLoad({ model: level });
+      load.recordResource({ memoryPressure: level, memoryMinAvailableBytes: 0 });
+      load.end();
+    }
+    const finished = spans.getFinishedSpans();
+    expect(
+      finished.map((span) => span.attributes["xybrid.genai.resource.memory.pressure"]),
+    ).toEqual(["normal", "warn", "critical"]);
+    for (const span of finished) {
+      expect(span.attributes["xybrid.genai.resource.memory.min_available_bytes"]).toBe(0);
+    }
   });
 });
 

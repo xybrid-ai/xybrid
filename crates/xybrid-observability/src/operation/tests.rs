@@ -471,3 +471,38 @@ fn spans_never_end_before_they_start() {
     let spans = s.spans.get_finished_spans().unwrap();
     assert_eq!(spans[0].end_time, start);
 }
+
+#[test]
+fn resource_samples_record_measured_values_only() {
+    let empty = resource_attributes(&ResourceSample::default());
+    assert!(empty.is_empty(), "an empty sample records nothing");
+
+    let sample = ResourceSample {
+        cpu_peak_utilization: Some(f64::NAN),
+        memory_min_available_bytes: Some(0),
+        memory_pressure: Some("high".into()),
+        ..ResourceSample::default()
+    };
+    let recorded = resource_attributes(&sample);
+    assert!(attr(&recorded, attr::RESOURCE_CPU_PEAK_UTILIZATION).is_empty());
+    assert_eq!(
+        attr(&recorded, attr::RESOURCE_MEMORY_MIN_AVAILABLE_BYTES),
+        [&OtelValue::I64(0)],
+        "zero available memory is a measurement"
+    );
+    assert!(attr(&recorded, attr::RESOURCE_MEMORY_PRESSURE).is_empty());
+
+    for level in MEMORY_PRESSURE_LEVELS {
+        let sample = ResourceSample {
+            memory_pressure: Some(level.into()),
+            ..ResourceSample::default()
+        };
+        assert_eq!(
+            attr(
+                &resource_attributes(&sample),
+                attr::RESOURCE_MEMORY_PRESSURE
+            ),
+            [&OtelValue::from(level)]
+        );
+    }
+}

@@ -13,14 +13,17 @@ PATH_FILTERS = {
     # platform floors, JS release scripts/manifests and the workflows its hygiene tests read.
     # test_generation_gates.py reads build-flutter.yml and the FRB wrapper, and
     # globs bindings/*/scripts/gen* for generators that need a drift gate.
-    "relevant": r"^(tools/scripts/|bindings/(web|observability-js)/(scripts/|package\.json$|pnpm-(lock|workspace)\.yaml$)|bindings/observability-js/src/version\.ts$|crates/zzz-sys/(zzz_pull\.py|natives-manifest\.json)$|bindings/flutter/((ios|macos)/xybrid_flutter\.podspec|android/build\.gradle|generate-frb\.sh)$|bindings/[^/]+/scripts/gen[^/]*$|\.bazelrc$|\.github/workflows/(ci|build-flutter|release-prep|release-publish|test-zzz-android|test-zzz-engine|trusted-zzz-sdk)\.yml$)",
+    # test_observability_capture.py reads each binding's observability scenario.
+    "relevant": r"^(tools/scripts/|bindings/(python/tests/observability_scenario\.py|apple/Tests/XybridTests/ObservabilityRuntimeTests\.swift|kotlin/consumer-smoke/app/src/androidTest/kotlin/ai/xybrid/smoke/ObservabilityScenario\.kt|unity/Tests/Editor/ObservabilityRuntimeScenarioTests\.cs|flutter/test/observability_scenario_test\.dart)$|bindings/(web|observability-js)/(scripts/|package\.json$|pnpm-(lock|workspace)\.yaml$)|bindings/observability-js/src/version\.ts$|crates/zzz-sys/(zzz_pull\.py|natives-manifest\.json)$|bindings/flutter/((ios|macos)/xybrid_flutter\.podspec|android/build\.gradle|generate-frb\.sh)$|bindings/[^/]+/scripts/gen[^/]*$|\.bazelrc$|\.github/workflows/(ci|build-flutter|release-prep|release-publish|test-zzz-android|test-zzz-engine|trusted-zzz-sdk)\.yml$)",
     # The committed C# is generated from the whole bolt crate (its exports and
     # their doc comments) and the facade types it wraps, so a change to either
     # must run the drift check and recompile the hand-written Api layer on top.
     "unity_bolt": r"^(bindings/unity/Runtime/(Bolt/|BoltSupplement/|Api/)|tools/unity-bolt-compile-check/|tools/scripts/gen_unity_bolt_csharp\.py$|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)",
     # The suite exports manual observations to a local receiver, so it also
-    # covers the facade those handles wrap.
-    "python_sdk": r"^(bindings/python/|tools/scripts/(gen_python_bolt\.py|build-python-bolt\.sh)$|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)",
+    # covers the facade those handles wrap, and runs the shared observability
+    # scenario (tools/scripts/observability_capture/) end to end, so it also
+    # covers the SDK and the observability crate that export it.
+    "python_sdk": r"^(bindings/python/|tools/scripts/(gen_python_bolt\.py|build-python-bolt\.sh)$|tools/scripts/observability_capture/|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|crates/xybrid-sdk/|crates/xybrid-observability/|\.github/workflows/ci\.yml$)",
     "kotlin_jni": r"^(bindings/kotlin/|tools/scripts/gen_kotlin_bolt\.py$|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)",
     "apple_bolt": r"^(bindings/apple/|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)",
 }

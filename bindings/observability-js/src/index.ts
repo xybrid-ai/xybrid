@@ -25,6 +25,7 @@ export {
   JSON_ATTRIBUTES,
   METRIC_DIMENSIONS,
   METRICS,
+  type MemoryPressure,
   type MetricName,
   OPERATIONS,
   PRESETS,

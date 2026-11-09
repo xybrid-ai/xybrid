@@ -36,7 +36,7 @@ use xybrid_observability::{
 const PROTOCOLS: [Protocol; 2] = [Protocol::HttpProtobuf, Protocol::HttpJson];
 
 /// An inference whose typed inputs are the R-WIRE-1 values: temperature 0,
-/// top_p 1 (integral input), TTFC exactly 1 s, cpu 1, battery 1,
+/// top_p 1 (integral input), TTFC exactly 1 s, cpu and peak cpu 1, battery 1,
 /// time_per_output_token 2, plus an integral double for an `int` key.
 fn instrument(observer: &Observer) -> Option<ObservationRef> {
     let t0 = SystemTime::now() - Duration::from_secs(10);
@@ -61,6 +61,9 @@ fn instrument(observer: &Observer) -> Option<ObservationRef> {
     op.record_token_timing(2.0);
     op.record_resource(&ResourceSample {
         cpu_utilization: Some(1.0),
+        cpu_peak_utilization: Some(1.0),
+        memory_min_available_bytes: Some(1_073_741_824),
+        memory_pressure: Some("warn".to_owned()),
         battery_level: Some(1.0),
         ..ResourceSample::default()
     });
@@ -140,6 +143,15 @@ fn check_inference_span(requests: &[Received], context: &str) {
         (attr::RESPONSE_TIME_TO_FIRST_TOKEN, Wire::DoubleValue(1.0)),
         (attr::RESPONSE_TIME_PER_OUTPUT_TOKEN, Wire::DoubleValue(2.0)),
         (attr::RESOURCE_CPU_UTILIZATION, Wire::DoubleValue(1.0)),
+        (attr::RESOURCE_CPU_PEAK_UTILIZATION, Wire::DoubleValue(1.0)),
+        (
+            attr::RESOURCE_MEMORY_MIN_AVAILABLE_BYTES,
+            Wire::IntValue(1_073_741_824),
+        ),
+        (
+            attr::RESOURCE_MEMORY_PRESSURE,
+            Wire::StringValue("warn".to_owned()),
+        ),
         (attr::RESOURCE_BATTERY_LEVEL, Wire::DoubleValue(1.0)),
         (attr::USAGE_INPUT_TOKENS, Wire::IntValue(2)),
         (attr::USAGE_OUTPUT_TOKENS, Wire::IntValue(3)),

@@ -1,4 +1,4 @@
-# Purpose: Analyze and test the Dart wrapper, build the native libraries, and build a consumer app against the packaged layout.
+# Purpose: Analyze and test the Dart wrapper, build the native libraries, run the observability runtime scenario on the Linux library, and build a consumer app against the packaged layout.
 name: "SDK: Flutter"
 
 on:
@@ -14,6 +14,9 @@ on:
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-observability/**'
       - 'xtask/**'
+      # The shared observability scenario's receiver and checker (the
+      # observability-runtime job below).
+      - 'tools/scripts/observability_capture/**'
       - '.github/workflows/build-flutter.yml'
       # Docs-only changes under the paths above (READMEs, examples) never
       # affect the native build — exclude markdown so they don't trigger it.
@@ -34,6 +37,7 @@ on:
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-observability/**'
       - 'xtask/**'
+      - 'tools/scripts/observability_capture/**'
       - '.github/workflows/build-flutter.yml'
       - '!**.md'
   workflow_dispatch:
@@ -54,7 +58,9 @@ jobs:
   # Pure-Dart gate for the hand-written wrapper in bindings/flutter/lib.
   #
   # Cheap and native-free on purpose: the wrapper classes are plain Dart and
-  # the cdylib is only dlopened by `Xybrid.init()`, which no unit test calls.
+  # the cdylib is only dlopened by `Xybrid.init()`, which no unit test calls
+  # here (the observability scenario test skips without the
+  # XYBRID_SCENARIO_ENDPOINT that the observability-runtime job sets).
   # That means this job needs no Rust, no FRB codegen and no cargokit — it
   # runs in ~1 minute alongside the (much slower) native build below.
   #
@@ -284,6 +290,77 @@ jobs:
             bindings/flutter/rust/target/**/release/*xybrid_flutter_ffi*
             target/**/release/*xybrid_flutter_ffi*
           if-no-files-found: error
+
+  # The Flutter row of docs/sdk/observability-coverage.md: the shared
+  # observability scenario (tools/scripts/observability_capture/scenario.md)
+  # through the public Dart API, on the Linux release library the job above
+  # built and uploaded. test/observability_scenario_test.dart loads it with
+  # flutter_rust_bridge, exports OTLP/JSON to capture_server.py on the runner
+  # and writes expectations.json; check_capture.py then compares the two. Its
+  # checks cover parent-in, references out, manual operations, redaction and
+  # omission, release-cancels, the weightless load and failed run, flush and
+  # double shutdown. run_scenario.py starts the receiver, runs the test, stops
+  # the receiver and runs the checker; the test skips in the Dart job above,
+  # which sets no XYBRID_SCENARIO_ENDPOINT. Its own job, so a failure names the
+  # scenario rather than the native build.
+  observability-runtime:
+    name: Observability runtime scenario (flutter test on Linux)
+    needs: build-flutter
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Flutter SDK
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Download the Linux native library
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: flutter-native-linux
+          path: ${{ runner.temp }}/flutter-native
+
+      # The upload names two roots, so the artifact keeps the cargo layout
+      # (target/<triple>/release/) under their common ancestor. Find the cdylib
+      # rather than hard-coding that layout.
+      - name: Locate libxybrid_flutter_ffi.so
+        run: |
+          set -euo pipefail
+          LIB="$(find "$RUNNER_TEMP/flutter-native" -name libxybrid_flutter_ffi.so -type f | head -1)"
+          if [ -z "$LIB" ]; then
+            echo "::error::no libxybrid_flutter_ffi.so in the flutter-native-linux artifact"
+            find "$RUNNER_TEMP/flutter-native" -type f
+            exit 1
+          fi
+          echo "XYBRID_FLUTTER_NATIVE_LIB=$LIB" >> "$GITHUB_ENV"
+          echo "using $LIB"
+
+      - name: Install Dart dependencies
+        working-directory: bindings/flutter
+        run: flutter pub get
+
+      - name: Run the observability scenario
+        working-directory: bindings/flutter
+        timeout-minutes: 15
+        run: |
+          python3 ../../tools/scripts/observability_capture/run_scenario.py \
+            --binding flutter --out-dir "$RUNNER_TEMP/observability-flutter" --timeout 600 -- \
+            flutter test --no-pub test/observability_scenario_test.dart
+
+      # capture.jsonl, expectations.json, report.json and the receiver log,
+      # for diagnosing a failed check.
+      - name: Upload the scenario capture and report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flutter-observability-scenario
+          path: ${{ runner.temp }}/observability-flutter
+          if-no-files-found: warn
+          retention-days: 7
 
   # Builds a scratch app against the package as consumers receive it, rather
   # than against the monorepo. The job above goes through `cargo xtask`, and

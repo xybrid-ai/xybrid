@@ -156,7 +156,10 @@ export const ATTR = {
   MODEL_CACHE_HIT: "xybrid.genai.model.cache_hit",
   MODEL_FORMAT: "xybrid.genai.model.format",
   RESOURCE_CPU_UTILIZATION: "xybrid.genai.resource.cpu.utilization",
+  RESOURCE_CPU_PEAK_UTILIZATION: "xybrid.genai.resource.cpu.peak_utilization",
   RESOURCE_MEMORY_USED_BYTES: "xybrid.genai.resource.memory.used_bytes",
+  RESOURCE_MEMORY_MIN_AVAILABLE_BYTES: "xybrid.genai.resource.memory.min_available_bytes",
+  RESOURCE_MEMORY_PRESSURE: "xybrid.genai.resource.memory.pressure",
   RESOURCE_PROCESS_RSS_BYTES: "xybrid.genai.resource.process.rss_bytes",
   RESOURCE_PROCESS_PEAK_RSS_BYTES: "xybrid.genai.resource.process.peak_rss_bytes",
   RESOURCE_THERMAL_STATE: "xybrid.genai.resource.thermal.state",
@@ -185,6 +188,7 @@ export const ENUMS = {
   finish_reason: ["stop", "length", "content_filter", "tool_call", "compaction", "error"],
   content_capture: ["no_content", "span_only", "event_only", "span_and_event"],
   "xybrid.genai.resource.thermal.state": ["nominal", "fair", "serious", "critical"],
+  "xybrid.genai.resource.memory.pressure": ["normal", "warn", "critical"],
   trace_mode: ["default", "suppress"],
   redaction_rule: ["replace_literal", "omit_attribute"],
   signal: ["traces", "logs", "metrics"],
@@ -286,6 +290,9 @@ export const METRIC_DIMENSIONS = {
 } as const;
 
 export type ContentCapture = (typeof ENUMS.content_capture)[number];
+
+/** `xybrid.genai.resource.memory.pressure` levels, least to most severe. */
+export type MemoryPressure = (typeof ENUMS)["xybrid.genai.resource.memory.pressure"][number];
 
 export const DEFAULTS = {
   content_capture: "span_only" as ContentCapture,
@@ -434,7 +441,10 @@ export const ATTRIBUTE_TYPES: Readonly<Record<string, AttributeType>> = {
   "xybrid.genai.model.cache_hit": "boolean",
   "xybrid.genai.model.format": "string",
   "xybrid.genai.resource.cpu.utilization": "double",
+  "xybrid.genai.resource.cpu.peak_utilization": "double",
   "xybrid.genai.resource.memory.used_bytes": "int",
+  "xybrid.genai.resource.memory.min_available_bytes": "int",
+  "xybrid.genai.resource.memory.pressure": "string",
   "xybrid.genai.resource.process.rss_bytes": "int",
   "xybrid.genai.resource.process.peak_rss_bytes": "int",
   "xybrid.genai.resource.thermal.state": "string",

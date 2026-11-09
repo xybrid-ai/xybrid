@@ -25,7 +25,8 @@ use crate::context::{ObservationContext, ObservationRef};
 use crate::observer::{push_any, Instruments, LogEvent, ObserverInner, SpanState};
 use crate::preflight;
 use crate::semconv::{
-    attr, event, op, ERROR_MESSAGE_KIND, MAX_ERROR_MESSAGE_CHARS, PREFLIGHT_NODE_BYTES,
+    attr, event, op, ERROR_MESSAGE_KIND, MAX_ERROR_MESSAGE_CHARS, MEMORY_PRESSURE_LEVELS,
+    PREFLIGHT_NODE_BYTES,
 };
 use crate::types::{
     AttemptInfo, ErrorInfo, InferenceRequest, Location, ModelLoadInfo, ResourceSample,
@@ -107,8 +108,22 @@ fn resource_attributes(sample: &ResourceSample) -> Vec<KeyValue> {
     if let Some(v) = finite(sample.cpu_utilization) {
         out.push(KeyValue::new(attr::RESOURCE_CPU_UTILIZATION, v));
     }
+    if let Some(v) = finite(sample.cpu_peak_utilization) {
+        out.push(KeyValue::new(attr::RESOURCE_CPU_PEAK_UTILIZATION, v));
+    }
     if let Some(v) = sample.memory_used_bytes {
         out.push(u64_attr(attr::RESOURCE_MEMORY_USED_BYTES, v));
+    }
+    if let Some(v) = sample.memory_min_available_bytes {
+        out.push(u64_attr(attr::RESOURCE_MEMORY_MIN_AVAILABLE_BYTES, v));
+    }
+    // A closed vocabulary: an unknown level is not a measurement.
+    if let Some(v) = sample
+        .memory_pressure
+        .as_deref()
+        .filter(|v| MEMORY_PRESSURE_LEVELS.contains(v))
+    {
+        out.push(KeyValue::new(attr::RESOURCE_MEMORY_PRESSURE, v.to_owned()));
     }
     if let Some(v) = sample.process_rss_bytes {
         out.push(u64_attr(attr::RESOURCE_PROCESS_RSS_BYTES, v));
@@ -714,7 +729,8 @@ impl InferenceOperation {
         }
     }
 
-    /// Records a host-measured resource sample (non-finite values ignored).
+    /// Records a host-measured resource sample. Non-finite numbers and
+    /// memory-pressure values outside the vocabulary are ignored.
     pub fn record_resource(&self, sample: &ResourceSample) {
         self.core.set_attributes(resource_attributes(sample));
     }
@@ -1231,7 +1247,8 @@ impl AttemptOperation {
         }
     }
 
-    /// Records a resource sample (non-finite values ignored).
+    /// Records a resource sample. Non-finite numbers and memory-pressure
+    /// values outside the vocabulary are ignored.
     pub fn record_resource(&self, sample: &ResourceSample) {
         self.core.set_attributes(resource_attributes(sample));
     }
@@ -1639,7 +1656,8 @@ impl ModelLoadOperation {
             .set_attribute(KeyValue::new(attr::MODEL_CACHE_HIT, hit));
     }
 
-    /// Records a host-measured resource sample (non-finite values ignored).
+    /// Records a host-measured resource sample. Non-finite numbers and
+    /// memory-pressure values outside the vocabulary are ignored.
     pub fn record_resource(&self, sample: &ResourceSample) {
         self.simple.core.set_attributes(resource_attributes(sample));
     }

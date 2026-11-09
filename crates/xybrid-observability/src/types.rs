@@ -300,14 +300,29 @@ impl Usage {
 
 /// A measured resource sample supplied by the host (CPU, memory, thermal,
 /// battery, accelerator). The observer never probes the device itself.
+///
+/// Every field is optional: leave a field `None` when it was not measured,
+/// never fill it with a default. Peak, minimum and state fields describe the
+/// operation's measurement window (see `CONTRACT.md` "Resource samples").
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ResourceSample {
     /// CPU utilization, 0.0–1.0.
     #[serde(default)]
     pub cpu_utilization: Option<f64>,
+    /// Highest CPU utilization observed in the window, 0.0–1.0.
+    #[serde(default)]
+    pub cpu_peak_utilization: Option<f64>,
     /// System memory in use, bytes.
     #[serde(default)]
     pub memory_used_bytes: Option<u64>,
+    /// Lowest system memory available for allocation in the window, bytes.
+    #[serde(default)]
+    pub memory_min_available_bytes: Option<u64>,
+    /// Most severe system memory pressure in the window: `normal`, `warn` or
+    /// `critical` ([`crate::semconv::MEMORY_PRESSURE_LEVELS`]). Any other
+    /// value is ignored.
+    #[serde(default)]
+    pub memory_pressure: Option<String>,
     /// Process resident set size, bytes.
     #[serde(default)]
     pub process_rss_bytes: Option<u64>,

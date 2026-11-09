@@ -84,6 +84,7 @@ pub fn attribute_type(key: &str) -> Option<CatalogType> {
         | "xybrid.genai.attempt.count"
         | "xybrid.genai.model.size_bytes"
         | "xybrid.genai.resource.memory.used_bytes"
+        | "xybrid.genai.resource.memory.min_available_bytes"
         | "xybrid.genai.resource.process.rss_bytes"
         | "xybrid.genai.resource.process.peak_rss_bytes"
         | "xybrid.genai.resource.accelerator.memory.used_bytes" => Some(CatalogType::Int),
@@ -96,6 +97,7 @@ pub fn attribute_type(key: &str) -> Option<CatalogType> {
         | "xybrid.genai.response.time_to_first_token"
         | "xybrid.genai.response.time_per_output_token"
         | "xybrid.genai.resource.cpu.utilization"
+        | "xybrid.genai.resource.cpu.peak_utilization"
         | "xybrid.genai.resource.battery.level"
         | "xybrid.genai.resource.accelerator.utilization" => Some(CatalogType::Double),
         "gen_ai.request.stream"
@@ -131,6 +133,7 @@ pub fn attribute_type(key: &str) -> Option<CatalogType> {
         | "xybrid.genai.attempt.reason"
         | "xybrid.genai.model.format"
         | "xybrid.genai.resource.thermal.state"
+        | "xybrid.genai.resource.memory.pressure"
         | "xybrid.genai.feedback.comment" => Some(CatalogType::String),
         "gen_ai.request.stop_sequences"
         | "gen_ai.response.finish_reasons"
