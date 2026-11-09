@@ -6334,6 +6334,8 @@ mod tests {
 
     #[test]
     fn release_memory_sees_registered_models() {
+        // `release_memory()` in a concurrent test would evict this model.
+        let _residency = crate::model_registry::residency_test_lock();
         let model = test_loaded_model(false);
         crate::model_registry::register(&model.model_id, &model.handle, &model.last_accessed, None);
 
@@ -7710,6 +7712,8 @@ mod tests {
 
     #[test]
     fn explicit_lazy_and_reload_loads_are_separate_load_operations() {
+        // `release_memory()` in a concurrent test would evict this model.
+        let _residency = crate::model_registry::residency_test_lock();
         use crate::observability::test_support::*;
         use crate::observability::{semconv, ObservationContext, ObservationOptions};
         let (session, memory, _provider) = memory_session();
@@ -7792,7 +7796,34 @@ mod tests {
     }
 
     #[test]
+    fn local_trace_collection_does_not_suppress_worker_backed_loads() {
+        use crate::observability::test_support::*;
+        use crate::observability::ObservationOptions;
+        let _residency = crate::model_registry::residency_test_lock();
+        let (session, memory, _provider) = memory_session();
+        let dir = weightless_onnx_dir();
+        let loader = ModelLoader::from_directory(dir.path())
+            .unwrap()
+            .observation(ObservationOptions::default().with_session(&session));
+        // A local collecting recorder has no trace context, but it is not an
+        // explicit suppression: the async load must stay observed, like the
+        // synchronous one.
+        let local = xybrid_core::tracing::capture();
+        let model = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(loader.load_async())
+            .unwrap();
+        drop(local);
+        let reference = model
+            .load_observation_ref()
+            .expect("the async load is observed under a local capture");
+        assert_eq!(memory.by_ref(reference).name, "load_model weightless");
+    }
+
+    #[test]
     fn explicitly_selected_session_samples_resources_while_the_default_is_off() {
+        // `release_memory()` in a concurrent test would evict this model.
+        let _residency = crate::model_registry::residency_test_lock();
         use crate::observability::test_support::*;
         use crate::observability::{
             install_default_session, ObservabilitySession, ObservationOptions, Observer,

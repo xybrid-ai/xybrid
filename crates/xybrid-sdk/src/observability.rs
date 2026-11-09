@@ -2389,16 +2389,23 @@ fn option_trace(options: Option<&ObservationOptions>) -> TraceMode {
     }
 }
 
+/// Whether this thread's innermost recorder is an SDK recorder that
+/// explicitly suppresses tracing. A foreign recorder (for example
+/// `xybrid_core::tracing::capture()`) or one without trace context is not
+/// suppression.
+fn recorder_suppressed() -> bool {
+    xybrid_core::tracing::current_recorder().is_some_and(|r| {
+        r.as_any()
+            .and_then(|r| r.downcast_ref::<StageRecorder>())
+            .is_some_and(|r| r.suppressed)
+    })
+}
+
 fn inherited_trace(trace: TraceMode) -> TraceMode {
     if trace == TraceMode::Suppress {
         return trace;
     }
-    let suppressed = xybrid_core::tracing::current_recorder().is_some_and(|r| {
-        r.as_any()
-            .and_then(|r| r.downcast_ref::<StageRecorder>())
-            .is_some_and(|r| r.suppressed)
-    });
-    if suppressed {
+    if recorder_suppressed() {
         TraceMode::Suppress
     } else {
         trace

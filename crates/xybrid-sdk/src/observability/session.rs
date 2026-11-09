@@ -390,7 +390,10 @@ impl CapturedContext {
     #[must_use]
     pub fn capture() -> Self {
         let parent = ambient_parent();
-        let suppressed = xybrid_core::tracing::current_recorder().is_some() && parent.is_none();
+        // Only an SDK recorder's explicit suppression carries over; a local
+        // collecting recorder (`xybrid_core::tracing::capture()`) has no
+        // trace context but suppresses nothing.
+        let suppressed = recorder_suppressed();
         Self {
             parent,
             session: resolve_session(None),
