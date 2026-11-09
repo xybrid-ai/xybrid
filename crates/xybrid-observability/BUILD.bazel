@@ -39,5 +39,6 @@ rust_test(
         "@crates//:opentelemetry-proto",
         "@crates//:opentelemetry_sdk",
         "@crates//:prost",
+        "@crates//:serde_json",
     ],
 )
