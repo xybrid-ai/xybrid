@@ -557,13 +557,15 @@ fn should_emit_dev_nudge(observability_enabled: bool, quiet: Option<&str>) -> bo
 }
 
 /// The nudge: export is explicit, and a key (from `xybrid connect` or the
-/// console) only authenticates until it is handed to the Xybrid preset.
+/// console) only authenticates until it is handed to the Xybrid preset. Every
+/// binding emits it (bolt forwards it to logcat / os_log), so it names no
+/// language's API.
 fn dev_nudge_text() -> String {
     format!(
         "observability export is not configured; traces stay local. To send them to Xybrid, \
-         get a project key with `xybrid connect` (or from {CONSOLE_URL}) and pass it to \
-         ObservabilityConfig::xybrid; a key alone exports nothing. Any OpenTelemetry backend \
-         works through ObservabilityConfig::otlp. See {OBSERVABILITY_DOCS_URL}"
+         get a project key with `xybrid connect` (or from {CONSOLE_URL}) and pass it to your \
+         SDK's Xybrid observability preset; a key alone exports nothing. Any OpenTelemetry \
+         backend works through the OTLP configuration. See {OBSERVABILITY_DOCS_URL}"
     )
 }
 
@@ -576,8 +578,10 @@ mod dev_nudge_tests {
         let text = dev_nudge_text();
         assert!(text.contains("xybrid connect"), "{text}");
         assert!(text.contains("https://console.xybrid.dev"), "{text}");
-        assert!(text.contains("ObservabilityConfig::xybrid"), "{text}");
+        assert!(text.contains("Xybrid observability preset"), "{text}");
         assert!(text.contains("a key alone exports nothing"), "{text}");
+        // Emitted by every binding: no Rust-only API names.
+        assert!(!text.contains("ObservabilityConfig"), "{text}");
         assert!(!text.contains("dashboard.xybrid.dev"), "{text}");
     }
 

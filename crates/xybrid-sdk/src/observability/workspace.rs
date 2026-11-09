@@ -51,8 +51,9 @@ pub enum WorkspaceNotice {
         key_expires_at: SystemTime,
     },
     /// The unclaimed workspace passed its key deadline. Ingest refused the
-    /// key and export to this destination stopped for the session. Claiming
-    /// the workspace restores the key; a new session exports again.
+    /// key and export to this destination stopped for the session (spans it
+    /// accepted before that were stored). Claiming the workspace restores
+    /// the key; a new session exports again.
     Expired,
 }
 
@@ -82,7 +83,9 @@ impl WorkspaceFeedback {
     ///
     /// [`ObservabilitySession::new`] does this itself; this is for hosts that
     /// build an [`xybrid_observability::otlp::ObservabilityPipeline`] from the
-    /// configuration directly.
+    /// configuration directly. Clones of the attached configuration share
+    /// this feedback: attach once per build for a notice per pipeline. Every
+    /// build starts with its destination enabled either way.
     pub fn attach(config: &mut OtlpConfig) -> Option<Self> {
         let traces = config
             .traces
@@ -105,10 +108,16 @@ impl WorkspaceFeedback {
         Some(feedback)
     }
 
-    /// The latest notice: [`WorkspaceNotice::Expired`] once ingest reported
-    /// it (it is never replaced), else the deadline of the latest accepted
-    /// export that carried one. `None` before any response, and after an
-    /// accepted export without the header (a claimed workspace or a full key).
+    /// The latest notice: [`WorkspaceNotice::Expired`] once ingest refused
+    /// the key, else the deadline of the latest accepted export that carried
+    /// one. `None` before any response, and after an accepted export without
+    /// the header (a claimed workspace or a full key). Responses that say
+    /// nothing about the workspace (a 429, a generic 401, a malformed
+    /// marker) leave it as it was.
+    ///
+    /// A destination stops at its expiry, so within one pipeline nothing
+    /// replaces [`WorkspaceNotice::Expired`]. Only an accepted export from a
+    /// pipeline built again with this feedback attached (after a claim) does.
     #[must_use]
     pub fn notice(&self) -> Option<WorkspaceNotice> {
         *lock(&self.state.notice)
@@ -137,19 +146,27 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 impl FeedbackState {
     /// Folds one response of the trusted destination into the notice.
+    ///
+    /// Only the expiry response itself disables the destination: the
+    /// pipeline keeps that destination stopped from then on, and a pipeline
+    /// built again (after a claim) starts enabled, even when it was built
+    /// from a configuration this feedback is already attached to.
     fn observe(&self, response: &ExportResponse<'_>) -> ResponseAction {
         let markers: Vec<&[u8]> = response.header_values(WORKSPACE_HEADER).collect();
         let rpc = response.rpc_status();
-        let observation = classify(response.status(), &markers, rpc.as_ref());
+        self.fold(classify(response.status(), &markers, rpc.as_ref()))
+    }
+
+    fn fold(&self, observation: Observation) -> ResponseAction {
         let mut notice = lock(&self.notice);
-        if *notice == Some(WorkspaceNotice::Expired) {
-            // Terminal: the destination is stopped, nothing replaces it.
-            return ResponseAction::Disable;
-        }
         match observation {
             Observation::Expired => {
-                *notice = Some(WorkspaceNotice::Expired);
+                let already =
+                    notice.replace(WorkspaceNotice::Expired) == Some(WorkspaceNotice::Expired);
                 drop(notice);
+                if already {
+                    return ResponseAction::Disable;
+                }
                 log::warn!(
                     target: "xybrid_sdk",
                     "Xybrid trace export stopped for this session: the key's unclaimed \
@@ -251,8 +268,7 @@ fn parse_marker(value: &str) -> Option<Marker> {
             if expires_at.is_some() {
                 return None;
             }
-            let at = DateTime::parse_from_rfc3339(raw).ok()?;
-            expires_at = Some(SystemTime::from(at.with_timezone(&Utc)));
+            expires_at = Some(deadline(raw)?);
         }
     }
     if state.eq_ignore_ascii_case("provisional") {
@@ -262,6 +278,16 @@ fn parse_marker(value: &str) -> Option<Marker> {
     } else {
         None
     }
+}
+
+/// An RFC 3339 key deadline. One before the Unix epoch is malformed: no key
+/// expires then, and not every platform's `SystemTime` reaches that far back.
+fn deadline(raw: &str) -> Option<SystemTime> {
+    let at = DateTime::parse_from_rfc3339(raw).ok()?;
+    let seconds = u64::try_from(at.timestamp()).ok()?;
+    let since_epoch = Duration::from_secs(seconds)
+        .checked_add(Duration::from_nanos(u64::from(at.timestamp_subsec_nanos())))?;
+    SystemTime::UNIX_EPOCH.checked_add(since_epoch)
 }
 
 #[cfg(test)]
@@ -313,6 +339,14 @@ mod tests {
             Observation::Provisional(deadline + Duration::from_millis(250))
         );
         assert_eq!(classify(200, &[], None), Observation::Unrestricted);
+        assert_eq!(
+            classify(
+                200,
+                &one("provisional; expires_at=1970-01-01T00:00:00Z"),
+                None
+            ),
+            Observation::Provisional(SystemTime::UNIX_EPOCH)
+        );
     }
 
     #[test]
@@ -328,6 +362,10 @@ mod tests {
             "provisional; =2026-11-15T12:00:00Z",
             "provisional; expires_at",
             "provisional; expires_at=2026-11-15T12:00:00Z; expires_at=2026-11-16T12:00:00Z",
+            // Before the Unix epoch: no key expires then (and a Windows
+            // `SystemTime` cannot hold year 1).
+            "provisional; expires_at=0001-01-01T00:00:00Z",
+            "provisional; expires_at=1969-12-31T23:59:59.999Z",
             "claimed",
         ] {
             assert_eq!(
@@ -648,6 +686,94 @@ mod tests {
         accepted.assert_hits(1);
         assert_eq!(second.stats().unwrap().traces.exported, 1);
         assert!(first.workspace_feedback().unwrap().is_expired());
+    }
+
+    #[test]
+    fn a_pipeline_rebuilt_from_an_attached_configuration_recovers_after_a_claim() {
+        use xybrid_observability::otlp::ObservabilityPipeline;
+
+        let server = MockServer::start();
+        let mut refused = server.mock(|when, then| {
+            when.method(POST).path("/v1/traces");
+            then.status(401)
+                .header("X-Xybrid-Workspace", "expired")
+                .body(EXPIRED_PROTOBUF);
+        });
+        // A host attaches once and builds from clones of the configuration.
+        let mut otlp = quick(OtlpConfig::xybrid_traces_to(&server.url("/v1/traces"), KEY));
+        let feedback = WorkspaceFeedback::attach(&mut otlp).expect("Xybrid preset");
+        let first = ObservabilityPipeline::build(otlp.clone()).unwrap();
+        first
+            .observer()
+            .start_inference(
+                InferenceRequest::new("chat", "llama.cpp"),
+                StartOptions::default(),
+            )
+            .end();
+        assert!(first.force_flush(Duration::from_secs(5)).is_err());
+        first.shutdown(Duration::from_secs(5)).unwrap();
+        refused.assert_hits(1);
+        assert!(feedback.is_expired());
+
+        // Claimed: ingest accepts the key again, without the header.
+        refused.delete();
+        let accepted = server.mock(|when, then| {
+            when.method(POST).path("/v1/traces");
+            then.status(200);
+        });
+        let second = ObservabilityPipeline::build(otlp.clone()).unwrap();
+        for _ in 0..2 {
+            second
+                .observer()
+                .start_inference(
+                    InferenceRequest::new("chat", "llama.cpp"),
+                    StartOptions::default(),
+                )
+                .end();
+            second.force_flush(Duration::from_secs(5)).unwrap();
+        }
+        second.shutdown(Duration::from_secs(5)).unwrap();
+        let traces = second.stats().traces;
+        assert_eq!((traces.exported, traces.dropped), (2, 0));
+        assert_eq!(feedback.notice(), None, "the accepted export replaced it");
+
+        // A session given the already attached configuration exports too.
+        let session =
+            ObservabilitySession::new(ObservabilityConfig::otlp(otlp).device_attributes(false))
+                .unwrap();
+        span(&session);
+        session.flush(Duration::from_secs(5)).unwrap();
+        session.shutdown(Duration::from_secs(5)).unwrap();
+        accepted.assert_hits(3);
+        assert_eq!(session.stats().unwrap().traces.exported, 1);
+    }
+
+    #[test]
+    fn responses_without_workspace_news_keep_the_notice() {
+        let state = FeedbackState::default();
+        let deadline = at(DEADLINE);
+        let provisional = Observation::Provisional(deadline);
+        assert_eq!(state.fold(provisional), ResponseAction::Continue);
+        assert_eq!(state.fold(Observation::Ignored), ResponseAction::Continue);
+        assert_eq!(
+            *lock(&state.notice),
+            Some(WorkspaceNotice::Provisional {
+                key_expires_at: deadline
+            })
+        );
+        // Each expiry answer disables the destination it came from; nothing
+        // else does, whatever the notice already says.
+        for _ in 0..2 {
+            assert_eq!(state.fold(Observation::Expired), ResponseAction::Disable);
+        }
+        assert_eq!(state.fold(Observation::Ignored), ResponseAction::Continue);
+        assert_eq!(*lock(&state.notice), Some(WorkspaceNotice::Expired));
+        // An accepted export (a pipeline built again after the claim).
+        assert_eq!(
+            state.fold(Observation::Unrestricted),
+            ResponseAction::Continue
+        );
+        assert_eq!(*lock(&state.notice), None);
     }
 
     #[test]
