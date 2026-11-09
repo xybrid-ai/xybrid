@@ -44,8 +44,16 @@ and `{out_dir}` in its arguments instead.
 - Android emulator: `--endpoint-host 10.0.2.2`. The app needs cleartext HTTP
   to that host (a debug network security config) and the `INTERNET`
   permission.
-- iOS simulator: `127.0.0.1` reaches the host. A physical device needs
-  `--endpoint-host <host LAN address>` and an ATS exception for plain HTTP.
+- Physical Android device: `adb reverse tcp:{port} tcp:{port}` inside the
+  command and `--endpoint-host 127.0.0.1` (the consumer's debug network
+  security config allows cleartext to 127.0.0.1 as well as 10.0.2.2).
+- iOS simulator: `127.0.0.1` reaches the host.
+- Physical iPhone: a package test cannot run on a device, so
+  `bindings/apple/scripts/observability-scenario-ios-device.sh` runs the same
+  Swift scenario inside the example app; `--endpoint-host <host LAN address>`,
+  the phone unlocked on the host's network, and iOS's local network prompt
+  allowed once (the export uses its own sockets, so App Transport Security does
+  not apply).
 - A scenario that writes `expectations.json` on a device copies it back inside
   its command (`adb pull`, `xcrun simctl get_app_container`) to the path given
   by `--expectations`.
