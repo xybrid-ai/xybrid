@@ -48,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   far-off date gives up at once instead of waiting a 60 s default. Registry
   calls (across every registry URL they try) and model downloads follow the
   same bound.
+- An opened circuit breaker recovers after its open duration instead of
+  refusing every later call until reset. The gateway client and registry calls
+  took a half-open circuit's only test request twice (once to fail fast, once
+  for the attempt), so the probe was never sent. Nor is that request kept any
+  longer by a retried call that gives up on a long `Retry-After`, or by a
+  registry probe that ends offline (it is given back) or with a compatibility
+  refusal (it closes the circuit). `CircuitBreaker::is_refusing` checks without
+  taking a request, and `CircuitBreaker::release` gives one back.
 
 ### Migration
 
