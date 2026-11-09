@@ -22,6 +22,19 @@
   Exporter state now reflects shutdown; invalid configurations can be corrected/retried.
   Invalid resource modes/intervals fail before export is enabled or replaced.
   Resource sampling remains independent of export. See README for migration.
+* Breaking: `XybridStreamSession.flush()` returns an `FfiTranscriptionResult`
+  instead of a `String`. Read `.text` for the transcript; the record also
+  carries `durationMs`, `chunksProcessed` and the session's `observation`.
+* Breaking: `FfiTtsStreamEvent.complete` carries an `FfiTtsStreamResult`
+  (status, sample rate, channels, sample and chunk counts, `observation`).
+  Code that constructs the event (mocks, fakes) must pass one. `runTtsStreaming`
+  hands it to the new `onComplete` callback, and fails the stream with a
+  `StateError` after the partial audio when the status is `limited`.
+* Changed: an explicit `traceparent` that is not valid W3C now fails the call
+  (`XybridException`, an error token, or a thrown error for sessions, loaders
+  and manual handles) instead of being ignored.
+* `XybridPipeline.run` accepts `observation:`; pipeline results now carry the
+  workflow reference and each stage's reference in `metrics.stageLatenciesMs`.
 
 
 ## 0.17.0

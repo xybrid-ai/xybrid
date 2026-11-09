@@ -288,7 +288,7 @@ const session = await asr.stream({ language: 'en' });
   for await (const partial of session.partials()) setCaption(partial.text);
 })();
 await session.feed(float32Samples);       // from your audio callback
-const transcript = await session.flush(); // when the user stops talking
+const { text } = await session.flush();  // when the user stops talking
 await session.release();
 ```
 

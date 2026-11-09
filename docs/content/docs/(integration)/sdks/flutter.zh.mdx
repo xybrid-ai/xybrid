@@ -94,6 +94,21 @@ final result = await model.run(envelope);
 print(result.text); // "Hello, how are you?"
 ```
 
+实时转写时，打开一个会话，并在音频到达时送入 PCM float32、单声道、16 kHz 采样。
+`flush()` 结束会话并返回 `FfiTranscriptionResult`：转写文本在 `text` 中，另含
+`durationMs`、`chunksProcessed` 以及会话的 `observation` 引用。
+
+```dart
+final session = await XybridStreamSession.fromModel(model);
+session.partials.listen((partial) => caption = partial.text); // listen first
+session.feed(samples);
+final transcript = (await session.flush()).text;
+```
+
+<Callout type="warn">
+早期版本的 `flush()` 以 `String` 返回转写文本。现在请改为读取结果的 `.text`。
+</Callout>
+
 ## LLM 对话与流式输出
 
 ```dart
@@ -294,7 +309,7 @@ class XybridPipeline {
   int get stageCount;
   List<String> get stageNames;
 
-  Future<XybridResult> run(XybridEnvelope envelope);
+  Future<XybridResult> run(XybridEnvelope envelope, {ObservationOptions? observation});
 }
 ```
 
@@ -316,6 +331,10 @@ final result = await pipeline.run(
 // 结果为最后阶段输出的 TTS 音频
 final wav = result.audioAsWav();
 ```
+
+`observation:` 接受与 `RunOptions.observation` 相同的 `ObservationOptions`。
+`result.observation` 是流水线的工作流引用，`result.metrics.stageLatenciesMs[i].observation`
+是每个阶段推理的引用。
 
 ---
 

@@ -243,28 +243,43 @@ Audio must be PCM **float32, mono, 16 kHz** — converting from the platform's
 microphone format is the caller's job.
 
 ```csharp
-using var session = model.Stream(StreamingConfigs.VoiceActivity(vadModelDir, language: "en"));
+using System.Threading;
+using Xybrid;
+using XybridBolt; // the Partials() extension
 
-// Drive the UI from the partial stream.
-await foreach (var partial in session.Partials(cancellationToken))
-{
-    label.text = partial.Text;
-}
+using var session = model.Stream(StreamingConfigs.VoiceActivity(vadModelDir, language: "en"));
+ShowPartials(session, cancellationToken); // not awaited: runs alongside the feed loop
 
 // From the Microphone clip, converted to float mono 16 kHz:
 session.Feed(pcm);
 
-string transcript = session.Flush();
+XybridTranscriptionResult result = session.Flush();
+string transcript = result.Text;
+
+// Started from the main thread, each await resumes there, so the UI can be updated.
+async void ShowPartials(XybridStreamingSession live, CancellationToken token)
+{
+    await foreach (var partial in live.Partials(token))
+    {
+        label.text = partial.Text;
+    }
+}
 ```
 
 Partial text is **cumulative, not a delta**: render each one in place of the
 previous rather than appending. A partial produced before you subscribe is
 delivered immediately, so the opening words of an utterance are never lost.
 
-`flush()` ends the session and returns the full transcript — and reports an
-error if any chunk failed to transcribe, because that audio is gone and the
-transcript would otherwise look complete. `cancel()` ends the session and
-discards queued audio.
+`Flush()` ends the session and returns an `XybridTranscriptionResult`: the full
+transcript in `Text`, plus `DurationMs`, `ChunksProcessed` and the session's
+`Observation` reference. It throws if any chunk failed to transcribe, because
+that audio is gone and the transcript would otherwise look complete.
+`Cancel()` ends the session and discards queued audio.
+
+<Callout type="warn">
+Earlier releases returned the transcript as a `string`. Read `.Text` from the
+result instead.
+</Callout>
 
 Voice-activity detection cuts chunks on speech boundaries instead of a fixed
 clock, which avoids the stutter you get when a window lands mid-word. It needs

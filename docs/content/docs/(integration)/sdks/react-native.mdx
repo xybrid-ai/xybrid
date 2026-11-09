@@ -108,7 +108,7 @@ The package covers the full SDK surface — see the [package README](https://git
 - structured output (`jsonSchemaToGbnf` + `generationConfig.grammar`)
 - tool calling (`generationConfig.tools`, `result.toolCalls`, `Envelope.toolResults`)
 - vision (`Envelope.image`, `Envelope.userMessage`)
-- text-to-speech voices and speech recognition, batch and live (`model.stream()`)
+- text-to-speech voices and speech recognition, batch and live (`model.stream()`; a session's `flush()` resolves a `TranscriptionResult` with `text`, `durationMs`, `chunksProcessed` and `observation`, where earlier releases resolved the transcript string)
 - Phonon (`phonon-31m-en`) and Kitten TTS 2 speech on Android `arm64-v8a` devices only; the engine's notices ship in the AAR under `assets/xybrid/zzz/` and Android merges them into your APK
 - multi-stage pipelines (`Pipeline.fromYaml` / `fromFile`)
 - background downloads with progress, speculative cloud serving, model cache management and memory release

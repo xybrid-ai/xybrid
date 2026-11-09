@@ -11,7 +11,9 @@ from pathlib import Path
 PATH_FILTERS = {
     # tools/scripts/tests also covers the zzz delivery contract, the Flutter
     # platform floors, JS release scripts/manifests and the workflows its hygiene tests read.
-    "relevant": r"^(tools/scripts/|bindings/(web|observability-js)/(scripts/|package\.json$|pnpm-(lock|workspace)\.yaml$)|bindings/observability-js/src/version\.ts$|crates/zzz-sys/(zzz_pull\.py|natives-manifest\.json)$|bindings/flutter/((ios|macos)/xybrid_flutter\.podspec|android/build\.gradle)$|\.bazelrc$|\.github/workflows/(ci|release-prep|release-publish|test-zzz-android|test-zzz-engine|trusted-zzz-sdk)\.yml$)",
+    # test_generation_gates.py reads build-flutter.yml and the FRB wrapper, and
+    # globs bindings/*/scripts/gen* for generators that need a drift gate.
+    "relevant": r"^(tools/scripts/|bindings/(web|observability-js)/(scripts/|package\.json$|pnpm-(lock|workspace)\.yaml$)|bindings/observability-js/src/version\.ts$|crates/zzz-sys/(zzz_pull\.py|natives-manifest\.json)$|bindings/flutter/((ios|macos)/xybrid_flutter\.podspec|android/build\.gradle|generate-frb\.sh)$|bindings/[^/]+/scripts/gen[^/]*$|\.bazelrc$|\.github/workflows/(ci|build-flutter|release-prep|release-publish|test-zzz-android|test-zzz-engine|trusted-zzz-sdk)\.yml$)",
     # The committed C# is generated from the whole bolt crate (its exports and
     # their doc comments) and the facade types it wraps, so a change to either
     # must run the drift check and recompile the hand-written Api layer on top.

@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and ASR flush returns a transcription result carrying its session reference.
   Public streaming, stage and pipeline result records gained observation fields;
   update exhaustive struct literals and serialized-result consumers.
+- Live ASR `flush()` returns a transcription record instead of a string in every
+  binding: Swift, Kotlin and Python `XybridTranscriptionResult`, Unity
+  `XybridBolt.XybridTranscriptionResult`, React Native `TranscriptionResult`
+  and Flutter `FfiTranscriptionResult`. Read `text` (Unity `Text`) for the
+  transcript; the record also carries the duration, the chunk count and the
+  session's observation reference.
+- Flutter `FfiTtsStreamEvent.complete` carries an `FfiTtsStreamResult`.
+  `runTtsStreaming` reports it through `onComplete` and fails the stream with
+  a `StateError` when the output was limited.
 - Invalid explicit W3C parents are rejected. Validate caller-supplied
   `traceparent` values before passing observation options.
 - React Native observation references use `{trace_id, span_id}`. Replace reads

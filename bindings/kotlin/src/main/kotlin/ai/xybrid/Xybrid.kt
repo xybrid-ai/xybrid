@@ -748,7 +748,7 @@ typealias Pipeline = XybridPipeline
  * // from the audio callback:
  * session.feed(pcm)
  * // when the user stops talking:
- * val transcript = session.flush()
+ * val transcript = session.flush().text   // .observation references the session
  * ```
  *
  * @param config chunking options; defaults to fixed-window chunking at

@@ -1,9 +1,12 @@
 """Regression tests for docs-only selection and the required CI gate."""
 
+import importlib.util
+import io
 import re
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -91,6 +94,58 @@ class ChangeSelectionTests(unittest.TestCase):
         for path in (
             "bindings/flutter/example/android/app/build.gradle.kts",
             "bindings/flutter/ios/Classes/dummy_file.c", "bindings/.bazelrc",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
+
+    def test_every_file_the_generation_gate_tests_read_runs_tooling_tests(self):
+        # test_generation_gates.py asserts on build-flutter.yml, the FRB
+        # wrapper, ci.yml and every generator it globs. Editing any of them
+        # (say, deleting the FRB drift step) must run that test, or the PR
+        # skips it and still passes CI Success. Record what the suite really
+        # reads instead of restating it here, so the two cannot drift.
+        tests_dir = Path(__file__).resolve().parent
+        spec = importlib.util.spec_from_file_location(
+            "generation_gates_under_ci_gate", tests_dir / "test_generation_gates.py"
+        )
+        gates = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gates)
+        repo = gates.REPO_ROOT.resolve()
+        read, globbed = set(), []
+        read_text, glob = Path.read_text, Path.glob
+
+        def recording_read(path, *args, **kwargs):
+            read.add(path.resolve())
+            return read_text(path, *args, **kwargs)
+
+        def recording_glob(path, pattern, *args, **kwargs):
+            globbed.append(pattern)
+            return glob(path, pattern, *args, **kwargs)
+
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(gates.GenerationGateTests)
+        with mock.patch.object(Path, "read_text", recording_read), \
+                mock.patch.object(Path, "glob", recording_glob):
+            result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+        self.assertTrue(result.wasSuccessful(), result.failures + result.errors)
+
+        inputs = sorted(
+            path.relative_to(repo).as_posix() for path in read if path.is_relative_to(repo)
+        )
+        for expected in (".github/workflows/build-flutter.yml", "bindings/flutter/generate-frb.sh"):
+            self.assertIn(expected, inputs, "the generation gate tests no longer read this file")
+        # A listed generator (deleting one fails the suite) and any file its
+        # globs would discover (a new generator without a gate) must select
+        # the tooling tests too.
+        self.assertTrue(globbed, "the generation gate tests no longer glob for generators")
+        new_generators = [pattern.replace("*", "new") for pattern in globbed]
+        for path in inputs + sorted(gates.GATES) + new_generators:
+            with self.subTest(path=path):
+                outputs = classify("pull_request", pr_files(path))
+                self.assertEqual(outputs["relevant"], "true")
+                self.assertEqual(OPTIONAL_JOBS["tooling-tests"], "relevant")
+        for path in (
+            ".github/workflows/build-flutter.yml.bak", "bindings/flutter/generate-frb.sh.orig",
+            "bindings/flutter/lib/src/pipeline.dart", "bindings/apple/scripts/set-natives-mode.sh",
         ):
             with self.subTest(path=path):
                 self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")

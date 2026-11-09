@@ -24,7 +24,7 @@ export 'rust/api/streaming.dart'
 /// final asr = await XybridStreamSession.fromModel(model);
 /// asr.partials.listen((p) => print(p.text)); // listen before feeding
 /// asr.feed(samples);                          // call repeatedly from the mic
-/// final transcript = await asr.flush();       // finalize
+/// final transcript = (await asr.flush()).text; // finalize
 /// ```
 class XybridStreamSession {
   final FfiStreamSession _inner;

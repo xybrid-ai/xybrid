@@ -14,7 +14,7 @@ import type { PartialResult, TranscriptionResult } from './types';
  * // from your audio callback (Float32, mono, 16 kHz):
  * await session.feed(samples);
  * // when the user stops talking:
- * const transcript = await session.flush();
+ * const { text, observation } = await session.flush();
  * await session.release();
  * ```
  */
