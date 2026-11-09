@@ -1,0 +1,142 @@
+crates/xybrid-core/src/execution/types.rs
+  s_5502e4c590b55f::t_3f0539c15dea12 388-403
+  s_5502e4c590b55f::t_ea7ab963585c9d 285-287
+  s_5502e4c590b55f::t_11b91480fe56c5 249-259
+  s_5502e4c590b55f::t_babe822616149b 139-148
+  s_5502e4c590b55f::t_17a95a0899078f 12
+  s_5502e4c590b55f::t_f2183a824427b8 47-50
+tools/conformance/expose_tts_duration.py
+  s_5502e4c590b55f::t_ce676ccf163168 1-113
+crates/xybrid-core/src/runtime_adapter/onnx/session.rs
+  s_5502e4c590b55f::t_fcf1e50309d5d8 808-854,863-864
+  s_5502e4c590b55f::t_9a0a4a04b9d868 549,551-581
+  s_5502e4c590b55f::t_bdb995f76a9d51 855-862,865,1065-1074
+bindings/unity/Tests/Editor/ResultWireCompatibilityTests.cs
+  s_5502e4c590b55f::t_05e41cf42a3637 4-5
+  s_5502e4c590b55f::t_08f9b0b2e44b18 27-185
+docs/sdk/api-surface.yaml
+  s_5502e4c590b55f::t_5a8255c5085ba6 657-673
+  s_5502e4c590b55f::t_d37de8edc6f23c 726-747
+CHANGELOG.md
+  s_5502e4c590b55f::t_fe4d39dc263600 24-40
+docs/sdk/MODEL_METADATA.md
+  s_5502e4c590b55f::t_4475e56325b380 465-490,503-525,528-540
+  s_5502e4c590b55f::t_c6c34acd5fa30f 491-495
+  s_5502e4c590b55f::t_410563dfd38fa3 496-502
+  s_5502e4c590b55f::t_82d3b3a10a24b8 526-527
+bindings/unity/README.md
+  s_5502e4c590b55f::t_533afa84428fbd 152,156-182
+  s_5502e4c590b55f::t_cb2b920b73a59c 186-187
+  s_5502e4c590b55f::t_5ef22958e4a630 183-185
+  s_5502e4c590b55f::t_825495808aa6a3 188
+crates/xybrid-core/src/execution/tts_timing.rs
+  s_5502e4c590b55f::t_8793d6ce5e6cca 1-242,260-268,270-389,392-413
+  s_5502e4c590b55f::t_a987930c6c2e56 243-259
+  s_5502e4c590b55f::t_a64ce60b8a2fe0 390-391
+  s_5502e4c590b55f::t_0eb49df224e815 269
+tools/conformance/verify_tts_duration.py
+  s_5502e4c590b55f::t_5d9a54deb731de 88-89
+  s_5502e4c590b55f::t_21569d6cb81cc6 1-87,90-97
+crates/xybrid-core/src/execution/mod.rs
+  s_5502e4c590b55f::t_026a4d7577dedd 107-109
+crates/xybrid-core/src/ir/mod.rs
+  s_5502e4c590b55f::t_415b666f0888bd 12
+crates/xybrid-core/src/execution/executor.rs
+  s_5502e4c590b55f::t_9656c3876f81af 3190,3204,3212,3215-3240,3246-3268
+  s_5502e4c590b55f::t_3b9a83d4c22113 3118,3123,3127,3130,3138,3142,3145,3147-3152,3156-3159,3163,3165-3173,3175-3176
+  s_5502e4c590b55f::t_30c7e2b10b690f 3700-3712
+  s_5502e4c590b55f::t_4f5ada63d3a165 3457-3461,3471-3472,3481,3487,3489-3492,3497-3514
+  s_5502e4c590b55f::t_5b0a6eacc24161 5925-6057
+  s_5502e4c590b55f::t_0bfb93e53bd2a4 2949
+  s_5502e4c590b55f::t_8714118104b927 194-202
+  s_5502e4c590b55f::t_ee3285e95ddb2b 2888-2889,2895-2907,2910
+  s_5502e4c590b55f::t_21c04f81b34aea 183,190,3124-3126,3146,3164
+integration-tests/tests/tts_phoneme_timings.rs
+  s_5502e4c590b55f::t_17db641850ff43 1-301,303-313,315-355,358-370,372-394
+  s_5502e4c590b55f::t_434fef2f71122a 302,314,356-357,371
+crates/xybrid-core/src/ir/envelope.rs
+  s_5502e4c590b55f::t_cdd539d8d10dad 1243-1246
+  s_5502e4c590b55f::t_c5e8b6716baa71 1212-1230
+crates/xybrid-core/src/execution/preprocessing/text.rs
+  s_5502e4c590b55f::t_48f2c162bb1783 11
+  s_5502e4c590b55f::t_c77c601b2a25fb 194-217,219,223,227-229,232,235,241,244,1474
+  s_5502e4c590b55f::t_a7de226e2285ba 1473,1475-1549
+bindings/unity/Runtime/Api/InferenceResult.cs
+  s_5502e4c590b55f::t_00e8be2bc1a782 245-246
+  s_5502e4c590b55f::t_407207080e27c9 6-7
+  s_5502e4c590b55f::t_d8ad0fbdd1b5b4 28,360-667,670-716
+  s_5502e4c590b55f::t_793c9bfab0171e 171-188
+  s_5502e4c590b55f::t_bc7bf0169f6b69 201-202
+  s_5502e4c590b55f::t_0b40c6c0d4b389 29-59
+  s_5502e4c590b55f::t_3c316b12dd7fba 668-669
+  s_5502e4c590b55f::t_e12b134299b159 215,225,227-232
+docs/sdk/API_REFERENCE.md
+  s_5502e4c590b55f::t_200b11b7c9e3a3 1392-1393
+  s_5502e4c590b55f::t_a1fee4d8be00af 1482-1497,1500-1546
+  s_5502e4c590b55f::t_31b324a0528976 1566-1567
+  s_5502e4c590b55f::t_c5309a8b2a2778 1498-1499
+tools/conformance/gen_fake_tts.py
+  s_5502e4c590b55f::t_609c6ebe8d450c 1-35,47-337
+  s_5502e4c590b55f::t_1909b39cbbc125 36-46
+integration-tests/.gitignore
+  s_5502e4c590b55f::t_e4a673d9f50222 12-14
+integration-tests/BUILD.bazel
+  s_5502e4c590b55f::t_73b391227c3f3e 94-105
+  s_5502e4c590b55f::t_6a6b6d5a4f424b 135,143,147-148,154-155
+  s_5502e4c590b55f::t_74a9421707c44b 156
+tools/conformance/README.md
+  s_5502e4c590b55f::t_61d923423ec9cd 7-10
+  s_5502e4c590b55f::t_cd3e031cd59bff 113
+  s_5502e4c590b55f::t_22d0f7388a7969 237-241
+  s_5502e4c590b55f::t_11879754d42163 258-260
+  s_5502e4c590b55f::t_d6e1deda627bde 273-277
+  s_5502e4c590b55f::t_c973271765b5bf 283-311
+  s_5502e4c590b55f::t_3a6564c88c3de5 231-236,242-257,261-272,278-282
+crates/xybrid-core/tests/tts_smoke.rs
+  s_5502e4c590b55f::t_f05dea5736f1a8 12-13
+  s_5502e4c590b55f::t_f63a78d0e60a0a 65-71
+  s_5502e4c590b55f::t_9af479a0d5c550 10-11
+  s_5502e4c590b55f::t_519580b66592dc 14
+  s_5502e4c590b55f::t_476f22c856a08a 62-64
+  s_5502e4c590b55f::t_4ceef011eed84e 72-74
+crates/xybrid-core/src/execution/modes/mod.rs
+  s_5502e4c590b55f::t_059b453b68220f 41
+crates/xybrid-core/src/execution/modes/tts.rs
+  s_5502e4c590b55f::t_41ecc3c5aac0ba 8-10,55-94,96-98,107-116,123-124,222-227,333-381
+crates/xybrid-core/src/execution/postprocessing/audio.rs
+  s_5502e4c590b55f::t_3bac96af129ed2 7,13-16,22-27,42-46,48-52,54,64-66,68-69,74-76,82-85,93-98,104,125,127,151-167,170-172,174,178,184,198,204-370
+crates/xybrid-core/src/phonemizer.rs
+  s_5502e4c590b55f::t_524fffdb43c7b9 7-10,13,67,69-86,88,114,117,157-168,174,177-178,236-297
+crates/xybrid-sdk/src/lib.rs
+  s_5502e4c590b55f::t_b4257ea1d1ae1c 270-271
+crates/xybrid-sdk/src/result.rs
+  s_5502e4c590b55f::t_90036b9d5323cb 9,341-357,573-638
+integration-tests/fixtures/tts/fake/with_duration/misaki/us_gold.json
+  s_5502e4c590b55f::t_842d2990570055 1-14
+integration-tests/fixtures/tts/fake/with_duration/model_metadata.json
+  s_5502e4c590b55f::t_c9882eced13ef3 1-37
+integration-tests/fixtures/tts/fake/with_duration/tokens.txt
+  s_5502e4c590b55f::t_c359c979b66af9 1-41
+integration-tests/fixtures/tts/fake/without_duration/misaki/us_gold.json
+  s_5502e4c590b55f::t_fbec4d697350ea 1-14
+integration-tests/fixtures/tts/fake/without_duration/model_metadata.json
+  s_5502e4c590b55f::t_706afe2255c60d 1-37
+integration-tests/fixtures/tts/fake/without_duration/tokens.txt
+  s_5502e4c590b55f::t_2550fdb124d615 1-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2f69caf0a88b23634d6de36658b6bb8fd89d8512",
+  "prompts": {},
+  "sessions": {
+    "s_5502e4c590b55f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cea3b300-d521-4c3d-9d9a-f849f9a0378a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}

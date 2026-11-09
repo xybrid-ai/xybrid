@@ -1,0 +1,19 @@
+integration-tests/tests/tts_phoneme_timings.rs
+  s_5502e4c590b55f::t_3c32d77050860c 104-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4bd5e3c61a69c0bfb7d8d12633a5f67aa6f98bd7",
+  "prompts": {},
+  "sessions": {
+    "s_5502e4c590b55f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cea3b300-d521-4c3d-9d9a-f849f9a0378a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
