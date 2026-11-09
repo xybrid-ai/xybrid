@@ -36,10 +36,17 @@ MARKER="XYBRID_SCENARIO_EXPECTATIONS_BASE64="
 build() {
     local udid="${1:?udid}" team="${2:-}"
     local entry="$APP_DIR/XybridExampleApp.swift" plist="$APP_DIR/Info.plist"
-    cp "$entry" "$entry.orig"; cp "$plist" "$plist.orig"
+    # One build at a time: a second build would back up the injected files.
+    local lock="$APP_DIR/.observability-scenario.lock" backup
+    if ! mkdir "$lock" 2>/dev/null; then
+        echo "error: another device build is using examples/ios (remove $lock if it is stale)" >&2
+        exit 1
+    fi
+    backup="$(mktemp -d)"
+    cp "$entry" "$backup/XybridExampleApp.swift"; cp "$plist" "$backup/Info.plist"
     # Expanded now: the trap runs after this function's locals are gone.
     # shellcheck disable=SC2064
-    trap "mv -f '$entry.orig' '$entry'; mv -f '$plist.orig' '$plist'" EXIT
+    trap "cp -f '$backup/XybridExampleApp.swift' '$entry'; cp -f '$backup/Info.plist' '$plist'; rm -rf '$backup' '$lock'" EXIT
     python3 - "$TEST" "$entry" "$plist" <<'PY'
 import sys
 test, entry, plist = sys.argv[1:]
@@ -118,6 +125,16 @@ print(json.dumps({"XYBRID_SCENARIO_DEVICE": "1", "XYBRID_SCENARIO_ENDPOINT": sys
     fi
     printf '%s' "${line#"$MARKER"}" | base64 --decode > "$expectations"
     echo "==> Wrote $expectations from the device console"
+    # The app always exits 0 (devicectl does not report its status); a scenario
+    # step that failed is reported on the console, so fail here as well.
+    if grep -q "XYBRID_SCENARIO_ERROR" "$log"; then
+        echo "error: the scenario reported a failed step (see $log)" >&2
+        exit 1
+    fi
+    if [ "$status" -ne 0 ]; then
+        echo "error: devicectl exited with $status (see $log)" >&2
+        exit "$status"
+    fi
 }
 
 case "${1:-}" in
