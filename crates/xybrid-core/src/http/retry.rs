@@ -55,6 +55,16 @@ impl RetryAfterBudget {
         }
     }
 
+    /// A budget of `limit`, for a call with a tighter deadline of its own.
+    ///
+    /// Never more than [`MAX_RETRY_AFTER`]: a larger `limit` gives the full
+    /// budget.
+    pub fn with_limit(limit: Duration) -> Self {
+        Self {
+            remaining: limit.min(MAX_RETRY_AFTER),
+        }
+    }
+
     /// Charge `wait` to the budget if it fits, returning whether the caller
     /// may sleep it.
     ///
@@ -80,6 +90,71 @@ impl Default for RetryAfterBudget {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Read an HTTP `Retry-After` value as the wait it asks for, as of `now`.
+///
+/// Both forms RFC 9110 allows are read: delay-seconds (`"120"`) and an
+/// HTTP-date (`"Wed, 21 Oct 2015 07:28:00 GMT"`, the time until then; a date
+/// already past is no wait). The result is always whole seconds, rounded up,
+/// so [`Duration::as_secs`] loses nothing. Two out-of-spec forms are read
+/// too, because guessing a default for them could wait far less (or more)
+/// than the server asked: a delay too large for `u64` saturates, and a
+/// fractional delay (`"1.5"`) rounds up.
+///
+/// Returns `None` for anything else, so the caller applies its own default.
+///
+/// # Examples
+///
+/// ```
+/// use std::time::{Duration, SystemTime};
+/// use xybrid_core::http::parse_retry_after;
+///
+/// let now = SystemTime::now();
+/// assert_eq!(parse_retry_after("120", now), Some(Duration::from_secs(120)));
+/// assert_eq!(
+///     parse_retry_after("Thu, 01 Jan 1970 00:00:00 GMT", now),
+///     Some(Duration::ZERO)
+/// );
+/// assert_eq!(parse_retry_after("soon", now), None);
+/// ```
+pub fn parse_retry_after(value: &str, now: std::time::SystemTime) -> Option<Duration> {
+    let value = value.trim();
+    if let Some(secs) = parse_delay_seconds(value) {
+        return Some(Duration::from_secs(secs));
+    }
+
+    use chrono::{DateTime, NaiveDateTime, Utc};
+    let date = DateTime::parse_from_rfc2822(value)
+        .map(|date| date.with_timezone(&Utc))
+        .or_else(|_| {
+            NaiveDateTime::parse_from_str(value, "%a, %d %b %Y %H:%M:%S GMT")
+                .map(|date| date.and_utc())
+        })
+        .ok()?;
+    // Negative (a date already past) is no wait at all.
+    let ahead = date
+        .signed_duration_since(DateTime::<Utc>::from(now))
+        .to_std()
+        .unwrap_or_default();
+    let secs = ahead
+        .as_secs()
+        .saturating_add(u64::from(ahead.subsec_nanos() > 0));
+    Some(Duration::from_secs(secs))
+}
+
+/// Delay-seconds, plus the out-of-spec forms [`parse_retry_after`] accepts:
+/// digits that overflow `u64` saturate, and a fraction rounds up.
+fn parse_delay_seconds(value: &str) -> Option<u64> {
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    let all_digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
+    if whole.is_empty() || !all_digits(whole) || !all_digits(fraction) {
+        return None;
+    }
+    // All ASCII digits, so the only possible parse error is overflow.
+    let whole = whole.parse::<u64>().unwrap_or(u64::MAX);
+    let round_up = fraction.bytes().any(|b| b != b'0');
+    Some(whole.saturating_add(u64::from(round_up)))
 }
 
 /// Configuration for retry behavior.
@@ -230,6 +305,17 @@ pub trait RetryableError {
     /// [`MAX_RETRY_AFTER`], which it can only do when it sees the real delay.
     fn retry_after(&self) -> Option<Duration>;
 
+    /// Returns true if the error says the endpoint is unhealthy, so it counts
+    /// against a circuit breaker.
+    ///
+    /// Defaults to `true`. Return `false` for the server's considered answer
+    /// to the request itself (a spent quota, say): [`with_retry`] records that
+    /// as a success, since the endpoint is up, so repeating it never opens the
+    /// circuit and hides the server's message behind a circuit-open error.
+    fn trips_circuit(&self) -> bool {
+        true
+    }
+
     /// Construct the error to report when a circuit breaker stayed open for the
     /// entire attempt budget, so no real attempt ever ran.
     ///
@@ -344,9 +430,15 @@ where
                 return RetryResult::Success(result);
             }
             Err(err) => {
-                // Record failure with circuit breaker
+                // Record failure with circuit breaker, unless the endpoint
+                // answered for itself: that shows it is up (and must close a
+                // half-open circuit, which would otherwise refuse every call)
                 if let Some(cb) = circuit {
-                    cb.record_failure();
+                    if err.trips_circuit() {
+                        cb.record_failure();
+                    } else {
+                        cb.record_success();
+                    }
                 }
 
                 // Check if error is retryable
@@ -673,6 +765,118 @@ mod tests {
         assert!(!fresh.spend(Duration::from_secs(u64::MAX)));
         assert_eq!(fresh.remaining(), MAX_RETRY_AFTER);
         assert!(fresh.spend(MAX_RETRY_AFTER));
+    }
+
+    #[test]
+    fn retry_after_budget_with_limit_never_exceeds_the_cap() {
+        let tight = RetryAfterBudget::with_limit(Duration::from_secs(1));
+        assert_eq!(tight.remaining(), Duration::from_secs(1));
+        let mut tight = tight;
+        assert!(!tight.spend(Duration::from_secs(2)));
+
+        let generous = RetryAfterBudget::with_limit(Duration::from_secs(86_400));
+        assert_eq!(generous.remaining(), MAX_RETRY_AFTER);
+    }
+
+    #[test]
+    fn parse_retry_after_reads_every_form_a_server_sends() {
+        use std::time::SystemTime;
+
+        // 2026-10-21T07:27:00Z
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_792_567_620);
+        let secs = |value: &str| parse_retry_after(value, now).map(|d| d.as_secs());
+
+        // delay-seconds, surrounding whitespace tolerated
+        assert_eq!(secs("0"), Some(0));
+        assert_eq!(secs(" 120 "), Some(120));
+        // HTTP-date: the time until then; one already past is no wait
+        assert_eq!(secs("Wed, 21 Oct 2026 07:28:00 GMT"), Some(60));
+        assert_eq!(secs("Wed, 21 Oct 2026 07:26:00 GMT"), Some(0));
+        assert_eq!(secs("Wed, 21 Oct 2099 07:28:00 GMT"), Some(2_303_683_260));
+        // Out of spec but unambiguous: saturate, or round up
+        assert_eq!(secs("99999999999999999999999"), Some(u64::MAX));
+        assert_eq!(secs("1.5"), Some(2));
+        assert_eq!(secs("2.0"), Some(2));
+        // Anything else is left to the caller's default
+        for unreadable in ["", "soon", "-1", "1.5s", ".5", "1e3", "inf", "NaN"] {
+            assert_eq!(secs(unreadable), None, "{unreadable:?}");
+        }
+    }
+
+    /// An error the endpoint answered with on purpose (a spent quota, say).
+    #[derive(Debug)]
+    struct Refusal;
+
+    impl RetryableError for Refusal {
+        fn is_retryable(&self) -> bool {
+            false
+        }
+
+        fn retry_after(&self) -> Option<Duration> {
+            None
+        }
+
+        fn trips_circuit(&self) -> bool {
+            false
+        }
+
+        fn circuit_open() -> Self {
+            Refusal
+        }
+    }
+
+    /// Repeating an answer that does not trip the circuit never opens it, so
+    /// each caller keeps getting the server's error; and it closes a
+    /// half-open circuit rather than leaving it refusing every call.
+    #[test]
+    fn errors_that_do_not_trip_the_circuit_count_as_the_endpoint_answering() {
+        use crate::http::{CircuitConfig, CircuitState};
+
+        let policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_ms: 0,
+            max_delay_ms: 0,
+            jitter_factor: 0.0,
+        };
+        let breaker = CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        });
+
+        let mut calls = 0;
+        for _ in 0..5 {
+            let result: RetryResult<(), Refusal> = with_retry(&policy, Some(&breaker), || {
+                calls += 1;
+                Err(Refusal)
+            });
+            assert!(matches!(result, RetryResult::Failure(Refusal)));
+        }
+        assert_eq!(calls, 5, "one request per call, none refused locally");
+        assert!(breaker.is_closed());
+
+        // Opened, with its zero open duration already over: the next call is
+        // the half-open probe.
+        breaker.record_failure();
+        assert!(breaker.is_open());
+        let mut state_during_probe = None;
+        let result: RetryResult<(), Refusal> = with_retry(&policy, Some(&breaker), || {
+            state_during_probe = Some(breaker.state());
+            Err(Refusal)
+        });
+        assert!(matches!(result, RetryResult::Failure(Refusal)));
+        assert_eq!(state_during_probe, Some(CircuitState::HalfOpen));
+        assert!(breaker.is_closed());
+
+        // Errors that do trip it still open it.
+        let result: RetryResult<(), TestError> = with_retry(&policy, Some(&breaker), || {
+            Err(TestError {
+                retryable: false,
+                retry_after: None,
+            })
+        });
+        assert!(matches!(result, RetryResult::Failure(_)));
+        assert!(breaker.is_open());
     }
 
     #[test]

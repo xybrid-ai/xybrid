@@ -38,8 +38,10 @@ pub enum CloudError {
 
     /// Rate limit exceeded (HTTP 429 other than a spent quota).
     ///
-    /// `retry_after_secs` is the server's `Retry-After` as sent; the retry
-    /// loop gives up rather than wait past
+    /// `retry_after_secs` is the server's `Retry-After`, read by
+    /// [`parse_retry_after`](crate::http::parse_retry_after) (an HTTP-date
+    /// counts the seconds until then), or 60 when it sent none that reads.
+    /// It is never clamped; the retry loop gives up rather than wait past
     /// [`MAX_RETRY_AFTER`](crate::http::MAX_RETRY_AFTER).
     #[error("Rate limit exceeded. Retry after {retry_after_secs} seconds.")]
     RateLimited { retry_after_secs: u64 },
@@ -185,6 +187,13 @@ impl RetryableError for CloudError {
             }
             _ => None,
         }
+    }
+
+    fn trips_circuit(&self) -> bool {
+        // A spent quota (the only 429 left as `ApiError`) is the gateway
+        // answering, not failing. Counted, a few repeats would open the
+        // circuit and swap the claim guidance for "try again later".
+        !matches!(self, CloudError::ApiError { status: 429, .. })
     }
 
     fn circuit_open() -> Self {

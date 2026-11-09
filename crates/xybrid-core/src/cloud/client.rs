@@ -3,10 +3,12 @@
 use super::completion::{CompletionRequest, CompletionResponse, Role};
 use super::config::{platform_gateway_url, same_origin, CloudBackend, CloudConfig};
 use super::error::{is_insufficient_quota, CloudError, INSUFFICIENT_QUOTA};
-use crate::http::{with_retry, CircuitBreaker, CircuitConfig, RetryPolicy, RetryResult};
+use crate::http::{
+    parse_retry_after, with_retry, CircuitBreaker, CircuitConfig, RetryPolicy, RetryResult,
+};
 use serde_json::json;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 /// Default timeout for HTTP connections (10 seconds).
 const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 10_000;
@@ -242,11 +244,13 @@ impl Cloud {
                 })
             }
             Err(ureq::Error::Status(status, resp)) => {
-                // Parse Retry-After header for rate limiting (before consuming response)
+                // Parse Retry-After header for rate limiting (before consuming
+                // response). Either RFC form; a date or a delay past the
+                // retry budget then ends the retry at once.
                 let retry_after_secs = resp
                     .header("Retry-After")
-                    .and_then(|v| v.parse::<u64>().ok())
-                    .unwrap_or(60); // Default to 60 seconds if not specified
+                    .and_then(|v| parse_retry_after(v, SystemTime::now()))
+                    .map_or(60, |wait| wait.as_secs()); // Default to 60 seconds if not specified
 
                 let error_body = resp.into_json::<serde_json::Value>().ok();
                 let error = error_body.as_ref().map(|v| &v["error"]);
@@ -1179,20 +1183,35 @@ mod tests {
         use crate::http::RetryableError;
         use httpmock::prelude::*;
 
-        // The platform gateway's shape (both fields), and either field alone.
-        // Each carries the day-long Retry-After earlier gateways sent.
-        for (error_type, code) in [
-            (Some("insufficient_quota"), Some("insufficient_quota")),
-            (Some("invalid_request_error"), Some("insufficient_quota")),
-            (Some("insufficient_quota"), None),
+        // The platform gateway's shape (both fields, no Retry-After, its own
+        // reset header): read as a rate limit, that would wait the default
+        // 60 s, so only detection keeps it inside `PROMPT`. Then either field
+        // alone, with the day-long Retry-After earlier gateways sent.
+        for (error_type, code, retry_after) in [
+            (Some("insufficient_quota"), Some("insufficient_quota"), None),
+            (
+                Some("insufficient_quota"),
+                Some("insufficient_quota"),
+                Some("86400"),
+            ),
+            (
+                Some("invalid_request_error"),
+                Some("insufficient_quota"),
+                Some("86400"),
+            ),
+            (Some("insufficient_quota"), None, Some("86400")),
         ] {
             let server = MockServer::start();
             let gateway = server.mock(|when, then| {
                 when.method(POST).path("/chat/completions");
-                then.status(429)
-                    .header("Retry-After", "86400")
+                let then = then
+                    .status(429)
+                    .header("X-Xybrid-Quota-Reset", "2026-11-10T00:00:00Z")
                     .header("content-type", "application/json")
                     .body(openai_error_body(QUOTA_MESSAGE, error_type, code));
+                if let Some(retry_after) = retry_after {
+                    then.header("Retry-After", retry_after);
+                }
             });
 
             let started = Instant::now();
@@ -1249,6 +1268,84 @@ mod tests {
             ),
             "{err:?}"
         );
+    }
+
+    /// The other ways a server says "much later" are read as such, rather
+    /// than as the 60 s default that would fit the budget and be slept.
+    #[test]
+    fn retry_after_date_or_huge_delay_past_the_budget_gives_up_promptly() {
+        use httpmock::prelude::*;
+
+        for (retry_after, at_least) in [
+            // RFC 9110's other form
+            ("Wed, 21 Oct 2099 07:28:00 GMT", 86_400),
+            // Too large for u64
+            ("99999999999999999999999", u64::MAX),
+        ] {
+            let server = MockServer::start();
+            let gateway = server.mock(|when, then| {
+                when.method(POST).path("/chat/completions");
+                then.status(429)
+                    .header("Retry-After", retry_after)
+                    .header("content-type", "application/json")
+                    .body(rate_limited_body());
+            });
+
+            let started = Instant::now();
+            let err = loopback_gateway(&server)
+                .complete(CompletionRequest::new("hello"))
+                .expect_err("rate limited");
+            let elapsed = started.elapsed();
+
+            gateway.assert_hits(1);
+            assert!(elapsed < PROMPT, "{retry_after}: took {elapsed:?}");
+            match err {
+                CloudError::RateLimited { retry_after_secs } => {
+                    assert!(
+                        retry_after_secs >= at_least,
+                        "{retry_after}: {retry_after_secs}"
+                    )
+                }
+                other => panic!("{retry_after}: expected RateLimited, got {other:?}"),
+            }
+        }
+    }
+
+    /// A long-lived client keeps reporting a spent quota in the server's own
+    /// words: the refusals do not add up to an open circuit breaker, whose
+    /// "try again later" would be wrong (waiting does not restore a quota).
+    #[test]
+    fn reused_client_keeps_reporting_the_spent_quota() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let gateway = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(429)
+                .header("content-type", "application/json")
+                .body(openai_error_body(
+                    QUOTA_MESSAGE,
+                    Some("insufficient_quota"),
+                    Some("insufficient_quota"),
+                ));
+        });
+        let cloud = loopback_gateway(&server);
+
+        // Past the breaker's failure threshold
+        let calls = CircuitConfig::default().failure_threshold + 2;
+        for call in 0..calls {
+            match cloud.complete(CompletionRequest::new("hello")) {
+                Err(CloudError::ApiError {
+                    status: 429,
+                    message,
+                }) => {
+                    assert_eq!(message, QUOTA_MESSAGE, "call {call}")
+                }
+                other => panic!("call {call}: expected the quota refusal, got {other:?}"),
+            }
+        }
+        gateway.assert_hits(calls as usize);
+        assert!(!cloud.is_circuit_open());
     }
 
     #[test]
