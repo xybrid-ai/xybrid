@@ -77,6 +77,11 @@ private func specURL(_ environment: [String: String], onDevice: Bool, local: URL
     return nonEmpty(environment["XYBRID_SCENARIO_SPEC"]).map { URL(fileURLWithPath: $0) } ?? defaultSpecURL()
 }
 
+// MARK: - Scenario
+
+private let scenarioBinding = "swift"
+private let scenarioSchema = "xybrid-observability-scenario/1"
+
 private func nonEmpty(_ value: String?) -> String? {
     guard let value, !value.isEmpty else { return nil }
     return value
