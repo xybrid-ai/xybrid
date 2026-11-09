@@ -198,9 +198,10 @@ impl DecoderObserver for AsrObservation {
             provider: None,
             server: None,
         });
+        let resources = observation.begin_resources();
         Box::new(DecodeScope {
             observation,
-            resources: crate::telemetry::begin_resource_run(),
+            resources,
             owner: self,
         })
     }

@@ -2291,7 +2291,6 @@ impl ModelLoader {
     /// # Ok(())
     /// # }
     /// ```
-    #[allow(deprecated)]
     pub fn load_with_progress<F>(&self, progress_callback: F) -> SdkResult<XybridModel>
     where
         F: Fn(DownloadStatus),
@@ -4204,7 +4203,6 @@ impl XybridModel {
         // its own event_type so the platform can render with a `warmup`
         // badge and default-filter it out of cost-attribution rollups.
         let start = Instant::now();
-        let resource_guard = crate::telemetry::begin_resource_run();
         let load = {
             let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
             let format = RunSubject::from_metadata(&self.model_id, &handle.metadata).format;
@@ -4220,6 +4218,7 @@ impl XybridModel {
             vec![KeyValue::new("gen_ai.request.model", self.model_id.clone())],
             Some(load),
         );
+        let resource_guard = span.begin_resources();
 
         let event_fields = (|| {
             let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -4371,9 +4370,9 @@ impl XybridModel {
         }
         self.local_leg(obs, || {
             let start = Instant::now();
-            // Resource-telemetry scope for this run; a no-op guard when
-            // `resource_telemetry_mode()` is `Off`.
-            let resource_guard = crate::telemetry::begin_resource_run();
+            // Resource-telemetry scope for this run, sampled with the mode of
+            // its session; a no-op guard when that mode is `Off`.
+            let resource_guard = obs.begin_resources();
 
             // Recover from poisoned RwLock to prevent permanent lock errors
             let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -4492,7 +4491,7 @@ impl XybridModel {
         let chunks = obs.chunk_sink();
         let result = (|| {
             let start = Instant::now();
-            let resource_guard = crate::telemetry::begin_resource_run();
+            let resource_guard = obs.begin_resources();
 
             let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
             if options
@@ -4761,7 +4760,7 @@ impl XybridModel {
             }
             self.local_leg(&obs, || {
                 let start = Instant::now();
-                let resource_guard = crate::telemetry::begin_resource_run();
+                let resource_guard = obs.begin_resources();
 
                 // Recover from poisoned RwLock to prevent permanent lock errors
                 let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -5579,7 +5578,7 @@ impl XybridModel {
 
         let local_tokens = Arc::new(AtomicU32::new(0));
         let local_start = Instant::now();
-        let local_resource_guard = crate::telemetry::begin_resource_run();
+        let local_resource_guard = obs.begin_resources();
 
         let local_result = {
             let local_tokens = local_tokens.clone();
@@ -7789,6 +7788,61 @@ mod tests {
                 current = parent;
             };
             assert_eq!(run.name, "predict weightless");
+        }
+    }
+
+    #[test]
+    fn explicitly_selected_session_samples_resources_while_the_default_is_off() {
+        use crate::observability::test_support::*;
+        use crate::observability::{
+            install_default_session, ObservabilitySession, ObservationOptions, Observer,
+        };
+        use xybrid_core::device::ResourceTelemetryMode;
+        let _default = default_session_lock();
+        // The default (and so the process-wide mode) samples nothing.
+        let previous =
+            install_default_session(ObservabilitySession::borrowed(Observer::disabled()));
+        let (session, memory, _provider) = resource_session(ResourceTelemetryMode::Boundary);
+        let selected = ObservationOptions::default().with_session(&session);
+        let options = RunOptions::new().with_observation(selected.clone());
+
+        let dir = weightless_onnx_dir();
+        let model = ModelLoader::from_directory(dir.path())
+            .unwrap()
+            .observation(selected)
+            .load()
+            .unwrap();
+        // The first execute materializes the weights lazily (and fails here).
+        assert!(model
+            .run_with_options(&text_envelope("hello"), &options)
+            .is_err());
+        let mut metadata = ModelMetadata::onnx("tts-model", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("task".into(), serde_json::json!("text-to-speech"));
+        // Blank text completes before any asset is touched.
+        let tts = test_model_with_metadata(metadata)
+            .run_tts_streaming(&text_envelope("   "), &options, |_| panic!("no audio"))
+            .unwrap();
+
+        // Uninstalls the application-installed default without shutting it down.
+        crate::observability::shutdown_observability(std::time::Duration::ZERO).unwrap();
+        if let Some(previous) = previous {
+            install_default_session(previous);
+        }
+        let explicit = memory.by_ref(model.load_observation_ref().expect("load reference"));
+        let lazy = memory
+            .spans()
+            .into_iter()
+            .find(|s| attr(s, "xybrid.load.trigger").as_deref() == Some("lazy"))
+            .expect("lazy load");
+        let run = memory.by_ref(tts.observation.as_ref().expect("TTS reference"));
+        for span in [explicit, lazy, run] {
+            assert!(
+                has_resources(&span),
+                "{} ignored its selected session's resource mode",
+                span.name
+            );
         }
     }
 

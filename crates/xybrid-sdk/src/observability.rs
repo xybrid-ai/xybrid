@@ -145,6 +145,10 @@ impl ObservabilityConfig {
 
     /// Samples device resources (CPU, memory, thermal, battery) around runs
     /// and records them on spans. Defaults to `Off`.
+    ///
+    /// Operations that select the session explicitly use this mode. Installed
+    /// as the default, it also becomes the process-wide mode for operations
+    /// that select no session.
     pub fn resource_telemetry(mut self, mode: ResourceTelemetryMode) -> Self {
         self.resource_telemetry = mode;
         self
@@ -969,6 +973,7 @@ impl WorkflowScope {
 /// A generic span with a stage recorder (warmup, pipelines' internal steps).
 pub(crate) struct SpanScope {
     span: SpanOperation,
+    session: ObservabilitySession,
     _scope: Option<RecorderScope>,
 }
 
@@ -993,11 +998,12 @@ impl SpanScope {
             .with_trace(inherited_trace(TraceMode::Default));
         let span = observer.start_span(name.to_owned(), attributes, options);
         let mut stages =
-            StageRecorder::for_session(session, span.context(), span.context().is_none());
+            StageRecorder::for_session(session.clone(), span.context(), span.context().is_none());
         stages.load = load;
         let scope = RecorderScope::install(Arc::new(stages));
         Self {
             span,
+            session,
             _scope: Some(scope),
         }
     }
@@ -1005,6 +1011,11 @@ impl SpanScope {
     /// The span's context.
     pub(crate) fn context(&self) -> Option<ObservationContext> {
         self.span.context()
+    }
+
+    /// Starts measuring resources with the mode of the span's session.
+    pub(crate) fn begin_resources(&self) -> xybrid_core::device::RunGuard {
+        self.session.begin_resources()
     }
 
     /// Ends the span with `result`.
@@ -1228,6 +1239,12 @@ impl RunObservation {
     /// The operation handle (attempts, extra attributes).
     pub(crate) fn operation(&self) -> &InferenceOperation {
         &self.op
+    }
+
+    /// Starts measuring resources with the mode of the run's session, fixed
+    /// when the run started.
+    pub(crate) fn begin_resources(&self) -> xybrid_core::device::RunGuard {
+        self.stages.session.begin_resources()
     }
 
     /// Records a resource summary measured around the run.
@@ -2113,7 +2130,8 @@ impl StageCapture {
     /// Records core stages beneath an explicitly captured parent.
     pub fn new(observer: Observer, root: Option<ObservationContext>) -> Self {
         let suppressed = root.is_none();
-        Self::for_session(ObservabilitySession::borrowed(observer), root, suppressed)
+        let session = ObservabilitySession::borrowed(observer).for_operation();
+        Self::for_session(session, root, suppressed)
     }
 
     /// Reports weights that core loads lazily beneath this recorder as
@@ -2282,7 +2300,7 @@ impl TraceRecorder for StageCapture {
                 id,
                 MeasuredLoad {
                     operation,
-                    resources: crate::telemetry::begin_resource_run(),
+                    resources: self.session.begin_resources(),
                 },
             );
             return id;
@@ -2387,6 +2405,14 @@ fn inherited_trace(trace: TraceMode) -> TraceMode {
     }
 }
 
+/// Resource sampling for work on this thread: the mode of the SDK operation
+/// running here, else the process-wide mode.
+pub(crate) fn current_resource_telemetry() -> ResourceTelemetryMode {
+    session::ambient_session().map_or_else(crate::telemetry::resource_telemetry_mode, |session| {
+        session.resource_telemetry()
+    })
+}
+
 /// The parent for an operation started on this thread: the innermost open
 /// stage of an installed SDK recorder (else that recorder's run), a foreign
 /// recorder's trace headers, or the application's active OpenTelemetry span.
@@ -2477,6 +2503,7 @@ impl LoadScope {
         if let Some(bytes) = metadata.and_then(declared_model_size) {
             load.record_size(bytes, LoadSizeSource::ModelDeclaration);
         }
+        let resources = Some(session.begin_resources());
         let _scope = Some(RecorderScope::install(Arc::new(
             StageRecorder::for_session(session, op.context(), trace == TraceMode::Suppress)
                 .with_conversation_id(conversation_id)
@@ -2485,7 +2512,7 @@ impl LoadScope {
         Self {
             load,
             _scope,
-            resources: Some(crate::telemetry::begin_resource_run()),
+            resources,
         }
     }
 
@@ -2732,10 +2759,11 @@ impl StageObservation {
             provider: provider.as_deref(),
             model: stage.model.as_deref(),
         });
+        let resources = run.begin_resources();
         Self::Inference(Box::new(StageInference {
             run,
             attempt,
-            resources: crate::telemetry::begin_resource_run(),
+            resources,
         }))
     }
 
@@ -2928,6 +2956,26 @@ pub(crate) mod test_support {
             .build();
         let observer = Observer::builder().tracer_provider(&provider).build();
         (ObservabilitySession::borrowed(observer), memory, provider)
+    }
+
+    /// [`memory_session`] configured (not borrowed) with resource sampling `mode`.
+    pub(crate) fn resource_session(
+        mode: ResourceTelemetryMode,
+    ) -> (ObservabilitySession, Memory, SdkTracerProvider) {
+        let memory = Memory::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(memory.clone())
+            .build();
+        let config = ObservabilityConfig::with_observer(
+            Observer::builder().tracer_provider(&provider).build(),
+        )
+        .resource_telemetry(mode);
+        (ObservabilitySession::new(config).unwrap(), memory, provider)
+    }
+
+    /// Whether `span` carries a measured resource sample.
+    pub(crate) fn has_resources(span: &SpanData) -> bool {
+        attr(span, semconv::attr::RESOURCE_CPU_UTILIZATION).is_some()
     }
 
     /// [`memory_session`] whose session allowlists trace context to each of
@@ -4725,6 +4773,92 @@ mod tests {
         if let Some(previous) = previous {
             install_default_session(previous);
         }
+    }
+
+    #[test]
+    fn pinned_operations_keep_their_session_resource_mode_after_the_default_is_replaced() {
+        use test_support::*;
+        let _default = default_session_lock();
+        let (pinned, memory, _provider) = resource_session(ResourceTelemetryMode::Boundary);
+        let previous = install_default_session(pinned.clone());
+        // Both start while `pinned` is the default, so both are pinned to it.
+        let workflow = start_workflow("pinned-resources", &ObservationOptions::default());
+        let captured = CapturedContext::capture();
+        let (replacement, replacement_memory, _replacement_provider) =
+            resource_session(ResourceTelemetryMode::Off);
+        install_default_session(replacement);
+
+        let scope = workflow.enter();
+        let entered = LoadScope::start("entered-model", None, None)
+            .end(&Ok::<(), SdkError>(()))
+            .unwrap();
+        drop(scope);
+        let hopped = std::thread::spawn(move || {
+            let _scope = captured.enter();
+            LoadScope::start("hopped-model", None, None)
+                .end(&Ok::<(), SdkError>(()))
+                .unwrap()
+        })
+        .join()
+        .unwrap();
+        workflow.end();
+        // An operation started after the replacement uses the new default's mode.
+        let fresh = LoadScope::start("fresh-model", None, None)
+            .end(&Ok::<(), SdkError>(()))
+            .unwrap();
+
+        let restore = session::take_default();
+        if let Some(previous) = previous {
+            install_default_session(previous);
+        }
+        drop(restore);
+        for reference in [entered, hopped] {
+            let load = memory.by_ref(&reference);
+            assert!(
+                has_resources(&load),
+                "{} lost its session's resource mode",
+                load.name
+            );
+        }
+        assert!(!has_resources(&replacement_memory.by_ref(&fresh)));
+    }
+
+    #[test]
+    fn in_flight_operations_keep_the_resource_mode_they_started_with() {
+        use test_support::*;
+        let _default = default_session_lock();
+        // A borrowed default has no resource mode of its own: operations that
+        // select no session sample with the process-wide mode.
+        let (borrowed, memory, _provider) = memory_session();
+        let previous = install_default_session(borrowed);
+        crate::init()
+            .resource_telemetry(ResourceTelemetryMode::Boundary)
+            .run();
+        let workflow = start_workflow("in-flight-resources", &ObservationOptions::default());
+        // The replacement publishes its own mode (`Off`) process-wide.
+        let (replacement, _replacement_memory, _replacement_provider) =
+            resource_session(ResourceTelemetryMode::Off);
+        install_default_session(replacement);
+
+        let scope = workflow.enter();
+        let load = LoadScope::start("in-flight-model", None, None)
+            .end(&Ok::<(), SdkError>(()))
+            .unwrap();
+        drop(scope);
+        workflow.end();
+
+        let restore = session::take_default();
+        if let Some(previous) = previous {
+            install_default_session(previous);
+        }
+        drop(restore);
+        crate::init()
+            .resource_telemetry(ResourceTelemetryMode::Off)
+            .run();
+        assert!(
+            has_resources(&memory.by_ref(&load)),
+            "the in-flight load lost the mode its operation started with"
+        );
     }
 
     #[test]

@@ -764,6 +764,11 @@ impl XybridInit {
     /// Configure resource sampling (CPU, memory, thermal, battery) around
     /// runs. Defaults to `Off`. Overrides the mode set on the observability
     /// configuration.
+    ///
+    /// Without [`Self::observability`] it sets the process-wide mode, used by
+    /// operations that select no observability session. An operation pinned
+    /// to a session (`ObservationOptions::with_session`) keeps that session's
+    /// mode.
     pub fn resource_telemetry(mut self, mode: xybrid_core::device::ResourceTelemetryMode) -> Self {
         self.resource_telemetry = Some(mode);
         self

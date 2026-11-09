@@ -1384,6 +1384,8 @@ fn execute_orchestrated(
     };
 
     let start_time = std::time::Instant::now();
+    // Callers install the run's workflow (or the warmup span) on this thread,
+    // so this samples with the mode of the session that operation is pinned to.
     let resource_guard = crate::telemetry::begin_resource_run();
     let mut stage_references = Vec::with_capacity(stage_descriptors.len());
     let execution_result = orchestrator.execute_pipeline_with_stage(
@@ -1743,7 +1745,7 @@ impl Xybrid {
                                 provider: None,
                                 model: Some(&model_id),
                             });
-                            let resource_guard = crate::telemetry::begin_resource_run();
+                            let resource_guard = obs.begin_resources();
                             let chunks = obs.chunk_sink();
                             let mut on_token = on_token;
                             let on_token: xybrid_core::runtime_adapter::types::StreamingCallback<

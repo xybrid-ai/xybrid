@@ -8,7 +8,6 @@ struct SessionInner {
     pipeline: Option<Arc<xybrid_observability::otlp::ObservabilityPipeline>>,
     live_trace_interval: Duration,
     live_traced: Mutex<HashMap<String, Instant>>,
-    resource_telemetry: ResourceTelemetryMode,
     retired: std::sync::atomic::AtomicBool,
 }
 
@@ -33,9 +32,20 @@ impl Drop for SessionInner {
 /// Clones share the same session. Borrowed observers leave provider lifecycle
 /// to the application; their stats are unavailable and flush/shutdown are no-ops.
 /// Operations retain this session even if the process default changes.
+///
+/// An operation that selects this session samples device resources with its
+/// configured [`ObservabilityConfig::resource_telemetry`] mode, whether or not
+/// it is the default. Operations that select no session, or a borrowed
+/// observer, use the process-wide
+/// [`resource_telemetry_mode`](crate::telemetry::resource_telemetry_mode).
+/// Either way the mode is fixed when the operation starts.
 #[derive(Clone)]
 pub struct ObservabilitySession {
     inner: Arc<SessionInner>,
+    /// Resource sampling for operations using this handle. `None` (a borrowed
+    /// observer has no mode of its own) resolves to the process-wide mode
+    /// once, when an operation starts ([`Self::for_operation`]).
+    resource_telemetry: Option<ResourceTelemetryMode>,
 }
 
 impl ObservabilitySession {
@@ -90,9 +100,11 @@ impl ObservabilitySession {
                 pipeline,
                 live_trace_interval: config.live_trace_interval,
                 live_traced: Mutex::new(HashMap::new()),
-                resource_telemetry: config.resource_telemetry,
                 retired: std::sync::atomic::AtomicBool::new(false),
             }),
+            resource_telemetry: Some(crate::telemetry::prepare_resource_telemetry(
+                config.resource_telemetry,
+            )),
         })
     }
 
@@ -106,9 +118,9 @@ impl ObservabilitySession {
                 pipeline: None,
                 live_trace_interval: Duration::from_secs(1),
                 live_traced: Mutex::new(HashMap::new()),
-                resource_telemetry: ResourceTelemetryMode::Off,
                 retired: std::sync::atomic::AtomicBool::new(false),
             }),
+            resource_telemetry: None,
         }
     }
 
@@ -179,6 +191,24 @@ impl ObservabilitySession {
         }
     }
 
+    /// Resource sampling for operations using this handle.
+    pub(super) fn resource_telemetry(&self) -> ResourceTelemetryMode {
+        self.resource_telemetry
+            .unwrap_or_else(crate::telemetry::resource_telemetry_mode)
+    }
+
+    /// Starts measuring resources around work of an operation in this session.
+    pub(super) fn begin_resources(&self) -> xybrid_core::device::RunGuard {
+        xybrid_core::device::ResourceMonitor::global().begin_run(self.resource_telemetry())
+    }
+
+    /// This handle with resource sampling fixed for one operation, so a later
+    /// process-wide change cannot alter the operation's measurements.
+    pub(super) fn for_operation(mut self) -> Self {
+        self.resource_telemetry = Some(self.resource_telemetry());
+        self
+    }
+
     pub(super) fn allows_provider_context(&self, origin: &str) -> bool {
         self.inner
             .provider_origins
@@ -240,14 +270,21 @@ pub(super) fn replace_default(
     session: ObservabilitySession,
     helper_owned: bool,
 ) -> Option<DefaultSlot> {
-    crate::telemetry::activate_resource_telemetry(session.inner.resource_telemetry);
-    DEFAULT
+    // The default's mode becomes the process-wide mode, which operations that
+    // select no session use. A borrowed observer configures none: `Off`.
+    let mode = session.resource_telemetry.unwrap_or_else(|| {
+        crate::telemetry::prepare_resource_telemetry(ResourceTelemetryMode::Off)
+    });
+    let mut slot = DEFAULT
         .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .replace(DefaultSlot {
-            session,
-            helper_owned,
-        })
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // Under the slot lock, so an operation resolving the default reads the
+    // session and the mode it published together (see `default_for_operation`).
+    crate::telemetry::set_resource_telemetry_mode(mode);
+    slot.replace(DefaultSlot {
+        session,
+        helper_owned,
+    })
 }
 
 pub(super) fn take_default() -> Option<DefaultSlot> {
@@ -298,6 +335,20 @@ pub fn default_session() -> Option<ObservabilitySession> {
         .map(|slot| slot.session.clone())
 }
 
+/// The default session for a new operation, sampling resources with the
+/// process-wide mode as of now: the mode the default published, unless
+/// `XybridInit::resource_telemetry` has set another since.
+fn default_for_operation() -> Option<ObservabilitySession> {
+    let slot = DEFAULT
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    slot.as_ref().map(|slot| ObservabilitySession {
+        inner: slot.session.inner.clone(),
+        resource_telemetry: Some(crate::telemetry::resource_telemetry_mode()),
+    })
+}
+
+/// The session of the SDK operation running on this thread, if any.
 pub(super) fn ambient_session() -> Option<ObservabilitySession> {
     xybrid_core::tracing::current_recorder().and_then(|recorder| {
         recorder
@@ -307,6 +358,9 @@ pub(super) fn ambient_session() -> Option<ObservabilitySession> {
     })
 }
 
+/// The session a new operation is pinned to, with its resource mode fixed:
+/// the explicit session or observer, else the enclosing operation's, else the
+/// default.
 pub(super) fn resolve_session(options: Option<&ObservationOptions>) -> ObservabilitySession {
     options
         .and_then(|o| o.session.clone())
@@ -316,8 +370,9 @@ pub(super) fn resolve_session(options: Option<&ObservationOptions>) -> Observabi
                 .map(ObservabilitySession::borrowed)
         })
         .or_else(ambient_session)
-        .or_else(default_session)
-        .unwrap_or_else(|| ObservabilitySession::borrowed(Observer::disabled()))
+        .map(ObservabilitySession::for_operation)
+        .or_else(default_for_operation)
+        .unwrap_or_else(|| ObservabilitySession::borrowed(Observer::disabled()).for_operation())
 }
 
 /// Context and session captured on the calling thread before a worker hop.
