@@ -37,7 +37,9 @@ build() {
     local udid="${1:?udid}" team="${2:-}"
     local entry="$APP_DIR/XybridExampleApp.swift" plist="$APP_DIR/Info.plist"
     cp "$entry" "$entry.orig"; cp "$plist" "$plist.orig"
-    trap 'mv -f "$entry.orig" "$entry"; mv -f "$plist.orig" "$plist"' EXIT
+    # Expanded now: the trap runs after this function's locals are gone.
+    # shellcheck disable=SC2064
+    trap "mv -f '$entry.orig' '$entry'; mv -f '$plist.orig' '$plist'" EXIT
     python3 - "$TEST" "$entry" "$plist" <<'PY'
 import sys
 test, entry, plist = sys.argv[1:]
