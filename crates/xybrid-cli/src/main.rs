@@ -7,6 +7,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | [`commands`] | Command handlers organized by subcommand |
+//! | [`platform`] | Xybrid platform credentials for `connect` / `auth` and the key resolver |
 //! | [`tracing_viz`] | Trace visualization utilities |
 //!
 //! ## Commands
@@ -23,8 +24,17 @@
 //! | `trace` | View and analyze telemetry sessions |
 //! | `pack` | Create a model bundle |
 //! | `bundle` | Fetch and bundle a registry model |
+//! | `connect` | Provision a claimable Xybrid workspace and key for this project |
+//! | `auth` | Inspect, recover or forget this project's Xybrid credentials |
+//!
+//! `connect` and `auth` are dispatched before any observability setup and
+//! never export. Every other command resolves one platform key (`--api-key`,
+//! then `XYBRID_API_KEY`, then the credentials `connect` saved for this host
+//! and repository); finding a key configures cloud authentication only, and
+//! trace export still needs an explicit `--observability`.
 
 mod commands;
+mod platform;
 #[allow(dead_code)]
 mod tracing_viz;
 pub mod ui;
@@ -36,7 +46,10 @@ pub(crate) static OBSERVABILITY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mut
 use commands::{CacheCommand, ModelsCommand, TelemetryCommand};
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand};
+use platform::host::{self, PlatformHost};
+use platform::resolve::{self, KeySource, ResolvedKey};
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 use xybrid_core::ir::Choice;
@@ -48,11 +61,15 @@ use xybrid_sdk::SdkError;
 #[command(name = "xybrid")]
 #[command(about = "Xybrid CLI - Run hybrid cloud-edge AI inference pipelines", long_about = None)]
 struct Cli {
-    /// Platform API key for cloud access (does not enable observability by itself)
+    /// Platform API key for cloud access (does not enable observability by
+    /// itself). When neither this nor XYBRID_API_KEY is set, the key `xybrid
+    /// connect` saved for this platform host and repository is used
     #[arg(long, global = true, env = "XYBRID_API_KEY")]
     api_key: Option<String>,
 
-    /// Cloud gateway endpoint (default: https://api.xybrid.dev)
+    /// Xybrid platform API origin: the cloud gateway, and the host `connect`
+    /// and `auth` talk to (production and staging map to pinned console and
+    /// ingest origins; anything else needs `--allow-custom-host` there)
     #[arg(
         long,
         global = true,
@@ -61,11 +78,14 @@ struct Cli {
     )]
     platform_url: String,
 
-    /// Export traces to Xybrid; alternatively configure OTEL_EXPORTER_OTLP_* variables
-    #[arg(long, global = true, requires = "api_key")]
+    /// Export traces to Xybrid with the resolved key (--api-key,
+    /// XYBRID_API_KEY or `xybrid connect`'s saved key); alternatively configure
+    /// OTEL_EXPORTER_OTLP_* variables
+    #[arg(long, global = true)]
     observability: bool,
 
-    /// Full OTLP trace URL for --observability (default: https://ingest.xybrid.dev/v1/traces)
+    /// Full OTLP trace URL for --observability (default: the ingest URL pinned to
+    /// --platform-url for production or staging, else https://ingest.xybrid.dev/v1/traces)
     #[arg(long, global = true, requires = "observability")]
     traces_endpoint: Option<String>,
 
@@ -261,9 +281,10 @@ enum Commands {
         trace_export: Option<PathBuf>,
 
         /// Serve from the cloud while the registry model downloads, instead of
-        /// blocking on the download. Requires --api-key (or XYBRID_API_KEY) and
-        /// a registry --model. Chat models only: the registry is asked first,
-        /// and any other model downloads, then runs locally.
+        /// blocking on the download. Requires a key (--api-key, XYBRID_API_KEY
+        /// or `xybrid connect`'s saved key) and a registry --model. Chat models
+        /// only: the registry is asked first, and any other model downloads,
+        /// then runs locally.
         #[arg(long)]
         speculative_cloud: bool,
     },
@@ -313,10 +334,10 @@ enum Commands {
         system: Option<String>,
 
         /// Serve from the cloud while the registry model downloads in the
-        /// background, then switch to local once ready. Requires --api-key
-        /// (or XYBRID_API_KEY) and a registry --model. Chat models only: the
-        /// registry is asked first, and any other model downloads, then runs
-        /// locally.
+        /// background, then switch to local once ready. Requires a key
+        /// (--api-key, XYBRID_API_KEY or `xybrid connect`'s saved key) and a
+        /// registry --model. Chat models only: the registry is asked first, and
+        /// any other model downloads, then runs locally.
         #[arg(long)]
         speculative_cloud: bool,
 
@@ -380,6 +401,37 @@ enum Commands {
         #[command(subcommand)]
         command: TelemetryCommand,
     },
+    /// Connect this project to a claimable Xybrid workspace and save its key
+    ///
+    /// Built for coding agents: no browser and no account. Provisions (or
+    /// reuses) a workspace with a restricted key, writes the key to an
+    /// untracked, gitignored project file when --write-env is given, and keeps
+    /// the claim link in private credentials (`xybrid auth claim`). It never
+    /// enables trace export and never prints the key. Exit codes: 0 created or
+    /// existing, 3 signup closed, 4 offline, 5 CI or opted out, 6 project file
+    /// tracked by Git, 7 workspace expired but still claimable, 1 error.
+    Connect(commands::connect::ConnectArgs),
+    /// Inspect, recover or forget this project's Xybrid credentials
+    Auth {
+        #[command(subcommand)]
+        command: commands::auth::AuthCommand,
+    },
+}
+
+impl Commands {
+    /// Whether this invocation prints machine-readable JSON on stdout, so
+    /// every hint and notice must stay off it (and out of the way).
+    fn json_output(&self) -> bool {
+        match self {
+            Commands::Init { json, .. } => *json,
+            _ => false,
+        }
+    }
+
+    /// Commands that run inference, where the no-export tip is useful.
+    fn runs_inference(&self) -> bool {
+        matches!(self, Commands::Run { .. } | Commands::Repl { .. })
+    }
 }
 
 /// `--max-tokens 0` would load the model and only then fail in the native
@@ -408,13 +460,38 @@ fn main() -> Result<()> {
     // that Rust SDK apps report.
     xybrid_sdk::set_binding("cli");
 
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
+    let explicit_key = explicit_key(&cli, &matches);
 
     configure_log_level(&cli);
 
-    if let Some(key) = &cli.api_key {
-        xybrid_sdk::set_api_key(key);
+    // `connect` and `auth` manage credentials. They run before, and instead
+    // of, any observability or cloud setup, even with OTEL_EXPORTER_OTLP_*
+    // configured: they neither export nor emit inference notices.
+    if let Some(code) = run_platform_command(&cli, explicit_key.clone()) {
+        let _ = std::io::stdout().flush();
+        std::process::exit(code);
     }
+
+    // Point the SDK's cloud gateway at the requested endpoint, so cloud calls
+    // (speculative cloud, reactive fallback) don't silently fall back to
+    // the production default (`api.xybrid.dev`) and 401 with a staging key.
+    // `cli.platform_url` already encodes clap's flag > env > default precedence,
+    // so set it unconditionally. Use the in-memory setter rather than
+    // `std::env::set_var`: exporter threads may start below, and a concurrent
+    // `setenv`/`getenv` is UB. XYBRID_GATEWAY_URL still wins if set.
+    xybrid_sdk::set_platform_url(&cli.platform_url);
+
+    let host = PlatformHost::parse(&cli.platform_url).ok();
+    let project_root = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| platform::git::project_root(&cwd).ok());
+    let (key, store_warning) =
+        resolve::resolve(explicit_key, host.as_ref(), project_root.as_deref());
+    configure_cloud_auth(key.as_ref(), host.as_ref());
+
+    let json = cli.command.json_output();
     let (render_trace, trace_path) = match &cli.command {
         Commands::Run {
             trace,
@@ -427,8 +504,10 @@ fn main() -> Result<()> {
     // trace (--trace / --trace-export) still renders and writes in-process.
     let sdk_disabled = otel_sdk_disabled();
     let local_capture = if render_trace || trace_path.is_some() {
-        let requested = observability_config(&cli, OtlpConfig::from_env());
-        if sdk_disabled && requested.is_some() && !cli.quiet {
+        let requested =
+            observability_config(&cli, key.as_ref(), host.as_ref(), OtlpConfig::from_env())
+                .map_err(|error| with_store_warning(error, store_warning.as_deref()))?;
+        if sdk_disabled && requested.is_some() && !cli.quiet && !json {
             ui::status("OTEL_SDK_DISABLED is set: the trace stays local, nothing is exported");
         }
         Some(tracing_viz::LocalCapture::configure(
@@ -440,18 +519,55 @@ fn main() -> Result<()> {
     };
     // `telemetry status` only reports configuration: it starts no exporter.
     let reports_only = matches!(cli.command, Commands::Telemetry { .. });
+    let telemetry_config = if reports_only {
+        observability_config(&cli, key.as_ref(), host.as_ref(), OtlpConfig::from_env())
+            .map_err(|error| with_store_warning(error, store_warning.as_deref()))?
+    } else {
+        None
+    };
     let exporting = match &local_capture {
         Some(capture) => capture.exports(),
         None if reports_only => false,
-        None => init_observability(&cli),
+        None => init_observability(
+            &cli,
+            key.as_ref(),
+            host.as_ref(),
+            store_warning.as_deref(),
+            json,
+        )?,
     };
-    if exporting && !cli.quiet {
+    // A store that can't be trusted or read keeps local commands working
+    // without its key, but never silently: cloud calls that would have used
+    // the key fail without it. (When `--observability` needs the key, its
+    // error above already carries this.) stderr only, as below.
+    if let Some(warning) = store_warning.as_deref() {
+        if !cli.quiet && !json {
+            ui::warning_stderr(warning);
+        }
+    }
+    if exporting && !cli.quiet && !json {
+        // stderr: stdout belongs to the command's own output.
         ui::status("Observability enabled");
+    }
+    // The reminder follows the project's saved credential whenever it is the
+    // key in use, including when it arrives through XYBRID_API_KEY (an
+    // exported .env) or --api-key.
+    platform::notices::maybe_claim_reminder(
+        || {
+            key.as_ref().and_then(|key| {
+                resolve::stored_matching(key, host.as_ref(), project_root.as_deref())
+            })
+        },
+        cli.quiet,
+        json,
+    );
+    if key.is_some() && !exporting && cli.command.runs_inference() {
+        platform::notices::maybe_export_tip(cli.quiet, json);
     }
 
     let root = local_capture.as_ref().map(tracing_viz::LocalCapture::begin);
     let scope = root.as_ref().map(|root| root.enter());
-    let result = run_command(cli);
+    let result = run_command(cli, telemetry_config);
     drop(scope);
     if let Some(root) = &root {
         if result.is_ok() {
@@ -463,13 +579,17 @@ fn main() -> Result<()> {
     if let Some(capture) = &local_capture {
         capture.finish(render_trace, trace_path.as_deref())?;
         if let Err(error) = capture.shutdown() {
-            ui::warning(&format!("Observability shutdown failed: {error}"));
+            if !json {
+                ui::warning_stderr(&format!("Observability shutdown failed: {error}"));
+            }
         }
     }
 
     if exporting && local_capture.is_none() {
         if let Err(error) = xybrid_sdk::shutdown_observability(Duration::from_secs(5)) {
-            ui::warning(&format!("Observability shutdown failed: {error}"));
+            if !json {
+                ui::warning_stderr(&format!("Observability shutdown failed: {error}"));
+            }
         }
     }
 
@@ -564,17 +684,113 @@ fn configure_log_level(cli: &Cli) {
     set_global_log_level(level);
 }
 
+/// `--api-key` / `XYBRID_API_KEY` (Clap merges them), with where it came from.
+fn explicit_key(cli: &Cli, matches: &ArgMatches) -> Option<ResolvedKey> {
+    let from_flag = matches.value_source("api_key") == Some(clap::parser::ValueSource::CommandLine);
+    resolve::explicit(cli.api_key.as_deref(), from_flag)
+}
+
+/// Run `connect` / `auth`, returning their exit code, or `None` for any
+/// other command.
+fn run_platform_command(cli: &Cli, explicit_key: Option<ResolvedKey>) -> Option<i32> {
+    let ctx = commands::connect::PlatformArgs {
+        platform_url: &cli.platform_url,
+        explicit_key,
+        quiet: cli.quiet,
+    };
+    match &cli.command {
+        Commands::Connect(args) => Some(commands::connect::run(&ctx, args)),
+        Commands::Auth { command } => Some(commands::auth::run(&ctx, command)),
+        _ => None,
+    }
+}
+
+/// Make the resolved key available to the cloud gateway (speculative cloud,
+/// reactive fallback) through the in-memory cell `CloudConfig` reads, since
+/// `--api-key` may arrive by flag rather than `XYBRID_API_KEY`. A saved key
+/// belongs to one platform origin, so it is only handed over when the gateway
+/// is that origin (`XYBRID_GATEWAY_URL` can point elsewhere).
+fn configure_cloud_auth(key: Option<&ResolvedKey>, host: Option<&PlatformHost>) {
+    let Some(key) = key else {
+        return;
+    };
+    let allowed = match key.source {
+        KeySource::Flag | KeySource::Env => true,
+        KeySource::Credentials => host.is_some_and(|host| {
+            xybrid_core::cloud::same_origin(
+                &xybrid_core::cloud::platform_gateway_url(),
+                host.origin(),
+            )
+        }),
+    };
+    if allowed {
+        xybrid_sdk::set_api_key(key.key.expose());
+    }
+}
+
+/// Where `--observability` sends traces with `key`.
+///
+/// An explicit key (flag or environment) goes to `--traces-endpoint` when
+/// given, else to the ingest endpoint pinned to a production or staging
+/// `--platform-url` (a staging key belongs to staging ingest), else to the
+/// documented production default. A saved key only goes to its platform's
+/// pinned ingest endpoint, or to a `--traces-endpoint` on that platform.
+fn trace_endpoint(cli: &Cli, key: &ResolvedKey, host: Option<&PlatformHost>) -> Result<String> {
+    match key.source {
+        KeySource::Flag | KeySource::Env => Ok(cli
+            .traces_endpoint
+            .clone()
+            .or_else(|| {
+                host.and_then(PlatformHost::traces_endpoint)
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| XYBRID_TRACES_ENDPOINT.to_string())),
+        KeySource::Credentials => {
+            let host =
+                host.expect("the resolver only returns a saved key for a parsed platform host");
+            match cli.traces_endpoint.as_deref() {
+                Some(endpoint) if host::trace_endpoint_allowed(host, endpoint) => {
+                    Ok(endpoint.to_string())
+                }
+                Some(endpoint) => Err(anyhow::anyhow!(
+                    "Refusing to send the key saved for {} to {endpoint}: a saved key only goes \
+                     to its own platform's trace endpoint. Pass the key with --api-key to send \
+                     it elsewhere on purpose.",
+                    host.origin()
+                )),
+                None => host.traces_endpoint().map(str::to_string).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "The saved key belongs to the custom platform host {}; pass its OTLP \
+                         trace URL with --traces-endpoint.",
+                        host.origin()
+                    )
+                }),
+            }
+        }
+    }
+}
+
 /// Select explicit trace export or standard OTLP environment configuration.
-fn observability_config(cli: &Cli, environment: Option<OtlpConfig>) -> Option<OtlpConfig> {
+///
+/// `--observability` needs a resolved key; its absence is an error, never a
+/// silent no-op. Generic OTLP configuration never receives the Xybrid key.
+fn observability_config(
+    cli: &Cli,
+    key: Option<&ResolvedKey>,
+    host: Option<&PlatformHost>,
+    environment: Option<OtlpConfig>,
+) -> Result<Option<OtlpConfig>> {
     let mut config = if cli.observability {
-        OtlpConfig::xybrid_traces_to(
-            cli.traces_endpoint
-                .as_deref()
-                .unwrap_or(XYBRID_TRACES_ENDPOINT),
-            cli.api_key.as_deref()?,
-        )
+        let key = key.context(
+            "--observability needs a Xybrid key: pass --api-key, set XYBRID_API_KEY, or run \
+             `xybrid connect` in this project first",
+        )?;
+        OtlpConfig::xybrid_traces_to(&trace_endpoint(cli, key, host)?, key.key.expose())
     } else {
-        environment?
+        match environment {
+            Some(config) => config,
+            None => return Ok(None),
+        }
     };
     if let Some(device_id) = &cli.device_id {
         config = config.with_resource_attribute(xybrid_sdk::observability::KeyValue::new(
@@ -582,54 +798,60 @@ fn observability_config(cli: &Cli, environment: Option<OtlpConfig>) -> Option<Ot
             device_id.clone(),
         ));
     }
-    Some(config.with_service("xybrid-cli", Some(env!("CARGO_PKG_VERSION").into())))
+    Ok(Some(config.with_service(
+        "xybrid-cli",
+        Some(env!("CARGO_PKG_VERSION").into()),
+    )))
 }
 
 /// Whether `OTEL_SDK_DISABLED=true` turns OpenTelemetry export off.
-pub(crate) fn otel_sdk_disabled() -> bool {
-    std::env::var("OTEL_SDK_DISABLED").is_ok_and(|value| value.trim().eq_ignore_ascii_case("true"))
+pub(crate) use platform::otel_sdk_disabled;
+
+/// Attach the credentials-store warning to an observability error, so a
+/// `--observability` failure explains why the saved key was not used.
+fn with_store_warning(error: anyhow::Error, store_warning: Option<&str>) -> anyhow::Error {
+    match store_warning {
+        Some(warning) => error.context(warning.to_string()),
+        None => error,
+    }
 }
 
-/// Configure cloud authentication independently from optional observability.
-fn init_observability(cli: &Cli) -> bool {
-    if let Some(ref api_key) = cli.api_key {
-        // Make the key resolvable by the cloud gateway too (speculative cloud,
-        // reactive fallback). `--api-key` may
-        // arrive by flag rather than the XYBRID_API_KEY env var, so set the
-        // in-memory cell that CloudConfig::resolve_api_key reads.
-        xybrid_sdk::set_api_key(api_key);
-    }
+/// Start explicit or environment-configured export. Returns whether it runs.
+/// A failure to start is a warning on stderr, and silent in JSON mode, where
+/// both streams belong to the command's JSON.
+fn init_observability(
+    cli: &Cli,
+    key: Option<&ResolvedKey>,
+    host: Option<&PlatformHost>,
+    store_warning: Option<&str>,
+    json: bool,
+) -> Result<bool> {
     if otel_sdk_disabled() {
-        return false;
+        return Ok(false);
     }
-    let Some(config) = observability_config(cli, OtlpConfig::from_env()) else {
-        return false;
+    let config = observability_config(cli, key, host, OtlpConfig::from_env())
+        .map_err(|error| with_store_warning(error, store_warning))?;
+    let Some(config) = config else {
+        return Ok(false);
     };
     match xybrid_sdk::init_observability(
         ObservabilityConfig::otlp(config)
             .resource_telemetry(commands::telemetry::CLI_RESOURCE_TELEMETRY),
     ) {
-        Ok(()) => true,
+        Ok(()) => Ok(true),
         Err(error) => {
-            ui::warning(&format!("Observability was not started: {error}"));
-            false
+            if !json {
+                ui::warning_stderr(&format!("Observability was not started: {error}"));
+            }
+            Ok(false)
         }
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_command(cli: Cli) -> Result<()> {
+fn run_command(cli: Cli, telemetry_config: Option<OtlpConfig>) -> Result<()> {
     let verbose = cli.verbose;
-    let telemetry_config = observability_config(&cli, OtlpConfig::from_env());
     let telemetry_explicit = cli.observability;
-    // Point the SDK's cloud gateway at the requested endpoint, so cloud calls
-    // (speculative cloud, reactive fallback) don't silently fall back to
-    // the production default (`api.xybrid.dev`) and 401 with a staging key.
-    // `cli.platform_url` already encodes clap's flag > env > default precedence,
-    // so set it unconditionally. Use the in-memory setter rather than
-    // `std::env::set_var`: exporter threads may already be running by now, and a
-    // concurrent `setenv`/`getenv` is UB. XYBRID_GATEWAY_URL still wins if set.
-    xybrid_sdk::set_platform_url(&cli.platform_url);
     match cli.command {
         Commands::Init {
             directory,
@@ -859,6 +1081,9 @@ fn run_command(cli: Cli) -> Result<()> {
             telemetry_config,
             telemetry_explicit,
         ),
+        Commands::Connect(_) | Commands::Auth { .. } => {
+            unreachable!("connect and auth are dispatched before observability setup")
+        }
     }
 }
 
@@ -914,23 +1139,83 @@ fn resolve_config_path(config: Option<PathBuf>, pipeline: Option<String>) -> Res
 mod tests {
     use super::*;
 
-    fn parse_observability_args(args: &[&str]) -> Result<Cli, clap::Error> {
-        use clap::{CommandFactory, FromArgMatches};
-
+    fn parse_matches(args: &[&str]) -> Result<(Cli, ArgMatches), clap::Error> {
         // Keep authentication and device attribution tests independent of the
         // developer's environment without mutating process-wide variables.
         let matches = Cli::command()
             .mut_arg("api_key", |arg| arg.env(None::<&str>))
             .mut_arg("device_id", |arg| arg.env(None::<&str>))
+            .mut_arg("platform_url", |arg| arg.env(None::<&str>))
             .try_get_matches_from(args)?;
-        Cli::from_arg_matches(&matches)
+        Ok((Cli::from_arg_matches(&matches)?, matches))
+    }
+
+    fn parse_observability_args(args: &[&str]) -> Result<Cli, clap::Error> {
+        parse_matches(args).map(|(cli, _)| cli)
+    }
+
+    /// The explicit key the resolver sees for `cli` (flag only: env is off).
+    fn flag_key(cli: &Cli) -> Option<ResolvedKey> {
+        resolve::explicit(cli.api_key.as_deref(), true)
+    }
+
+    /// A key as if `xybrid connect` had saved it for `host`.
+    fn saved_key(host: &PlatformHost) -> ResolvedKey {
+        ResolvedKey {
+            key: platform::credentials::Secret::new("sk_live_saved"),
+            source: KeySource::Credentials,
+            credential: Some(platform::credentials::Credential {
+                platform_origin: host.origin().to_string(),
+                repository_root: PathBuf::from("/repo"),
+                api_key: platform::credentials::Secret::new("sk_live_saved"),
+                scope: Some("client".into()),
+                organization: None,
+                project: None,
+                key_expires_at: None,
+                claim_expires_at: None,
+                claim_token: None,
+                source: None,
+                console_origin: None,
+                env_file: None,
+                claimed: false,
+                terms_url: None,
+                privacy_url: None,
+                created_at: chrono::Utc::now(),
+            }),
+        }
     }
 
     #[test]
     fn cloud_authentication_alone_does_not_enable_export() {
         let cli = parse_observability_args(&["xybrid", "--api-key", "cloud-key", "models", "list"])
             .expect("cloud authentication is optional");
-        assert!(observability_config(&cli, None).is_none());
+        assert!(
+            observability_config(&cli, flag_key(&cli).as_ref(), None, None)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn api_key_source_distinguishes_flag_from_environment() {
+        for args in [
+            vec!["xybrid", "--api-key", "k", "models", "list"],
+            vec!["xybrid", "models", "list", "--api-key", "k"],
+            vec!["xybrid", "auth", "status", "--api-key", "k"],
+        ] {
+            let (cli, matches) = parse_matches(&args).unwrap();
+            assert_eq!(
+                explicit_key(&cli, &matches).unwrap().source,
+                KeySource::Flag,
+                "{args:?}"
+            );
+        }
+        let matches = Cli::command()
+            .mut_arg("api_key", |arg| arg.env("XYBRID_TEST_ONLY_UNSET_VARIABLE"))
+            .try_get_matches_from(["xybrid", "models", "list"])
+            .unwrap();
+        let cli = Cli::from_arg_matches(&matches).unwrap();
+        assert!(explicit_key(&cli, &matches).is_none());
     }
 
     #[test]
@@ -946,9 +1231,14 @@ mod tests {
             "list",
         ])
         .expect("explicit tracing should parse");
-        let config =
-            observability_config(&cli, Some(OtlpConfig::collector("http://localhost:4318")))
-                .expect("explicit tracing should be configured");
+        let config = observability_config(
+            &cli,
+            flag_key(&cli).as_ref(),
+            None,
+            Some(OtlpConfig::collector("http://localhost:4318")),
+        )
+        .unwrap()
+        .expect("explicit tracing should be configured");
         let traces = config.traces.expect("trace destination");
         assert_eq!(traces.endpoint, XYBRID_TRACES_ENDPOINT);
         assert_eq!(
@@ -979,7 +1269,9 @@ mod tests {
             "list",
         ])
         .expect("custom tracing should parse");
-        let config = observability_config(&cli, None).expect("trace configuration");
+        let config = observability_config(&cli, flag_key(&cli).as_ref(), None, None)
+            .unwrap()
+            .expect("trace configuration");
         assert_eq!(
             config.traces.unwrap().endpoint,
             "https://collector.example.test/custom/traces"
@@ -1001,7 +1293,10 @@ mod tests {
         ] {
             let cli = parse_observability_args(&args).expect("cloud credentials are optional");
             let collector = OtlpConfig::collector("http://localhost:4318");
-            let config = observability_config(&cli, Some(collector.clone())).expect("OTLP opt-in");
+            let config =
+                observability_config(&cli, flag_key(&cli).as_ref(), None, Some(collector.clone()))
+                    .unwrap()
+                    .expect("OTLP opt-in");
             assert_eq!(config.traces, collector.traces);
             assert_eq!(config.metrics, collector.metrics);
             assert_eq!(config.logs, collector.logs);
@@ -1009,27 +1304,212 @@ mod tests {
     }
 
     #[test]
-    fn trace_flags_require_explicit_authentication_and_opt_in() {
-        for args in [
-            vec!["xybrid", "--observability", "models", "list"],
-            vec![
-                "xybrid",
-                "--api-key",
-                "cloud-key",
-                "--traces-endpoint",
-                "http://localhost:4318/v1/traces",
-                "models",
-                "list",
-            ],
+    fn trace_endpoint_requires_explicit_opt_in() {
+        let Err(error) = parse_observability_args(&[
+            "xybrid",
+            "--api-key",
+            "cloud-key",
+            "--traces-endpoint",
+            "http://localhost:4318/v1/traces",
+            "models",
+            "list",
+        ]) else {
+            panic!("--traces-endpoint without --observability should be rejected");
+        };
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+    }
+
+    #[test]
+    fn observability_without_a_resolved_key_is_an_actionable_error() {
+        // Parsing no longer requires --api-key: a saved key must work too.
+        let cli = parse_observability_args(&["xybrid", "--observability", "models", "list"])
+            .expect("the key is validated after resolution");
+        let error = observability_config(&cli, None, None, None).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("xybrid connect"), "{message}");
+        assert!(message.contains("--api-key"), "{message}");
+    }
+
+    #[test]
+    fn a_saved_key_goes_only_to_its_platforms_trace_endpoint() {
+        let prod = PlatformHost::parse("https://api.xybrid.dev").unwrap();
+        let staging = PlatformHost::parse("https://staging.api.xybrid.dev").unwrap();
+        let cli =
+            parse_observability_args(&["xybrid", "--observability", "models", "list"]).unwrap();
+        for (host, endpoint) in [
+            (&prod, XYBRID_TRACES_ENDPOINT),
+            (&staging, "https://staging.ingest.xybrid.dev/v1/traces"),
         ] {
-            let Err(error) = parse_observability_args(&args) else {
-                panic!("missing tracing requirement should be rejected");
-            };
+            let config = observability_config(&cli, Some(&saved_key(host)), Some(host), None)
+                .unwrap()
+                .unwrap();
+            let traces = config.traces.unwrap();
+            assert_eq!(traces.endpoint, endpoint);
             assert_eq!(
-                error.kind(),
-                clap::error::ErrorKind::MissingRequiredArgument
+                traces.headers,
+                [("Authorization".into(), "Bearer sk_live_saved".into())]
             );
         }
+
+        let elsewhere = parse_observability_args(&[
+            "xybrid",
+            "--observability",
+            "--traces-endpoint",
+            "https://collector.example.test/v1/traces",
+            "models",
+            "list",
+        ])
+        .unwrap();
+        let error = observability_config(&elsewhere, Some(&saved_key(&prod)), Some(&prod), None)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("Refusing"), "{error:#}");
+
+        let local = PlatformHost::parse("http://localhost:3001").unwrap();
+        let error =
+            observability_config(&cli, Some(&saved_key(&local)), Some(&local), None).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("--traces-endpoint"),
+            "{error:#}"
+        );
+        let local_cli = parse_observability_args(&[
+            "xybrid",
+            "--observability",
+            "--traces-endpoint",
+            "http://localhost:8081/v1/traces",
+            "models",
+            "list",
+        ])
+        .unwrap();
+        let config = observability_config(&local_cli, Some(&saved_key(&local)), Some(&local), None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            config.traces.unwrap().endpoint,
+            "http://localhost:8081/v1/traces"
+        );
+    }
+
+    #[test]
+    fn an_explicit_key_follows_a_pinned_platform_to_its_ingest() {
+        let prod = PlatformHost::parse("https://api.xybrid.dev").unwrap();
+        let staging = PlatformHost::parse("https://staging.api.xybrid.dev").unwrap();
+        let custom = PlatformHost::parse("https://gateway.example.test").unwrap();
+        for (host, endpoint) in [
+            (&prod, XYBRID_TRACES_ENDPOINT),
+            (&staging, "https://staging.ingest.xybrid.dev/v1/traces"),
+            // A custom host has no pinned ingest: the documented default.
+            (&custom, XYBRID_TRACES_ENDPOINT),
+        ] {
+            let platform = host.origin().to_string();
+            let cli = parse_observability_args(&[
+                "xybrid",
+                "--api-key",
+                "staging-key",
+                "--platform-url",
+                &platform,
+                "--observability",
+                "models",
+                "list",
+            ])
+            .unwrap();
+            let config = observability_config(&cli, flag_key(&cli).as_ref(), Some(host), None)
+                .unwrap()
+                .unwrap();
+            let traces = config.traces.unwrap();
+            assert_eq!(traces.endpoint, endpoint, "{platform}");
+            assert_eq!(
+                traces.headers,
+                [("Authorization".into(), "Bearer staging-key".into())]
+            );
+        }
+
+        // An explicit --traces-endpoint still wins, on any platform.
+        let cli = parse_observability_args(&[
+            "xybrid",
+            "--api-key",
+            "staging-key",
+            "--platform-url",
+            "https://staging.api.xybrid.dev",
+            "--observability",
+            "--traces-endpoint",
+            "https://collector.example.test/v1/traces",
+            "models",
+            "list",
+        ])
+        .unwrap();
+        let config = observability_config(&cli, flag_key(&cli).as_ref(), Some(&staging), None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            config.traces.unwrap().endpoint,
+            "https://collector.example.test/v1/traces"
+        );
+    }
+
+    #[test]
+    fn generic_otlp_configuration_never_receives_a_saved_key() {
+        let prod = PlatformHost::parse("https://api.xybrid.dev").unwrap();
+        let cli = parse_observability_args(&["xybrid", "models", "list"]).unwrap();
+        let collector = OtlpConfig::collector("http://localhost:4318");
+        let config = observability_config(
+            &cli,
+            Some(&saved_key(&prod)),
+            Some(&prod),
+            Some(collector.clone()),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(config.traces, collector.traces);
+    }
+
+    #[test]
+    fn platform_commands_parse() {
+        for args in [
+            vec![
+                "xybrid",
+                "connect",
+                "--agent",
+                "claude-code",
+                "--write-env",
+                ".env",
+                "--json",
+            ],
+            vec![
+                "xybrid",
+                "connect",
+                "--new",
+                "--allow-ci",
+                "--project-name",
+                "my app",
+            ],
+            vec![
+                "xybrid",
+                "--platform-url",
+                "http://localhost:3001",
+                "connect",
+                "--allow-custom-host",
+                "--write-env",
+                "app.env",
+                "--env-name",
+                "EXPO_PUBLIC_XYBRID_API_KEY",
+            ],
+            vec!["xybrid", "auth", "status", "--json", "--show-claim-url"],
+            vec!["xybrid", "auth", "claim", "--no-browser"],
+            vec!["xybrid", "auth", "logout"],
+            vec!["xybrid", "auth", "signup", "--json"],
+        ] {
+            parse_observability_args(&args).unwrap_or_else(|err| panic!("{args:?}: {err}"));
+        }
+        let Err(error) = parse_observability_args(&["xybrid", "connect", "--env-name", "X"]) else {
+            panic!("--env-name needs --write-env");
+        };
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
     }
 
     #[test]
