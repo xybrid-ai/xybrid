@@ -150,7 +150,7 @@ impl Profile {
                 {
                     return Err(Error::UnsupportedMetadata);
                 }
-                let temperature: f32 = value.parse().map_err(|_| Error::InvalidMetadata)?;
+                let temperature = parse_native_float(value).ok_or(Error::InvalidMetadata)?;
                 if !temperature.is_finite() || temperature <= 0.0 {
                     return Err(Error::InvalidMetadata);
                 }
@@ -200,6 +200,39 @@ impl Profile {
         }
         (None, 1.0)
     }
+}
+
+/// Parses a float from llama.cpp's metadata string map.
+///
+/// llama.cpp formats float metadata with `std::to_string`, which follows the
+/// process's `LC_NUMERIC`: where the decimal separator is a comma, `0.7`
+/// arrives as `0,700000`. Upstream reads the string back with `strtof` under
+/// that same locale, so it never notices. Rust's parser is locale-independent
+/// and must accept the separator itself, or a host that calls
+/// `setlocale(LC_ALL, "")` (GTK, Qt) could not load a calibrated model.
+///
+/// Only `%f` output is accepted this way: digits, one separator that is a
+/// comma or a non-ASCII character, then exactly six digits. Any other text
+/// Rust cannot parse still refuses.
+fn parse_native_float(text: &str) -> Option<f32> {
+    if let Ok(value) = text.parse() {
+        return Some(value);
+    }
+    let (sign, unsigned) = match text.strip_prefix('-') {
+        Some(rest) => ("-", rest),
+        None => ("", text),
+    };
+    // `get` refuses a split inside a multi-byte separator.
+    let fraction_start = unsigned.len().checked_sub(6)?;
+    let fraction = unsigned.get(fraction_start..)?;
+    let head = unsigned.get(..fraction_start)?;
+    let separator = head.chars().next_back()?;
+    let integer = &head[..head.len() - separator.len_utf8()];
+    let is_digits = |digits: &str| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit());
+    if !is_digits(integer) || !is_digits(fraction) || (separator != ',' && separator.is_ascii()) {
+        return None;
+    }
+    format!("{sign}{integer}.{fraction}").parse().ok()
 }
 
 /// Narrow preparation boundary, allowing vocabulary-only conformance checks.
@@ -623,6 +656,39 @@ mod tests {
             escape_controls("<user-defined>", &controls).unwrap(),
             "<user-defined>"
         );
+    }
+
+    #[test]
+    fn native_floats_parse_whatever_the_locale_decimal_separator() {
+        let expected: f32 = "1.337398".parse().unwrap();
+        // C locale, a comma-decimal locale, and U+066B (the fa/ps separator).
+        for text in ["1.337398", "1,337398", "1\u{66b}337398"] {
+            assert_eq!(
+                parse_native_float(text).map(f32::to_bits),
+                Some(expected.to_bits()),
+                "{text}"
+            );
+        }
+        assert_eq!(parse_native_float("-0,500000"), Some(-0.5));
+        // Text Rust already parses keeps its meaning.
+        assert_eq!(parse_native_float("2"), Some(2.0));
+        assert_eq!(parse_native_float("1e-3"), Some(0.001));
+        // Anything else that is not `%f` output still refuses.
+        for text in [
+            "",
+            "abc",
+            "1,5",
+            ",500000",
+            "1,",
+            "1 500000",
+            "1x500000",
+            "1,2,500000",
+            "1,50000a",
+            "+1,500000",
+            "1,,500000",
+        ] {
+            assert_eq!(parse_native_float(text), None, "{text:?}");
+        }
     }
 
     #[test]

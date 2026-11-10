@@ -43,6 +43,13 @@ valid. A value rounded to zero by native formatting refuses. Nonempty score-bias
 metadata and unknown decision metadata refuse. Unused `temperature.image`
 metadata does not invalidate a text artifact and never overrides a text pass.
 
+Two limits of this check follow from how llama.cpp exposes metadata. Its string
+map holds scalar values only, so an array-typed `lfm3.decision.*` entry is not
+seen and cannot refuse; upstream writes scalars at this pin. And it formats
+floats under the process's `LC_NUMERIC`, so a temperature can arrive as
+`0,700000`: admission accepts that `%f` form with any decimal separator, as
+upstream's `strtof` does under the same locale.
+
 Vocabulary-only admission uses a distinct handle that cannot create an
 inference context. Metadata reads are bounded to 1 MiB per string and 8 MiB
 aggregate; the text profile admits at most 1,048,576 vocabulary tokens and 256
