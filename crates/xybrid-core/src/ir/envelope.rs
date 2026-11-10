@@ -1877,8 +1877,21 @@ impl Envelope {
     ///
     /// A `Result` containing the deserialized envelope or an error
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, EnvelopeError> {
-        bincode::deserialize(bytes).map_err(|_| {
-            EnvelopeError::DeserializationError("Failed to deserialize envelope".into())
+        // The decoder's own message can quote the payload. Name the kind of
+        // failure only.
+        bincode::deserialize(bytes).map_err(|error| {
+            let cause = match *error {
+                bincode::ErrorKind::Io(_) => "truncated or unreadable input",
+                bincode::ErrorKind::InvalidUtf8Encoding(_) => "invalid UTF-8",
+                bincode::ErrorKind::InvalidBoolEncoding(_) => "invalid boolean",
+                bincode::ErrorKind::InvalidCharEncoding => "invalid character",
+                bincode::ErrorKind::InvalidTagEncoding(_) => "unknown variant",
+                bincode::ErrorKind::SizeLimit => "size limit exceeded",
+                bincode::ErrorKind::DeserializeAnyNotSupported
+                | bincode::ErrorKind::SequenceMustHaveLength
+                | bincode::ErrorKind::Custom(_) => "invalid data",
+            };
+            EnvelopeError::DeserializationError(format!("Failed to deserialize envelope: {cause}"))
         })
     }
 
@@ -1907,9 +1920,20 @@ impl Envelope {
     /// A `Result` containing the deserialized envelope or an error
     pub fn from_json(json: &str) -> Result<Self, EnvelopeError> {
         // Deserializer errors can quote caller text (unknown keys/variants).
-        // Envelopes are a public boundary; retain only a stable category.
-        serde_json::from_str(json).map_err(|_| {
-            EnvelopeError::DeserializationError("Failed to deserialize envelope JSON".into())
+        // Envelopes are a public boundary: keep the class of failure and
+        // where it is, which is enough to find it, and drop the message.
+        serde_json::from_str(json).map_err(|error| {
+            let class = match error.classify() {
+                serde_json::error::Category::Io => "unreadable input",
+                serde_json::error::Category::Syntax => "invalid JSON",
+                serde_json::error::Category::Data => "unexpected value",
+                serde_json::error::Category::Eof => "truncated JSON",
+            };
+            EnvelopeError::DeserializationError(format!(
+                "Failed to deserialize envelope JSON: {class} at line {} column {}",
+                error.line(),
+                error.column()
+            ))
         })
     }
 

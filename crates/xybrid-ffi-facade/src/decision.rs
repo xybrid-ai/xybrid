@@ -4,6 +4,7 @@
 //! foreign dictionary: doing so can reorder keys or round large integers.
 
 use crate::{unrepresentable, Error, Result};
+use xybrid_core::execution::decision::liquid::DecisionProtocolError as Refusal;
 use xybrid_core::ir;
 
 /// Text or raw ordered JSON. JSON null belongs in the containing optional field.
@@ -135,9 +136,11 @@ redacted_debug!(
     Decisions
 );
 
-fn invalid() -> Error {
+/// A refusal naming its stable category (`duplicate_key`, `too_many_options`,
+/// ...), so a binding can tell failures apart. Never request content.
+fn invalid(refusal: impl Into<Refusal>) -> Error {
     Error::ConfigError {
-        message: "invalid decision data".into(),
+        message: format!("invalid decision data: {}", refusal.into().category()),
     }
 }
 
@@ -146,8 +149,9 @@ impl DecisionContent {
         match self {
             Self::Text { text } => Ok(ir::DecisionContent::text(text)),
             Self::Json { json_text } => {
-                let json = ir::OrderedJson::parse(&json_text).map_err(|_| invalid())?;
-                ir::DecisionContent::from_json(json).ok_or_else(invalid)
+                let json = ir::OrderedJson::parse(&json_text).map_err(invalid)?;
+                // JSON null belongs in the containing optional field.
+                ir::DecisionContent::from_json(json).ok_or_else(|| invalid(Refusal::InvalidRequest))
             }
         }
     }
@@ -172,7 +176,7 @@ impl DecisionRequest {
     /// Convert and validate before entering inference. Errors never quote content.
     pub fn into_sdk(self) -> Result<ir::DecisionRequest> {
         if self.questions.len() > 16 {
-            return Err(invalid());
+            return Err(invalid(Refusal::BudgetExceeded));
         }
         let questions = self
             .questions
@@ -181,7 +185,7 @@ impl DecisionRequest {
                 let kind = match question.kind {
                     DecisionQuestionKind::Choice { options } => {
                         if options.len() > 255 {
-                            return Err(invalid());
+                            return Err(invalid(Refusal::TooManyOptions));
                         }
                         ir::DecisionQuestionKind::choice(
                             options
@@ -201,7 +205,7 @@ impl DecisionRequest {
                     ),
                     DecisionQuestionKind::Score { levels } => {
                         if levels.len() > 255 {
-                            return Err(invalid());
+                            return Err(invalid(Refusal::LevelCount));
                         }
                         ir::DecisionQuestionKind::score(
                             levels
@@ -225,7 +229,7 @@ impl DecisionRequest {
             questions,
         );
         ir::decision::validate_structure(&request, &ir::decision::StructuralLimits::default())
-            .map_err(|_| invalid())?;
+            .map_err(invalid)?;
         Ok(request)
     }
 
@@ -349,14 +353,14 @@ impl Decisions {
     /// Validate foreign output data when reconstructing an envelope.
     pub fn into_sdk(self) -> Result<ir::Decisions> {
         if self.answers.len() > 16 {
-            return Err(invalid());
+            return Err(invalid(Refusal::InvalidOutput));
         }
         let answers = self
             .answers
             .into_iter()
             .map(|answer| {
                 if answer.distribution.len() > 255 {
-                    return Err(invalid());
+                    return Err(invalid(Refusal::InvalidOutput));
                 }
                 let value = match answer.value {
                     DecisionValue::Choice { key } => ir::DecisionValue::choice(key),
@@ -385,7 +389,7 @@ impl Decisions {
                     })
                     .collect();
                 ir::DecisionAnswer::new(answer.question_id, distribution, value, answer.confidence)
-                    .map_err(|_| invalid())
+                    .map_err(invalid)
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(ir::Decisions::new(
@@ -499,6 +503,52 @@ mod tests {
         }
         .into_ir()
         .is_err());
+    }
+
+    #[test]
+    fn refusals_name_their_category_and_nothing_else() {
+        let message = |content: DecisionContent| match content.into_ir().unwrap_err() {
+            Error::ConfigError { message } => message,
+            other => panic!("{other:?}"),
+        };
+        let json = |text: &str| DecisionContent::Json {
+            json_text: text.into(),
+        };
+        assert_eq!(
+            message(json(r#"{"PRIVATE":1,"PRIVATE":2}"#)),
+            "invalid decision data: duplicate_key"
+        );
+        assert_eq!(
+            message(json("PRIVATE")),
+            "invalid decision data: invalid_json"
+        );
+        assert_eq!(
+            message(json("null")),
+            "invalid decision data: invalid_request"
+        );
+        let question = |id: usize| DecisionQuestion {
+            id: id.to_string(),
+            instructions: Some(DecisionContent::Text {
+                text: "PRIVATE".into(),
+            }),
+            kind: DecisionQuestionKind::YesNo {
+                yes: None,
+                no: None,
+            },
+        };
+        let error = DecisionRequest {
+            state: None,
+            questions: (0..17).map(question).collect(),
+        }
+        .into_sdk()
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            Error::ConfigError {
+                message: "invalid decision data: budget_exceeded".into()
+            }
+            .to_string()
+        );
     }
 
     #[test]
