@@ -210,7 +210,10 @@ the workflow carrying the conversation id.
 **(e) Lifecycle.** Flush; record `lifecycle.flush` as `"ok"` or
 `"error: ..."`; read stats (`after_flush`). Shut down twice and record both
 results as `lifecycle.shutdown` (`["ok", "ok"]` expected); read stats
-(`after_shutdown`, expected disabled and all zero). Then start workflow
+(`after_shutdown`, expected disabled with the shut-down session's final
+counters: they stay readable until the next init, nothing is pending, nothing
+was dropped or failed, and each is at least what it was after the flush; the
+shutdown's final metrics collection adds metric points). Then start workflow
 `scenario-after-shutdown` with no options, read its reference and context
 (both expected `null`), complete and release it, and flush again. Record
 `lifecycle.after_shutdown = {"workflow_ref", "workflow_context", "flush"}`.
@@ -267,8 +270,8 @@ step threw: then set `scenario_error` to the error text and exit non-zero.
 | `automatic.load` | The load span is a child of the workflow with the conversation id; its error matches the recorded outcome. |
 | `automatic.run` | Exactly one workflow child besides the manual operations and the load, the run span: conversation id, model id, `error.type`, status ERROR; a non-null `references.run` names it. |
 | `trace.tree` | Every span in T has an exported parent; only the workflow hangs under P. Spans outside T are noted. |
-| `stats.consistent` | `accepted = exported + dropped + failed + pending` in every snapshot; after the flush nothing pending, dropped or failed; `traces.exported` at least the spans asserted; the receiver holds at least as many spans, log records and metric points as were reported exported; metrics were exported. |
-| `lifecycle.shutdown` | Flush ok, both shutdowns ok, stats afterwards disabled with all five counters of every signal present and zero, the post-shutdown workflow has no reference or context, the post-shutdown flush is ok. |
+| `stats.consistent` | `accepted = exported + dropped + failed + pending` in every snapshot; after the flush nothing pending, dropped or failed; `traces.exported` at least the spans asserted; the receiver holds at least as many spans, log records and metric points as were reported exported, after the flush and after shutdown; metrics were exported. |
+| `lifecycle.shutdown` | Flush ok, both shutdowns ok; stats afterwards disabled with all five counters of every signal present and final: nothing pending, `accepted = exported + dropped + failed`, nothing dropped or failed, and `accepted` and `exported` at least their values after the flush (zeros, a reset, fail); the post-shutdown workflow has no reference or context, the post-shutdown flush is ok. |
 | `lifecycle.nothing_after_shutdown` | The post-shutdown workflow was never exported. |
 
 `content.omit` and the omit clause of `inference.content` can only show that

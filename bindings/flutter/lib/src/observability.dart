@@ -147,6 +147,9 @@ class XybridObservability {
   static void init(ObservabilityConfig config) =>
       ffi.initObservability(config: config.toFfi());
 
+  /// Delivery counters: live while export runs; after [shutdown], the final
+  /// ones (what the shutdown failed or dropped included) until the next
+  /// [init]; all zero before any.
   static ObservabilityStats get stats => ffi.observabilityStats();
 
   /// Export queued records without blocking the Dart UI isolate.

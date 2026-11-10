@@ -36,6 +36,16 @@ literal replacements and exact attribute omission), and size budgets. Content
 that cannot be processed safely (too deep, over budget, a failing hook) is
 omitted and listed in `xybrid.genai.content.truncated_attributes`.
 
+Rust only: `ContentPolicy::capped_by(&ceiling)` combines two policies so the
+result never captures more than either (destinations both capture, the smaller
+budgets, the ceiling's hooks and rules first, each hook once however often
+policies are combined), and
+`Observer::content_capped_by(&ceiling)` derives an observer over the same
+providers with that policy. Hosts that let one operation pick its own
+observer use them so the pick can lower capture but not raise it (the Xybrid
+SDK does, for per-run sessions and observers). They add no wire behaviour; JS
+applications choose an observer per operation directly.
+
 `examples/standalone.rs` instruments a fake streaming model end to end without
 any Xybrid dependency. It prints what it recorded, or exports over OTLP/HTTP
 when `OTEL_EXPORTER_OTLP_ENDPOINT` is set:
@@ -63,11 +73,15 @@ Before the paired Rust log exporter, processors see null as
 different exporter encodes that carrier as empty bytes rather than null.
 
 Each export shares one absolute deadline across split requests, retries and
-response reads. Redirects are disabled. Retained operations and traversal
-default to 480 KiB, queues plus in-flight data to 32 MiB per signal, and JSON
-depth to 128. These budgets describe library-owned data, not process RSS.
-`stats()` reports `accepted`, `exported`, `dropped`, `failed` and `pending`
-for each signal. A missing acknowledgement leaves delivery unknown; retries
+response reads. Redirects are disabled. Content retained per operation defaults
+to 208 KiB and traversal to 480 KiB, queues plus in-flight data to 32 MiB per
+signal, and JSON depth to 128. These budgets describe library-owned data, not
+process RSS. The content budgets are clamped so one span fits the request bound
+(`max_request_body_bytes`, 480 KiB; see `ContentPolicy`), content for a span
+that is not recording is not processed, and a redaction hook that panics fails
+closed like one that returns an error. `stats()` reports `accepted`,
+`exported`, `dropped`, `failed`, `pending` and `buffered_bytes` (the bytes
+held against the 32 MiB budget) for each signal. A missing acknowledgement leaves delivery unknown; retries
 do not multiply item outcomes. Flush covers its acceptance barrier; shutdown
 closes admission, drains, cancels remaining requests and remembers its result.
 An application-owned OpenTelemetry metrics provider retains the SDK reader's

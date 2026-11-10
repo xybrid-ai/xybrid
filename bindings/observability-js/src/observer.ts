@@ -100,16 +100,36 @@ export type ContentOptions = {
    * `OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT`; any other value throws `RangeError`.
    */
   readonly capture?: ContentCaptureInput | undefined;
-  /** UTF-8 byte budget per content attribute (default 16384, integer >= 1). */
+  /**
+   * UTF-8 byte budget per content attribute (default 16384, integer >= 1); clamped to the
+   * effective `maxRetainedOperationBytes`.
+   */
   readonly maxAttributeBytes?: number | undefined;
-  /** Content retained by one operation until it ends (default 491520 = 480 KiB). */
+  /**
+   * Content retained by one operation until it ends (default 212992 = 208 KiB, integer >= 1);
+   * clamped to `(maxRequestBodyBytes - 65536) / 2` (at least 1) so that one span's content cannot
+   * push its export request past `maxRequestBodyBytes` (CONTRACT.md "Content pipeline").
+   */
   readonly maxRetainedOperationBytes?: number | undefined;
+  /**
+   * `maxRequestBodyBytes` of the exporter that sends this observer's spans (default 491520 =
+   * 480 KiB, integer >= 1), which the content budgets are clamped to fit. `OtlpPipeline.observer`
+   * applies its own bound (the smaller one wins); set it for providers the application owns.
+   */
+  readonly maxRequestBodyBytes?: number | undefined;
   /** Preflight cost bound of one content value (default 491520 = 480 KiB). */
   readonly maxTraversalBytes?: number | undefined;
   /** Callback redactor; runs on a canonical copy before the declarative rules. */
   readonly redact?: Redactor | undefined;
   /** Declarative rules applied after `redact` (validated; invalid rules throw `TypeError`). */
   readonly rules?: readonly RedactionRule[] | undefined;
+};
+
+/** Effective content budgets of an observer (CONTRACT.md "Content pipeline", budgets). */
+export type ContentBudgets = {
+  readonly maxAttributeBytes: number;
+  readonly maxRetainedOperationBytes: number;
+  readonly maxRequestBodyBytes: number;
 };
 
 export type ObserverOptions = {
@@ -444,6 +464,19 @@ const positiveInteger = (value: unknown, fallback: number, name: string): number
   return value;
 };
 
+/**
+ * The largest retained-operation (and so attribute) budget that keeps one span within
+ * `maxRequestBodyBytes`: `(request - allowance) / growth`, at least 1.
+ */
+export const spanContentCeiling = (maxRequestBodyBytes: number): number =>
+  Math.max(
+    1,
+    Math.floor(
+      Math.max(0, maxRequestBodyBytes - DEFAULTS.span_envelope_allowance_bytes) /
+        DEFAULTS.span_content_encoding_growth,
+    ),
+  );
+
 type Instrument = Histogram | Counter;
 
 /** Shared, immutable state behind an {@link Observer} and its operations. */
@@ -451,6 +484,7 @@ class ObserverCore {
   readonly capture: ContentCapture;
   readonly budget: number;
   readonly maxRetained: number;
+  readonly maxRequestBodyBytes: number;
   readonly content: ContentProcessor;
   readonly tracer: otel.Tracer | undefined;
   readonly #clock: (() => number) | undefined;
@@ -469,11 +503,23 @@ class ObserverCore {
       DEFAULTS.max_content_attribute_bytes,
       "content.maxAttributeBytes",
     );
-    this.maxRetained = positiveInteger(
-      content.maxRetainedOperationBytes,
-      DEFAULTS.max_retained_operation_bytes,
-      "content.maxRetainedOperationBytes",
+    const maxRequestBodyBytes = positiveInteger(
+      content.maxRequestBodyBytes,
+      DEFAULTS.max_request_body_bytes,
+      "content.maxRequestBodyBytes",
     );
+    this.maxRequestBodyBytes = maxRequestBodyBytes;
+    // Budgets are clamped, never rejected: the attribute budget fits the retained budget, which
+    // fits the span content ceiling of the request bound.
+    this.maxRetained = Math.min(
+      positiveInteger(
+        content.maxRetainedOperationBytes,
+        DEFAULTS.max_retained_operation_bytes,
+        "content.maxRetainedOperationBytes",
+      ),
+      spanContentCeiling(maxRequestBodyBytes),
+    );
+    this.budget = Math.min(this.budget, this.maxRetained);
     const maxTraversalBytes = positiveInteger(
       content.maxTraversalBytes,
       DEFAULTS.max_traversal_bytes,
@@ -503,6 +549,15 @@ class ObserverCore {
 
   get spanContent(): boolean {
     return this.capture === "span_only" || this.capture === "span_and_event";
+  }
+
+  /** The effective content budgets, after clamping. */
+  get budgets(): ContentBudgets {
+    return Object.freeze({
+      maxAttributeBytes: this.budget,
+      maxRetainedOperationBytes: this.maxRetained,
+      maxRequestBodyBytes: this.maxRequestBodyBytes,
+    });
   }
 
   get eventContent(): boolean {
@@ -802,7 +857,9 @@ abstract class Operation {
    */
   protected recordContent(key: string, raw: unknown, shape: ContentShape, governed: boolean): void {
     if (this.#ended) return;
-    const toSpan = !governed || this.core.spanContent;
+    // Content for a span that does not record (unsampled, suppressed, no tracer) is never
+    // processed; the event destination does not depend on the span.
+    const toSpan = (!governed || this.core.spanContent) && this.span?.isRecording() === true;
     const toEvent = this.hasDetailsEvent && this.core.eventContent;
     if (!toSpan && !toEvent) return;
     const outcome = this.core.content.process(key, raw, shape);
@@ -836,8 +893,12 @@ abstract class Operation {
       eventValue = toEvent ? bounded.value : undefined;
     }
     const keyBytes = DEFAULTS.preflight_node_bytes + utf8Length(key);
+    // Plain text is charged as OTLP/JSON writes it (escapes counted), so no span value grows more
+    // than twofold when encoded.
+    const spanBytes = (value: string): number =>
+      shape === "string" ? utf8Length(JSON.stringify(value)) - 2 : utf8Length(value);
     const bytes =
-      (spanValue === undefined ? 0 : keyBytes + utf8Length(spanValue)) +
+      (spanValue === undefined ? 0 : keyBytes + spanBytes(spanValue)) +
       (eventValue === undefined ? 0 : keyBytes + jsonCost(eventValue));
     this.#release(key);
     if (this.#retained + bytes > this.core.maxRetained) {
@@ -910,7 +971,13 @@ abstract class Operation {
     this.#ended = true;
     this.recordMetrics(endMs);
     this.emitEvents(endMs, error, message);
-    this.span?.end(msToHrTime(endMs));
+    try {
+      this.span?.end(msToHrTime(endMs));
+    } catch {
+      // A span processor threw in onEnd: contained, like a Rust processor's panic. The operation
+      // has ended; processors after the throwing one never see this span.
+      diag.debug("xybrid-observability: a span processor threw while a span ended");
+    }
   }
 
   protected durationSeconds(endMs: number): number {
@@ -1541,6 +1608,14 @@ export class Observer {
   /** The effective content capture mode (lowercase). */
   get contentCapture(): ContentCapture {
     return this.#core.capture;
+  }
+
+  /**
+   * The effective content budgets: `maxRetainedOperationBytes` at most the span content ceiling
+   * of `maxRequestBodyBytes`, `maxAttributeBytes` at most `maxRetainedOperationBytes`.
+   */
+  get contentBudgets(): ContentBudgets {
+    return this.#core.budgets;
   }
 
   /**

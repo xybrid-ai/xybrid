@@ -162,9 +162,10 @@ class PassingRunTests(CheckerTestCase):
         self.refs["load"] = None
         self.expected["automatic"] = {"load": {"outcome": "error", "error": "LoadError: x"},
                                       "run": {"outcome": "skipped", "error": None}}
-        flushed = self.expected["stats"]["after_flush"]
-        flushed["traces"].update(accepted=6, exported=6)
-        flushed["logs"].update(accepted=1, exported=1)
+        for snapshot in ("after_flush", "after_shutdown"):
+            counters = self.expected["stats"][snapshot]
+            counters["traces"].update(accepted=6, exported=6)
+            counters["logs"].update(accepted=1, exported=1)
         self.assertOnlyFails()
 
     def test_a_declared_sdk_binding_overrides_the_attribution_check(self):
@@ -300,6 +301,9 @@ class TerminalFaultTests(CheckerTestCase):
         dropped = self.cancelled_durations()
         for points in metric_points(self.entries, "gen_ai.client.inference.duration"):
             points[:] = [point for point in points if point not in dropped]
+        # Points never recorded were never exported either.
+        final = self.expected["stats"]["after_shutdown"]["metrics"]
+        final.update(accepted=final["accepted"] - len(dropped), exported=final["exported"] - len(dropped))
         outcome = self.assertOnlyFails("inference.released")
         self.assertIn("error.type 'cancelled'", " ".join(outcome["inference.released"].failures))
 
@@ -382,8 +386,12 @@ class StatsAndLifecycleFaultTests(CheckerTestCase):
         self.assertOnlyFails("stats.consistent")
 
     def test_more_exported_than_received_fails(self):
-        self.expected["stats"]["after_flush"]["traces"].update(accepted=12, exported=12)
-        self.assertOnlyFails("stats.consistent")
+        # The final counters after shutdown claim as much, so only the
+        # receiver comparison fails.
+        for snapshot in ("after_flush", "after_shutdown"):
+            self.expected["stats"][snapshot]["traces"].update(accepted=12, exported=12)
+        outcome = self.assertOnlyFails("stats.consistent")
+        self.assertEqual(len(outcome["stats.consistent"].failures), 2)
 
     def test_non_idempotent_shutdown_fails(self):
         self.expected["lifecycle"]["shutdown"] = ["ok", "error: TelemetryDelivery: x"]
@@ -398,13 +406,49 @@ class StatsAndLifecycleFaultTests(CheckerTestCase):
         self.assertOnlyFails("lifecycle.shutdown")
 
     def test_stats_after_shutdown_without_counters_fail(self):
-        # "All zero" must not hold vacuously over counters that were never read.
+        # The final counters must not hold vacuously over counters never read.
         self.expected["stats"]["after_shutdown"] = {"enabled": False}
         outcome = self.assertOnlyFails("lifecycle.shutdown")
         self.assertEqual(len(outcome["lifecycle.shutdown"].failures), len(check_capture.SIGNAL_KEYS))
         self.expected["stats"]["after_shutdown"] = {
             "enabled": False, **{signal: {"accepted": 0} for signal in check_capture.SIGNAL_KEYS}}
         self.assertOnlyFails("lifecycle.shutdown")
+
+    def test_stats_reset_by_shutdown_fail(self):
+        # After shutdown the stats are the session's
+        # final counters until the next init, not zeros (the old behaviour).
+        self.expected["stats"]["after_shutdown"] = {
+            "enabled": False,
+            **{signal: dict.fromkeys(check_capture.COUNTER_KEYS, 0) for signal in check_capture.SIGNAL_KEYS}}
+        outcome = self.assertOnlyFails("lifecycle.shutdown")
+        failures = outcome["lifecycle.shutdown"].failures
+        self.assertTrue(all("not a reset" in failure for failure in failures), failures)
+        # Every signal's accepted and exported were above zero after the flush.
+        self.assertEqual(len(failures), 2 * len(check_capture.SIGNAL_KEYS))
+
+    def test_stats_after_shutdown_must_be_settled_and_lossless(self):
+        final = self.expected["stats"]["after_shutdown"]
+        cases = (
+            ("traces", {"pending": 1, "accepted": 10}, "pending is 1"),
+            ("logs", {"accepted": 3}, "accepted 3 != exported + dropped + failed"),
+            ("metrics", {"failed": 1, "accepted": 17}, "metrics.failed is 1"),
+            ("traces", {"dropped": 2, "accepted": 11}, "traces.dropped is 2"),
+        )
+        for signal, change, message in cases:
+            with self.subTest(signal=signal, change=change):
+                original = dict(final[signal])
+                final[signal].update(change)
+                outcome = self.assertOnlyFails("lifecycle.shutdown")
+                failures = outcome["lifecycle.shutdown"].failures
+                self.assertTrue(any(message in failure for failure in failures), failures)
+                final[signal] = original
+
+    def test_more_exported_after_shutdown_than_received_fails(self):
+        # The final counters are held against the receiver like the flush's.
+        self.expected["stats"]["after_shutdown"]["metrics"].update(accepted=24, exported=24)
+        outcome = self.assertOnlyFails("stats.consistent")
+        self.assertEqual(outcome["stats.consistent"].failures,
+                         ["after shutdown, metrics.exported 24 but the receiver holds 16 data points"])
 
     def test_export_after_shutdown_fails(self):
         late = copy.deepcopy(self.entries[0])

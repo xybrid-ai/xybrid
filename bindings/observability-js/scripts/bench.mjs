@@ -129,8 +129,8 @@ const POLICIES = [
     "hook_and_rules",
     { capture: "span_only", redact: substringRedactor(["Lisbon", "Tagus"]), rules: RULES },
   ],
-  // The default policy under a sampler that drops every span: nothing can be recorded, so this
-  // measures what content processing costs an operation whose span is not recording.
+  // The default policy under a sampler that drops every span: the span is not recording, so the
+  // capture gate closes its destination and no content work is done (about metadata_only's cost).
   ["unsampled", { capture: "span_only" }],
 ];
 

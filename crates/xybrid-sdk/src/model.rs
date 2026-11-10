@@ -42,7 +42,7 @@ use xybrid_core::orchestrator::authority::{
     PolicyRequest, ResolvedTarget, SignalContext, StageContext,
 };
 use xybrid_core::orchestrator::routing_engine::LocalReliabilityHint;
-use xybrid_core::runtime_adapter::types::GenerationConfig;
+use xybrid_core::runtime_adapter::types::{GenerationConfig, StreamingError};
 use xybrid_core::runtime_adapter::{
     encode_stop_sequences, CloudRuntimeAdapter, CloudStreaming, RuntimeAdapter,
     STOP_SEQUENCES_METADATA_KEY,
@@ -461,6 +461,79 @@ fn finish_tts_stream(
     Ok(summary)
 }
 
+/// What [`RunObservation::start`] records about a request of a model whose
+/// run is `subject`, served at `location`.
+fn run_start<'a>(
+    subject: RunSubject,
+    location: Location,
+    input: &'a Envelope,
+    history: &'a [Envelope],
+    options: Option<&'a RunOptions>,
+    config: Option<&'a GenerationConfig>,
+    streaming: bool,
+) -> RunStart<'a> {
+    RunStart {
+        subject,
+        input: Some(input),
+        history,
+        options,
+        generation: config.or_else(|| options.and_then(|o| o.generation_config.as_ref())),
+        streaming,
+        location,
+        parent: None,
+        provider: None,
+        server: None,
+    }
+}
+
+/// A token callback as a trait object (see [`XybridModel::spawn_event_stream`]).
+type TokenSink<'a> = dyn FnMut(xybrid_core::runtime_adapter::types::PartialToken) -> Result<(), StreamingError>
+    + Send
+    + 'a;
+
+/// The gate of a stream with no per-token checks.
+fn ungated() -> Result<(), StreamingError> {
+    Ok(())
+}
+
+/// Wraps a caller's token callback for one observed stream: `gate` (the
+/// per-token abort checks) runs first, and only a token it lets through is
+/// handed to `on_token`, then counted as a delivered chunk once the caller
+/// accepts it. So `chunk_count` is the number of tokens the caller received,
+/// whatever stopped the stream. A stop that is the caller's cancellation (the
+/// gate stopping on [`AbortReason::UserCancelled`], or `on_token` returning
+/// it because its consumer went away) marks the run cancelled.
+///
+/// [`AbortReason::UserCancelled`]: crate::run_options::AbortReason::UserCancelled
+fn deliver_gated<G, F>(
+    chunks: crate::observability::ChunkSink,
+    mut gate: G,
+    mut on_token: F,
+) -> impl FnMut(xybrid_core::runtime_adapter::types::PartialToken) -> Result<(), StreamingError> + Send
+where
+    G: FnMut() -> Result<(), StreamingError> + Send,
+    F: FnMut(xybrid_core::runtime_adapter::types::PartialToken) -> Result<(), StreamingError>
+        + Send,
+{
+    move |token| {
+        gate().inspect_err(|error| chunks.cancel_mark().note(error.as_ref()))?;
+        chunks.deliver(|| on_token(token))
+    }
+}
+
+/// Records a streamed synthesis's terminal status and packet count on its
+/// run.
+fn record_tts_summary(obs: &RunObservation, summary: &xybrid_core::execution::TtsStreamResult) {
+    obs.operation().set_attribute(KeyValue::new(
+        "xybrid.tts.status",
+        format!("{:?}", summary.status).to_lowercase(),
+    ));
+    obs.operation().set_attribute(KeyValue::new(
+        "xybrid.tts.chunks",
+        i64::from(summary.chunks),
+    ));
+}
+
 /// Stamp the live-capture tag onto a telemetry-event `data` object.
 ///
 /// When `live_tag` is `Some`, inserts the flat `live_mode = true` +
@@ -759,6 +832,9 @@ where
                 .as_ref()
                 .is_some_and(CancellationToken::is_cancelled)
             {
+                if let Some(obs) = obs {
+                    obs.mark_cancelled();
+                }
                 return Err(SdkError::inference(format!(
                     "Execution aborted: {}",
                     crate::run_options::AbortReason::UserCancelled
@@ -900,6 +976,7 @@ where
             let cloud_tokens = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
             let cloud_tokens_for_cb = cloud_tokens.clone();
             let cancellation_for_cb = cancellation_token.clone();
+            let cancel_mark = obs.map(|obs| obs.chunk_sink().cancel_mark().clone());
             let cloud_callback: xybrid_core::runtime_adapter::types::StreamingCallback<'_> =
                 Box::new(move |token| {
                     // Honour user cancellation across the local→cloud seam.
@@ -909,6 +986,9 @@ where
                     // surface CloudFallbackAbort errors at the wrong layer.
                     if let Some(token_handle) = cancellation_for_cb.as_ref() {
                         if token_handle.is_cancelled() {
+                            if let Some(mark) = cancel_mark.as_ref() {
+                                mark.set();
+                            }
                             return Err(Box::new(crate::run_options::AbortReason::UserCancelled)
                                 as Box<dyn std::error::Error + Send + Sync>);
                         }
@@ -2529,6 +2609,7 @@ impl ModelLoader {
             generation_params: None,
         };
         let default_generation_config = xybrid_core::execution::model_default_gen_config(&metadata);
+        let subject = RunSubject::from_metadata(id, &metadata);
         let placeholder = ModelHandle {
             // Lazy executor over the not-yet-populated extraction dir; never run
             // while the state is not `Loaded` (runs route to cloud).
@@ -2635,6 +2716,7 @@ impl ModelLoader {
             speculative: Some(download),
             last_accessed,
             load_observation: None,
+            subject: Arc::new(Mutex::new(Some(subject))),
         }
     }
 
@@ -3332,6 +3414,7 @@ impl ModelLoader {
         let approx_size_mb = declared_size_mb(&handle.metadata);
         let default_generation_config =
             xybrid_core::execution::model_default_gen_config(&handle.metadata);
+        let subject = RunSubject::from_metadata(&model_id, &handle.metadata);
 
         let handle = Arc::new(RwLock::new(handle));
         let last_accessed = Arc::new(AtomicU64::new(crate::model_registry::now_ms()));
@@ -3348,6 +3431,7 @@ impl ModelLoader {
             speculative: None,
             last_accessed,
             load_observation: None,
+            subject: Arc::new(Mutex::new(Some(subject))),
         }
     }
 
@@ -3564,6 +3648,12 @@ pub struct XybridModel {
     /// picks a slightly different victim, which is not a correctness question.
     last_accessed: Arc<AtomicU64>,
     load_observation: Option<ObservationRef>,
+    /// What a run of the installed handle is, as last read from its metadata:
+    /// set at load and refreshed by every observed run. A request that ends
+    /// before it runs (see [`Self::observe_unstarted`]) reads it when a run in
+    /// flight holds the handle's write lock, so recording that request never
+    /// waits for the lock. `Arc`-shared with every clone.
+    subject: Arc<Mutex<Option<RunSubject>>>,
 }
 
 /// Model size in MB if the bundle declares one, for LRU tie-breaking only.
@@ -3870,22 +3960,105 @@ impl XybridModel {
             let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
             RunSubject::from_metadata(&self.model_id, &handle.metadata)
         };
-        RunObservation::start(RunStart {
-            subject,
-            input: Some(input),
-            history,
-            options,
-            generation: config.or_else(|| options.and_then(|o| o.generation_config.as_ref())),
-            streaming,
-            location: if self.cloud_serve() {
-                Location::Remote
-            } else {
-                Location::Local
-            },
-            parent,
-            provider: None,
-            server: None,
-        })
+        self.remember_subject(&subject);
+        // Where the run is routed: `run_body` / `stream_body` read the same
+        // `cloud_serve`, waiting for the handle as they do.
+        let location = if self.cloud_serve() {
+            Location::Remote
+        } else {
+            Location::Local
+        };
+        let mut start = run_start(
+            subject, location, input, history, options, config, streaming,
+        );
+        start.parent = parent;
+        RunObservation::start(start)
+    }
+
+    /// Starts observing a request that ends before it runs: a refused input,
+    /// a pre-run cancellation or a pre-run resource abort. The caller ends it
+    /// at once with that outcome, so the request is counted like any other
+    /// (one operation, one duration point with its `error.type`).
+    ///
+    /// Never waits for the handle lock: a request cancelled or aborted while
+    /// another run holds the write lock returns without waiting for that run,
+    /// and recording it must not change that. When the lock is busy the
+    /// subject is the one the last observed run (or the load) read.
+    fn observe_unstarted(
+        &self,
+        input: &Envelope,
+        history: &[Envelope],
+        options: Option<&RunOptions>,
+        config: Option<&GenerationConfig>,
+        streaming: bool,
+    ) -> RunObservation {
+        let read = self
+            .try_handle()
+            .map(|handle| RunSubject::from_metadata(&self.model_id, &handle.metadata));
+        let subject = match read {
+            Some(subject) => {
+                self.remember_subject(&subject);
+                subject
+            }
+            None => self
+                .subject
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+                .unwrap_or_else(|| RunSubject::unknown(&self.model_id)),
+        };
+        // Where `cloud_serve` would route it, read without waiting either.
+        let location = self.serving_location();
+        RunObservation::start(run_start(
+            subject, location, input, history, options, config, streaming,
+        ))
+    }
+
+    /// Ends an unstarted request (see [`Self::observe_unstarted`]) with
+    /// `error`, which it returns unchanged.
+    fn refuse<T>(
+        &self,
+        input: &Envelope,
+        history: &[Envelope],
+        options: Option<&RunOptions>,
+        config: Option<&GenerationConfig>,
+        streaming: bool,
+        error: SdkError,
+    ) -> SdkResult<T> {
+        self.observe_unstarted(input, history, options, config, streaming)
+            .fail(&error);
+        Err(error)
+    }
+
+    /// The handle, unless a writer holds it (a poisoned lock still reads).
+    fn try_handle(&self) -> Option<std::sync::RwLockReadGuard<'_, ModelHandle>> {
+        match self.handle.try_read() {
+            Ok(handle) => Some(handle),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        }
+    }
+
+    fn remember_subject(&self, subject: &RunSubject) {
+        *self.subject.lock().unwrap_or_else(|e| e.into_inner()) = Some(subject.clone());
+    }
+
+    /// Where a request that ends before it runs would have been served:
+    /// [`Self::cloud_serve`] without the wait (see
+    /// [`Self::observe_unstarted`]). A handle whose write lock is held is
+    /// running (or installing) a local model, so a request behind it is local.
+    /// Runs that start read the blocking [`Self::cloud_serve`] their routing
+    /// reads.
+    fn serving_location(&self) -> Location {
+        let unloaded = self.speculative.is_some()
+            && self
+                .try_handle()
+                .is_some_and(|handle| handle.state == LoadState::Unloaded);
+        if unloaded {
+            Location::Remote
+        } else {
+            Location::Local
+        }
     }
 
     /// Runs the local leg. After an earlier (cloud) attempt it is recorded as
@@ -4348,7 +4521,9 @@ impl XybridModel {
     ) -> SdkResult<InferenceResult> {
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
-        self.guard_input(envelope, EntryPoint::Batch)?;
+        if let Err(error) = self.guard_input(envelope, EntryPoint::Batch) {
+            return self.refuse(envelope, &[], options, config, false, error);
+        }
         let obs = self.observe(envelope, &[], options, config, false, parent);
         let result = self.run_body(envelope, config, &obs);
         obs.finish(result)
@@ -4477,16 +4652,24 @@ impl XybridModel {
             .as_ref()
             .is_some_and(CancellationToken::is_cancelled)
         {
-            return Ok((cancelled_result(), None));
+            // Cancelled before it started: one cancelled request, recorded
+            // without waiting for the model lock.
+            let summary = cancelled_result();
+            let obs = self.observe_unstarted(envelope, &[], Some(options), None, true);
+            record_tts_summary(&obs, &summary);
+            return Ok((summary, obs.cancel()));
         }
         let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
         let mut abort_state = AbortState::new(options);
-        abort_state
-            .check_before_run()
-            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
+        if let Err(reason) = abort_state.check_before_run() {
+            let error = streaming_pre_run_abort_error(reason, fallback_to_cloud);
+            return self.refuse(envelope, &[], Some(options), None, true, error);
+        }
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
-        self.guard_input(envelope, EntryPoint::Streaming)?;
+        if let Err(error) = self.guard_input(envelope, EntryPoint::Streaming) {
+            return self.refuse(envelope, &[], Some(options), None, true, error);
+        }
         let obs = self.observe(envelope, &[], Some(options), None, true, None);
         let chunks = obs.chunk_sink();
         let result = (|| {
@@ -4595,14 +4778,7 @@ impl XybridModel {
         })();
         match result {
             Ok(summary) => {
-                obs.operation().set_attribute(KeyValue::new(
-                    "xybrid.tts.status",
-                    format!("{:?}", summary.status).to_lowercase(),
-                ));
-                obs.operation().set_attribute(KeyValue::new(
-                    "xybrid.tts.chunks",
-                    i64::from(summary.chunks),
-                ));
+                record_tts_summary(&obs, &summary);
                 if summary.status == xybrid_core::execution::TtsStatus::Cancelled {
                     Ok((summary, obs.cancel()))
                 } else {
@@ -4617,6 +4793,11 @@ impl XybridModel {
     }
 
     /// Synthesize on a blocking worker, delivering owned audio packets.
+    ///
+    /// `options` carries the run's observation controls: an explicit parent
+    /// there wins over the ambient context wherever the future runs; without
+    /// one, the parent is the ambient context where the future first runs (see
+    /// [`Self::run_async`]).
     pub async fn run_tts_streaming_async<F>(
         &self,
         envelope: &Envelope,
@@ -4645,9 +4826,11 @@ impl XybridModel {
         options: &RunOptions,
     ) -> SdkResult<InferenceResult> {
         let mut abort_state = AbortState::new(options);
-        abort_state
-            .check_before_run()
-            .map_err(|reason| SdkError::inference(format!("Execution aborted: {reason}")))?;
+        if let Err(reason) = abort_state.check_before_run() {
+            let error = SdkError::inference(format!("Execution aborted: {reason}"));
+            let config = options.generation_config.as_ref();
+            return self.refuse(envelope, &[], Some(options), config, false, error);
+        }
         #[cfg(feature = "tts-zzz")]
         {
             let is_zzz = matches!(
@@ -4744,8 +4927,10 @@ impl XybridModel {
         options: Option<&RunOptions>,
     ) -> SdkResult<InferenceResult> {
         self.touch();
-        self.guard_context_input(envelope, context, EntryPoint::Conversation)?;
         let history = observed_history(context, envelope);
+        if let Err(error) = self.guard_context_input(envelope, context, EntryPoint::Conversation) {
+            return self.refuse(envelope, &history, options, config, false, error);
+        }
         let obs = self.observe(envelope, &history, options, config, false, None);
         let result = (|| {
             // Speculative cloud: serve from the gateway until the local handle
@@ -4817,9 +5002,12 @@ impl XybridModel {
         options: &RunOptions,
     ) -> SdkResult<InferenceResult> {
         let mut abort_state = AbortState::new(options);
-        abort_state
-            .check_before_run()
-            .map_err(|reason| SdkError::inference(format!("Execution aborted: {reason}")))?;
+        if let Err(reason) = abort_state.check_before_run() {
+            let error = SdkError::inference(format!("Execution aborted: {reason}"));
+            let history = observed_history(context, envelope);
+            let config = options.generation_config.as_ref();
+            return self.refuse(envelope, &history, Some(options), config, false, error);
+        }
         self.run_with_context_observed(
             envelope,
             context,
@@ -4881,35 +5069,37 @@ impl XybridModel {
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
-        self.run_streaming_with_context_tagged(envelope, context, config, None, on_token)
+        self.run_streaming_with_context_tagged(envelope, context, config, None, ungated, on_token)
     }
 
     /// Internal context-streaming entry point. `options` (from the
     /// options-aware entry points) carries observation controls and the
     /// live-capture tag stamped onto the emitted `ModelComplete` event.
-    fn run_streaming_with_context_tagged<F>(
+    /// `gate` runs before each token reaches `on_token` (see
+    /// [`deliver_gated`]).
+    fn run_streaming_with_context_tagged<G, F>(
         &self,
         envelope: &Envelope,
         context: &ConversationContext,
         config: Option<&GenerationConfig>,
         options: Option<&RunOptions>,
-        mut on_token: F,
+        gate: G,
+        on_token: F,
     ) -> SdkResult<InferenceResult>
     where
+        G: FnMut() -> Result<(), StreamingError> + Send,
         F: FnMut(
                 xybrid_core::runtime_adapter::types::PartialToken,
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
         self.touch();
-        self.guard_context_input(envelope, context, EntryPoint::Streaming)?;
         let history = observed_history(context, envelope);
+        if let Err(error) = self.guard_context_input(envelope, context, EntryPoint::Streaming) {
+            return self.refuse(envelope, &history, options, config, true, error);
+        }
         let obs = self.observe(envelope, &history, options, config, true, None);
-        let chunks = obs.chunk_sink();
-        let mut on_token = move |token| {
-            chunks.chunk();
-            on_token(token)
-        };
+        let mut on_token = deliver_gated(obs.chunk_sink(), gate, on_token);
         let result = (|| {
             // Speculative cloud: stream from the gateway until the local
             // handle is ready. The gateway leg is stateless (`context` not
@@ -5045,7 +5235,7 @@ impl XybridModel {
         envelope: &Envelope,
         context: &ConversationContext,
         options: &RunOptions,
-        mut on_token: F,
+        on_token: F,
     ) -> SdkResult<InferenceResult>
     where
         F: FnMut(
@@ -5059,20 +5249,23 @@ impl XybridModel {
         // (or model load + prompt fill on streaming models) before the first
         // token boundary checks the abort state.
         let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
-        abort_state
-            .check_before_run()
-            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
+        let config = options.generation_config.as_ref();
+        if let Err(reason) = abort_state.check_before_run() {
+            let error = streaming_pre_run_abort_error(reason, fallback_to_cloud);
+            let history = observed_history(context, envelope);
+            return self.refuse(envelope, &history, Some(options), config, true, error);
+        }
         self.run_streaming_with_context_tagged(
             envelope,
             context,
-            options.generation_config.as_ref(),
+            config,
             Some(options),
-            move |token| {
-                if let Err(reason) = abort_state.check_before_token() {
-                    return Err(reason.into_streaming_error(fallback_to_cloud));
-                }
-                on_token(token)
+            move || {
+                abort_state
+                    .check_before_token()
+                    .map_err(|reason| reason.into_streaming_error(fallback_to_cloud))
             },
+            on_token,
         )
     }
 
@@ -5085,6 +5278,15 @@ impl XybridModel {
     /// This "everything is a stream" pattern allows consumers to use the same
     /// API regardless of model type, while LLMs get the latency benefits of
     /// true streaming.
+    ///
+    /// Returning [`AbortReason::UserCancelled`](crate::AbortReason::UserCancelled)
+    /// from `on_token` stops the run at that token as the caller's
+    /// cancellation (for example, the consumer of a forwarded stream went
+    /// away): the call still fails as a callback error, and observability
+    /// records the run as `cancelled` rather than as an error. Any other
+    /// callback error stops it as an error. This holds for every token-stream
+    /// entry point, and `chunk_count` counts only the tokens `on_token`
+    /// accepted.
     ///
     /// # Arguments
     ///
@@ -5124,33 +5326,34 @@ impl XybridModel {
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
-        self.run_streaming_tagged(envelope, config, None, on_token)
+        self.run_streaming_tagged(envelope, config, None, ungated, on_token)
     }
 
     /// Internal streaming entry point. `options` (from the options-aware
     /// entry points) carries observation controls and the live-capture tag
-    /// stamped onto the emitted `ModelComplete` event.
-    fn run_streaming_tagged<F>(
+    /// stamped onto the emitted `ModelComplete` event. `gate` runs before
+    /// each token reaches `on_token` (see [`deliver_gated`]).
+    fn run_streaming_tagged<G, F>(
         &self,
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
         options: Option<&RunOptions>,
-        mut on_token: F,
+        gate: G,
+        on_token: F,
     ) -> SdkResult<InferenceResult>
     where
+        G: FnMut() -> Result<(), StreamingError> + Send,
         F: FnMut(
                 xybrid_core::runtime_adapter::types::PartialToken,
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
         self.touch();
-        self.guard_input(envelope, EntryPoint::Streaming)?;
+        if let Err(error) = self.guard_input(envelope, EntryPoint::Streaming) {
+            return self.refuse(envelope, &[], options, config, true, error);
+        }
         let obs = self.observe(envelope, &[], options, config, true, None);
-        let chunks = obs.chunk_sink();
-        let mut on_token = move |token| {
-            chunks.chunk();
-            on_token(token)
-        };
+        let mut on_token = deliver_gated(obs.chunk_sink(), gate, on_token);
         let result = self.stream_body(envelope, config, options, &obs, &mut on_token);
         obs.finish(result)
     }
@@ -5277,11 +5480,17 @@ impl XybridModel {
     }
 
     /// Run streaming inference with per-token abort checks.
+    ///
+    /// A run stopped on the caller's cancellation (the token, or `on_token`
+    /// returning [`AbortReason::UserCancelled`](crate::AbortReason::UserCancelled)),
+    /// a run cancelled or aborted before it starts and a refused input are
+    /// each recorded as one request with that outcome; see
+    /// [`Self::run_streaming`].
     pub fn run_streaming_with_options<F>(
         &self,
         envelope: &Envelope,
         options: &RunOptions,
-        mut on_token: F,
+        on_token: F,
     ) -> SdkResult<InferenceResult>
     where
         F: FnMut(
@@ -5302,17 +5511,19 @@ impl XybridModel {
         // batch even when the cancellation token was set before invocation,
         // because `check_abort_for_streaming` short-circuits in that case.
         let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
-        abort_state
-            .check_before_run()
-            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
+        let config = options.generation_config.as_ref();
+        if let Err(reason) = abort_state.check_before_run() {
+            let error = streaming_pre_run_abort_error(reason, fallback_to_cloud);
+            return self.refuse(envelope, &[], Some(options), config, true, error);
+        }
         self.run_streaming_tagged(
             envelope,
-            options.generation_config.as_ref(),
+            config,
             Some(options),
-            move |token| {
-                check_abort_for_streaming(supports_streaming, &mut abort_state, fallback_to_cloud)?;
-                on_token(token)
+            move || {
+                check_abort_for_streaming(supports_streaming, &mut abort_state, fallback_to_cloud)
             },
+            on_token,
         )
     }
 
@@ -5335,23 +5546,38 @@ impl XybridModel {
         let supports_streaming = self.supports_streaming;
         let mut abort_state = AbortState::new(options);
         let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
-        abort_state
-            .check_before_run()
-            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
+        let local_attempt = || {
+            obs.attempt(AttemptSpec {
+                reason: AttemptReason::Initial,
+                location: Location::Local,
+                provider: None,
+                model: Some(&self.model_id),
+            })
+        };
+        if let Err(reason) = abort_state.check_before_run() {
+            let user_cancelled = reason == crate::run_options::AbortReason::UserCancelled;
+            let result = Err(streaming_pre_run_abort_error(reason, fallback_to_cloud));
+            if user_cancelled {
+                obs.mark_cancelled();
+            } else if !self.cloud_serve() {
+                // A resource gate that trips before the local leg runs stops
+                // that leg: it is the request's failed first attempt, ahead of
+                // any cloud fallback.
+                local_attempt().end(&result);
+            }
+            return result;
+        }
+        let chunks = obs.chunk_sink();
         let mut on_token = move |token| {
-            check_abort_for_streaming(supports_streaming, &mut abort_state, fallback_to_cloud)?;
+            check_abort_for_streaming(supports_streaming, &mut abort_state, fallback_to_cloud)
+                .inspect_err(|error| chunks.cancel_mark().note(error.as_ref()))?;
             on_token(token)
         };
         let config = options.generation_config.as_ref();
         if self.cloud_serve() {
             return self.stream_body(envelope, config, Some(options), obs, &mut on_token);
         }
-        let attempt = obs.attempt(AttemptSpec {
-            reason: AttemptReason::Initial,
-            location: Location::Local,
-            provider: None,
-            model: Some(&self.model_id),
-        });
+        let attempt = local_attempt();
         let live_tag = options.live_mode_tag();
         let result = self.stream_local(envelope, config, live_tag.as_ref(), &mut on_token);
         attempt.end(&result);
@@ -5560,9 +5786,12 @@ impl XybridModel {
         use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
 
-        // Before the resource scope: a refused input starts nothing. The
-        // local leg below checks again, as every streaming entry does.
-        self.guard_input(envelope, EntryPoint::Streaming)?;
+        // Before the resource scope: a refused input starts nothing but its
+        // record. The local leg below checks again, as every streaming entry
+        // does.
+        if let Err(error) = self.guard_input(envelope, EntryPoint::Streaming) {
+            return self.refuse(envelope, &[], Some(options), None, true, error);
+        }
 
         let correlation_id = options
             .correlation_id
@@ -5570,11 +5799,7 @@ impl XybridModel {
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
         let obs = self.observe(envelope, &[], Some(options), None, true, None);
-        let chunks = obs.chunk_sink();
-        let mut on_token = move |token| {
-            chunks.chunk();
-            on_token(token)
-        };
+        let mut on_token = deliver_gated(obs.chunk_sink(), ungated, on_token);
 
         let local_tokens = Arc::new(AtomicU32::new(0));
         let local_start = Instant::now();
@@ -5626,6 +5851,24 @@ impl XybridModel {
     /// For non-LLM models, a single `Token` event is emitted with the full result,
     /// followed by `Complete`.
     ///
+    /// Dropping the stream before its terminal event cancels the run: it stops
+    /// at its next token and is recorded as `cancelled`, as if its token had
+    /// been cancelled.
+    ///
+    /// # Observation
+    ///
+    /// This takes no [`RunOptions`], so the run has no explicit parent,
+    /// session, conversation id or trace suppression of its own. It reports to
+    /// the session of the enclosing SDK operation, else the default, and takes
+    /// its parent from the ambient OpenTelemetry context of the thread that
+    /// calls `run_stream` (the stream captures it there, wherever it is then
+    /// drained). An application span attached with `Context::attach` on
+    /// another thread, or on a task this call does not run in, is not seen:
+    /// call it under `cx.attach()`, or inside a future wrapped with
+    /// [`FutureExt::with_context`](opentelemetry::context::FutureExt::with_context).
+    /// For explicit controls use [`Self::run_streaming_with_options`] on a
+    /// blocking worker.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -5651,14 +5894,52 @@ impl XybridModel {
         envelope: Envelope,
         config: Option<GenerationConfig>,
     ) -> Pin<Box<dyn tokio_stream::Stream<Item = StreamEvent> + Send + '_>> {
+        self.touch();
+        // A refused input yields one error event (and its record); nothing is
+        // spawned.
+        if let Err(error) = self.guard_input(&envelope, EntryPoint::Streaming) {
+            let event = StreamEvent::Error(error.to_string());
+            let _: SdkResult<()> = self.refuse(&envelope, &[], None, config.as_ref(), true, error);
+            return Box::pin(tokio_stream::iter([event]));
+        }
+        self.spawn_event_stream(
+            envelope,
+            config,
+            |model, envelope, config, obs, on_token| {
+                model.stream_body(envelope, config, None, obs, &mut &mut *on_token)
+            },
+        )
+    }
+
+    /// Runs `body` on a blocking worker as one observed stream and returns
+    /// its events (see [`Self::run_stream`]).
+    ///
+    /// Dropping the returned stream before its terminal event is the
+    /// caller's cancellation: the next token finds no receiver, `on_token`
+    /// returns [`AbortReason::UserCancelled`] so the run stops at that token,
+    /// and the run ends `cancelled` (see [`deliver_gated`]).
+    ///
+    /// [`AbortReason::UserCancelled`]: crate::run_options::AbortReason::UserCancelled
+    fn spawn_event_stream<B>(
+        &self,
+        envelope: Envelope,
+        config: Option<GenerationConfig>,
+        body: B,
+    ) -> Pin<Box<dyn tokio_stream::Stream<Item = StreamEvent> + Send + 'static>>
+    where
+        B: FnOnce(
+                &XybridModel,
+                &Envelope,
+                Option<&GenerationConfig>,
+                &RunObservation,
+                &mut TokenSink<'_>,
+            ) -> SdkResult<InferenceResult>
+            + Send
+            + 'static,
+    {
         use tokio::sync::mpsc;
         use xybrid_core::runtime_adapter::types::PartialToken;
 
-        self.touch();
-        // A refused input yields one error event; nothing is spawned.
-        if let Err(error) = self.guard_input(&envelope, EntryPoint::Streaming) {
-            return Box::pin(tokio_stream::iter([StreamEvent::Error(error.to_string())]));
-        }
         let (tx, rx) = mpsc::channel::<StreamEvent>(100);
         let model = self.clone();
         // Captured on the caller's thread: the run happens on a blocking worker.
@@ -5672,11 +5953,8 @@ impl XybridModel {
             let result = tokio::task::spawn_blocking(move || -> SdkResult<InferenceResult> {
                 let _context = context.enter();
                 let obs = model.observe(&envelope, &[], None, config.as_ref(), true, None);
-                let chunks = obs.chunk_sink();
-                let mut on_token = move |token: PartialToken| {
-                    chunks.chunk();
-                    // Ignore send errors (receiver dropped)
-                    let _ = tx.blocking_send(StreamEvent::Token(StreamToken {
+                let send = move |token: PartialToken| {
+                    tx.blocking_send(StreamEvent::Token(StreamToken {
                         token: token.token,
                         token_id: token.token_id,
                         index: token.index,
@@ -5684,11 +5962,14 @@ impl XybridModel {
                         finish_reason: token.finish_reason,
                         tool_calls: token.tool_calls,
                         raw_text: token.raw_text,
-                    }));
-                    Ok(())
+                    }))
+                    // The receiver is gone: the caller dropped the stream.
+                    .map_err(|_| {
+                        Box::new(crate::run_options::AbortReason::UserCancelled) as StreamingError
+                    })
                 };
-                let result =
-                    model.stream_body(&envelope, config.as_ref(), None, &obs, &mut on_token);
+                let mut on_token = deliver_gated(obs.chunk_sink(), ungated, send);
+                let result = body(&model, &envelope, config.as_ref(), &obs, &mut on_token);
                 obs.finish(result)
             })
             .await;
@@ -5736,6 +6017,20 @@ impl XybridModel {
     }
 
     /// Run batch inference asynchronously.
+    ///
+    /// # Observation
+    ///
+    /// This takes no [`RunOptions`], so the run has no explicit parent,
+    /// session, conversation id or trace suppression of its own. It reports to
+    /// the session of the enclosing SDK operation, else the default, and takes
+    /// its parent from the ambient OpenTelemetry context where its future
+    /// first runs. A context attached with `Context::attach` on the caller is
+    /// lost when the future is `tokio::spawn`-ed onto another worker; wrap the
+    /// future with
+    /// [`FutureExt::with_context`](opentelemetry::context::FutureExt::with_context)
+    /// (or poll it on the thread holding the attached context) to keep it.
+    /// For explicit controls use [`Self::run_with_options`] on a blocking
+    /// worker; [`Self::run_tts_streaming_async`] takes `RunOptions` directly.
     pub async fn run_async(
         &self,
         envelope: &Envelope,
@@ -5885,6 +6180,7 @@ impl Clone for XybridModel {
             // the registry knows about, not of this clone.
             last_accessed: self.last_accessed.clone(),
             load_observation: self.load_observation.clone(),
+            subject: self.subject.clone(),
         }
     }
 }
@@ -5906,6 +6202,10 @@ mod tests {
     /// Capture modes, declarative rules and fail-closed budgets on the
     /// content automatic runs record (`model/tests/`).
     mod content_controls;
+
+    /// Runs their caller cancels or abandons, and requests that end before
+    /// they run, counted with their outcome (`model/tests/`).
+    mod run_outcomes;
 
     #[cfg(feature = "huggingface")]
     #[test]
@@ -6807,6 +7107,7 @@ mod tests {
             speculative: Some(Arc::new(SpeculativeDownload::default())),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
             load_observation: None,
+            subject: Default::default(),
         };
         assert!(speculating.cloud_serve(), "not loaded -> cloud");
 
@@ -6852,6 +7153,7 @@ mod tests {
             speculative: Some(Arc::new(SpeculativeDownload::default())),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
             load_observation: None,
+            subject: Default::default(),
         };
 
         // Pre-swap: the optimistic cached values stand (the cloud leg streams
@@ -6907,6 +7209,7 @@ mod tests {
             speculative: Some(Arc::clone(&download)),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
             load_observation: None,
+            subject: Default::default(),
         };
 
         // Download already landed, so a token-less failure can retry locally.
@@ -7664,6 +7967,7 @@ mod tests {
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
             load_observation: None,
+            subject: Default::default(),
         }
     }
 
@@ -7687,6 +7991,7 @@ mod tests {
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
             load_observation: None,
+            subject: Default::default(),
         }
     }
 
@@ -9093,6 +9398,7 @@ mod tests {
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
             load_observation: None,
+            subject: Default::default(),
         }
     }
 
@@ -9194,7 +9500,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------------
-    // Exported outcome of a user cancellation (A3 / E3.4): a run its caller
+    // Exported outcome of a user cancellation: a run its caller
     // cancels through `RunOptions::cancellation_token` ends as `cancelled` on
     // the span and in the duration metric, and is never an exception.
     // ------------------------------------------------------------------------
@@ -9336,30 +9642,39 @@ mod tests {
         use crate::run_options::AbortReason;
         use xybrid_core::runtime_adapter::AdapterError;
 
-        // An LLM runtime reports the callback's abort as text only.
-        let erased = streaming_execution_error(AdapterError::from_streaming_callback_error(
-            Box::new(AbortReason::UserCancelled),
-        ));
-        let cause = std::error::Error::source(&erased).expect("cause");
+        // An LLM runtime reports the callback's abort as text only, so what
+        // ends the run cancelled is the mark set where the stream stopped on
+        // the caller's cancellation, not the error.
+        let erased = || {
+            streaming_execution_error(AdapterError::from_streaming_callback_error(Box::new(
+                AbortReason::UserCancelled,
+            )))
+        };
+        let shape = erased();
+        let cause = std::error::Error::source(&shape).expect("cause");
         assert!(cause.downcast_ref::<AbortReason>().is_none());
         assert!(cause.to_string().contains("user_cancelled"), "{cause}");
         let failed = streaming_execution_error(AdapterError::RuntimeError("decoder failed".into()));
 
-        for (error, cancel, expected) in [
-            (erased, true, "cancelled"),
+        for (error, stopped, cancelled_token, expected) in [
+            (erased(), true, true, "cancelled"),
             // A failure of a run nobody cancelled is still an error.
-            (failed, false, "inference_error"),
+            (failed, false, false, "inference_error"),
+            // So is one whose token was cancelled but that did not stop on it.
+            (erased(), false, true, "inference_error"),
         ] {
             let signals = crate::observability::test_support::memory_session_with_signals();
             let model = as_chat(test_loaded_model(true));
             let token = CancellationToken::new();
-            if cancel {
+            if cancelled_token {
                 token.cancel();
             }
             let options = observed(RunOptions::new().with_cancellation_token(token), &signals);
-            model
-                .observe(&text_envelope("hi"), &[], Some(&options), None, true, None)
-                .fail(&error);
+            let obs = model.observe(&text_envelope("hi"), &[], Some(&options), None, true, None);
+            if stopped {
+                obs.mark_cancelled();
+            }
+            obs.fail(&error);
             assert_span_outcome(&signals, &run_span_name(&model), expected);
             assert_one_duration_point(&signals, expected);
         }
@@ -9415,21 +9730,31 @@ mod tests {
         assert_eq!(cloud.call_count(), 1);
         assert_eq!(delivered.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_span_outcome(&signals, &span_name, "cancelled");
-        assert_span_outcome(&signals, "attempt 0", "cancelled");
+        // The memory abort stopped the local leg first: its failed attempt
+        // keeps its own error type, and the cancelled one is the fallback.
+        assert_span_outcome(&signals, "attempt 0", "aborted_for_cloud_fallback");
+        assert_span_outcome(&signals, "attempt 1", "cancelled");
         assert_eq!(
             attr(
-                &signals.spans.named("attempt 0"),
+                &signals.spans.named("attempt 1"),
                 "xybrid.genai.attempt.reason"
             )
             .as_deref(),
             Some("fallback")
         );
         assert_one_duration_point(&signals, "cancelled");
-        let attempts = signals.points(crate::observability::semconv::metric::ATTEMPTS);
-        assert_eq!(attempts.len(), 1, "{attempts:?}");
+        let mut attempts: Vec<_> = signals
+            .points(crate::observability::semconv::metric::ATTEMPTS)
+            .iter()
+            .map(|p| (p.attr("error.type").map(str::to_owned), p.count))
+            .collect();
+        attempts.sort();
         assert_eq!(
-            (attempts[0].attr("error.type"), attempts[0].count),
-            (Some("cancelled"), 1)
+            attempts,
+            [
+                (Some("aborted_for_cloud_fallback".to_owned()), 1),
+                (Some("cancelled".to_owned()), 1)
+            ]
         );
         assert_no_exception(&signals);
     }
@@ -9470,8 +9795,8 @@ mod tests {
         assert_eq!(cloud.call_count(), 0);
         assert_span_outcome(&signals, &run_span_name(&model), "cancelled");
         assert_no_exception(&signals);
-        // Whether a request cancelled before it ran is counted in the duration
-        // metric is undecided (E3.5), so the metric side is not asserted.
+        // A request cancelled before it ran is still one request.
+        assert_one_duration_point(&signals, "cancelled");
     }
 
     /// Blocks the first resource poll (the TTS pre-run abort check) until the
@@ -9550,9 +9875,9 @@ mod tests {
         assert!(result.observation.is_some(), "the request was observed");
         assert_span_outcome(&signals, &span_name, "cancelled");
         assert_no_exception(&signals);
-        // The cancel stops the request before synthesis starts. Whether such a
-        // request is counted in the duration metric is undecided (E3.5), so
-        // the metric side is not asserted.
+        // The cancel stops the request before synthesis starts; it is still
+        // one request.
+        assert_one_duration_point(&signals, "cancelled");
     }
 
     #[test]
@@ -9602,12 +9927,12 @@ mod tests {
     }
 
     // ------------------------------------------------------------------------
-    // Caller parents of async entry points (A1, A2). `run_async`,
+    // Caller parents of async entry points. `run_async`,
     // `run_stream`, `warmup_async` and `ModelLoader::load_async` take no
     // observation options: they report to the default session and take the
     // caller's parent only from the ambient context where their future first
     // runs (`run_stream`: where it is called). The async LLM runs have no
-    // explicit-parent form yet; that is an API decision (A2-needs_decision).
+    // explicit-parent form; that would be an API addition.
     // ------------------------------------------------------------------------
 
     /// [`weightless_onnx_dir`] for a model named `id`, so its spans are this
@@ -9732,6 +10057,56 @@ mod tests {
             "{events:?}"
         );
         Hop::BlockOn.assert_parent(&signals.spans.named_since(mark, &run_span), &parent);
+    }
+
+    #[test]
+    fn async_streamed_tts_takes_its_explicit_parent_from_its_run_options() {
+        // Unlike the async LLM runs, `run_tts_streaming_async` takes
+        // `RunOptions`, so its explicit parent wins over the ambient one
+        // wherever its future runs.
+        use crate::observability::test_support::*;
+        let _default = default_session_lock();
+        let signals = memory_session_with_signals();
+        let _installed = DefaultSession::install(&signals.session);
+        let mut metadata = ModelMetadata::onnx("async-tts", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("task".into(), serde_json::json!("text-to-speech"));
+        let model = test_model_with_metadata(metadata);
+
+        for (case, hop) in Hop::ALL.into_iter().enumerate() {
+            let ambient = caller_context(9, case);
+            let explicit = caller_context(10, case);
+            let options = RunOptions::new().with_observation(
+                crate::observability::ObservationOptions::default().with_parent(explicit.clone()),
+            );
+            let mark = signals.spans.mark();
+            let m = model.clone();
+            let result = hop
+                .run(&ambient, async move {
+                    // Blank text completes before any asset is touched.
+                    m.run_tts_streaming_async(&text_envelope("   "), &options, |_| {
+                        panic!("no audio")
+                    })
+                    .await
+                })
+                .expect("blank text completes");
+            assert_eq!(
+                result.status,
+                xybrid_core::execution::TtsStatus::Completed,
+                "{hop:?}"
+            );
+            let span = signals
+                .spans
+                .named_since(mark, "generate_content async-tts");
+            assert_eq!(parent_id(&span), explicit.span_id(), "{hop:?}");
+            assert_eq!(trace_id(&span), explicit.trace_id(), "{hop:?}");
+            assert_eq!(
+                result.observation.map(|r| r.span_id),
+                Some(span_id(&span)),
+                "{hop:?}: the result names the exported span"
+            );
+        }
     }
 
     /// Fake `"onnx"` runtime whose `execute()` returns only once every run
@@ -10677,6 +11052,7 @@ mod tests {
             speculative: Some(Arc::clone(&download)),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
             load_observation: None,
+            subject: Default::default(),
         };
         // Point any cloud leg at the mock, with a key, so a leaked request
         // would be counted rather than fail before sending.

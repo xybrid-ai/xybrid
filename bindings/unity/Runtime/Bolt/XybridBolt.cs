@@ -1070,7 +1070,7 @@ namespace XybridBolt
         }
 
         /// <summary>
-        /// Current delivery counters (all zero when observability is off).
+        /// Delivery counters: live while export runs, the final ones after shutdown until the next init.
         /// </summary>
         public static global::XybridBolt.XybridObservabilityStats ObservabilityStats()
         {

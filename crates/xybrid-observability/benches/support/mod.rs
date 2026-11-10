@@ -543,6 +543,7 @@ pub fn stats_json(stats: &xybrid_observability::otlp::PipelineStats) -> Value {
             "dropped": s.dropped,
             "failed": s.failed,
             "pending": s.pending,
+            "buffered_bytes": s.buffered_bytes,
             "consistent": s.is_consistent(),
         })
     };

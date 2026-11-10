@@ -58,7 +58,9 @@ Also: `startWorkflow(name)`, `startTool({ name, callId, toolType, arguments })`
 with `recordResult(value)`, `startModelLoad({ model, provider, runtime, format, sizeBytes })`
 with `recordCacheHit(hit)`, and `op.startAttempt({ index, reason, provider, location })`
 for retries and fallbacks under one logical request. Hot paths never await,
-flush, or do I/O. Recording calls never throw.
+flush, or do I/O. Recording calls never throw, and neither does ending: a span
+processor of yours that throws in `onEnd` is contained (processors after it do
+not see that span).
 
 End every handle on every path (`try`/`finally`, or `cancel()` when the work
 is abandoned). Garbage collection never ends a handle, so one that is never
@@ -160,15 +162,25 @@ Every content value goes through one pipeline, in order:
    `undefined`, an own `__proto__` key stays a key);
 3. a canonical copy goes to your `redact(kind, value)` callback, which returns
    the value, `undefined` (drop) or `null` (JSON null); a throw, a promise or
-   non-JSON output fails closed;
+   non-JSON output fails closed (a Rust hook that panics does the same);
 4. `replace_literal` rules replace every occurrence of a literal in every string
    value (never keys), in order;
 5. truncation to `maxAttributeBytes` (default 16384): the longest strings are
    halved (at code point boundaries, with `…[truncated]`), then the oldest
    messages are dropped, then the attribute is omitted;
 6. content retained by one operation is bounded by `maxRetainedOperationBytes`
-   (default 480 KiB) and written once, at the end (a later record of the same
+   (default 208 KiB) and written once, at the end (a later record of the same
    key replaces it).
+
+Content headed for a span that is not recording (a sampler drop, an unsampled
+parent, `trace: "suppress"`, no tracer) is not processed at all; event capture
+(`event_only`, `span_and_event`) still processes and emits it. The budgets are
+clamped so one span's content cannot push its export request past
+`maxRequestBodyBytes` (default 480 KiB; `pipeline.observer()` uses the
+pipeline's traces bound when it is smaller): `maxRetainedOperationBytes` is at most
+`(maxRequestBodyBytes - 65536) / 2`, and `maxAttributeBytes` at most
+`maxRetainedOperationBytes`. Raising a budget past that clamps it rather than
+throwing; `observer.contentBudgets` reports the effective values.
 
 ```ts
 new Observer({
@@ -225,7 +237,10 @@ backoff capped at 2 seconds; `Retry-After` can exceed that cap while fitting the
 single absolute export deadline. Nothing is persisted.
 
 Each signal's `SignalStats` contains `accepted`, `exported`, `dropped`, `failed`
-and `pending`. Every snapshot satisfies
+and `pending`, plus `bufferedBytes`: the bytes the pending items hold against
+the 32 MiB `batch.maxBufferedBytes` budget (the per-item estimate admitted, or a
+metrics collection's encoded body; not process memory; zero once nothing is
+pending, so always after shutdown). Every snapshot satisfies
 `accepted = exported + dropped + failed + pending`. Refused items count as
 accepted and dropped; lost acknowledgements and partial-success rejections
 count as failed. Retries never multiply item counts. Metrics count data points.

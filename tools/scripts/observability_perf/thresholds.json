@@ -2,7 +2,7 @@
   "status": "agreed",
   "agreed": {
     "on": "2026-11-09",
-    "by": "workspace owner (decision 15, .context/ws/acceptance/decisions.md)",
+    "by": "workspace owner",
     "evidence": "Apple M5 Max, Qwen3.5-0.8B Q4_K_M: e2e 10 and 20 rounds per mode, micro bench profile; every bound held at the median",
     "gate": "within (median delta for e2e rows, the measured value for micro rows); a failed gate makes `e2e` and `micro` exit 1"
   },
@@ -87,7 +87,7 @@
       "bound": {
         "max_abs": 16.0
       },
-      "rationale": "Pipeline runtime threads, HTTP client and a few retained spans per process; content is bounded to 480 KiB per operation. The 32 MiB per-signal buffer cannot fill with a handful of operations, so 16 MiB catches leaks or unbounded retention without flagging the fixed cost."
+      "rationale": "Pipeline runtime threads, HTTP client and a few retained spans per process; content retained by an operation is bounded to 208 KiB by default (clamped to fit the 480 KiB request bound). The 32 MiB per-signal buffer cannot fill with a handful of operations, so 16 MiB catches leaks or unbounded retention without flagging the fixed cost."
     },
     {
       "id": "E7",

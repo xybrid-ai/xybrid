@@ -3635,7 +3635,12 @@ class XybridModel:
         return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_stream_result(self._handle, stream_id)), lambda reader: XybridResult._boltffi_from_reader(reader))
 
     def stream_close(self, stream_id: int) -> None:
-        """Forget a streaming session."""
+        """Forget a streaming session.
+
+        Closing a session before its terminal event cancels its run: the run
+        stops at its next token and is recorded as a user cancellation
+        (`error.type` `cancelled`), not as an error.
+        """
         _native._boltffi_xybrid_model_stream_close(self._handle, stream_id)
 
     def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> XybridResult:
@@ -3897,7 +3902,9 @@ class XybridObservabilityConfig:
         _native._boltffi_xybrid_observability_config_set_metadata_only(self._handle, metadata_only)
 
     def set_max_content_bytes(self, bytes: int) -> None:
-        """Maximum bytes per captured content attribute."""
+        """Maximum bytes per captured content attribute, clamped to at most
+        208 KiB so that one span fits the 480 KiB export request.
+        """
         _native._boltffi_xybrid_observability_config_set_max_content_bytes(self._handle, bytes)
 
     def allow_provider_context(self, origin: str) -> None:
@@ -4382,7 +4389,7 @@ def observability_default_traces_endpoint() -> str:
     """The default Xybrid OTLP trace endpoint."""
     return _native.observability_default_traces_endpoint()
 def observability_stats() -> XybridObservabilityStats:
-    """Current delivery counters (all zero when observability is off)."""
+    """Delivery counters: live while export runs, the final ones after shutdown until the next init."""
     return _boltffi_read_wire(_native.observability_stats(), lambda reader: XybridObservabilityStats._boltffi_from_reader(reader))
 def observability_flush(timeout_ms: int) -> None:
     """Export queued telemetry, waiting at most `timeout_ms`.

@@ -189,7 +189,10 @@ export interface ObservationRef {
   span_id: string;
 }
 
-/** Delivery counters of the observability pipeline; all zero while it is off. */
+/**
+ * Delivery counters of one signal: live while export runs, the final ones after
+ * shutdown until the next init, all zero before any.
+ */
 export interface SignalStats {
   accepted: number;
   exported: number;

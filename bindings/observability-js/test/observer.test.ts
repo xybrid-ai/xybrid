@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { context, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import type { SpanProcessor } from "@opentelemetry/sdk-trace";
 import { ObservationContext, Observer, resolveContentCapture } from "../src/index.ts";
 import { createHarness, normalizeMetrics } from "./support/harness.ts";
 
@@ -333,5 +334,41 @@ describe("generic spans", () => {
     expect(stage.observationRef()?.span_id).toBe(span?.spanContext().spanId ?? "");
     const names = normalizeMetrics(await collectMetrics()).map((metric) => metric.name);
     expect(names).toEqual(["gen_ai.client.inference.duration"]);
+  });
+});
+
+describe("a span processor that throws in onEnd", () => {
+  test("is contained: the operation ends, metrics are recorded, later spans export", async () => {
+    // Mirror of the Rust an_application_span_processor_panic_in_on_end_is_contained. The throwing
+    // processor comes first, so the in-memory exporter after it never sees that span.
+    const seen: string[] = [];
+    const throwing: SpanProcessor = {
+      onStart: () => undefined,
+      onEnd: (span) => {
+        seen.push(span.name);
+        if (span.name === "chat boom") throw new Error("application processor threw");
+      },
+      forceFlush: async () => undefined,
+      shutdown: async () => undefined,
+    };
+    const { observer, spans, collectMetrics } = createHarness({ spanProcessors: [throwing] });
+    const named = (model: string) => ({ ...request, model });
+    observer.startInference(named("before")).end();
+    const boom = observer.startInference(named("boom"));
+    expect(() => boom.end()).not.toThrow();
+    expect(boom.ended).toBe(true);
+    observer.startInference(named("after")).end();
+    expect(seen).toEqual(["chat before", "chat boom", "chat after"]);
+    expect(spans.getFinishedSpans().map((span) => span.name)).toEqual([
+      "chat before",
+      "chat after",
+    ]);
+    const durations = normalizeMetrics(await collectMetrics()).filter(
+      (metric) => metric.name === "gen_ai.client.inference.duration",
+    );
+    const counts = durations.flatMap((metric) =>
+      metric.points.map((point) => ("count" in point ? point.count : 0)),
+    );
+    expect(counts.reduce((a, b) => a + b, 0)).toBe(3);
   });
 });

@@ -2310,6 +2310,10 @@ public final class XybridModel {
     }
 
     /// Forget a streaming session.
+    ///
+    /// Closing a session before its terminal event cancels its run: the run
+    /// stops at its next token and is recorded as a user cancellation
+    /// (`error.type` `cancelled`), not as an error.
     public func streamClose(streamId: UInt64) {
         boltffi_method_class_xybrid_bolt_xybrid_model_stream_close(self.handle, streamId)
     }
@@ -2697,7 +2701,8 @@ public final class XybridObservabilityConfig {
         boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_metadata_only(self.handle, metadataOnly)
     }
 
-    /// Maximum bytes per captured content attribute.
+    /// Maximum bytes per captured content attribute, clamped to at most
+    /// 208 KiB so that one span fits the 480 KiB export request.
     public func setMaxContentBytes(bytes: UInt32) {
         boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_max_content_bytes(self.handle, bytes)
     }
@@ -3638,7 +3643,7 @@ public func observabilityDefaultTracesEndpoint() -> String {
     return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readString() }
 }
 
-/// Current delivery counters (all zero when observability is off).
+/// Delivery counters: live while export runs, the final ones after shutdown until the next init.
 public func observabilityStats() -> XybridObservabilityStats {
     let boltffiResult = boltffi_function_xybrid_bolt_observability_stats()
     defer { boltffi_free_buf(boltffiResult) }

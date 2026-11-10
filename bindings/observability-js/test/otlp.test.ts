@@ -38,6 +38,7 @@ const stats = (partial: Partial<SignalStats>): SignalStats => ({
   dropped: 0,
   failed: 0,
   pending: 0,
+  bufferedBytes: 0,
   ...partial,
 });
 
@@ -65,7 +66,11 @@ describe("createOtlpPipeline", () => {
     );
     const observer = pipeline.observer();
     for (let index = 0; index < 5; index += 1) observer.startInference(request).end();
-    expect(pipeline.stats().traces).toEqual(stats({ accepted: 5, dropped: 3, pending: 2 }));
+    const held = pipeline.stats().traces;
+    expect(held.bufferedBytes).toBeGreaterThan(0);
+    expect(held).toEqual(
+      stats({ accepted: 5, dropped: 3, pending: 2, bufferedBytes: held.bufferedBytes }),
+    );
     expect(await pipeline.forceFlush(2000)).toBe(true);
     expect(pipeline.stats().traces).toEqual(stats({ accepted: 5, exported: 2, dropped: 3 }));
   });
@@ -288,7 +293,7 @@ const linked = (target: ObservationRef | undefined): ObservationRef => {
   return target;
 };
 
-describe("unsampled spans still export metrics and linked evaluations (C2, C3)", () => {
+describe("unsampled spans still export metrics and linked evaluations", () => {
   for (const protocol of ["http/json", "http/protobuf"] as const) {
     test(`${protocol}: a dropping sampler sends no span, exact metrics and evaluations on its references`, async () => {
       const server = await startServer();

@@ -23,9 +23,10 @@
 //! redaction), `rules` (three `replace_literal` rules and an
 //! `omit_attribute` rule on another key), `hook_and_rules` (a substring
 //! callback redactor, then the same rules), and `unsampled` (the default
-//! policy under a tracer whose sampler drops every span: nothing can be
-//! recorded, so this measures what content processing costs an operation
-//! whose span is not recording — unsampled parents, sampler drops).
+//! policy under a tracer whose sampler drops every span: the span is not
+//! recording, so the capture gate closes its destination and no content work
+//! is done — this measures that gate, as for unsampled parents and sampler
+//! drops; it should cost about what `metadata_only` does).
 //!
 //! Each (policy, workload) outcome is checked once before measuring, so a
 //! bench never silently measures a different path. Expected outcomes are the

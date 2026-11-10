@@ -71,7 +71,9 @@ capture content by default; call `set_metadata_only(True)` to exclude it.
 `observability_flush(5000)` flushes without stopping export.
 
 `observability_stats()` reports `accepted`, `exported`, `dropped`, `failed` and
-`pending` counts per signal (`traces`, `logs`, `metrics`). When a flush or
+`pending` counts per signal (`traces`, `logs`, `metrics`); after
+`observability_shutdown` they are the session's final counters (what the
+shutdown failed or dropped included) until the next `init()`. When a flush or
 shutdown cannot deliver everything it raises `xybrid.TelemetryDelivery`: the
 inference already succeeded, so do not rerun it.
 

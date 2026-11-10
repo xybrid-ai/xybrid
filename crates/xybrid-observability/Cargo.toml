@@ -56,8 +56,7 @@ otlp = [
     "dep:tokio-util",
     "dep:httpdate",
 ]
-# Manual clock for deterministic tests and the pipeline's buffered-bytes
-# diagnostic for benchmarks (M-TEST-UTIL).
+# Manual clock for deterministic tests (M-TEST-UTIL).
 test-util = []
 
 [[test]]
@@ -71,7 +70,7 @@ path = "tests/pipeline.rs"
 required-features = ["otlp"]
 
 # Overhead and memory benchmarks (tools/scripts/observability_perf/README.md).
-# `cargo bench -p xybrid-observability --features test-util` runs all three.
+# `cargo bench -p xybrid-observability` runs all three.
 [[bench]]
 name = "stream_overhead"
 harness = false
@@ -81,12 +80,11 @@ required-features = ["otlp"]
 name = "content_pipeline"
 harness = false
 
-# Peak library-owned bytes come from the `test-util` diagnostic
-# `ObservabilityPipeline::buffered_bytes`.
+# Peak library-owned bytes come from `SignalStats::buffered_bytes`.
 [[bench]]
 name = "saturation"
 harness = false
-required-features = ["otlp", "test-util"]
+required-features = ["otlp"]
 
 [[example]]
 name = "standalone"

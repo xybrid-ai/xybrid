@@ -9,9 +9,9 @@
 //!   percentiles under saturation (`op_ns`) next to the unsaturated
 //!   blackhole case, and the burst wall time (Criterion group `burst`);
 //! - the bounds hold: accepted / dropped / pending counters, the sampled
-//!   peak of library-owned bytes (`ObservabilityPipeline::buffered_bytes`,
-//!   feature `test-util`) against the 32 MiB budget, and pending items
-//!   against the 2048 queue;
+//!   peak of library-owned bytes (`SignalStats::buffered_bytes` in
+//!   `ObservabilityPipeline::stats`) against the 32 MiB budget, pending
+//!   items against the 2048 queue, and no bytes held after shutdown;
 //! - process RSS before, at the sampled peak and after shutdown (context
 //!   only: RSS includes allocator retention and everything else in the
 //!   process).
@@ -23,7 +23,7 @@
 //! `cargo test --benches` runs a tenth of the operations once.
 //!
 //! ```bash
-//! cargo bench -p xybrid-observability --features test-util --bench saturation
+//! cargo bench -p xybrid-observability --bench saturation
 //! ```
 //!
 //! Side report: `saturation.json` (see `support::report_dir`).
@@ -186,20 +186,29 @@ fn measured(s: &Scenario, content: &Arc<Content>) -> Value {
     let bytes = {
         let p = pipeline.clone();
         MaxSampler::start(Duration::from_millis(1), move || {
-            let b = p.buffered_bytes();
-            Some(b.traces.max(b.logs).max(b.metrics))
+            let s = p.stats();
+            Some(
+                s.traces
+                    .buffered_bytes
+                    .max(s.logs.buffered_bytes)
+                    .max(s.metrics.buffered_bytes),
+            )
         })
     };
     let rss = MaxSampler::start(support::rss_sample_interval(), support::rss_bytes);
     let (wall, latencies) = burst(s, &observer, content);
     let after_burst = pipeline.stats();
-    let held = pipeline.buffered_bytes();
     let (peak_bytes, byte_samples) = bytes.finish();
     let (peak_rss, rss_samples) = rss.finish();
     let (shutdown, shutdown_time) = support::timed(|| pipeline.shutdown(SHUTDOWN));
     let after_shutdown = pipeline.stats();
     let ops = (s.threads * s.ops_per_thread) as u64;
-    let peak_bytes = peak_bytes.unwrap_or(0).max(held.traces);
+    let peak_bytes = peak_bytes
+        .unwrap_or(0)
+        .max(after_burst.traces.buffered_bytes);
+    let held_after_shutdown = after_shutdown.traces.buffered_bytes
+        + after_shutdown.logs.buffered_bytes
+        + after_shutdown.metrics.buffered_bytes;
     json!({
         "wall_ms": wall.as_secs_f64() * 1e3,
         "ops": ops,
@@ -207,7 +216,9 @@ fn measured(s: &Scenario, content: &Arc<Content>) -> Value {
         "op_ns": support::distribution(latencies),
         "stats_after_burst": support::stats_json(&after_burst),
         "buffered_bytes_after_burst": {
-            "traces": held.traces, "logs": held.logs, "metrics": held.metrics,
+            "traces": after_burst.traces.buffered_bytes,
+            "logs": after_burst.logs.buffered_bytes,
+            "metrics": after_burst.metrics.buffered_bytes,
         },
         "peak_buffered_bytes_sampled": peak_bytes,
         "buffered_byte_samples": byte_samples,
@@ -217,6 +228,7 @@ fn measured(s: &Scenario, content: &Arc<Content>) -> Value {
             "bytes_within_budget": peak_bytes <= defaults::MAX_BUFFERED_BYTES_PER_SIGNAL as u64,
             "pending_within_queue": after_burst.traces.pending <= defaults::MAX_QUEUE_SIZE as u64,
             "accepted_equals_ops": after_burst.traces.accepted == ops,
+            "no_bytes_after_shutdown": held_after_shutdown == 0,
         },
         "shutdown": {
             "timeout_ms": SHUTDOWN.as_millis() as u64,
@@ -288,6 +300,7 @@ fn main() {
                     r["bounds"]["bytes_within_budget"] == json!(true)
                         && r["bounds"]["pending_within_queue"] == json!(true)
                         && r["bounds"]["accepted_equals_ops"] == json!(true)
+                        && r["bounds"]["no_bytes_after_shutdown"] == json!(true)
                 }),
             });
             results.push(json!({

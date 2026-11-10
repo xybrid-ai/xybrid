@@ -2118,6 +2118,10 @@ impl XybridModel {
     }
 
     /// Forget a streaming session.
+    ///
+    /// Closing a session before its terminal event cancels its run: the run
+    /// stops at its next token and is recorded as a user cancellation
+    /// (`error.type` `cancelled`), not as an error.
     pub fn stream_close(&self, stream_id: u64) {
         self.streams
             .lock()
@@ -2386,7 +2390,7 @@ pub struct XybridObservabilityStats {
     pub metrics: XybridSignalStats,
 }
 
-/// Current delivery counters (all zero when observability is off).
+/// Delivery counters: live while export runs, the final ones after shutdown until the next init.
 #[export]
 pub fn observability_stats() -> XybridObservabilityStats {
     let s = facade::observability_stats();
@@ -2514,7 +2518,8 @@ impl XybridObservabilityConfig {
         self.inner.set_metadata_only(metadata_only);
     }
 
-    /// Maximum bytes per captured content attribute.
+    /// Maximum bytes per captured content attribute, clamped to at most
+    /// 208 KiB so that one span fits the 480 KiB export request.
     pub fn set_max_content_bytes(&self, bytes: u32) {
         self.inner.set_max_content_bytes(bytes);
     }
@@ -2681,6 +2686,105 @@ mod tests {
         // An SDK that registers after a native call still reports its name.
         facade::set_binding("unity".to_string());
         assert_eq!(facade::get_binding(), "unity");
+    }
+
+    /// A weightless model directory, removed on drop.
+    struct WeightlessModel(std::path::PathBuf);
+
+    impl WeightlessModel {
+        fn new(id: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("{id}-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("model_metadata.json"),
+                format!(
+                    r#"{{"model_id":"{id}","version":"1.0","execution_template":{{"type":"Onnx","model_file":"model.onnx"}},"files":[]}}"#
+                ),
+            )
+            .unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for WeightlessModel {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn closing_a_stream_mid_run_stops_the_run_at_the_next_token_as_a_user_cancellation() {
+        use std::sync::mpsc;
+        let dir = WeightlessModel::new("bolt-stream-close");
+        // Through the facade loader: a Bolt constructor would register the
+        // platform fallback binding, which the test above owns.
+        let model = XybridModel::new(
+            facade::ModelLoader::from_directory(dir.0.to_string_lossy().into_owned())
+                .unwrap()
+                .load()
+                .unwrap(),
+        );
+        // A run whose token `i` the test paces, standing in for the SDK run
+        // behind `run_stream`.
+        let (permit, permits) = mpsc::channel::<()>();
+        let (report, reported) = mpsc::channel();
+        let session = facade::StreamingSession::spawn_tokens_for_test(move |on_token| {
+            let mut callbacks = 0;
+            let mut stopped = None;
+            for index in 0..5 {
+                permits
+                    .recv_timeout(std::time::Duration::from_secs(30))
+                    .expect("the test paces every token");
+                callbacks += 1;
+                let token = xybrid_sdk::PartialToken {
+                    token: format!("t{index}"),
+                    token_id: None,
+                    index,
+                    cumulative_text: String::new(),
+                    finish_reason: None,
+                    tool_calls: Vec::new(),
+                    raw_text: None,
+                };
+                if let Err(error) = on_token(token) {
+                    stopped = Some(error);
+                    break;
+                }
+            }
+            report.send((callbacks, stopped)).unwrap();
+            Err(xybrid_sdk::SdkError::InferenceError {
+                message: "stopped".into(),
+                source: None,
+            })
+        });
+        let stream_id = 7;
+        model.streams.lock().unwrap().insert(
+            stream_id,
+            std::sync::Arc::new(StreamEntry {
+                session,
+                result: std::sync::Mutex::new(None),
+            }),
+        );
+        for index in 0..2 {
+            permit.send(()).unwrap();
+            let event = model.stream_next(stream_id).unwrap();
+            assert_eq!(event.token.map(|token| token.index), Some(index));
+        }
+
+        model.stream_close(stream_id);
+        // The next token finds no receiver.
+        permit.send(()).unwrap();
+        let (callbacks, stopped) = reported
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("the run returns");
+
+        assert_eq!(callbacks, 3, "it stops at the token after the close");
+        let stopped: xybrid_sdk::StreamingError = stopped.expect("the callback stopped the run");
+        // The SDK records this error as the caller's cancellation.
+        assert_eq!(
+            stopped.downcast_ref::<xybrid_sdk::AbortReason>(),
+            Some(&xybrid_sdk::AbortReason::UserCancelled),
+            "{stopped}"
+        );
     }
 
     #[test]

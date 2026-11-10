@@ -498,6 +498,7 @@ const CONFIG_FIELDS: &[&str] = &[
     "content_capture",
     "max_content_attribute_bytes",
     "max_retained_operation_bytes",
+    "max_request_body_bytes",
     "max_traversal_bytes",
     "redact_substrings",
     "test_redactor",
@@ -525,6 +526,10 @@ fn content_policy(config: &Value) -> ContentPolicy {
         .with_max_retained_operation_bytes(size(
             "max_retained_operation_bytes",
             semconv::DEFAULT_MAX_RETAINED_OPERATION_BYTES,
+        ))
+        .with_max_request_body_bytes(size(
+            "max_request_body_bytes",
+            semconv::DEFAULT_MAX_REQUEST_BODY_BYTES,
         ))
         .with_max_traversal_bytes(size(
             "max_traversal_bytes",
@@ -1310,6 +1315,24 @@ fn catalog_matches_constants() {
     assert_eq!(
         defaults["max_traversal_bytes"],
         semconv::DEFAULT_MAX_TRAVERSAL_BYTES
+    );
+    assert_eq!(
+        defaults["span_envelope_allowance_bytes"],
+        semconv::SPAN_ENVELOPE_ALLOWANCE_BYTES
+    );
+    assert_eq!(
+        defaults["span_content_encoding_growth"],
+        semconv::SPAN_CONTENT_ENCODING_GROWTH
+    );
+    assert_eq!(
+        defaults["max_request_body_bytes"],
+        semconv::DEFAULT_MAX_REQUEST_BODY_BYTES
+    );
+    // The default budgets are the ceiling of the default request bound, so
+    // no default is ever clamped.
+    assert_eq!(
+        semconv::span_content_ceiling(semconv::DEFAULT_MAX_REQUEST_BODY_BYTES),
+        semconv::DEFAULT_MAX_RETAINED_OPERATION_BYTES
     );
     assert_eq!(defaults["max_json_depth"], semconv::MAX_JSON_DEPTH);
     assert_eq!(

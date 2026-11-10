@@ -84,6 +84,8 @@ export class OtlpPipeline {
   readonly #spans: BoundedBatchQueue<ReadableSpan> | undefined;
   readonly #logs: BoundedBatchQueue<ReadableLogRecord> | undefined;
   readonly #metrics: PipelineMetricReader | undefined;
+  /** `maxRequestBodyBytes` of the traces export, if spans are exported. */
+  readonly #spanRequestBound: number | undefined;
   #shutdown: Promise<boolean> | undefined;
 
   /**
@@ -94,6 +96,7 @@ export class OtlpPipeline {
     const resolved = resolveOtlpOptions(options);
     const { limits } = resolved;
     const resource = defaultResource().merge(resourceFromAttributes(resolved.resourceAttributes));
+    this.#spanRequestBound = resolved.traces === undefined ? undefined : limits.maxRequestBodyBytes;
     if (resolved.traces !== undefined) {
       const sender = new BatchSender<ReadableSpan>(
         "traces",
@@ -135,14 +138,25 @@ export class OtlpPipeline {
   /**
    * An {@link Observer} over this pipeline's providers. Signals the pipeline does not export are
    * disabled rather than read from globals, so evaluation events return `false` on a traces-only
-   * pipeline.
+   * pipeline. With a traces signal, the content budgets are clamped to fit this pipeline's
+   * `maxRequestBodyBytes` (or `content.maxRequestBodyBytes`, default 480 KiB, if smaller).
    */
   observer(content?: ContentOptions): Observer {
+    const bound = this.#spanRequestBound;
+    const own =
+      content?.maxRequestBodyBytes === undefined
+        ? DEFAULTS.max_request_body_bytes
+        : content.maxRequestBodyBytes;
+    // Only a valid bound larger than the pipeline's (the default when absent) is replaced, as in
+    // Rust; invalid input still throws.
+    const replace =
+      bound !== undefined && typeof own === "number" && Number.isSafeInteger(own) && own > bound;
+    const fitted = replace ? { ...content, maxRequestBodyBytes: bound } : content;
     return new Observer({
       tracerProvider: this.tracerProvider ?? null,
       meterProvider: this.meterProvider ?? null,
       loggerProvider: (this.loggerProvider as LoggerProviderLike | undefined) ?? null,
-      ...(content === undefined ? {} : { content }),
+      ...(fitted === undefined ? {} : { content: fitted }),
     });
   }
 

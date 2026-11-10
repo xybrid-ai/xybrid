@@ -18,17 +18,29 @@
 //! - Declarative rules: `omit_attribute` removes a governed key the run
 //!   produced from both destinations without listing it as truncated, and
 //!   `replace_literal` rewrites what remains.
-//! - Fail closed: a redaction hook that fails for one key, a value over the
-//!   per-attribute budget and a value over the retained-operation budget each
-//!   leave the run's result whole. The value is truncated with the marker or
-//!   omitted, and listed in `xybrid.genai.content.truncated_attributes`.
+//! - Fail closed: a redaction hook that fails or panics for one key, a value
+//!   over the per-attribute budget and a value over the retained-operation
+//!   budget each leave the run's result whole. The value is truncated with the
+//!   marker or omitted, and listed in `xybrid.genai.content.truncated_attributes`.
+//! - Request bound: with default budgets the run's span encodes under the
+//!   480 KiB request bound in OTLP/JSON, and a raised budget is clamped so the
+//!   span is exported with its content truncated rather than dropped.
+//! - Per-run overrides: a per-run session or observer
+//!   lowers capture below the session the run would otherwise use (the
+//!   enclosing operation's, else the default) and never raises it: the run
+//!   records content only where both policies capture. Every test here holds
+//!   [`NoDefaultSession`], so no other test's default caps its per-run
+//!   sessions. The default floor, which needs restrictive defaults, is pinned
+//!   in its own process (`tests/per_run_content.rs`).
 
 use super::*;
 use crate::observability::semconv::{attr, event, TRUNCATION_MARKER};
-use crate::observability::test_support::{memory_session_with_content, span_id, Signals};
+use crate::observability::test_support::{
+    memory_session_with_content, span_id, NoDefaultSession, Signals,
+};
 use crate::observability::{
-    ContentCapture, ContentPolicy, ObservabilityConfig, ObservabilitySession, ObservationOptions,
-    ObservationRef, RedactionRule, Redactor,
+    install_default_session, ContentCapture, ContentPolicy, ObservabilityConfig,
+    ObservabilitySession, ObservationOptions, ObservationRef, RedactionRule, Redactor,
 };
 use opentelemetry_sdk::trace::SpanData;
 use serde_json::Value;
@@ -418,6 +430,8 @@ fn assert_content(content: &BTreeMap<String, Value>, expected: &Expected, what: 
 
 #[test]
 fn each_capture_mode_puts_automatic_run_content_on_its_destinations() {
+    // No other test's default caps this test's per-run sessions.
+    let _no_default = NoDefaultSession::hold();
     let gateway = gateway();
     for capture in [
         ContentCapture::NoContent,
@@ -536,6 +550,8 @@ fn each_capture_mode_puts_automatic_run_content_on_its_destinations() {
 
 #[test]
 fn a_packaged_session_exports_run_content_where_its_capture_mode_says() {
+    // No other test's default caps this test's per-run sessions.
+    let _no_default = NoDefaultSession::hold();
     // E1.1 on an SDK-owned pipeline: the policy set with
     // `ObservabilityConfig::content` governs what an automatic run exports
     // over OTLP, on `/v1/traces` in span modes and on the details record on
@@ -634,6 +650,8 @@ fn a_packaged_session_exports_run_content_where_its_capture_mode_says() {
 
 #[test]
 fn omit_rules_remove_governed_keys_an_automatic_run_produced() {
+    // No other test's default caps this test's per-run sessions.
+    let _no_default = NoDefaultSession::hold();
     let replace = RedactionRule::replace_literal("secret", "[R]").unwrap();
     let policy = |omit: bool| {
         let mut rules = vec![replace.clone()];
@@ -723,6 +741,8 @@ impl Redactor for FailingFor {
 
 #[test]
 fn a_redaction_hook_that_fails_for_one_key_omits_and_lists_only_that_key() {
+    // No other test's default caps this test's per-run sessions.
+    let _no_default = NoDefaultSession::hold();
     let signals = memory_session_with_content(
         ContentPolicy::default()
             .with_capture(ContentCapture::SpanAndEvent)
@@ -769,6 +789,8 @@ fn a_redaction_hook_that_fails_for_one_key_omits_and_lists_only_that_key() {
 
 #[test]
 fn content_over_its_byte_budgets_is_truncated_or_omitted_and_listed() {
+    // No other test's default caps this test's per-run sessions.
+    let _no_default = NoDefaultSession::hold();
     // Per attribute: a long input is cut to the budget with the marker and
     // stays valid JSON; the short output fits whole.
     const BUDGET: usize = 256;
@@ -836,4 +858,355 @@ fn content_over_its_byte_budgets_is_truncated_or_omitted_and_listed() {
         assert_eq!(truncated, &[attr::INPUT_MESSAGES], "{destination}");
     }
     assert!(!exported_anywhere(&signals, "yyyy"));
+}
+
+// ---------------------------------------------------------------------------
+// A redaction hook that panics fails closed on automatic runs.
+// ---------------------------------------------------------------------------
+
+/// Redacts nothing, and panics for one key.
+struct PanicsFor(&'static str);
+
+impl Redactor for PanicsFor {
+    fn redact(&self, kind: &str, value: Value) -> Option<Value> {
+        assert!(kind != self.0, "redaction hook panicked on {kind}");
+        Some(value)
+    }
+}
+
+#[test]
+fn a_redaction_hook_that_panics_fails_closed_and_the_stream_is_whole() {
+    // No other test's default caps this test's per-run sessions.
+    let _no_default = NoDefaultSession::hold();
+    // The panic never reaches the run: every token is delivered, the run
+    // succeeds, and the key the hook panicked on is omitted and listed on both
+    // destinations, exactly as for a hook that returns an error. The session
+    // stays usable: each later run calls the hook (and recovers) again.
+    let signals = memory_session_with_content(
+        ContentPolicy::default()
+            .with_capture(ContentCapture::SpanAndEvent)
+            .with_redactor(PanicsFor(attr::OUTPUT_MESSAGES)),
+    );
+    let model = chat_model(ANSWER);
+    let context = conversation(SYSTEM);
+    for round in 0..2 {
+        let mut tokens: Vec<String> = Vec::new();
+        let streamed = model
+            .run_streaming_with_context_options(
+                &message(MessageRole::User, QUESTION),
+                &context,
+                &observed(RunOptions::new(), &signals),
+                |token| {
+                    tokens.push(token.token.clone());
+                    Ok(())
+                },
+            )
+            .expect("a panicking hook never fails a run");
+        assert!(!tokens.is_empty(), "round {round}: tokens were delivered");
+        assert_eq!(
+            tokens.concat(),
+            ANSWER,
+            "round {round}: every token arrived"
+        );
+        let batch = run_in_context(&model, QUESTION, &context, &signals);
+        for result in [streamed, batch] {
+            assert_eq!(
+                result.text(),
+                Some(ANSWER),
+                "round {round}: the run is whole"
+            );
+            let reference = result.observation_ref().unwrap();
+            let span = signals.spans.by_ref(reference);
+            assert_eq!(
+                span.status,
+                opentelemetry::trace::Status::Unset,
+                "round {round}: a panicking hook is not a failed run"
+            );
+            let exported = Exported::of(&signals, reference);
+            for (destination, content, truncated) in [
+                ("span", exported.span.clone(), &exported.span_truncated),
+                ("event", exported.event_content(), &exported.event_truncated),
+            ] {
+                assert_eq!(
+                    content.keys().map(String::as_str).collect::<Vec<_>>(),
+                    [attr::INPUT_MESSAGES, attr::SYSTEM_INSTRUCTIONS],
+                    "round {round}, {destination}: only the key it panicked on is left out"
+                );
+                assert_eq!(truncated, &[attr::OUTPUT_MESSAGES], "{destination}");
+            }
+        }
+    }
+    assert!(!exported_anywhere(&signals, ANSWER));
+}
+
+// ---------------------------------------------------------------------------
+// Content budgets keep a run's span within one export request
+// (the clamp itself: `a_raised_content_budget_is_clamped_so_the_run_span_is_exported`).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn every_governed_key_at_its_default_maximum_encodes_under_the_request_bound_in_json() {
+    // No other test's default caps this test's per-run sessions.
+    let _no_default = NoDefaultSession::hold();
+    // A guard on the defaults, not on the clamp (the next test pins that): at
+    // the default 16 KiB attribute budget three governed keys stay far under
+    // the default retained budget, so this passes with or without the clamp
+    // and fails only if the effective default budgets let these keys outgrow
+    // one request.
+    // A system prompt, a question and an answer each far over the attribute
+    // budget, and quote-heavy so that OTLP/JSON doubles them: the run's span
+    // encodes under the 480 KiB request bound in OTLP/JSON, and every governed
+    // key is cut to the budget and listed.
+    use xybrid_observability::semconv::{
+        DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES, DEFAULT_MAX_REQUEST_BODY_BYTES,
+    };
+    let quoted = |text: &str| format!("{text} {}", "\"".repeat(120_000));
+    let signals = memory_session_with_content(
+        ContentPolicy::default().with_capture(ContentCapture::SpanOnly),
+    );
+    let model = chat_model(&quoted(ANSWER));
+    let result = run_in_context(
+        &model,
+        &quoted(QUESTION),
+        &conversation(&quoted(SYSTEM)),
+        &signals,
+    );
+    let span = signals.spans.by_ref(result.observation_ref().unwrap());
+    let resource = opentelemetry_sdk::Resource::builder_empty()
+        .with_service_name("svc")
+        .build();
+    let json = xybrid_observability::otlp::trace_json(vec![span.clone()], &resource).unwrap();
+    assert!(
+        json.len() < DEFAULT_MAX_REQUEST_BODY_BYTES,
+        "{} bytes of OTLP/JSON",
+        json.len()
+    );
+    for key in GOVERNED {
+        let value = span
+            .attributes
+            .iter()
+            .find(|kv| kv.key.as_str() == key)
+            .map(|kv| kv.value.as_str().into_owned())
+            .unwrap_or_else(|| panic!("{key} is kept, truncated"));
+        assert!(
+            value.len() <= DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES,
+            "{key}: {}",
+            value.len()
+        );
+        assert!(value.contains(TRUNCATION_MARKER), "{key}");
+    }
+    assert_eq!(span_truncated(&span), GOVERNED);
+}
+
+#[test]
+fn a_raised_content_budget_is_clamped_so_the_run_span_is_exported() {
+    // No other test's default caps this test's per-run sessions.
+    let _no_default = NoDefaultSession::hold();
+    // A packaged session over OTLP/JSON with the attribute budget raised to
+    // 400 KB: the answer, 300 KB of quotes, would encode to about 800 KB and
+    // its span be dropped whole as an oversized item. The budget is clamped
+    // to fit the request bound, so the answer is truncated, listed, and the
+    // span exported.
+    use httpmock::Method::POST;
+    use xybrid_observability::otlp::{EnvironmentSource, OtlpConfig, Protocol, SignalEndpoint};
+    /// Hang detector for flush and shutdown; their expiry is the failure.
+    const HANG: Duration = Duration::from_secs(20);
+
+    let collector = httpmock::MockServer::start();
+    let truncated = collector.mock(|when, then| {
+        when.method(POST)
+            .path("/v1/traces")
+            .body_contains(TRUNCATION_MARKER)
+            .body_contains(attr::CONTENT_TRUNCATED_ATTRIBUTES);
+        then.status(200);
+    });
+    let _traces = collector.mock(|when, then| {
+        when.method(POST).path("/v1/traces");
+        then.status(200);
+    });
+    let session = ObservabilitySession::new(
+        ObservabilityConfig::otlp(
+            OtlpConfig::default()
+                .with_environment(EnvironmentSource::Disabled)
+                .with_traces(Some(
+                    SignalEndpoint::new(collector.url("/v1/traces"))
+                        .with_protocol(Protocol::HttpJson),
+                )),
+        )
+        .content(
+            ContentPolicy::default()
+                .with_capture(ContentCapture::SpanOnly)
+                .with_max_attribute_bytes(400_000)
+                .with_max_retained_operation_bytes(1_000_000),
+        )
+        .device_attributes(false),
+    )
+    .expect("a valid packaged session");
+    let answer = "\"".repeat(300_000);
+    let result = chat_model(&answer)
+        .run_with_options(
+            &message(MessageRole::User, QUESTION),
+            &RunOptions::new()
+                .with_observation(ObservationOptions::default().with_session(&session)),
+        )
+        .expect("the run succeeds");
+    assert_eq!(result.text(), Some(answer.as_str()));
+    session.flush(HANG).expect("every span fits one request");
+    let traces = session.stats().expect("a packaged session").traces;
+    assert!(traces.accepted > 0, "{traces:?}");
+    assert_eq!(
+        (traces.exported, traces.dropped, traces.failed),
+        (traces.accepted, 0, 0),
+        "no span was dropped as oversized"
+    );
+    assert_eq!(
+        truncated.hits(),
+        1,
+        "the run's span arrived with its answer truncated and listed"
+    );
+    session.shutdown(HANG).expect("the session shuts down");
+}
+
+// ---------------------------------------------------------------------------
+// Per-run content overrides: a per-run session
+// or observer can lower content capture below the session the run would
+// otherwise use (the enclosing operation's, else the default), never raise it.
+// ---------------------------------------------------------------------------
+
+/// A context run of [`QUESTION`] with `observation` as its per-run options
+/// (`None`: the default session).
+fn run_with(model: &XybridModel, observation: Option<ObservationOptions>) -> ObservationRef {
+    let options = match observation {
+        Some(observation) => RunOptions::new().with_observation(observation),
+        None => RunOptions::new(),
+    };
+    model
+        .run_with_context_options(
+            &message(MessageRole::User, QUESTION),
+            &conversation(SYSTEM),
+            &options,
+        )
+        .expect("content controls never fail a run")
+        .observation_ref()
+        .cloned()
+        .expect("the run is observed")
+}
+
+fn with_session(signals: &Signals) -> Option<ObservationOptions> {
+    Some(ObservationOptions::default().with_session(&signals.session))
+}
+
+/// Asserts what the run of `reference` exported to `signals`: its content on
+/// the span and on the details event, each either the conversation or none.
+fn assert_destinations(signals: &Signals, reference: &ObservationRef, span: bool, event: bool) {
+    let exported = Exported::of(signals, reference);
+    if span {
+        assert_content(&exported.span, CONVERSATION, "span");
+    } else {
+        assert!(
+            exported.span.is_empty(),
+            "span content: {:?}",
+            exported.span
+        );
+    }
+    if event {
+        assert_content(&exported.event_content(), CONVERSATION, "event");
+    } else {
+        assert!(
+            exported.event.is_none(),
+            "details event: {:?}",
+            exported.event
+        );
+    }
+}
+
+#[test]
+fn a_per_run_session_or_observer_lowers_content_capture_below_the_default() {
+    let _no_default = NoDefaultSession::hold();
+    let model = chat_model(ANSWER);
+    let default = memory_session_with_content(
+        ContentPolicy::default().with_capture(ContentCapture::SpanAndEvent),
+    );
+    install_default_session(default.session.clone());
+    let metadata_only = memory_session_with_content(ContentPolicy::metadata_only());
+
+    // The default records content on both destinations.
+    let plain = run_with(&model, None);
+    assert_destinations(&default, &plain, true, true);
+
+    // A metadata-only per-run session records none, on its own export.
+    let lowered = run_with(&model, with_session(&metadata_only));
+    assert_destinations(&metadata_only, &lowered, false, false);
+    assert!(
+        default
+            .spans
+            .spans()
+            .iter()
+            .all(|s| span_id(s) != lowered.span_id),
+        "the run reports to its own session"
+    );
+
+    // The default's providers with capture capped for one run: the same
+    // destination, metadata only.
+    let capped = default
+        .session
+        .observer()
+        .content_capped_by(&ContentPolicy::metadata_only());
+    let same_destination = run_with(
+        &model,
+        Some(ObservationOptions {
+            observer: Some(capped),
+            ..ObservationOptions::default()
+        }),
+    );
+    assert_destinations(&default, &same_destination, false, false);
+    assert!(!on_any_span(&metadata_only, QUESTION) && !on_any_log(&metadata_only, QUESTION));
+}
+
+#[test]
+fn a_per_run_session_cannot_raise_content_capture_above_its_enclosing_operation() {
+    // The default floor installs restrictive defaults, which would cap other
+    // tests' per-run sessions: it is pinned in its own test binary
+    // (`tests/per_run_content.rs`). Here the floor is the enclosing
+    // operation's session, which touches no process-wide state.
+    let _no_default = NoDefaultSession::hold();
+    let model = chat_model(ANSWER);
+    let everything = memory_session_with_content(
+        ContentPolicy::default().with_capture(ContentCapture::SpanAndEvent),
+    );
+
+    // Control: with no other session, the per-run session's own policy applies.
+    let alone = run_with(&model, with_session(&everything));
+    assert_destinations(&everything, &alone, true, true);
+
+    // Inside an operation pinned to a capturing-less session, the per-run
+    // session records only what both capture.
+    for (policy, span, event) in [
+        (ContentPolicy::metadata_only(), false, false),
+        (
+            ContentPolicy::default().with_capture(ContentCapture::SpanOnly),
+            true,
+            false,
+        ),
+        (
+            ContentPolicy::default().with_capture(ContentCapture::EventOnly),
+            false,
+            true,
+        ),
+    ] {
+        let enclosing = memory_session_with_content(policy);
+        let workflow = crate::observability::start_workflow(
+            "floor",
+            &ObservationOptions::default().with_session(&enclosing.session),
+        );
+        let nested = {
+            let _scope = workflow.enter();
+            run_with(&model, with_session(&everything))
+        };
+        workflow.end();
+        assert_destinations(&everything, &nested, span, event);
+        // The run still reports its metadata to the per-run session.
+        assert_eq!(everything.spans.by_ref(&nested).name, run_span_name(&model));
+        assert!(!on_any_span(&enclosing, QUESTION) && !on_any_log(&enclosing, QUESTION));
+    }
 }

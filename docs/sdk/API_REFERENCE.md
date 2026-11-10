@@ -1807,10 +1807,18 @@ the optional `cancellationToken` parameter. Cancellation is **cooperative**:
 the token's cancelled state is checked before every emitted token, so it takes
 effect at the next token boundary, not mid-token, and surfaces as the
 `AbortSignal::UserCancelled` policy signal. When the token is cancelled — or
-the Dart stream is unsubscribed mid-run (sink-close-as-cancel) — Rust halts
-generation at the next token and **releases the model write lock promptly**, so
-a follow-up run can start. The Dart cancel handle exposes `cancel()` and an
-`isCancelled` getter.
+the Dart stream is unsubscribed mid-run (sink-close-as-cancel, with or without
+a token) — Rust halts generation at the next token and **releases the model
+write lock promptly**, so a follow-up run can start. The Dart cancel handle
+exposes `cancel()` and an `isCancelled` getter.
+
+**Abandoning a stream cancels its run.** Dropping the Rust `run_stream` stream,
+dropping a facade streaming session, closing a Bolt stream (`stream_close`) or
+unsubscribing the Dart stream before its terminal event stops the run at its
+next token, as a cancelled token would. A Rust token callback does the same by
+returning `AbortReason::UserCancelled`. Observability records the run as
+cancelled (`error.type` `cancelled`), not as an error; see
+[run outcomes](observability-coverage.md#run-outcomes).
 
 ```dart
 final cancel = CancellationToken();

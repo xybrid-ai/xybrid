@@ -433,10 +433,9 @@ impl xybrid_core::runtime_adapter::CloudStreaming for TokensCloud {
 const CLOUD_TOKENS: &[&str] = &["one ", "two ", "three ", "four ", "five"];
 
 /// Options pinned to `session` under which critical memory pressure stops the
-/// local leg before it runs, so a fallback run streams [`CLOUD_TOKENS`]. The
-/// tests that use it assert no attempts: such a run records only its remote
-/// attempt today, and whether it should also record a failed local one is
-/// still open.
+/// local leg before it runs, so a fallback run streams [`CLOUD_TOKENS`]. Such
+/// a run records the stopped local leg as its failed first attempt, then the
+/// remote one (`run_outcomes`); the tests that use it assert no attempts.
 fn pressured(session: &ObservabilitySession) -> RunOptions {
     let mut critical = xybrid_core::device::ResourceSnapshot::unknown();
     critical.memory_pressure = xybrid_core::device::MemoryPressure::Critical;
@@ -542,8 +541,8 @@ fn a_reactive_fallback_is_one_request_with_a_failed_local_and_a_remote_attempt()
     // resource gate wrapped around it returns mid-stream, so the local
     // attempt ends the same way. The gate itself is not used: it samples
     // resources at most every 100 ms, so tripping it mid-stream would need
-    // the test to wait. (A gate that trips before the run records no local
-    // attempt at all; that path is not pinned here.)
+    // the test to wait. (A gate that trips before the run is pinned in
+    // `run_outcomes`.)
     let delivered = Arc::new(Mutex::new(Vec::new()));
     let seen = delivered.clone();
     let mut on_token = move |token: PartialToken| {

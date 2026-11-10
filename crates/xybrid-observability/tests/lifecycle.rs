@@ -663,7 +663,7 @@ impl log::Log for LogBridge {
 
 #[test]
 fn export_retries_never_feed_back_into_the_pipeline() {
-    // D26.8 (NEW-6): every 503 makes the transport log a warning. Without
+    // D26.8: every 503 makes the transport log a warning. Without
     // suppression, a bridge would turn each one into a span and a log record
     // that the next export carries, and an outage would feed itself.
     static INSTALL: std::sync::Once = std::sync::Once::new();
@@ -1044,6 +1044,65 @@ fn a_failing_application_processor_makes_shutdown_fail_and_is_remembered() {
     pipeline.tracer_provider().unwrap().shutdown().unwrap();
     pipeline.shutdown(Duration::from_secs(5)).unwrap();
     assert_eq!(pipeline.stats().traces.exported, 1);
+}
+
+/// An application processor that panics in `on_end` for the first span
+/// named `chat boom` and counts the spans it sees.
+#[derive(Debug, Default)]
+struct PanicsOnce(Arc<AtomicUsize>);
+
+impl SpanProcessor for PanicsOnce {
+    fn on_start(&self, _span: &mut Span, _cx: &Context) {}
+
+    fn on_end(&self, span: SpanData) {
+        let seen = self.0.fetch_add(1, Ordering::SeqCst);
+        assert!(
+            !(span.name == "chat boom" && seen == 0),
+            "application processor panicked in on_end"
+        );
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        Ok(())
+    }
+
+    fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_span_processor_panic_in_on_end_loses_only_that_span() {
+    // An operation whose application processor panics while its
+    // span ends returns normally. The processor runs before the pipeline's,
+    // so that span is neither exported nor counted; the SDK is left working:
+    // later spans are seen by both and exported, and shutdown succeeds.
+    let server = Server::ok();
+    let seen = Arc::new(AtomicUsize::new(0));
+    let pipeline = ObservabilityPipeline::build_with_span_processor(
+        server.traces_config(Protocol::HttpProtobuf),
+        PanicsOnce(seen.clone()),
+    )
+    .unwrap();
+    let observer = pipeline.observer();
+    let op = observer.start_inference(
+        InferenceRequest::new("chat", "fake").with_model("boom"),
+        StartOptions::default(),
+    );
+    op.end();
+    assert!(op.is_finished());
+    inference(&observer);
+    inference(&observer);
+    pipeline.shutdown(Duration::from_secs(5)).unwrap();
+    assert_eq!(seen.load(Ordering::SeqCst), 3);
+    let stats = pipeline.stats().traces;
+    assert_eq!((stats.accepted, stats.exported, stats.pending), (2, 2, 0));
+    let names: Vec<String> = server
+        .requests_to("/v1/traces")
+        .iter()
+        .flat_map(|r| r.span_names())
+        .collect();
+    assert_eq!(names, ["chat m", "chat m"]);
 }
 
 #[test]

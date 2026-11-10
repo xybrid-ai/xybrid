@@ -99,7 +99,9 @@ recorded). Feedback and evaluations (`Observability.recordEvaluation`) need a
 logs signal, so they resolve `false` with the Xybrid preset, which exports
 traces only. `Observability.stats()` reports accepted, exported, dropped,
 failed and pending counts per signal (`traces`, `logs`, `metrics`);
-`Observability.shutdown(timeoutMs)` flushes and stops export. A flush or
+`Observability.shutdown(timeoutMs)` flushes and stops export, after which
+`stats()` keeps the session's final counters (what the shutdown failed or
+dropped included) until the next `init()`. A flush or
 shutdown that cannot deliver everything rejects with
 `xybrid_telemetry_delivery`; the inference already succeeded, so do not rerun it.
 

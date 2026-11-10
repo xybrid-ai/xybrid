@@ -629,37 +629,83 @@ fn the_byte_budget_drops_items_beyond_it() {
     }
 }
 
-#[cfg(feature = "test-util")]
 #[test]
-fn buffered_bytes_report_the_byte_budget_running_total() {
-    // The benchmark diagnostic behind the saturation bench's peak
-    // library-owned bytes: against an endpoint that never answers, the
-    // admitted items stay counted (queued plus in flight) within the budget,
-    // and shutdown releases them.
+fn stats_report_the_bytes_the_byte_budget_admits_against() {
+    // `SignalStats::buffered_bytes` is the running total the
+    // `max_buffered_bytes` budget admits against, per signal. Against an
+    // endpoint that never answers, the admitted spans and log records stay
+    // counted (queued plus in flight) within the budget; the metrics
+    // collection in flight holds exactly its encoded body; refused items add
+    // nothing; shutdown releases everything.
+    use opentelemetry::metrics::MeterProvider as _;
+
     let server = Server::always(Action::Hang);
+    let endpoint = |signal: &str| {
+        Some(
+            server
+                .endpoint(signal, Protocol::HttpProtobuf)
+                .with_timeout(Duration::from_secs(120)),
+        )
+    };
     let config = server
-        .traces_config(Protocol::HttpProtobuf)
-        .with_logs(Some(server.endpoint("logs", Protocol::HttpProtobuf)))
+        .all_config(Protocol::HttpProtobuf)
+        .with_traces(endpoint("traces"))
+        .with_logs(endpoint("logs"))
+        .with_metrics(endpoint("metrics"))
         .with_batch(BatchLimits {
             max_buffered_bytes: 10_000,
             scheduled_delay: Duration::from_secs(60),
+            export_timeout: Duration::from_secs(120),
             ..BatchLimits::default()
         });
-    let pipeline = ObservabilityPipeline::build(config).unwrap();
-    assert_eq!(pipeline.buffered_bytes().traces, 0);
+    let pipeline = Arc::new(ObservabilityPipeline::build(config).unwrap());
+    let stats = pipeline.stats();
+    for s in [stats.traces, stats.logs, stats.metrics] {
+        assert_eq!(s.buffered_bytes, 0, "{s:?}");
+    }
     spans(&pipeline, 5, 3000);
     let names: Vec<String> = (0..5).map(|i| format!("log-{i}")).collect();
     logs(&pipeline, &names, 3000);
-    let held = pipeline.buffered_bytes();
-    for (signal, bytes) in [("traces", held.traces), ("logs", held.logs)] {
-        assert!(bytes > 6000 && bytes <= 10_000, "{signal}: {bytes}");
+    let stats = pipeline.stats();
+    for (signal, s) in [("traces", stats.traces), ("logs", stats.logs)] {
+        assert_eq!((s.accepted, s.pending, s.dropped), (5, 2, 3), "{signal}");
+        // Two 3 KB items admitted; the three refused ones hold nothing.
+        assert!(
+            s.buffered_bytes > 6000 && s.buffered_bytes <= 10_000,
+            "{signal}: {s:?}"
+        );
     }
-    assert_eq!(held.metrics, 0, "metrics not configured");
-    let _ = pipeline.shutdown(Duration::from_millis(200));
+    assert_eq!(stats.metrics.buffered_bytes, 0, "no collection yet");
+
+    pipeline
+        .meter_provider()
+        .unwrap()
+        .meter("app")
+        .u64_counter("items")
+        .build()
+        .add(1, &[]);
+    let flush = {
+        let pipeline = pipeline.clone();
+        thread::spawn(move || pipeline.force_flush(Duration::from_secs(60)))
+    };
+    // The bound only detects a request that never arrives.
+    server.wait_for_path("/v1/metrics", 1, Duration::from_secs(10));
+    let parked = server.requests_to("/v1/metrics");
+    let metrics = pipeline.stats().metrics;
+    assert_eq!(metrics.pending, 1, "{metrics:?}");
     assert_eq!(
-        pipeline.buffered_bytes(),
-        xybrid_observability::otlp::BufferedBytes::default()
+        metrics.buffered_bytes,
+        parked[0].body.len() as u64,
+        "the collection in flight holds its encoded body"
     );
+
+    let _ = pipeline.shutdown(Duration::from_millis(200));
+    assert!(flush.join().unwrap().is_err());
+    let stats = pipeline.stats();
+    for s in [stats.traces, stats.logs, stats.metrics] {
+        assert_eq!((s.pending, s.buffered_bytes), (0, 0), "{s:?}");
+        assert!(s.is_consistent(), "{s:?}");
+    }
 }
 
 fn large_distinct_scope(index: usize) -> InstrumentationScope {
@@ -1120,8 +1166,8 @@ fn an_unconfigured_signal_config_is_rejected_before_anything_starts() {
     ));
 }
 
-// Per signal: failure replies (D2), lost acknowledgements (D3), an outage and
-// its recovery (D1), saturation (D4) and receiver reconciliation (D5).
+// Per signal: failure replies, lost acknowledgements, an outage and
+// its recovery, saturation and receiver reconciliation.
 
 /// One signal of the per-signal tables below.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1677,12 +1723,14 @@ fn an_outage_then_recovery(down: Down) {
     logs(&pipeline, &during[4..], 10);
     let stats = pipeline.stats();
     for (signal, s) in [("traces", stats.traces), ("logs", stats.logs)] {
+        assert!(s.buffered_bytes > 0, "{down:?}: {signal} holds its items");
         let held = SignalStats {
             accepted: 12,
             exported: 2,
             dropped: 2,
             failed: 0,
             pending: 8,
+            buffered_bytes: s.buffered_bytes,
         };
         assert_eq!(s, held, "{down:?}: {signal} while down");
     }
@@ -1720,6 +1768,7 @@ fn an_outage_then_recovery(down: Down) {
         dropped: 2,
         failed: 8,
         pending: 0,
+        buffered_bytes: 0,
     };
     assert_eq!(stats.traces, lost, "{down:?}");
     assert_eq!(stats.logs, lost, "{down:?}");
@@ -1955,13 +2004,16 @@ fn a_hung_endpoint_saturates_the_log_queue_exactly() {
     // The bound only detects a request that never arrives.
     server.wait_for_path("/v1/logs", 1, Duration::from_secs(10));
     logs(&pipeline, &records[4..], 10);
+    let held = pipeline.stats().logs;
+    assert!(held.buffered_bytes > 0, "{held:?}");
     let saturated = SignalStats {
         accepted: 20,
         dropped: 12,
         pending: 8,
+        buffered_bytes: held.buffered_bytes,
         ..SignalStats::default()
     };
-    assert_eq!(pipeline.stats().logs, saturated);
+    assert_eq!(held, saturated);
     let sent = server.requests();
     assert_eq!(sent.len(), 1);
     assert_eq!(log_bodies(&sent[0]), records[..4]);
@@ -2052,4 +2104,121 @@ fn exported_metric_points_are_the_points_the_receiver_acknowledged() {
         ..SignalStats::default()
     };
     assert_eq!(stats, reconciled);
+}
+
+/// The string value of span attribute `key` in an OTLP request.
+fn span_string(request: &Received, key: &str) -> Option<String> {
+    request
+        .traces()
+        .resource_spans
+        .into_iter()
+        .flat_map(|r| r.scope_spans)
+        .flat_map(|s| s.spans)
+        .flat_map(|span| span.attributes)
+        .find(|kv| kv.key == key)
+        .and_then(|kv| kv.value?.value)
+        .map(|v| match v {
+            Wire::StringValue(s) => s,
+            Wire::ArrayValue(a) => format!("{:?}", a.values),
+            other => panic!("{key}: {other:?}"),
+        })
+}
+
+#[test]
+fn raised_content_budgets_are_clamped_so_the_span_is_exported() {
+    // An attribute budget raised past what one request can carry
+    // is clamped at configuration, so a quote-heavy 300 KB output (it doubles
+    // in OTLP/JSON) is truncated and its span exported, not dropped whole as
+    // an oversized item. Each pipeline also fits the budgets to its own,
+    // smaller, request bound.
+    use xybrid_observability::semconv::{
+        attr, span_content_ceiling, DEFAULT_MAX_REQUEST_BODY_BYTES,
+    };
+    use xybrid_observability::OutputMessage;
+
+    let quoted = "\"".repeat(300_000);
+    for (bound, protocol) in [
+        (DEFAULT_MAX_REQUEST_BODY_BYTES, Protocol::HttpJson),
+        (DEFAULT_MAX_REQUEST_BODY_BYTES, Protocol::HttpProtobuf),
+        (200_000, Protocol::HttpJson),
+    ] {
+        let what = format!("{protocol:?}, bound {bound}");
+        let server = Server::ok();
+        let mut config = server.traces_config(protocol);
+        config.max_request_body_bytes = bound;
+        let pipeline = ObservabilityPipeline::build(config).unwrap();
+        let observer = pipeline.observer_with(
+            ContentPolicy::default()
+                .with_capture(ContentCapture::SpanOnly)
+                .with_max_attribute_bytes(400_000)
+                .with_max_retained_operation_bytes(1_000_000),
+        );
+        let ceiling = span_content_ceiling(bound);
+        let policy = observer.content_policy();
+        assert_eq!(policy.max_request_body_bytes(), bound, "{what}");
+        assert_eq!(policy.max_retained_operation_bytes(), ceiling, "{what}");
+        assert_eq!(policy.max_attribute_bytes(), ceiling, "{what}");
+
+        let op = observer.start_inference(
+            InferenceRequest::new("chat", "llama.cpp").with_model("m"),
+            StartOptions::default(),
+        );
+        op.record_output_messages(&[OutputMessage::assistant_text(quoted.clone(), None)]);
+        op.end();
+        pipeline.force_flush(Duration::from_secs(10)).unwrap();
+        let stats = pipeline.stats().traces;
+        assert_eq!(
+            (stats.accepted, stats.exported, stats.dropped),
+            (1, 1, 0),
+            "{what}"
+        );
+        let sent = server.requests_to("/v1/traces");
+        assert_eq!(sent.len(), 1, "{what}");
+        assert!(
+            sent[0].body.len() <= bound,
+            "{what}: {}",
+            sent[0].body.len()
+        );
+        let output = span_string(&sent[0], attr::OUTPUT_MESSAGES).expect("the output");
+        assert!(output.len() <= ceiling, "{what}: {}", output.len());
+        assert!(output.contains("…[truncated]"), "{what}");
+        let listed = span_string(&sent[0], attr::CONTENT_TRUNCATED_ATTRIBUTES).unwrap();
+        assert!(listed.contains(attr::OUTPUT_MESSAGES), "{what}: {listed}");
+        pipeline.shutdown(Duration::from_secs(5)).unwrap();
+    }
+}
+
+#[test]
+fn an_observer_takes_the_pipeline_traces_bound_only_when_it_is_smaller() {
+    // The policy's own
+    // request bound (default 480 KiB) is replaced by the traces bound only
+    // when that is smaller. A larger pipeline bound does not raise it, and a
+    // pipeline without traces has no span request to fit.
+    use xybrid_observability::semconv::DEFAULT_MAX_REQUEST_BODY_BYTES as DEFAULT;
+    let server = Server::ok();
+    let fitted = |config: OtlpConfig, policy: ContentPolicy| {
+        let pipeline = ObservabilityPipeline::build(config).unwrap();
+        let bound = pipeline
+            .observer_with(policy)
+            .content_policy()
+            .max_request_body_bytes();
+        pipeline.shutdown(Duration::from_secs(5)).unwrap();
+        bound
+    };
+    let traces = |bound: usize| {
+        let mut config = server.traces_config(Protocol::HttpProtobuf);
+        config.max_request_body_bytes = bound;
+        config
+    };
+    let own = |bound: usize| ContentPolicy::default().with_max_request_body_bytes(bound);
+
+    assert_eq!(fitted(traces(DEFAULT), own(100_000)), 100_000);
+    assert_eq!(fitted(traces(DEFAULT), own(900_000)), DEFAULT);
+    assert_eq!(fitted(traces(200_000), ContentPolicy::default()), 200_000);
+    assert_eq!(fitted(traces(1_000_000), ContentPolicy::default()), DEFAULT);
+    assert_eq!(fitted(traces(1_000_000), own(900_000)), 900_000);
+    let logs_only = traces(70_000)
+        .with_traces(None)
+        .with_logs(Some(server.endpoint("logs", Protocol::HttpProtobuf)));
+    assert_eq!(fitted(logs_only, ContentPolicy::default()), DEFAULT);
 }

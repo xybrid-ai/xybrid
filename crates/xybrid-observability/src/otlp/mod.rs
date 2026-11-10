@@ -60,8 +60,6 @@ pub use config::{
 };
 pub use export::{exporters, OtlpExporters, OtlpLogExporter, OtlpMetricExporter, OtlpSpanExporter};
 pub use pipeline::ObservabilityPipeline;
-#[cfg(feature = "test-util")]
-pub use stats::BufferedBytes;
 pub use stats::{PipelineStats, SignalStats};
 
 /// Catalog defaults (`catalog.defaults`) of the OTLP transport.
@@ -85,7 +83,7 @@ pub mod defaults {
     /// `retry.retryable_status`.
     pub const RETRYABLE_STATUS: [u16; 4] = [429, 502, 503, 504];
     /// `max_request_body_bytes` (480 KiB).
-    pub const MAX_REQUEST_BODY_BYTES: usize = 491_520;
+    pub const MAX_REQUEST_BODY_BYTES: usize = crate::semconv::DEFAULT_MAX_REQUEST_BODY_BYTES;
     /// `max_buffered_bytes_per_signal` (32 MiB).
     pub const MAX_BUFFERED_BYTES_PER_SIGNAL: usize = 33_554_432;
     /// `max_response_body_bytes` (64 KiB).

@@ -237,7 +237,9 @@ Xybrid.Observability.flushAsync()
 ```
 
 `Xybrid.Observability.stats` reports accepted, exported, dropped, failed, and
-pending counts per signal (`traces`, `logs`, `metrics`). A flush or shutdown that
+pending counts per signal (`traces`, `logs`, `metrics`); after `shutdown` they are
+the session's final counters (what the shutdown failed or dropped included)
+until the next `start()`. A flush or shutdown that
 cannot deliver everything throws `XybridError.TelemetryDelivery`; the inference
 already succeeded, so do not rerun it. `suppressTrace = true` in `runOptions`
 skips the detailed trace for one run. Pipelines take the same trace fields and

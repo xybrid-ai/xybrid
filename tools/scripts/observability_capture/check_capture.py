@@ -735,13 +735,18 @@ class Checker:
         asserted = self.asserted_span_count()
         if traces.get("exported", 0) < asserted:
             failures.append(f"traces.exported {traces.get('exported')} < the {asserted} spans this scenario asserts")
-        if len(self.index) < traces.get("exported", 0):
-            failures.append(f"traces.exported {traces.get('exported')} but the receiver holds {len(self.index)} spans")
-        if len(self.capture.logs) < logs.get("exported", 0):
-            failures.append(f"logs.exported {logs.get('exported')} but the receiver holds {len(self.capture.logs)} records")
-        if self.capture.metric_points < metrics.get("exported", 0):
-            failures.append(f"metrics.exported {metrics.get('exported')} but the receiver holds "
-                            f"{self.capture.metric_points} data points")
+        # The final counters (after shutdown) too: the receiver holds at least
+        # what each snapshot reports exported.
+        for snapshot in ("after_flush", "after_shutdown"):
+            stats = self.stats(snapshot)
+            held = (("traces", len(self.index), "spans"), ("logs", len(self.capture.logs), "records"),
+                    ("metrics", self.capture.metric_points, "data points"))
+            for signal, count, what in held:
+                counters = stats.get(signal)
+                exported = counters.get("exported", 0) if isinstance(counters, dict) else 0
+                if count < exported:
+                    prefix = "" if snapshot == "after_flush" else "after shutdown, "
+                    failures.append(f"{prefix}{signal}.exported {exported} but the receiver holds {count} {what}")
         if metrics.get("exported", 0) == 0:
             failures.append("no metric data point was exported; flush collects metrics")
         return failures
@@ -758,17 +763,41 @@ class Checker:
             failures.append(f"a workflow started after shutdown has a reference/context: {after}")
         if after.get("flush") != "ok":
             failures.append(f"flush after shutdown returned {after.get('flush')!r}; it must be a no-op")
+        failures.extend(self.final_counter_failures())
+        return failures
+
+    def final_counter_failures(self) -> List[str]:
+        """Stats after shutdown: export off, and the shut-down session's final
+        counters, not a reset. Every item is settled in
+        one terminal bucket, the healthy receiver lost nothing, and the
+        counters only grew since the flush (`stats.consistent` holds them
+        against what the receiver got)."""
+        failures = []
         stats = self.stats("after_shutdown")
+        flushed = self.stats("after_flush")
         if stats.get("enabled") is not False:
             failures.append(f"stats after shutdown report enabled={stats.get('enabled')!r}")
         for signal in SIGNAL_KEYS:
             counters = stats.get(signal)
             if not isinstance(counters, dict) or any(key not in counters for key in COUNTER_KEYS):
                 failures.append(f"stats.after_shutdown.{signal} lacks {list(COUNTER_KEYS)}")
-        nonzero = [f"{signal}.{key}" for signal in SIGNAL_KEYS if isinstance(stats.get(signal), dict)
-                   for key, value in stats[signal].items() if value]
-        if nonzero:
-            failures.append(f"stats after shutdown are not all zero: {nonzero}")
+                continue
+            settled = counters["exported"] + counters["dropped"] + counters["failed"]
+            if counters["pending"] != 0:
+                failures.append(f"after shutdown, {signal}.pending is {counters['pending']}; shutdown settles "
+                                "every item")
+            if counters["accepted"] != settled:
+                failures.append(f"stats.after_shutdown.{signal}: accepted {counters['accepted']} != exported + "
+                                f"dropped + failed ({settled})")
+            for key in ("dropped", "failed"):
+                if counters[key] != 0:
+                    failures.append(f"after shutdown, {signal}.{key} is {counters[key]}; the receiver accepted "
+                                    "everything")
+            before = flushed.get(signal) if isinstance(flushed.get(signal), dict) else {}
+            for key in ("accepted", "exported"):
+                if counters[key] < before.get(key, 0):
+                    failures.append(f"stats.after_shutdown.{signal}.{key} {counters[key]} < {before.get(key)} after "
+                                    "the flush; they must be the shut-down session's final counters, not a reset")
         return failures
 
     def check_nothing_after_shutdown(self) -> List[str]:

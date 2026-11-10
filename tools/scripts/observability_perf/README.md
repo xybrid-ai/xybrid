@@ -130,9 +130,9 @@ written; the JSON line on stdout names the failed checks).
 
 ## Micro benchmarks (`micro`)
 
-`cargo bench -p xybrid-observability --features test-util` (the
-`saturation` bench needs `test-util` for `ObservabilityPipeline::buffered_bytes`,
-the running total the 32 MiB byte budget admits against). Each bench writes a
+`cargo bench -p xybrid-observability` (the `saturation` bench reads
+`SignalStats::buffered_bytes` from `ObservabilityPipeline::stats`, the running
+total the 32 MiB byte budget admits against). Each bench writes a
 JSON side report next to Criterion's output (`XYBRID_OBS_BENCH_DIR`, default
 `target/observability-bench`).
 
@@ -156,7 +156,10 @@ JSON side report next to Criterion's output (`XYBRID_OBS_BENCH_DIR`, default
   Policies: `metadata_only`, `default`, `rules` (three `replace_literal`, one
   `omit_attribute` on another key), `hook_and_rules` (a substring callback
   redactor first), `unsampled` (the default policy under a sampler that drops
-  every span: what content costs an operation whose span is not recording).
+  every span). Content for a span that is not recording is not processed, so `unsampled`
+  measures the capture gate and should cost about what `metadata_only` does;
+  before that gate it cost the same as `default` (Rust 256 KiB: 140 µs vs
+  141 µs; JS 3.27 vs 3.38 ms, 2026-11-09 Mac run).
   Every (policy, workload) outcome (kept, truncated, failed closed, skipped)
   is asserted before timing, so a bench cannot silently measure another
   path. Under `hook_and_rules` the near-budget histories fail
@@ -167,8 +170,9 @@ JSON side report next to Criterion's output (`XYBRID_OBS_BENCH_DIR`, default
   byte budget binds before the 2048-item queue); 64 threads x 250; and 8 x
   1250 against the answering endpoint. Per scenario (5 repetitions, fresh
   pipeline each): burst wall time, per-operation latency percentiles,
-  accepted/dropped/pending, the sampled peak of library-owned bytes against
-  the 32 MiB budget, pending against the queue, process RSS before / sampled
+  accepted/dropped/pending, the sampled peak of library-owned bytes
+  (`buffered_bytes`) against the 32 MiB budget and that none are held after
+  shutdown, pending against the queue, process RSS before / sampled
   peak / after shutdown, shutdown time. Criterion's `burst` group times the
   bursts.
 - **JS** (`pnpm bench`): `disabled`, `memory_metadata` and `memory_content`
@@ -214,7 +218,7 @@ not to flag run-to-run noise.
 | E3 | first callback | <= max(2 ms, 2%) later | operation start plus one prompt through the content pipeline (tens of us for 2 KiB) |
 | E4 | median callback gap | <= max(50 us, 1%) longer | the per-chunk cost lands here directly |
 | E5 | p99 callback gap | <= max(0.5 ms, 5%) longer | tails catch blocking; `blocked` must look like any enabled mode |
-| E6, E7 | peak RSS; peak footprint | <= 16 MiB larger | runtime threads, HTTP client, a few spans; content <= 480 KiB per operation; the 32 MiB buffer cannot fill with a handful of operations |
+| E6, E7 | peak RSS; peak footprint | <= 16 MiB larger | runtime threads, HTTP client, a few spans; content retained <= 208 KiB per operation (the default budget, clamped to fit the 480 KiB request bound); the 32 MiB buffer cannot fill with a handful of operations |
 | E8 | shutdown, `blocked` | <= timeout + 2.5 s | timeout plus the pipeline's settle grace (2 x 1 s) and 250 ms slack |
 | E9 | shutdown, answering sink | <= 1 s | a final flush of a few spans and one metrics collection |
 | M1, J1 | per-chunk overhead / e2e per-token time | <= 0.1% | ~5-10 us at 100-200 tok/s, 10x the expected cost |

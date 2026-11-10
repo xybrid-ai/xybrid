@@ -1017,7 +1017,12 @@ class XybridModel:
     def stream_result(self, stream_id: int) -> XybridResult:
         """Take the final result after receiving a `Complete` event."""
     def stream_close(self, stream_id: int) -> None:
-        """Forget a streaming session."""
+        """Forget a streaming session.
+
+        Closing a session before its terminal event cancels its run: the run
+        stops at its next token and is recorded as a user cancellation
+        (`error.type` `cancelled`), not as an error.
+        """
     def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> XybridResult:
         """Run inference seeded with a conversation `context` (multi-turn chat).
 
@@ -1159,7 +1164,9 @@ class XybridObservabilityConfig:
     def set_metadata_only(self, metadata_only: bool) -> None:
         """Record metadata only: no prompts, outputs, or tool payloads."""
     def set_max_content_bytes(self, bytes: int) -> None:
-        """Maximum bytes per captured content attribute."""
+        """Maximum bytes per captured content attribute, clamped to at most
+        208 KiB so that one span fits the 480 KiB export request.
+        """
     def allow_provider_context(self, origin: str) -> None:
         """Allows context propagation to one exact third-party HTTP(S) origin."""
     def set_device_id(self, id: str) -> None:
@@ -1455,7 +1462,7 @@ def is_auto_release_enabled() -> bool:
 def observability_default_traces_endpoint() -> str:
     """The default Xybrid OTLP trace endpoint."""
 def observability_stats() -> XybridObservabilityStats:
-    """Current delivery counters (all zero when observability is off)."""
+    """Delivery counters: live while export runs, the final ones after shutdown until the next init."""
 def observability_flush(timeout_ms: int) -> None:
     """Export queued telemetry, waiting at most `timeout_ms`.
 

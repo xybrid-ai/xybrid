@@ -103,6 +103,8 @@ pub struct ObservabilityPipeline {
     meter_gate: Arc<tokio::sync::Mutex<()>>,
     runtime: Arc<TransportRuntime>,
     shutdown: Mutex<Option<Arc<Completion<Result<()>>>>>,
+    /// `max_request_body_bytes` of the traces export, if spans are exported.
+    span_request_bound: Option<usize>,
 }
 
 impl ObservabilityPipeline {
@@ -223,6 +225,10 @@ impl ObservabilityPipeline {
             meter_gate: Arc::new(tokio::sync::Mutex::new(())),
             runtime,
             shutdown: Mutex::new(None),
+            span_request_bound: resolved
+                .traces
+                .as_ref()
+                .map(|_| limits.max_request_body_bytes),
         })
     }
 
@@ -233,9 +239,18 @@ impl ObservabilityPipeline {
         self.observer_with(ContentPolicy::from_env())
     }
 
-    /// An observer wired to this pipeline's providers.
+    /// An observer wired to this pipeline's providers. With a traces signal,
+    /// the content budgets are clamped to fit this pipeline's
+    /// `max_request_body_bytes` (or the policy's own bound, default 480 KiB,
+    /// if smaller).
     #[must_use]
     pub fn observer_with(&self, content: ContentPolicy) -> Observer {
+        let content = match self.span_request_bound {
+            Some(bound) if bound < content.max_request_body_bytes() => {
+                content.with_max_request_body_bytes(bound)
+            }
+            _ => content,
+        };
         let mut builder = Observer::builder().content_policy(content);
         if let Some(p) = &self.tracer_provider {
             builder = builder.tracer_provider(p);
@@ -267,26 +282,14 @@ impl ObservabilityPipeline {
         self.logger_provider.as_ref()
     }
 
-    /// Per-signal delivery counters (zeros for unconfigured signals).
+    /// Per-signal delivery counters and buffered bytes (zeros for
+    /// unconfigured signals).
     #[must_use]
     pub fn stats(&self) -> PipelineStats {
         PipelineStats {
             traces: self.traces.as_ref().map(|b| b.stats()).unwrap_or_default(),
             logs: self.logs.as_ref().map(|b| b.stats()).unwrap_or_default(),
             metrics: self.metrics.as_ref().map(|m| m.stats()).unwrap_or_default(),
-        }
-    }
-
-    /// Library-owned bytes held for delivery now, per signal: the running
-    /// totals the `max_buffered_bytes` budget admits against (benchmark and
-    /// test diagnostics; not process memory).
-    #[cfg(feature = "test-util")]
-    #[must_use]
-    pub fn buffered_bytes(&self) -> super::stats::BufferedBytes {
-        super::stats::BufferedBytes {
-            traces: self.traces.as_ref().map_or(0, |b| b.buffered_bytes()),
-            logs: self.logs.as_ref().map_or(0, |b| b.buffered_bytes()),
-            metrics: self.metrics.as_ref().map_or(0, |m| m.buffered_bytes()),
         }
     }
 

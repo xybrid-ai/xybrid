@@ -83,6 +83,7 @@ describe("R-DEADLINE-2 split siblings after deadline", () => {
       dropped: 0,
       failed: 4,
       pending: 0,
+      bufferedBytes: 0,
     });
   });
 });
@@ -186,6 +187,7 @@ describe("R-DEADLINE-4 2xx with slow body", () => {
         dropped: 0,
         failed: honoured ? 1 : 0,
         pending: 0,
+        bufferedBytes: 0,
       });
     });
   }
@@ -236,6 +238,7 @@ describe("R-CNT-3 lost ack then success", () => {
       dropped: 0,
       failed: 0,
       pending: 0,
+      bufferedBytes: 0,
     });
   });
   test("max_retries 0 lost ack -> failed", async () => {
@@ -276,6 +279,7 @@ describe("R-CNT-4 partial success protobuf + over-count clamp", () => {
       dropped: 0,
       failed: 1,
       pending: 0,
+      bufferedBytes: 0,
     });
   });
   test("rejected count above item count is clamped", async () => {
@@ -298,6 +302,7 @@ describe("R-CNT-4 partial success protobuf + over-count clamp", () => {
       dropped: 0,
       failed: 1,
       pending: 0,
+      bufferedBytes: 0,
     });
   });
 });
@@ -323,6 +328,7 @@ describe("R-CANCEL-4/5 barriers", () => {
       dropped: 0,
       failed: 0,
       pending: 0,
+      bufferedBytes: 0,
     });
   });
   test("concurrent flushes: the later one waits for its later items", async () => {
@@ -420,6 +426,7 @@ describe("per-attempt and shutdown deadlines (R-DEADLINE-5, A7)", () => {
         dropped: 0,
         failed: stats.accepted,
         pending: 0,
+        bufferedBytes: 0,
       });
     });
     test(`${signal}: shutdown caps a longer export and never reports success on cancellation`, async () => {
@@ -467,6 +474,7 @@ test("R-CNT-2: 503, 503, 200 retries identical bytes and counts one item", async
     failed: 0,
     dropped: 0,
     pending: 0,
+    bufferedBytes: 0,
   });
 });
 
@@ -506,6 +514,7 @@ for (const protocol of ["http/json", "http/protobuf"] as const) {
         failed: 1,
         dropped: 0,
         pending: 0,
+        bufferedBytes: 0,
       });
     });
   }
@@ -680,6 +689,7 @@ describe("D2: HTTP failure statuses, per signal", () => {
             dropped: 0,
             failed: 2 - exported,
             pending: 0,
+            bufferedBytes: 0,
           });
         },
         HANG_GUARD_MS,
@@ -707,6 +717,7 @@ describe("D3: lost acknowledgements for logs and metrics", () => {
           dropped: 0,
           failed: 0,
           pending: 0,
+          bufferedBytes: 0,
         });
       },
       HANG_GUARD_MS,
@@ -727,6 +738,7 @@ describe("D3: lost acknowledgements for logs and metrics", () => {
           dropped: 0,
           failed: 2,
           pending: 0,
+          bufferedBytes: 0,
         });
       },
       HANG_GUARD_MS,
