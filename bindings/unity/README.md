@@ -443,9 +443,9 @@ traces. Export is off until you configure it; an API key passed to
 `XybridClient.Initialize` does not enable it.
 
 ```csharp
-// Traces to the Xybrid dashboard...
+// Traces to Xybrid (get a key at console.xybrid.dev)...
 XybridClient.InitializeObservability(
-    ObservabilityConfig.Xybrid("xy_live_...")
+    ObservabilityConfig.Xybrid("sk_live_...")
         .WithService(Application.productName, Application.version));
 
 // ...or traces, metrics, and logs to an OpenTelemetry Collector.

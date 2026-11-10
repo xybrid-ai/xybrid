@@ -46,7 +46,7 @@ print(result.text)
 Pass an API key to configure cloud authentication:
 
 ```python
-xybrid.init(api_key="xyb_...")
+xybrid.init(api_key="sk_live_...")
 ```
 
 Initialization is optional for local inference. An API key alone does not enable

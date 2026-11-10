@@ -85,7 +85,7 @@ started, each run is exported as an OpenTelemetry trace, with prompts and
 outputs included unless you call `.metadataOnly()`.
 
 ```swift
-// Traces to the Xybrid dashboard (free key at dashboard.xybrid.dev)
+// Traces to Xybrid (get a key at console.xybrid.dev)
 try Xybrid.Observability.xybrid(apiKey: key)
     .service("MyApp", version: "1.4.0")
     .start()

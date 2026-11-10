@@ -21,14 +21,14 @@ xybrid_sdk::init().run();
 
 // Cloud authentication with explicit trace export to Xybrid.
 xybrid_sdk::init()
-    .api_key("xy_live_...")
-    .observability(ObservabilityConfig::xybrid("xy_live_..."))
+    .api_key("sk_live_...")
+    .observability(ObservabilityConfig::xybrid("sk_live_..."))
     .run();
 ```
 
 An API key alone does not enable export. Without observability configuration,
 the first inference logs a one-shot setup hint (suppress with `XYBRID_QUIET=1`).
-Get a key at <https://dashboard.xybrid.dev>. The builder also accepts
+Get a key at <https://console.xybrid.dev>. The builder also accepts
 `.cache_dir(...)`, `.gateway_url(...)`, and `.resource_telemetry(...)`.
 Use the fallible `init_observability` API below when startup errors must be
 handled by your application; the convenience builder logs configuration errors.

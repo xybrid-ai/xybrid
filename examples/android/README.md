@@ -82,8 +82,8 @@ the app runs anonymously (on-device inference, no trace export). With a key,
 `MainActivity` passes it to `Xybrid.init` and also starts trace export with
 `Xybrid.Observability.xybrid(apiKey).start()` — the SDK never exports on the
 key alone. `XYBRID_TRACES_ENDPOINT` points those traces at a self-hosted or
-tunneled endpoint instead of the Xybrid dashboard. Get a free key at
-[dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+tunneled endpoint instead of Xybrid. Get a key at
+[console.xybrid.dev](https://console.xybrid.dev).
 
 ### 4. Obtain Model Files
 

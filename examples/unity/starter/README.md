@@ -118,8 +118,9 @@ public class XybridDemo : MonoBehaviour
 {
     async void Start()
     {
-        // Runs locally with no key. Pass an apiKey to light up the
-        // dashboard: XybridClient.Initialize(apiKey: "xy_live_...")
+        // Runs locally with no key. An apiKey adds cloud features:
+        // XybridClient.Initialize(apiKey: "sk_live_..."). Trace export is
+        // a separate opt-in (XybridClient.InitializeObservability).
         XybridClient.Initialize();
 
         // Load a model from the registry

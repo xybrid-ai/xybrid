@@ -59,7 +59,7 @@ On Android, models are cached under `Application.persistentDataPath/xybrid` (the
 Inference runs entirely on-device whether or not you authenticate. The `apiKey` authenticates the cloud gateway; `gatewayUrl` overrides it:
 
 ```csharp
-XybridClient.Initialize(apiKey: "xy_live_...");
+XybridClient.Initialize(apiKey: "sk_live_...");
 ```
 
 ## Observability
@@ -67,16 +67,16 @@ XybridClient.Initialize(apiKey: "xy_live_...");
 Trace export is off until you configure it — an API key alone does not enable it. Start it once with one of two presets:
 
 ```csharp
-// Traces to the Xybrid dashboard
+// Traces to Xybrid
 XybridClient.InitializeObservability(
-    ObservabilityConfig.Xybrid("xy_live_...")
+    ObservabilityConfig.Xybrid("sk_live_...")
         .WithService(Application.productName, Application.version));
 
 // Traces, metrics, and logs to an OTLP/HTTP endpoint (e.g. an OpenTelemetry Collector)
 XybridClient.InitializeObservability(ObservabilityConfig.Otlp("http://collector:4318"));
 ```
 
-Prompts and outputs are captured by default; chain `.WithMetadataOnly()` to export metadata only. `.WithTracesEndpoint(url)` points the dashboard preset at a self-hosted endpoint. Until export is configured, the first inference logs a one-shot hint (suppress with `XYBRID_QUIET=1`). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+Prompts and outputs are captured by default; chain `.WithMetadataOnly()` to export metadata only. `.WithTracesEndpoint(url)` points the Xybrid preset at a self-hosted endpoint. Until export is configured, the first inference logs a one-shot hint (suppress with `XYBRID_QUIET=1`). Get a key at [console.xybrid.dev](https://console.xybrid.dev).
 
 `ObservationOptions` carries per-run trace context, and each result's `Observation` identifies its trace:
 
@@ -93,7 +93,7 @@ if (result.Observation is XybridBolt.XybridObservationRef run)
 XybridClient.FlushObservability(TimeSpan.FromSeconds(2));
 ```
 
-Feedback and evaluations (`XybridClient.RecordEvaluation(target, name, ...)`) need a logs signal, so they return `false` with the dashboard preset, which sends traces only. Call `FlushObservability` from `OnApplicationPause(true)` and `ShutdownObservability` from `OnApplicationQuit`: mobile OSes can kill a backgrounded app without a quit callback.
+Feedback and evaluations (`XybridClient.RecordEvaluation(target, name, ...)`) need a logs signal, so they return `false` with the Xybrid preset, which sends traces only. Call `FlushObservability` from `OnApplicationPause(true)` and `ShutdownObservability` from `OnApplicationQuit`: mobile OSes can kill a backgrounded app without a quit callback.
 
 ## Quick Start
 

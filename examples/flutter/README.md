@@ -68,8 +68,8 @@ flutter run \
 Both are optional. Without a key the app runs anonymously (on-device inference,
 telemetry disabled); without a platform URL it uses the default Xybrid
 endpoint. `XYBRID_PLATFORM_URL` is handy for pointing a debug build at a
-self-hosted or tunneled (e.g. ngrok) platform. Get a free key at
-[dashboard.xybrid.dev](https://dashboard.xybrid.dev). The iOS and Android
+self-hosted or tunneled (e.g. ngrok) platform. Get a key at
+[console.xybrid.dev](https://console.xybrid.dev). The iOS and Android
 native examples use the equivalent Xcode scheme / Gradle `BuildConfig`
 mechanisms — see their READMEs.
 

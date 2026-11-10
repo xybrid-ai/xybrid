@@ -211,7 +211,7 @@ import ai.xybrid.runOptions
 import ai.xybrid.service
 import ai.xybrid.start
 
-// Traces to the Xybrid dashboard (free key at dashboard.xybrid.dev)
+// Traces to Xybrid (get a key at console.xybrid.dev)
 Xybrid.Observability.xybrid(apiKey)
     .service("MyApp", version = BuildConfig.VERSION_NAME)
     .start()
