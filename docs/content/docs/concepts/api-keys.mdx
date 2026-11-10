@@ -52,7 +52,18 @@ client key. Create a full key in the console for MCP or API reads.
 
 A key that ships inside an app (a mobile, desktop, web or game build) can be
 extracted from the package and used, within its scope, by whoever extracts it.
-Use a dedicated key per app, and revoke and replace a key that leaks.
+**The console creates full-scope keys only**, so a console key in a shipped
+build lets anyone who extracts it read its project's traces through the API and
+the MCP server, including the prompts and outputs those traces captured.
+Content capture is on by default (see [Content policy](#content-policy)). To
+limit what a shipped key exposes:
+
+- Export [metadata only](#content-policy), so no prompts or outputs are stored.
+- Keep each shipped app in a project of its own, with its own key.
+- Or keep the key off the device for export: send traces to an OpenTelemetry
+  Collector you run, and let the Collector forward them to Xybrid ingest with
+  the key.
+- Revoke and replace a key that leaks.
 
 ## Authentication and trace export are separate
 
@@ -68,7 +79,7 @@ Collector.
 | Kotlin | `Xybrid.init(context, apiKey = key)` | `Xybrid.Observability.xybrid(key).start()` |
 | React Native | `Xybrid.initialize({ apiKey: key })` | `ObservabilityConfig.xybrid(key).init()` |
 | Unity | `XybridClient.Initialize(apiKey: key)` | `XybridClient.InitializeObservability(ObservabilityConfig.Xybrid(key))` |
-| Rust | `xybrid::init().api_key(key)` or `XYBRID_API_KEY` | `.observability(ObservabilityConfig::xybrid(key))` on the same builder |
+| Rust | `xybrid_sdk::init().api_key(key).run()` or `XYBRID_API_KEY` | `xybrid_sdk::init().observability(ObservabilityConfig::xybrid(key)).run()` |
 | Python | `xybrid.init(api_key=key)` | `xybrid.XybridObservabilityConfig.xybrid(key).init()` |
 | CLI | `--api-key` or `XYBRID_API_KEY` | Add `--observability` |
 
@@ -124,14 +135,22 @@ what happens to such a workspace.
 |---------------------|---------------------|
 | Day 0 | Created with a client-scoped `sk_live_` key, which works immediately. The agent gives you a private claim link. |
 | Day 7 | The key stops working: trace ingest and the cloud gateway refuse it. Local inference keeps working. |
-| Days 7 to 14 | The workspace can still be claimed. Claiming restores the key. |
+| Days 7 to 14 | The workspace can still be claimed. Claiming restores the key, unless you rotate it. |
 | Day 14 | The workspace is deleted, with its keys and stored traces. |
 
 To claim, open the claim link, sign in to the console with GitHub, review the
 workspace and claim it. The link is private: anyone who opens it and signs in
-can claim the workspace. A claimed workspace keeps its projects, keys and trace
+can claim the workspace. A claimed workspace keeps its projects and trace
 history, and its deadlines no longer apply. Until then, it can send traces,
 use the registry and make a small daily number of cloud-gateway requests.
+
+A claimed workspace also keeps its keys, unless you tick **Rotate the keys** on
+the claim form. Rotating revokes the workspace's keys, the ones the agent wrote
+into your project files, and shows one new client-scoped key per project, once.
+Your app's exports and cloud requests are then refused until you replace the
+old key (for example `XYBRID_API_KEY` in `.env`, `local.properties` or your
+`.xcconfig` file) with the new one. A revoked key gets an ordinary 401, so it
+never shows up as a [workspace notice](#workspace-notices).
 
 ### Workspace notices
 
@@ -144,22 +163,36 @@ state in the `X-Xybrid-Workspace` response header:
   `google.rpc.Status` whose code is 16 and message `workspace_expired`, in the
   request's encoding (protobuf or OTLP/JSON).
 
-SDK and CLI releases whose [changelog](https://github.com/xybrid-ai/xybrid/blob/master/CHANGELOG.md)
-lists workspace notices act on these responses:
+SDK and CLI releases that include Xybrid workspace feedback (see the
+[changelog](https://github.com/xybrid-ai/xybrid/blob/master/CHANGELOG.md)) act
+on these responses:
 
-- **SDK, in every binding.** While the key is provisional, the SDK logs one
-  info message per session with the key's deadline. When ingest reports the
-  workspace expired, it logs one warning and stops sending traces to Xybrid for
-  the rest of the session, without retrying. Spans it no longer sends are
-  counted as dropped in the exporter statistics, never as exported. Local
-  inference, local spans and every other export destination keep running. The
-  logs appear in logcat under the `xybrid` tag on Android, in the unified log
-  (subsystem `dev.xybrid.sdk`) on iOS, and through your application's logger
-  (target `xybrid_sdk`) in Rust and on desktop.
+- **SDKs built on the Xybrid runtime** (Flutter, Swift, Kotlin, React Native,
+  Unity, Rust and Python). When ingest reports the workspace expired, the SDK
+  stops sending traces to Xybrid for the rest of the session, without
+  retrying. Spans it no longer sends are counted as dropped in the exporter
+  statistics, never as exported. Local inference, local spans and every other
+  export destination keep running.
+
+  The SDK also logs one info message per session with a provisional key's
+  deadline, and one warning when export stops. Where those messages appear
+  depends on the platform:
+
+  | Platform | Where the notices appear |
+  |----------|--------------------------|
+  | Android, in any binding | logcat, tag `xybrid` |
+  | iOS, in any binding | the unified log, subsystem `dev.xybrid.sdk` |
+  | Rust | the `log` backend your application installs, target `xybrid_sdk` |
+  | Desktop: Python, macOS apps, Flutter and Unity desktop builds, the Unity Editor | Nowhere: no logger is installed. Export still stops; watch the dropped count in the exporter statistics. |
+
 - **CLI.** After a command's final export, the CLI prints the notice to
   stderr: on every run whose traces were refused because the workspace expired,
   and at most once a day, with the deadline, while the key is provisional.
   `-q`, JSON output, CI environments and `XYBRID_QUIET=1` suppress it.
+- **Not covered:** the JavaScript package `@xybrid/observability` (used by the
+  browser preview). Its `xybridTracesPreset` does not read these responses:
+  after the deadline it keeps sending, and ingest refuses every export with
+  401.
 
 Only that exact expiry response stops export. A generic 401, a rate limit or a
 server error never does, and an OpenTelemetry Collector or other endpoint is
@@ -167,7 +200,8 @@ never affected.
 
 **Resuming after a claim.** Claiming restores the key right away, but a session
 that stopped exporting stays stopped. Restart the app, or initialize
-observability again, to resume; the CLI resumes on its next command. Traces
+observability again, to resume; the CLI resumes on its next command. If you
+rotated the keys while claiming, replace the key in your project first. Traces
 recorded while export was stopped are not resent.
 
 ## Related

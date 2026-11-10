@@ -44,7 +44,15 @@ Android 的 `local.properties`，或 iOS 中由构建配置引入的 `.xcconfig`
 客户端密钥仍是客户端密钥。如需使用 MCP 或通过 API 读取数据，请在控制台中创建完整作用域的密钥。
 
 随应用一起发布的密钥（移动端、桌面端、Web 或游戏构建）可能被人从安装包中提取，
-并在其作用域内被提取者使用。请为每个应用使用单独的密钥，密钥泄露时吊销并更换。
+并在其作用域内被提取者使用。**控制台只能创建完整作用域的密钥**，因此发布构建中的控制台密钥
+会让提取者通过 API 和 MCP 服务器读取该密钥所属项目的轨迹，包括这些轨迹采集到的提示词和输出。
+内容采集默认开启（参见[内容策略](#内容策略)）。要限制发布出去的密钥所能暴露的内容：
+
+- [只导出元数据](#内容策略)，这样就不会存储提示词或输出。
+- 让每个发布的应用使用单独的项目和密钥。
+- 或者不让导出用的密钥进入设备：把轨迹发送到你自己运行的 OpenTelemetry Collector，
+  再由 Collector 携带密钥转发到 Xybrid ingest。
+- 密钥泄露时吊销并更换。
 
 ## 认证与轨迹导出相互独立
 
@@ -58,7 +66,7 @@ Android 的 `local.properties`，或 iOS 中由构建配置引入的 `.xcconfig`
 | Kotlin | `Xybrid.init(context, apiKey = key)` | `Xybrid.Observability.xybrid(key).start()` |
 | React Native | `Xybrid.initialize({ apiKey: key })` | `ObservabilityConfig.xybrid(key).init()` |
 | Unity | `XybridClient.Initialize(apiKey: key)` | `XybridClient.InitializeObservability(ObservabilityConfig.Xybrid(key))` |
-| Rust | `xybrid::init().api_key(key)` 或 `XYBRID_API_KEY` | 在同一个构建器上调用 `.observability(ObservabilityConfig::xybrid(key))` |
+| Rust | `xybrid_sdk::init().api_key(key).run()` 或 `XYBRID_API_KEY` | `xybrid_sdk::init().observability(ObservabilityConfig::xybrid(key)).run()` |
 | Python | `xybrid.init(api_key=key)` | `xybrid.XybridObservabilityConfig.xybrid(key).init()` |
 | CLI | `--api-key` 或 `XYBRID_API_KEY` | 添加 `--observability` |
 
@@ -106,12 +114,18 @@ Flutter（`resourceTelemetry`）或 `XYBRID_RESOURCE_TELEMETRY` 环境变量开�
 |--------|----------------|
 | 第 0 天 | 创建时附带一个客户端作用域的 `sk_live_` 密钥，立即可用。代理会给你一个私密的认领链接。 |
 | 第 7 天 | 密钥停止工作：轨迹接收和云端网关都会拒绝它。本地推理不受影响。 |
-| 第 7 至 14 天 | 仍可认领该工作区，认领后密钥恢复可用。 |
+| 第 7 至 14 天 | 仍可认领该工作区，认领后密钥恢复可用（除非你选择轮换密钥）。 |
 | 第 14 天 | 工作区连同其密钥和已存储的轨迹一起被删除。 |
 
 认领方法：打开认领链接，使用 GitHub 登录控制台，确认工作区信息后认领。该链接是私密的：
-任何打开它并登录的人都能认领这个工作区。认领后的工作区会保留其项目、密钥和轨迹历史，
+任何打开它并登录的人都能认领这个工作区。认领后的工作区会保留其项目和轨迹历史，
 上述期限也不再适用。在认领之前，它可以发送轨迹、使用模型仓库，并每天发起少量云端网关请求。
+
+认领后的工作区也会保留其密钥，除非你在认领表单中勾选 **Rotate the keys**（轮换密钥）。
+轮换会吊销该工作区的密钥（即代理写入项目文件的那些密钥），并为每个项目生成一个新的客户端作用域密钥，
+只显示一次。在你用新密钥替换旧密钥之前（例如 `.env`、`local.properties` 或 `.xcconfig`
+文件中的 `XYBRID_API_KEY`），应用的导出和云端请求都会被拒绝。被吊销的密钥收到的是普通的 401，
+因此不会表现为[工作区通知](#工作区通知)。
 
 ### 工作区通知
 
@@ -121,25 +135,36 @@ Flutter（`resourceTelemetry`）或 `XYBRID_RESOURCE_TELEMETRY` 环境变量开�
 - 截止时间之后，ingest 返回 HTTP 401，响应头为 `expired`，并附带一个 code 为 16、message 为
   `workspace_expired` 的 `google.rpc.Status`，编码与请求一致（protobuf 或 OTLP/JSON）。
 
-[更新日志](https://github.com/xybrid-ai/xybrid/blob/master/CHANGELOG.md)中列出了工作区通知的
+包含 Xybrid 工作区反馈（workspace feedback，参见[更新日志](https://github.com/xybrid-ai/xybrid/blob/master/CHANGELOG.md)）的
 SDK 与 CLI 版本会处理这些响应：
 
-- **SDK（所有绑定）。** 密钥处于临时状态时，SDK 每个会话会记录一条带有密钥截止时间的 info 日志。
-  当 ingest 报告工作区已过期时，SDK 记录一条警告，并在本次会话的剩余时间内停止向 Xybrid
-  发送轨迹，不再重试。不再发送的 span 会在导出器统计中计为 dropped，绝不会计为已导出。
-  本地推理、本地 span 以及其他所有导出目标都会继续运行。这些日志在 Android 上出现在 logcat 的
-  `xybrid` 标签下，在 iOS 上出现在统一日志（子系统 `dev.xybrid.sdk`）中，在 Rust 和桌面端
-  则通过应用自己的日志器输出（target 为 `xybrid_sdk`）。
+- **基于 Xybrid 运行时的 SDK**（Flutter、Swift、Kotlin、React Native、Unity、Rust 和 Python）。
+  当 ingest 报告工作区已过期时，SDK 会在本次会话的剩余时间内停止向 Xybrid 发送轨迹，不再重试。
+  不再发送的 span 会在导出器统计中计为 dropped，绝不会计为已导出。
+  本地推理、本地 span 以及其他所有导出目标都会继续运行。
+
+  SDK 还会在每个会话中为临时密钥记录一条带有截止时间的 info 日志，并在停止导出时记录一条警告。
+  这些消息出现在哪里取决于平台：
+
+  | 平台 | 通知出现的位置 |
+  |------|----------------|
+  | Android（任意绑定） | logcat，标签 `xybrid` |
+  | iOS（任意绑定） | 统一日志，子系统 `dev.xybrid.sdk` |
+  | Rust | 你的应用安装的 `log` 后端，target 为 `xybrid_sdk` |
+  | 桌面端：Python、macOS 应用、Flutter 与 Unity 桌面构建、Unity 编辑器 | 不会出现：没有安装日志器。导出仍会停止；请关注导出器统计中的 dropped 计数。 |
+
 - **CLI。** 命令完成最后一次导出后，CLI 会把通知打印到 stderr：每次因工作区过期而被拒绝轨迹的
   运行都会打印；密钥处于临时状态时，最多每天打印一次并附上截止时间。`-q`、JSON 输出、
   CI 环境以及 `XYBRID_QUIET=1` 都会关闭这些通知。
+- **不包括：** JavaScript 包 `@xybrid/observability`（浏览器预览版使用它）。它的
+  `xybridTracesPreset` 不读取这些响应：截止时间之后它仍会继续发送，而 ingest 会以 401 拒绝每次导出。
 
 只有上述明确的过期响应才会停止导出。普通的 401、限流或服务器错误都不会，
 OpenTelemetry Collector 或其他端点也永远不受影响。
 
 **认领后恢复导出。** 认领后密钥会立即恢复，但已经停止导出的会话会保持停止状态。
 重启应用，或再次初始化可观测性，即可恢复导出；CLI 会在下一条命令时恢复。
-导出停止期间记录的轨迹不会被重新发送。
+如果认领时轮换了密钥，请先替换项目中的密钥。导出停止期间记录的轨迹不会被重新发送。
 
 ## 相关内容
 
