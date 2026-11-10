@@ -52,6 +52,14 @@
 
 // Log levels matching Rust's Severity enum
 // 0 = Silent (no logs), 1 = Error, 2 = Warn, 3 = Info, 4 = Debug
+// Mutes llama.cpp's logs while a native call whose diagnostics may quote
+// caller text is running (tokenization, decision load and passes).
+//
+// The gate is process-wide: logs from every thread are dropped until the call
+// returns, including those of an unrelated model generating elsewhere. Scoping
+// it to the calling thread needs thread-local storage, and this file must not
+// add any: the Android gate (tools/scripts/verify_zzz_android.py) requires a
+// library built without the speech engine to carry no PT_TLS segment.
 static std::atomic<unsigned> g_private_native_calls{0};
 struct private_native_scope {
     private_native_scope() { g_private_native_calls.fetch_add(1, std::memory_order_acq_rel); }

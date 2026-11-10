@@ -225,6 +225,42 @@ cmake/cc/NDK versions. That is right for publisher/consumer cache parity and
 wrong for distribution, which is why the download path selects by target +
 feature set + ABI attributes from the manifest instead of recomputing it.
 
+### Liquid decision models (`lfm3-d1/text/v1`)
+
+Decision models answer typed questions without generating text. A request is
+an `EnvelopeKind::DecisionRequest` on the ordinary `run` / `run_async` /
+`run_with_options` surface; there is no decision-specific `run*` method. The
+contract is `docs/development/liquid-decision-protocol.md`, and
+`docs/development/decision-conformance.md` says what is and is not qualified.
+
+- **The chat path refuses decision artifacts.** A GGUF is a decision artifact
+  when a metadata key is `tokenizer.chat_template.systemone`, starts with
+  `systemone.` or contains `.decision.`. The SDK's header sniff
+  (`execution::decision::is_decision_metadata_key`) is best effort; the
+  authority is `LlamaModel::load`, which scans every key after loading and
+  refuses (`xybrid_llama::is_decision_metadata_key`). Change both together: a
+  core test compares them.
+- **`Decision CPU conformance` is a required check.**
+  `test-decision-conformance.yml` has no path filter, and
+  `tools/scripts/llamacpp_update.py` waits on that job name. It collects a
+  fresh upstream reference on the runner and compares bit for bit. Never loosen
+  the comparison to make it pass.
+- **The llama.cpp pin has copies the update automation does not rewrite:**
+  `tools/conformance/decision/{check.py,oracle.py}`,
+  `integration-tests/fixtures/decision/{integrity.json,oracle.json}`,
+  `integration-tests/tests/decision_conformance.rs`, and the commit named in
+  `crates/llama-cpp-sys/NOTICE`. A llama.cpp update PR migrates them by hand.
+- **`crates/llama-cpp-sys/NOTICE` is the notice source.** Byte-identical copies
+  are committed for the Kotlin AAR (`assets/xybrid/llama/NOTICE`, gated by
+  `verify_zzz_android.py`), Python and Unity; React Native, the web package,
+  native slices and the CLI release assets copy it at build time. Edit the
+  source, then the committed copies.
+- **The wrapper compiles llama.cpp's Jinja closure** (`common/jinja/*.cpp`,
+  `common/json.cpp`, `common/unicode.cpp`). The list is in
+  `crates/llama-cpp-sys/build.rs` and in `//:llama_decision_jinja`; keep them
+  equal. Keep llama.cpp's `src/` off the wrapper's include path: a second
+  `ggml.h` breaks the iOS build.
+
 ### Releases
 
 **Releases are cut by branch name, not by hand.** Push a `release/v<version>`
