@@ -36,12 +36,15 @@ function sections(nodes: Node[]): Section[] {
 export function GET() {
   const language = i18n.defaultLanguage;
   const pages = new Map(source.getPages(language).map((page) => [page.url, page]));
+  // The docs have no index page (`/zh/docs` is a 404), so point at a real one.
+  const chinese = source.getPage(['introduction'], 'zh');
   const lines = [
     '# Xybrid',
     '',
     '> Xybrid is an on-device AI SDK: speech-to-text, text-to-speech, LLMs, vision and embeddings run locally in mobile, desktop and game apps (Flutter, Swift, Kotlin, React Native, Unity, Rust, a CLI, and a browser preview). Local inference needs no account or key; cloud fallback and trace export are opt-in.',
     '',
-    `The full text of every page is at ${SITE}/llms-full.txt. The pages are also available in Chinese under ${SITE}/zh/docs.`,
+    `The full text of every page is at ${SITE}/llms-full.txt.` +
+      (chinese ? ` Most pages are also available in Chinese, starting at ${SITE}${chinese.url}.` : ''),
   ];
   for (const section of sections(source.getPageTree(language).children)) {
     lines.push('', `## ${section.title}`, '');
