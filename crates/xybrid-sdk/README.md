@@ -32,6 +32,8 @@ Get a key at <https://console.xybrid.dev>. The builder also accepts
 `.cache_dir(...)`, `.gateway_url(...)`, and `.resource_telemetry(...)`.
 Use the fallible `init_observability` API below when startup errors must be
 handled by your application; the convenience builder logs configuration errors.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ## Usage
 

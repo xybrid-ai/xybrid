@@ -65,6 +65,8 @@ await Xybrid.initialize({ apiKey: XYBRID_API_KEY });
 
 Options apply once per app process; calling again with different options
 rejects with `xybrid_config_error` (restart the app to change them).
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ### Observability (OpenTelemetry)
 

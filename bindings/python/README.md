@@ -52,6 +52,8 @@ xybrid.init(api_key="sk_live_...")
 Initialization is optional for local inference. An API key alone does not enable
 observability export or replace an existing exporter. The first successful
 `init()` applies its arguments; subsequent calls are no-ops.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 Opt in to observability separately, using an export key independent of cloud
 authentication:

@@ -83,6 +83,8 @@ if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
 Export is off until you start it; an API key alone does not enable it. Once
 started, each run is exported as an OpenTelemetry trace, with prompts and
 outputs included unless you call `.metadataOnly()`.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ```swift
 // Traces to Xybrid (get a key at console.xybrid.dev)

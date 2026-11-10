@@ -441,6 +441,8 @@ See the [full API documentation](https://docs.xybrid.dev/en/docs/sdks/unity) for
 Model loads, runs, and pipelines can be exported as OpenTelemetry (OTLP/HTTP)
 traces. Export is off until you configure it; an API key passed to
 `XybridClient.Initialize` does not enable it.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ```csharp
 // Traces to Xybrid (get a key at console.xybrid.dev)...

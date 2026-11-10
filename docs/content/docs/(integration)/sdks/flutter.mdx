@@ -61,6 +61,8 @@ without Xybrid authentication. CPU/memory sampling is separately configured
 with `resourceTelemetry`. `ingestUrl` remains a legacy explicit opt-in to OTLP
 trace export; new integrations should use `observability`.
 
+Key prefixes and scopes, what gets exported, and provisional workspaces: see [API keys](/docs/concepts/api-keys).
+
 `Xybrid.init()` also subscribes to OS battery state on iOS and Android via `battery_plus` and forwards each reading to the routing engine.
 
 ## Core Pattern: Load → Run
