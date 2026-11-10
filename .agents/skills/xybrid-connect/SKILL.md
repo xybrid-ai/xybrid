@@ -713,7 +713,7 @@ The reference implementation is [`scripts/xybrid_agent_connect.py`](scripts/xybr
 
 ```bash
 curl -sSL -o "${TMPDIR:-/tmp}/xybrid_agent_connect.py" https://raw.githubusercontent.com/xybrid-ai/xybrid/master/agents/skills/xybrid-connect/scripts/xybrid_agent_connect.py
-# sha256: 0c48ee16294b230462b5ac9c59a29fabe061db58858ce43205452e7c3e475456
+# sha256: f713284dd6248f272b4b81e423b7b32e82606b4c52c0610b2efab39618692315
 python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" connect --write-env .env --agent claude-code --binding python
 python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" status   # Step 7, instead of `xybrid auth status --json`
 python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" claim    # the private claim link again

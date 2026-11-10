@@ -23,6 +23,7 @@ import os
 import platform
 import re
 import secrets
+import shlex
 import string
 import subprocess
 import sys
@@ -51,7 +52,19 @@ TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 WORD = re.compile(r"^[A-Za-z0-9_@%+=:,./-]+$")  # a shell word that needs no quoting
 LOCAL = " On-device inference works without it."
 KEEPS = " On-device inference keeps working."
-SELF = "python3 -I xybrid_agent_connect.py"
+def self_command():
+    """The command that re-runs this script: its interpreter and absolute path.
+
+    Suggested commands must work from the project directory, while the script
+    lives next to the installed skill or in a temporary directory, so they name
+    it by absolute path, each part as one shell word."""
+    words = [sys.executable or "python3", "-I", os.path.abspath(__file__)]
+    if os.name == "nt":
+        return " ".join(w if WORD.match(w) else '"%s"' % w for w in words)
+    return " ".join(shlex.quote(w) for w in words)
+
+
+SELF = self_command()
 CLAIM = "`%s claim` (or `xybrid auth claim`)" % SELF
 NEW = " To start over with a new workspace instead, run `xybrid connect --new` (with the CLI)."
 EXPORT_NOTE = (" Trace export is not configured by connecting: the key alone sends nothing until the app's "

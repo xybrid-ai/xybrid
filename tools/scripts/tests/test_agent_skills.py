@@ -554,6 +554,10 @@ class ScriptContractTests(unittest.TestCase):
         self.assertEqual(words[3:8], ["status", *flags], words)
         code, report = self.run_script(sub, *words[3:8])
         self.assertEqual((code, report["status"], report["key"]["source"]), (0, "connected", "env_file"), report)
+        # The suggested command names the script by absolute path, so it runs as printed from the
+        # project directory even though the script lives elsewhere.
+        self.assertTrue(os.path.isabs(words[0]) or words[0] == "python3", words)
+        self.assertEqual((words[1], os.path.realpath(words[2])), ("-I", os.path.realpath(str(SCRIPT))), words)
 
     def test_a_file_with_conflicting_values_gets_no_check_that_must_fail(self):
         # status refuses a file that gives the variable two values, so connect suggests no command reading it.
