@@ -53,6 +53,10 @@ pub(crate) struct DecisionRuntime {
 impl DecisionRuntime {
     pub(crate) fn load(path: &Path, spec: &DecisionTemplate) -> Result<Self, AdapterError> {
         spec.validate()?;
+        if !path.is_file() {
+            // Name the file: the native loader only reports a content-free failure.
+            return Err(AdapterError::ModelNotFound(path.display().to_string()));
+        }
         let identity = file_identity(path);
         let model = LlamaModel::load_decision_cpu(
             path.to_str()
@@ -86,33 +90,36 @@ impl DecisionRuntime {
         request: &DecisionRequest,
         abort: Option<&AtomicBool>,
     ) -> Result<Envelope, AdapterError> {
-        let result = self.run_inner(request, abort);
+        cancelled(abort)?;
+        // Preflight every question before the first native evaluation. Prompt
+        // strings are released by preparation; only bounded tokens/plans remain.
+        // Preparation reads the vocabulary and renders with a fresh interpreter:
+        // a refusal here never touched the context, which stays usable.
+        let prepared = self
+            .protocol
+            .prepare_controlled(&self.model, request, abort)?;
+        cancelled(abort)?;
+        let result = self.evaluate(&prepared, abort);
         if result.is_err() {
-            // This includes cancellation between passes and finalization
-            // failure, not only failures reported by the native evaluator.
+            // Once passes begin, any failure drops the context: cancellation
+            // between passes and finalization failure, not only failures
+            // reported by the native evaluator.
             self.context = None;
         }
         result
     }
 
-    fn run_inner(
+    fn evaluate(
         &mut self,
-        request: &DecisionRequest,
+        prepared: &[super::prepare::PreparedQuestion],
         abort: Option<&AtomicBool>,
     ) -> Result<Envelope, AdapterError> {
-        cancelled(abort)?;
-        // Preflight every question before the first native evaluation. Prompt
-        // strings are released by preparation; only bounded tokens/plans remain.
-        let prepared = self
-            .protocol
-            .prepare_controlled(&self.model, request, abort)?;
-        cancelled(abort)?;
         if self.context.is_none() {
             self.context = Some(DecisionContext::new(&self.model).map_err(native_error)?);
         }
         let mut answers = Vec::with_capacity(prepared.len());
         let mut tokens = 0u64;
-        for question in &prepared {
+        for question in prepared {
             cancelled(abort)?;
             let result = self
                 .context

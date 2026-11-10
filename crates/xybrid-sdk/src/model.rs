@@ -417,6 +417,16 @@ fn decision_warmup_request() -> Envelope {
     )))
 }
 
+/// Maps a failure to load a decision model. Capability and missing-artifact
+/// errors keep their type; anything else is a load error, because no inference
+/// ran.
+fn decision_load_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
+    match sdk_execution_error("decision runtime", error) {
+        SdkError::InferenceError { message, source } => SdkError::LoadError { message, source },
+        typed => typed,
+    }
+}
+
 fn decision_capability_refusal(model_id: &str, capability: &str) -> SdkError {
     SdkError::UnsupportedModelCapability {
         model_id: model_id.to_string(),
@@ -3499,7 +3509,7 @@ impl ModelLoader {
         if matches!(metadata.execution_template, ExecutionTemplate::Decision(_)) {
             executor
                 .load_decision(&metadata)
-                .map_err(|e| sdk_execution_error("Decision model load failed", e))?;
+                .map_err(decision_load_error)?;
         }
 
         Ok(ModelHandle {
@@ -11198,6 +11208,15 @@ mod tests {
             Err(error) => error,
         };
         assert!(!is_speculation_refusal(&error), "{error:?}");
+        // A model that cannot load is a load failure (or, without llama.cpp,
+        // a missing capability), never a failed inference.
+        assert!(
+            matches!(
+                error,
+                SdkError::LoadError { .. } | SdkError::UnsupportedModelCapability { .. }
+            ),
+            "{error:?}"
+        );
 
         // The handle a speculative download swaps in still refuses decisions.
         let error = match ModelLoader::create_model_handle(&dir, true) {

@@ -63,6 +63,12 @@ pub(crate) fn run_decisions(
     // the request's optional `model` field can alter the selected model.
     let request = xybrid_sdk::decode_decision_request(&json)?;
     let model = loader.with_speculative_cloud(false).load()?;
+    if !model.is_decision_model() {
+        anyhow::bail!(
+            "--decision-request needs a decision model; '{}' is not one",
+            model.model_id()
+        );
+    }
     let result = model.run(&Envelope::new(EnvelopeKind::DecisionRequest(request)), None)?;
     let decisions = result
         .decisions()
