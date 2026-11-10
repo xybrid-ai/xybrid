@@ -178,7 +178,7 @@ class ConnectSkillTests(unittest.TestCase):
 
 # --- the reference script against a loopback platform ------------------------
 
-KEY = "sk_live_" + "TESTonlyTESTonly0123456789abcdefQZ"
+KEY = "sk_live_" + "FAKE_TEST_KEY"  # obviously fake, and split so no scanner reads it as a key
 TOKEN = "TestClaimTokenTestClaimTokenTestClaimToken1"
 
 
@@ -274,7 +274,7 @@ class ScriptContractTests(unittest.TestCase):
         self.assertEqual((code, report["status"]), (0, "created"), report)
         self.assertEqual(report["claim_url"], f"http://localhost:5173/claim/{TOKEN}")
         self.assertTrue(report["env_file"]["written"] and report["env_file"]["gitignored"])
-        self.assertEqual(report["key"]["preview"], "sk_live_TESTonly…")
+        self.assertEqual(report["key"]["preview"], "sk_live_FAKE…")
         text = (app / ".env").read_text()
         self.assertIn(f"\nXYBRID_API_KEY={KEY}\n", "\n" + text)
         self.assertNotIn(TOKEN, text, "the claim token never goes into the project file")
