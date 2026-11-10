@@ -386,7 +386,7 @@ Xybrid works with **any** ONNX, GGUF, or SafeTensors model. You just need a `mod
 
 ```sh
 # Install xybrid skills into your project
-curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | bash
 
 # Generate model_metadata.json from a HuggingFace model
 claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX

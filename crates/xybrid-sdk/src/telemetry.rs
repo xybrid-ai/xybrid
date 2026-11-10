@@ -374,13 +374,13 @@ fn redact_secret_like_token(token: &str) -> String {
         || trimmed.starts_with("gho_")
         || trimmed.starts_with("xoxb-")
         || trimmed.starts_with("xoxp-")
-        // Xybrid's own key prefixes — the secret most likely to appear in a
-        // *xybrid* error / gateway-auth failure string, and previously the one
-        // provider key this redactor missed. Matched specifically (`xy_live_`
-        // / `xy_test_`, the only two formats used across the SDK docs and
-        // bindings) rather than a bare `xy_`, which would over-redact common
-        // identifiers like `xy_coords` / `xy_axis` and corrupt legitimate
-        // error messages.
+        // Legacy Xybrid key placeholders — older SDK docs and bindings showed
+        // `xy_live_` / `xy_test_` keys (the platform issues `sk_live_` /
+        // `sk_test_`, caught by the `sk_` arm above), so a key pasted in that
+        // shape can still reach a *xybrid* error / gateway-auth failure string.
+        // Matched specifically rather than a bare `xy_`, which would
+        // over-redact common identifiers like `xy_coords` / `xy_axis` and
+        // corrupt legitimate error messages.
         || trimmed.starts_with("xy_live_")
         || trimmed.starts_with("xy_test_")
     {
@@ -526,9 +526,10 @@ pub fn publish_cloud_retry(
 // First-inference dev nudge
 // ============================================================================
 
-/// Documentation for enabling observability export. Hard-coded rather than
+/// Documentation for enabling observability export (the API keys page, which
+/// separates cloud authentication from trace export). Hard-coded rather than
 /// wired through config because the nudge fires when no config was provided.
-const OBSERVABILITY_DOCS_URL: &str = "https://docs.xybrid.dev/sdk/observability";
+const OBSERVABILITY_DOCS_URL: &str = "https://docs.xybrid.dev/docs/concepts/api-keys";
 
 /// The console that issues project keys (the dashboard origin is retired).
 const CONSOLE_URL: &str = "https://console.xybrid.dev";
@@ -583,6 +584,11 @@ mod dev_nudge_tests {
         // Emitted by every binding: no Rust-only API names.
         assert!(!text.contains("ObservabilityConfig"), "{text}");
         assert!(!text.contains("dashboard.xybrid.dev"), "{text}");
+        // A page the docs site serves (`/sdk/...` paths 404 there).
+        assert!(
+            text.contains("https://docs.xybrid.dev/docs/concepts/api-keys"),
+            "{text}"
+        );
     }
 
     #[test]
