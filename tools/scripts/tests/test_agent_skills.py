@@ -175,10 +175,75 @@ class ConnectSkillTests(unittest.TestCase):
         printed = re.findall(r"# sha256: ([0-9a-f]{64})", self.skill)
         self.assertEqual(printed, [hashlib.sha256(SCRIPT.read_bytes()).hexdigest()])
 
+    def section(self, heading: str) -> str:
+        start = self.skill.index(f"\n## {heading}")
+        end = self.skill.find("\n## ", start + 1)
+        return self.skill[start:end if end >= 0 else len(self.skill)]
+
+    def test_unity_builds_never_pack_a_stale_key(self):
+        # A failed player build skips OnPostprocessBuild, so the resource a
+        # keyed build generated stays behind. A later build without the key
+        # must remove it before deciding there is nothing to copy, or Unity
+        # packs the old key into the player and it exports.
+        recipe = self.section("Step 6: Wire explicit, metadata-only trace export")
+        (step,) = [b for b in re.findall(r"```csharp\n(.*?)```", recipe, re.S) if "XybridKeyBuildStep" in b]
+
+        def method(name: str) -> str:
+            match = re.search(rf"\b{name}\([^)]*\)\s*(=>[^;]*;|\{{.*?\n    \}})", step, re.S)
+            self.assertIsNotNone(match, name)
+            return match.group(1)
+
+        pre, post, delete = method("OnPreprocessBuild"), method("OnPostprocessBuild"), method("DeleteKeyResource")
+        self.assertIn("DeleteKeyResource()", pre)
+        self.assertLess(pre.index("DeleteKeyResource()"), pre.index("return"), "removed before the no-key return")
+        self.assertIn("DeleteKeyResource()", post)
+        self.assertIn("AssetDatabase.DeleteAsset(AssetPath)", delete)
+        self.assertIn("File.Delete(AssetPath)", delete, "a file the AssetDatabase never imported goes too")
+        self.assertNotIn("the next build replaces it", recipe)
+
+    @unittest.skipUnless(shutil.which("bash"), "bash is required")
+    def test_every_verification_command_uses_the_file_key(self):
+        # With key.source "env_file", connect saved no key, and the CLI never
+        # reads project files: each xybrid command of Step 7 (both auth status
+        # checks and the fallback run) needs that file's key, read without
+        # printing it, in a shell of its own (agent shells keep no state).
+        step = self.section("Step 7: Verify one real trace")
+        lines = [line.strip() for b in re.findall(r"```bash\n(.*?)```", step, re.S) for line in b.splitlines()]
+        setup = [line for line in lines if re.match(r"^(FILE=|[a-z_]+\(\) \{)", line)]
+        self.assertTrue(setup, "Step 7 says how to read the file's key")
+        commands = [line for line in lines if re.search(r"(^|\s)xybrid\s", line) and not line.startswith("#")]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            log = tmp / "calls.log"
+            stub = tmp / "bin" / "xybrid"
+            stub.parent.mkdir()
+            stub.write_text('#!/bin/sh\nprintf "%s|%s\\n" "${XYBRID_API_KEY:-}" "$*" >> "$CALLS"\n')
+            stub.chmod(0o755)
+            project = tmp / "app"
+            project.mkdir()
+            (project / ".env.local").write_text(f"OTHER=1\nEXPO_PUBLIC_XYBRID_API_KEY={KEY}\n")
+            seen = {}
+            for command in commands:
+                result = subprocess.run(["bash", "-c", "\n".join(setup + [command])], cwd=project, capture_output=True,
+                                        text=True, env={"PATH": f"{stub.parent}{os.pathsep}{os.environ['PATH']}",
+                                                        "CALLS": str(log), "TMPDIR": str(tmp)})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn(KEY, result.stdout + result.stderr, "the key is never printed")
+            for line in log.read_text().splitlines():
+                key, args = line.split("|", 1)
+                kind = "run" if "--observability run" in args else "status" if args.startswith("auth status") else args
+                seen.setdefault(kind, set()).add(key)
+        self.assertEqual(set(seen), {"status", "run"}, seen)
+        for kind, keys in seen.items():
+            with self.subTest(command=kind):
+                self.assertIn(KEY, keys, f"no `{kind}` command in Step 7 passes the file's key")
+
 
 # --- the reference script against a loopback platform ------------------------
 
 KEY = "sk_live_" + "FAKE_TEST_KEY"  # obviously fake, and split so no scanner reads it as a key
+OTHER_KEY = "sk_live_" + "FAKE_OTHER_KEY"  # a key the user configured themselves
+REVOKED_KEY = "sk_live_" + "FAKE_REVOKED_KEY"
 TOKEN = "TestClaimTokenTestClaimTokenTestClaimToken1"
 
 
@@ -187,14 +252,18 @@ class Platform(BaseHTTPRequestHandler):
 
     closed = False
     requests: list = []
+    workspace: dict = {}  # fields that override the GET /v1/agent/workspace answer
+    workspace_failure = None  # (status, body, headers) instead of that answer
 
     def log_message(self, *args):
         pass
 
-    def reply(self, status, body):
+    def reply(self, status, body, headers=None):
         raw = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
@@ -206,13 +275,20 @@ class Platform(BaseHTTPRequestHandler):
         if self.path == "/v1/agent/challenge":
             return self.reply(200, {"challenge": "xybrid-pow-test-vector", "difficulty": 8,
                                     "expires_at": "2999-01-01T00:00:00Z", "algorithm": "sha256-leading-zero-bits"})
-        if self.path == "/v1/agent/workspace" and self.headers.get("Authorization") == f"Bearer {KEY}":
-            return self.reply(200, {"organization": {"slug": "app", "name": "app"}, "project": {"slug": "default",
-                                    "name": "Default"}, "scope": "client", "provisional": True, "claimed": False,
-                                    "expired": False, "key_expires_at": "2999-01-01T00:00:00Z",
-                                    "claim_expires_at": "2999-01-08T00:00:00Z",
-                                    "verification": {"state": "received", "traces_received": True, "spans": 2,
-                                                     "traces": 1, "first_ingested_at": None, "last_ingested_at": None}})
+        bearer = self.headers.get("Authorization")
+        if self.path == "/v1/agent/workspace" and bearer in (f"Bearer {KEY}", f"Bearer {OTHER_KEY}"):
+            if type(self).workspace_failure:
+                return self.reply(*type(self).workspace_failure)
+            # Each key names its own workspace, so a test can tell which one was checked.
+            name = "app" if bearer == f"Bearer {KEY}" else "other"
+            answer = {"organization": {"slug": name, "name": name}, "project": {"slug": "default",
+                      "name": "Default"}, "scope": "client", "provisional": True, "claimed": False,
+                      "expired": False, "key_expires_at": "2999-01-01T00:00:00Z",
+                      "claim_expires_at": "2999-01-08T00:00:00Z",
+                      "verification": {"state": "received", "traces_received": True, "spans": 2,
+                                       "traces": 1, "first_ingested_at": None, "last_ingested_at": None}}
+            answer.update(type(self).workspace)
+            return self.reply(200, answer)
         self.reply(401, {"error": "invalid_api_key", "message": "no"})
 
     def do_POST(self):
@@ -239,7 +315,7 @@ class ScriptContractTests(unittest.TestCase):
         self.home.mkdir()
         (self.home / "gitconfig").write_text("")
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Platform)
-        Platform.closed, Platform.requests = False, []
+        Platform.closed, Platform.requests, Platform.workspace, Platform.workspace_failure = False, [], {}, None
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
@@ -261,11 +337,36 @@ class ScriptContractTests(unittest.TestCase):
         keep.update(extra)
         return keep
 
-    def run_script(self, cwd, *args, **env):
-        result = subprocess.run([sys.executable, "-I", str(SCRIPT), *args, "--platform-url", self.url,
-                                 "--allow-custom-host"], cwd=cwd, env=self.env(**env), capture_output=True, text=True)
-        self.assertNotIn(KEY, result.stdout + result.stderr, "the key never reaches the output")
-        return result.returncode, json.loads(result.stdout)
+    def run_script(self, cwd, *args, flags=(), **env):
+        result = subprocess.run([sys.executable, *flags, "-I", str(SCRIPT), *args, "--platform-url", self.url,
+                                 "--allow-custom-host"], cwd=cwd, env=self.env(**env), capture_output=True)
+        out, err = result.stdout.decode("utf-8"), result.stderr.decode("utf-8", "replace")
+        for key in (KEY, OTHER_KEY, REVOKED_KEY):
+            self.assertNotIn(key, out + err, "a key never reaches the output")
+        self.assertEqual(err, "")
+        return result.returncode, json.loads(out)
+
+    @property
+    def store(self):
+        return self.home / ".xybrid" / "credentials.json"
+
+    def seed(self, app, **fields):
+        """Save a credential for `app`, as an earlier connect would have."""
+        credential = {"platform_origin": self.url, "repository_root": str(app.resolve()), "api_key": KEY,
+                      "scope": "client", "organization": {"slug": "app", "name": "app"},
+                      "project": {"slug": "default", "name": "Default"}, "key_expires_at": "2999-01-01T00:00:00Z",
+                      "claim_expires_at": "2999-01-08T00:00:00Z", "claim_token": TOKEN, "claimed": False,
+                      "created_at": "2026-01-01T00:00:00Z"}
+        credential.update(fields)
+        self.store.parent.mkdir(mode=0o700, exist_ok=True)
+        self.store.write_text(json.dumps({"version": 1, "credentials": [credential], "pending": [], "retired": []}))
+        self.store.chmod(0o600)
+
+    def saved(self):
+        return json.loads(self.store.read_text())
+
+    def workspace_checks(self):
+        return [r[3]["Authorization"] for r in Platform.requests if r[1] == "/v1/agent/workspace"]
 
     def test_connect_writes_an_ignored_file_and_private_recovery(self):
         app = self.repo("app")
@@ -348,6 +449,237 @@ class ScriptContractTests(unittest.TestCase):
                                        XYBRID_CREDENTIALS_FILE=str(other / "credentials.json"))
         self.assertEqual((code, report["error"]["code"]), (1, "credentials_in_repository"))
         self.assertFalse((other / "credentials.json").exists())
+
+    # --- the saved credential follows the platform, as `xybrid connect` does ---
+
+    def test_a_claim_made_in_the_console_restores_an_expired_saved_key(self):
+        app = self.repo("claimed")
+        self.seed(app, key_expires_at="2000-01-01T00:00:00Z")
+        Platform.workspace = {"provisional": False, "claimed": True, "key_expires_at": None, "claim_expires_at": None}
+        code, report = self.run_script(app, "connect", "--write-env", ".env")
+        self.assertEqual((code, report["status"], report["key"]["source"]), (0, "existing", "credentials"), report)
+        self.assertEqual(self.workspace_checks(), [f"Bearer {KEY}"], "the platform is asked before the saved deadline")
+        self.assertIsNone(report["claim_url"])
+        self.assertEqual((report["workspace"]["claimed"], report["workspace"]["lifecycle_source"]), (True, "server"))
+        self.assertIn(f"\nXYBRID_API_KEY={KEY}\n", "\n" + (app / ".env").read_text())
+        (entry,) = self.saved()["credentials"]
+        self.assertTrue(entry["claimed"], "the claim is saved")
+        self.assertEqual(entry["env_file"], {"path": ".env", "variable": "XYBRID_API_KEY"})
+
+    def test_the_saved_deadline_decides_only_when_the_platform_cant_answer(self):
+        app = self.repo("unanswered")
+        self.seed(app, key_expires_at="2000-01-01T00:00:00Z")
+        Platform.workspace_failure = (503, {"error": "unavailable", "message": "later"})
+        code, report = self.run_script(app, "connect", "--write-env", ".env")
+        self.assertEqual((code, report["status"]), (7, "workspace_expired"), report)
+        self.assertEqual(report["claim_url"], None, "a custom host without XYBRID_CONSOLE_URL has no console")
+        self.assertFalse((app / ".env").exists())
+        Platform.workspace_failure = None
+        Platform.workspace = {"expired": True, "key_expires_at": "2000-01-01T00:00:00Z"}
+        code, report = self.run_script(app, "connect", "--write-env", ".env", XYBRID_CONSOLE_URL="http://localhost:5173")
+        self.assertEqual((code, report["status"]), (7, "workspace_expired"), report)
+        self.assertEqual(report["claim_url"], f"http://localhost:5173/claim/{TOKEN}")
+        Platform.workspace = {"expired": True, "key_expires_at": "2000-01-01T00:00:00Z",
+                              "claim_expires_at": "2000-01-08T00:00:00Z"}
+        code, report = self.run_script(app, "connect", "--write-env", ".env")
+        self.assertEqual((code, report["error"]["code"]), (1, "claim_expired"), report)
+        self.assertEqual(self.saved()["credentials"][0]["claim_expires_at"], "2000-01-08T00:00:00Z")
+
+    def test_a_key_the_platform_rejects_is_set_aside(self):
+        app = self.repo("revoked")
+        self.seed(app, api_key=REVOKED_KEY)
+        code, report = self.run_script(app, "connect", "--write-env", ".env")
+        self.assertEqual((code, report["error"]["code"]), (1, "stored_credential_rejected"), report)
+        self.assertFalse((app / ".env").exists(), "a rejected key is never written")
+        saved = self.saved()
+        self.assertEqual(saved["credentials"], [])
+        self.assertEqual([(r["reason"], r["credential"]["api_key"]) for r in saved["retired"]],
+                         [("rejected by the platform", REVOKED_KEY)])
+        code, report = self.run_script(app, "claim", XYBRID_CONSOLE_URL="http://localhost:5173")
+        self.assertEqual((code, report["status"]), (0, "claimable"), "its claim link is still recoverable")
+
+    def test_status_and_claim_save_what_the_platform_reports(self):
+        Platform.workspace = {"provisional": False, "claimed": True, "key_expires_at": None}
+        for command in ("status", "claim"):
+            with self.subTest(command=command):
+                app = self.repo(command)
+                self.seed(app)
+                code, report = self.run_script(app, command, XYBRID_CONSOLE_URL="http://localhost:5173")
+                self.assertEqual((code, report["status"]), (0, {"status": "connected", "claim": "claimed"}[command]))
+                self.assertIsNone(report["claim_url"], "a claimed workspace has no claim link")
+                self.assertTrue(self.saved()["credentials"][0]["claimed"])
+
+    # --- status checks the key connect reported ---------------------------------
+
+    def test_status_checks_the_key_connect_reported(self):
+        app = self.repo("explicit")
+        self.seed(app)  # a saved key that is not the one in use
+        code, report = self.run_script(app, "connect", "--write-env", ".env", XYBRID_API_KEY=OTHER_KEY)
+        self.assertEqual((code, report["status"], report["key"]["source"]), (0, "existing", "env"), report)
+        self.assertIn("status", report["next_steps"][1]["command"])
+        code, report = self.run_script(app, "status", XYBRID_API_KEY=OTHER_KEY)
+        self.assertEqual((code, report["status"], report["key"]["source"]), (0, "connected", "env"), report)
+        self.assertEqual(report["workspace"]["organization"]["name"], "other")
+        self.assertIsNone(report["stored"], "the saved credential describes another key")
+
+        (app / ".env.local").write_text(f"OTHER=1\nEXPO_PUBLIC_XYBRID_API_KEY={OTHER_KEY}\n")
+        flags = ("--write-env", ".env.local", "--env-name", "EXPO_PUBLIC_XYBRID_API_KEY")
+        code, report = self.run_script(app, "connect", *flags)
+        self.assertEqual((code, report["status"], report["key"]["source"]), (0, "existing", "env_file"), report)
+        verify = report["next_steps"][1]["command"]
+        self.assertIn("--write-env .env.local --env-name EXPO_PUBLIC_XYBRID_API_KEY", verify)
+        code, report = self.run_script(app, "status", *flags)
+        self.assertEqual((code, report["status"], report["key"]["source"]), (0, "connected", "env_file"), report)
+        self.assertEqual(report["workspace"]["organization"]["name"], "other")
+        self.assertEqual(self.workspace_checks(), [f"Bearer {OTHER_KEY}"] * 2, "the saved key was never checked")
+        code, report = self.run_script(app, "status")
+        self.assertEqual((code, report["key"]["source"], report["workspace"]["organization"]["name"]),
+                         (0, "credentials", "app"))
+
+    # --- the project file, read and written as the CLI does ----------------------
+
+    def test_quoted_values_spanning_lines_are_refused(self):
+        app = self.repo("multiline")
+        for text in ('CERT="-----BEGIN\nXYBRID_API_KEY=example\n-----END"\n',  # text inside CERT, not a key
+                     'CERT="-----BEGIN\n'):  # an appended key would land inside CERT
+            with self.subTest(text=text):
+                (app / ".env").write_bytes(text.encode())
+                code, report = self.run_script(app, "connect", "--write-env", ".env")
+                self.assertEqual((code, report["status"], report["error"]["code"]), (1, "error", "env_file_ambiguous"),
+                                 report)
+                self.assertEqual((app / ".env").read_bytes(), text.encode())
+        self.assertEqual(Platform.requests, [], "refused before any request")
+
+    def test_existing_text_is_kept_byte_for_byte(self):
+        # CRLF endings and non-ASCII text survive, whatever the locale's encoding
+        # (`-X utf8=0` with LC_ALL=C makes it ASCII here, as cp1252 is on Windows).
+        app = self.repo("crlf")
+        original = "A=1\r\nNAME=caf\u00e9 \u2603\r\n".encode("utf-8")
+        (app / ".env").write_bytes(original)
+        code, report = self.run_script(app, "connect", "--write-env", ".env", flags=("-X", "utf8=0"), LC_ALL="C")
+        self.assertEqual((code, report["status"]), (0, "created"), report)
+        out = (app / ".env").read_bytes()
+        self.assertTrue(out.startswith(original + b"\r\n# "), out)
+        self.assertTrue(out.endswith(f"\r\nXYBRID_API_KEY={KEY}\r\n".encode()), out)
+        self.assertNotIn(b"\n", out.replace(b"\r\n", b""), "every line keeps CRLF")
+        self.assertIn("\u201c", report["tell_the_user"], "the report itself is UTF-8")
+        (app / "latin1.env").write_bytes("NAME=caf\u00e9\n".encode("latin-1"))
+        code, report = self.run_script(app, "connect", "--write-env", "latin1.env")
+        self.assertEqual((code, report["error"]["code"]), (1, "env_file_unwritable"), report)
+
+    def test_an_invalid_variable_name_changes_nothing(self):
+        app = self.repo("names")
+        for target, name in ((".env", "XYBRID-API-KEY"), (".env", "1KEY"), (".env", "xybrid.apiKey"),
+                             ("local.properties", "xybrid apiKey"), ("Secrets.xcconfig", "API-KEY")):
+            with self.subTest(target=target, name=name):
+                code, report = self.run_script(app, "connect", "--write-env", target, "--env-name", name)
+                self.assertEqual((code, report["error"]["code"]), (1, "invalid_env_name"), report)
+                self.assertFalse((app / target).exists())
+        self.assertFalse((app / ".gitignore").exists())
+        self.assertFalse(self.store.parent.exists())
+        self.assertEqual(Platform.requests, [])
+
+    def test_a_single_empty_assignment_is_filled_in_place(self):
+        app = self.repo("ios")
+        (app / "Secrets.xcconfig").write_bytes(b"PRODUCT_NAME = MyApp\r\nXYBRID_API_KEY[config=Debug] =\r\nB = 2\r\n")
+        code, report = self.run_script(app, "connect", "--write-env", "Secrets.xcconfig")
+        self.assertEqual((code, report["status"], report["env_file"]["written"]), (0, "created", True), report)
+        text = (app / "Secrets.xcconfig").read_bytes().decode()
+        self.assertTrue(text.startswith("PRODUCT_NAME = MyApp\r\n// "), text)
+        self.assertTrue(text.endswith(f"\r\nXYBRID_API_KEY[config=Debug] = {KEY}\r\nB = 2\r\n"), text)
+
+
+class ProjectFileTests(unittest.TestCase):
+    """The script reads project files as crates/xybrid-cli/src/platform/env_file.rs does (its test cases)."""
+
+    script = load_script()
+
+    def test_lookups_match_the_cli(self):
+        cases = {
+            "dotenv": {
+                "present": ["XYBRID_API_KEY=abc", "export XYBRID_API_KEY=abc", '  XYBRID_API_KEY = "abc"',
+                            "XYBRID_API_KEY='abc' # comment", "XYBRID_API_KEY=\nXYBRID_API_KEY=abc\nXYBRID_API_KEY=\n"],
+                "empty": ["XYBRID_API_KEY=", 'XYBRID_API_KEY=""', "XYBRID_API_KEY= # later",
+                          'A="one line" # "quoted"\nXYBRID_API_KEY=\n', "A='it''s'\nXYBRID_API_KEY=\n",
+                          '# CERT="open\nXYBRID_API_KEY=\n', 'CERT="-----BEGIN\nMIIE==\n-----END"\nXYBRID_API_KEY=\n'],
+                "absent": ["# XYBRID_API_KEY=abc", "XYBRID_API_KEY_OLD=abc", "MY_XYBRID_API_KEY=abc", ""],
+                "several_empty": ['XYBRID_API_KEY=\nA=1\nexport XYBRID_API_KEY=""\n'],
+                "quoted_lines": ['CERT="-----BEGIN\nXYBRID_API_KEY=\n-----END"\n',
+                                 "CERT='-----BEGIN\nexport XYBRID_API_KEY=abc\n-----END'\n", "CERT=`one\nXYBRID_API_KEY=\n`\n",
+                                 'A="x\\"\nXYBRID_API_KEY=\n"\n', 'XYBRID_API_KEY="\nabc"\n', 'CERT="open\nXYBRID_API_KEY="x"\n',
+                                 'XYBRID_API_KEY=abc\nCERT="\nXYBRID_API_KEY=\n"\n', 'CERT="-----BEGIN\n'],
+            },
+            "properties": {
+                "present": ["xybrid.apiKey=abc", "xybrid.apiKey : abc", "xybrid.apiKey abc"],
+                "empty": ["xybrid.apiKey=", "xybrid.apiKey", "  xybrid.apiKey", "xybrid.apiKey\t", "\x0cxybrid.apiKey",
+                          "sdk.dir = C:\\\\\nxybrid.apiKey=\n", "# note \\\nxybrid.apiKey=\n",
+                          "other = foo \\\n\nxybrid.apiKey=\n"],
+                "absent": ["! xybrid.apiKey=abc", "", "   ", "\n\t\n", "xybrid.apiKeyOld", "xybrid",
+                           "sdk.dir=/opt/android/sdk\\\n", "sdk.dir=/opt/android/sdk\\"],
+                "several_empty": ["xybrid.apiKey=\nsdk.dir=/sdk\nxybrid.apiKey :\n", "xybrid.apiKey=\nsdk.dir=/sdk\nxybrid.apiKey\n"],
+                "continuation": ["other = foo \\\nxybrid.apiKey=\n", "other = foo \\\n  xybrid.apiKey=abc\n",
+                                 "other = a \\\\\\\nxybrid.apiKey=\n", "xybrid.apiKey = \\\n  abc\n",
+                                 "xybrid.apiKey = abc\nother = \\\nxybrid.apiKey\n"],
+            },
+            "xcconfig": {
+                "present": ["XYBRID_API_KEY[config=Debug] = abc // note",
+                            "XYBRID_API_KEY[config=Debug][sdk=iphoneos*] = abc // note"],
+                "empty": ["XYBRID_API_KEY = // filled in later", "XYBRID_API_KEY[config=Debug] =",
+                          "/* a */ /* b */\n/*\nc\n*/ /* d */\nXYBRID_API_KEY =\n", "/*\nPRODUCT_NAME = Old\n*/\nXYBRID_API_KEY =\n",
+                          "HEADER_SEARCH_PATHS = $(SRCROOT)/**\nXYBRID_API_KEY =\n", "OTHER_FLAGS = -a \\\n  -b\nXYBRID_API_KEY =\n",
+                          "OTHER_FLAGS = -a \\\n\nXYBRID_API_KEY =\n", "OTHER_FLAGS = -a \\\n// end\nXYBRID_API_KEY =\n"],
+                "absent": ["// XYBRID_API_KEY = abc", "/* XYBRID_API_KEY = old */\nPRODUCT_NAME = MyApp\n",
+                           "HEADER_SEARCH_PATHS = $(SRCROOT)/**\n", "OTHER_LDFLAGS = -ObjC \\\n", "OTHER_LDFLAGS = -ObjC \\"],
+                "several_empty": ["XYBRID_API_KEY =\nPRODUCT_NAME = MyApp\nXYBRID_API_KEY[config=Release] = // later\n"],
+                "block_comment": ["/*\nXYBRID_API_KEY =\n*/\n", "/*\nXYBRID_API_KEY = old\n*/\n",
+                                  "PRODUCT_NAME = MyApp\n  /* disabled:\n  XYBRID_API_KEY[config=Debug] =\n  */\n",
+                                  "/*\n * notes\n */ XYBRID_API_KEY =\n", "/* note */ XYBRID_API_KEY = old\n",
+                                  "XYBRID_API_KEY = /* set me */\n", "XYBRID_API_KEY = abc\n/*\nXYBRID_API_KEY =\n*/\n",
+                                  "PRODUCT_NAME = MyApp\n/* notes\n",
+                                  "/* Secrets */ /* disabled until launch:\nXYBRID_API_KEY = old\n*/\n",
+                                  "/*\nheader\n*/ /* a */ /* second block\nXYBRID_API_KEY =\n*/\n",
+                                  "/* a */ /* b */ XYBRID_API_KEY = old\n", "/* a */ /* b\n", "/*\nheader\n*/ /* b\n",
+                                  "FOO = a \\\n/* start\nXYBRID_API_KEY =\n*/\n", "FOO = a \\\n/* start\n"],
+                "continuation": ["OTHER_FLAGS = -a \\\nXYBRID_API_KEY =\n", "OTHER_FLAGS = -a \\ // note\n  XYBRID_API_KEY = abc\n",
+                                 "OTHER_FLAGS = -a \\;\nXYBRID_API_KEY =\n", "OTHER_FLAGS = -a \\\n  -b \\\n  XYBRID_API_KEY =\n",
+                                 "XYBRID_API_KEY = \\\n  $(SECRET)\n", "FOO = a \\\n/* a */ XYBRID_API_KEY =\n",
+                                 "FOO = a \\\n/* a */ \\\nXYBRID_API_KEY =\n"],
+            },
+        }
+        names = {"dotenv": "XYBRID_API_KEY", "properties": "xybrid.apiKey", "xcconfig": "XYBRID_API_KEY"}
+        for fmt, expected in cases.items():
+            for outcome, texts in expected.items():
+                for text in texts:
+                    with self.subTest(format=fmt, text=text):
+                        self.assertEqual(self.script.lookup(fmt, text, names[fmt]), outcome)
+
+    def test_writes_match_the_cli(self):
+        upsert = self.script.upsert
+        cases = [
+            ("dotenv", "A=1\r\nexport XYBRID_API_KEY=\r\nB=2\r\n", ["c"], f"A=1\r\n# c\r\nexport XYBRID_API_KEY={KEY}\r\nB=2\r\n"),
+            ("dotenv", "# app\nexport OTHER=1", ["c"], f"# app\nexport OTHER=1\n\n# c\nXYBRID_API_KEY={KEY}\n"),
+            ("dotenv", "", [], f"XYBRID_API_KEY={KEY}\n"),
+            ("dotenv", "", ["name\nEVIL=1"], f"# name EVIL=1\nXYBRID_API_KEY={KEY}\n"),
+            ("xcconfig", "A = 1\n  XYBRID_API_KEY[config=Debug][sdk=iphoneos*] = // later\n", [],
+             f"A = 1\nXYBRID_API_KEY[config=Debug][sdk=iphoneos*] = {KEY}\n"),
+            ("xcconfig", "OTHER_LDFLAGS = -ObjC \\", ["c"], f"OTHER_LDFLAGS = -ObjC \\\n\n// c\nXYBRID_API_KEY = {KEY}\n"),
+            ("properties", "sdk.dir=/sdk\n  xybrid.apiKey\nother=1\n", [], f"sdk.dir=/sdk\nxybrid.apiKey={KEY}\nother=1\n"),
+        ]
+        for fmt, text, comment, expected in cases:
+            name = "xybrid.apiKey" if fmt == "properties" else "XYBRID_API_KEY"
+            with self.subTest(format=fmt, text=text):
+                self.assertEqual(upsert(fmt, text, name, KEY, comment), expected)
+                self.assertTrue(self.script.assigns(fmt, expected, name, KEY))
+        self.assertFalse(self.script.assigns("dotenv", f'CERT="\nXYBRID_API_KEY={KEY}\n"\n', "XYBRID_API_KEY", KEY))
+
+    def test_variable_names_match_the_cli(self):
+        valid = self.script.valid_variable
+        self.assertTrue(valid("dotenv", "EXPO_PUBLIC_XYBRID_API_KEY") and valid("properties", "xybrid.apiKey"))
+        self.assertTrue(valid("properties", "xybrid-api.key_1") and valid("xcconfig", "_KEY"))
+        for bad in ("", "1ABC", "A B", "A=B", "A\nB", "xybrid.apiKey", "A-B", "\u00c9T\u00c9", "A" * 129):
+            self.assertFalse(valid("dotenv", bad), bad)
+        for bad in ("a=b", "a:b", "a b", ""):
+            self.assertFalse(valid("properties", bad), bad)
 
 
 if __name__ == "__main__":
