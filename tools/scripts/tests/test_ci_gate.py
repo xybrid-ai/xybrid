@@ -251,11 +251,12 @@ class RequiredGateTests(unittest.TestCase):
 
     def test_docs_only_runs_and_cannot_mask_the_always_on_jobs(self):
         # Docs-only PRs skip every gated job, and they are where the docs'
-        # install pins get edited, so Version sync (like Workflow index) has no
-        # path gate: it must stay ungated, required, and fail the gate.
+        # install pins and the agent skills get edited, so Version sync and
+        # Agent skills (like Workflow index) have no path gate: they must stay
+        # ungated, required, and fail the gate.
         workflow = (Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         required = re.search(r"^  ci-success:\n(?:    .*\n)*?    needs: \[([^\]]*)\]", workflow, re.M)[1]
-        for job in ("workflow-index", "version-sync"):
+        for job in ("workflow-index", "version-sync", "agent-skills"):
             block = re.search(rf"^  {job}:\n((?:    .*\n|\n)*)", workflow, re.M)[1]
             with self.subTest(job=job):
                 self.assertNotRegex(block, r"(?m)^    (if|needs):", "an always-on job has no path gate")
