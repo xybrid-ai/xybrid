@@ -183,7 +183,7 @@ def is_ignored(root, rel):
     return code == 0
 
 
-def ensure_ignored(root, rel):
+def ensure_ignored(root, rel, what="Xybrid project key"):
     if is_ignored(root, rel):
         return False
     if any(ord(c) < 32 for c in rel):
@@ -194,7 +194,7 @@ def ensure_ignored(root, rel):
     nl = "\r\n" if b"\r\n" in existing else "\n"
     lead = nl if existing and not existing.endswith(b"\n") else ""
     with open(path, "a", newline="") as handle:
-        handle.write("%s# Xybrid project key written by `xybrid connect`; keep it out of Git%s%s%s" % (lead, nl, pattern, nl))
+        handle.write("%s# %s written by xybrid_agent_connect.py; keep it out of Git%s%s%s" % (lead, what, nl, pattern, nl))
     if not is_ignored(root, rel):
         raise Stop("error", "Couldn't connect: %s is still not ignored after adding %s to .gitignore." % (rel, pattern) + LOCAL,
                    "env_file_not_ignorable")
@@ -219,12 +219,16 @@ def assigned(fmt, text, name):
         line = line.strip()
         if not line or line.startswith(("#", "//", "!")):
             continue
-        if fmt == "dotenv" and line.startswith("export "):
-            line = line[7:].lstrip()
-        match = re.match(r"^([A-Za-z0-9_.\-]+)(\[[^\]]*\])*\s*[=:]\s*(.*)$", line) if fmt != "dotenv" else \
-            re.match(r"^([A-Za-z_][A-Za-z0-9_]*)()\s*=\s*(.*)$", line)
+        if fmt == "properties":  # as java.util.Properties reads it: the key ends at the first `=`, `:` or blank
+            match = re.match(r"^([^=:\s]+)\s*[=:]?\s*(.*)$", line)
+        elif fmt == "xcconfig":  # NAME[config=Debug] = value
+            match = re.match(r"^([A-Za-z0-9_]+)(?:\[[^\]]*\])*\s*=\s*(.*)$", line)
+        else:
+            if line.startswith("export "):
+                line = line[7:].lstrip()
+            match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$", line)
         if match and match.group(1) == name:
-            value = match.group(3).split("//")[0] if fmt == "xcconfig" else match.group(3)
+            value = match.group(2).split("//")[0] if fmt == "xcconfig" else match.group(2)
             return value.strip().strip("'\"").strip()
     return None
 
@@ -236,10 +240,8 @@ def write_atomic(path, text, private=False):
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        if not private and path.exists():
+        if not private and path.exists():  # a new file keeps mkstemp's 0600, as the CLI's does
             os.chmod(temp, path.stat().st_mode & 0o777)
-        elif not private:
-            os.chmod(temp, 0o644)
         os.replace(temp, str(path))
     except BaseException:
         if os.path.exists(temp):
@@ -252,8 +254,9 @@ def write_key(target, credential):
     nl = "\r\n" if "\r\n" in text else "\n"
     org = (credential.get("organization") or {}).get("name", "this project")
     day = lambda raw: raw[:10] if raw else "?"
-    lines = ['Xybrid provisional workspace "%s": restricted client key written by `xybrid connect`.' % org,
-             "Claim it with GitHub by %s to keep it: run `xybrid auth claim`." % day(credential.get("key_expires_at")),
+    lines = ['Xybrid provisional workspace "%s": restricted client key written by xybrid_agent_connect.py.' % org,
+             "Claim it with GitHub by %s to keep it: run `xybrid_agent_connect.py claim` (or `xybrid auth claim`)."
+             % day(credential.get("key_expires_at")),
              "Unclaimed, the key stops on %s (UTC) and the workspace is deleted on %s." % (
                  day(credential.get("key_expires_at")), day(credential.get("claim_expires_at"))),
              "Never commit this file or share the key."]
@@ -265,6 +268,23 @@ def write_key(target, credential):
 
 
 # --- the private store (same file and format as the CLI) -------------------
+
+def guard_store(store):
+    """Keep a store inside any Git working tree (not only this project's) out of commits, as the CLI does."""
+    directory = store.parent.resolve()
+    existing = next((d for d in [directory] + list(directory.parents) if d.exists()), None)
+    root = repository_root(existing) if existing is not None else None
+    if root is None:
+        return
+    if directory == root:
+        raise Stop("error", "Couldn't connect: %s would keep the credentials directly in the Git repository %s; point "
+                   "XYBRID_CREDENTIALS_FILE to a directory of its own." % (store, root) + LOCAL, "credentials_in_repository")
+    rel = directory.relative_to(root).as_posix()
+    if is_tracked(root, rel):
+        raise Stop("error", "Couldn't connect: the credentials directory %s holds files tracked by Git; point "
+                   "XYBRID_CREDENTIALS_FILE to a directory of its own." % rel + LOCAL, "credentials_tracked")
+    ensure_ignored(root, rel, "Xybrid credentials store")
+
 
 def store_path():
     raw = os.environ.get("XYBRID_CREDENTIALS_FILE")
@@ -388,20 +408,22 @@ def connect(args, host, report):
                           "already_configured": False, "tracked": False, "gitignored": False,
                           "gitignore_updated": False, "suggestions": []}
     if repo is not None and is_tracked(repo, rel):
-        alternative = {"dotenv": ".env.local", "properties": "local.properties", "xcconfig": "Secrets.xcconfig"}[fmt]
-        suggestion = (rel.rsplit("/", 1)[0] + "/" if "/" in rel else "") + alternative
-        report["env_file"].update(tracked=True, suggestions=[] if is_tracked(repo, suggestion) else [suggestion])
+        candidates = {"dotenv": (".env.local", ".env.development.local"),
+                      "properties": ("local.properties", "xybrid.local.properties"),
+                      "xcconfig": ("Secrets.xcconfig", "Secrets.local.xcconfig")}[fmt]
+        prefix = rel.rsplit("/", 1)[0] + "/" if "/" in rel else ""
+        suggestions = [prefix + c for c in candidates if c != path.name and not is_tracked(repo, prefix + c)][:1]
+        report["env_file"].update(tracked=True, suggestions=suggestions)
         raise Stop("env_file_tracked", "Didn't connect: %s is tracked by Git, so a key written there would be committed. "
-                   "Use an untracked file such as %s. On-device inference works without a key." % (rel, suggestion))
+                   "Use an untracked file%s. On-device inference works without a key." % (
+                       rel, " such as %s" % suggestions[0] if suggestions else ""))
     if env("XYBRID_API_KEY"):
         report["key"] = {"source": "env", "preview": preview(env("XYBRID_API_KEY")), "scope": None}
         raise Stop("existing", "This environment already provides a Xybrid key (XYBRID_API_KEY); nothing was changed.")
     current = assigned(fmt, path.read_text(encoding="utf-8"), variable) if path.exists() else None
 
     store = store_path()
-    if repo is not None and repository_root(store.parent) == repo and not is_ignored(repo, store.parent.relative_to(repo).as_posix()):
-        raise Stop("error", "Couldn't connect: the credentials store %s would sit in this repository." % store + LOCAL,
-                   "credentials_in_repository")
+    guard_store(store)
     with Store(store, host["console"]) as lock:
         data = lock.load()
         report["credentials"] = {"path": str(store), "saved": False, "recovery": False, "moved_corrupt_file": None}

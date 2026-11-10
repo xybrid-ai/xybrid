@@ -290,6 +290,7 @@ class ScriptContractTests(unittest.TestCase):
         if os.name == "posix":
             self.assertEqual(store.stat().st_mode & 0o777, 0o600)
             self.assertEqual(store.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((app / ".env").stat().st_mode & 0o777, 0o600, "a new key file is private, as the CLI's")
         posts = [r for r in Platform.requests if r[0] == "POST"]
         self.assertEqual(len(posts), 1)
         _, _, body, headers = posts[0]
@@ -316,6 +317,37 @@ class ScriptContractTests(unittest.TestCase):
         self.assertEqual((code, report["status"], report["error"]["code"]), (3, "signup_closed", "agent_signup_closed"))
         self.assertFalse((tracked / ".env.local").exists())
         self.assertFalse([r for r in Platform.requests if r[0] == "POST"])
+
+    def test_a_tracked_default_alternative_is_not_suggested(self):
+        app = self.repo("expo")
+        (app / ".env.local").write_text("OTHER=1\n")
+        subprocess.run(["git", "add", ".env.local"], cwd=app, check=True, env=self.env())
+        code, report = self.run_script(app, "connect", "--write-env", ".env.local")
+        self.assertEqual((code, report["status"]), (6, "env_file_tracked"))
+        self.assertEqual(report["env_file"]["suggestions"], [".env.development.local"])
+        self.assertIn(".env.development.local", report["tell_the_user"])
+
+    def test_a_properties_key_with_a_blank_separator_is_kept(self):
+        # java.util.Properties reads `xybrid.apiKey value` as an assignment, as the CLI does.
+        app = self.repo("android")
+        own = "sk_live_" + "OWN"
+        (app / "local.properties").write_text(f"sdk.dir=/sdk\nxybrid.apiKey {own}\n")
+        code, report = self.run_script(app, "connect", "--write-env", "local.properties")
+        self.assertEqual((code, report["status"], report["key"]["source"]), (0, "existing", "env_file"))
+        self.assertEqual((app / "local.properties").read_text(), f"sdk.dir=/sdk\nxybrid.apiKey {own}\n")
+        self.assertFalse([r for r in Platform.requests if r[0] == "POST"])
+
+    def test_a_store_in_another_repository_is_ignored_there_or_refused(self):
+        app, other = self.repo("app"), self.repo("dotfiles")
+        store = other / ".xybrid" / "credentials.json"
+        code, report = self.run_script(app, "connect", "--write-env", ".env", XYBRID_CREDENTIALS_FILE=str(store))
+        self.assertEqual((code, report["status"]), (0, "created"), report)
+        ignored = subprocess.run(["git", "check-ignore", "-q", ".xybrid/credentials.json"], cwd=other, env=self.env())
+        self.assertEqual(ignored.returncode, 0, "the store's directory is gitignored in the repository holding it")
+        code, report = self.run_script(self.repo("app2"), "connect", "--write-env", ".env",
+                                       XYBRID_CREDENTIALS_FILE=str(other / "credentials.json"))
+        self.assertEqual((code, report["error"]["code"]), (1, "credentials_in_repository"))
+        self.assertFalse((other / "credentials.json").exists())
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ If this skill was installed during the current session, your agent may not list 
 - **Read the key from the gitignored file at build or run time.** Never hard-code it, and never copy it into a tracked file.
 - **A key alone exports nothing.** Trace export starts only from the app's explicit observability call (or `xybrid --observability`). Wire it with metadata-only content.
 - **Keep observability the app already owns.** Starting a Xybrid observability config replaces the process's active one; never replace an app's own exporter without asking.
-- **Report what actually happened.** A saved key is not "export configured", and an export that ran is not "verified". Only `verification.traces_received: true` is verified.
+- **Report what actually happened.** A saved key is not "export configured", and an export that ran is not "verified". Only a `verification.spans` count that rose after your run is verified (Step 7): `traces_received: true` alone can predate it.
 - **One workspace.** Don't pass `--new`, `--allow-ci`, `--allow-custom-host` or `--platform-url` unless the user asked for that.
 
 ## Step 1: Decide whether to connect
@@ -65,7 +65,7 @@ xybrid connect --help >/dev/null 2>&1; echo $?     # PowerShell: xybrid connect 
 - `2` (`unrecognized subcommand 'connect'`): this CLI predates `connect`. `127` (command not found): there is no CLI. If the user already approved installing the Xybrid CLI in this session, re-run that same installer once (`curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh | sh` on macOS/Linux, `irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex` on Windows) and check again. Never install anything the user didn't approve.
 - Still no `connect`, or the environment only has pip/npm/pub: use the [no-CLI path](#no-cli-path-pip-npm-or-pub-only-environments). If that isn't possible either, say: "This environment can't connect to the Xybrid console yet; on-device inference works without it." and stop.
 
-If `~/.xybrid` isn't writable (some sandboxes), the CLI fails with a `credentials_*` error before creating anything. Then, and only then, prefix this and every later `xybrid` command with `XYBRID_CREDENTIALS_FILE=.xybrid/credentials.json`; the CLI gitignores that directory.
+If `~/.xybrid` isn't writable (some sandboxes), the CLI fails with a `credentials_*` error before creating anything. Then, and only then, prefix this and every later `xybrid` command with `XYBRID_CREDENTIALS_FILE=.xybrid/credentials.json`; the CLI gitignores that directory. Tell the user about the prefix in Step 8.
 
 ## Step 4: Run `xybrid connect`
 
@@ -101,6 +101,7 @@ Fields you'll use: `env_file.path` / `variable` / `written` / `already_configure
 Every recipe reads the key the CLI wrote, starts the binding's **Xybrid preset with metadata-only content**, and flushes before the process stops or is backgrounded. Adapt names (`my-app`, file paths) to the project, keep its structure, and build or type-check after editing.
 
 - Passing the key to the SDK's init (`apiKey`) is cloud authentication, not export. Add it only when the app uses cloud routing or fallback: those calls spend the workspace's small gateway quota, and the platform gateway records them under its own policy, which metadata-only SDK export doesn't change.
+- Trace export doesn't need the SDK's init call, so the recipes don't add one. Keep the app's own init call, with its arguments, where it is: in Kotlin (`Xybrid.init`), Swift (`Xybrid.initialize`) and Unity (`XybridClient.Initialize`) the first call wins, so an extra key-less call ahead of the app's would silently drop its `apiKey` and gateway. Flutter is the exception: `XybridObservability` needs `Xybrid.init()` first, so start export after the app's existing call.
 - Leave resource sampling off and don't add device IDs, hostnames or installation IDs to telemetry unless the user asks.
 - Don't add `run*` variants or edit generated binding code (`xybrid/_bolt`, `XybridBolt.*`, `rust/frb_generated*`).
 
@@ -286,8 +287,7 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // apiKey = key would add cloud auth/fallback; it does not export.
-        Xybrid.init(this)
+        // Export doesn't need Xybrid.init(); keep the app's own init call (and its apiKey) as it is.
         val key = BuildConfig.XYBRID_API_KEY.ifBlank { null } ?: return // no key: export nothing
         exporting = try {
             Xybrid.Observability.xybrid(key)
@@ -311,7 +311,26 @@ class App : Application() {
 }
 ```
 
-`Xybrid.Observability.flush` blocks: call it off the main thread, or use `flushAsync()` from a coroutine. To keep the key out of release builds, set the field in `buildTypes { debug { ... } }` instead of `defaultConfig`.
+`Xybrid.Observability.flush` blocks: call it off the main thread, or use `flushAsync()` from a coroutine.
+
+To keep the key out of release builds, declare the field per build type instead of in `defaultConfig`: the key in `debug`, and an empty value in `release` and every other build type, so `BuildConfig.XYBRID_API_KEY` exists in every variant (App.kt doesn't compile without it):
+
+```kotlin
+android {
+    buildTypes {
+        getByName("debug") {
+            buildConfigField(
+                "String",
+                "XYBRID_API_KEY",
+                "\"" + xybridApiKey.replace("\\", "\\\\").replace("\"", "\\\"") + "\"",
+            )
+        }
+        getByName("release") {
+            buildConfigField("String", "XYBRID_API_KEY", "\"\"") // no key: release exports nothing
+        }
+    }
+}
+```
 
 ### iOS / macOS (Swift)
 
@@ -337,8 +356,7 @@ enum XybridSetup {
     /// Starts metadata-only trace export to the Xybrid console. Returns whether it runs.
     @discardableResult
     static func start() -> Bool {
-        // Xybrid.initialize(apiKey: apiKey) would add cloud auth/fallback; it does not export.
-        Xybrid.initialize()
+        // Export doesn't need Xybrid.initialize(); keep the app's own call (and its apiKey) as it is.
         guard let key = apiKey else { return false } // no key: run locally, export nothing
         do {
             try Xybrid.Observability.xybrid(apiKey: key)
@@ -390,7 +408,8 @@ const xybridApiKey = String.fromEnvironment('XYBRID_API_KEY');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // apiKey: xybridApiKey would add cloud auth/fallback; it does not export.
+  // XybridObservability needs Xybrid.init() first. If the app already calls it,
+  // keep that call and its arguments, and start export after it.
   await Xybrid.init();
   if (xybridApiKey.isNotEmpty) {
     try {
@@ -414,14 +433,25 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  // Deliver queued spans when the app is backgrounded or closed.
-  late final AppLifecycleListener _lifecycle = AppLifecycleListener(
-    onHide: () => unawaited(XybridObservability.flush(timeoutMs: 2000)),
-    onExitRequested: () async {
-      await XybridObservability.shutdown(timeoutMs: 5000);
-      return AppExitResponse.exit;
-    },
-  );
+  late final AppLifecycleListener _lifecycle;
+
+  @override
+  void initState() {
+    super.initState();
+    // Deliver queued spans when the app is backgrounded or closed. Assigned
+    // here, not in a lazy field initializer, so the listener exists at once.
+    _lifecycle = AppLifecycleListener(
+      onHide: () => XybridObservability.flush(timeoutMs: 2000).ignore(),
+      onExitRequested: () async {
+        try {
+          await XybridObservability.shutdown(timeoutMs: 5000);
+        } catch (_) {
+          // Best effort: never block quitting.
+        }
+        return AppExitResponse.exit;
+      },
+    );
+  }
 
   @override
   void dispose() {
@@ -440,7 +470,7 @@ Expo: `.env.local` with `EXPO_PUBLIC_XYBRID_API_KEY`. Expo inlines `process.env.
 
 ```ts
 import { AppState } from 'react-native';
-import { Observability, ObservabilityConfig, Xybrid } from '@xybrid/react-native';
+import { Observability, ObservabilityConfig } from '@xybrid/react-native';
 
 // Expo inlines EXPO_PUBLIC_* from the gitignored .env.local at bundle time.
 // Reference it literally (no destructuring) or Expo cannot inline it.
@@ -448,8 +478,7 @@ const XYBRID_API_KEY = process.env.EXPO_PUBLIC_XYBRID_API_KEY ?? '';
 
 /** Metadata-only trace export to the Xybrid console. Resolves whether it runs. */
 export async function startXybridTraces(): Promise<boolean> {
-  // { apiKey: XYBRID_API_KEY } would add cloud auth/fallback; it does not export.
-  await Xybrid.initialize();
+  // Export doesn't need Xybrid.initialize(); keep the app's own call (and its options) as it is.
   if (!XYBRID_API_KEY) return false; // no key: run locally, export nothing
   try {
     await ObservabilityConfig.xybrid(XYBRID_API_KEY)
@@ -470,7 +499,7 @@ export async function startXybridTraces(): Promise<boolean> {
 }
 ```
 
-Call `startXybridTraces()` once at startup (the root component's first effect, or before `registerRootComponent`).
+Call `startXybridTraces()` once at startup (the root component's first effect, or before `registerRootComponent`). If the app calls `Xybrid.initialize(...)` with options, call it after that: every bridged call, this one included, settles the model cache directory, so a later `initialize({ cacheDir })` rejects.
 
 ### Unity
 
@@ -541,8 +570,7 @@ public sealed class XybridBootstrap : MonoBehaviour
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void Boot()
     {
-        // apiKey: key would add cloud auth/fallback; it does not export.
-        XybridClient.Initialize();
+        // Export doesn't need XybridClient.Initialize(); keep the app's own call (and its apiKey) as it is.
         string key = XybridKey.Load();
         if (string.IsNullOrEmpty(key)) return; // no key: run locally, export nothing
         try
@@ -613,26 +641,37 @@ A failed player build skips the post-build step and leaves `XybridApiKey.txt` be
 
 ## Step 7: Verify one real trace
 
-1. Run one real inference **through the app's wiring** and let it flush: run the Rust or Python entry point, `flutter run` on an available device or desktop, or the mobile or Unity app on an emulator or simulator if one is available.
-2. If you can't run the app here, verify the workspace with the CLI instead (it uses the saved key). Use the model the app uses, or the setup prompt's `kokoro-82m`:
+`verification` counts every span the project has ever stored, so `traces_received: true` can predate your wiring (an `existing` connection, or an earlier CLI check). Verify by comparison:
 
-   ```bash
-   OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content xybrid --observability run --model kokoro-82m --input-text "hello" -o "${TMPDIR:-/tmp}/xybrid-verify.wav"
-   ```
-
-   In PowerShell, set `$env:OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT = "no_content"` first. This proves the key and the workspace's ingestion, not the app's wiring. Say so in the final message.
-3. Ask the platform, retrying for about two minutes (ingestion is asynchronous):
+1. Take a baseline right before the run, and note `verification.spans` (`null` or `0` when nothing is stored yet) and `verification.last_ingested_at`:
 
    ```bash
    xybrid auth status --json
    ```
 
-   - `verification.traces_received: true` (`state: "received"`): verified.
+   It uses `XYBRID_API_KEY` from the environment when set, so make sure that is unset or is this project's key. If `connect` reported `key.source: "env_file"` (a key it didn't save), pass that key without printing it, reading `env_file.variable` from `env_file.path` (the same command works for dotenv, `.properties` and `.xcconfig` files), on this and every later `auth status`:
+
+   ```bash
+   FILE=.env.local VAR=EXPO_PUBLIC_XYBRID_API_KEY   # env_file.path and env_file.variable from the connect result
+   XYBRID_API_KEY="$(sed -nE "s/^[[:space:]]*(export[[:space:]]+)?${VAR}([[:space:]]*[=:][[:space:]]*|[[:space:]]+)[\"']?([A-Za-z0-9_-]+).*/\3/p" "$FILE" | head -n 1)" xybrid auth status --json
+   ```
+
+   The result must say `key.source: "env"`. Any other source means the value wasn't read and the CLI checked a different key: stop and say so.
+2. Run one real inference **through the app's wiring** and let it flush: run the Rust or Python entry point, `flutter run` on an available device or desktop, or the mobile or Unity app on an emulator or simulator if one is available.
+3. If you can't run the app here, verify the workspace with the CLI instead (it uses the saved key). Use the model the app uses, or the setup prompt's `kokoro-82m`:
+
+   ```bash
+   OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content xybrid --observability run --model kokoro-82m --input-text "hello" -o "${TMPDIR:-/tmp}/xybrid-verify.wav"
+   ```
+
+   In PowerShell, set `$env:OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT = "no_content"` first. This proves the key and the workspace's ingestion, not the app's wiring. Say so in the final message, and take a new baseline before a later app run.
+4. Ask the platform again with the same command, retrying for about two minutes (ingestion is asynchronous):
+
+   - `state: "received"` and `verification.spans` above the baseline (with a later `last_ingested_at`): verified, by the run you made since the baseline.
+   - `state: "received"` without an increase: the stored spans predate the run. Not verified.
    - `state: "none"`: nothing stored yet. Check that export started, that the run flushed (or shut down) before the process ended, and that the key is the project's. Not verified.
    - `state: "unavailable"`: the platform can't tell right now. Not verified.
-   - exit 7 (`workspace_expired`): relay the claim link; nothing exports until it is claimed.
-
-   `auth status` uses `XYBRID_API_KEY` from the environment when set, so make sure it is unset or is this project's key. If `connect` reported `key.source: "env_file"` (a key it didn't save), pass that key without printing it: `XYBRID_API_KEY="$(sed -n 's/^XYBRID_API_KEY=//p' .env | head -n 1)" xybrid auth status --json`.
+   - exit 7 (`workspace_expired`): this output carries no link. Get it with `xybrid auth claim --json` (its `claim_url`) and relay it; nothing exports until the workspace is claimed.
 
 The SDKs' delivery counters (`xybrid.observability_stats().traces.exported`, `Xybrid.Observability.stats`, `XybridObservability.stats`, `Observability.stats()`, `XybridClient.ObservabilityStats()`) show what the exporter sent. They don't prove storage.
 
@@ -643,7 +682,7 @@ In chat, never anywhere else, include:
 - `tell_the_user` from the connect result, with the claim link and both deadlines (unclaimed, the key stops on `workspace.key_expires_at` and the workspace is deleted on `workspace.claim_expires_at`; claiming any time before the deletion date keeps the workspace and its history and restores the key), and the terms and privacy links when present.
 - What you wired (metadata-only Xybrid trace export, in which file and init call, and whether cloud authentication was added), and the exact verification result: verified through the app, verified only through the CLI, or not verified (`none`/`unavailable`), and why.
 - For mobile, web, Expo and Unity builds: the key ships inside the app and can be extracted. It is a restricted client key (trace export, a small gateway quota); claiming the workspace lets the user rotate it.
-- That claiming means signing in with GitHub and accepting the terms in the console, and that `xybrid auth claim` shows the link again later.
+- That claiming means signing in with GitHub and accepting the terms in the console, and that `xybrid auth claim` shows the link again later. If Step 3 used the project-local store, say that the command needs the same prefix, run from the repository root (`XYBRID_CREDENTIALS_FILE=.xybrid/credentials.json xybrid auth claim`): without it the CLI looks in `~/.xybrid` and finds no link.
 
 In commits and PR descriptions, say only that a Xybrid key is configured in a gitignored file: no key, no link, no claim token.
 
@@ -661,7 +700,7 @@ The reference implementation is [`scripts/xybrid_agent_connect.py`](scripts/xybr
 
 ```bash
 curl -sSL -o "${TMPDIR:-/tmp}/xybrid_agent_connect.py" https://raw.githubusercontent.com/xybrid-ai/xybrid/master/agents/skills/xybrid-connect/scripts/xybrid_agent_connect.py
-# sha256: 1f4365c9dbc1b6fe7c27e0db11cedf3f93f4a55d958d3fb83c284be3bdc0608e
+# sha256: fc5552cd61110ea1fdca371276e25e4b60fb8e91fd8bd44b05e3a6f24df27d1a
 python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" connect --write-env .env --agent claude-code --binding python
 python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" status   # Step 7, instead of `xybrid auth status --json`
 python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" claim    # the private claim link again
@@ -678,19 +717,19 @@ Its `status` values, exit codes and fields match Steps 5 and 7. It provisions on
 
 Never follow redirects on these requests, and never take a host from a response.
 
-1. **Preflight**, before any request: the CI markers and opt-outs of Step 1 end with `ci_skipped` / `opted_out`. A nonempty `XYBRID_API_KEY` or an existing value in the target file ends with `existing`, changing nothing. A target that `git ls-files` lists ends with `env_file_tracked`. Then make sure the target is ignored: when `git check-ignore -q -- <path>` fails, append a root-anchored, glob-escaped entry (`/<path>`) to the repository's `.gitignore` and check again. Open the private store (step 5) and stop if it isn't private to this account.
+1. **Preflight**, before any request: the CI markers and opt-outs of Step 1 end with `ci_skipped` / `opted_out`. A nonempty `XYBRID_API_KEY` or an existing value in the target file ends with `existing`, changing nothing. A target that `git ls-files` lists ends with `env_file_tracked`. Then make sure the target is ignored: when `git check-ignore -q -- <path>` fails, append a root-anchored, glob-escaped entry (`/<path>`) to the repository's `.gitignore` and check again. Open the private store (described after step 8) and stop if it isn't private to this account, or if it sits in a Git working tree you can't keep it out of.
 2. **Challenge:** `GET /v1/agent/challenge` answers `200 {"challenge", "difficulty", "expires_at", "algorithm": "sha256-leading-zero-bits"}`. The challenge is opaque, valid for five minutes and single-use; the difficulty is 18 to 28 bits (20 by default). `403 {"error": "agent_signup_closed", "reason", "console_url", "min_cli_version"}` means `signup_closed`; `503 agent_signup_unavailable` means try again later.
 3. **Proof of work:** find the smallest `nonce`, a canonical decimal `u64` (ASCII digits, no sign, no leading zeros, `"0"` allowed), such that `SHA256(UTF8(challenge) || ":" || ASCII(nonce))` starts with at least `difficulty` zero bits. Bits count from the most significant bit of the first byte.
 4. **Retry state first:** generate an `Idempotency-Key` of 32 to 128 characters from `[A-Za-z0-9_-]` (32 random bytes in unpadded base64url) and save it with the challenge and nonce in the private store **before** posting, so a lost answer is retried instead of creating a second workspace.
 5. **Connect:** `POST /v1/agent/connect` with `Content-Type: application/json`, exactly one `Idempotency-Key` header, and a body of at most 16 KiB: `{"challenge", "nonce", "source"?, "project_name"?, "install_id"?, "client_info"?}`. `source` is the self-reported agent (normalized to 32 characters of `[a-z0-9-]`), `project_name` becomes the workspace name (48 characters), `client_info` takes only `cli_version`, `sdk_version`, `os`, `arch` and `binding` (64 characters each), and `install_id` (16 to 128 URL-safe characters) is optional; the script omits it.
    - `201` (new) or `200` with `"replayed": true` (a retry with the same key within ten minutes: same workspace and deadlines, a **new** key and claim token, the previous key revoked): `{"api_key", "key_prefix", "scope": "client", "organization": {"slug", "name"}, "project": {"slug", "name"}, "key_expires_at", "claim_expires_at", "claim_token", "limits": {"gateway_daily_requests", "max_projects"}, "terms_url"?, "privacy_url"?, "replayed"}`.
-   - `400 challenge_expired | challenge_invalid | proof_of_work_invalid`: solve a fresh challenge once, same key. `409 idempotency_key_expired | idempotency_key_conflict | workspace_claimed | workspace_unavailable`: start over once with a new key and challenge. `503 agent_signup_busy` (`Retry-After: 2`): wait and retry with the same key, up to three times. `429 agent_signup_rate_limited` (`Retry-After`), `409 challenge_replayed`, `503 client_ip_unavailable`: stop and relay.
+   - `400 challenge_expired | challenge_invalid | proof_of_work_invalid`: solve a fresh challenge once, same key. `409 idempotency_key_expired | idempotency_key_conflict | workspace_claimed | workspace_unavailable`: start over once with a new key and challenge. `503 agent_signup_busy` (`Retry-After: 2`): wait and retry with the same key, up to three times. `429 agent_signup_rate_limited` (`Retry-After`) and `409 challenge_replayed`: stop and relay. `503 client_ip_unavailable`: relay it, but as with any 5xx keep the retry state (next item).
    - No answer, a 5xx or a malformed 2xx: the request may have been applied. Keep the retry state and repeat the same request (same key, challenge and nonce) within ten minutes; the platform resolves a retry before it checks the challenge.
-6. **Save, then write:** check that the key matches `^[A-Za-z0-9_-]{8,256}$` and the claim token `^[A-Za-z0-9_-]{32,128}$`. Save both, with the deadlines, in the private store first. Check again that Git doesn't track the target and still ignores it, then append a comment (claim command and dates, never the token or link) and the assignment: `XYBRID_API_KEY=<key>` (dotenv), `xybrid.apiKey=<key>` (properties) or `XYBRID_API_KEY = <key>` (xcconfig, `//` comments), keeping the rest of the file byte for byte.
+6. **Save, then write:** check that the key matches `^[A-Za-z0-9_-]{8,256}$` and the claim token `^[A-Za-z0-9_-]{32,128}$`. Save both, with the deadlines, in the private store first. Check again that Git doesn't track the target and still ignores it, then append a comment (claim command and dates, never the token or link) and the assignment, creating a new file `0600` (an existing one keeps its mode): `XYBRID_API_KEY=<key>` (dotenv), `xybrid.apiKey=<key>` (properties) or `XYBRID_API_KEY = <key>` (xcconfig, `//` comments), keeping the rest of the file byte for byte.
 7. **Claim link:** `<pinned console>/claim/<claim_token>`, built locally, shown only in chat.
 8. **Verify:** `GET /v1/agent/workspace` with `Authorization: Bearer <key>` answers `{"organization", "project", "scope", "provisional", "claimed", "expired", "key_expires_at", "claim_expires_at", "verification": {"state": "received" | "none" | "unavailable", "traces_received", "spans", "traces", "first_ingested_at", "last_ingested_at"}}`; `401 invalid_api_key` for an unknown, revoked or purged key. Errors everywhere are flat JSON: `{"error": "<code>", "message": "...", ...details}`.
 
-The private store is the CLI's `~/.xybrid/credentials.json` (or `XYBRID_CREDENTIALS_FILE`): directory `0700`, file `0600`, replaced atomically; on Unix, writers hold an exclusive `flock` on `credentials.json.lock`. It is `{"version": 1, "credentials": [...], "pending": [...], "retired": [...]}`. Each credential holds `platform_origin`, `repository_root` (the canonical repository root), `api_key`, `scope`, `organization`, `project`, `key_expires_at`, `claim_expires_at`, `claim_token`, `source`, `env_file` (`{"path", "variable"}`), `claimed`, `terms_url`, `privacy_url` and `created_at`; a custom host's entry also holds `console_origin`. A pending request holds `platform_origin`, `repository_root`, `kind: "connect"`, `idempotency_key`, `challenge`, `nonce`, `project_name`, `source` and `started_at`.
+The private store is the CLI's `~/.xybrid/credentials.json` (or `XYBRID_CREDENTIALS_FILE`): directory `0700`, file `0600`, replaced atomically; on Unix, writers hold an exclusive `flock` on `credentials.json.lock`. It is `{"version": 1, "credentials": [...], "pending": [...], "retired": [...]}`. Each credential holds `platform_origin`, `repository_root` (the canonical repository root), `api_key`, `scope`, `organization`, `project`, `key_expires_at`, `claim_expires_at`, `claim_token`, `source`, `env_file` (`{"path", "variable"}`), `claimed`, `terms_url`, `privacy_url` and `created_at`; a custom host's entry also holds `console_origin`. A pending request holds `platform_origin`, `repository_root`, `kind: "connect"`, `idempotency_key`, `challenge`, `nonce`, `project_name`, `source` and `started_at`. When the store's directory is inside any Git working tree (a dotfiles repository at home, or `XYBRID_CREDENTIALS_FILE` pointing into a repository), gitignore that directory first; refuse when it is the repository root itself or holds tracked files.
 
 ### Proof-of-work test vectors
 
