@@ -411,6 +411,9 @@ impl Connection {
     }
 
     fn serve(self, mut socket: TcpStream) {
+        // Accepted sockets inherit O_NONBLOCK on macOS/BSD (not on Linux), which
+        // would make the read timeout below a busy WouldBlock instead of a wait.
+        socket.set_nonblocking(false).unwrap();
         socket
             .set_read_timeout(Some(Duration::from_millis(5)))
             .unwrap();

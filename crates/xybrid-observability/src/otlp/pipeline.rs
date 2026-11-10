@@ -726,6 +726,9 @@ mod tests {
                         Err(e) => panic!("accept: {e}"),
                     }
                 };
+                // Accepted sockets inherit O_NONBLOCK on macOS/BSD (not on Linux), which
+                // would make the read timeout below a busy WouldBlock instead of a wait.
+                socket.set_nonblocking(false).unwrap();
                 socket
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
