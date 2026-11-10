@@ -682,6 +682,10 @@ namespace XybridBolt
 
         /// <summary>
         /// Forget a streaming session.
+        ///
+        /// Closing a session before its terminal event cancels its run: the run
+        /// stops at its next token and is recorded as a user cancellation
+        /// (`error.type` `cancelled`), not as an error.
         /// </summary>
         public void StreamClose(ulong streamId)
         {

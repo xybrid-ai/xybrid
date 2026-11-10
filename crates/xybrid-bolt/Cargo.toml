@@ -23,6 +23,10 @@ xybrid-sdk = { path = "../xybrid-sdk", default-features = false }
 boltffi = { version = "0.30", default-features = false }
 log = "0.4"
 
+[dev-dependencies]
+# The facade's test seam paces a stream's tokens in the stream-close test.
+xybrid-ffi-facade = { path = "../xybrid-ffi-facade", features = ["test-util"] }
+
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.15"
 

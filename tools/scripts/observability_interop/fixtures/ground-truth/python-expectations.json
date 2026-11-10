@@ -1,0 +1,155 @@
+{
+  "automatic": {
+    "load": {
+      "error": null,
+      "outcome": "ok"
+    },
+    "run": {
+      "error": "InferenceError: Execution failed: Inference error: Backend error: Load failed: Model not found: Model file not found: /tmp/interop-run/xybrid-wire/python/work/scenario-weightless/model.onnx",
+      "outcome": "error"
+    }
+  },
+  "binding": "python",
+  "lifecycle": {
+    "after_shutdown": {
+      "flush": "ok",
+      "workflow_context": null,
+      "workflow_ref": null
+    },
+    "flush": "ok",
+    "shutdown": [
+      "ok",
+      "ok"
+    ]
+  },
+  "parent_span_id": "707974686f6e0000",
+  "references": {
+    "inference": {
+      "span_id": "e495596a7e3814ed",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "inference_failed": {
+      "span_id": "4486b88a464166a7",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "inference_released": {
+      "span_id": "eaa62471ce145c30",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "load": {
+      "span_id": "6720394789545b6c",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "run": null,
+    "tool": {
+      "span_id": "db1a749676e8acb3",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "workflow": {
+      "span_id": "b640cb8c1c2849ee",
+      "trace_id": "78793a707974686f6e00000000000000"
+    }
+  },
+  "scenario_error": null,
+  "schema": "xybrid-observability-scenario/1",
+  "sdk_version": "0.17.0",
+  "stats": {
+    "after_flush": {
+      "enabled": true,
+      "logs": {
+        "accepted": 2,
+        "dropped": 0,
+        "exported": 2,
+        "failed": 0,
+        "pending": 0
+      },
+      "metrics": {
+        "accepted": 8,
+        "dropped": 0,
+        "exported": 8,
+        "failed": 0,
+        "pending": 0
+      },
+      "traces": {
+        "accepted": 9,
+        "dropped": 0,
+        "exported": 9,
+        "failed": 0,
+        "pending": 0
+      }
+    },
+    "after_release": {
+      "enabled": true,
+      "logs": {
+        "accepted": 1,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 1
+      },
+      "metrics": {
+        "accepted": 0,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 0
+      },
+      "traces": {
+        "accepted": 4,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 4
+      }
+    },
+    "after_shutdown": {
+      "enabled": false,
+      "logs": {
+        "accepted": 2,
+        "dropped": 0,
+        "exported": 2,
+        "failed": 0,
+        "pending": 0
+      },
+      "metrics": {
+        "accepted": 16,
+        "dropped": 0,
+        "exported": 16,
+        "failed": 0,
+        "pending": 0
+      },
+      "traces": {
+        "accepted": 9,
+        "dropped": 0,
+        "exported": 9,
+        "failed": 0,
+        "pending": 0
+      }
+    },
+    "before_release": {
+      "enabled": true,
+      "logs": {
+        "accepted": 1,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 1
+      },
+      "metrics": {
+        "accepted": 0,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 0
+      },
+      "traces": {
+        "accepted": 3,
+        "dropped": 0,
+        "exported": 0,
+        "failed": 0,
+        "pending": 3
+      }
+    }
+  },
+  "trace_id": "78793a707974686f6e00000000000000"
+}

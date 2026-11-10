@@ -133,7 +133,9 @@ final stages = run.metrics.stageLatenciesMs.map((stage) => stage.observation);
 errors; corrected config can be retried. `shutdown` disables native exporter
 state and is idempotent; a later `init` restarts export. Flush/shutdown run off
 the UI isolate, have bounded timeouts, and surface native lifecycle errors. Counters
-and state are available through `XybridObservability.stats`.
+and state are available through `XybridObservability.stats`; after shutdown the
+counters are the session's final ones (what the shutdown failed or dropped
+included) until the next `init`.
 
 Migration: `Xybrid.init(apiKey: ...)` now configures authentication only. Pass
 `observability:` to enable export. The explicit legacy

@@ -1,5 +1,5 @@
 // The packaged OTLP pipeline: providers, presets, all three signals, saturation on hot paths,
-// and export-request tracing suppression.
+// unsampled spans, and export-request tracing suppression.
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   type ContextManager,
@@ -8,17 +8,31 @@ import {
   DiagLogLevel,
   diag,
   ROOT_CONTEXT,
+  TraceFlags,
   type Tracer,
   trace,
 } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { isTracingSuppressed } from "@opentelemetry/core";
 import {
+  SimpleSpanProcessor,
+  TraceIdRatioBasedSampler,
+  TracerProvider,
+} from "@opentelemetry/sdk-trace";
+import {
+  type JsonValue,
+  type LoggerProviderLike,
+  type ObservationRef,
+  Observer,
+} from "../src/index.ts";
+import {
   createOtlpPipeline,
   type OtlpPipeline,
+  OtlpTraceExporter,
   type SignalStats,
   xybridTracesPreset,
 } from "../src/otlp/index.ts";
+import { decodeRequest } from "./support/otlp-decode.ts";
 import { closedUrl, startServer, type TestServer } from "./support/otlp-server.ts";
 
 const request = { operation: "chat", provider: "llama.cpp", model: "tiny" } as const;
@@ -29,6 +43,7 @@ const stats = (partial: Partial<SignalStats>): SignalStats => ({
   dropped: 0,
   failed: 0,
   pending: 0,
+  bufferedBytes: 0,
   ...partial,
 });
 
@@ -56,7 +71,11 @@ describe("createOtlpPipeline", () => {
     );
     const observer = pipeline.observer();
     for (let index = 0; index < 5; index += 1) observer.startInference(request).end();
-    expect(pipeline.stats().traces).toEqual(stats({ accepted: 5, dropped: 3, pending: 2 }));
+    const held = pipeline.stats().traces;
+    expect(held.bufferedBytes).toBeGreaterThan(0);
+    expect(held).toEqual(
+      stats({ accepted: 5, dropped: 3, pending: 2, bufferedBytes: held.bufferedBytes }),
+    );
     expect(await pipeline.forceFlush(2000)).toBe(true);
     expect(pipeline.stats().traces).toEqual(stats({ accepted: 5, exported: 2, dropped: 3 }));
   });
@@ -119,6 +138,59 @@ describe("createOtlpPipeline", () => {
       logs: stats({}),
       metrics: stats({}),
     });
+  });
+
+  test("a traces-only pipeline has no event destination: content is processed for the span only", async () => {
+    const server = await startServer();
+    const pipeline = track(
+      createOtlpPipeline({
+        traces: { endpoint: `${server.url}/v1/traces`, protocol: "http/json" },
+        batch: { scheduledDelayMs: 60_000 },
+      }),
+      server,
+    );
+    expect(pipeline.loggerProvider).toBeUndefined();
+    const calls: string[] = [];
+    const redact = (kind: string, value: JsonValue): JsonValue => {
+      calls.push(kind);
+      return value;
+    };
+    const messages = [{ role: "user", parts: [{ type: "text", content: "hi" }] }];
+    // The span copy costs 95 bytes; an event copy (243 more) would not fit 300.
+    const both = pipeline
+      .observer({ capture: "span_and_event", maxRetainedOperationBytes: 300, redact })
+      .startInference(request);
+    both.recordInputMessages(messages);
+    both.end();
+    expect(calls).toEqual(["gen_ai.input.messages"]);
+    // event_only: governed content skips the span, and nothing receives the event. The message is
+    // over the 16 KiB attribute bound, so processing it for an event would mark the span truncated.
+    const large = [{ role: "user", parts: [{ type: "text", content: "x".repeat(20_000) }] }];
+    const eventOnly = pipeline.observer({ capture: "event_only", redact }).startInference(request);
+    eventOnly.recordInputMessages(large);
+    eventOnly.end();
+    expect(calls).toEqual(["gen_ai.input.messages"]);
+
+    expect(await pipeline.forceFlush(3000)).toBe(true);
+    const spans = server
+      .received("/v1/traces")
+      .flatMap((received) =>
+        JSON.parse(received.body.toString()).resourceSpans.flatMap(
+          (resource: { scopeSpans: { spans: unknown[] }[] }) =>
+            resource.scopeSpans.flatMap((scope) => scope.spans),
+        ),
+      ) as { spanId: string; attributes: { key: string; value: { stringValue?: string } }[] }[];
+    const attributes = (ref: ObservationRef | undefined) => {
+      const span = spans.find((candidate) => candidate.spanId === ref?.span_id);
+      if (span === undefined) throw new Error("expected the operation's span");
+      return Object.fromEntries(span.attributes.map(({ key, value }) => [key, value]));
+    };
+    const recorded = attributes(both.observationRef());
+    expect(JSON.parse(String(recorded["gen_ai.input.messages"]?.stringValue))).toEqual(messages);
+    expect(recorded["xybrid.genai.content.truncated_attributes"]).toBeUndefined();
+    const quiet = attributes(eventOnly.observationRef());
+    expect(quiet["gen_ai.input.messages"]).toBeUndefined();
+    expect(quiet["xybrid.genai.content.truncated_attributes"]).toBeUndefined();
   });
 
   test("the Xybrid preset defaults to the ingest endpoint and rejects empty keys", () => {
@@ -201,6 +273,226 @@ describe("createOtlpPipeline", () => {
       diag.disable();
     }
   });
+});
+
+// biome-ignore lint/suspicious/noExplicitAny: decoded wire data is inspected dynamically.
+type Json = any;
+
+const plain = (attributes: Json[] | undefined): Record<string, unknown> =>
+  Object.fromEntries(
+    (attributes ?? []).map((entry: Json) => [entry.key, Object.values(entry.value ?? {})[0]]),
+  );
+
+/** A histogram point (`count` and `sum`) or a sum point (its value as `sum`, no `count`). */
+type Point = {
+  readonly metric: string;
+  readonly attributes: Record<string, unknown>;
+  readonly count: number | undefined;
+  readonly sum: number;
+};
+
+/** Every data point the receiver got, decoded from either encoding. */
+const receivedPoints = (server: TestServer): Point[] =>
+  server.received("/v1/metrics").flatMap((received) =>
+    decodeRequest(
+      "metrics",
+      received.headers["content-type"],
+      received.body,
+    ).resourceMetrics.flatMap((resource: Json) =>
+      resource.scopeMetrics.flatMap((scope: Json) =>
+        scope.metrics.flatMap((metric: Json) => [
+          ...(metric.histogram?.dataPoints ?? []).map((point: Json) => ({
+            metric: metric.name,
+            attributes: plain(point.attributes),
+            count: Number(point.count),
+            sum: Number(point.sum),
+          })),
+          ...(metric.sum?.dataPoints ?? []).map((point: Json) => ({
+            metric: metric.name,
+            attributes: plain(point.attributes),
+            count: undefined,
+            sum: Number(point.asInt ?? point.asDouble),
+          })),
+        ]),
+      ),
+    ),
+  );
+
+/** `[error.type, count, sum]` of each point of `metric`, sorted by error type. */
+const outcomes = (points: readonly Point[], metric: string): unknown[][] =>
+  points
+    .filter((point) => point.metric === metric)
+    .map((point) => [point.attributes["error.type"] ?? "", point.count, point.sum])
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+/** `[error.type, count]` of each histogram point of `metric` (durations: the sum is timing). */
+const counts = (points: readonly Point[], metric: string): unknown[][] =>
+  outcomes(points, metric).map(([type, count]) => [type, count]);
+
+type Received = { eventName: string; traceId: string; spanId: string; flags: number };
+
+const receivedLogs = (server: TestServer): Received[] =>
+  server.received("/v1/logs").flatMap((received) =>
+    decodeRequest("logs", received.headers["content-type"], received.body).resourceLogs.flatMap(
+      (resource: Json) =>
+        resource.scopeLogs.flatMap((scope: Json) =>
+          scope.logRecords.map((record: Json) => ({
+            eventName: record.eventName,
+            traceId: record.traceId,
+            spanId: record.spanId,
+            flags: Number(record.flags ?? 0),
+          })),
+        ),
+    ),
+  );
+
+const linked = (target: ObservationRef | undefined): ObservationRef => {
+  if (target === undefined) throw new Error("expected a reference to an unsampled span");
+  return target;
+};
+
+describe("unsampled spans still export metrics and linked evaluations", () => {
+  for (const protocol of ["http/json", "http/protobuf"] as const) {
+    test(`${protocol}: a dropping sampler sends no span, exact metrics and evaluations on its references`, async () => {
+      const server = await startServer();
+      const pipeline = track(
+        createOtlpPipeline({
+          metrics: { endpoint: `${server.url}/v1/metrics`, protocol },
+          logs: { endpoint: `${server.url}/v1/logs`, protocol },
+          batch: { scheduledDelayMs: 60_000 },
+          metricExportIntervalMs: 60_000,
+        }),
+        server,
+      );
+      // The application owns the tracer and its sampler; a sampled span would reach the
+      // same receiver through the package's trace exporter.
+      const exporter = new OtlpTraceExporter({
+        traces: { endpoint: `${server.url}/v1/traces`, protocol },
+      });
+      const tracerProvider = new TracerProvider({
+        sampler: new TraceIdRatioBasedSampler(0),
+        spanProcessors: [new SimpleSpanProcessor({ exporter })],
+      });
+      cleanups.push(() => tracerProvider.shutdown());
+      const observer = new Observer({
+        tracerProvider,
+        meterProvider: pipeline.meterProvider ?? null,
+        loggerProvider: (pipeline.loggerProvider as LoggerProviderLike | undefined) ?? null,
+      });
+      const ops = Array.from({ length: 5 }, () => observer.startInference(request));
+      for (const op of ops.slice(0, 3)) {
+        op.recordUsage({ inputTokens: 2, outputTokens: 4 });
+        op.end();
+      }
+      ops[3]?.endWithError({ errorType: "network" });
+      ops[4]?.cancel();
+      const refs = ops.map((op) => linked(op.observationRef()));
+      for (const op of ops) expect(op.context()?.traceFlags).toBe(TraceFlags.NONE);
+      expect(new Set(refs.map((ref) => ref.span_id)).size).toBe(5);
+      const first = linked(refs[0]);
+      const failed = linked(refs[3]);
+      expect(observer.recordEvaluation(first, { name: "relevance", scoreValue: 1 })).toBe(true);
+      expect(observer.recordFeedback(failed, { score: 0 })).toBe(true);
+
+      expect(await pipeline.forceFlush(10_000)).toBe(true);
+      await tracerProvider.forceFlush();
+      expect(server.received("/v1/traces")).toHaveLength(0);
+      expect(exporter.stats()).toEqual(stats({}));
+
+      const points = receivedPoints(server);
+      expect(counts(points, "gen_ai.client.inference.duration")).toEqual([
+        ["", 3],
+        ["cancelled", 1],
+        ["network", 1],
+      ]);
+      expect(outcomes(points, "gen_ai.client.inference.operation.input_tokens")).toEqual([
+        ["", 3, 6],
+      ]);
+      expect(outcomes(points, "gen_ai.client.inference.operation.output_tokens")).toEqual([
+        ["", 3, 12],
+      ]);
+      expect(outcomes(points, "gen_ai.client.inference.usage.input_tokens")).toEqual([
+        ["", undefined, 6],
+      ]);
+
+      const logs = receivedLogs(server);
+      const evaluations = logs.filter((log) => log.eventName === "gen_ai.evaluation.result");
+      expect(evaluations.map((log) => [log.traceId, log.spanId, log.flags])).toEqual([
+        [first.trace_id, first.span_id, 0],
+        [failed.trace_id, failed.span_id, 0],
+      ]);
+      expect(
+        logs
+          .filter((log) => log.eventName === "gen_ai.client.operation.exception")
+          .map((log) => [log.spanId, log.flags]),
+      ).toEqual([[failed.span_id, 0]]);
+      const { logs: logStats, metrics } = pipeline.stats();
+      expect(logStats).toEqual(stats({ accepted: 3, exported: 3 }));
+      expect(metrics).toEqual(stats({ accepted: points.length, exported: points.length }));
+    }, 30_000);
+
+    test(`${protocol}: an unsampled parent exports no child span, exact metrics and evaluations on its references`, async () => {
+      const server = await startServer();
+      const pipeline = track(
+        createOtlpPipeline({
+          traces: { endpoint: `${server.url}/v1/traces`, protocol },
+          metrics: { endpoint: `${server.url}/v1/metrics`, protocol },
+          logs: { endpoint: `${server.url}/v1/logs`, protocol },
+          batch: { scheduledDelayMs: 60_000 },
+          metricExportIntervalMs: 60_000,
+        }),
+        server,
+      );
+      const observer = pipeline.observer();
+      const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+      const inference = observer.startInference(request, {
+        parent: `00-${traceId}-00f067aa0ba902b7-00`,
+      });
+      inference.recordUsage({ inputTokens: 2, outputTokens: 4 });
+      inference
+        .startAttempt({ index: 0, reason: "initial", provider: "llama.cpp", location: "local" })
+        .end();
+      const tool = observer.startTool({ name: "search" }, { parent: inference.context() });
+      tool.end();
+      inference.end();
+      const inferenceRef = linked(inference.observationRef());
+      const toolRef = linked(tool.observationRef());
+      expect(inferenceRef.trace_id).toBe(traceId);
+      expect(toolRef.trace_id).toBe(traceId);
+      expect(inference.context()?.traceFlags).toBe(TraceFlags.NONE);
+      expect(tool.context()?.traceFlags).toBe(TraceFlags.NONE);
+      expect(observer.recordEvaluation(inferenceRef, { name: "relevance", scoreValue: 1 })).toBe(
+        true,
+      );
+      expect(observer.recordFeedback(toolRef, { score: 1 })).toBe(true);
+
+      expect(await pipeline.forceFlush(10_000)).toBe(true);
+      expect(server.received("/v1/traces")).toHaveLength(0);
+      const points = receivedPoints(server);
+      expect(counts(points, "gen_ai.client.inference.duration")).toEqual([["", 1]]);
+      expect(counts(points, "gen_ai.execute_tool.duration")).toEqual([["", 1]]);
+      expect(outcomes(points, "xybrid.genai.client.inference.attempts")).toEqual([
+        ["", undefined, 1],
+      ]);
+      expect(outcomes(points, "gen_ai.client.inference.operation.input_tokens")).toEqual([
+        ["", 1, 2],
+      ]);
+      expect(outcomes(points, "gen_ai.client.inference.operation.output_tokens")).toEqual([
+        ["", 1, 4],
+      ]);
+      expect(
+        receivedLogs(server).map((log) => [log.eventName, log.traceId, log.spanId, log.flags]),
+      ).toEqual([
+        ["gen_ai.evaluation.result", traceId, inferenceRef.span_id, 0],
+        ["gen_ai.evaluation.result", traceId, toolRef.span_id, 0],
+      ]);
+      expect(pipeline.stats()).toEqual({
+        traces: stats({}),
+        logs: stats({ accepted: 2, exported: 2 }),
+        metrics: stats({ accepted: points.length, exported: points.length }),
+      });
+    }, 30_000);
+  }
 });
 
 describe("export request tracing suppression", () => {

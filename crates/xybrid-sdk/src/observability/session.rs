@@ -9,8 +9,131 @@ struct SessionInner {
     /// Workspace feedback of the pipeline's Xybrid trace destination.
     workspace: Option<WorkspaceFeedback>,
     live_trace_interval: Duration,
-    live_traced: Mutex<HashMap<String, Instant>>,
+    live_traced: Mutex<LiveSessions>,
+    live_clock: LiveClock,
     retired: std::sync::atomic::AtomicBool,
+}
+
+/// Live frame sessions are forgotten this long after their last frame.
+const LIVE_SESSION_TTL: Duration = Duration::from_secs(300);
+
+/// The live-frame sampler remembers at most this many frame sessions; a new
+/// one beyond it evicts the least recently used.
+const MAX_LIVE_SESSIONS: usize = 1024;
+
+/// The frame sessions the live-frame sampler remembers: for each, when its
+/// current interval opened (its last traced frame), least recently used
+/// first.
+///
+/// Bounded by [`MAX_LIVE_SESSIONS`] and [`LIVE_SESSION_TTL`], so a caller
+/// that uses a fresh id per frame cannot grow it. A lookup is a hash probe;
+/// keeping the use order costs `O(log n)` with `n` at most the cap, and
+/// expiry and eviction remove entries from the least recently used end, so
+/// no frame scans the whole set.
+#[derive(Default)]
+struct LiveSessions {
+    by_id: HashMap<Arc<str>, LiveSession>,
+    /// Session ids by their last use, least recent first.
+    by_use: std::collections::BTreeMap<u64, Arc<str>>,
+    /// Use stamp of the next frame (strictly increasing).
+    next_use: u64,
+}
+
+struct LiveSession {
+    /// When the session's last traced frame opened its interval.
+    traced: Instant,
+    /// When the session last had a frame.
+    used: Instant,
+    /// Its key in [`LiveSessions::by_use`].
+    use_stamp: u64,
+}
+
+impl LiveSessions {
+    /// Whether a frame of `id` at `now` opens a traced interval, recording
+    /// the frame as the session's latest use.
+    fn trace_mode(&mut self, id: &str, now: Instant, interval: Duration) -> TraceMode {
+        let stamp = self.next_use;
+        self.next_use += 1;
+        let mode = match self.by_id.get_key_value(id) {
+            Some((key, session)) => {
+                let key = key.clone();
+                let previous = session.use_stamp;
+                let opens = now.saturating_duration_since(session.traced) >= interval;
+                self.by_use.remove(&previous);
+                self.by_use.insert(stamp, key);
+                let session = self.by_id.get_mut(id).expect("the session was just found");
+                session.used = now;
+                session.use_stamp = stamp;
+                if opens {
+                    session.traced = now;
+                    TraceMode::Default
+                } else {
+                    TraceMode::Suppress
+                }
+            }
+            None => {
+                if self.by_id.len() >= MAX_LIVE_SESSIONS {
+                    self.evict_least_recently_used();
+                }
+                let key: Arc<str> = Arc::from(id);
+                self.by_use.insert(stamp, key.clone());
+                self.by_id.insert(
+                    key,
+                    LiveSession {
+                        traced: now,
+                        used: now,
+                        use_stamp: stamp,
+                    },
+                );
+                TraceMode::Default
+            }
+        };
+        // The session of this frame was just used, so it is never expired here.
+        self.expire(now);
+        mode
+    }
+
+    /// Forgets the sessions with no frame for longer than the TTL.
+    fn expire(&mut self, now: Instant) {
+        while let Some((_, id)) = self.by_use.first_key_value() {
+            let used = self.by_id.get(id).map_or(now, |session| session.used);
+            if now.saturating_duration_since(used) <= LIVE_SESSION_TTL {
+                break;
+            }
+            self.evict_least_recently_used();
+        }
+    }
+
+    fn evict_least_recently_used(&mut self) {
+        if let Some((_, id)) = self.by_use.pop_first() {
+            self.by_id.remove(&id);
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.by_id.len()
+    }
+}
+
+/// Monotonic time source of the live-frame sampler: the system clock, or in
+/// tests a clock the test moves, so which frame opens an interval never
+/// depends on how fast the test runs.
+enum LiveClock {
+    System,
+    #[cfg(test)]
+    Manual(Arc<Mutex<Instant>>),
+}
+
+impl LiveClock {
+    fn now(&self) -> Instant {
+        match self {
+            Self::System => Instant::now(),
+            #[cfg(test)]
+            Self::Manual(now) => *now
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        }
+    }
 }
 
 impl Drop for SessionInner {
@@ -48,6 +171,13 @@ pub struct ObservabilitySession {
     /// observer has no mode of its own) resolves to the process-wide mode
     /// once, when an operation starts ([`Self::for_operation`]).
     resource_telemetry: Option<ResourceTelemetryMode>,
+    /// The session's observer with its content capture capped, when an
+    /// operation chose this session over the one it would otherwise use
+    /// (see [`resolve_session`]); the session's own observer otherwise.
+    capped: Option<Observer>,
+    /// Whether this handle was resolved for an operation (never one an
+    /// application holds): its content cap is already fixed.
+    resolved: bool,
 }
 
 impl ObservabilitySession {
@@ -109,12 +239,15 @@ impl ObservabilitySession {
                 pipeline,
                 workspace,
                 live_trace_interval: config.live_trace_interval,
-                live_traced: Mutex::new(HashMap::new()),
+                live_traced: Mutex::new(LiveSessions::default()),
+                live_clock: LiveClock::System,
                 retired: std::sync::atomic::AtomicBool::new(false),
             }),
             resource_telemetry: Some(crate::telemetry::prepare_resource_telemetry(
                 config.resource_telemetry,
             )),
+            capped: None,
+            resolved: false,
         })
     }
 
@@ -128,17 +261,20 @@ impl ObservabilitySession {
                 pipeline: None,
                 workspace: None,
                 live_trace_interval: Duration::from_secs(1),
-                live_traced: Mutex::new(HashMap::new()),
+                live_traced: Mutex::new(LiveSessions::default()),
+                live_clock: LiveClock::System,
                 retired: std::sync::atomic::AtomicBool::new(false),
             }),
             resource_telemetry: None,
+            capped: None,
+            resolved: false,
         }
     }
 
     /// The observer used by operations in this session.
     #[must_use]
     pub fn observer(&self) -> &Observer {
-        &self.inner.observer
+        self.capped.as_ref().unwrap_or(&self.inner.observer)
     }
 
     /// Whether this session owns an export pipeline.
@@ -148,6 +284,9 @@ impl ObservabilitySession {
     }
 
     /// Per-signal delivery counters; unavailable for borrowed providers.
+    ///
+    /// They stay readable after [`Self::shutdown`], which settles them: the
+    /// final counters, with what the shutdown failed or dropped.
     #[must_use]
     pub fn stats(&self) -> Option<PipelineStats> {
         self.inner.pipeline.as_ref().map(|p| p.stats())
@@ -226,6 +365,27 @@ impl ObservabilitySession {
     /// process-wide change cannot alter the operation's measurements.
     pub(super) fn for_operation(mut self) -> Self {
         self.resource_telemetry = Some(self.resource_telemetry());
+        self.resolved = true;
+        self
+    }
+
+    /// This handle, chosen by an operation over `floor` (see [`content_floor`]),
+    /// with content capture capped by `floor`'s policy: a per-run session or
+    /// observer can lower capture, never raise it.
+    /// With no floor it keeps its own policy; the same session as the floor
+    /// keeps the floor's cap.
+    fn capped_by(mut self, floor: Option<&ObservabilitySession>) -> Self {
+        let Some(floor) = floor else {
+            return self;
+        };
+        self.capped = if Arc::ptr_eq(&self.inner, &floor.inner) {
+            floor.capped.clone()
+        } else {
+            Some(
+                self.observer()
+                    .content_capped_by(floor.observer().content_policy()),
+            )
+        };
         self
     }
 
@@ -243,31 +403,46 @@ impl ObservabilitySession {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Drives this session's live-frame sampler from `clock` instead of the
+    /// system clock (a test seam; see [`LiveClock`]).
+    ///
+    /// # Panics
+    ///
+    /// When the session is already shared: the clock is set right after the
+    /// session is built, before any clone or operation holds it.
+    #[cfg(test)]
+    pub(crate) fn drive_live_clock(&mut self, clock: Arc<Mutex<Instant>>) {
+        Arc::get_mut(&mut self.inner)
+            .expect("the live clock is set before the session is shared")
+            .live_clock = LiveClock::Manual(clock);
+    }
+
     pub(super) fn retire(&self) {
         self.inner
             .retired
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Whether a frame of live frame session `session` is traced: the first
+    /// frame of each interval is, the others are suppressed (and still
+    /// counted in metrics).
     pub(super) fn live_trace_mode(&self, session: &str) -> TraceMode {
-        let now = Instant::now();
-        let mut map = self
-            .inner
+        let now = self.inner.live_clock.now();
+        self.inner
             .live_traced
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        map.retain(|id, last| {
-            id == session || now.duration_since(*last) <= Duration::from_secs(300)
-        });
-        match map.get(session) {
-            Some(last) if now.duration_since(*last) < self.inner.live_trace_interval => {
-                TraceMode::Suppress
-            }
-            _ => {
-                map.insert(session.to_owned(), now);
-                TraceMode::Default
-            }
-        }
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .trace_mode(session, now, self.inner.live_trace_interval)
+    }
+
+    /// How many frame sessions the live-frame sampler remembers.
+    #[cfg(test)]
+    pub(crate) fn live_sessions(&self) -> usize {
+        self.inner
+            .live_traced
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 }
 
@@ -284,7 +459,34 @@ pub(super) struct DefaultSlot {
     pub session: ObservabilitySession,
     pub helper_owned: bool,
 }
-static DEFAULT: RwLock<Option<DefaultSlot>> = RwLock::new(None);
+
+/// The process default, and the pipeline whose counters [`super::stats`]
+/// reports while none is installed.
+struct Defaults {
+    current: Option<DefaultSlot>,
+    /// The pipeline of the helper-owned default that the last
+    /// [`super::shutdown_observability`] uninstalled. Its counters, settled
+    /// by that shutdown, stay readable until the next installation
+    ///.
+    retired: Option<Arc<xybrid_observability::otlp::ObservabilityPipeline>>,
+}
+
+static DEFAULT: RwLock<Defaults> = RwLock::new(Defaults {
+    current: None,
+    retired: None,
+});
+
+fn defaults_write() -> std::sync::RwLockWriteGuard<'static, Defaults> {
+    DEFAULT
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn defaults_read() -> std::sync::RwLockReadGuard<'static, Defaults> {
+    DEFAULT
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 pub(super) fn replace_default(
     session: ObservabilitySession,
@@ -295,23 +497,41 @@ pub(super) fn replace_default(
     let mode = session.resource_telemetry.unwrap_or_else(|| {
         crate::telemetry::prepare_resource_telemetry(ResourceTelemetryMode::Off)
     });
-    let mut slot = DEFAULT
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut defaults = defaults_write();
     // Under the slot lock, so an operation resolving the default reads the
     // session and the mode it published together (see `default_for_operation`).
     crate::telemetry::set_resource_telemetry_mode(mode);
-    slot.replace(DefaultSlot {
+    // A new default starts fresh counters: the last shutdown's are gone.
+    defaults.retired = None;
+    defaults.current.replace(DefaultSlot {
         session,
         helper_owned,
     })
 }
 
-pub(super) fn take_default() -> Option<DefaultSlot> {
-    DEFAULT
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .take()
+/// Uninstalls the default. A helper-owned one leaves its pipeline's counters
+/// readable through [`default_stats`] until the next installation: its
+/// shutdown settles them.
+pub(super) fn uninstall_default() -> Option<DefaultSlot> {
+    let mut defaults = defaults_write();
+    // With nothing installed (a repeated shutdown) the retained counters stay.
+    let slot = defaults.current.take()?;
+    defaults.retired = slot
+        .helper_owned
+        .then(|| slot.session.inner.pipeline.clone())
+        .flatten();
+    Some(slot)
+}
+
+/// The default session's counters; with none installed, those of the
+/// helper-owned default the last shutdown uninstalled, until the next
+/// installation.
+pub(super) fn default_stats() -> Option<PipelineStats> {
+    let defaults = defaults_read();
+    match &defaults.current {
+        Some(slot) => slot.session.stats(),
+        None => defaults.retired.as_ref().map(|pipeline| pipeline.stats()),
+    }
 }
 
 /// Installs a default for new root operations and returns the previous session.
@@ -348,9 +568,8 @@ pub(super) fn retire_replaced(previous: DefaultSlot) {
 /// The default session for new root operations, when configured.
 #[must_use]
 pub fn default_session() -> Option<ObservabilitySession> {
-    DEFAULT
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    defaults_read()
+        .current
         .as_ref()
         .map(|slot| slot.session.clone())
 }
@@ -359,12 +578,12 @@ pub fn default_session() -> Option<ObservabilitySession> {
 /// process-wide mode as of now: the mode the default published, unless
 /// `XybridInit::resource_telemetry` has set another since.
 fn default_for_operation() -> Option<ObservabilitySession> {
-    let slot = DEFAULT
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    slot.as_ref().map(|slot| ObservabilitySession {
+    let defaults = defaults_read();
+    defaults.current.as_ref().map(|slot| ObservabilitySession {
         inner: slot.session.inner.clone(),
         resource_telemetry: Some(crate::telemetry::resource_telemetry_mode()),
+        capped: None,
+        resolved: true,
     })
 }
 
@@ -378,21 +597,45 @@ pub(super) fn ambient_session() -> Option<ObservabilitySession> {
     })
 }
 
+/// The session whose content policy caps an explicit per-run session or
+/// observer: the first of the enclosing operation's session and the default
+/// that exports anything. A session whose observer is disabled records no
+/// content to cap by, so it never lifts the default's cap: a per-run session
+/// inside an operation that observes nothing is still capped by the default.
+fn content_floor() -> Option<ObservabilitySession> {
+    let enabled = |session: &ObservabilitySession| session.observer().is_enabled();
+    ambient_session()
+        .filter(enabled)
+        .or_else(|| default_session().filter(enabled))
+}
+
 /// The session a new operation is pinned to, with its resource mode fixed:
 /// the explicit session or observer, else the enclosing operation's, else the
 /// default.
+///
+/// An explicit session or observer can only lower content capture: its
+/// content is capped by the policy of the session the operation would
+/// otherwise use (the enclosing operation's, else the default; the first
+/// that is enabled, see [`content_floor`]), so a per-run setting that would
+/// capture more than that session is ignored. A
+/// handle the SDK already resolved for an operation (a live ASR stream's
+/// decodes) keeps its cap.
 pub(super) fn resolve_session(options: Option<&ObservationOptions>) -> ObservabilitySession {
-    options
-        .and_then(|o| o.session.clone())
-        .or_else(|| {
-            options
-                .and_then(|o| o.observer.clone())
-                .map(ObservabilitySession::borrowed)
-        })
-        .or_else(ambient_session)
-        .map(ObservabilitySession::for_operation)
-        .or_else(default_for_operation)
-        .unwrap_or_else(|| ObservabilitySession::borrowed(Observer::disabled()).for_operation())
+    let chosen = options.and_then(|o| o.session.clone()).or_else(|| {
+        options
+            .and_then(|o| o.observer.clone())
+            .map(ObservabilitySession::borrowed)
+    });
+    match chosen {
+        Some(session) if session.resolved => session,
+        Some(session) => session.capped_by(content_floor().as_ref()).for_operation(),
+        None => ambient_session()
+            .map(ObservabilitySession::for_operation)
+            .or_else(default_for_operation)
+            .unwrap_or_else(|| {
+                ObservabilitySession::borrowed(Observer::disabled()).for_operation()
+            }),
+    }
 }
 
 /// Context and session captured on the calling thread before a worker hop.

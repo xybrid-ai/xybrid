@@ -1545,11 +1545,53 @@ impl StreamingSession {
         }
     }
 
+    /// Runs `run` on the worker as a token stream: each token it hands to the
+    /// callback goes to [`Self::next`], then the run's terminal event.
+    ///
+    /// Dropping the session before the terminal event is the caller's
+    /// cancellation. The next token finds no receiver and the callback
+    /// returns [`sdk::AbortReason::UserCancelled`], so the run stops at that
+    /// token and the SDK ends it `cancelled` (span, duration metric, no
+    /// exception), as if the caller had cancelled its token.
+    fn spawn_tokens(
+        run: impl FnOnce(&mut TokenCallback) -> sdk::SdkResult<sdk::InferenceResult> + Send + 'static,
+    ) -> std::io::Result<Arc<Self>> {
+        Self::spawn(move |sender| {
+            let tokens = sender.clone();
+            let mut on_token = move |token: sdk::PartialToken| {
+                tokens
+                    .send(StreamEvent::Token(StreamToken::from_sdk(token)))
+                    // The receiver is gone: the caller dropped the session.
+                    .map_err(|_| Box::new(sdk::AbortReason::UserCancelled) as sdk::StreamingError)
+            };
+            let result = run(&mut on_token);
+            let _ = sender.send(StreamEvent::terminal(result));
+        })
+    }
+
+    /// [`Self::spawn_tokens`] for tests of the crates that wrap the facade:
+    /// `run` stands in for the SDK run, so a test can pace its tokens and see
+    /// how the run stops (M-TEST-UTIL).
+    ///
+    /// # Panics
+    ///
+    /// When the worker thread cannot be spawned.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn spawn_tokens_for_test(
+        run: impl FnOnce(&mut TokenCallback) -> sdk::SdkResult<sdk::InferenceResult> + Send + 'static,
+    ) -> Arc<Self> {
+        Self::spawn_tokens(run).expect("test streaming worker should spawn")
+    }
+
     #[cfg(test)]
     fn spawn_for_test(produce: impl FnOnce(SyncSender<StreamEvent>) + Send + 'static) -> Arc<Self> {
         Self::spawn(produce).expect("test streaming worker should spawn")
     }
 }
+
+/// The token callback a streaming worker hands to the SDK run.
+type TokenCallback =
+    dyn FnMut(sdk::PartialToken) -> std::result::Result<(), sdk::StreamingError> + Send;
 
 impl Drop for StreamingSession {
     fn drop(&mut self) {
@@ -2407,6 +2449,14 @@ impl XybridModel {
     }
 
     /// Async inference. The SDK offloads to `spawn_blocking` internally.
+    ///
+    /// Takes no [`RunOptions`]: the run has no explicit parent, conversation
+    /// id or trace suppression, and takes its parent only from the ambient
+    /// OpenTelemetry context where the future first runs (a context the host
+    /// attached on another thread is not seen; poll the future under that
+    /// context or wrap it with `FutureExt::with_context`). Hosts that pass a
+    /// `traceparent` use [`Self::run_with_options`] or [`Self::run_stream`],
+    /// which take [`RunOptions`].
     pub async fn run_async(&self, envelope: Envelope) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
         let result = self
@@ -2421,7 +2471,9 @@ impl XybridModel {
     ///
     /// The returned session owns a bounded channel and the inference worker
     /// owns a clone of the model, so both remain alive until inference ends.
-    /// Dropping the session disconnects the producer at its next token.
+    /// Dropping the session before its terminal event cancels the run: it
+    /// stops at its next token and is recorded as a user cancellation
+    /// (`error.type` `cancelled`), not as an error.
     ///
     /// # Errors
     ///
@@ -2490,19 +2542,8 @@ impl XybridModel {
             }));
         }
 
-        StreamingSession::spawn(move |sender| {
-            let result = model.run_streaming_with_options(&envelope, &options, |token| {
-                sender
-                    .send(StreamEvent::Token(StreamToken::from_sdk(token)))
-                    .map_err(|_| {
-                        Box::new(std::io::Error::new(
-                            std::io::ErrorKind::BrokenPipe,
-                            "stream receiver dropped",
-                        )) as Box<dyn std::error::Error + Send + Sync>
-                    })
-            });
-
-            let _ = sender.send(StreamEvent::terminal(result));
+        StreamingSession::spawn_tokens(move |on_token| {
+            model.run_streaming_with_options(&envelope, &options, on_token)
         })
         .map_err(|error| Error::InferenceError {
             message: format!("failed to start streaming worker: {error}"),
@@ -2531,21 +2572,8 @@ impl XybridModel {
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
         let model = self.inner.clone();
 
-        StreamingSession::spawn(move |sender| {
-            let result =
-                model.run_streaming_with_context_options(&envelope, &ctx, &options, |token| {
-                    sender
-                        .send(StreamEvent::Token(StreamToken::from_sdk(token)))
-                        .map_err(|_| {
-                            Box::new(std::io::Error::new(
-                                std::io::ErrorKind::BrokenPipe,
-                                "stream receiver dropped",
-                            ))
-                                as Box<dyn std::error::Error + Send + Sync>
-                        })
-                });
-
-            let _ = sender.send(StreamEvent::terminal(result));
+        StreamingSession::spawn_tokens(move |on_token| {
+            model.run_streaming_with_context_options(&envelope, &ctx, &options, on_token)
         })
         .map_err(|error| Error::InferenceError {
             message: format!("failed to start streaming worker: {error}"),
@@ -3557,7 +3585,10 @@ impl ObservabilityConfigHandle {
     }
 
     /// Maximum bytes per captured content attribute (longer content is
-    /// truncated with a marker).
+    /// truncated with a marker). The value is clamped, never rejected, to the
+    /// retained-operation budget: at most 208 KiB, which keeps a span's
+    /// content within the 480 KiB export request with 64 KiB left for its
+    /// other data.
     pub fn set_max_content_bytes(&self, bytes: u32) {
         self.with_draft(|d| d.max_content_bytes = Some(bytes));
     }
@@ -3667,7 +3698,15 @@ pub struct ObservabilityStats {
     pub metrics: SignalStats,
 }
 
-/// Current delivery counters (all zero when observability is off).
+/// Delivery counters of the observability pipeline.
+///
+/// While export is on, the live counters. After [`observability_shutdown`],
+/// `enabled` is `false` and the counters are the shut-down session's final
+/// ones, settled by the shutdown (what it failed in flight or dropped from
+/// the queue included, nothing pending), until the next
+/// [`ObservabilityConfigHandle::init`] starts a new session's. All zero
+/// before any init. An init that replaces a running session starts the new
+/// session's counters at once: shut down first to read the old one's.
 pub fn observability_stats() -> ObservabilityStats {
     let enabled = sdk::observability::is_enabled();
     sdk::observability::stats().map_or(
@@ -3694,6 +3733,9 @@ pub fn observability_flush(timeout_ms: u32) -> Result<()> {
 }
 
 /// Flush and stop exporting, waiting at most `timeout_ms`. Idempotent.
+///
+/// The session's final counters stay readable through
+/// [`observability_stats`] until the next init.
 ///
 /// # Errors
 /// When the bound is exceeded.
@@ -4922,6 +4964,73 @@ stages:
         ));
         assert!(matches!(session.next(), Some(StreamEvent::Complete(_))));
         assert!(session.next().is_none());
+    }
+
+    /// A token run the test paces: token `i` is handed to the callback once
+    /// the test sends its permit. Reports how many callbacks it made and the
+    /// error that stopped it.
+    fn paced_tokens(
+        permits: mpsc::Receiver<()>,
+        report: mpsc::Sender<(usize, Option<sdk::StreamingError>)>,
+    ) -> impl FnOnce(&mut TokenCallback) -> sdk::SdkResult<sdk::InferenceResult> + Send + 'static
+    {
+        move |on_token| {
+            let mut callbacks = 0;
+            let mut stopped = None;
+            for index in 0..5 {
+                permits
+                    .recv_timeout(Duration::from_secs(30))
+                    .expect("the test paces every token");
+                callbacks += 1;
+                let token = sdk::PartialToken {
+                    token: format!("t{index}"),
+                    token_id: None,
+                    index,
+                    cumulative_text: String::new(),
+                    finish_reason: None,
+                    tool_calls: Vec::new(),
+                    raw_text: None,
+                };
+                if let Err(error) = on_token(token) {
+                    stopped = Some(error);
+                    break;
+                }
+            }
+            report.send((callbacks, stopped)).unwrap();
+            Err(sdk::SdkError::InferenceError {
+                message: "stopped".into(),
+                source: None,
+            })
+        }
+    }
+
+    #[test]
+    fn dropping_a_token_stream_stops_its_run_at_the_next_token_as_a_user_cancellation() {
+        let (permit, permits) = mpsc::channel();
+        let (report, reported) = mpsc::channel();
+        let session = StreamingSession::spawn_tokens_for_test(paced_tokens(permits, report));
+        for index in 0..2 {
+            permit.send(()).unwrap();
+            assert!(
+                matches!(session.next(), Some(StreamEvent::Token(StreamToken { index: i, .. })) if i as usize == index)
+            );
+        }
+
+        drop(session);
+        // The next token finds no receiver.
+        permit.send(()).unwrap();
+        let (callbacks, stopped) = reported
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the run returns");
+
+        assert_eq!(callbacks, 3, "it stops at the token after the drop");
+        let stopped = stopped.expect("the callback stopped the run");
+        // The SDK records this error as the caller's cancellation.
+        assert_eq!(
+            stopped.downcast_ref::<sdk::AbortReason>(),
+            Some(&sdk::AbortReason::UserCancelled),
+            "{stopped}"
+        );
     }
 
     #[test]

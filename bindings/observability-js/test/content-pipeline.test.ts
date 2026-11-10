@@ -2,18 +2,27 @@
 // content-9, content-10, content-11).
 import { afterEach, describe, expect, test } from "bun:test";
 import { DiagLogLevel, diag } from "@opentelemetry/api";
+import {
+  AlwaysOffSampler,
+  AlwaysOnSampler,
+  ParentBasedSampler,
+  type Sampler,
+} from "@opentelemetry/sdk-trace";
 import { applyReplacements, ContentProcessor, jsonCost } from "../src/content.ts";
 import {
   boundJson,
   DEFAULTS,
   type JsonValue,
+  type ObservationContext,
   Observer,
   type RedactionRule,
+  type StartOptions,
+  spanContentCeiling,
   toRedactionRules,
   utf8Length,
   utf8Prefix,
 } from "../src/index.ts";
-import { createHarness } from "./support/harness.ts";
+import { createHarness, type TracerKind } from "./support/harness.ts";
 
 const request = { operation: "chat", provider: "llama.cpp", model: "m" } as const;
 const MARKER = DEFAULTS.truncation_marker;
@@ -380,11 +389,25 @@ describe("declarative rules (D19, R-CONTENT-4)", () => {
 
 describe("budgets and re-recording (D20, D22, R-BUF-3, content-11)", () => {
   test("defaults equal the catalog and invalid budgets throw RangeError", () => {
-    expect(DEFAULTS.max_retained_operation_bytes as number).toBe(480 * 1024);
+    // The default retained budget is the span content ceiling of the default request bound.
+    expect(DEFAULTS.max_retained_operation_bytes as number).toBe(208 * 1024);
+    expect(spanContentCeiling(DEFAULTS.max_request_body_bytes)).toBe(
+      DEFAULTS.max_retained_operation_bytes,
+    );
     expect(DEFAULTS.max_traversal_bytes as number).toBe(480 * 1024);
     expect(DEFAULTS.max_json_depth as number).toBe(128);
+    expect(new Observer().contentBudgets).toEqual({
+      maxAttributeBytes: DEFAULTS.max_content_attribute_bytes,
+      maxRetainedOperationBytes: DEFAULTS.max_retained_operation_bytes,
+      maxRequestBodyBytes: DEFAULTS.max_request_body_bytes,
+    });
     for (const value of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "10"]) {
-      for (const key of ["maxAttributeBytes", "maxRetainedOperationBytes", "maxTraversalBytes"]) {
+      for (const key of [
+        "maxAttributeBytes",
+        "maxRetainedOperationBytes",
+        "maxTraversalBytes",
+        "maxRequestBodyBytes",
+      ]) {
         expect(() => new Observer({ content: { [key]: value as never } })).toThrow(RangeError);
       }
     }
@@ -595,5 +618,225 @@ describe("replacement rules stop building once the document is provably over bud
     // Expands to 80 bytes then shrinks to nothing: the final cost fits, so nothing fails.
     const shrunk = applyReplacements(structuredClone(many), [grow, shrink], jsonCost(many), 2_000);
     expect(shrunk).toEqual(Array.from({ length: 50 }, () => ""));
+  });
+});
+
+describe("content for spans that do not record", () => {
+  // Every content key the operations below record, in recording order.
+  const CONTENT_KEYS = [
+    "gen_ai.prompt.variable.city",
+    "gen_ai.system_instructions",
+    "gen_ai.input.messages",
+    "gen_ai.tool.definitions",
+    "gen_ai.output.messages",
+    "gen_ai.tool.call.arguments",
+    "gen_ai.tool.call.result",
+  ];
+  const sorted = (keys: readonly string[]): string[] => [...keys].sort();
+
+  /** An inference and a tool, each recording every kind of content. */
+  const recordEveryContentKind = (observer: Observer, options: StartOptions): void => {
+    const op = observer.startInference(
+      { ...request, prompt: { name: "p", variables: { city: "Lisbon" } } },
+      options,
+    );
+    op.recordSystemInstructions([{ type: "text", content: "be brief" }]);
+    op.recordInputMessages([{ role: "user", parts: [{ type: "text", content: "hi" }] }]);
+    op.recordToolDefinitions([{ name: "lookup" }]);
+    op.recordOutputMessages([
+      { role: "assistant", parts: [{ type: "text", content: "hello" }], finish_reason: "stop" },
+    ]);
+    op.end();
+    const tool = observer.startTool({ name: "lookup", arguments: { q: "x" } }, options);
+    tool.recordResult({ r: "y" });
+    tool.end();
+  };
+
+  /** A redaction hook that records the kinds it was called for. */
+  const counting = (): {
+    calls: string[];
+    redact: (kind: string, value: JsonValue) => JsonValue;
+  } => {
+    const calls: string[] = [];
+    return {
+      calls,
+      redact: (kind, value) => {
+        calls.push(kind);
+        return value;
+      },
+    };
+  };
+
+  const unsampledParent = (): ObservationContext => {
+    const { observer } = createHarness({ sampler: new AlwaysOffSampler() });
+    const context = observer.startWorkflow("w").context();
+    if (context === undefined || context.sampled) throw new Error("expected an unsampled context");
+    return context;
+  };
+  type Case = { sampler: Sampler; options: StartOptions; tracer?: TracerKind };
+  const CASES: readonly [string, () => Case][] = [
+    ["sampler drop", () => ({ sampler: new AlwaysOffSampler(), options: {} })],
+    [
+      "unsampled parent",
+      () => ({
+        sampler: new ParentBasedSampler({ root: new AlwaysOnSampler() }),
+        options: { parent: unsampledParent() },
+      }),
+    ],
+    ["suppressed", () => ({ sampler: new AlwaysOnSampler(), options: { trace: "suppress" } })],
+    // The SDK provider (always on) is not wired to the observer.
+    ["no tracer", () => ({ sampler: new AlwaysOnSampler(), options: {}, tracer: "none" })],
+    ["API-only tracer", () => ({ sampler: new AlwaysOnSampler(), options: {}, tracer: "noop" })],
+  ];
+
+  for (const [name, setup] of CASES) {
+    test(`${name}: span_only never runs the pipeline; event capture still does`, () => {
+      const hook = counting();
+      const { sampler, options, tracer } = setup();
+      const quiet = createHarness({
+        sampler,
+        ...(tracer === undefined ? {} : { tracer }),
+        content: { capture: "span_only", redact: hook.redact },
+      });
+      recordEveryContentKind(quiet.observer, options);
+      expect(hook.calls).toEqual([]);
+      expect(quiet.spans.getFinishedSpans()).toHaveLength(0);
+      expect(quiet.logs.getFinishedLogRecords()).toHaveLength(0);
+
+      for (const capture of ["span_and_event", "event_only"] as const) {
+        const events = counting();
+        const { sampler: eventSampler, options: eventOptions, tracer: eventTracer } = setup();
+        const harness = createHarness({
+          sampler: eventSampler,
+          ...(eventTracer === undefined ? {} : { tracer: eventTracer }),
+          content: { capture, redact: events.redact },
+        });
+        recordEveryContentKind(harness.observer, eventOptions);
+        expect(events.calls).toEqual(CONTENT_KEYS);
+        const onEvents = harness.logs
+          .getFinishedLogRecords()
+          .flatMap((record) => Object.keys(record.attributes))
+          .filter((key) => CONTENT_KEYS.includes(key));
+        expect(sorted(onEvents)).toEqual(sorted(CONTENT_KEYS));
+      }
+    });
+
+    test(`${name}: with no logger, event capture does not run the pipeline either`, () => {
+      for (const capture of ["span_and_event", "event_only"] as const) {
+        const hook = counting();
+        const { sampler, options, tracer } = setup();
+        const harness = createHarness({
+          sampler,
+          logs: false,
+          ...(tracer === undefined ? {} : { tracer }),
+          content: { capture, redact: hook.redact },
+        });
+        recordEveryContentKind(harness.observer, options);
+        expect(hook.calls).toEqual([]);
+        expect(harness.spans.getFinishedSpans()).toHaveLength(0);
+        expect(harness.logs.getFinishedLogRecords()).toHaveLength(0);
+      }
+    });
+  }
+
+  test("a recording span still processes and records every value", () => {
+    const hook = counting();
+    const { observer, spans } = createHarness({
+      content: { capture: "span_only", redact: hook.redact },
+    });
+    recordEveryContentKind(observer, {});
+    expect(hook.calls).toEqual(CONTENT_KEYS);
+    const onSpans = spans
+      .getFinishedSpans()
+      .flatMap((span) => Object.keys(span.attributes))
+      .filter((key) => CONTENT_KEYS.includes(key));
+    expect(sorted(onSpans)).toEqual(sorted(CONTENT_KEYS));
+  });
+});
+
+describe("content budgets fit one span in the request bound", () => {
+  const ceiling = (DEFAULTS.max_request_body_bytes - DEFAULTS.span_envelope_allowance_bytes) / 2;
+
+  test("budgets are clamped, never rejected, and the effective values are exposed", () => {
+    expect(ceiling).toBe(212_992);
+    expect(spanContentCeiling(DEFAULTS.max_request_body_bytes)).toBe(ceiling);
+    expect(spanContentCeiling(DEFAULTS.span_envelope_allowance_bytes)).toBe(1);
+    expect(spanContentCeiling(1)).toBe(1);
+    const raised = new Observer({
+      content: { maxAttributeBytes: 400_000, maxRetainedOperationBytes: 1_000_000 },
+    });
+    expect(raised.contentBudgets).toEqual({
+      maxAttributeBytes: ceiling,
+      maxRetainedOperationBytes: ceiling,
+      maxRequestBodyBytes: DEFAULTS.max_request_body_bytes,
+    });
+    // The attribute budget follows a lower retained budget.
+    expect(
+      new Observer({ content: { maxAttributeBytes: 5000, maxRetainedOperationBytes: 1000 } })
+        .contentBudgets.maxAttributeBytes,
+    ).toBe(1000);
+    // A smaller request bound lowers both; values under it are kept.
+    const bound = DEFAULTS.span_envelope_allowance_bytes + 2 * 10_000;
+    expect(
+      new Observer({
+        content: {
+          maxAttributeBytes: 400_000,
+          maxRetainedOperationBytes: 1_000_000,
+          maxRequestBodyBytes: bound,
+        },
+      }).contentBudgets,
+    ).toEqual({
+      maxAttributeBytes: 10_000,
+      maxRetainedOperationBytes: 10_000,
+      maxRequestBodyBytes: bound,
+    });
+    expect(
+      new Observer({ content: { maxAttributeBytes: 64, maxRequestBodyBytes: bound } })
+        .contentBudgets.maxAttributeBytes,
+    ).toBe(64);
+  });
+
+  test("truncation uses the effective budget", () => {
+    const bound = DEFAULTS.span_envelope_allowance_bytes + 2 * 10_000;
+    const { observer, spans } = createHarness({
+      content: { capture: "span_only", maxAttributeBytes: 400_000, maxRequestBodyBytes: bound },
+    });
+    const op = observer.startInference(request);
+    op.recordOutputMessages([
+      {
+        role: "assistant",
+        parts: [{ type: "text", content: "b".repeat(20_000) }],
+        finish_reason: "stop",
+      },
+    ]);
+    op.end();
+    const attributes = spans.getFinishedSpans()[0]?.attributes ?? {};
+    const output = String(attributes["gen_ai.output.messages"]);
+    expect(utf8Length(output)).toBeLessThanOrEqual(10_000);
+    expect(output.endsWith(`${MARKER}"}],"finish_reason":"stop"}]`)).toBe(true);
+    expect(attributes["xybrid.genai.content.truncated_attributes"]).toEqual([
+      "gen_ai.output.messages",
+    ]);
+  });
+
+  test("plain text is charged at its JSON-escaped length against the retained budget", () => {
+    // 16 + 24 ("gen_ai.prompt.variable.a") + 100 raw bytes fits 300 twice; written as JSON the
+    // 100 quotes are 200 bytes, so only the first variable fits.
+    for (const [value, kept] of [
+      ["x".repeat(100), 2],
+      ['"'.repeat(100), 1],
+    ] as const) {
+      const { observer, spans } = createHarness({
+        content: { capture: "span_only", maxRetainedOperationBytes: 300 },
+      });
+      observer
+        .startInference({ ...request, prompt: { name: "p", variables: { a: value, b: value } } })
+        .end();
+      const attributes = spans.getFinishedSpans()[0]?.attributes ?? {};
+      const variables = Object.keys(attributes).filter((key) =>
+        key.startsWith("gen_ai.prompt.variable."),
+      );
+      expect(variables).toHaveLength(kept);
+    }
   });
 });

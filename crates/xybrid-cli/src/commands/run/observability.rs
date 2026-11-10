@@ -316,6 +316,9 @@ mod tests {
                     Err(error) => panic!("collector accept: {error}"),
                 }
             };
+            // Accepted sockets inherit O_NONBLOCK on macOS/BSD (not on Linux), which
+            // would make the read timeout below a busy WouldBlock instead of a wait.
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();

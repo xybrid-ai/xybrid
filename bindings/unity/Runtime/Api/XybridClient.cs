@@ -368,8 +368,10 @@ namespace Xybrid
         public static bool IsObservabilityEnabled => ObservabilityStats().Enabled;
 
         /// <summary>
-        /// Returns the export pipeline's delivery counters (all zero when
-        /// observability is off).
+        /// Returns the export pipeline's delivery counters: live while export
+        /// runs; after <see cref="ShutdownObservability"/>, the final ones (what
+        /// the shutdown failed or dropped included) until the next
+        /// initialization; all zero before any.
         /// </summary>
         public static XybridBolt.XybridObservabilityStats ObservabilityStats() =>
             XybridBolt.XybridBolt.ObservabilityStats();

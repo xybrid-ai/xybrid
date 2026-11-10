@@ -6541,8 +6541,10 @@ dependencies = [
 name = "xybrid-observability"
 version = "0.17.0"
 dependencies = [
+ "criterion",
  "httpdate",
  "httpmock",
+ "libc",
  "log",
  "opentelemetry",
  "opentelemetry-proto",

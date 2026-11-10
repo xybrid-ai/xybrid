@@ -354,7 +354,11 @@ object Xybrid {
         @JvmStatic
         fun otlp(endpoint: String): XybridObservabilityConfig = XybridObservabilityConfig.otlp(endpoint)
 
-        /** Current delivery counters; all zero while export is off. */
+        /**
+         * Delivery counters: live while export runs; after [shutdown], the final
+         * ones (what the shutdown failed or dropped included) until the next
+         * `start()`; all zero before any.
+         */
         @JvmStatic
         val stats: XybridObservabilityStats get() = ai.xybrid.observabilityStats()
 

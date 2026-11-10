@@ -325,8 +325,40 @@ pub const CAPTURE_CONTENT_ENV: &str = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTEN
 /// Legacy capture variable, honoured only when [`CAPTURE_CONTENT_ENV`] is
 /// unset (`true` means `span_only`; `false` and unknown values `no_content`).
 pub const CAPTURE_CONTENT_LEGACY_ENV: &str = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT";
-/// Default budget of content retained by one operation, in bytes (480 KiB).
-pub const DEFAULT_MAX_RETAINED_OPERATION_BYTES: usize = 491_520;
+/// Default budget of content retained by one operation, in bytes (208 KiB):
+/// the most the content budgets may reach under the default request bound
+/// (see [`span_content_ceiling`]).
+pub const DEFAULT_MAX_RETAINED_OPERATION_BYTES: usize = 212_992;
+/// Default `max_request_body_bytes` of an OTLP export request (480 KiB). The
+/// content budgets are clamped so that a span's content fits it with
+/// [`SPAN_ENVELOPE_ALLOWANCE_BYTES`] left for the span's other data.
+pub const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 491_520;
+/// Bytes of a span's request reserved for its non-content data (ids, name,
+/// resource and scope, metadata attributes, status, the truncation list)
+/// when the content budgets are fitted to the request bound (64 KiB).
+/// Reserved, not enforced: a span whose non-content data outgrows it can
+/// still exceed the request bound, and the exporter then drops it whole.
+pub const SPAN_ENVELOPE_ALLOWANCE_BYTES: usize = 65_536;
+/// How much larger a span's content can encode than the retained bytes it
+/// is charged: OTLP/JSON writes each content attribute as a JSON string, and
+/// escaping at most doubles a serialized JSON value (`"` and `\` take two
+/// bytes); plain text is charged at its escaped length.
+pub const SPAN_CONTENT_ENCODING_GROWTH: usize = 2;
+
+/// The largest retained-operation (and so attribute) budget that keeps one
+/// span's content within `max_request_body_bytes` less
+/// [`SPAN_ENVELOPE_ALLOWANCE_BYTES`]: `(request − allowance) / growth`, at
+/// least 1 (CONTRACT.md "Content pipeline", budgets).
+#[must_use]
+pub const fn span_content_ceiling(max_request_body_bytes: usize) -> usize {
+    let ceiling = max_request_body_bytes.saturating_sub(SPAN_ENVELOPE_ALLOWANCE_BYTES)
+        / SPAN_CONTENT_ENCODING_GROWTH;
+    if ceiling == 0 {
+        1
+    } else {
+        ceiling
+    }
+}
 /// Default preflight traversal budget per content value, in bytes (480 KiB).
 pub const DEFAULT_MAX_TRAVERSAL_BYTES: usize = 491_520;
 /// Maximum JSON nesting depth of a content value.

@@ -76,6 +76,46 @@ impl Received {
             .map(|s| s.name)
             .collect()
     }
+
+    /// Log records in the body.
+    pub fn log_record_count(&self) -> u64 {
+        self.logs()
+            .resource_logs
+            .into_iter()
+            .flat_map(|r| r.scope_logs)
+            .map(|s| s.log_records.len() as u64)
+            .sum()
+    }
+
+    /// Metric data points in the body (the unit the metrics counters count).
+    pub fn metric_point_count(&self) -> u64 {
+        use opentelemetry_proto::tonic::metrics::v1::metric::Data;
+        self.metrics()
+            .resource_metrics
+            .into_iter()
+            .flat_map(|r| r.scope_metrics)
+            .flat_map(|s| s.metrics)
+            .filter_map(|m| m.data)
+            .map(|data| match data {
+                Data::Gauge(g) => g.data_points.len(),
+                Data::Sum(s) => s.data_points.len(),
+                Data::Histogram(h) => h.data_points.len(),
+                Data::ExponentialHistogram(h) => h.data_points.len(),
+                Data::Summary(s) => s.data_points.len(),
+            } as u64)
+            .sum()
+    }
+
+    /// The items in the body: spans, log records or metric data points, by
+    /// the request's path.
+    pub fn item_count(&self) -> u64 {
+        match self.path.as_str() {
+            "/v1/traces" => self.span_names().len() as u64,
+            "/v1/logs" => self.log_record_count(),
+            "/v1/metrics" => self.metric_point_count(),
+            other => panic!("not an OTLP signal path: {other}"),
+        }
+    }
 }
 
 /// What the server does with one request.
@@ -159,7 +199,15 @@ pub struct Server {
 impl Server {
     /// Starts a server that answers each request as `script` decides.
     pub fn start(script: impl Fn(&Received) -> Action + Send + Sync + 'static) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        Self::start_on(TcpListener::bind("127.0.0.1:0").unwrap(), script)
+    }
+
+    /// [`Server::start`] on a listener the test bound itself (an endpoint
+    /// that refused connections and then comes up on the same port).
+    pub fn start_on(
+        listener: TcpListener,
+        script: impl Fn(&Received) -> Action + Send + Sync + 'static,
+    ) -> Self {
         let url = format!("http://{}", listener.local_addr().unwrap());
         listener.set_nonblocking(true).unwrap();
         let received = Arc::new(Mutex::new(Vec::new()));
@@ -269,6 +317,19 @@ impl Server {
         }
     }
 
+    /// Waits until `n` requests to `path` arrived.
+    pub fn wait_for_path(&self, path: &str, n: usize, within: Duration) {
+        let until = Instant::now() + within;
+        while self.requests_to(path).len() < n {
+            assert!(
+                Instant::now() < until,
+                "expected {n} requests to {path}, got {}",
+                self.requests_to(path).len()
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     pub fn events(&self) -> Vec<Event> {
         self.events.lock().unwrap().clone()
     }
@@ -350,6 +411,9 @@ impl Connection {
     }
 
     fn serve(self, mut socket: TcpStream) {
+        // Accepted sockets inherit O_NONBLOCK on macOS/BSD (not on Linux), which
+        // would make the read timeout below a busy WouldBlock instead of a wait.
+        socket.set_nonblocking(false).unwrap();
         socket
             .set_read_timeout(Some(Duration::from_millis(5)))
             .unwrap();
