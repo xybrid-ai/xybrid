@@ -7,7 +7,7 @@
 //  `xybrid_bolt.swift` alongside this file; both compile into the same
 //  Swift module so consumers `import Xybrid` and see one surface.
 //
-//  For full API documentation, see https://docs.xybrid.dev/sdk/swift
+//  For full API documentation, see https://docs.xybrid.dev/docs/sdks/ios
 //
 
 import Foundation

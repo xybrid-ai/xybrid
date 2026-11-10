@@ -278,7 +278,7 @@ adb shell ls -la /data/local/tmp/models/kokoro-82m/
 
 - **[SDK API Reference](../../docs/sdk/API_REFERENCE.md)** - Complete API specification
 - **[Kotlin SDK Docs](../../docs/sdk/kotlin.md)** - Kotlin-specific documentation
-- **[Online Documentation](https://docs.xybrid.dev/sdk/kotlin)** - Full guides and tutorials
+- **[Online Documentation](https://docs.xybrid.dev/docs/sdks/android)** - Full guides and tutorials
 
 ## Related
 

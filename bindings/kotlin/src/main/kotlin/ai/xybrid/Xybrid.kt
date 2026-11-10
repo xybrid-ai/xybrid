@@ -5,7 +5,7 @@
  * bindings in `XybridBolt.kt`. Both files live in the same `ai.xybrid`
  * package so consumers `import ai.xybrid.…` and see a single surface.
  *
- * For full API documentation, see https://docs.xybrid.dev/sdk/kotlin
+ * For full API documentation, see https://docs.xybrid.dev/docs/sdks/kotlin
  */
 @file:Suppress("unused")
 

@@ -315,7 +315,7 @@ flutter test integration_test/
 
 - **[SDK API Reference](../../docs/sdk/API_REFERENCE.md)** - Complete API specification
 - **[Flutter SDK Docs](../../docs/sdk/flutter.md)** - Flutter-specific documentation
-- **[Online Documentation](https://docs.xybrid.dev/sdk/flutter)** - Full guides and tutorials
+- **[Online Documentation](https://docs.xybrid.dev/docs/sdks/flutter)** - Full guides and tutorials
 
 ## Related
 

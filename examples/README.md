@@ -274,7 +274,7 @@ The Xybrid SDK follows a consistent pattern across all platforms:
 ### Online Documentation
 
 - **[docs.xybrid.dev](https://docs.xybrid.dev)** - Full documentation site
-- **[docs.xybrid.dev/sdk](https://docs.xybrid.dev/sdk)** - SDK guides and tutorials
+- **[docs.xybrid.dev/docs/quickstart](https://docs.xybrid.dev/docs/quickstart)** - Quickstart, then a guide per SDK
 
 ---
 
