@@ -1,4 +1,4 @@
-# Purpose: Rust format, lint, tests and feature matrix, plus binding drift, API contract, observability, Python and Web SDK checks. Gates merges.
+# Purpose: Rust format, lint, tests and feature matrix, plus binding drift, API contract, observability, Python SDK, Web SDK and agent skills checks. Gates merges.
 name: "CI: Workspace"
 
 on:
@@ -232,6 +232,16 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - run: bash tools/scripts/version-sync.sh --check
       - run: python3 -m unittest discover -s tools/scripts/tests -p test_install_pins.py
+
+  # Agent skills are Markdown, so their edits land in docs-only PRs that skip
+  # the tooling tests, and the .agents/skills mirror drifted unnoticed before.
+  # A couple of seconds, so it runs on every PR like the workflow index.
+  agent-skills:
+    name: Agent skills
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - run: python3 -m unittest discover -s tools/scripts/tests -p test_agent_skills.py -v
 
   clippy:
     name: Clippy
@@ -666,7 +676,7 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, unity-bolt-compile, unity-bolt-drift, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, workflow-index, version-sync, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, observability, web]
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, unity-bolt-drift, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, workflow-index, version-sync, agent-skills, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, observability, web]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Verify required job results
